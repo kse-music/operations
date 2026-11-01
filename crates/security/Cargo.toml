@@ -1,0 +1,18 @@
+[package]
+name = "serverdeck-security"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serverdeck-core.workspace = true
+keyring = "4.2"
+zeroize.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true

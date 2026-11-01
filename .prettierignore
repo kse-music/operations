@@ -1,0 +1,9 @@
+target
+node_modules
+dist
+gen
+Cargo.lock
+package-lock.json
+docs/PRD.md
+AGENTS.md
+.local

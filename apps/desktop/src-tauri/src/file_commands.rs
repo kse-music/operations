@@ -1,0 +1,211 @@
+use serverdeck_application::Application;
+use serverdeck_core::{
+    Error, IpcError,
+    files::*,
+    terminal::{TerminalEvent, TerminalSession, TerminalSize},
+};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::Emitter;
+use tauri_plugin_dialog::DialogExt;
+pub struct ExitApproval(pub AtomicBool);
+#[tauri::command]
+pub async fn files_open(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    events: tauri::ipc::Channel<TerminalEvent>,
+) -> Result<TerminalSession, IpcError> {
+    application
+        .files_open(
+            host_id,
+            std::sync::Arc::new(move |event| events.send(event).is_ok()),
+        )
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn file_terminal(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    action: FileTerminalAction,
+    size: TerminalSize,
+    events: tauri::ipc::Channel<TerminalEvent>,
+) -> Result<TerminalSession, IpcError> {
+    application
+        .file_terminal(
+            host_id,
+            action,
+            size,
+            std::sync::Arc::new(move |event| events.send(event).is_ok()),
+        )
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_list(
+    application: tauri::State<'_, Application>,
+    id: String,
+    path: String,
+) -> Result<DirectoryListing, IpcError> {
+    application.files_list(&id, &path).await.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_local(
+    application: tauri::State<'_, Application>,
+    path: Option<String>,
+) -> Result<DirectoryListing, IpcError> {
+    application.files_local(path).await.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_properties(
+    application: tauri::State<'_, Application>,
+    id: String,
+    path: String,
+) -> Result<FileEntry, IpcError> {
+    application
+        .files_properties(&id, &path)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_action(
+    application: tauri::State<'_, Application>,
+    id: String,
+    action: RemoteAction,
+) -> Result<(), IpcError> {
+    application
+        .files_action(&id, action)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_close(
+    application: tauri::State<'_, Application>,
+    id: String,
+    cancel: bool,
+) -> Result<(), IpcError> {
+    application
+        .files_close(&id, cancel)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_pick<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    kind: String,
+) -> Result<Vec<String>, IpcError> {
+    if !["files", "folder"].contains(&kind.as_str()) {
+        return Err(Error::Validation("选择器类型无效").into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let picker = app
+            .dialog()
+            .file()
+            .set_title("ServerDeck：选择本地传输路径");
+        let selected = if kind == "folder" {
+            picker.blocking_pick_folder().map(|p| vec![p])
+        } else {
+            picker.blocking_pick_files()
+        };
+        selected
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| {
+                p.into_path()
+                    .map_err(|_| Error::Validation("不支持此文件 URI"))?
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| Error::Validation("本地路径不是 Unicode"))
+            })
+            .collect::<Result<Vec<_>, Error>>()
+    })
+    .await
+    .map_err(|e| IpcError::from(Error::Worker(Box::new(e))))?
+    .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn transfer_start(
+    application: tauri::State<'_, Application>,
+    input: TransferInput,
+) -> Result<TransferInfo, IpcError> {
+    application.transfer_start(input).map_err(Into::into)
+}
+#[tauri::command]
+pub fn transfer_list(
+    application: tauri::State<'_, Application>,
+) -> Result<Vec<TransferInfo>, IpcError> {
+    application.transfer_list().map_err(Into::into)
+}
+#[tauri::command]
+pub fn transfer_cancel(
+    application: tauri::State<'_, Application>,
+    id: String,
+) -> Result<(), IpcError> {
+    application.transfer_cancel(&id).map_err(Into::into)
+}
+#[tauri::command]
+pub async fn transfer_retry(
+    application: tauri::State<'_, Application>,
+    id: String,
+    session_id: String,
+    conflict: ConflictPolicy,
+    confirmed: bool,
+) -> Result<TransferInfo, IpcError> {
+    application
+        .transfer_retry(&id, &session_id, conflict, confirmed)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn text_read(
+    application: tauri::State<'_, Application>,
+    id: String,
+    path: String,
+) -> Result<TextDocument, IpcError> {
+    application.text_read(&id, &path).await.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn text_save(
+    application: tauri::State<'_, Application>,
+    input: SaveText,
+) -> Result<SaveResult, IpcError> {
+    application.text_save(input).await.map_err(Into::into)
+}
+#[tauri::command]
+pub fn text_dirty(
+    application: tauri::State<'_, Application>,
+    token: String,
+    dirty: bool,
+) -> Result<(), IpcError> {
+    application.text_dirty(&token, dirty).map_err(Into::into)
+}
+#[tauri::command]
+pub fn text_close(
+    application: tauri::State<'_, Application>,
+    token: String,
+    discard: bool,
+) -> Result<(), IpcError> {
+    application.text_close(&token, discard).map_err(Into::into)
+}
+#[tauri::command]
+pub fn app_exit_confirm<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    approval: tauri::State<'_, ExitApproval>,
+    application: tauri::State<'_, Application>,
+    confirmed: bool,
+) -> Result<(), IpcError> {
+    let pending = application.exit_pending();
+    if !confirmed && (pending.0 > 0 || pending.1 > 0) {
+        app.emit("app-exit-review", pending)
+            .map_err(|_| IpcError::from(Error::Validation("无法请求退出确认，请重试")))?;
+        return Ok(());
+    }
+    approval.0.store(true, Ordering::Release);
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn files_connections(
+    application: tauri::State<'_, Application>,
+) -> Result<Vec<TerminalSession>, IpcError> {
+    application.file_connections().map_err(Into::into)
+}

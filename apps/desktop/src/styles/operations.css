@@ -1,0 +1,154 @@
+.operations-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.operations-view h1 {
+  margin: 0;
+}
+.ops-toolbar,
+.ops-tabs,
+.ops-capabilities,
+.ops-row-actions,
+.ops-log-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.operations-view input:not([type='checkbox']),
+.operations-view select {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  max-width: 320px;
+}
+.operations-view input[type='number'] {
+  width: 100px;
+}
+.ops-table {
+  overflow: auto;
+}
+.ops-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.ops-table td,
+.ops-table th {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  max-width: 300px;
+  overflow-wrap: anywhere;
+}
+.ops-row-actions {
+  min-width: 180px;
+}
+.ops-detail,
+.ops-logs,
+.ops-history {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 16px;
+}
+.ops-detail pre,
+.ops-log-output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 520px;
+  overflow: auto;
+  padding: 14px;
+  background: var(--bg);
+  font:
+    12px/1.6 Consolas,
+    monospace;
+}
+.ops-tabs [aria-selected='true'],
+.ops-log-tabs [aria-selected='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ops-capabilities {
+  padding: 12px;
+  background: var(--panel);
+  border-radius: 8px;
+}
+.ops-log-tabs {
+  margin: 12px 0;
+}
+.ops-log-tabs span {
+  padding-left: 12px;
+}
+.ops-logs h2 {
+  margin-top: 0;
+}
+
+.batch-targets {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.task-host {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.task-command-label {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+.task-command-label textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 12px;
+  font:
+    13px/1.5 Consolas,
+    monospace;
+}
+.batch-row {
+  margin-top: 16px;
+}
+
+.automation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.automation-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.automation-form label:has(input[type='checkbox']) {
+  flex-direction: row;
+  align-items: center;
+}
+.automation-form input:not([type='checkbox']),
+.automation-form select,
+.automation-form textarea {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.automation-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font:
+    13px/1.5 Consolas,
+    monospace;
+}
+.automation-param {
+  margin-bottom: 12px;
+}

@@ -1,0 +1,230 @@
+pub mod automation;
+pub mod backup;
+pub mod monitor;
+pub mod ops;
+pub mod product;
+pub mod tasks;
+use serde::{Deserialize, Serialize};
+
+pub mod connection;
+pub mod files;
+pub mod hosts;
+pub mod openssh;
+pub mod terminal;
+pub mod workspace;
+
+pub const CONFIG_VERSION: u32 = 1;
+pub const DATABASE_VERSION: u32 = 5;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("{message}")]
+    Connection {
+        code: &'static str,
+        message: &'static str,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
+    #[error("配置项无效：{0}")]
+    Validation(&'static str),
+    #[error("配置版本 {0} 不受当前应用支持")]
+    UnsupportedConfig(u32),
+    #[error("数据库版本 {0} 高于当前应用支持版本")]
+    UnsupportedDatabase(u32),
+    #[error("本地存储操作失败")]
+    Storage(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("本地操作正忙，请稍后重试")]
+    Busy,
+    #[error("后台任务执行失败")]
+    Worker(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("应用正在退出")]
+    ShuttingDown,
+    #[error("记录不存在或已被删除")]
+    NotFound,
+    #[error("数据已变化或存在关联，请刷新后重试")]
+    Conflict,
+    #[error("系统安全凭据库不可用，未保存秘密。请检查系统凭据服务或解锁钥匙串")]
+    SecureStore(#[source] Box<dyn std::error::Error + Send + Sync>),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    #[default]
+    Dark,
+    Light,
+    System,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LogLevel {
+    Error,
+    Warn,
+    #[default]
+    Info,
+    Debug,
+}
+
+impl LogLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warn => "warn",
+            Self::Info => "info",
+            Self::Debug => "debug",
+        }
+    }
+}
+
+/// Versioned, non-sensitive preferences. Never add credentials to this DTO.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AppConfig {
+    pub version: u32,
+    pub theme: Theme,
+    pub sidebar_width: u16,
+    pub terminal_font_size: u8,
+    #[serde(default)]
+    pub terminal: terminal::TerminalPreferences,
+    pub connect_timeout_secs: u16,
+    pub monitor_interval_secs: u8,
+    #[serde(default = "files::default_concurrency")]
+    pub transfer_concurrency: u8,
+    pub log_level: LogLevel,
+    #[serde(default)]
+    pub product: product::ProductPreferences,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            version: CONFIG_VERSION,
+            theme: Theme::Dark,
+            sidebar_width: 248,
+            terminal_font_size: 14,
+            terminal: Default::default(),
+            connect_timeout_secs: 15,
+            monitor_interval_secs: 3,
+            transfer_concurrency: files::default_concurrency(),
+            log_level: LogLevel::Info,
+            product: Default::default(),
+        }
+    }
+}
+
+impl AppConfig {
+    pub fn validate(&self) -> Result<(), Error> {
+        self.terminal.validate()?;
+        self.product.validate()?;
+        if !(1..=6).contains(&self.transfer_concurrency) {
+            return Err(Error::Validation("每主机并发传输须为 1–6"));
+        }
+        if self.version != CONFIG_VERSION {
+            return Err(Error::UnsupportedConfig(self.version));
+        }
+        if !(200..=400).contains(&self.sidebar_width) {
+            return Err(Error::Validation("侧边栏宽度须为 200–400"));
+        }
+        if !(10..=32).contains(&self.terminal_font_size) {
+            return Err(Error::Validation("终端字号须为 10–32"));
+        }
+        if !(1..=120).contains(&self.connect_timeout_secs) {
+            return Err(Error::Validation("连接超时须为 1–120 秒"));
+        }
+        if ![3, 5, 10, 30].contains(&self.monitor_interval_secs) {
+            return Err(Error::Validation("监控间隔须为 3、5、10 或 30 秒"));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bootstrap {
+    pub app_version: String,
+    pub database_version: u32,
+    pub data_directory: String,
+    pub log_directory: String,
+    pub config: AppConfig,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IpcError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl From<Error> for IpcError {
+    fn from(error: Error) -> Self {
+        let code = match &error {
+            Error::Connection { code, .. } => code,
+            Error::Validation(_) => "VALIDATION",
+            Error::UnsupportedConfig(_) | Error::UnsupportedDatabase(_) => "VERSION_UNSUPPORTED",
+            Error::Storage(_) => "STORAGE",
+            Error::Busy => "BUSY",
+            Error::Worker(_) => "WORKER",
+            Error::ShuttingDown => "SHUTTING_DOWN",
+            Error::NotFound => "NOT_FOUND",
+            Error::Conflict => "CONFLICT",
+            Error::SecureStore(_) => "SECURE_STORE_UNAVAILABLE",
+        };
+        Self {
+            code,
+            message: error.to_string(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_rejects_invalid_ranges_and_future_versions() {
+        assert!(AppConfig::default().validate().is_ok());
+        for config in [
+            AppConfig {
+                version: 2,
+                ..Default::default()
+            },
+            AppConfig {
+                sidebar_width: 199,
+                ..Default::default()
+            },
+            AppConfig {
+                terminal_font_size: 33,
+                ..Default::default()
+            },
+            AppConfig {
+                connect_timeout_secs: 0,
+                ..Default::default()
+            },
+            AppConfig {
+                monitor_interval_secs: 4,
+                ..Default::default()
+            },
+        ] {
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn config_contract_rejects_unknown_fields() {
+        let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
+        json["password"] = "must not be accepted".into();
+        assert!(serde_json::from_value::<AppConfig>(json).is_err());
+    }
+
+    #[test]
+    fn error_source_is_retained_without_crossing_the_ipc_boundary() {
+        let error = Error::Storage(Box::new(std::io::Error::other(
+            "sensitive internal payload",
+        )));
+        assert!(std::error::Error::source(&error).is_some());
+        let json = serde_json::to_string(&IpcError::from(error)).expect("serialize error");
+        assert!(json.contains("STORAGE"));
+        assert!(!json.contains("sensitive internal payload"));
+    }
+}

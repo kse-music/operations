@@ -1,0 +1,39 @@
+{
+  "name": "serverdeck",
+  "version": "0.1.0-beta.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @serverdeck/desktop",
+    "build": "npm run build -w @serverdeck/desktop",
+    "typecheck": "npm run typecheck -w @serverdeck/desktop",
+    "test": "npm run test -w @serverdeck/desktop",
+    "test:native": "node tools/native-e2e.mjs",
+    "test:terminal": "node tools/native-terminal-e2e.mjs",
+    "lint": "eslint apps/desktop/src apps/desktop/vite.config.ts --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "tauri": "node tools/tauri.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0",
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.14.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-vue": "^10.5.0",
+    "globals": "^17.0.0",
+    "prettier": "^3.6.0",
+    "typescript-eslint": "^8.46.0",
+    "vue-eslint-parser": "^10.2.0"
+  },
+  "overrides": {
+    "dompurify": "^3.4.17",
+    "minimatch": "^11.0.1"
+  }
+}

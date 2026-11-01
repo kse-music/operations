@@ -1,0 +1,29 @@
+[package]
+name = "serverdeck-sftp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serverdeck-core.workspace = true
+serverdeck-ssh.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }
+russh-sftp = "3.0.1"
+sha2 = "0.10"
+uuid.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serverdeck-storage.workspace = true
+rand = "0.10"
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
+zeroize.workspace = true
+rpassword = "7"
+
+[lints]
+workspace = true

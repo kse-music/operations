@@ -1,0 +1,42 @@
+[package]
+name = "serverdeck-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[lib]
+name = "serverdeck_desktop_lib"
+crate-type = ["rlib"]
+test = false
+doctest = false
+
+[[bin]]
+name = "serverdeck-desktop"
+path = "src/main.rs"
+test = false
+
+[[test]]
+name = "ipc"
+path = "tests/ipc.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tokio.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-dialog = "2"
+serverdeck-core.workspace = true
+serverdeck-application.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tempfile.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
