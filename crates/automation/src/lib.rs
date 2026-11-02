@@ -403,7 +403,7 @@ fn targets(
             Ok(Target {
                 route_signature: engine.profile_signature(&id)?,
                 host_id: id,
-                name: h.config.name,
+                name: h.config.display_name(),
                 hostname: h.config.hostname,
                 port: h.config.port,
                 username: h.config.username,

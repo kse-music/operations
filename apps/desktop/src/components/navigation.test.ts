@@ -14,7 +14,6 @@ it('puts only workspaces and independent tools in global navigation', () => {
   document.body.append(root);
   app = createApp(AppNavigation, {
     active: 'operations',
-    terminals: 3,
     tasks: 1,
     onNavigate: navigate,
     onWorkspace: workspace,
@@ -30,10 +29,10 @@ it('puts only workspaces and independent tools in global navigation', () => {
   expect(navigate).toHaveBeenCalledTimes(7);
   expect(workspace).toHaveBeenCalledOnce();
   expect(root.querySelector('[aria-label="SFTP 文件"]')).toBeNull();
-  expect(root.querySelector('[aria-label="主机管理"]')).toBeNull();
-  expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
-    '主机工作区',
-  );
-  expect(root.querySelector('[aria-label="主机工作区"] small')?.textContent).toBe('3');
-  expect(root.querySelector('[aria-label="运维自动化"] small')?.textContent).toBe('1');
+  expect(root.querySelector('[aria-label="主机工作区"]')).toBeNull();
+  expect(root.querySelector('[aria-label="主机管理"] .nav-label')?.textContent).toBe('主机管理');
+  expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('主机管理');
+  expect(root.querySelector('[aria-label="主机管理"] small')).toBeNull();
+  expect(root.querySelector('[aria-label="自动运维"] .nav-label')?.textContent).toBe('自动运维');
+  expect(root.querySelector('[aria-label="自动运维"] small')?.textContent).toBe('1');
 });

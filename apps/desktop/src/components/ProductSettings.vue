@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { filesApi } from '../services/files';
@@ -46,6 +47,7 @@ function capture(action: string, e: KeyboardEvent) {
   const key = globalKey(e);
   if (key) model.value.shortcuts[action] = key;
 }
+useErrorNotifications(error);
 </script>
 <template>
   <fieldset>
@@ -151,6 +153,5 @@ function capture(action: string, e: KeyboardEvent) {
       使用 Ctrl（macOS 可用 Command）及可选 Shift。不会覆盖远端 Ctrl+C/Z
       等控制键；对话框中不触发全局导航。
     </p>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
   </fieldset>
 </template>

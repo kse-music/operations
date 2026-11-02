@@ -18,7 +18,7 @@ export type TerminalEvent =
   | { type: 'data'; sequence: number; data: number[] }
   | { type: 'exit'; status: number | null };
 export const stateLabels: Record<string, string> = {
-  idle: '等待手动连接',
+  idle: '未连接',
   opening: '准备连接',
   connecting: '连接中',
   awaiting_trust: '等待指纹确认',

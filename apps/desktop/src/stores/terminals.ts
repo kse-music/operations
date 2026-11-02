@@ -1,6 +1,7 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
 import { computed, ref, watch, onScopeDispose } from 'vue';
-import type { Host } from '../types/hosts';
+import { hostDisplayName, type Host } from '../types/hosts';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import type { LayoutNode, SplitAxis, WorkspaceLayout } from '../types/workspace';
@@ -30,7 +31,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
     active = ref(''),
     focused = ref(''),
     error = ref<string | null>(null),
-    restored = ref(false),
     initialized = ref(false);
   const panes = computed(() => tabs.value.flatMap((t) => t.panes));
   const connectedCount = computed(() => panes.value.filter((p) => p.state === 'connected').length);
@@ -91,7 +91,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const key = crypto.randomUUID();
     tabs.value.push({
       key,
-      title: host?.name ?? '本地设备',
+      title: host ? hostDisplayName(host) : '本地设备',
       panes: [pane],
       layout: { kind: 'leaf', pane: pane.key },
     });
@@ -195,14 +195,10 @@ export const useTerminalsStore = defineStore('terminals', () => {
       error.value = errorMessage(cause);
     }
   }
-  async function closeOthers(key: string, right = false): Promise<void> {
+  async function closeAll(key: string): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
-    const available = hostTabs(tab.panes[0]?.host?.id ?? '');
-    const index = available.findIndex((t) => t.key === key);
-    const targets = available
-      .filter((t, i) => (right ? i > index : t.key !== key))
-      .map((t) => t.key);
+    const targets = hostTabs(tab.panes[0]?.host?.id ?? '').map((t) => t.key);
     for (const id of targets) await close(id);
   }
   async function closeHost(id: string): Promise<boolean> {
@@ -242,7 +238,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
           tabs.value.push({ ...tab, panes: restoredPanes, layout });
       }
       select(tabs.value.find((t) => t.key === saved.active)?.key ?? tabs.value[0]?.key ?? '');
-      restored.value = tabs.value.length > 0;
     } catch (cause) {
       error.value = errorMessage(cause);
     } finally {
@@ -281,13 +276,13 @@ export const useTerminalsStore = defineStore('terminals', () => {
     disposed = true;
     clearTimeout(saveTimer);
   });
+  useErrorNotifications(error);
   return {
     tabs,
     panes,
     active,
     focused,
     error,
-    restored,
     initialized,
     connectedCount,
     hostState,
@@ -303,7 +298,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     cycle,
     closePane,
     close,
-    closeOthers,
+    closeAll,
     closeHost,
     snapshot,
     saveLayout,

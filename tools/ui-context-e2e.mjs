@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace, selectHostWorkspace } from './ui-navigation.mjs';
+import { navigateWorkspace, selectHostWorkspace, terminalTabAction } from './ui-navigation.mjs';
 
 // Rendering fixtures are confined to these browser pages; no persisted data or remote operations.
 const output = process.env.SERVERDECK_CONTEXT_OUTPUT ?? '.local/ui-context';
@@ -78,7 +78,55 @@ try {
     };
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
     await assertHost('a', 'terminals');
+    assert.equal(await page.locator('.workspace-context').count(), 0);
+    assert.deepEqual(
+      (await page.locator('.workspace-header button').allTextContents()).map((text) => text.trim()),
+      ['Shell', 'SFTP', '监控', 'Linux 运维'],
+    );
     assert.equal(await page.locator('.terminal-tab').count(), 1);
+    assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
+    const sessionActions = page.getByRole('toolbar', { name: '会话操作', exact: true });
+    assert.equal(await sessionActions.count(), 0);
+    assert.equal(await page.locator('.split-toolbar').count(), 0);
+    await terminalTabAction(page, '复制');
+    await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 2);
+    await page.evaluate(async () => {
+      const { useTerminalsStore } = await import('/src/stores/terminals.ts');
+      const store = useTerminalsStore();
+      const added = store.tabs.find((tab) => tab.key === store.active);
+      const pane = added.panes[0];
+      if (pane.host?.id !== 'a' || added.panes.length !== 1 || pane.key !== store.focused)
+        throw new Error('duplicate must open and focus a single new session for the source host');
+    });
+    assert.equal(await page.getByRole('menu').count(), 0);
+    await page.locator('.terminal-tab').first().click({ button: 'right' });
+    assert.deepEqual(
+      (await page.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
+      ['复制', '重命名', '关闭所有', '关闭'],
+    );
+    await page.screenshot({ path: `${output}/${name}-session-menu.png` });
+    await page.getByRole('menuitem', { name: '关闭', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 1);
+    const compactHeader = await page.evaluate(() => {
+      const box = (selector) => document.querySelector(selector).getBoundingClientRect();
+      const host = box('.workspace-header'),
+        sessions = box('.terminal-session-header'),
+        area = box('.split-area'),
+        workspace = box('.workspace-tabs');
+      return {
+        hostHeight: host.height,
+        sessionHeight: sessions.height,
+        terminalGap: area.top - sessions.bottom,
+        totalHeight: area.top - workspace.bottom,
+      };
+    });
+    assert(compactHeader.terminalGap <= 4, JSON.stringify({ name, compactHeader }));
+    assert(compactHeader.sessionHeight <= 40, JSON.stringify({ name, compactHeader }));
+    assert(
+      compactHeader.totalHeight <= (width >= 1200 ? 84 : width > 720 ? 116 : 200),
+      JSON.stringify({ name, compactHeader }),
+    );
+    await page.screenshot({ path: `${output}/${name}-compact-header.png` });
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'terminals');
     assert.equal(await page.locator('.terminal-tab').count(), 1);
@@ -133,15 +181,35 @@ try {
     await nav('SSH 终端');
     await assertHost('b', 'terminals');
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
+    await page.waitForFunction(
+      () => {
+        const bounds = document.querySelector('.workspace-tab.active')?.getBoundingClientRect();
+        return bounds && bounds.width > 50 && bounds.left >= 0 && bounds.right <= innerWidth;
+      },
+      undefined,
+      { timeout: 3000 },
+    );
     const bounds = await page.locator('.workspace-tab.active').boundingBox();
-    assert(bounds && bounds.width > 50 && bounds.x >= 0 && bounds.x + bounds.width <= width);
+    assert(
+      bounds && bounds.width > 50 && bounds.x >= 0 && bounds.x + bounds.width <= width,
+      JSON.stringify({ name, width, bounds }),
+    );
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,
     );
     assert.deepEqual(errors, []);
     await page.screenshot({ path: `${output}/${name}-terminal.png` });
-    results.push({ name, width, height, theme, passed: true });
+    await terminalTabAction(page, '关闭所有');
+    await page.getByRole('heading', { name: '没有打开的终端', exact: true }).waitFor();
+    await page.evaluate(async () => {
+      const { useTerminalsStore } = await import('/src/stores/terminals.ts');
+      const store = useTerminalsStore();
+      if (store.hostTabs('a').length !== 1 || store.hostTabs('b').length !== 0)
+        throw new Error('close-all must close only the target host sessions');
+    });
+    await page.screenshot({ path: `${output}/${name}-closed-all.png` });
+    results.push({ name, width, height, theme, compactHeader, passed: true });
     await page.close();
   }
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));

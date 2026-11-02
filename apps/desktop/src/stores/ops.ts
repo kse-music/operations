@@ -1,3 +1,4 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { opsApi } from '../services/ops';
@@ -70,5 +71,8 @@ export const useOpsStore = defineStore('operations', () => {
       }
     }
   }
+  useErrorNotifications(() =>
+    Object.values(connections.value).map((connection) => connection.error),
+  );
   return { connections, active, current, open, trust, close, hostState, sync };
 });

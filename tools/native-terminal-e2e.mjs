@@ -1,3 +1,4 @@
+import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
 import { automationChecks } from './native-automation-e2e.mjs';
 import { networkBatchChecks } from './native-network-batch-e2e.mjs';
 import { probeOps, operationsChecks } from './native-ops-e2e.mjs';
@@ -223,8 +224,8 @@ try {
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
   // SSH scenarios start from an empty terminal baseline; startup now opens a local PTY.
-  const localPane = page.locator('.terminal-pane').filter({ hasText: '本地设备' });
-  await localPane.getByRole('button', { name: '关闭终端', exact: true }).click();
+  const localPane = page.locator('.terminal-pane[data-host-id=""]');
+  await terminalAction(page, localPane, '关闭终端');
   const setup = await page.evaluate(
     async ({ hostname, username, secret, product }) => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -273,12 +274,9 @@ try {
     await showHostTree(page);
     const panes = await page.locator('.terminal-pane').count();
     await page.locator('.tree-host').filter({ hasText: 'Linux SSH verification' }).click();
-    await page
-      .locator('.terminal-pane:visible .terminal-identity strong')
-      .filter({ hasText: 'Linux SSH verification' })
-      .waitFor();
+    await page.locator(`.terminal-pane:visible[data-host-id="${hostId}"]`).waitFor();
     if ((await page.locator('.terminal-pane').count()) === panes)
-      await page.getByRole('button', { name: '新建终端', exact: true }).click();
+      await terminalTabAction(page, '复制');
   }
   const active = () => page.locator('.terminal-pane:visible');
   const screen = () => active().locator('.xterm-rows');
@@ -300,19 +298,19 @@ try {
     );
     await trust.getByRole('button', { name: '已核对，信任并连接' }).click();
   }
-  await active().getByRole('status').filter({ hasText: '已连接' }).waitFor();
+  await active().locator('.xterm-container[data-state="connected"]').waitFor();
   await command("printf '\\n__SD_%s__\\n' NATIVE; uname -s");
   await contains('__SD_NATIVE__');
   await contains('Linux');
   passed('native xterm real Linux shell + explicit fingerprint confirmation');
   if (!process.argv.includes('--modules-only')) {
     await openTerminal();
-    await active().getByRole('status').filter({ hasText: '已连接' }).waitFor();
+    await active().locator('.xterm-container[data-state="connected"]').waitFor();
     assert.equal(await page.getByRole('tablist', { name: '终端标签' }).getByRole('tab').count(), 2);
     assert.equal(await page.getByRole('dialog').count(), 0);
     passed('two independent tabs + persisted trust');
     await page.getByRole('tablist', { name: '终端标签' }).getByRole('tab').nth(0).click();
-    await active().getByRole('button', { name: '关闭终端', exact: true }).click();
+    await terminalAction(page, active(), '关闭终端');
     await page.waitForFunction(
       () => document.querySelectorAll('[aria-label="终端标签"] [role=tab]').length === 1,
     );
@@ -420,15 +418,15 @@ try {
     await command("head -c 2097152 /dev/zero | tr '\\000' x; printf '\\n__SD_%s__\\n' BULK_DONE");
     await contains('__SD_BULK_DONE__');
     passed('2 MiB output rendered through parser acknowledgements');
-    await active().getByRole('button', { name: '查找', exact: true }).click();
+    await terminalAction(page, active(), '查找');
     await active().getByLabel('终端查找内容').fill('__SD_BULK_DONE__');
     await active().getByRole('button', { name: '上一个', exact: true }).click();
     assert.equal(await active().getByRole('alert').count(), 0);
     passed('search real terminal scrollback');
     await command('exit');
-    await active().getByRole('status').filter({ hasText: '已关闭' }).waitFor();
-    await active().getByRole('button', { name: '重新连接', exact: true }).click();
-    await active().getByRole('status').filter({ hasText: '已连接' }).waitFor();
+    await active().locator('.xterm-container[data-state="closed"]').waitFor();
+    await terminalAction(page, active(), '重新连接');
+    await active().locator('.xterm-container[data-state="connected"]').waitFor();
     await command("printf '\\n__SD_%s__\\n' RECONNECTED");
     await contains('__SD_RECONNECTED__');
     passed('manual reconnect creates fresh shell');
@@ -465,7 +463,7 @@ try {
       for (const tab of [...store.tabs]) await store.close(tab.key);
     });
     await openTerminal();
-    await active().getByRole('status').filter({ hasText: '已连接' }).waitFor();
+    await active().locator('.xterm-container[data-state="connected"]').waitFor();
   }
   if (process.argv.includes('--automation') || process.argv.includes('--recover-automation'))
     await automationChecks({
@@ -535,10 +533,7 @@ try {
     };
     if (!process.argv.includes('--product-core')) {
       await monitorChecks(shared);
-      await page
-        .locator('.terminal-pane:visible')
-        .getByRole('button', { name: '监控', exact: true })
-        .click();
+      await terminalAction(page, page.locator('.terminal-pane:visible'), '监控');
       await page.getByRole('button', { name: '查看资源占用进程', exact: true }).click();
       assert.equal(
         await page.locator('.workspace-tab.active').getAttribute('data-host-id'),

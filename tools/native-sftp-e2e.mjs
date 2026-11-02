@@ -1,3 +1,4 @@
+import { terminalAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile, open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -80,10 +81,7 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     .locator('.terminal-pane:visible .xterm-rows')
     .filter({ hasText: '__SFTP_OSC_READY__' })
     .waitFor();
-  await page
-    .locator('.terminal-pane:visible')
-    .getByRole('button', { name: 'SFTP 文件', exact: true })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), 'SFTP 文件');
   await table('remote').waitFor();
   const home = await page.getByLabel('远程路径', { exact: true }).inputValue();
   assert(home.startsWith('/') && home !== '.');
@@ -300,10 +298,7 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     .waitFor();
   await page.locator('.terminal-pane:visible .xterm-helper-textarea').focus();
   await page.keyboard.press('Control+c');
-  await page
-    .locator('.terminal-pane:visible .session-state')
-    .filter({ hasText: '已关闭' })
-    .waitFor();
+  await page.locator('.terminal-pane:visible .xterm-container[data-state="closed"]').waitFor();
   await navFiles();
   passed('native OSC 7 working-directory link and safely quoted independent tail -f PTY');
   // A sparse local file is a real large file, cancelled while bytes are in flight.

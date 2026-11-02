@@ -15,7 +15,7 @@ const pages = [
   ['SFTP 文件', 'files'],
   ['服务器监控', 'monitor'],
   ['Linux 运维', 'operations'],
-  ['运维自动化', 'automation'],
+  ['自动运维', 'automation'],
   ['批量运维', 'batch'],
   ['网络诊断', 'network'],
   ['安全凭据', 'credentials'],

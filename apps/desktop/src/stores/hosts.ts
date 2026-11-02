@@ -1,9 +1,10 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { hostsApi } from '../services/hosts';
 import { errorMessage } from '../services/ipc';
 import type { Catalog, Host } from '../types/hosts';
-import { hostInput } from '../types/hosts';
+import { hostDisplayName, hostInput } from '../types/hosts';
 
 export type HostSort = 'name' | 'hostname' | 'updated';
 export function filterHosts(
@@ -20,7 +21,7 @@ export function filterHosts(
         (!favorites || h.favorite) &&
         (!tag || h.tags.includes(tag)) &&
         (!query ||
-          [h.name, h.hostname, h.username, h.description, ...h.tags].some((s) =>
+          [hostDisplayName(h), h.hostname, h.username, h.description, ...h.tags].some((s) =>
             s.toLocaleLowerCase().includes(query),
           )),
     )
@@ -30,7 +31,7 @@ export function filterHosts(
           ? b.updatedAt.localeCompare(a.updatedAt)
           : sort === 'hostname'
             ? a.hostname.localeCompare(b.hostname)
-            : a.name.localeCompare(b.name, 'zh-CN');
+            : hostDisplayName(a).localeCompare(hostDisplayName(b), 'zh-CN');
       return value || a.id.localeCompare(b.id);
     });
 }
@@ -109,6 +110,7 @@ export const useHostsStore = defineStore('hosts', () => {
       return;
     await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), '主机分组已更新。');
   }
+  useErrorNotifications(error);
   return {
     catalog,
     busy,

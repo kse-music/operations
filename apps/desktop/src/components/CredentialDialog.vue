@@ -48,7 +48,7 @@ onBeforeUnmount(() => {
       <p v-if="credential?.hostCount" class="banner">
         此凭据被 {{ credential.hostCount }} 台主机共享，更新后将影响这些主机。
       </p>
-      <p v-if="store.error" role="alert" class="banner error">{{ store.error }}</p>
+
       <fieldset :disabled="store.busy">
         <label>凭据名称<input v-model="draft.name" autofocus maxlength="128" required /></label>
         <label

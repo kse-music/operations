@@ -23,7 +23,7 @@ export const messages = {
     operations: 'Linux 运维',
     network: '网络诊断',
     batch: '批量运维',
-    automation: '运维自动化',
+    automation: '自动运维',
     backup: '备份恢复',
   },
 } as const;

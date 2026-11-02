@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import { Columns2, Rows2, Pencil, Plus, Save, X } from '@lucide/vue';
+import { X } from '@lucide/vue';
 import { useTerminalsStore, type TerminalTab } from '../stores/terminals';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { stateLabels } from '../types/terminal';
+import { hostDisplayName } from '../types/hosts';
 import { geometry, type Divider } from '../services/layout';
 import TerminalPane from '../components/TerminalPane.vue';
 import Modal from '../components/Modal.vue';
@@ -33,7 +34,8 @@ function newTerminal(): void {
   if (!props.hostId || host.value) store.open(host.value);
 }
 function sessionTitle(item: TerminalTab, index: number): string {
-  return item.title === (item.panes[0]?.host?.name ?? '本地设备')
+  const host = item.panes[0]?.host;
+  return item.title === (host ? hostDisplayName(host) : '本地设备')
     ? `会话 ${index + 1}`
     : item.title;
 }
@@ -62,9 +64,10 @@ function paneStyle(
       }
     : { display: 'none' };
 }
-function split(axis: 'rows' | 'columns'): void {
-  const pane = tab.value?.panes.find((p) => p.key === store.focused) ?? tab.value?.panes[0];
-  if (pane) store.split(pane.key, axis);
+function duplicateSession(key: string): void {
+  const pane = store.tabs.find((t) => t.key === key)?.panes[0];
+  if (pane) store.open(pane.host);
+  menu.value = null;
 }
 function rename(key: string): void {
   menu.value = null;
@@ -157,17 +160,6 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div class="terminals-view">
-    <div v-if="store.error" class="banner error" role="alert">
-      {{ store.error }} <button class="text-button" @click="store.error = null">关闭提示</button>
-    </div>
-    <div v-if="store.restored" class="banner" role="status">
-      已恢复布局，所有窗格保持未连接。点击窗格中的“连接”后才会打开新的远端 Shell。<button
-        class="text-button"
-        @click="store.restored = false"
-      >
-        知道了
-      </button>
-    </div>
     <div v-if="!tabs.length" class="workspace-empty">
       <h2>没有打开的终端</h2>
       <p>当前主机尚无终端。可新建会话，或通过工作区标签切换主机。</p>
@@ -176,77 +168,42 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <template v-if="tabs.length">
-      <div class="terminal-tabs" role="tablist" aria-label="终端标签">
-        <div
-          v-for="(item, index) in tabs"
-          :key="item.key"
-          :class="['terminal-tab', { active: store.active === item.key }]"
-          draggable="true"
-          @mousedown.middle.prevent
-          @auxclick.middle.prevent="store.close(item.key)"
-          @dragstart="dragTab($event, item.key)"
-          @dragover.prevent
-          @drop.prevent="dropTab($event, item.key)"
-          @contextmenu.prevent="context(item.key, $event)"
-        >
-          <button
-            role="tab"
-            :aria-selected="store.active === item.key"
-            @click="store.select(item.key)"
-            @dblclick="rename(item.key)"
+      <div class="terminal-session-header">
+        <div class="terminal-tabs" role="tablist" aria-label="终端标签">
+          <div
+            v-for="(item, index) in tabs"
+            :key="item.key"
+            :class="['terminal-tab', { active: store.active === item.key }]"
+            draggable="true"
+            @mousedown.middle.prevent
+            @auxclick.middle.prevent="store.close(item.key)"
+            @dragstart="dragTab($event, item.key)"
+            @dragover.prevent
+            @drop.prevent="dropTab($event, item.key)"
+            @contextmenu.prevent="context(item.key, $event)"
           >
-            {{ sessionTitle(item, index) }}
-            <small>{{
-              item.panes.length > 1
-                ? `${item.panes.length} 个窗格`
-                : stateLabels[item.panes[0]?.state ?? 'idle']
-            }}</small></button
-          ><button
-            :aria-label="`关闭标签 ${sessionTitle(item, index)}`"
-            title="关闭标签"
-            @click="store.close(item.key)"
-          >
-            <X :size="14" aria-hidden="true" />
-          </button>
+            <button
+              role="tab"
+              :title="item.title"
+              :aria-selected="store.active === item.key"
+              @click="store.select(item.key)"
+              @dblclick="rename(item.key)"
+            >
+              {{ sessionTitle(item, index) }}
+              <small>{{
+                item.panes.length > 1
+                  ? `${item.panes.length} 个窗格`
+                  : stateLabels[item.panes[0]?.state ?? 'idle']
+              }}</small></button
+            ><button
+              :aria-label="`关闭标签 ${sessionTitle(item, index)}`"
+              title="关闭标签"
+              @click="store.close(item.key)"
+            >
+              <X :size="14" aria-hidden="true" />
+            </button>
+          </div>
         </div>
-      </div>
-      <div class="split-toolbar">
-        <button
-          class="tool-button"
-          :aria-label="props.hostId ? '新建终端' : '新建本地终端'"
-          title="为当前主机新建终端会话"
-          @click="newTerminal"
-        >
-          <Plus :size="15" aria-hidden="true" />
-        </button>
-        <button
-          class="tool-button"
-          aria-label="水平分屏（上下）"
-          title="水平分屏（上下）"
-          @click="split('rows')"
-        >
-          <Rows2 :size="15" aria-hidden="true" /></button
-        ><button
-          class="tool-button"
-          aria-label="垂直分屏（左右）"
-          title="垂直分屏（左右）"
-          @click="split('columns')"
-        >
-          <Columns2 :size="15" aria-hidden="true" /></button
-        ><button
-          class="tool-button"
-          aria-label="重命名标签"
-          title="重命名标签"
-          @click="rename(store.active)"
-        >
-          <Pencil :size="14" aria-hidden="true" />
-        </button>
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <button class="button" @click="store.closeOthers(store.active)">关闭其他标签</button
-        ><button class="button" @click="store.closeOthers(store.active, true)">关闭右侧标签</button
-        ><button class="button" @click="store.saveLayout()">
-          <Save :size="14" aria-hidden="true" />保存布局
-        </button>
       </div>
     </template>
     <div ref="area" class="split-area">
@@ -289,7 +246,13 @@ onBeforeUnmount(() => {
   <Modal v-if="renaming" title="重命名标签" @close="renaming = null"
     ><form @submit.prevent="submitRename">
       <label
-        >标签名称<input v-model="title" maxlength="128" required autofocus aria-label="标签名称"
+        >标签名称<input
+          v-model="title"
+          class="terminal-rename-input"
+          maxlength="128"
+          required
+          autofocus
+          aria-label="标签名称"
       /></label>
       <footer class="dialog-actions">
         <button class="button" type="button" @click="renaming = null">取消</button
@@ -300,23 +263,16 @@ onBeforeUnmount(() => {
   <template v-if="menu"
     ><button class="context-backdrop" aria-label="关闭标签菜单" @click="menu = null"></button>
     <div class="context-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+      <button role="menuitem" @click="duplicateSession(menu.key)">复制</button>
       <button role="menuitem" @click="rename(menu.key)">重命名</button
       ><button
         role="menuitem"
         @click="
-          store.closeOthers(menu.key);
+          store.closeAll(menu.key);
           menu = null;
         "
       >
-        关闭其他标签</button
-      ><button
-        role="menuitem"
-        @click="
-          store.closeOthers(menu.key, true);
-          menu = null;
-        "
-      >
-        关闭右侧标签</button
+        关闭所有</button
       ><button
         role="menuitem"
         @click="
@@ -324,7 +280,7 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
-        关闭标签
+        关闭
       </button>
     </div></template
   >

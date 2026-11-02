@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useApplicationStore } from '../stores/application';
@@ -93,7 +94,7 @@ async function start(): Promise<void> {
       if (!alive || token !== generation) return;
       if (event.type === 'trust') trust.value = event;
       else if (event.type === 'state') {
-        connection.value = event.message ?? event.state;
+        connection.value = event.state;
         if (event.message) error.value = event.message;
         if (event.state !== 'awaiting_trust') trust.value = null;
       }
@@ -178,6 +179,10 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', visibility);
   void pauseHost();
 });
+useErrorNotifications(() => [
+  error.value,
+  ...(sample.value?.disks.map((disk) => disk.error) ?? []),
+]);
 </script>
 <template>
   <section class="monitor-view page-view" aria-label="Linux 服务器监控">
@@ -196,9 +201,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-    <div v-if="error" class="banner error" role="alert">
-      {{ error }}<span v-if="sample"> · 下方为上次成功样本，禁止视作当前值。</span>
-    </div>
+
     <p class="monitor-status" role="status" data-testid="monitor-state">
       {{ snapshot ? (monitorLabels[snapshot.state] ?? snapshot.state) : connection || '尚未采样' }}
       · 间隔
@@ -207,11 +210,12 @@ onBeforeUnmount(() => {
         · 最后成功 {{ new Date(sample.sampledAt).toLocaleTimeString() }}</span
       >
     </p>
+    <p v-if="sample && stale" class="subtle">下方为上次成功样本，禁止视作当前值。</p>
     <div v-if="!sample" class="host-empty">
       {{
         session
           ? '正在建立安全连接或等待首个样本；CPU 和网络需要连续采样。'
-          : '请打开远程主机工作区后查看服务器资源使用情况。'
+          : '请在主机管理中打开远程主机后查看服务器资源使用情况。'
       }}
     </div>
     <div v-if="sample" :class="{ 'monitor-stale': stale }">
@@ -352,8 +356,7 @@ onBeforeUnmount(() => {
                 <td>{{ disk.available == null ? '—' : bytes(disk.available) }}</td>
                 <td :class="{ 'error-text': (disk.usage ?? 0) >= 90 }">
                   {{ disk.usage == null ? '不可用' : percent(disk.usage) }}
-                  {{ (disk.usage ?? 0) >= 90 ? '高占用' : ''
-                  }}<small v-if="disk.error">{{ disk.error }}</small>
+                  {{ (disk.usage ?? 0) >= 90 ? '高占用' : '' }}
                 </td>
               </tr>
             </tbody>

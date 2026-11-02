@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { ref, shallowRef, watch } from 'vue';
 import { productApi } from '../services/product';
 import { downloadResult } from '../services/tasks';
@@ -91,6 +92,7 @@ async function restore() {
     busy.value = false;
   }
 }
+useErrorNotifications(error);
 </script>
 <template>
   <section class="operations-view backup-view page-view" aria-label="备份恢复工作区">
@@ -136,7 +138,7 @@ async function restore() {
       </div>
     </section>
     <p v-if="busy" role="status">正在处理本地备份…</p>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <section v-if="preview" class="work-section result-section" aria-label="备份恢复预览">
       <h2>格式 v{{ preview.version }} · {{ preview.items.length }} 个条目</h2>
       <p v-for="w in preview.warnings" :key="w" class="subtle">{{ w }}</p>

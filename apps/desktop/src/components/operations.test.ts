@@ -1,6 +1,7 @@
 /* eslint-disable vue/one-component-per-file -- Tests mount isolated components. */
-import { afterEach, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, it, expect, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
+import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { LogBuffer } from '../services/log-buffer';
 const mocks = vi.hoisted(() => ({
   logOpen: vi.fn(),
@@ -12,8 +13,14 @@ vi.mock('../services/ops', () => ({ opsApi: mocks }));
 import OpsLogPanel from './OpsLogPanel.vue';
 import type { LogEvent, LogInput } from '../types/ops';
 let app: App | undefined, root: HTMLDivElement | undefined;
+let pinia: Pinia;
+beforeEach(() => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+});
 afterEach(() => {
   app?.unmount();
+  disposePinia(pinia);
   app = undefined;
   root?.remove();
   vi.useRealTimers();

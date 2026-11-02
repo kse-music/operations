@@ -11,6 +11,7 @@ vi.mock('../services/ops', () => ({ opsApi: mocks }));
 import OperationsView from './OperationsView.vue';
 import { useOpsStore } from '../stores/ops';
 import { useHostsStore } from '../stores/hosts';
+import { useNotificationsStore } from '../stores/notifications';
 import type { Host } from '../types/hosts';
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 let app: App | undefined, pinia: Pinia | undefined, root: HTMLDivElement;
@@ -108,7 +109,12 @@ it('binds confirmation to its SSH session and sends only the strict process iden
   await nextTick();
   await click('确认执行');
   expect(mocks.query.mock.calls.some(([, request]) => request.kind === 'signal')).toBe(false);
-  expect(root.textContent).toContain('主机上下文已变化');
+  expect(
+    useNotificationsStore().items.some(
+      (item) => item.error && item.text.includes('主机上下文已变化'),
+    ),
+  ).toBe(true);
+  expect(root.textContent).not.toContain('主机上下文已变化');
   hostId.value = 'a';
   await flush();
   await click('进程详情 / 信号');

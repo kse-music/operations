@@ -1,3 +1,4 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import * as ipc from '../services/ipc';
@@ -45,5 +46,6 @@ export const useApplicationStore = defineStore('application', () => {
     error.value = '界面发生异常，请重新启动应用并检查本地日志。';
   }
 
+  useErrorNotifications(error);
   return { state, loading, saving, error, notice, ready, initialize, save, reportUnexpectedError };
 });

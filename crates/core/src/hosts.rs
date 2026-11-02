@@ -32,6 +32,7 @@ impl AuthType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HostInput {
+    /// Empty means the UI displays the address and non-default SSH port.
     pub name: String,
     pub hostname: String,
     pub port: u16,
@@ -88,10 +89,24 @@ pub fn normalize_hostname(host: &str) -> Result<String, Error> {
 }
 
 impl HostInput {
+    pub fn display_name(&self) -> String {
+        if !self.name.trim().is_empty() {
+            self.name.trim().to_owned()
+        } else if self.port == 22 {
+            self.hostname.clone()
+        } else if self.hostname.contains(':') {
+            format!("[{}]:{}", self.hostname, self.port)
+        } else {
+            format!("{}:{}", self.hostname, self.port)
+        }
+    }
+
     pub fn normalize(mut self) -> Result<Self, Error> {
         self.ssh.normalize()?;
         self.name = self.name.trim().to_owned();
-        validate_name(&self.name)?;
+        if !self.name.is_empty() {
+            validate_name(&self.name)?;
+        }
         self.hostname = normalize_hostname(&self.hostname)?;
         self.username = self.username.trim().to_owned();
         if self.username.is_empty()
@@ -251,6 +266,36 @@ mod tests {
             connect_timeout_secs: 15,
         }
     }
+    #[test]
+    fn host_names_are_optional_but_named_hosts_still_validate() {
+        for name in ["", "   "] {
+            let mut input = host();
+            input.name = name.into();
+            let normalized = input.normalize().expect("unnamed host");
+            assert!(normalized.name.is_empty());
+            assert_eq!(normalized.display_name(), "example.com");
+            let mut custom_port = normalized.clone();
+            custom_port.port = 2222;
+            assert_eq!(custom_port.display_name(), "example.com:2222");
+            custom_port.hostname = "2001:db8::1".into();
+            assert_eq!(custom_port.display_name(), "[2001:db8::1]:2222");
+            custom_port.port = 22;
+            assert_eq!(custom_port.display_name(), "2001:db8::1");
+        }
+        let mut named = host();
+        named.name = "  生产  ".into();
+        assert_eq!(named.normalize().expect("named").display_name(), "生产");
+        for name in ["x".repeat(129), "bad\0name".into()] {
+            let mut invalid = host();
+            invalid.name = name;
+            assert!(invalid.normalize().is_err());
+        }
+        assert!(
+            validate_name("").is_err(),
+            "group/credential names remain required"
+        );
+    }
+
     #[test]
     fn validates_ips_dns_ports_and_user_input() {
         assert_eq!(host().normalize().expect("host").hostname, "example.com");

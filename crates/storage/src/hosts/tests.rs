@@ -19,6 +19,112 @@ fn input() -> HostInput {
 }
 
 #[test]
+fn unnamed_hosts_can_be_created_updated_copied_and_reopened() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).expect("db");
+    let mut config = input();
+    config.name = "   ".into();
+    let created = db.host_create(config).expect("create unnamed");
+    assert!(created.config.name.is_empty());
+    assert_eq!(created.config.display_name(), "example.com:2222");
+    let copied = db.host_copy(&created.id).expect("copy unnamed");
+    assert_eq!(copied.config.name, "example.com:2222 副本");
+    let mut updated = copied.config.clone();
+    updated.name.clear();
+    updated.port = 22;
+    db.host_update(&copied.id, updated).expect("clear name");
+    let reopened = Database::open(path).expect("reopen");
+    let saved = reopened.host(&copied.id).expect("saved");
+    assert!(saved.config.name.is_empty());
+    assert_eq!(saved.config.display_name(), "example.com");
+    assert_eq!(reopened.catalog().expect("catalog").hosts.len(), 2);
+}
+
+#[test]
+fn migrates_v5_hosts_without_changing_configuration_or_links() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("v5.sqlite3");
+    let connection = Connection::open(&path).expect("open");
+    for sql in [
+        include_str!("../../migrations/001_settings.sql"),
+        include_str!("../../migrations/002_hosts.sql"),
+        include_str!("../../migrations/003_known_hosts.sql"),
+        include_str!("../../migrations/004_terminal_workspace.sql"),
+        include_str!("../../migrations/005_automation.sql"),
+    ] {
+        connection.execute_batch(sql).expect("v5 schema");
+    }
+    connection
+        .pragma_update(None, "user_version", 5)
+        .expect("v5");
+    let legacy = Database { path: path.clone() };
+    let group = legacy
+        .group_save(
+            None,
+            GroupInput {
+                name: "生产".into(),
+                sort_order: 2,
+            },
+        )
+        .expect("group");
+    let credential = legacy
+        .credential_save(
+            "private-key",
+            None,
+            "key",
+            AuthType::PrivateKey,
+            Some("C:/keys/test"),
+            None,
+        )
+        .expect("credential");
+    let jump = legacy.host_create(input()).expect("jump");
+    let mut config = input();
+    config.name = "应用".into();
+    config.group_id = Some(group.id);
+    config.auth_type = AuthType::PrivateKey;
+    config.credential_id = Some(credential.id);
+    config.ssh.jump_host_id = Some(jump.id);
+    legacy.host_create(config).expect("child");
+    let settings = AppConfig {
+        theme: Theme::Light,
+        ..Default::default()
+    };
+    legacy.save_config(&settings).expect("settings");
+    let before = serde_json::to_value(legacy.catalog().expect("before")).expect("json");
+    drop(connection);
+    let migrated = Database::open(&path).expect("migrate");
+    assert_eq!(
+        migrated.version().expect("version"),
+        serverdeck_core::DATABASE_VERSION
+    );
+    assert_eq!(
+        serde_json::to_value(migrated.catalog().expect("after")).expect("json"),
+        before
+    );
+    assert_eq!(migrated.load_config().expect("settings"), settings);
+    let mut unnamed = input();
+    unnamed.name.clear();
+    let saved = migrated
+        .host_create(unnamed)
+        .expect("unnamed after migration");
+    let connection = migrated.connect().expect("connect");
+    assert!(
+        connection
+            .execute("UPDATE hosts SET port=0 WHERE id=?1", [&saved.id])
+            .is_err()
+    );
+    assert!(
+        connection
+            .execute(
+                "UPDATE hosts SET group_id='missing' WHERE id=?1",
+                [&saved.id]
+            )
+            .is_err()
+    );
+}
+
+#[test]
 fn host_crud_copy_groups_and_restart_preserve_real_data() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");

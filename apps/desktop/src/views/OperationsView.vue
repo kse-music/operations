@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
@@ -16,7 +17,7 @@ import type {
   Feedback,
 } from '../types/ops';
 import { pidPorts } from '../services/product-links';
-import type { Host } from '../types/hosts';
+import { hostDisplayName, type Host } from '../types/hosts';
 import { stateLabels } from '../types/terminal';
 import Modal from '../components/Modal.vue';
 import OpsTable from '../components/OpsTable.vue';
@@ -331,6 +332,7 @@ async function relatedPorts() {
     error.value = errorMessage(cause);
   }
 }
+useErrorNotifications(error);
 </script>
 <template>
   <section class="operations-view page-view" aria-label="主机运维工作区">
@@ -345,12 +347,14 @@ async function relatedPorts() {
       </div>
     </div>
     <p class="ops-connection-status" role="status">
-      {{ connection?.host.name ?? (chosen ? '当前主机尚未连接' : '请打开远程主机工作区') }} ·
+      {{
+        hostDisplayName(connection?.host) ||
+        (chosen ? '当前主机尚未连接' : '请在主机管理中打开远程主机')
+      }}
+      ·
       {{ stateLabels[connection?.state ?? 'idle'] ?? connection?.state }}
     </p>
-    <div v-if="connection?.error || error" role="alert" class="banner error">
-      {{ error ?? connection?.error }}
-    </div>
+
     <div v-if="notice" role="status" class="banner success">{{ notice }}</div>
     <template v-if="connected"
       ><div v-if="capabilities" class="ops-capabilities">
@@ -551,7 +555,7 @@ async function relatedPorts() {
         :key="connection.session.id"
         ref="logs"
         :session-id="connection.session.id"
-        :host-name="connection.host.name"
+        :host-name="hostDisplayName(connection.host)"
       />
       <section v-if="detail" class="ops-detail">
         <div class="section-heading">
@@ -616,9 +620,7 @@ async function relatedPorts() {
         <pre data-testid="operations-detail">{{ JSON.stringify(detail, null, 2) }}</pre>
       </section>
     </template>
-    <p v-else class="host-empty">
-      从主机工作区连接后，查看真实 Docker、进程、端口、服务和指定日志。
-    </p>
+    <p v-else class="host-empty">从主机管理连接后，查看真实 Docker、进程、端口、服务和指定日志。</p>
     <details class="ops-history">
       <summary>本次应用内操作反馈（仅目标与结果，不记录输出）</summary>
       <p
@@ -632,7 +634,7 @@ async function relatedPorts() {
     <Modal v-if="pending" title="确认主机运维操作" :busy="busy" @close="pending = null"
       ><p>{{ pending.title }}</p>
       <p>
-        主机：{{ connection?.host.name }} · {{ connection?.host.hostname }} · 账号
+        主机：{{ hostDisplayName(connection?.host) }} · {{ connection?.host.hostname }} · 账号
         {{ connection?.host.username }}
       </p>
       <code>{{ pending.target }}</code>

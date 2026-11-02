@@ -98,6 +98,82 @@ it('bounds initial host DOM, exposes further rows, and supports arrow/Home/End k
   expect(root.textContent).toContain('Host 449');
 });
 
+it('uses address and non-default port when the host name is empty', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const store = useHostsStore();
+  store.catalog = {
+    hosts: [
+      { id: 'default', name: '', hostname: '192.0.2.10', port: 22 },
+      { id: 'custom', name: '', hostname: '192.0.2.10', port: 2222 },
+      { id: 'named', name: '生产', hostname: '192.0.2.20', port: 2222 },
+      { id: 'spaces', name: '   ', hostname: 'server.example', port: 22 },
+      { id: 'ipv6', name: '', hostname: '2001:db8::1', port: 2200 },
+    ].map((host) => ({ ...hostInput(), ...host, createdAt: '', updatedAt: '' })),
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  };
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(HostSidebar).use(pinia);
+  app.mount(root);
+  await nextTick();
+  for (const [id, name] of [
+    ['default', '192.0.2.10'],
+    ['custom', '192.0.2.10:2222'],
+    ['named', '生产'],
+    ['spaces', 'server.example'],
+    ['ipv6', '[2001:db8::1]:2200'],
+  ]) {
+    expect(root.querySelector(`[data-host-id="${id}"] .host-name`)?.textContent).toBe(name);
+  }
+});
+
+it('shows the saved host total beside All Hosts regardless of filtering and updates after changes', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const store = useHostsStore();
+  const host = {
+    ...hostInput(),
+    id: 'first',
+    name: 'First',
+    hostname: 'first.example',
+    createdAt: '',
+    updatedAt: '',
+  };
+  store.catalog = {
+    hosts: [host, { ...host, id: 'second', name: 'Second', favorite: true }],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  };
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(HostSidebar).use(pinia);
+  app.mount(root);
+  const count = () =>
+    root.querySelector('.host-filter button:first-child .host-count')?.textContent?.trim();
+  expect(count()).toBe('2');
+  store.favorites = true;
+  store.search = 'no-match';
+  await nextTick();
+  expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
+  expect(count()).toBe('2');
+  store.catalog.hosts.push({ ...host, id: 'third' });
+  await nextTick();
+  expect(count()).toBe('3');
+  store.catalog.hosts.splice(0, 2);
+  await nextTick();
+  expect(count()).toBe('1');
+  store.catalog.hosts = [];
+  await nextTick();
+  expect(count()).toBe('0');
+  store.catalog = null;
+  await nextTick();
+  expect(root.querySelector('.host-count')).toBeNull();
+});
+
 it('keeps host tools outside the scrolling list and preserves selection, grouping and favorites', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
@@ -120,6 +196,7 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
     pendingSecretDeletions: 0,
   };
   const select = vi.fn(),
+    collapse = vi.fn(),
     create = vi.fn(),
     groups = vi.fn(),
     importHosts = vi.fn(),
@@ -128,6 +205,7 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
   document.body.append(root);
   app = createApp(HostSidebar, {
     onSelect: select,
+    onCollapse: collapse,
     onCreate: create,
     onGroups: groups,
     onImport: importHosts,
@@ -139,6 +217,9 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
   expect(scroll.querySelector('input')).toBeNull();
   expect(scroll.querySelector('[aria-label="新建主机"]')).toBeNull();
   expect(scroll.querySelector('footer')).toBeNull();
+  root.querySelector<HTMLButtonElement>('.host-sidebar-title [aria-label="收起主机栏"]')!.click();
+  expect(collapse).toHaveBeenCalledOnce();
+  expect(root.querySelector('.host-search-field > svg')).not.toBeNull();
   expect(root.querySelector('.host-address')?.textContent).toBe('prod.example');
   const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
   row.click();

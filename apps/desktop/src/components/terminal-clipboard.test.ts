@@ -1,0 +1,477 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { createApp, h, nextTick, ref, type App } from 'vue';
+import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
+import TerminalPane from './TerminalPane.vue';
+import { useApplicationStore } from '../stores/application';
+import { useTerminalsStore, type TerminalPaneModel } from '../stores/terminals';
+import { useNotificationsStore } from '../stores/notifications';
+import { terminalApi } from '../services/terminal';
+import { defaultTerminalPreferences } from '../types/preferences';
+import { defaultProductPreferences } from '../types/product';
+import { hostInput } from '../types/hosts';
+
+const xterm = vi.hoisted(() => ({
+  selection: '',
+  selectionChanged: () => {},
+  input: vi.fn() as (data: string) => void,
+  keyHandler: vi.fn(() => true) as (event: KeyboardEvent) => boolean,
+  pasted: vi.fn(),
+}));
+vi.mock('@xterm/xterm', () => ({
+  Terminal: class {
+    options = {};
+    cols = 80;
+    rows = 24;
+    parser = { registerOscHandler: vi.fn() };
+    loadAddon() {}
+    open() {}
+    focus() {}
+    dispose() {}
+    write() {}
+    onResize() {}
+    onBinary() {}
+    attachCustomKeyEventHandler(callback: (event: KeyboardEvent) => boolean) {
+      xterm.keyHandler = callback;
+    }
+    onSelectionChange(callback: () => void) {
+      xterm.selectionChanged = callback;
+    }
+    onData(callback: (data: string) => void) {
+      xterm.input = callback;
+    }
+    getSelection() {
+      return xterm.selection;
+    }
+    hasSelection() {
+      return xterm.selection.length > 0;
+    }
+    paste(text: string) {
+      xterm.pasted(text);
+      xterm.input(text);
+    }
+  },
+}));
+vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {} }));
+vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
+
+let app: App, pinia: Pinia, root: HTMLDivElement, tab: TerminalPaneModel;
+const active = ref(true);
+const events = {
+  files: vi.fn(),
+  operations: vi.fn(),
+  monitor: vi.fn(),
+  automation: vi.fn(),
+  network: vi.fn(),
+  close: vi.fn(),
+};
+const PaneHarness = {
+  setup: () => () =>
+    h(TerminalPane, {
+      tab,
+      active: active.value,
+      onFiles: events.files,
+      onOperations: events.operations,
+      onMonitor: events.monitor,
+      onAutomation: events.automation,
+      onNetwork: events.network,
+      onClose: events.close,
+    }),
+};
+const writeText = vi.fn(),
+  readText = vi.fn();
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+beforeEach(async () => {
+  vi.clearAllMocks();
+  xterm.selection = '';
+  active.value = true;
+  writeText.mockResolvedValue(undefined);
+  readText.mockResolvedValue('clipboard text');
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: { writeText, readText },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  pinia = createPinia();
+  setActivePinia(pinia);
+  useApplicationStore().state = {
+    appVersion: 'test',
+    databaseVersion: 5,
+    dataDirectory: '',
+    logDirectory: '',
+    config: {
+      version: 1,
+      theme: 'dark',
+      sidebarWidth: 260,
+      terminalFontSize: 14,
+      connectTimeoutSecs: 10,
+      monitorIntervalSecs: 5,
+      transferConcurrency: 3,
+      logLevel: 'info',
+      terminal: defaultTerminalPreferences(),
+      product: defaultProductPreferences(),
+    },
+  };
+  const store = useTerminalsStore();
+  store.open(null);
+  tab = store.tabs[0]!.panes[0]!;
+  vi.spyOn(terminalApi, 'openLocal').mockImplementation(async (_size, receive) => {
+    receive({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: 'local:test', shell: 'test shell' };
+  });
+  vi.spyOn(terminalApi, 'input').mockResolvedValue();
+  vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(PaneHarness).use(pinia);
+  app.mount(root);
+  await vi.waitFor(() => expect(tab.sessionId).toBe('local:test'));
+});
+afterEach(() => {
+  app.unmount();
+  disposePinia(pinia);
+  root.remove();
+  document.querySelectorAll('dialog').forEach((dialog) => dialog.remove());
+  if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+  else Reflect.deleteProperty(navigator, 'clipboard');
+  if (originalShowModal)
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+  vi.unstubAllGlobals();
+});
+function enable(value = true) {
+  useApplicationStore().state!.config.terminal.quickCopyPaste = value;
+}
+function rightClick(selector = '.xterm-container', button = 2, shiftKey = false) {
+  const event = new MouseEvent('contextmenu', {
+    bubbles: true,
+    cancelable: true,
+    button,
+    shiftKey,
+  });
+  root.querySelector(selector)!.dispatchEvent(event);
+  return event;
+}
+async function menuAction(label: string): Promise<void> {
+  rightClick('.xterm-container', 2, true);
+  await nextTick();
+  const button = [
+    ...document.querySelectorAll<HTMLButtonElement>('[aria-label="终端操作"] [role="menuitem"]'),
+  ].find((item) => item.textContent?.trim() === label);
+  expect(button).toBeDefined();
+  button!.click();
+  await nextTick();
+}
+
+it('removes the persistent toolbar while retaining copy and paste in the local context menu', async () => {
+  expect(root.querySelector('.terminal-toolbar')).toBeNull();
+  expect(root.querySelector('.terminal-identity')).toBeNull();
+  expect(root.querySelector('.terminal-pane')?.firstElementChild).toBe(
+    root.querySelector('.xterm-container'),
+  );
+  xterm.selection = 'selected from menu';
+  await menuAction('复制');
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('selected from menu');
+  await menuAction('粘贴');
+  await vi.waitFor(() => expect(xterm.pasted).toHaveBeenCalledExactlyOnceWith('clipboard text'));
+  expect(document.querySelector('[aria-label="终端操作"]')).toBeNull();
+});
+
+it('keeps quick right-click paste and opens the menu with Shift+right-click or Shift+F10', async () => {
+  enable();
+  rightClick();
+  await nextTick();
+  expect(readText).toHaveBeenCalledOnce();
+  expect(document.querySelector('[aria-label="终端操作"]')).toBeNull();
+  rightClick('.xterm-container', 2, true);
+  await nextTick();
+  expect(readText).toHaveBeenCalledOnce();
+  const menu = document.querySelector('[aria-label="终端操作"]')!;
+  expect(menu).not.toBeNull();
+  const buttons = [...menu.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
+  menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }));
+  expect(document.activeElement).toBe(buttons.at(-1));
+  menu.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }),
+  );
+  expect(document.activeElement).toBe(buttons[0]);
+  menu.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+  );
+  await nextTick();
+  expect(document.querySelector('[aria-label="终端操作"]')).toBeNull();
+  const key = new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, cancelable: true });
+  expect(xterm.keyHandler(key)).toBe(false);
+  await nextTick();
+  expect(key.defaultPrevented).toBe(true);
+  expect(document.querySelector('[aria-label="终端操作"]')).not.toBeNull();
+});
+
+it('retains export confirmation and emits close only when selected from the menu', async () => {
+  expect(document.querySelector('dialog')).toBeNull();
+  await menuAction('导出内容');
+  expect(document.querySelector('dialog[aria-label="导出终端内容"]')).not.toBeNull();
+  expect(events.close).not.toHaveBeenCalled();
+  document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭对话框"]')!.click();
+  await nextTick();
+  await menuAction('关闭终端');
+  expect(events.close).toHaveBeenCalledOnce();
+});
+
+it('routes remote menu actions to the same host, working directory and pane', async () => {
+  app.unmount();
+  const store = useTerminalsStore();
+  store.tabs = [];
+  const host = {
+    ...hostInput(),
+    id: 'menu-host',
+    name: 'Menu Host',
+    hostname: 'menu.example',
+    username: 'operator',
+    createdAt: '',
+    updatedAt: '',
+  };
+  store.open(host);
+  tab = store.panes[0]!;
+  tab.cwd = '/srv/project';
+  vi.spyOn(terminalApi, 'open').mockImplementation(async (_id, _size, receive) => {
+    receive({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: 'remote:menu', hostId: host.id, transportId: 'transport', routeHostIds: [] };
+  });
+  app = createApp(PaneHarness).use(pinia);
+  app.mount(root);
+  await vi.waitFor(() => expect(tab.sessionId).toBe('remote:menu'));
+  await menuAction('SFTP 文件');
+  expect(events.files).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ id: host.id }),
+    '/srv/project',
+    tab.key,
+  );
+  for (const [label, event] of [
+    ['运维', events.operations],
+    ['监控', events.monitor],
+    ['自动化', events.automation],
+  ] as const) {
+    await menuAction(label);
+    expect(event).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: host.id }));
+  }
+  const forwards = vi.spyOn(terminalApi, 'forwardList').mockResolvedValue([]);
+  await menuAction('端口转发');
+  expect(forwards).toHaveBeenCalledWith('remote:menu');
+  const forwardDialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="端口转发"]')!;
+  expect(forwardDialog.textContent).toContain('Menu Host');
+  forwardDialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await nextTick();
+  tab.state = 'failed';
+  await menuAction('诊断连接异常');
+  expect(events.network).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: host.id }));
+});
+
+it('opens an idle SSH pane once after an explicit connection request and keeps trust confirmation', async () => {
+  app.unmount();
+  const store = useTerminalsStore();
+  store.tabs = [];
+  store.open({
+    ...hostInput(),
+    id: 'ssh-host',
+    name: 'SSH Host',
+    hostname: 'host.example',
+    createdAt: '',
+    updatedAt: '',
+  });
+  tab = store.panes[0]!;
+  store.update(tab.key, { state: 'idle', connectRequested: false });
+  const open = vi.spyOn(terminalApi, 'open').mockImplementation(async (_hostId, _size, receive) => {
+    receive({ type: 'state', state: 'awaiting_trust', code: null, message: null });
+    receive({
+      type: 'trust',
+      hostname: 'host.example',
+      port: 22,
+      algorithm: 'ssh-ed25519',
+      fingerprint: 'SHA256:test',
+    });
+    return { id: 'ssh-session', hostId: 'ssh-host', transportId: 'transport', routeHostIds: [] };
+  });
+  const trust = vi.spyOn(terminalApi, 'trust').mockResolvedValue();
+  app = createApp(PaneHarness).use(pinia);
+  app.mount(root);
+  await nextTick();
+  expect(open).not.toHaveBeenCalled();
+  store.update(tab.key, { connectRequested: true });
+  await vi.waitFor(() => expect(tab.sessionId).toBe('ssh-session'));
+  expect(open).toHaveBeenCalledExactlyOnceWith(
+    'ssh-host',
+    expect.any(Object),
+    expect.any(Function),
+  );
+  expect(tab.state).toBe('awaiting_trust');
+  expect(document.querySelector('dialog[open]')?.textContent).toContain('SHA256:test');
+  expect(trust).not.toHaveBeenCalled();
+  store.update(tab.key, { connectRequested: true });
+  active.value = false;
+  await nextTick();
+  active.value = true;
+  await nextTick();
+  expect(open).toHaveBeenCalledOnce();
+});
+
+it('does not read or write the clipboard by default and reacts to saved preference changes', async () => {
+  xterm.selection = 'selected text';
+  xterm.selectionChanged();
+  expect(rightClick().defaultPrevented).toBe(true);
+  expect(writeText).not.toHaveBeenCalled();
+  expect(readText).not.toHaveBeenCalled();
+  enable();
+  xterm.selectionChanged();
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('selected text');
+  expect(rightClick().defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(xterm.pasted).toHaveBeenCalledExactlyOnceWith('clipboard text'));
+  expect(terminalApi.input).toHaveBeenCalledWith(
+    'local:test',
+    new TextEncoder().encode('clipboard text'),
+  );
+  enable(false);
+  xterm.selectionChanged();
+  rightClick();
+  expect(writeText).toHaveBeenCalledTimes(1);
+  expect(readText).toHaveBeenCalledTimes(1);
+});
+
+it('copies only a nonempty selection from an active pane', async () => {
+  enable();
+  xterm.selectionChanged();
+  expect(writeText).not.toHaveBeenCalled();
+  active.value = false;
+  await nextTick();
+  xterm.selection = 'inactive text';
+  xterm.selectionChanged();
+  rightClick();
+  expect(writeText).not.toHaveBeenCalled();
+  expect(readText).not.toHaveBeenCalled();
+});
+
+it('intercepts right mouse events only inside the terminal and does not also invoke xterm handlers', () => {
+  enable();
+  root.addEventListener('contextmenu', (event) => event.preventDefault(), true);
+  const child = document.createElement('div');
+  root.querySelector('.xterm-container')!.append(child);
+  const handler = vi.fn();
+  child.addEventListener('mousedown', handler);
+  child.addEventListener('contextmenu', handler);
+  const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 2 });
+  child.dispatchEvent(down);
+  child.dispatchEvent(
+    new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 }),
+  );
+  expect(down.defaultPrevented).toBe(true);
+  expect(handler).not.toHaveBeenCalled();
+  expect(readText).toHaveBeenCalledOnce();
+  rightClick('.terminal-footnote');
+  rightClick('.xterm-container', 0);
+  expect(readText).toHaveBeenCalledOnce();
+});
+
+it('keeps large paste behind confirmation and cancellation sends no input', async () => {
+  enable();
+  readText.mockResolvedValue('x'.repeat(4096));
+  rightClick();
+  await vi.waitFor(() => expect(document.querySelector('dialog[open]')).not.toBeNull());
+  expect(xterm.pasted).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+  const cancel = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
+    (button) => button.textContent === '取消',
+  )!;
+  cancel.click();
+  await nextTick();
+  expect(document.querySelector('dialog')).toBeNull();
+  rightClick();
+  await vi.waitFor(() => expect(document.querySelector('dialog[open]')).not.toBeNull());
+  const approve = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
+    (button) => button.textContent === '确认粘贴',
+  )!;
+  approve.click();
+  await vi.waitFor(() => expect(xterm.pasted).toHaveBeenCalledExactlyOnceWith('x'.repeat(4096)));
+});
+
+it('rejects oversize or disconnected pastes and does not act behind an open dialog', async () => {
+  enable();
+  readText.mockResolvedValue('x'.repeat(2 * 1024 * 1024 + 1));
+  rightClick();
+  await vi.waitFor(() =>
+    expect(
+      useNotificationsStore().items.some(
+        (item) => item.error && item.text.includes('单次粘贴最多 2 MiB'),
+      ),
+    ).toBe(true),
+  );
+  expect(xterm.pasted).not.toHaveBeenCalled();
+  tab.state = 'disconnected';
+  rightClick();
+  await nextTick();
+  expect(readText).toHaveBeenCalledOnce();
+  expect(
+    useNotificationsStore().items.some(
+      (item) => item.error && item.text.includes('请先连接终端再粘贴'),
+    ),
+  ).toBe(true);
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  tab.state = 'connected';
+  const dialog = document.createElement('dialog');
+  dialog.open = true;
+  document.body.append(dialog);
+  rightClick();
+  expect(readText).toHaveBeenCalledOnce();
+});
+
+it('reports clipboard permission errors without sending terminal input', async () => {
+  enable();
+  writeText.mockRejectedValue(new Error('private failure details'));
+  readText.mockRejectedValue(new Error('private failure details'));
+  xterm.selection = 'text';
+  xterm.selectionChanged();
+  await vi.waitFor(() =>
+    expect(useNotificationsStore().items.some((item) => item.text.includes('无法写入剪贴板'))).toBe(
+      true,
+    ),
+  );
+  rightClick();
+  await vi.waitFor(() =>
+    expect(useNotificationsStore().items.some((item) => item.text.includes('无法读取剪贴板'))).toBe(
+      true,
+    ),
+  );
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  expect(
+    useNotificationsStore().items.some((item) => item.text.includes('private failure details')),
+  ).toBe(false);
+  expect(root.textContent).not.toContain('private failure details');
+  expect(xterm.pasted).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+});
+
+it('drops an asynchronous clipboard read if the pane reconnects before it finishes', async () => {
+  enable();
+  let finish: (text: string) => void;
+  readText.mockImplementation(() => new Promise<string>((resolve) => (finish = resolve)));
+  rightClick();
+  tab.state = 'failed';
+  await nextTick();
+  await menuAction('重新连接');
+  await vi.waitFor(() => expect(terminalApi.openLocal).toHaveBeenCalledTimes(2));
+  finish!('stale clipboard');
+  await nextTick();
+  expect(xterm.pasted).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+});

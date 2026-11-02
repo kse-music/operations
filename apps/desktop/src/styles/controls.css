@@ -281,7 +281,15 @@ input[type='file']::file-selector-button {
   gap: 28px;
   margin: 0;
 }
-.settings-form > fieldset {
+.settings-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.settings-tabs > .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.settings-tabpanel > fieldset {
   min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px 24px;
@@ -291,10 +299,6 @@ input[type='file']::file-selector-button {
   font-size: 14px;
   font-weight: 600;
   padding: 0 0 16px;
-}
-.settings-form > fieldset + fieldset {
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
 }
 .settings-form fieldset > :is(p, h3, .banner) {
   grid-column: 1 / -1;
@@ -307,6 +311,9 @@ input[type='file']::file-selector-button {
 .settings-form .checkbox-label {
   align-self: end;
   min-height: 32px;
+}
+.settings-form input[type='range'] {
+  margin: 0;
 }
 .input-action {
   display: flex;
@@ -412,7 +419,7 @@ input[type='file']::file-selector-button {
 @container workspace (max-width: 700px) {
   .file-columns,
   .monitor-charts,
-  .settings-form > fieldset {
+  .settings-tabpanel > fieldset {
     grid-template-columns: minmax(0, 1fr);
   }
   .monitor-cards {

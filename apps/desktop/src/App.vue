@@ -15,7 +15,7 @@ import SettingsPanel from './components/SettingsPanel.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import HostTools from './components/HostTools.vue';
-import { Monitor, PanelLeftClose, PanelLeftOpen, Search, Server, X } from '@lucide/vue';
+import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import GroupManager from './components/GroupManager.vue';
@@ -23,7 +23,7 @@ import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
 import { useHostsStore } from './stores/hosts';
 import { hostsApi } from './services/hosts';
-import type { Host } from './types/hosts';
+import { hostDisplayName, type Host } from './types/hosts';
 const TerminalsView = defineAsyncComponent(() => import('./views/TerminalsView.vue'));
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useFilesStore } from './stores/files';
@@ -31,6 +31,7 @@ import { filesApi } from './services/files';
 import { errorMessage } from './services/ipc';
 import { useAutomationStore } from './stores/automation';
 import { useWorkspaceStore } from './stores/workspace';
+import NotificationToasts from './components/NotificationToasts.vue';
 import { useNotificationsStore } from './stores/notifications';
 import { useBackgroundStore } from './stores/background';
 import { useOpsStore } from './stores/ops';
@@ -135,7 +136,7 @@ function navigate(
     terminals.activateHost(host?.id ?? '');
     if (!terminals.active) terminals.open(host ?? null);
     const pane = terminals.panes.find((p) => p.key === terminals.focused);
-    if (pane && !pane.host && pane.state === 'idle') pane.connectRequested = true;
+    if (pane?.state === 'idle') pane.connectRequested = true;
   }
   if (value === 'files') files.active = hostId;
   if (value === 'operations') operations.active = hostId;
@@ -147,22 +148,24 @@ function fromSearch(value: View, hostId = currentHostId.value, entryId = '') {
   if (value === 'automation' && entryId) automationHost.value = hostId;
   navigate(value, hostId);
 }
-function setContext(hostId: string) {
+function setContext(hostId: string, connectShell = false) {
   const existing = workspace.tabs.some((tab) => hostViews.has(tab.view) && tab.hostId === hostId);
   workspace.selectHost(hostId);
   const tab = workspace.current;
-  if (tab && !existing) navigate(tab.view, tab.hostId, tab.section);
+  if (tab && (!existing || (connectShell && tab.view === 'terminals')))
+    navigate(tab.view, tab.hostId, tab.section);
 }
 function tabName(tab: WorkspaceTab) {
   return hostViews.has(tab.view)
     ? tab.hostId
-      ? (knownHost(tab.hostId)?.name ?? '已删除主机')
+      ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机'
       : '本地设备'
     : messages['zh-CN'][tab.view];
 }
 function activate(tab: WorkspaceTab) {
   if (tab.view !== 'automation') entryIntent.value = '';
-  workspace.activate(tab.key);
+  if (tab.view === 'terminals' && tab.hostId) navigate(tab.view, tab.hostId, tab.section);
+  else workspace.activate(tab.key);
 }
 function revealActiveTab() {
   document
@@ -284,12 +287,27 @@ function globalShortcut(event: KeyboardEvent) {
 }
 const sidebarDraft = ref<number | null>(null);
 const sidebarOpen = ref(!window.matchMedia('(max-width: 720px)').matches);
+function clampSidebarWidth(width: number): number {
+  return Math.max(200, Math.min(400, Math.round(width)));
+}
+async function toggleSidebar(): Promise<void> {
+  sidebarOpen.value = !sidebarOpen.value;
+  await nextTick();
+  document
+    .querySelector<HTMLButtonElement>(
+      sidebarOpen.value
+        ? '.host-sidebar-title [aria-label="收起主机栏"]'
+        : '.workspace-tabs [aria-label="展开主机栏"]',
+    )
+    ?.focus({ preventScroll: true });
+  revealActiveTab();
+}
 function resizeSidebar(event: PointerEvent) {
   event.preventDefault();
   const start = event.clientX,
     width = application.state?.config.sidebarWidth ?? 248;
   function move(e: PointerEvent) {
-    sidebarDraft.value = Math.max(200, Math.min(400, width + e.clientX - start));
+    sidebarDraft.value = clampSidebarWidth(width + e.clientX - start);
   }
   function end() {
     window.removeEventListener('pointermove', move);
@@ -303,7 +321,7 @@ function resizeSidebar(event: PointerEvent) {
 }
 async function saveSidebar(width: number) {
   if (application.state) {
-    await application.save({ ...application.state.config, sidebarWidth: width });
+    await application.save({ ...application.state.config, sidebarWidth: clampSidebarWidth(width) });
     sidebarDraft.value = null;
   }
 }
@@ -311,13 +329,7 @@ function sidebarKey(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
   event.preventDefault();
   void saveSidebar(
-    Math.max(
-      200,
-      Math.min(
-        400,
-        (application.state?.config.sidebarWidth ?? 248) + (event.key === 'ArrowRight' ? 8 : -8),
-      ),
-    ),
+    (application.state?.config.sidebarWidth ?? 248) + (event.key === 'ArrowRight' ? 8 : -8),
   );
 }
 
@@ -516,40 +528,16 @@ watch(
   { immediate: true },
 );
 watch(
-  () => application.error,
-  (v) => notifications.push(v, true),
-);
-watch(
   () => application.notice,
   (v) => notifications.push(v),
-);
-watch(
-  () => store.error,
-  (v) => notifications.push(v, true),
 );
 watch(
   () => store.notice,
   (v) => notifications.push(v),
 );
 watch(
-  () => files.error,
-  (v) => notifications.push(v, true),
-);
-watch(
   () => files.notice,
   (v) => notifications.push(v),
-);
-watch(
-  () => terminals.error,
-  (v) => notifications.push(v, true),
-);
-watch(
-  () => background.error,
-  (v) => notifications.push(v, true),
-);
-watch(
-  () => automation.error,
-  (v) => notifications.push(v, true),
 );
 </script>
 
@@ -560,45 +548,21 @@ watch(
         <span class="brand-icon" aria-hidden="true">S<span>▸</span></span
         ><strong>ServerDeck</strong><span class="version">v0.1</span>
       </div>
-      <button
-        v-if="isHostWorkspace || view === null"
-        class="shell-icon-button"
-        :aria-label="sidebarOpen ? '收起主机栏' : '展开主机栏'"
-        :title="sidebarOpen ? '收起主机栏' : '展开主机栏'"
-        :aria-expanded="sidebarOpen"
-        aria-controls="host-sidebar"
-        @click="sidebarOpen = !sidebarOpen"
-      >
-        <PanelLeftClose v-if="sidebarOpen" :size="18" aria-hidden="true" />
-        <PanelLeftOpen v-else :size="18" aria-hidden="true" />
-      </button>
-      <div class="topbar-context" aria-label="当前主机上下文">
-        <span v-if="isHostWorkspace || view === null">主机工作区</span>
-        <span v-else>{{ messages['zh-CN'][view] }}</span>
-      </div>
-      <button
-        class="button global-search-button"
-        aria-label="打开全局搜索"
-        @click="searching = true"
-      >
-        <Search :size="15" aria-hidden="true" /><span>搜索</span>
-        <kbd>{{ application.state?.config.product?.shortcuts.search ?? 'Ctrl+K' }}</kbd>
-      </button>
     </header>
     <AppNavigation
       :active="view"
-      :terminals="terminals.tabs.length"
       :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
       @navigate="navigate($event)"
       @workspace="setContext(currentHostId)"
     />
-    <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机工作区侧栏">
+    <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
       <HostSidebar
+        @collapse="toggleSidebar"
         @create="openHost()"
         @groups="groups = true"
         @import="importing = true"
         @export="exportHosts"
-        @select="setContext($event.id)"
+        @select="setContext($event.id, true)"
         @saved="revealHost"
       />
     </aside>
@@ -622,6 +586,17 @@ watch(
         aria-label="工作区标签"
         @keydown="workspaceKeys"
       >
+        <button
+          v-if="!sidebarOpen && (isHostWorkspace || view === null)"
+          class="workspace-sidebar-button"
+          aria-label="展开主机栏"
+          title="展开主机栏"
+          :aria-expanded="false"
+          aria-controls="host-sidebar"
+          @click="toggleSidebar"
+        >
+          <PanelLeftOpen :size="18" aria-hidden="true" />
+        </button>
         <div
           v-for="tab in workspace.tabs"
           :key="tab.key"
@@ -656,77 +631,21 @@ watch(
             <X :size="14" aria-hidden="true" />
           </button>
         </div>
-        <button
-          v-if="!workspace.tabs.some((tab) => hostViews.has(tab.view) && !tab.hostId)"
-          class="workspace-local-button"
-          aria-label="打开本地工作区"
-          title="打开本地终端"
-          @click="setContext('')"
-        >
-          <Monitor :size="16" aria-hidden="true" />
-        </button>
       </div>
-      <div v-if="isHostWorkspace" class="workspace-context">
-        <strong>{{ currentHost?.name ?? (currentHostId ? '已删除主机' : '本地设备') }}</strong>
-        <template v-if="currentHost">
-          <span>{{ currentHost.username }}@{{ currentHost.hostname }}:{{ currentHost.port }}</span>
-          <span>{{
-            background.connections
-              ? background.hostState(currentHost.id)
-              : files.hostState(currentHost.id)
-          }}</span>
-          <button class="text-button" @click="openNetwork(currentHost)">诊断连接</button>
-        </template>
-        <button v-else class="text-button" @click="openHost()">新建主机</button>
+      <div v-if="isHostWorkspace && view" class="workspace-header">
+        <HostTools :active="view" :local="!currentHostId" @navigate="navigate($event)" />
       </div>
-      <HostTools
-        v-if="isHostWorkspace && view"
-        :active="view"
-        :local="!currentHostId"
-        @navigate="navigate($event)"
-      />
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
         当前仍操作建立时的连接：{{ currentHost?.username }}@{{ currentHost?.hostname }}:{{
           currentHost?.port
         }}。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。
       </p>
-      <div
-        v-if="
-          automation.status?.schedulerError ||
-          automation.status?.awaiting ||
-          (automation.status?.latestFailure?.id !== automation.dismissed &&
-            automation.status?.latestFailure)
-        "
-        class="banner"
-        role="status"
-      >
-        自动化：{{ automation.status?.awaiting || 0 }} 个待确认任务。{{
-          automation.status?.schedulerError
-            ? `最近调度/保存错误：${automation.status.schedulerError}`
-            : ''
-        }}
-        <span v-if="automation.status?.latestFailure?.id !== automation.dismissed">{{
-          automation.status?.latestFailure
-            ? `最近失败/未知：${automation.status.latestFailure.entryName}`
-            : ''
-        }}</span>
+      <div v-if="automation.status?.awaiting" class="banner" role="status">
+        自动化：{{ automation.status.awaiting }} 个待确认任务。
         <button class="text-button" @click="view = 'automation'">查看自动化任务</button>
-        <button
-          v-if="automation.status?.latestFailure"
-          class="text-button"
-          @click="automation.dismissed = automation.status!.latestFailure!.id"
-        >
-          已阅失败提示
-        </button>
       </div>
 
       <div v-show="view !== 'terminals'" class="content-scroll">
-        <div v-if="application.error" class="banner error" role="alert">
-          {{ application.error }}
-        </div>
-
-        <div v-if="store.error" class="banner error" role="alert">{{ store.error }}</div>
-
         <section v-if="view === null" class="workspace-empty" aria-label="欢迎页面">
           <h1>欢迎使用 ServerDeck</h1>
           <p>打开本地终端，或从左侧主机列表连接服务器。</p>
@@ -810,19 +729,7 @@ watch(
       >
     </footer>
   </div>
-  <div class="toast-stack" aria-label="全局通知">
-    <div
-      v-for="t in notifications.items"
-      :key="t.id"
-      :class="['toast', { error: t.error }]"
-      :role="t.error ? 'alert' : 'status'"
-    >
-      <span>{{ t.text }}</span
-      ><button class="text-button" aria-label="关闭通知" @click="notifications.dismiss(t.id)">
-        ×
-      </button>
-    </div>
-  </div>
+  <NotificationToasts />
   <GlobalSearch
     v-if="searching"
     @close="searching = false"
@@ -840,7 +747,7 @@ watch(
       退出将关闭所有 SSH
       会话及模块连接，并停止本地调度。若有未完成的传输、诊断、批量或自动化任务，将请求取消；未保存文本修改将放弃。已完成文件保留，远端命令是否停止仍需核对。
     </p>
-    <p v-if="files.error" class="banner error" role="alert">{{ files.error }}</p>
+
     <footer class="dialog-actions">
       <button class="button" :disabled="exitBusy" @click="files.exitReview = false">继续使用</button
       ><button class="button danger" :disabled="exitBusy" @click="confirmExit">

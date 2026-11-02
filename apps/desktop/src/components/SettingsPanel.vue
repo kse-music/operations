@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import ProductSettings from './ProductSettings.vue';
 import { defaultProductPreferences } from '../types/product';
 import { useApplicationStore } from '../stores/application';
@@ -7,6 +7,14 @@ import type { AppConfig } from '../types/ipc';
 import { shortcutLabels, shortcutKey, defaultTerminalPreferences } from '../types/preferences';
 
 const application = useApplicationStore();
+const tabs = [
+  { id: 'general', label: '界面与运行' },
+  { id: 'terminal', label: '终端显示与输入' },
+  { id: 'shortcuts', label: '终端快捷键' },
+  { id: 'workspace', label: '工作区与连接' },
+] as const;
+type SettingsTab = (typeof tabs)[number]['id'];
+const activeTab = ref<SettingsTab>('general');
 const draft = ref<AppConfig | null>(null);
 let baseline = '';
 const submitting = ref(false);
@@ -25,7 +33,46 @@ watch(
   { immediate: true },
 );
 
-async function submit(): Promise<void> {
+function navigateTabs(event: KeyboardEvent): void {
+  const index = tabs.findIndex((tab) => tab.id === activeTab.value);
+  let target: number;
+  switch (event.key) {
+    case 'ArrowRight':
+      target = (index + 1) % tabs.length;
+      break;
+    case 'ArrowLeft':
+      target = (index + tabs.length - 1) % tabs.length;
+      break;
+    case 'Home':
+      target = 0;
+      break;
+    case 'End':
+      target = tabs.length - 1;
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+  activeTab.value = tabs[target]!.id;
+  (event.currentTarget as HTMLElement)
+    .querySelector<HTMLButtonElement>(`#settings-tab-${activeTab.value}`)
+    ?.focus();
+}
+
+async function submit(event: Event): Promise<void> {
+  const form = event.currentTarget as HTMLFormElement;
+  const invalid = form.querySelector<HTMLInputElement | HTMLSelectElement>(
+    'input:invalid, select:invalid',
+  );
+  if (invalid) {
+    const panel = invalid.closest('[role="tabpanel"]');
+    const tab = tabs.find((tab) => panel?.id === `settings-panel-${tab.id}`);
+    if (tab) activeTab.value = tab.id;
+    await nextTick();
+    invalid.focus();
+    invalid.reportValidity();
+    return;
+  }
   if (draft.value) {
     submitting.value = true;
     try {
@@ -53,144 +100,204 @@ function capture(action: string, event: KeyboardEvent): void {
       <span class="subtle">仅保存在此设备</span>
     </div>
     <p class="section-description">保存后应用界面和终端偏好。连接参数在新建连接时生效。</p>
-    <form v-if="draft" class="settings-form" @submit.prevent="submit">
-      <fieldset :disabled="application.saving">
-        <legend>界面与运行</legend>
-        <label
-          >每主机并发传输数<input
-            v-model.number="draft.transferConcurrency"
-            aria-label="每主机并发传输数"
-            type="number"
-            min="1"
-            max="6"
-            required
-        /></label>
-        <label
-          >外观主题
-          <select v-model="draft.theme" data-testid="theme-select">
-            <option value="dark">深色</option>
-            <option value="light">浅色</option>
-            <option value="system">跟随系统</option>
-          </select>
-        </label>
-        <label
-          >侧边栏宽度 <span class="subtle">{{ draft.sidebarWidth }} px</span>
-          <input v-model.number="draft.sidebarWidth" type="range" min="200" max="400" />
-        </label>
-        <label
-          >SSH 连接超时（秒）
-          <input
-            v-model.number="draft.connectTimeoutSecs"
-            type="number"
-            min="1"
-            max="120"
-            required
-          />
-        </label>
-        <label
-          >监控采样间隔<select v-model.number="draft.monitorIntervalSecs">
-            <option :value="3">3 秒</option>
-            <option :value="5">5 秒</option>
-            <option :value="10">10 秒</option>
-            <option :value="30">30 秒</option>
-          </select></label
-        >
-        <label
-          >日志级别 <span class="subtle">重启后生效</span
-          ><select v-model="draft.logLevel">
-            <option value="error">ERROR</option>
-            <option value="warn">WARN</option>
-            <option value="info">INFO</option>
-            <option value="debug">DEBUG</option>
-          </select></label
-        >
-      </fieldset>
-      <fieldset :disabled="application.saving">
-        <legend>终端显示与输入</legend>
-        <label
-          >终端字号<input
-            v-model.number="draft.terminalFontSize"
-            type="number"
-            min="10"
-            max="32"
-            required
-        /></label>
-        <label
-          >终端字体<input
-            v-model="draft.terminal.fontFamily"
-            maxlength="128"
-            required
-            aria-label="终端字体"
-        /></label>
-        <label
-          >终端行高（%）<input
-            v-model.number="draft.terminal.lineHeight"
-            type="number"
-            min="100"
-            max="200"
-            required
-            aria-label="终端行高"
-        /></label>
-        <label
-          >滚动历史行数<input
-            v-model.number="draft.terminal.scrollback"
-            type="number"
-            min="0"
-            max="20000"
-            required
-            aria-label="滚动历史行数"
-        /></label>
-        <label
-          >终端主题<select v-model="draft.terminal.theme" aria-label="终端主题">
-            <option value="deck">ServerDeck 深色</option>
-            <option value="light">浅色</option>
-            <option value="nord">Nord</option>
-            <option value="solarized">Solarized Dark</option>
-          </select></label
-        >
-        <label
-          >光标样式<select v-model="draft.terminal.cursorStyle" aria-label="光标样式">
-            <option value="block">方块</option>
-            <option value="bar">竖线</option>
-            <option value="underline">下划线</option>
-          </select></label
-        >
-        <label class="checkbox-label"
-          ><input v-model="draft.terminal.cursorBlink" type="checkbox" />光标闪烁</label
-        >
-        <label
-          >大文本粘贴确认阈值（字符）<input
-            v-model.number="draft.terminal.pasteConfirmChars"
-            type="number"
-            min="256"
-            max="65536"
-            required
-        /></label>
-      </fieldset>
-      <fieldset :disabled="application.saving">
-        <legend>终端快捷键</legend>
-        <p class="subtle">
-          选中后按新组合键。使用 Ctrl+Shift、Meta+Shift 或 Ctrl+Alt，避免拦截远端 Ctrl+C / Z
-          等常用按键。
-        </p>
-        <label v-for="(label, action) in shortcutLabels" :key="action"
-          >{{ label
-          }}<input
-            :value="draft.terminal.shortcuts[action]"
-            readonly
-            :aria-label="`${label}快捷键`"
-            @keydown="capture(action, $event)" /></label
-        ><button
-          type="button"
+    <form v-if="draft" class="settings-form" novalidate @submit.prevent="submit">
+      <div
+        class="page-tabs settings-tabs"
+        role="tablist"
+        aria-label="设置分类"
+        @keydown="navigateTabs"
+      >
+        <button
+          v-for="tab in tabs"
+          :id="`settings-tab-${tab.id}`"
+          :key="tab.id"
           class="button"
-          @click="draft.terminal.shortcuts = defaultTerminalPreferences().shortcuts"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === tab.id"
+          :aria-controls="`settings-panel-${tab.id}`"
+          :tabindex="activeTab === tab.id ? 0 : -1"
+          @click="activeTab = tab.id"
         >
-          恢复默认快捷键
+          {{ tab.label }}
         </button>
-      </fieldset>
-      <ProductSettings v-model="draft.product" :disabled="application.saving" />
+      </div>
+      <div
+        v-show="activeTab === 'general'"
+        id="settings-panel-general"
+        class="settings-tabpanel"
+        role="tabpanel"
+        aria-labelledby="settings-tab-general"
+      >
+        <fieldset :disabled="application.saving">
+          <legend>界面与运行</legend>
+          <label
+            >每主机并发传输数<input
+              v-model.number="draft.transferConcurrency"
+              aria-label="每主机并发传输数"
+              type="number"
+              min="1"
+              max="6"
+              required
+          /></label>
+          <label
+            >外观主题
+            <select v-model="draft.theme" data-testid="theme-select">
+              <option value="dark">深色</option>
+              <option value="light">浅色</option>
+              <option value="system">跟随系统</option>
+            </select>
+          </label>
+          <label
+            >侧边栏宽度 <span class="subtle">{{ draft.sidebarWidth }} px</span>
+            <input v-model.number="draft.sidebarWidth" type="range" min="200" max="400" />
+          </label>
+          <label
+            >SSH 连接超时（秒）
+            <input
+              v-model.number="draft.connectTimeoutSecs"
+              type="number"
+              min="1"
+              max="120"
+              required
+            />
+          </label>
+          <label
+            >监控采样间隔<select v-model.number="draft.monitorIntervalSecs">
+              <option :value="3">3 秒</option>
+              <option :value="5">5 秒</option>
+              <option :value="10">10 秒</option>
+              <option :value="30">30 秒</option>
+            </select></label
+          >
+          <label
+            >日志级别 <span class="subtle">重启后生效</span
+            ><select v-model="draft.logLevel">
+              <option value="error">ERROR</option>
+              <option value="warn">WARN</option>
+              <option value="info">INFO</option>
+              <option value="debug">DEBUG</option>
+            </select></label
+          >
+        </fieldset>
+      </div>
+      <div
+        v-show="activeTab === 'terminal'"
+        id="settings-panel-terminal"
+        class="settings-tabpanel"
+        role="tabpanel"
+        aria-labelledby="settings-tab-terminal"
+      >
+        <fieldset :disabled="application.saving">
+          <legend>终端显示与输入</legend>
+          <label
+            >终端字号<input
+              v-model.number="draft.terminalFontSize"
+              type="number"
+              min="10"
+              max="32"
+              required
+          /></label>
+          <label
+            >终端字体<input
+              v-model="draft.terminal.fontFamily"
+              maxlength="128"
+              required
+              aria-label="终端字体"
+          /></label>
+          <label
+            >终端行高（%）<input
+              v-model.number="draft.terminal.lineHeight"
+              type="number"
+              min="100"
+              max="200"
+              required
+              aria-label="终端行高"
+          /></label>
+          <label
+            >滚动历史行数<input
+              v-model.number="draft.terminal.scrollback"
+              type="number"
+              min="0"
+              max="20000"
+              required
+              aria-label="滚动历史行数"
+          /></label>
+          <label
+            >终端主题<select v-model="draft.terminal.theme" aria-label="终端主题">
+              <option value="deck">ServerDeck 深色</option>
+              <option value="light">浅色</option>
+              <option value="nord">Nord</option>
+              <option value="solarized">Solarized Dark</option>
+            </select></label
+          >
+          <label
+            >光标样式<select v-model="draft.terminal.cursorStyle" aria-label="光标样式">
+              <option value="block">方块</option>
+              <option value="bar">竖线</option>
+              <option value="underline">下划线</option>
+            </select></label
+          >
+          <label class="checkbox-label"
+            ><input v-model="draft.terminal.cursorBlink" type="checkbox" />光标闪烁</label
+          >
+          <label class="checkbox-label"
+            ><input
+              v-model="draft.terminal.quickCopyPaste"
+              type="checkbox"
+            />选中即复制，右键即粘贴</label
+          >
+          <p class="subtle">快捷复制粘贴默认关闭，仅在终端内容区生效，大文本粘贴仍需确认。</p>
+          <label
+            >大文本粘贴确认阈值（字符）<input
+              v-model.number="draft.terminal.pasteConfirmChars"
+              type="number"
+              min="256"
+              max="65536"
+              required
+          /></label>
+        </fieldset>
+      </div>
+      <div
+        v-show="activeTab === 'shortcuts'"
+        id="settings-panel-shortcuts"
+        class="settings-tabpanel"
+        role="tabpanel"
+        aria-labelledby="settings-tab-shortcuts"
+      >
+        <fieldset :disabled="application.saving">
+          <legend>终端快捷键</legend>
+          <p class="subtle">
+            选中后按新组合键。使用 Ctrl+Shift、Meta+Shift 或 Ctrl+Alt，避免拦截远端 Ctrl+C / Z
+            等常用按键。
+          </p>
+          <label v-for="(label, action) in shortcutLabels" :key="action"
+            >{{ label
+            }}<input
+              :value="draft.terminal.shortcuts[action]"
+              readonly
+              :aria-label="`${label}快捷键`"
+              @keydown="capture(action, $event)" /></label
+          ><button
+            type="button"
+            class="button"
+            @click="draft.terminal.shortcuts = defaultTerminalPreferences().shortcuts"
+          >
+            恢复默认快捷键
+          </button>
+        </fieldset>
+      </div>
+      <div
+        v-show="activeTab === 'workspace'"
+        id="settings-panel-workspace"
+        class="settings-tabpanel"
+        role="tabpanel"
+        aria-labelledby="settings-tab-workspace"
+      >
+        <ProductSettings v-model="draft.product" :disabled="application.saving" />
+      </div>
       <div class="form-footer">
-        <p class="subtle">配置不包含密码、私钥或私钥口令。</p>
+        <p class="subtle">统一保存所有分类。配置不包含密码、私钥或私钥口令。</p>
         <button class="button primary" type="submit" :disabled="application.saving">
           {{ application.saving ? '保存中…' : '保存设置' }}
         </button>

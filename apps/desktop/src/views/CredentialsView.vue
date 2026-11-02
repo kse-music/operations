@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { ref } from 'vue';
 import CredentialDialog from '../components/CredentialDialog.vue';
 import Modal from '../components/Modal.vue';
@@ -28,6 +29,9 @@ async function remove(): Promise<void> {
   );
   if (result.ok) deleting.value = null;
 }
+useErrorNotifications(() =>
+  status.value && !status.value.available ? status.value.message : null,
+);
 </script>
 <template>
   <section class="credentials-view page-view">
@@ -53,7 +57,7 @@ async function remove(): Promise<void> {
         重试清理旧秘密</button
       ><span class="subtle">待清理 {{ store.catalog?.pendingSecretDeletions ?? '—' }} 项</span>
     </div>
-    <p v-if="status" :class="['banner', status.available ? 'success' : 'error']" role="status">
+    <p v-if="status?.available" class="banner success" role="status">
       {{ status.message }}
     </p>
     <p v-if="store.catalog && !store.catalog.credentials.length" class="workspace-empty">
@@ -106,7 +110,7 @@ async function remove(): Promise<void> {
       {{ deleting.hostCount }} 台主机的关联；主机配置保留，连接前需重新绑定凭据。</label
     >
     <p class="subtle">系统凭据库不可用时，旧秘密会标记为待清理，并明确提示。</p>
-    <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
+
     <footer class="dialog-actions">
       <button class="button" :disabled="store.busy" @click="deleting = null">取消</button
       ><button

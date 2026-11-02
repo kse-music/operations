@@ -4,34 +4,53 @@
   height: 100%;
   min-height: 0;
 }
-.terminal-tabs {
+.terminal-session-header {
   display: flex;
-  gap: 3px;
-  overflow: auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 8px;
+  background: var(--panel);
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
-  padding: 8px 8px 0;
+}
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 .terminal-tab {
   display: flex;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px 6px 0 0;
+  flex-shrink: 0;
+  background: transparent;
+  border-radius: 4px;
 }
 .terminal-tab.active {
-  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
 }
 .terminal-tab button {
   border: 0;
   background: none;
   color: inherit;
-  padding: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 18px;
   white-space: nowrap;
   cursor: pointer;
 }
 .terminal-tab small {
   opacity: 0.65;
   margin-left: 6px;
+}
+.terminal-rename-input:focus-visible {
+  outline: none;
 }
 .terminal-pane {
   flex: 1;
@@ -40,30 +59,14 @@
   min-height: 0;
   overflow: hidden;
 }
-.terminal-toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 10px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
+.terminal-context-menu {
+  max-height: calc(100vh - 16px);
 }
-.terminal-toolbar .button {
-  min-height: var(--compact-height);
-  padding: 3px 10px;
-}
-.session-state {
-  margin-right: auto;
+.terminal-menu-heading {
+  margin: 4px 6px 8px;
   color: var(--muted);
-  font-size: 12px;
-}
-.session-state.connected {
-  color: #4bc4a0;
-}
-.session-state.failed {
-  color: #f88282;
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 .xterm-container {
   flex: 1;
@@ -98,20 +101,6 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-.split-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 10px;
-  flex-shrink: 0;
-  align-items: center;
-  border-bottom: 1px solid var(--border);
-}
-.split-toolbar .button {
-  min-height: var(--compact-height);
-  padding: 3px 10px;
-  font-size: 12px;
 }
 .split-area {
   position: relative;
@@ -150,50 +139,10 @@
   transform: translateY(-3px);
   cursor: row-resize;
 }
-.split-pane .terminal-toolbar {
-  padding: 8px;
-  gap: 6px;
-  font-size: 12px;
-}
-.split-pane .terminal-toolbar .button {
-  font-size: 12px;
-  padding: 3px 10px;
-}
-.split-pane .terminal-toolbar .subtle {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 200px;
-}
 .split-pane .terminal-footnote {
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
-}
-.terminal-identity,
-.terminal-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-}
-.terminal-identity > strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 45%;
-}
-.terminal-identity .session-state {
-  margin-left: auto;
-  margin-right: 0;
-}
-.toolbar-divider {
-  width: 1px;
-  height: 18px;
-  margin: 0 3px;
-  background: var(--border-strong);
-  flex-shrink: 0;
 }
 .disconnected-dot.connected {
   background: #4bc4a0;
@@ -214,4 +163,16 @@
   gap: 12px;
   border-top: 1px solid var(--border);
   padding: 8px 0;
+}
+@media (max-width: 720px) {
+  .terminal-session-header {
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 0;
+  }
+  .terminal-tabs {
+    flex-basis: 100%;
+    min-height: 36px;
+    padding: 2px 8px;
+  }
 }

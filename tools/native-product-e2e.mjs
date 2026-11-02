@@ -1,3 +1,4 @@
+import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { navigateWorkspace, selectHostWorkspace, showHostTree } from './ui-navigation.mjs';
 import path from 'node:path';
@@ -14,7 +15,7 @@ export async function createProductHost(page, target, credentialId, description)
     .getByRole('button', { name: '新建主机', exact: true })
     .click();
   const dialog = page.getByRole('dialog', { name: '新建主机', exact: true });
-  await dialog.getByLabel('主机名称', { exact: true }).fill('Linux SSH verification');
+  await dialog.getByLabel('主机名称（可选）', { exact: true }).fill('Linux SSH verification');
   await dialog.getByLabel('地址（IP / 域名）', { exact: true }).fill(target.hostname);
   await dialog.getByLabel('用户名', { exact: true }).fill(target.username);
   await dialog.getByLabel('认证方式', { exact: true }).selectOption('password');
@@ -148,18 +149,14 @@ export async function productChecks(context) {
   await remember();
   // Keep all three independent leases open and verify the same authenticated Transport.
   await nav('SSH 终端');
-  await page
-    .locator('.terminal-pane:visible')
-    .getByRole('button', { name: 'SFTP', exact: false })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), 'SFTP 文件');
   await until(async () => {
     const s = await rpc('files_connections');
     return s.some((s) => s.hostId === hostId);
   });
-  await page
-    .locator('.workspace-context')
-    .getByRole('button', { name: 'Processes', exact: true })
-    .click();
+  await nav('Linux 运维');
+  await page.getByRole('button', { name: '连接运维', exact: true }).click();
+  await page.getByRole('tab', { name: '进程', exact: true }).click();
   await page.getByRole('button', { name: '刷新运维列表', exact: true }).waitFor();
   await until(async () => {
     const b = await rpc('background_tasks');
@@ -214,10 +211,7 @@ export async function productChecks(context) {
   await page.getByRole('status').filter({ hasText: '当前仍操作建立时的连接' }).waitFor();
   await nav('SSH 终端');
   const beforeCross = (await rpc('files_connections')).map((s) => s.id);
-  await page
-    .locator('.terminal-pane:visible')
-    .getByRole('button', { name: 'SFTP 文件', exact: true })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), 'SFTP 文件');
   await page.getByRole('alert').filter({ hasText: '主机连接配置已变更' }).waitFor();
   assert.deepEqual(
     (await rpc('files_connections')).map((s) => s.id),
@@ -241,11 +235,7 @@ export async function productChecks(context) {
   await rpc('host_update', { id, input });
   await page.getByRole('button', { name: '刷新', exact: true }).click();
   await selectHostWorkspace(page, id);
-  await page.locator('.workspace-context').filter({ hasText: input.name }).waitFor();
-  await page
-    .locator('.workspace-context')
-    .getByRole('button', { name: '诊断连接', exact: true })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), '诊断连接异常');
   assert.equal(
     await page.getByLabel('诊断目标', { exact: true }).inputValue(),
     originalHost.hostname,
@@ -283,7 +273,7 @@ export async function productChecks(context) {
     await close.first().click();
   }
   // Run a reusable real command using the already chosen host, then export its actual result.
-  await nav('运维自动化');
+  await nav('自动运维');
   await page.getByRole('button', { name: '新建命令 / 脚本', exact: true }).click();
   const editor = page.getByRole('dialog', { name: '新建命令 / 脚本', exact: true });
   await editor.getByLabel('自动化条目名称').fill(name);
@@ -520,7 +510,7 @@ export async function productChecks(context) {
     'active workspace tab must remain visible after viewport resize',
   );
   await page.screenshot({ path: path.join(artifacts, 'product-dpi.png') });
-  assert(await page.getByRole('button', { name: '打开全局搜索', exact: true }).isVisible());
+  assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   page = await restart();
   assert.equal((await rpc('app_bootstrap')).config.product.sshDefaults.keepaliveIntervalSecs, 33);
@@ -556,16 +546,12 @@ export async function productChecks(context) {
   await showHostTree(page);
   const previousPanes = await page.locator('.terminal-pane').count();
   await page.locator('.tree-host').filter({ hasText: originalHost.name }).click();
-  await page
-    .locator('.terminal-pane:visible .terminal-identity strong')
-    .filter({ hasText: originalHost.name })
-    .waitFor();
+  await page.locator(`.terminal-pane:visible[data-host-id="${hostId}"]`).waitFor();
   if ((await page.locator('.terminal-pane').count()) === previousPanes)
-    await page.getByRole('button', { name: '新建终端', exact: true }).click();
+    await terminalTabAction(page, '复制');
   await page
     .locator('.terminal-pane:visible')
-    .getByRole('status')
-    .filter({ hasText: '已连接' })
+    .locator('.xterm-container[data-state="connected"]')
     .waitFor();
   await command("printf '\\n__SD_%s__\\n' PRODUCT_RESTART_SURVIVED");
   await contains('__SD_PRODUCT_RESTART_SURVIVED__');

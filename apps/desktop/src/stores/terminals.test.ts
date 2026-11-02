@@ -22,6 +22,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('independent terminal tabs', () => {
+  it('uses the address as the default terminal title for unnamed hosts', () => {
+    const store = useTerminalsStore();
+    store.open({ ...host, name: '', hostname: '192.0.2.10', port: 22 });
+    expect(store.tabs[0]!.title).toBe('192.0.2.10');
+    store.open({ ...host, name: '', hostname: '192.0.2.10', port: 2222 });
+    expect(store.tabs[1]!.title).toBe('192.0.2.10:2222');
+  });
   it('switches hosts without reopening sessions and remembers the last selected session per host', async () => {
     const store = useTerminalsStore();
     store.open(host);
@@ -44,22 +51,14 @@ describe('independent terminal tabs', () => {
     expect(store.panes).toHaveLength(3);
     expect(terminalApi.close).not.toHaveBeenCalled();
   });
-  it('close other/right sessions only affects the current host and never switches to another host on last close', async () => {
+  it('closes all sessions relative to the target host without switching to another host', async () => {
     const store = useTerminalsStore();
     store.open(host);
     const first = store.active;
     store.open({ ...host, id: 'other' });
     const other = store.active;
     store.open(host);
-    const last = store.active;
-    await store.closeOthers(first, true);
-    expect(store.tabs.map((t) => t.key)).toEqual([first, other]);
-    expect(store.tabs.some((t) => t.key === last)).toBe(false);
-    store.open(host);
-    const keep = store.active;
-    await store.closeOthers(keep);
-    expect(store.tabs.map((t) => t.key)).toEqual([other, keep]);
-    await store.close(keep);
+    await store.closeAll(first);
     expect(store.active).toBe('');
     expect(store.focused).toBe('');
     expect(store.tabs.map((t) => t.key)).toEqual([other]);
@@ -138,17 +137,83 @@ describe('independent terminal tabs', () => {
     expect(first.layout).toEqual({ kind: 'leaf', pane: pane.key });
     expect(first.title).toBe('Renamed');
   });
-  it('closes only the requested right or other tabs', async () => {
+  it.each(['remote', 'local'])(
+    'closes every pane of the target %s host while preserving other hosts',
+    async (kind) => {
+      const store = useTerminalsStore();
+      store.open({ ...host, id: 'other' });
+      const other = store.tabs[0]!;
+      store.update(other.panes[0]!.key, { sessionId: 'other-session' });
+      const targetHost = kind === 'local' ? null : host;
+      store.open(targetHost);
+      const target = store.tabs[1]!;
+      store.split(store.focused, 'columns');
+      store.open(targetHost);
+      const closingPanes = store.panes.filter((p) => p.host?.id !== 'other');
+      for (const pane of closingPanes) store.update(pane.key, { sessionId: pane.key });
+      store.select(other.key);
+      await store.closeAll(target.key);
+      expect(store.tabs.map((t) => t.key)).toEqual([other.key]);
+      expect(store.active).toBe(other.key);
+      expect(store.focused).toBe(other.panes[0]!.key);
+      expect(terminalApi.close).toHaveBeenCalledTimes(3);
+      expect(vi.mocked(terminalApi.close).mock.calls.flat().sort()).toEqual(
+        closingPanes.map((p) => p.key).sort(),
+      );
+    },
+  );
+  it('retains a failed tab and reports its error while closing the remaining tabs in close-all', async () => {
     const store = useTerminalsStore();
     store.open(host);
+    const failed = store.tabs[0]!;
+    store.update(failed.panes[0]!.key, { sessionId: 'failed-session' });
     store.open(host);
+    store.update(store.focused, { sessionId: 'closed-session' });
+    vi.mocked(terminalApi.close).mockRejectedValueOnce({ message: 'close failed' });
+    await store.closeAll(failed.key);
+    expect(store.tabs.map((t) => t.key)).toEqual([failed.key]);
+    expect(store.active).toBe(failed.key);
+    expect(store.focused).toBe(failed.panes[0]!.key);
+    expect(terminalApi.close).toHaveBeenCalledTimes(2);
+    expect(terminalApi.close).toHaveBeenCalledWith('closed-session');
+    expect(store.error).toBe('close failed');
+  });
+  it('keeps the current tab selected when closing another tab fails', async () => {
+    const store = useTerminalsStore();
     store.open(host);
-    const [a, b, c] = store.tabs;
-    await store.closeOthers(b!.key, true);
-    expect(store.tabs.map((t) => t.key)).toEqual([a!.key, b!.key]);
-    expect(store.tabs.some((t) => t.key === c!.key)).toBe(false);
-    await store.closeOthers(b!.key);
-    expect(store.tabs.map((t) => t.key)).toEqual([b!.key]);
+    const keep = store.tabs[0]!;
+    store.open(host);
+    const failed = store.active;
+    store.update(store.focused, { sessionId: 'failed-session' });
+    store.select(keep.key);
+    vi.mocked(terminalApi.close).mockRejectedValueOnce({ message: 'close failed' });
+    await store.close(failed);
+    expect(store.tabs).toHaveLength(2);
+    expect(store.active).toBe(keep.key);
+    expect(store.focused).toBe(keep.panes[0]!.key);
+    expect(terminalApi.close).toHaveBeenCalledExactlyOnceWith('failed-session');
+    expect(store.error).toBe('close failed');
+  });
+  it('ignores stale menu targets without closing any sessions', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const saved = store.snapshot();
+    await store.close('missing');
+    await store.closeAll('missing');
+    expect(store.snapshot()).toEqual(saved);
+    expect(terminalApi.close).not.toHaveBeenCalled();
+  });
+  it('preserves the focused split pane when closing another session', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const closing = store.active;
+    store.open(host);
+    const target = store.active;
+    store.split(store.focused, 'columns');
+    const focused = store.focused;
+    await store.close(closing);
+    expect(store.tabs.map((t) => t.key)).toEqual([target]);
+    expect(store.focused).toBe(focused);
   });
   it('restores metadata as disconnected panes without runtime IDs or automatic connection', async () => {
     const original = useTerminalsStore();
@@ -179,7 +244,8 @@ describe('independent terminal tabs', () => {
         tabs: [expect.objectContaining({ title: 'Host' })],
       }),
     );
-    await store.close(store.tabs[0]!.key);
+    store.open(host);
+    await store.closeAll(store.tabs[0]!.key);
     await vi.advanceTimersByTimeAsync(300);
     expect(terminalApi.workspaceSave).toHaveBeenLastCalledWith({
       version: 1,

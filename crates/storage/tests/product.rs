@@ -27,6 +27,57 @@ fn restore(text: String, selected: Vec<String>, conflict: ConflictPolicy) -> Res
     }
 }
 #[test]
+fn unnamed_hosts_roundtrip_without_false_name_conflicts() {
+    let source = tempfile::tempdir().unwrap();
+    let db = Database::open(source.path().join("db")).unwrap();
+    let first = host(&db, "");
+    let second = host(&db, "");
+    let mut config = second.config;
+    config.port = 2222;
+    db.host_update(&second.id, config).unwrap();
+    let text = db.backup_export().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let path = target.path().join("db");
+    let out = Database::open(&path).unwrap();
+    let existing = host(&out, "");
+    let mut config = existing.config;
+    config.hostname = "127.0.0.2".into();
+    out.host_update(&existing.id, config).unwrap();
+    let preview = out.backup_preview(&text).unwrap();
+    assert!(preview.items.iter().all(|i| !i.duplicate));
+    let mut names = preview
+        .items
+        .iter()
+        .map(|i| i.name.as_str())
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(names, vec!["127.0.0.1", "127.0.0.1:2222"]);
+    let result = out
+        .backup_restore(restore(
+            text.clone(),
+            vec![first.id.clone(), second.id],
+            ConflictPolicy::Skip,
+        ))
+        .unwrap();
+    assert_eq!((result.hosts, result.skipped), (2, 0));
+    assert!(
+        out.backup_preview(&text)
+            .unwrap()
+            .items
+            .iter()
+            .all(|i| i.duplicate)
+    );
+    let result = out
+        .backup_restore(restore(text, vec![first.id], ConflictPolicy::Copy))
+        .unwrap();
+    assert_eq!(result.hosts, 1);
+    let reopened = Database::open(path).unwrap();
+    let hosts = reopened.catalog().unwrap().hosts;
+    assert_eq!(hosts.len(), 4);
+    assert!(hosts.iter().all(|h| h.config.name.is_empty()));
+}
+
+#[test]
 fn backup_roundtrip_preserves_definitions_groups_tags_and_omits_credentials_and_history() {
     let source = tempfile::tempdir().unwrap();
     let db = Database::open(source.path().join("db")).unwrap();

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
+import { hostDisplayName } from '../types/hosts';
 import { onBeforeUnmount, ref, shallowRef } from 'vue';
 import Modal from './Modal.vue';
 import TaskConnections from './TaskConnections.vue';
@@ -89,6 +91,7 @@ async function execute() {
     busy.value = false;
   }
 }
+useErrorNotifications(error);
 </script>
 <template>
   <Modal
@@ -109,8 +112,8 @@ async function execute() {
             type="checkbox"
             :value="h.id"
             :disabled="!!pendingRun"
-            :aria-label="`自动化目标 ${h.name}`"
-          />{{ h.name }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }}</label
+            :aria-label="`自动化目标 ${hostDisplayName(h)}`"
+          />{{ hostDisplayName(h) }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }}</label
         >
       </fieldset>
       <TaskConnections v-if="hostIds.length" :ids="hostIds" />
@@ -199,6 +202,5 @@ async function execute() {
         </button>
       </footer>
     </section>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p></Modal
-  >
+  </Modal>
 </template>

@@ -1,3 +1,4 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
 import { productApi } from '../services/product';
@@ -21,7 +22,7 @@ export const useBackgroundStore = defineStore('background', () => {
       for (const t of data.value.tasks)
         if (['failed', 'uncertain'].includes(t.state) && previous.get(t.id) !== t.state)
           useNotificationsStore().push(
-            `${t.label}：${t.state === 'uncertain' ? '结果未确认' : '失败'}，请在后台任务查看目标和原因。`,
+            `${t.label}：${t.state === 'uncertain' ? '结果未确认' : '失败'}，请打开对应页面查看任务状态。`,
             true,
           );
       tasks.value = data.value.tasks;
@@ -45,5 +46,6 @@ export const useBackgroundStore = defineStore('background', () => {
       connections.value?.filter((c) => c.hostId === id || c.routeHostIds.includes(id)) ?? [];
     return rows.some((c) => c.state === 'connected') ? '已连接' : rows.length ? '连接中' : '未连接';
   }
+  useErrorNotifications(error);
   return { tasks, connections, hostState, pending, error, start, stop };
 });

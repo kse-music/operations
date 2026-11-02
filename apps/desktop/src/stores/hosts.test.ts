@@ -44,6 +44,19 @@ describe('host search and mutation boundary', () => {
     expect(hostInput(fixtures[0])).not.toHaveProperty('id');
     expect(hostInput(fixtures[0])).not.toHaveProperty('updatedAt');
   });
+  it('searches and sorts unnamed hosts by their displayed address', () => {
+    const hosts = ['192.0.2.20', '192.0.2.10'].map((hostname, i) => ({
+      ...fixtures[0]!,
+      id: String(i),
+      name: '',
+      hostname,
+      port: 2222,
+    }));
+    expect(filterHosts(hosts, '192.0.2.10:2222', false, '', 'name').map((h) => h.id)).toEqual([
+      '1',
+    ]);
+    expect(filterHosts(hosts, '', false, '', 'name').map((h) => h.id)).toEqual(['1', '0']);
+  });
   it('keeps the dialog failure observable and does not create a frontend-only host', async () => {
     Reflect.set(window, 'isTauri', true);
     setActivePinia(createPinia());

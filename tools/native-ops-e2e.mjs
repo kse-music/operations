@@ -1,3 +1,4 @@
+import { terminalAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFile, readFile } from 'node:fs/promises';
@@ -345,8 +346,7 @@ export async function operationsChecks(context) {
   await confirm(fixture.container);
   await page
     .locator('.terminal-pane:visible')
-    .getByRole('status')
-    .filter({ hasText: '已连接' })
+    .locator('.xterm-container[data-state="connected"]')
     .waitFor();
   await command(
     `test -f /.dockerenv && printf '\\n__SD_%s__%s__\\n' CONTAINER_REAL_SHELL "$(hostname)"`,
@@ -355,13 +355,9 @@ export async function operationsChecks(context) {
   await command('exit');
   await page
     .locator('.terminal-pane:visible')
-    .getByRole('status')
-    .filter({ hasText: '已关闭' })
+    .locator('.xterm-container[data-state="closed"]')
     .waitFor();
-  await page
-    .locator('.terminal-pane:visible')
-    .getByRole('button', { name: '关闭终端', exact: true })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), '关闭终端');
   passed(
     'native bounded Docker log stream, timestamps/search/pause/resume/close and independent real container PTY shell',
   );

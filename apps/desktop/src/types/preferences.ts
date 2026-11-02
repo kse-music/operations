@@ -5,6 +5,7 @@ export interface TerminalPreferences {
   theme: 'deck' | 'light' | 'nord' | 'solarized';
   cursorStyle: 'block' | 'bar' | 'underline';
   cursorBlink: boolean;
+  quickCopyPaste: boolean;
   pasteConfirmChars: number;
   shortcuts: Record<string, string>;
 }
@@ -15,6 +16,7 @@ export const defaultTerminalPreferences = (): TerminalPreferences => ({
   theme: 'deck',
   cursorStyle: 'block',
   cursorBlink: true,
+  quickCopyPaste: false,
   pasteConfirmChars: 4096,
   shortcuts: {
     copy: 'Ctrl+Shift+C',

@@ -1,3 +1,4 @@
+import { terminalAction } from './ui-navigation.mjs';
 // Real release WebView, application stores, IPC and authorized SSH; no substituted implementations.
 import assert from 'node:assert/strict';
 import { showHostTree } from './ui-navigation.mjs';
@@ -177,10 +178,7 @@ export async function releaseChecks({
     await store('select', [tabs[0]]);
     passed('eight additional open/close cycles preserve original SSH');
     // Use the real files store through its normal navigation, and SFTP protocol for all filesystem operations.
-    await page
-      .locator('.terminal-pane:visible')
-      .getByRole('button', { name: 'SFTP 文件', exact: true })
-      .click();
+    await terminalAction(page, page.locator('.terminal-pane:visible'), 'SFTP 文件');
     for (let i = 0; i < 100; i++) {
       const connections = await rpc('files_connections');
       if (connections.length) {

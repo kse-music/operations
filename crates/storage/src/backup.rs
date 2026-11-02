@@ -143,7 +143,7 @@ fn preview(c: &Connection, b: &Backup) -> Result<BackupPreview, Error> {
     let mut items = Vec::new();
     for h in &b.hosts {
         let duplicate = existing.hosts.iter().any(|e| {
-            e.config.name.eq_ignore_ascii_case(&h.config.name)
+            (!h.config.name.is_empty() && e.config.name.eq_ignore_ascii_case(&h.config.name))
                 || (e.config.hostname == h.config.hostname
                     && e.config.port == h.config.port
                     && e.config.username == h.config.username)
@@ -163,7 +163,7 @@ fn preview(c: &Connection, b: &Backup) -> Result<BackupPreview, Error> {
         items.push(PreviewItem {
             id: h.id.clone(),
             kind: "host",
-            name: h.config.name.clone(),
+            name: h.config.display_name(),
             detail: format!(
                 "{}@{}:{}",
                 h.config.username, h.config.hostname, h.config.port
@@ -344,7 +344,9 @@ impl Database {
                     continue;
                 }
                 let mut config = h.config.clone();
-                config.name = unique_name(&config.name, &mut host_names);
+                if !config.name.is_empty() {
+                    config.name = unique_name(&config.name, &mut host_names);
+                }
                 config.group_id = config.group_id.and_then(|id| host_groups.get(&id).cloned());
                 config.ssh.jump_host_id = config
                     .ssh

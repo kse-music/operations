@@ -203,7 +203,10 @@ impl Database {
     }
     pub fn host_copy(&self, id: &str) -> Result<Host, Error> {
         let mut input = one_host(&self.connect()?, id)?.config;
-        input.name = format!("{} 副本", input.name.chars().take(120).collect::<String>());
+        input.name = format!(
+            "{} 副本",
+            input.display_name().chars().take(120).collect::<String>()
+        );
         self.host_create(input)
     }
     pub fn group_save(&self, id: Option<&str>, input: GroupInput) -> Result<HostGroup, Error> {
@@ -456,7 +459,7 @@ impl Database {
     }
 }
 fn duplicate(connection: &Connection, host: &HostInput) -> Result<bool, Error> {
-    connection.query_row("SELECT EXISTS(SELECT 1 FROM hosts WHERE name=?1 COLLATE NOCASE OR (hostname=?2 COLLATE NOCASE AND port=?3 AND username=?4))",params![host.name,host.hostname,host.port,host.username],|r|r.get(0)).map_err(storage_error)
+    connection.query_row("SELECT EXISTS(SELECT 1 FROM hosts WHERE (?1 != '' AND name=?1 COLLATE NOCASE) OR (hostname=?2 COLLATE NOCASE AND port=?3 AND username=?4))",params![host.name,host.hostname,host.port,host.username],|r|r.get(0)).map_err(storage_error)
 }
 fn resolve_jump(
     connection: &Connection,

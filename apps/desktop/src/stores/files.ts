@@ -1,3 +1,4 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Host } from '../types/hosts';
@@ -8,7 +9,6 @@ import { filesApi } from '../services/files';
 import { useTerminalsStore } from './terminals';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
-import { useNotificationsStore } from './notifications';
 export interface FileConnection {
   host: Host;
   id?: string;
@@ -180,12 +180,6 @@ export const useFilesStore = defineStore('files', () => {
       const finished = value.filter(
         (t) => t.state === 'completed' && before.get(t.id) && before.get(t.id) !== 'completed',
       );
-      for (const t of value)
-        if (t.state === 'failed' && before.get(t.id) !== 'failed')
-          useNotificationsStore().push(
-            `文件传输失败：${t.id}，请在后台传输中查看主机、原因和恢复路径。`,
-            true,
-          );
       tasks.value = value;
       if (finished.length) {
         notice.value = `${finished.length} 个传输任务完成，详见校验和跳过统计。`;
@@ -217,6 +211,15 @@ export const useFilesStore = defineStore('files', () => {
       return '连接中';
     return '未连接';
   }
+  useErrorNotifications(() => [
+    error.value,
+    ...Object.values(connections.value).map((connection) => connection.error),
+    ...tasks.value.map((task) =>
+      task.message || task.recoveryPaths.length
+        ? `文件传输 ${task.id}（HostId=${task.hostId}）：${[task.message, ...task.recoveryPaths.map((path) => `待检查临时文件：${path}`)].filter(Boolean).join('；')}`
+        : null,
+    ),
+  ]);
   return {
     hostState,
     connections,

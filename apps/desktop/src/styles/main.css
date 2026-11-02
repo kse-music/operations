@@ -76,12 +76,6 @@ button {
   font-weight: 400;
   letter-spacing: 0;
 }
-.topbar-context {
-  display: flex;
-  gap: 14px;
-  color: var(--muted);
-  font-size: 12px;
-}
 .icon-button {
   margin-left: auto;
   border: 1px solid var(--border);
@@ -316,6 +310,9 @@ h1 {
   color: var(--muted);
   font-size: 12px;
   margin: 0 0 20px;
+}
+.workspace-empty > .action-row {
+  justify-content: center;
 }
 .module-grid {
   display: grid;

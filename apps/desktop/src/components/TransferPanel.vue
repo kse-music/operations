@@ -52,12 +52,6 @@ async function cancel(id: string): Promise<void> {
           {{ bytes(task.transferredBytes) }} / {{ bytes(task.totalBytes) }} ·
           {{ bytes(task.bytesPerSecond) }}/s · 剩余 {{ bytes(task.remainingBytes) }}
         </p>
-        <p v-if="task.message" :class="{ 'error-text': task.state === 'failed' }">
-          {{ task.message }}
-        </p>
-        <p v-for="path in task.recoveryPaths" :key="path" class="error-text">
-          待检查临时文件：{{ path }}
-        </p>
       </div>
       <button
         v-if="unfinished(task)"

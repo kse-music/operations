@@ -1,26 +1,14 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { opsApi } from '../services/ops';
-import {
-  ArrowDown,
-  ArrowUp,
-  ChartNoAxesCombined,
-  ClipboardPaste,
-  Copy,
-  Download,
-  FolderSync,
-  Network,
-  Play,
-  Search,
-  Wrench,
-  X,
-} from '@lucide/vue';
+import { ArrowDown, ArrowUp } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
 import { filesApi } from '../services/files';
 import { osc7Path } from '../services/osc7';
-import type { Host } from '../types/hosts';
+import { hostDisplayName, type Host } from '../types/hosts';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import {
@@ -49,7 +37,7 @@ const emit = defineEmits<{
 }>();
 const application = useApplicationStore();
 const store = useTerminalsStore();
-const name = computed(() => props.tab.host?.name ?? '本地设备');
+const name = computed(() => (props.tab.host ? hostDisplayName(props.tab.host) : '本地设备'));
 const container = ref<HTMLElement>();
 const searchInput = ref<HTMLInputElement>();
 const message = ref<string | null>(null);
@@ -63,6 +51,32 @@ const preferences = computed(
   () => application.state?.config.terminal ?? defaultTerminalPreferences(),
 );
 const working = ref(false);
+const menu = ref<{ x: number; y: number } | null>(null);
+const menuElement = ref<HTMLElement>();
+const menuActions = computed(() => [
+  {
+    key: 'connect',
+    label: props.tab.state === 'idle' ? '连接' : '重新连接',
+    disabled: working.value || !['closed', 'failed', 'idle'].includes(props.tab.state),
+  },
+  { key: 'copy', label: '复制', disabled: false },
+  { key: 'paste', label: '粘贴', disabled: props.tab.state !== 'connected' },
+  { key: 'find', label: '查找', disabled: false },
+  ...(props.tab.host
+    ? [
+        { key: 'automation', label: '自动化', disabled: false },
+        { key: 'operations', label: '运维', disabled: false },
+        { key: 'monitor', label: '监控', disabled: false },
+        { key: 'files', label: 'SFTP 文件', disabled: false },
+        ...(['failed', 'disconnected'].includes(props.tab.state)
+          ? [{ key: 'network', label: '诊断连接异常', disabled: false }]
+          : []),
+        { key: 'forwards', label: '端口转发', disabled: props.tab.state !== 'connected' },
+      ]
+    : []),
+  { key: 'export', label: '导出内容', disabled: false },
+  { key: 'close', label: '关闭终端', disabled: false },
+]);
 let terminal: Terminal;
 let fit: FitAddon;
 let search: SearchAddon;
@@ -110,6 +124,7 @@ async function connect(): Promise<void> {
   if (working.value) return;
   working.value = true;
   const attempt = ++generation;
+  pendingPaste.value = null;
   message.value = null;
   trust.value = null;
   inputQueue.reset();
@@ -196,9 +211,114 @@ async function copy(): Promise<void> {
     message.value = '无法写入剪贴板，请检查系统权限。';
   }
 }
+function copySelection(): void {
+  if (preferences.value.quickCopyPaste && props.active && terminal.hasSelection()) void copy();
+}
+function preventTerminalRightClick(event: MouseEvent): void {
+  if (event.button === 2) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}
+function terminalContextMenu(event: MouseEvent): void {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (!props.active || document.querySelector('dialog[open]')) return;
+  if (preferences.value.quickCopyPaste && event.button === 2 && !event.shiftKey) {
+    menu.value = null;
+    void paste();
+  } else void openMenu(event.clientX, event.clientY);
+}
+async function openMenu(x: number, y: number): Promise<void> {
+  if (!props.active || document.querySelector('dialog[open]')) return;
+  store.focused = props.tab.key;
+  if (trust.value) return;
+  menu.value = { x, y };
+  await nextTick();
+  if (!menu.value || !menuElement.value) return;
+  const bounds = menuElement.value.getBoundingClientRect();
+  menu.value = {
+    x: Math.max(8, Math.min(x, window.innerWidth - bounds.width - 8)),
+    y: Math.max(8, Math.min(y, window.innerHeight - bounds.height - 8)),
+  };
+  await nextTick();
+  menuElement.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+}
+function closeMenu(): void {
+  if (!menu.value) return;
+  menu.value = null;
+  focusTerminal();
+}
+function menuKey(event: KeyboardEvent): void {
+  const buttons = [
+    ...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+  ];
+  if (['Escape', 'Tab'].includes(event.key)) {
+    event.preventDefault();
+    closeMenu();
+    return;
+  }
+  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key) || !buttons.length) return;
+  event.preventDefault();
+  const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  const index =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (current + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length;
+  buttons[index]?.focus();
+}
+function runMenuAction(key: string): void {
+  closeMenu();
+  switch (key) {
+    case 'connect':
+      void connect();
+      break;
+    case 'copy':
+      void copy();
+      break;
+    case 'paste':
+      void paste();
+      break;
+    case 'find':
+      void toggleFind();
+      break;
+    case 'automation':
+      if (props.tab.host) emit('automation', props.tab.host);
+      break;
+    case 'operations':
+      if (props.tab.host) emit('operations', props.tab.host);
+      break;
+    case 'monitor':
+      if (props.tab.host) emit('monitor', props.tab.host);
+      break;
+    case 'files':
+      if (props.tab.host) emit('files', props.tab.host, props.tab.cwd, props.tab.key);
+      break;
+    case 'network':
+      if (props.tab.host) emit('network', props.tab.host);
+      break;
+    case 'forwards':
+      forwards.value = true;
+      break;
+    case 'export':
+      exporting.value = true;
+      break;
+    case 'close':
+      emit('close');
+      break;
+  }
+}
 async function paste(): Promise<void> {
+  if (props.tab.state !== 'connected') {
+    message.value = '请先连接终端再粘贴。';
+    return;
+  }
+  const attempt = generation;
   try {
-    requestPaste(await navigator.clipboard.readText());
+    const text = await navigator.clipboard.readText();
+    if (!disposed && attempt === generation) requestPaste(text);
   } catch {
     message.value = '无法读取剪贴板，请检查系统权限。';
   }
@@ -219,6 +339,10 @@ function requestPaste(text: string): void {
   sendPaste(text);
 }
 function sendPaste(text: string): void {
+  if (props.tab.state !== 'connected') {
+    message.value = '请先连接终端再粘贴。';
+    return;
+  }
   message.value = null;
   approvedPaste = true;
   try {
@@ -294,6 +418,7 @@ onMounted(() => {
     return true;
   });
   container.value!.addEventListener('paste', nativePaste, true);
+  terminal.onSelectionChange(copySelection);
   terminal.onData((data) => queueInput(encoder.encode(data)));
   terminal.onBinary((data) => queueInput(Uint8Array.from(data, (char) => char.charCodeAt(0))));
   terminal.onResize((size) => {
@@ -309,6 +434,12 @@ onMounted(() => {
   });
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      const bounds = container.value!.getBoundingClientRect();
+      void openMenu(bounds.left + 16, bounds.top + 16);
+      return false;
+    }
     const key = shortcutKey(event);
     const action = Object.entries(preferences.value.shortcuts).find(
       ([, binding]) => binding === key,
@@ -334,6 +465,7 @@ onMounted(() => {
   });
   observer = new ResizeObserver(fitTerminal);
   observer.observe(container.value!);
+  window.addEventListener('resize', closeMenu);
   if (props.tab.connectRequested) void connect();
 });
 watch(
@@ -352,6 +484,9 @@ watch(
   },
   { deep: true },
 );
+watch(trust, (value) => {
+  if (value) menu.value = null;
+});
 watch(
   () => props.active,
   async (active) => {
@@ -359,7 +494,7 @@ watch(
       await nextTick();
       fitTerminal();
       focusTerminal();
-    }
+    } else menu.value = null;
   },
 );
 watch(
@@ -376,6 +511,7 @@ onBeforeUnmount(() => {
   ++generation;
   clearTimeout(resizeTimer);
   observer?.disconnect();
+  window.removeEventListener('resize', closeMenu);
   container.value?.removeEventListener('paste', nativePaste, true);
   if (session)
     void terminalApi.close(session.id).catch((cause: unknown) => {
@@ -384,106 +520,16 @@ onBeforeUnmount(() => {
   terminal?.dispose();
   inputQueue.dispose();
 });
+useErrorNotifications(message);
 </script>
 <template>
-  <section class="terminal-pane" :aria-label="`终端 ${name}`">
-    <div class="terminal-toolbar">
-      <div class="terminal-identity">
-        <strong>{{ name }}</strong
-        ><span v-if="tab.host" class="subtle"
-          >{{ tab.host.username }}@{{ tab.host.hostname }}:{{ tab.host.port }}</span
-        >
-        <span v-else class="subtle">{{ tab.shell ?? '本地 Shell' }}</span>
-        <span :class="['session-state', tab.state]" role="status">{{
-          stateLabels[tab.state] ?? tab.state
-        }}</span>
-      </div>
-      <div class="terminal-actions">
-        <button
-          class="button"
-          :disabled="working || !['closed', 'failed', 'idle'].includes(tab.state)"
-          @click="connect"
-        >
-          {{ tab.state === 'idle' ? '连接' : '重新连接' }}
-        </button>
-        <template v-if="tab.host"
-          ><button
-            class="tool-button"
-            aria-label="自动化"
-            title="自动化"
-            @click="emit('automation', tab.host)"
-          >
-            <Play :size="14" aria-hidden="true" /></button
-          ><button
-            v-if="['failed', 'disconnected'].includes(tab.state)"
-            class="button"
-            @click="emit('network', tab.host)"
-          >
-            诊断连接异常
-          </button>
-          <button
-            class="tool-button"
-            aria-label="运维"
-            title="Linux 运维"
-            @click="emit('operations', tab.host)"
-          >
-            <Wrench :size="14" aria-hidden="true" />
-          </button>
-          <button
-            class="tool-button"
-            aria-label="监控"
-            title="服务器监控"
-            @click="emit('monitor', tab.host)"
-          >
-            <ChartNoAxesCombined :size="14" aria-hidden="true" />
-          </button>
-          <button
-            class="tool-button"
-            aria-label="SFTP 文件"
-            title="SFTP 文件"
-            @click="emit('files', tab.host, tab.cwd, tab.key)"
-          >
-            <FolderSync :size="14" aria-hidden="true" /></button
-        ></template>
-        <span class="toolbar-divider" aria-hidden="true"></span>
-        <button class="tool-button" aria-label="查找" title="查找" @click="toggleFind">
-          <Search :size="14" aria-hidden="true" /></button
-        ><button class="tool-button" aria-label="复制" title="复制" @click="copy">
-          <Copy :size="14" aria-hidden="true" />
-        </button>
-        <button
-          class="tool-button"
-          aria-label="粘贴"
-          title="粘贴"
-          :disabled="tab.state !== 'connected'"
-          @click="paste"
-        >
-          <ClipboardPaste :size="14" aria-hidden="true" />
-        </button>
-        <button
-          v-if="tab.host"
-          class="tool-button"
-          aria-label="端口转发"
-          title="端口转发"
-          :disabled="tab.state !== 'connected'"
-          @click="forwards = true"
-        >
-          <Network :size="14" aria-hidden="true" />
-        </button>
-        <button
-          class="tool-button"
-          aria-label="导出内容"
-          title="导出内容"
-          @click="exporting = true"
-        >
-          <Download :size="14" aria-hidden="true" />
-        </button>
-        <button class="tool-button" aria-label="关闭终端" title="关闭终端" @click="emit('close')">
-          <X :size="14" aria-hidden="true" />
-        </button>
-        <button v-if="trust" class="button" @click="store.focused = tab.key">查看主机指纹</button>
-      </div>
-    </div>
+  <section
+    class="terminal-pane"
+    :aria-label="`终端 ${name}`"
+    :aria-description="stateLabels[tab.state] ?? tab.state"
+    :data-host-id="tab.host?.id ?? ''"
+    :data-state="tab.state"
+  >
     <div v-if="finding" class="terminal-find">
       <input
         ref="searchInput"
@@ -497,10 +543,18 @@ onBeforeUnmount(() => {
         <ArrowDown :size="14" aria-hidden="true" />
       </button>
     </div>
-    <div v-if="message" class="banner error" role="alert">{{ message }}</div>
-    <div ref="container" class="xterm-container" aria-label="交互式 Shell"></div>
+
+    <div
+      ref="container"
+      class="xterm-container"
+      aria-label="交互式 Shell"
+      :data-state="tab.state"
+      @mousedown.capture="preventTerminalRightClick"
+      @contextmenu.capture="terminalContextMenu"
+    ></div>
     <div class="terminal-footnote">
       <span v-if="tab.fileAction">此窗格是已确认的文件命令，手动重连将重新运行该命令。 · </span>
+      {{ preferences.quickCopyPaste ? 'Shift+右键' : '右键' }} 打开终端操作 ·
       {{ preferences.shortcuts.copy }} / {{ preferences.shortcuts.paste }} 复制粘贴 ·
       {{ preferences.shortcuts.find }} 查找 · Ctrl+C / Z 发送到{{ tab.host ? '远端' : '本地终端' }}
     </div>
@@ -551,8 +605,43 @@ onBeforeUnmount(() => {
     <ForwardDialog
       v-if="forwards && session && tab.host"
       :session-id="session.id"
-      :host-name="tab.host.name"
+      :host-name="hostDisplayName(tab.host)"
       @close="forwards = false"
     />
+    <Teleport to="body">
+      <template v-if="menu">
+        <button
+          class="context-backdrop"
+          aria-label="关闭终端菜单"
+          @click="closeMenu"
+          @contextmenu.prevent="closeMenu"
+          @wheel.prevent
+        ></button>
+        <div
+          ref="menuElement"
+          class="context-menu terminal-context-menu"
+          role="menu"
+          aria-label="终端操作"
+          :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+          @keydown="menuKey"
+        >
+          <p class="terminal-menu-heading">
+            {{ name }} · {{ stateLabels[tab.state] ?? tab.state }}
+          </p>
+          <p v-if="tab.host" class="terminal-menu-heading">
+            {{ tab.host.username }}@{{ tab.host.hostname }}:{{ tab.host.port }}
+          </p>
+          <button
+            v-for="item in menuActions"
+            :key="item.key"
+            role="menuitem"
+            :disabled="item.disabled"
+            @click="runMenuAction(item.key)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+      </template>
+    </Teleport>
   </section>
 </template>

@@ -1,3 +1,4 @@
+import { useErrorNotifications } from '../composables/error-notifications';
 import { ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 import { automationApi } from '../services/automation';
@@ -5,8 +6,7 @@ import { errorMessage } from '../services/ipc';
 import type { Status } from '../types/automation';
 export const useAutomationStore = defineStore('automation', () => {
   const status = shallowRef<Status | null>(null),
-    error = ref(''),
-    dismissed = ref('');
+    error = ref('');
   let timer: ReturnType<typeof setTimeout> | undefined,
     stopped = true;
   async function poll() {
@@ -28,5 +28,12 @@ export const useAutomationStore = defineStore('automation', () => {
     stopped = true;
     clearTimeout(timer);
   }
-  return { status, error, dismissed, start, stop, poll };
+  useErrorNotifications(() => [
+    error.value,
+    status.value?.schedulerError,
+    status.value?.latestFailure
+      ? `自动化任务「${status.value.latestFailure.entryName}」失败或结果未确认（${status.value.latestFailure.id}），请查看任务状态。`
+      : null,
+  ]);
+  return { status, error, start, stop, poll };
 });

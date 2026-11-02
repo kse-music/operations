@@ -5,7 +5,7 @@ import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { remotePython } from './native-ops-e2e.mjs';
-import { navigateWorkspace, showHostTree } from './ui-navigation.mjs';
+import { navigateWorkspace, showHostTree, terminalAction } from './ui-navigation.mjs';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function automationChecks(context) {
   let { page } = context;
@@ -50,10 +50,9 @@ export async function automationChecks(context) {
       .first()
       .click();
     const pane = page.locator('.terminal-pane:visible');
-    const connect = pane.getByRole('button', { name: '连接', exact: true });
-    if (await connect.isVisible()) {
-      await connect.click();
-      await pane.getByRole('status').filter({ hasText: '已连接' }).waitFor();
+    if ((await pane.getAttribute('data-state')) === 'idle') {
+      await terminalAction(page, pane, '连接');
+      await pane.locator('.xterm-container[data-state="connected"]').waitFor();
     }
   }
   async function fixtureCall(mode, extra = {}) {
@@ -154,7 +153,7 @@ export async function automationChecks(context) {
     return;
   }
   await remember();
-  await nav('运维自动化');
+  await nav('自动运维');
   await page.getByRole('button', { name: '管理命令分组', exact: true }).click();
   const gd = page.getByRole('dialog', { name: '命令与脚本分组', exact: true });
   await gd.getByLabel('命令分组名称', { exact: true }).fill(prefix);
@@ -197,7 +196,7 @@ export async function automationChecks(context) {
   system = (await catalog()).entries.find((e) => e.id === system.id);
   assert.equal(system.description, 'Edited persistent task');
   async function openRun(e, ids, values = {}, options = {}) {
-    await nav('运维自动化');
+    await nav('自动运维');
     await page.getByRole('tab', { name: '命令与脚本库', exact: true }).click();
     await page.getByRole('button', { name: '刷新自动化数据', exact: true }).click();
     const card = page.locator(`[data-entry-id="${e.id}"]`);
@@ -505,7 +504,7 @@ export async function automationChecks(context) {
   await page.getByRole('button', { name: '查看自动化任务', exact: true }).waitFor();
   for (const p of [normalPlan, dangerPlan, failurePlan])
     await rpc('automation_schedule_disable', { id: p.id });
-  await nav('运维自动化');
+  await nav('自动运维');
   await page.getByRole('tab', { name: '执行历史', exact: true }).click();
   await page.getByRole('button', { name: '刷新自动化数据', exact: true }).click();
   await page.locator(`[data-run-id="${pending.id}"]`).click();

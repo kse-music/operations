@@ -26,6 +26,7 @@ pub struct TerminalPreferences {
     pub theme: TerminalTheme,
     pub cursor_style: CursorStyle,
     pub cursor_blink: bool,
+    pub quick_copy_paste: bool,
     pub paste_confirm_chars: u32,
     pub shortcuts: BTreeMap<String, String>,
 }
@@ -38,6 +39,7 @@ impl Default for TerminalPreferences {
             theme: TerminalTheme::Deck,
             cursor_style: CursorStyle::Block,
             cursor_blink: true,
+            quick_copy_paste: false,
             paste_confirm_chars: 4096,
             shortcuts: default_shortcuts(),
         }
@@ -216,5 +218,26 @@ mod preference_tests {
         let config: crate::AppConfig = serde_json::from_value(value).expect("old config");
         assert_eq!(config.terminal_font_size, 18);
         assert_eq!(config.terminal, TerminalPreferences::default());
+    }
+    #[test]
+    fn quick_copy_paste_defaults_off_for_existing_settings_and_roundtrips() {
+        let mut value = serde_json::to_value(TerminalPreferences::default()).expect("serialize");
+        value
+            .as_object_mut()
+            .expect("object")
+            .remove("quickCopyPaste");
+        value["scrollback"] = 1234.into();
+        let mut preferences: TerminalPreferences =
+            serde_json::from_value(value).expect("existing preferences");
+        assert!(!preferences.quick_copy_paste);
+        assert_eq!(preferences.scrollback, 1234);
+        preferences.quick_copy_paste = true;
+        preferences.validate().expect("enabled preferences");
+        let value = serde_json::to_value(&preferences).expect("serialize enabled");
+        assert_eq!(value["quickCopyPaste"], true);
+        assert_eq!(
+            serde_json::from_value::<TerminalPreferences>(value).expect("roundtrip"),
+            preferences
+        );
     }
 }

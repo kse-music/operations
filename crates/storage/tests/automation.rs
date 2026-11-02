@@ -66,7 +66,7 @@ fn v4_migration_preserves_hosts_and_settings_and_is_idempotent() {
     c.pragma_update(None, "user_version", 4).unwrap();
     drop(c);
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.version().unwrap(), 5);
+    assert_eq!(db.version().unwrap(), serverdeck_core::DATABASE_VERSION);
     assert_eq!(db.host(&id).unwrap().config.name, "existing");
     let config = db.load_config().unwrap();
     assert_eq!(config, old_config);

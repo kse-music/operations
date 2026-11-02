@@ -186,7 +186,7 @@ try {
       .getByRole('button', { name: '新建主机', exact: true })
       .click();
     form = dialog('新建主机');
-    await form.getByLabel('主机名称', { exact: true }).fill('E2E-Host');
+    await form.getByLabel('主机名称（可选）', { exact: true }).fill('E2E-Host');
     await form.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.25');
     await form.getByLabel('用户名', { exact: true }).fill('ops');
     await form.getByLabel('分组', { exact: true }).selectOption({ label: '验收分组' });
@@ -205,7 +205,7 @@ try {
       ),
     );
     results.push('native host update via real IPC, reflected in the sidebar');
-    await page.getByRole('button', { name: '主机工作区', exact: true }).click();
+    await page.getByRole('button', { name: '主机管理', exact: true }).click();
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
     if (await expand.isVisible()) await expand.click();
     const original = (await invoke('host_list')).hosts.find((item) => item.name === 'E2E-Host');

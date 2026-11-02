@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { ref, watch } from 'vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
@@ -52,6 +53,7 @@ async function submit(): Promise<void> {
     emit('close');
   }
 }
+useErrorNotifications(fileError);
 </script>
 <template>
   <Modal title="导入 OpenSSH Config" :busy="store.busy" wide @close="emit('close')">
@@ -59,9 +61,7 @@ async function submit(): Promise<void> {
       只读取你选择或粘贴的配置，不执行任何命令，不修改原文件。支持明确 Host
       别名及常见字段；未知选项会提示或阻止导入。
     </p>
-    <p v-if="store.error || fileError" role="alert" class="banner error">
-      {{ fileError || store.error }}
-    </p>
+
     <label class="file-picker"
       >选择配置文件<input type="file" :disabled="store.busy" @change="fileChange"
     /></label>

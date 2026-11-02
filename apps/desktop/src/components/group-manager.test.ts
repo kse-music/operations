@@ -3,6 +3,7 @@ import { createApp, h, ref, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import GroupManager from './GroupManager.vue';
 import { useHostsStore } from '../stores/hosts';
+import { useNotificationsStore } from '../stores/notifications';
 import { hostsApi } from '../services/hosts';
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
@@ -50,7 +51,10 @@ it.each([true, false])(
     expect(save).toHaveBeenCalledWith(null, { name: 'Production', sortOrder: 0 });
     expect(document.querySelector('dialog') === null).toBe(success);
     if (!success) {
-      expect(document.querySelector('dialog')?.textContent).toContain('save failed');
+      expect(useNotificationsStore().items).toContainEqual(
+        expect.objectContaining({ text: 'save failed', error: true }),
+      );
+      expect(document.querySelector('dialog')?.textContent).not.toContain('save failed');
       expect(name.value).toBe('Production');
     }
   },

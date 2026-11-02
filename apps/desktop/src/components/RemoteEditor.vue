@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/editor/contrib/find/browser/findController';
@@ -155,6 +156,10 @@ async function perform(action: 'close' | 'reload'): Promise<void> {
     busy.value = false;
   }
 }
+useErrorNotifications(() => [
+  error.value,
+  !document.value.atomicSave ? '服务器缺少原子替换扩展，此文档只可查看。' : null,
+]);
 </script>
 <template>
   <Modal title="远程文本编辑" wide :busy="busy" @close="request('close')"
@@ -169,8 +174,7 @@ async function perform(action: 'close' | 'reload'): Promise<void> {
         {{ busy ? '保存中…' : '保存远程文件' }}</button
       ><button class="button" :disabled="busy" @click="request('close')">关闭编辑器</button>
     </div>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
-    <p v-if="!document.atomicSave" class="banner error">服务器缺少原子替换扩展，此文档只可查看。</p>
+
     <label class="checkbox-label"
       ><input v-model="confirmed" type="checkbox" />确认原子替换会改变
       inode；保留基本权限和属主，不适用于须保留 ACL、扩展属性或硬链接关系的文件。</label

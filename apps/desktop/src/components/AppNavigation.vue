@@ -13,7 +13,6 @@ import { hostViews, messages, type WorkspaceView } from '../types/product';
 
 defineProps<{
   active: WorkspaceView | null;
-  terminals: number;
   tasks: number;
 }>();
 defineEmits<{ navigate: [view: WorkspaceView]; workspace: [] }>();
@@ -37,14 +36,13 @@ const groups = [
     <div class="activity-group">
       <button
         :class="['nav-item', { active: active !== null && hostViews.has(active) }]"
-        aria-label="主机工作区"
+        aria-label="主机管理"
         :aria-current="active !== null && hostViews.has(active) ? 'page' : undefined"
-        data-tooltip="主机工作区"
+        data-tooltip="主机管理"
         @click="$emit('workspace')"
       >
         <PanelsTopLeft :size="20" :stroke-width="1.6" aria-hidden="true" />
-        <span class="nav-label">主机工作区</span>
-        <small v-if="terminals" class="nav-badge">{{ Math.min(99, terminals) }}</small>
+        <span class="nav-label">主机管理</span>
       </button>
     </div>
     <div v-for="(group, index) in groups" :key="index" class="activity-group">

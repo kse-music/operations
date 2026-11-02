@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
@@ -10,6 +11,7 @@ import TaskConnections from '../components/TaskConnections.vue';
 import Modal from '../components/Modal.vue';
 import { type Batch, type BatchInput, type BatchRow, taskLabels } from '../types/tasks';
 import type { ConflictPolicy } from '../types/files';
+import { hostDisplayName } from '../types/hosts';
 const hosts = useHostsStore(),
   ops = useOpsStore(),
   files = useFilesStore();
@@ -86,7 +88,7 @@ function makePreview(input: BatchInput, retry?: Preview['retry']) {
       const h = c?.host ?? hosts.catalog?.hosts.find((h) => h.id === t.hostId);
       return {
         id: t.hostId,
-        name: h?.name ?? t.hostId,
+        name: h ? hostDisplayName(h) : t.hostId,
         hostname: h?.hostname ?? '已删除主机',
         username: h?.username ?? '',
         port: h?.port ?? 22,
@@ -179,9 +181,9 @@ function label(id: string, sessionId: string | null) {
   const actual = o?.session?.id === sessionId ? o.host : f?.id === sessionId ? f.host : null;
   const h = actual ?? hosts.catalog?.hosts.find((h) => h.id === id);
   return actual
-    ? `${actual.name} (${actual.username}@${actual.hostname}:${actual.port})`
+    ? `${hostDisplayName(actual)} (${actual.username}@${actual.hostname}:${actual.port})`
     : h
-      ? `${h.name}（会话已结束；端点以执行时预览为准）`
+      ? `${hostDisplayName(h)}（会话已结束；端点以执行时预览为准）`
       : id;
 }
 
@@ -193,6 +195,10 @@ async function copy() {
     error.value = errorMessage(e);
   }
 }
+useErrorNotifications(() => [
+  error.value,
+  ...tasks.value.flatMap((task) => task.rows.map((row) => row.message)),
+]);
 </script>
 <template>
   <section class="operations-view tasks-view batch-view page-view">
@@ -239,10 +245,12 @@ async function copy() {
             v-model="selected"
             type="checkbox"
             :value="host.id"
-            :aria-label="`选择批量目标 ${host.name}`"
-          />{{ host.name }} · {{ host.username }}@{{ host.hostname }}:{{ host.port }}</label
+            :aria-label="`选择批量目标 ${hostDisplayName(host)}`"
+          />{{ hostDisplayName(host) }} · {{ host.username }}@{{ host.hostname }}:{{
+            host.port
+          }}</label
         >
-        <p v-if="!hosts.catalog?.hosts.length">暂无主机，请先在主机工作区的主机树中添加。</p>
+        <p v-if="!hosts.catalog?.hosts.length">暂无主机，请先在主机管理的主机树中添加。</p>
       </fieldset>
       <TaskConnections v-if="selected.length" :ids="selected" :file="mode === 'file'" />
       <label v-if="mode === 'command'" class="task-command-label"
@@ -274,7 +282,7 @@ async function copy() {
       </div>
       <button class="button primary" :disabled="busy">预览全部目标与操作</button>
     </form>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <div class="ops-log-tabs" role="tablist" aria-label="批量任务">
       <button
         v-for="b in tasks"
@@ -328,7 +336,7 @@ async function copy() {
             row.exitCode ?? (current.input.operation.kind === 'file' ? '不适用' : '未取得')
           }}
         </p>
-        <p v-if="row.message" role="status">{{ row.message }}</p>
+
         <template v-if="row.transfer"
           ><progress
             :value="row.transfer.transferredBytes"
@@ -370,7 +378,7 @@ async function copy() {
       </p>
       <ul>
         <li v-for="h in preview.labels" :key="h.id">
-          {{ h.name }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }} ·
+          {{ hostDisplayName(h) }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }} ·
           {{ h.ready ? '已有连接' : '未连接，将记录失败且不执行' }} · {{ h.id }}
         </li>
       </ul>
@@ -387,7 +395,7 @@ async function copy() {
         >输入“执行 {{ preview.labels.length }} 台”确认
         <input v-model="phrase" aria-label="批量执行确认文字" autocomplete="off"
       /></label>
-      <p v-if="error" class="banner error">{{ error }}</p>
+
       <footer class="dialog-actions">
         <button class="button" :disabled="busy" @click="preview = null">取消</button
         ><button

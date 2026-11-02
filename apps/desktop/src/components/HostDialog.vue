@@ -5,7 +5,7 @@ import CredentialDialog from './CredentialDialog.vue';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
-import { hostInput, type Host } from '../types/hosts';
+import { hostDisplayName, hostInput, type Host } from '../types/hosts';
 const props = defineProps<{ host?: Host }>();
 const emit = defineEmits<{ close: []; saved: [host: Host] }>();
 const store = useHostsStore();
@@ -67,9 +67,14 @@ function credentialSaved(id: string): void {
 <template>
   <Modal :title="host ? '编辑主机' : '新建主机'" :busy="store.busy" @close="emit('close')">
     <form class="editor-form" @submit.prevent="submit">
-      <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
       <fieldset class="form-grid" :disabled="store.busy">
-        <label>主机名称<input v-model="draft.name" autofocus required maxlength="128" /></label>
+        <label
+          >主机名称（可选）<input
+            v-model="draft.name"
+            autofocus
+            maxlength="128"
+            placeholder="留空时显示地址，非 22 端口会附加端口号"
+        /></label>
         <label
           >地址（IP / 域名）<input
             v-model="draft.hostname"
@@ -174,7 +179,7 @@ function credentialSaved(id: string): void {
                   :key="item.id"
                   :value="item.id"
                 >
-                  {{ item.name }} · {{ item.username }}@{{ item.hostname }}
+                  {{ hostDisplayName(item) }} · {{ item.username }}@{{ item.hostname }}
                 </option>
               </select></label
             >

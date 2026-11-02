@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Modal from './Modal.vue';
 import { terminalApi } from '../services/terminal';
@@ -87,11 +88,12 @@ onBeforeUnmount(() => {
   disposed = true;
   clearTimeout(timer);
 });
+useErrorNotifications(() => [error.value, ...items.value.map((item) => item.message)]);
 </script>
 <template>
   <Modal title="端口转发" wide :busy="busy" @close="emit('close')"
     ><p>{{ hostName }} · 转发归属于此终端，关闭终端将停止相关监听和流量。</p>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <form class="editor-form" @submit.prevent="start">
       <fieldset :disabled="busy" class="form-grid">
         <label
@@ -168,7 +170,6 @@ onBeforeUnmount(() => {
             >→ {{ item.input.targetHost }}:{{ item.input.targetPort }}</span
           >
         </p>
-        <p v-if="item.message" class="banner error" role="alert">{{ item.message }}</p>
       </div>
       <button
         class="button"

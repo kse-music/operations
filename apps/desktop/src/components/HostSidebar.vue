@@ -7,6 +7,7 @@ import {
   FolderOpen,
   FolderCog,
   MoreHorizontal,
+  PanelLeftClose,
   Plus,
   RefreshCw,
   Search,
@@ -17,7 +18,7 @@ const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
-import type { Host } from '../types/hosts';
+import { hostDisplayName, type Host } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
 import HostTreeControls from './HostTreeControls.vue';
 const store = useHostsStore();
@@ -30,6 +31,7 @@ const hostState = (id: string) =>
       ? operations.hostState(id)
       : files.hostState(id);
 defineEmits<{
+  collapse: [];
   create: [];
   groups: [];
   import: [];
@@ -200,7 +202,18 @@ function toggle(id: string): void {
     @click.capture="ignoreDragClick"
   >
     <header class="host-sidebar-heading">
-      <h2>主机</h2>
+      <div class="host-sidebar-title">
+        <button
+          class="shell-icon-button"
+          aria-label="收起主机栏"
+          title="收起主机栏"
+          :aria-expanded="true"
+          aria-controls="host-sidebar"
+          @click="$emit('collapse')"
+        >
+          <PanelLeftClose :size="16" aria-hidden="true" />
+        </button>
+      </div>
       <div class="host-sidebar-actions">
         <button
           class="shell-icon-button"
@@ -284,6 +297,7 @@ function toggle(id: string): void {
       <label class="host-search-field">
         <Search :size="14" aria-hidden="true" />
         <input
+          id="host-tree-search"
           v-model="store.search"
           class="sidebar-search"
           aria-label="搜索主机"
@@ -291,7 +305,11 @@ function toggle(id: string): void {
         />
       </label>
       <div class="host-filter" role="group" aria-label="主机筛选">
-        <button :aria-pressed="!store.favorites" @click="store.favorites = false">全部主机</button>
+        <button :aria-pressed="!store.favorites" @click="store.favorites = false">
+          全部主机<small v-if="store.catalog" class="host-count" aria-hidden="true">{{
+            store.catalog.hosts.length
+          }}</small>
+        </button>
         <button :aria-pressed="store.favorites" @click="store.favorites = true">
           <Star :size="12" aria-hidden="true" />收藏
         </button>
@@ -361,7 +379,7 @@ function toggle(id: string): void {
                   :aria-label="hostState(host.id)"
                 ></span
                 ><span class="host-label"
-                  ><span class="host-name">{{ host.name }}</span
+                  ><span class="host-name">{{ hostDisplayName(host) }}</span
                   ><span class="host-address"
                     >{{ host.hostname
                     }}<template v-if="host.port !== 22">:{{ host.port }}</template></span
@@ -398,7 +416,7 @@ function toggle(id: string): void {
       aria-hidden="true"
       :style="{ left: `${dragPosition.x + 12}px`, top: `${dragPosition.y + 12}px` }"
     >
-      {{ store.catalog?.hosts.find((h) => h.id === dragged)?.name }}
+      {{ hostDisplayName(store.catalog?.hosts.find((h) => h.id === dragged)) }}
       <span>{{
         dropTarget
           ? `移动到 ${dropTarget === 'ungrouped' ? '未分组' : store.catalog?.groups.find((g) => g.id === dropTarget)?.name}`

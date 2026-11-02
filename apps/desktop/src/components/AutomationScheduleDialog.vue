@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
+import { hostDisplayName } from '../types/hosts';
 import { onBeforeUnmount, ref, shallowRef } from 'vue';
 import Modal from './Modal.vue';
 import { automationApi } from '../services/automation';
@@ -98,6 +100,7 @@ async function save() {
     busy.value = false;
   }
 }
+useErrorNotifications(error);
 </script>
 <template>
   <Modal title="本地定时计划" wide :busy="busy" @close="emit('close')"
@@ -117,8 +120,8 @@ async function save() {
             v-model="hostIds"
             type="checkbox"
             :value="h.id"
-            :aria-label="`计划目标 ${h.name}`"
-          />{{ h.name }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }}</label
+            :aria-label="`计划目标 ${hostDisplayName(h)}`"
+          />{{ hostDisplayName(h) }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }}</label
         >
       </fieldset>
       <label v-for="p in entry.parameters.filter((p) => !p.secret)" :key="p.name"
@@ -229,6 +232,5 @@ async function save() {
         </button>
       </footer>
     </section>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p></Modal
-  >
+  </Modal>
 </template>

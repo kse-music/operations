@@ -14,7 +14,7 @@ pub mod terminal;
 pub mod workspace;
 
 pub const CONFIG_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 5;
+pub const DATABASE_VERSION: u32 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -215,6 +215,17 @@ mod tests {
         let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
         json["password"] = "must not be accepted".into();
         assert!(serde_json::from_value::<AppConfig>(json).is_err());
+    }
+
+    #[test]
+    fn sidebar_width_contract_requires_integer_logical_pixels() {
+        let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
+        json["sidebarWidth"] = serde_json::json!(299.5);
+        assert!(serde_json::from_value::<AppConfig>(json.clone()).is_err());
+        json["sidebarWidth"] = 300.into();
+        let config: AppConfig = serde_json::from_value(json).expect("integer sidebar width");
+        assert_eq!(config.sidebar_width, 300);
+        config.validate().expect("valid sidebar width");
     }
 
     #[test]

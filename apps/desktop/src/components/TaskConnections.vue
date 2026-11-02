@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
 import { useFilesStore } from '../stores/files';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
-import type { Host } from '../types/hosts';
+import { hostDisplayName, type Host } from '../types/hosts';
 const props = defineProps<{ ids: string[]; file?: boolean }>();
 const hosts = useHostsStore(),
   ops = useOpsStore(),
@@ -44,6 +45,7 @@ async function trust(h: Host, accept: boolean) {
     error.value = errorMessage(e);
   }
 }
+useErrorNotifications(error);
 </script>
 <template>
   <section class="ops-detail task-connections" aria-label="目标连接">
@@ -55,9 +57,10 @@ async function trust(h: Host, accept: boolean) {
     <button type="button" class="button" :disabled="busy || !selected.length" @click="all">
       连接所选目标
     </button>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <div v-for="host in selected" :key="host.id" class="task-host">
-      <strong>{{ host.name }}</strong> {{ host.hostname }}:{{ host.port }} · {{ host.username }} ·
+      <strong>{{ hostDisplayName(host) }}</strong> {{ host.hostname }}:{{ host.port }} ·
+      {{ host.username }} ·
       {{ connection(host)?.state ?? '未连接' }}
       <span
         v-if="
@@ -72,7 +75,7 @@ async function trust(h: Host, accept: boolean) {
         }}:{{ connection(host)!.host.port }}；应用新配置前须先断开并重新连接。</span
       >
       <button type="button" class="text-button" @click="connect(host)">连接此目标</button>
-      <span v-if="connection(host)?.error" class="danger">{{ connection(host)?.error }}</span>
+
       <div v-if="connection(host)?.trust" class="banner">
         首次主机密钥：{{ connection(host)?.trust?.hostname }}:{{ connection(host)?.trust?.port }} ·
         {{ connection(host)?.trust?.algorithm }} ·

@@ -43,7 +43,7 @@ async function remove(): Promise<void> {
 <template>
   <Modal title="管理主机分组" :busy="store.busy" @close="emit('close')">
     <p class="subtle">仅支持单层分组。排序值越小越靠前，同值按名称排序。</p>
-    <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
+
     <ul class="management-list">
       <li v-for="group in store.catalog?.groups" :key="group.id">
         <span

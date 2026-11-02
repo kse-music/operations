@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onMounted, ref, shallowRef } from 'vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
@@ -6,6 +7,7 @@ import { automationApi } from '../services/automation';
 import { errorMessage } from '../services/ipc';
 import { messages, type WorkspaceView } from '../types/product';
 import type { Entry } from '../types/automation';
+import { hostDisplayName } from '../types/hosts';
 const emit = defineEmits<{
   close: [];
   selectHost: [hostId: string];
@@ -31,7 +33,7 @@ const results = computed(() => {
     ...(hosts.catalog?.hosts ?? []).map((h) => ({
       key: h.id,
       kind: 'host',
-      name: `主机 · ${h.name} · ${h.username}@${h.hostname}:${h.port}`,
+      name: `主机 · ${hostDisplayName(h)} · ${h.username}@${h.hostname}:${h.port}`,
       view: 'terminals' as WorkspaceView,
       hostId: h.id,
       entryId: '',
@@ -76,6 +78,7 @@ onMounted(async () => {
     loading.value = false;
   }
 });
+useErrorNotifications(error);
 </script>
 <template>
   <Modal title="全局搜索" @close="emit('close')"
@@ -92,7 +95,7 @@ onMounted(async () => {
     />
     <p class="subtle">↑↓ 选择，Enter 打开，Esc 关闭。任务执行仍需目标预览和确认。</p>
     <p v-if="loading" role="status">正在读取任务库…</p>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <div id="global-search-results" role="listbox" aria-label="全局搜索结果">
       <button
         v-for="(r, n) in results"

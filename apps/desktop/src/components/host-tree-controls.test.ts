@@ -3,6 +3,7 @@ import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import HostTreeControls from './HostTreeControls.vue';
 import { useHostsStore } from '../stores/hosts';
+import { useNotificationsStore } from '../stores/notifications';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useTerminalsStore } from '../stores/terminals';
 import { hostsApi } from '../services/hosts';
@@ -88,30 +89,18 @@ it('reads and edits the exact host while leaving the active host and terminal in
   expect(useTerminalsStore().focused).toBe(focused);
 });
 
-it.each([true, false])(
-  'copies the exact host and reports failures without navigating (%s)',
-  async (success) => {
-    const { hosts, saved } = await mount();
-    const duplicate = { ...hosts.catalog!.hosts[1]!, id: 'copy-b' };
-    const copy = vi.spyOn(hostsApi, 'copy');
-    if (success) copy.mockResolvedValue(duplicate);
-    else copy.mockRejectedValue({ message: 'copy failed' });
-    vi.spyOn(hostsApi, 'list').mockResolvedValue({
-      ...hosts.catalog!,
-      hosts: [...hosts.catalog!.hosts, duplicate],
-    });
-    root.querySelector<HTMLButtonElement>('[aria-label="复制主机 Host b"]')!.click();
-    await vi.waitFor(() => expect(hosts.busy).toBe(false));
-    expect(copy).toHaveBeenCalledExactlyOnceWith('b');
-    if (success) expect(saved).toHaveBeenCalledWith(duplicate);
-    else {
-      expect(saved).not.toHaveBeenCalled();
-      expect(hosts.error).toContain('copy failed');
-    }
-    expect(useWorkspaceStore().current?.hostId).toBe('a');
-    expect(useTerminalsStore().panes).toHaveLength(1);
-  },
-);
+it('only exposes edit and delete actions without a host copy operation', async () => {
+  const { saved } = await mount();
+  expect(
+    [...root.querySelectorAll('.tree-host-actions button')].map((item) =>
+      item.getAttribute('aria-label'),
+    ),
+  ).toEqual(['编辑主机 Host b', '删除主机 Host b']);
+  expect(root.querySelector('[aria-label^="复制主机 "]')).toBeNull();
+  expect(saved).not.toHaveBeenCalled();
+  expect(useWorkspaceStore().current?.hostId).toBe('a');
+  expect(useTerminalsStore().panes).toHaveLength(1);
+});
 
 it.each([true, false])(
   'requires explicit deletion, supports cancellation and preserves failures (%s)',
@@ -145,7 +134,10 @@ it.each([true, false])(
       expect(hosts.catalog!.hosts).toHaveLength(1);
     } else {
       expect(dialog.open).toBe(true);
-      expect(dialog.textContent).toContain('delete failed');
+      expect(useNotificationsStore().items).toContainEqual(
+        expect.objectContaining({ text: 'delete failed', error: true }),
+      );
+      expect(dialog.textContent).not.toContain('delete failed');
       expect(hosts.catalog!.hosts).toHaveLength(2);
     }
     expect(useTerminalsStore().panes).toHaveLength(1);

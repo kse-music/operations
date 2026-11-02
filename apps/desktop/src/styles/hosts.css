@@ -14,10 +14,10 @@
   padding: 0 10px 0 16px;
   border-bottom: 1px solid var(--border);
 }
-.host-sidebar-heading h2 {
-  font-size: 12px;
-  font-weight: 600;
-  margin: 0;
+.host-sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .host-sidebar-actions {
   display: flex;
@@ -73,6 +73,9 @@
   min-width: 0;
   width: 100%;
 }
+.sidebar-search:focus-visible {
+  outline: none;
+}
 .host-filter {
   display: flex;
   gap: 16px;
@@ -94,6 +97,17 @@
 .host-filter [aria-pressed='true'] {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+.host-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
 }
 .host-tree-scroll {
   flex: 1;
@@ -180,6 +194,13 @@
   display: flex;
   align-items: center;
   gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.tree-host-row:hover .tree-host-actions,
+.tree-host-row:has(:focus-visible) .tree-host-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 .tree-host-actions .shell-icon-button {
   width: 24px;
@@ -196,7 +217,7 @@
   border: 0;
   border-radius: 4px;
   background: none;
-  padding: 7px 82px 7px 26px;
+  padding: 7px 57px 7px 26px;
   min-height: 46px;
   text-align: left;
 }

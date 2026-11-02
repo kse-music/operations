@@ -1,6 +1,7 @@
 export type AuthType = 'password' | 'private_key' | 'agent';
 export interface HostInput {
   ssh: import('./connection').SshOptions;
+  /** Empty means the address and non-default SSH port are used for display. */
   name: string;
   hostname: string;
   port: number;
@@ -71,6 +72,15 @@ export const authLabels: Record<AuthType, string> = {
   private_key: 'SSH 私钥',
   agent: '系统 SSH Agent',
 };
+export function hostDisplayName(
+  host: Pick<HostInput, 'name' | 'hostname' | 'port'> | null | undefined,
+): string {
+  if (!host) return '';
+  if (host.name.trim()) return host.name.trim();
+  if (host.port === 22) return host.hostname;
+  const address = host.hostname.includes(':') ? `[${host.hostname}]` : host.hostname;
+  return `${address}:${host.port}`;
+}
 export function hostInput(host?: Host, timeout = 15): HostInput {
   return {
     ssh: host?.ssh

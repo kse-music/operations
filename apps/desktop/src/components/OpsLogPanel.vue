@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onBeforeUnmount, ref, shallowRef, triggerRef, nextTick } from 'vue';
 import { opsApi } from '../services/ops';
 import { LogBuffer } from '../services/log-buffer';
@@ -139,6 +140,7 @@ onBeforeUnmount(() => {
   tabs.value = [];
 });
 defineExpose({ open });
+useErrorNotifications(() => [error.value, ...tabs.value.map((tab) => tab.message)]);
 </script>
 <template>
   <section class="ops-logs">
@@ -163,7 +165,7 @@ defineExpose({ open });
         打开日志文件
       </button>
     </div>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <div class="ops-log-tabs" role="tablist">
       <button
         v-for="tab in tabs"
@@ -200,7 +202,7 @@ defineExpose({ open });
           current.updatedAt ? new Date(current.updatedAt).toLocaleString() : '等待输出'
         }}（Docker / journal 日志保留源时间戳）
       </p>
-      <p v-if="current.message" class="banner error" role="alert">{{ current.message }}</p>
+
       <p v-if="current.buffer.dropped" class="subtle">
         已丢弃 {{ current.buffer.dropped }} 字节旧输出。
       </p>

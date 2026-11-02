@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { reactive, ref } from 'vue';
 import Modal from './Modal.vue';
 import { automationApi } from '../services/automation';
@@ -36,6 +37,7 @@ function add() {
     default: null,
   });
 }
+useErrorNotifications(error);
 </script>
 <template>
   <Modal
@@ -159,7 +161,7 @@ function add() {
       <p class="subtle">
         默认只持久化状态/退出码与非秘密参数。含秘密参数时无论此选项如何均不展示或保存输出。修改正文、参数、风险或执行选项会停用关联计划；收藏、名称、分组和描述修改不影响计划授权。
       </p>
-      <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
       <footer class="dialog-actions">
         <button type="button" class="button" :disabled="busy" @click="emit('close')">取消</button
         ><button class="button primary" :disabled="busy">保存条目</button>

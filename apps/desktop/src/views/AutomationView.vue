@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
+import { ChevronRight } from '@lucide/vue';
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { automationApi } from '../services/automation';
 import { useHostsStore } from '../stores/hosts';
@@ -243,6 +245,12 @@ async function copy(value: string) {
     error.value = errorMessage(e);
   }
 }
+useErrorNotifications(() => [
+  error.value,
+  ...catalog.value.schedules.map((plan) => scheduleView(plan).lastMessage),
+  selectedRun.value?.message,
+  ...(selectedRun.value?.rows.map((row) => row.message) ?? []),
+]);
 </script>
 <template>
   <section class="operations-view automation-view page-view">
@@ -293,7 +301,7 @@ async function copy(value: string) {
         刷新自动化数据
       </button>
     </div>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <p v-if="loading" role="status">正在读取任务库…</p>
     <template v-if="tab === 'library'"
       ><div class="ops-toolbar">
@@ -315,7 +323,7 @@ async function copy(value: string) {
         ><button class="button primary" @click="editor = {}">新建命令 / 脚本</button
         ><button class="button" @click="groupOpen = true">管理命令分组</button>
       </div>
-      <p v-if="!entries.length && !loading" class="subtle">
+      <p v-if="!entries.length && !loading" class="subtle automation-library-empty">
         暂无匹配条目。可新建或从下方可审查模板创建，不会自动执行。
       </p>
       <article v-for="e in entries" :key="e.id" class="ops-detail" :data-entry-id="e.id">
@@ -352,14 +360,34 @@ async function copy(value: string) {
           </p>
         </details>
       </article>
-      <details class="ops-detail">
-        <summary>常用模板（先查看实际内容，再创建）</summary>
-        <article v-for="t in catalog.templates" :key="t.name">
-          <h3>{{ t.name }}</h3>
-          <pre class="ops-log-output">{{ t.body }}</pre>
-          <button class="button" @click="editor = { template: t }">使用“{{ t.name }}”模板</button>
-        </article>
-      </details></template
+      <section class="automation-templates" aria-label="常用模板">
+        <header class="automation-templates-heading">
+          <strong>常用模板</strong>
+          <span class="subtle">点击模板展开详情，再创建</span>
+        </header>
+        <div class="automation-template-list">
+          <details v-for="t in catalog.templates" :key="t.name" class="automation-template-drawer">
+            <summary>
+              <ChevronRight :size="16" aria-hidden="true" />
+              <strong>{{ t.name }}</strong>
+            </summary>
+            <div class="automation-template-content">
+              <pre class="ops-log-output" tabindex="0" :aria-label="`${t.name}模板正文`">{{
+                t.body
+              }}</pre>
+              <footer>
+                <button
+                  class="button"
+                  :aria-label="`使用“${t.name}”模板`"
+                  @click="editor = { template: t }"
+                >
+                  使用模板
+                </button>
+              </footer>
+            </div>
+          </details>
+        </div>
+      </section></template
     >
     <template v-else-if="tab === 'schedules'"
       ><p class="banner">
@@ -384,7 +412,7 @@ async function copy(value: string) {
           下次运行（本机显示）：{{ new Date(scheduleView(p).nextAt).toLocaleString() }} ·
           {{ p.spec.targets.length }} 台 · 错过 {{ p.missedPolicy === 'skip' ? '跳过' : '待确认' }}
         </p>
-        <p v-if="scheduleView(p).lastMessage" role="status">{{ scheduleView(p).lastMessage }}</p>
+
         <p v-if="p.spec.entry.risk === 'dangerous'" class="danger">危险计划：只生成待确认任务。</p>
         <div class="ops-toolbar">
           <button v-if="scheduleView(p).enabled" class="button" @click="disable(p)">停用计划</button
@@ -488,7 +516,7 @@ async function copy(value: string) {
             new Date(selectedRun.scheduledFor ?? selectedRun.createdAt).toLocaleString()
           }}
         </p>
-        <p v-if="selectedRun.message" role="status">{{ selectedRun.message }}</p>
+
         <p class="subtle">
           {{
             selectedRun.spec.hasSecrets
@@ -543,7 +571,7 @@ async function copy(value: string) {
             {{ row.hostId }} · 退出码 {{ row.exitCode ?? '未取得' }} · 已裁剪
             {{ row.droppedBytes }} 字节
           </p>
-          <p v-if="row.message" role="status">{{ row.message }}</p>
+
           <template v-if="!selectedRun.spec.hasSecrets"
             ><h4>stdout</h4>
             <pre class="ops-log-output">{{
@@ -589,7 +617,7 @@ async function copy(value: string) {
           {{ groupId ? '保存分组名称' : '新增命令分组' }}
         </button>
       </form>
-      <p v-if="error" class="banner error">{{ error }}</p>
+
       <div v-for="g in catalog.groups" :key="g.id" class="ops-toolbar">
         <strong>{{ g.name }}</strong
         ><button
@@ -623,7 +651,7 @@ async function copy(value: string) {
                 : '此历史删除后无法恢复。'
         }}
       </p>
-      <p v-if="error" class="banner error">{{ error }}</p>
+
       <footer class="dialog-actions">
         <button class="button" :disabled="busy" @click="deletion = null">取消</button
         ><button class="button danger" :disabled="busy" @click="remove">确认删除自动化数据</button>

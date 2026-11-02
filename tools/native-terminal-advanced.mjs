@@ -1,3 +1,4 @@
+import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -17,10 +18,10 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     await pane.locator('.xterm-rows').filter({ hasText: text }).waitFor();
   }
   async function ready(pane) {
-    await pane.locator('.session-state').filter({ hasText: '已连接' }).waitFor();
+    await pane.locator('.xterm-container[data-state="connected"]').waitFor();
   }
   async function rename(title) {
-    await page.getByRole('button', { name: '重命名标签', exact: true }).click();
+    await terminalTabAction(page, '重命名');
     const dialog = page.getByRole('dialog', { name: '重命名标签', exact: true });
     await dialog.getByLabel('标签名称').fill(title);
     await dialog.getByRole('button', { name: '保存名称' }).click();
@@ -31,7 +32,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     'HISTFILE=/dev/null; SD_PANE_VALUE=alpha; printf \'\\n__SD_VALUE_%s__\\n\' "$SD_PANE_VALUE"',
   );
   await contains(panes().nth(0), '__SD_VALUE_alpha__');
-  await page.getByRole('button', { name: '垂直分屏（左右）', exact: true }).click();
+  await panes().nth(0).locator('.xterm-helper-textarea').press('Control+Shift+e');
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll('.terminal-pane')].filter((p) => p.offsetHeight > 0).length ===
@@ -66,7 +67,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   const after = await size();
   assert(after[1] > before[1], 'drag must resize real remote PTY columns');
   await panes().nth(1).locator('.xterm-helper-textarea').focus();
-  await page.getByRole('button', { name: '水平分屏（上下）', exact: true }).click();
+  await page.keyboard.press('Control+Shift+h');
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll('.terminal-pane')].filter((p) => p.offsetHeight > 0).length ===
@@ -75,7 +76,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   await ready(panes().nth(2));
   await send(panes().nth(0), 'printf \'\\n__SD_VALUE_%s__\\n\' "$SD_PANE_VALUE"');
   await contains(panes().nth(0), '__SD_VALUE_alpha__');
-  await panes().nth(1).getByRole('button', { name: '关闭终端', exact: true }).click();
+  await terminalAction(page, panes().nth(1), '关闭终端');
   await page.waitForFunction(
     () =>
       [...document.querySelectorAll('.terminal-pane')].filter((p) => p.offsetHeight > 0).length ===
@@ -96,18 +97,18 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   await page.waitForFunction(() =>
     document.querySelector('[aria-label="终端标签"] [role=tab]')?.textContent.includes('Extra C'),
   );
-  await page.getByRole('tab', { name: /Operations/ }).click();
-  await page.getByRole('button', { name: '关闭右侧标签', exact: true }).click();
-  await page.waitForFunction(
-    () => document.querySelectorAll('[aria-label="终端标签"] [role=tab]').length === 2,
-  );
-  await page.getByRole('button', { name: '关闭其他标签', exact: true }).click();
+  for (const title of ['Extra B', 'Extra C'])
+    await terminalTabAction(
+      page,
+      '关闭',
+      page.getByRole('tab', { name: new RegExp(title) }).locator('..'),
+    );
   await page.waitForFunction(
     () => document.querySelectorAll('[aria-label="终端标签"] [role=tab]').length === 1,
   );
   await send(panes().nth(0), 'printf \'\\n__SD_VALUE_%s__\\n\' "$SD_PANE_VALUE"');
   await contains(panes().nth(0), '__SD_VALUE_alpha__');
-  passed('tab rename, drag reorder, close-right and close-others retain live split shells');
+  passed('tab rename, drag reorder and closing individual extra sessions retain live split shells');
   await page.getByRole('navigation').getByRole('button', { name: '全局设置', exact: true }).click();
   await page.getByLabel('终端字体', { exact: true }).fill('Consolas, monospace');
   await page.getByLabel('终端行高', { exact: true }).fill('120');
@@ -123,7 +124,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     .getByRole('button', { name: /SSH 终端/ })
     .click();
   if (await panes().nth(0).getByLabel('终端查找内容').isVisible())
-    await panes().nth(0).getByRole('button', { name: '查找', exact: true }).click();
+    await terminalAction(page, panes().nth(0), '查找');
   await panes().nth(0).locator('.xterm-helper-textarea').focus();
   await page.keyboard.press('Control+Shift+g');
   await panes().nth(0).getByLabel('终端查找内容').waitFor();
@@ -135,7 +136,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   passed(
     'persisted terminal font/line-height/scrollback/theme/cursor settings and configurable search shortcut',
   );
-  await panes().nth(0).getByRole('button', { name: '查找', exact: true }).click();
+  await terminalAction(page, panes().nth(0), '查找');
   await send(
     panes().nth(0),
     "bind 'set enable-bracketed-paste on'; printf '\\n__SD_%s__\\n' BRACKET_READY",
@@ -171,7 +172,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   const downloads = path.join(artifacts, 'downloads');
   await mkdir(downloads, { recursive: true });
   const downloaded = page.waitForEvent('download');
-  await panes().nth(0).getByRole('button', { name: '导出内容', exact: true }).click();
+  await terminalAction(page, panes().nth(0), '导出内容');
   const exporting = page.getByRole('dialog', { name: '导出终端内容', exact: true });
   await exporting.getByRole('button', { name: '确认导出文本' }).click();
   const download = await downloaded;
@@ -203,7 +204,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   );
   passed('8 MiB repeated real output with finite scrollback and measured renderer heap');
   // Leave a real listener alive so reload must prove it releases the previous sessions.
-  await panes().nth(0).getByRole('button', { name: '端口转发', exact: true }).click();
+  await terminalAction(page, panes().nth(0), '端口转发');
   const cleanupDialog = page.getByRole('dialog', { name: '端口转发', exact: true });
   await cleanupDialog.getByRole('button', { name: '启动转发', exact: true }).click();
   const liveForward = cleanupDialog.locator('.forward-row').filter({ hasText: '运行中' });
@@ -212,8 +213,10 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   const probe = await tcpConnect(cleanupPort);
   probe.destroy();
   await cleanupDialog.getByRole('button', { name: '关闭面板', exact: true }).click();
-  await page.getByRole('button', { name: '保存布局', exact: true }).click();
-  await delay(300);
+  await page.waitForFunction(async () => {
+    const saved = await window.__TAURI_INTERNALS__.invoke('workspace_load');
+    return saved?.tabs[0]?.panes.length === 2;
+  });
   const saved = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('workspace_load'));
   assert.equal(saved.tabs[0].panes.length, 2);
   assert(
@@ -228,15 +231,15 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     .getByRole('button', { name: /SSH 终端/ })
     .click();
   assert.equal(await panes().count(), 2);
-  assert.equal(await panes().getByRole('button', { name: '连接', exact: true }).count(), 2);
-  assert.equal(await panes().locator('.session-state').filter({ hasText: '已连接' }).count(), 0);
+  assert.equal(await panes().locator('.xterm-container[data-state="idle"]').count(), 2);
+  assert.equal(await panes().locator('.xterm-container[data-state="connected"]').count(), 0);
   await assert.rejects(() => tcpConnect(cleanupPort));
   passed('workspace reload restores idle panes and closes the previous WebView sessions');
 }
 
 async function networkChecks(page, panes, passed, openTerminal, pin) {
   const dialog = page.getByRole('dialog', { name: '端口转发', exact: true });
-  await panes().nth(0).getByRole('button', { name: '端口转发', exact: true }).click();
+  await terminalAction(page, panes().nth(0), '端口转发');
   await dialog.waitFor();
   const row = (kind) =>
     dialog
@@ -269,7 +272,7 @@ async function networkChecks(page, panes, passed, openTerminal, pin) {
   passed('real Linux dynamic SOCKS5 forwarding');
   await dialog.getByRole('button', { name: '关闭面板', exact: true }).click();
   await routeChecks({ page, panes, passed, openTerminal, pin, dynamic });
-  await panes().nth(0).getByRole('button', { name: '端口转发', exact: true }).click();
+  await terminalAction(page, panes().nth(0), '端口转发');
   await dialog.waitFor();
   const sockets = new Set();
   const echo = net.createServer((socket) => {
@@ -380,7 +383,7 @@ async function routeChecks({ page, panes, passed, openTerminal, pin, dynamic }) 
     const trust = page.getByRole('dialog', { name: '确认 SSH 主机指纹', exact: true });
     await Promise.race([
       trust.waitFor(),
-      pane.locator('.session-state').filter({ hasText: '已连接' }).waitFor(),
+      pane.locator('.xterm-container[data-state="connected"]').waitFor(),
     ]);
     if (await trust.isVisible()) {
       assert(
@@ -389,7 +392,7 @@ async function routeChecks({ page, panes, passed, openTerminal, pin, dynamic }) 
       );
       await trust.getByRole('button', { name: '已核对，信任并连接' }).click();
     }
-    await pane.locator('.session-state').filter({ hasText: '已连接' }).waitFor();
+    await pane.locator('.xterm-container[data-state="connected"]').waitFor();
     await pane.locator('.xterm-helper-textarea').focus();
     await page.keyboard.type(`HISTFILE=/dev/null; printf '\\n__SD_%s__\\n' ${marker}; uname -s`);
     await page.keyboard.press('Enter');
@@ -398,7 +401,7 @@ async function routeChecks({ page, panes, passed, openTerminal, pin, dynamic }) 
       .filter({ hasText: `__SD_${marker}__` })
       .waitFor();
     await pane.locator('.xterm-rows').filter({ hasText: 'Linux' }).waitFor();
-    await pane.getByRole('button', { name: '关闭终端', exact: true }).click();
+    await terminalAction(page, pane, '关闭终端');
     await page.waitForFunction(
       () => document.querySelectorAll('[aria-label="终端标签"] [role=tab]').length === 1,
     );

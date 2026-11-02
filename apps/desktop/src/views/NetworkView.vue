@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
@@ -6,6 +7,7 @@ import TaskConnections from '../components/TaskConnections.vue';
 import { tasksApi, downloadResult } from '../services/tasks';
 import { errorMessage } from '../services/ipc';
 import { type Diagnostic, type Tool, taskLabels, active } from '../types/tasks';
+import { hostDisplayName } from '../types/hosts';
 const props = defineProps<{ hostId?: string; requestId?: number }>();
 const hosts = useHostsStore(),
   ops = useOpsStore(),
@@ -115,7 +117,7 @@ function origin(t: Diagnostic) {
   const c = ops.connections[id];
   const h = c?.session?.id === t.input.origin.sessionId ? c.host : undefined;
   return h
-    ? `远程 ${h.name} (${h.username}@${h.hostname}:${h.port}) · HostId=${id}`
+    ? `远程 ${hostDisplayName(h)} (${h.username}@${h.hostname}:${h.port}) · HostId=${id}`
     : `远程 HostId=${id} · SessionId=${t.input.origin.sessionId}（连接已结束，仅保留原会话标识）`;
 }
 function result(t: Diagnostic) {
@@ -138,6 +140,7 @@ async function copy() {
     error.value = errorMessage(e);
   }
 }
+useErrorNotifications(() => [error.value, ...tasks.value.map((task) => task.message)]);
 </script>
 <template>
   <section class="operations-view tasks-view network-view page-view">
@@ -175,7 +178,7 @@ async function copy() {
           <select v-model="host" aria-label="诊断主机" required>
             <option value="" disabled>选择执行诊断的主机</option>
             <option v-for="item in hosts.catalog?.hosts" :key="item.id" :value="item.id">
-              {{ item.name }} · {{ item.username }}@{{ item.hostname }}:{{ item.port }}
+              {{ hostDisplayName(item) }} · {{ item.username }}@{{ item.hostname }}:{{ item.port }}
             </option>
           </select>
         </label>
@@ -214,7 +217,7 @@ async function copy() {
         本机未提供受管 MTR，可选择远端。SSH 延迟使用已有可信连接，不重新发送登录凭据。
       </p>
     </form>
-    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
+
     <div class="ops-log-tabs" role="tablist" aria-label="诊断任务">
       <button
         v-for="t in tasks"
@@ -246,7 +249,7 @@ async function copy() {
           导出诊断结果
         </button>
       </div>
-      <p v-if="current.message" class="banner error" role="status">{{ current.message }}</p>
+
       <p>退出码：{{ current.exitCode ?? '未取得' }} · 已裁剪 {{ current.droppedBytes }} 字节</p>
       <pre class="ops-log-output" aria-label="诊断实时结果">{{
         current.output || '等待输出…'

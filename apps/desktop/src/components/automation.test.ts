@@ -224,6 +224,71 @@ it('dangerous schedule requires explicit authorization and explains per-occurren
     }),
   );
 });
+it('templates start collapsed and each drawer can be opened and closed independently', async () => {
+  api.catalog.mockResolvedValue({
+    entries: [],
+    groups: [],
+    schedules: [],
+    templates: [
+      { ...entryInput(), name: '查看系统信息', body: 'hostname; uptime' },
+      { ...entryInput(), name: '查看磁盘使用率', body: 'df -h -P' },
+    ],
+  });
+  mount(AutomationView);
+  await flush();
+  const drawers = [...root.querySelectorAll<HTMLDetailsElement>('.automation-template-drawer')];
+  expect(drawers).toHaveLength(2);
+  expect(drawers.every((drawer) => !drawer.open)).toBe(true);
+  expect(drawers.map((drawer) => drawer.querySelector('summary')?.textContent?.trim())).toEqual([
+    '查看系统信息',
+    '查看磁盘使用率',
+  ]);
+  drawers[0]!.querySelector('summary')!.click();
+  expect(drawers.map((drawer) => drawer.open)).toEqual([true, false]);
+  drawers[1]!.querySelector('summary')!.click();
+  expect(drawers.map((drawer) => drawer.open)).toEqual([true, true]);
+  drawers[0]!.querySelector('summary')!.click();
+  expect(drawers.map((drawer) => drawer.open)).toEqual([false, true]);
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(api.prepare).not.toHaveBeenCalled();
+  expect(api.start).not.toHaveBeenCalled();
+  expect(api.approve).not.toHaveBeenCalled();
+});
+it('expanded template selection preserves the full script for review without starting execution', async () => {
+  const template = {
+    ...entryInput(entry),
+    name: '查看日志',
+    body: `tail -n "$2" -- "$1"\n# ${'long script content '.repeat(100)}`,
+  };
+  api.catalog.mockResolvedValue({ entries: [], groups: [], schedules: [], templates: [template] });
+  mount(AutomationView);
+  await flush();
+  const drawer = root.querySelector<HTMLDetailsElement>('.automation-template-drawer')!;
+  expect(drawer.open).toBe(false);
+  drawer.querySelector('summary')!.click();
+  expect(drawer.open).toBe(true);
+  expect(document.querySelector('pre')?.textContent).toBe(template.body);
+  const useTemplate = document.querySelector<HTMLButtonElement>(
+    '[aria-label="使用“查看日志”模板"]',
+  );
+  expect(useTemplate).toBeTruthy();
+  useTemplate!.click();
+  await flush();
+  expect(drawer.open).toBe(true);
+  expect(document.querySelector<HTMLInputElement>('[aria-label="自动化条目名称"]')?.value).toBe(
+    template.name,
+  );
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="自动化条目正文"]')?.value).toBe(
+    template.body,
+  );
+  expect(document.querySelector<HTMLSelectElement>('[aria-label="自动化条目类型"]')?.value).toBe(
+    'script',
+  );
+  expect(document.querySelectorAll('.automation-param')).toHaveLength(template.parameters.length);
+  expect(api.prepare).not.toHaveBeenCalled();
+  expect(api.start).not.toHaveBeenCalled();
+  expect(api.approve).not.toHaveBeenCalled();
+});
 it('late history polling cannot replace the selected run with another host result', async () => {
   api.history.mockResolvedValue(
     ['A', 'B'].map((id) => ({

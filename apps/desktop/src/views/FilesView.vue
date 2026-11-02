@@ -33,7 +33,7 @@ import {
   type TransferInfo,
   type FileTerminalAction,
 } from '../types/files';
-import type { Host } from '../types/hosts';
+import { hostDisplayName, type Host } from '../types/hosts';
 import { stateLabels } from '../types/terminal';
 const props = defineProps<{ hostId?: string }>();
 const application = useApplicationStore();
@@ -150,7 +150,7 @@ function prepareTransfer(direction: Direction, sources: string[]): void {
   }
   transfer.value = {
     id: current.id,
-    host: current.host.name,
+    host: hostDisplayName(current.host),
     direction,
     sources,
     destination:
@@ -207,7 +207,7 @@ async function retry(task: TransferInfo): Promise<void> {
   }
   transfer.value = {
     id: store.current!.id!,
-    host: host.name,
+    host: hostDisplayName(host),
     direction: task.direction,
     sources: task.sources,
     destination: task.destination,
@@ -366,13 +366,13 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </div>
-    <p v-if="store.error" class="banner error" role="alert">
-      {{ store.error }} <button class="text-button" @click="store.error = null">关闭提示</button>
-    </p>
+
     <p v-if="store.notice" class="banner success" role="status">{{ store.notice }}</p>
-    <p v-if="!chosen" class="banner" role="status">请打开远程主机工作区后使用 SFTP 文件管理。</p>
+    <p v-if="!chosen" class="banner" role="status">
+      请在主机管理中打开远程主机后使用 SFTP 文件管理。
+    </p>
     <div v-if="store.current" class="files-status">
-      <strong>{{ store.current.host.name }}</strong
+      <strong>{{ hostDisplayName(store.current.host) }}</strong
       ><span>{{ stateLabels[store.current.state] ?? store.current.state }}</span
       ><button class="text-button" @click="disconnecting = true">断开文件连接</button
       ><label class="checkbox-label"
@@ -384,7 +384,7 @@ onBeforeUnmount(() => {
         />跟随来源终端的 OSC 7 目录</label
       ><span class="subtle">{{ cwd ?? '来源终端未报告目录；不从屏幕文本猜测 pwd' }}</span>
     </div>
-    <p v-if="store.current?.error" class="banner error" role="alert">{{ store.current.error }}</p>
+
     <div class="file-columns">
       <section class="file-side">
         <h2>本地文件</h2>
@@ -609,8 +609,8 @@ onBeforeUnmount(() => {
     "
     :busy="busy"
     @close="operation = null"
-    ><p>{{ store.current?.host.name }} · {{ operation.parent }}</p>
-    <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
+    ><p>{{ hostDisplayName(store.current?.host) }} · {{ operation.parent }}</p>
+
     <form class="editor-form" @submit.prevent="submitOperation">
       <label v-if="operation.kind !== 'delete'"
         >{{ operation.kind === 'mkdir' ? '文件夹名称' : '新名称'
@@ -652,7 +652,7 @@ onBeforeUnmount(() => {
       {{ transfer.host }} · {{ transfer.direction === 'upload' ? '上传到远端' : '下载到本地' }} ·
       {{ transfer.sources.length }} 个源项目
     </p>
-    <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
+
     <pre class="file-path-preview">{{ transfer.sources.join('\n') }}</pre>
     <form class="editor-form" @submit.prevent="startTransfer">
       <label
@@ -736,7 +736,7 @@ onBeforeUnmount(() => {
   >
   <Modal v-if="disconnecting" title="断开 SFTP 连接" :busy="busy" @close="disconnecting = false"
     ><p>此主机的未完成传输将被取消，已完成文件保留。仅离开文件页面可继续后台任务。</p>
-    <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
+
     <footer class="dialog-actions">
       <button class="button" @click="disconnecting = false">继续后台传输</button
       ><button class="button danger" :disabled="busy" @click="disconnect">取消传输并断开</button>
@@ -744,7 +744,7 @@ onBeforeUnmount(() => {
   >
   <Modal v-if="terminalAction" title="确认打开文件终端" @close="terminalAction = null"
     ><p>
-      {{ store.current?.host.name }} ·
+      {{ hostDisplayName(store.current?.host) }} ·
       {{
         terminalAction.kind === 'tail'
           ? '运行 tail -f'

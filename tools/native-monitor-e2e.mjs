@@ -1,3 +1,4 @@
+import { terminalAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { navigateWorkspace } from './ui-navigation.mjs';
 import path from 'node:path';
@@ -24,10 +25,7 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
   const match = text.match(/__SD_MONITOR_REF__([A-Za-z0-9+/=]+)__SD_MONITOR_END__/);
   assert(match, 'real Linux reference command must return a complete response');
   const reference = JSON.parse(Buffer.from(match[1], 'base64').toString());
-  await page
-    .locator('.terminal-pane:visible')
-    .getByRole('button', { name: '监控', exact: true })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), '监控');
   const snapshot = () =>
     page.evaluate(async (hostId) => {
       try {

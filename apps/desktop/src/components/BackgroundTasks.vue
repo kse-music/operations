@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import Modal from './Modal.vue';
 import TransferPanel from './TransferPanel.vue';
@@ -9,6 +10,7 @@ import { tasksApi } from '../services/tasks';
 import { errorMessage } from '../services/ipc';
 import { taskLabels } from '../types/tasks';
 import type { BackgroundTask, WorkspaceView } from '../types/product';
+import { hostDisplayName } from '../types/hosts';
 const emit = defineEmits<{ close: []; navigate: [view: WorkspaceView, hostId?: string] }>();
 const background = useBackgroundStore(),
   automation = useAutomationStore(),
@@ -19,7 +21,9 @@ const tasks = computed(() => [...background.tasks].reverse());
 function names(ids: string[]) {
   return ids.map((id) => {
     const h = hosts.catalog?.hosts.find((h) => h.id === id);
-    return h ? `${h.name} · HostId=${h.id} · 当前配置 ${h.username}@${h.hostname}:${h.port}` : id;
+    return h
+      ? `${hostDisplayName(h)} · HostId=${h.id} · 当前配置 ${h.username}@${h.hostname}:${h.port}`
+      : id;
   });
 }
 function open(view: WorkspaceView, hostId = '') {
@@ -37,15 +41,14 @@ async function stop() {
     error.value = errorMessage(e);
   }
 }
+useErrorNotifications(error);
 </script>
 <template>
   <Modal title="后台任务与传输" wide @close="emit('close')"
     ><p class="subtle">
       所有结果归属各自目标。关闭此面板不会停止任务；停止在途远端命令后仍需核对实际状态。
     </p>
-    <p v-if="background.error || error" class="banner error" role="alert">
-      {{ error || background.error }}
-    </p>
+
     <TransferPanel @retry="(t) => open('files', t.hostId)" />
     <h2>网络与批量任务</h2>
     <p v-if="!tasks.length" class="host-empty">没有网络或批量任务</p>
