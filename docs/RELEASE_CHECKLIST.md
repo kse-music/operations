@@ -46,4 +46,57 @@ Cargo 审计单独执行 `cargo audit --deny unsound`，目前预期失败并应
 
 Windows 安装包：`target/release/bundle/nsis/ServerDeck_0.1.0-beta.1_x64-setup.exe`；程序：`target/release/serverdeck-desktop.exe`；校验：`.local/release-qa/SHA256SUMS` 和 `release-manifest.json`。校验值不是发布者签名。最终安装器大小/Hash 以清单为准。
 
+这些是本机构建产物路径，`target/` 和 `.local/` 已被 Git 忽略，不是下载地址；克隆源码不会获得安装器或校验文件。发布时需另行提供可信的分发入口。
+
 安装前备份数据和保留凭据库；默认卸载保留配置，不选择“删除数据”选项。应用退出过程中先完成脏文本、传输和任务确认，不能把 kill 当作正常退出验收。自动更新未实现，未来必须先具备签名和来源校验方案。
+
+## 本地调试构建
+
+嵌入生产前端资源、无需 Vite 服务的 Windows 调试二进制：
+
+```powershell
+node tools/tauri.mjs build --debug --no-bundle
+```
+
+产物为 `target/debug/serverdeck-desktop.exe`。只构建 Release 二进制可运行 `node tools/tauri.mjs build --no-bundle`。Windows 会锁定运行中的 EXE，重新构建前先关闭该程序。
+
+## 原生验收
+
+常规编译、类型与单元测试入口见 [README](../README.md#测试)。Windows 受限执行环境可能禁止 Vitest 缓存重命名或 loopback TCP；这些测试需要正常本地进程权限。
+
+桌面 CRUD/凭据/导入的隔离端到端测试，以及显式系统凭据库集成测试：
+
+```powershell
+npm run test:native
+cargo test -p serverdeck-security native_store_roundtrip_update_and_delete -- --ignored
+```
+
+原生 E2E 使用 `.local/native-e2e` 下独立数据库、复制的测试 EXE 和仅测试进程的 loopback CDP；结束后清理随机凭据并恢复正常构建，保留诊断产物。普通应用构建不开放调试端口。测试流程和证据见[主机/凭据验收](VALIDATION_STAGE2.md)。
+
+SSH 模块验收需要已授权测试账号、带外核对的主机指纹，以及仅本次进程使用的密码；不要把秘密写入命令历史或文件。设置 `SERVERDECK_TEST_HOST`、`SERVERDECK_TEST_USER`、`SERVERDECK_TEST_PIN` 并按 [SSH 增强验收](VALIDATION_SSH_USABILITY.md#复现与边界)或[网络/批量验收](VALIDATION_NETWORK_BATCH.md#复现)的隐藏密码方式启动。依赖 Docker 的套件还需要已授权 Docker 环境。
+
+| 验收范围                       | 入口                                       | 详细记录                                     |
+| ------------------------------ | ------------------------------------------ | -------------------------------------------- |
+| SSH 基础                       | `npm run test:terminal`                    | [SSH 基础验收](VALIDATION_STAGE3.md)         |
+| 分屏、标签、代理、跳板与转发   | `npm run test:terminal -- --advanced`      | [SSH 增强验收](VALIDATION_SSH_USABILITY.md)  |
+| SFTP 与远程编辑                | `npm run test:terminal -- --sftp`          | [SFTP 验收](VALIDATION_STAGE4.md)            |
+| Linux 监控                     | `npm run test:terminal -- --monitor`       | [监控验收](VALIDATION_STAGE5.md)             |
+| Docker、日志、进程、端口与服务 | `npm run test:terminal -- --ops`           | [Linux 运维验收](VALIDATION_OPERATIONS.md)   |
+| 网络与批量操作                 | `npm run test:terminal -- --network-batch` | [网络/批量验收](VALIDATION_NETWORK_BATCH.md) |
+| 自动化与计划                   | `npm run test:terminal -- --automation`    | [自动化验收](VALIDATION_AUTOMATION.md)       |
+| 完整产品流程                   | `npm run test:terminal -- --product`       | [产品整合验收](VALIDATION_PRODUCT.md)        |
+
+测试输出和下载保存在 `.local/terminal-e2e` 的隔离目录。远端测试只创建和清理 UUID/标签所属临时资源，不修改宿主 sshd；具体夹具和环境要求以各套件说明为准。
+
+## 安装版发布复验
+
+先按“复建及产物”生成安装包和清单，安装到专属 QA 目录；以下占位路径须替换为实际路径，要求空主机目录，不得清除已有用户数据来满足前置条件。
+
+```powershell
+node tools/release-startup-bench.mjs <installed-serverdeck-desktop.exe> <artifact-directory>
+node tools/native-terminal-e2e.mjs --release --installed-exe <installed-serverdeck-desktop.exe> --release-qa
+```
+
+模块验收选项也可用于安装版：`--automation --network-batch --ops --monitor --sftp` 覆盖对应模块，`--advanced` 覆盖 SSH 增强；`--soak --ops` 增加五分钟同时监控/Docker 日志，`--exit-transfer` 验证真实上传中确认退出与重启清理。`--modules-only` 仅用于独立复测模块，不算完整终端回归。
+
+安装版验收拒绝已有主机/凭据的目录，结束后恢复原偏好。功能证据、失败重跑、性能口径和未完成条件以[测试报告](TEST_REPORT.md)为准；CI 手动生成四类候选产物，不自动创建 Release、上传用户数据或引入自动更新。
