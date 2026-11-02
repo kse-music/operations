@@ -7,6 +7,7 @@ body {
   margin: 0;
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 13px;
+  letter-spacing: 0;
   background: var(--bg);
   color: var(--text);
 }
@@ -32,18 +33,22 @@ button {
   color: inherit;
 }
 .app-shell {
-  height: 100vh;
-  min-height: 580px;
-  min-width: 870px;
+  --rail-width: 56px;
+  --host-panel-width: var(--sidebar-width);
+  height: 100dvh;
+  min-height: 560px;
   display: grid;
-  grid-template: 58px minmax(0, 1fr) 30px / var(--sidebar-width) minmax(0, 1fr);
+  grid-template: 48px minmax(0, 1fr) 28px / var(--rail-width) var(--host-panel-width) minmax(0, 1fr);
+}
+.app-shell.hosts-hidden {
+  --host-panel-width: 0px;
 }
 .topbar {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 42px;
-  padding: 0 22px;
+  gap: 12px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -52,7 +57,7 @@ button {
   gap: 9px;
   align-items: center;
   font-size: 16px;
-  letter-spacing: -0.3px;
+  letter-spacing: 0;
 }
 .brand-icon {
   font-size: 21px;
@@ -87,9 +92,12 @@ button {
   font-size: 18px;
 }
 .sidebar {
+  grid-column: 2;
+  grid-row: 2;
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 22px 14px 16px;
+  min-width: 0;
+  padding: 0;
   display: flex;
   flex-direction: column;
 }
@@ -194,6 +202,10 @@ button {
   background: var(--muted);
 }
 .main-content {
+  grid-column: 3;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -221,7 +233,7 @@ button {
 }
 .content-scroll {
   overflow: auto;
-  padding: 36px 42px;
+  padding: 22px 24px;
 }
 .workspace-view,
 .settings-panel {
@@ -233,19 +245,20 @@ button {
   justify-content: space-between;
   gap: 16px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .eyebrow {
   font-size: 10px;
-  letter-spacing: 2px;
+  letter-spacing: 0;
   color: var(--accent);
   margin: 0 0 10px;
   font-weight: 600;
 }
 h1 {
-  font-size: 25px;
+  font-size: 21px;
   margin: 0;
   font-weight: 600;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
 }
 .stage-label {
   color: var(--muted);

@@ -604,6 +604,7 @@
 | zvariant 5.15.1                         | MIT                                                 | Cargo          |
 | zvariant_derive 5.15.1                  | MIT                                                 | Cargo          |
 | zvariant_utils 4.2.0                    | MIT                                                 | Cargo          |
+| @lucide/vue 1.66.0                      | ISC (Feather-derived icons: MIT)                    | npm production |
 | @tauri-apps/api 2.12.4                  | Apache-2.0 OR MIT                                   | npm production |
 | @xterm/addon-fit 0.11.0                 | MIT                                                 | npm production |
 | @xterm/addon-search 0.16.0              | MIT                                                 | npm production |

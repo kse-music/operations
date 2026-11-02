@@ -347,7 +347,6 @@ async function relatedPorts() {
   <section class="operations-view" aria-label="主机运维工作区">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">HOST OPERATIONS</p>
         <h1>Linux 运维</h1>
         <p class="subtle">当前 SSH 账号执行 · 不自动提权 · Docker 使用远端 Unix Socket</p>
       </div>
@@ -362,7 +361,7 @@ async function relatedPorts() {
         ><button class="button" :disabled="!connected" @click="disconnect">断开运维连接</button>
       </div>
     </div>
-    <p role="status">
+    <p class="ops-connection-status" role="status">
       {{ connection?.host.name ?? '未选择主机' }} ·
       {{ stateLabels[connection?.state ?? 'idle'] ?? connection?.state }}
     </p>

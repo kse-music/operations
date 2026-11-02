@@ -13,6 +13,8 @@ import { useTheme } from './composables/theme';
 import WorkspaceView from './views/WorkspaceView.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import HostSidebar from './components/HostSidebar.vue';
+import AppNavigation from './components/AppNavigation.vue';
+import { PanelLeftClose, PanelLeftOpen, Power, Search, Settings2, X } from '@lucide/vue';
 import HostsView from './views/HostsView.vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
@@ -190,6 +192,7 @@ function globalShortcut(event: KeyboardEvent) {
   else taskPanel.value = true;
 }
 const sidebarDraft = ref<number | null>(null);
+const sidebarOpen = ref(!window.matchMedia('(max-width: 720px)').matches);
 function resizeSidebar(event: PointerEvent) {
   event.preventDefault();
   const start = event.clientX,
@@ -515,12 +518,23 @@ async function disconnectHost() {
 </script>
 
 <template>
-  <div class="app-shell" :style="layoutStyle">
+  <div class="app-shell" :class="{ 'hosts-hidden': !sidebarOpen }" :style="layoutStyle">
     <header class="topbar">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">S<span>▸</span></span
         ><strong>ServerDeck</strong><span class="version">v0.1</span>
       </div>
+      <button
+        class="shell-icon-button"
+        :aria-label="sidebarOpen ? '收起主机栏' : '展开主机栏'"
+        :title="sidebarOpen ? '收起主机栏' : '展开主机栏'"
+        :aria-expanded="sidebarOpen"
+        aria-controls="host-sidebar"
+        @click="sidebarOpen = !sidebarOpen"
+      >
+        <PanelLeftClose v-if="sidebarOpen" :size="18" aria-hidden="true" />
+        <PanelLeftOpen v-else :size="18" aria-hidden="true" />
+      </button>
       <div class="topbar-context" aria-label="当前主机上下文">
         <span v-if="view === 'batch'">多主机任务 · 以目标预览为准</span
         ><template v-else
@@ -538,10 +552,8 @@ async function disconnectHost() {
             </option>
             <option v-for="h in store.catalog?.hosts" :key="h.id" :value="h.id">
               {{ h.name }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }}
-            </option></select
-          ><span v-if="currentHost" class="context-address"
-            >{{ currentHost.username }}@{{ currentHost.hostname }}:{{ currentHost.port }}</span
-          ></template
+            </option>
+          </select></template
         >
       </div>
       <button
@@ -549,74 +561,29 @@ async function disconnectHost() {
         aria-label="打开全局搜索"
         @click="searching = true"
       >
-        搜索 <kbd>{{ application.state?.config.product?.shortcuts.search ?? 'Ctrl+K' }}</kbd>
+        <Search :size="15" aria-hidden="true" /><span>搜索</span>
+        <kbd>{{ application.state?.config.product?.shortcuts.search ?? 'Ctrl+K' }}</kbd>
       </button>
-      <button class="text-button" @click="requestExit">退出应用</button>
-      <button class="icon-button" aria-label="打开全局设置" @click="view = 'settings'">⚙</button>
+      <button class="shell-icon-button" aria-label="退出应用" title="退出应用" @click="requestExit">
+        <Power :size="17" aria-hidden="true" />
+      </button>
+      <button
+        class="shell-icon-button"
+        aria-label="打开全局设置"
+        title="全局设置"
+        @click="view = 'settings'"
+      >
+        <Settings2 :size="18" aria-hidden="true" />
+      </button>
     </header>
-    <aside class="sidebar">
-      <p class="sidebar-caption">工作台</p>
-      <nav aria-label="主导航">
-        <button
-          :class="['nav-item', { active: view === 'automation' }]"
-          @click="navigate('automation')"
-        >
-          <span aria-hidden="true">▶</span>运维自动化
-          <small>{{ automation.status?.active || automation.status?.awaiting || '' }}</small>
-        </button>
-        <button :class="['nav-item', { active: view === 'network' }]" @click="navigate('network')">
-          <span aria-hidden="true">◎</span>网络诊断
-        </button>
-        <button :class="['nav-item', { active: view === 'batch' }]" @click="view = 'batch'">
-          <span aria-hidden="true">▤</span>批量运维
-        </button>
-        <button
-          :class="['nav-item', { active: view === 'operations' }]"
-          @click="navigate('operations')"
-        >
-          <span aria-hidden="true">⚒</span>Linux 运维
-        </button>
-        <button :class="['nav-item', { active: view === 'monitor' }]" @click="navigate('monitor')">
-          <span aria-hidden="true">◴</span>服务器监控
-        </button>
-        <button :class="['nav-item', { active: view === 'files' }]" @click="view = 'files'">
-          <span aria-hidden="true">⇄</span>SFTP 文件 <small>{{ files.pending || '' }}</small>
-        </button>
-        <button :class="['nav-item', { active: view === 'terminals' }]" @click="view = 'terminals'">
-          <span aria-hidden="true">›_</span>SSH 终端 <small>{{ terminals.tabs.length }}</small>
-        </button>
-        <button
-          :class="['nav-item', { active: view === 'hosts' }]"
-          :aria-current="view === 'hosts' ? 'page' : undefined"
-          @click="view = 'hosts'"
-        >
-          <span aria-hidden="true">▦</span>主机管理
-        </button>
-        <button
-          :class="['nav-item', { active: view === 'credentials' }]"
-          :aria-current="view === 'credentials' ? 'page' : undefined"
-          @click="view = 'credentials'"
-        >
-          <span aria-hidden="true">◇</span>安全凭据
-        </button>
-        <button
-          :class="['nav-item', { active: view === 'overview' }]"
-          :aria-current="view === 'overview' ? 'page' : undefined"
-          @click="view = 'overview'"
-        >
-          <span aria-hidden="true">⌘</span>本地环境
-        </button>
-        <button
-          :class="['nav-item', { active: view === 'settings' }]"
-          :aria-current="view === 'settings' ? 'page' : undefined"
-          @click="view = 'settings'"
-        >
-          <span aria-hidden="true">⚙</span>全局设置
-        </button>
-        <button :class="['nav-item', { active: view === 'backup' }]" @click="view = 'backup'">
-          <span aria-hidden="true">↥</span>备份恢复
-        </button>
-      </nav>
+    <AppNavigation
+      :active="view"
+      :terminals="terminals.tabs.length"
+      :transfers="files.pending"
+      :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
+      @navigate="navigate($event)"
+    />
+    <aside v-show="sidebarOpen" id="host-sidebar" class="sidebar" aria-label="主机管理栏">
       <HostSidebar
         @create="openHost()"
         @groups="groups = true"
@@ -624,21 +591,15 @@ async function disconnectHost() {
         @menu="openMenu"
         @connect="connect"
       />
-      <div class="local-note">
-        <span class="status-dot"></span>
-        <div>
-          <strong>Local First</strong>
-          <p>数据留在你的设备上</p>
-        </div>
-      </div>
     </aside>
     <div
+      v-if="sidebarOpen"
       class="sidebar-resizer"
       role="separator"
       aria-label="调整主机侧栏宽度"
       aria-orientation="vertical"
       tabindex="0"
-      :aria-valuenow="application.state?.config.sidebarWidth ?? 248"
+      :aria-valuenow="sidebarDraft ?? application.state?.config.sidebarWidth ?? 248"
       aria-valuemin="200"
       aria-valuemax="400"
       @pointerdown="resizeSidebar"
@@ -671,7 +632,7 @@ async function disconnectHost() {
             title="仅关闭导航标签；后台任务和独立终端保留"
             @click="workspace.close(tab.key)"
           >
-            ×
+            <X :size="14" aria-hidden="true" />
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@
 :root[data-theme='dark'] {
   color-scheme: dark;
   --bg: #101217;
+  --rail: #0c0f13;
   --panel: #15181f;
   --panel-soft: #14171e;
   --raised: #202530;
@@ -19,6 +20,7 @@
 :root[data-theme='light'] {
   color-scheme: light;
   --bg: #f7f9fc;
+  --rail: #edf1f5;
   --panel: #ffffff;
   --panel-soft: #fbfcfe;
   --raised: #edf1f7;
