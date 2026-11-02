@@ -191,7 +191,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section class="monitor-view" aria-label="Linux 服务器监控">
+  <section class="monitor-view page-view" aria-label="Linux 服务器监控">
     <div class="section-heading">
       <div>
         <p class="eyebrow">AGENTLESS MONITOR</p>

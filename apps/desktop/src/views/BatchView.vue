@@ -195,7 +195,7 @@ async function copy() {
 }
 </script>
 <template>
-  <section class="operations-view tasks-view">
+  <section class="operations-view tasks-view batch-view page-view">
     <header>
       <p class="eyebrow">BATCH OPERATIONS</p>
       <h1>多服务器批量运维</h1>
@@ -204,8 +204,8 @@ async function copy() {
         Rust 管理，离页后继续，结果仅保留在本次应用内。
       </p>
     </header>
-    <form class="ops-detail" @submit.prevent="review">
-      <div class="ops-toolbar">
+    <form class="work-section" @submit.prevent="review">
+      <div class="form-row">
         <label
           >任务类型
           <select v-model="mode" aria-label="批量任务类型">
@@ -255,7 +255,7 @@ async function copy() {
           spellcheck="false"
         ></textarea>
       </label>
-      <div v-else class="ops-toolbar">
+      <div v-else class="form-row">
         <label>本地文件 <input v-model="source" required aria-label="分发源文件" /></label
         ><button type="button" class="button" @click="pick">选择分发文件</button
         ><label
@@ -289,7 +289,7 @@ async function copy() {
         {{ b.finished ? '已结束' : '执行中' }} · {{ new Date(b.createdAt).toLocaleTimeString() }}
       </button>
     </div>
-    <section v-if="current" class="ops-detail">
+    <section v-if="current" class="work-section result-section">
       <h2>
         批量结果 ·
         {{ current.rows.filter((r) => !['queued', 'running'].includes(r.state)).length }} /

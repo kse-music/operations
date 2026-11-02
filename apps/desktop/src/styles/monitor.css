@@ -40,7 +40,7 @@
   padding: 16px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 6px;
   min-width: 0;
   color: var(--accent);
 }
@@ -103,12 +103,34 @@
   }
 }
 
-.monitor-view .panel {
+.monitor-cards .panel {
   padding: 16px;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 12px;
+  border-radius: 6px;
+  margin: 0;
+}
+.monitor-charts {
+  margin-top: 16px;
+}
+.monitor-view :is(section, details, .monitor-system).panel {
+  padding: 20px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  margin-top: 20px;
+  background: transparent;
+}
+.monitor-cards .panel p {
+  margin: 8px 0;
+}
+.monitor-cards .panel small {
+  color: var(--muted);
+}
+.monitor-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .monitor-actions select {

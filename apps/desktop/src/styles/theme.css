@@ -1,5 +1,8 @@
 :root,
 :root[data-theme='dark'] {
+  --control-height: 32px;
+  --compact-height: 28px;
+  --control-radius: 4px;
   color-scheme: dark;
   --bg: #101217;
   --rail: #0c0f13;

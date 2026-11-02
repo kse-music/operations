@@ -44,7 +44,7 @@ function capture(action: string, event: KeyboardEvent): void {
 </script>
 
 <template>
-  <section class="settings-panel" aria-labelledby="settings-title">
+  <section class="settings-panel page-view" aria-labelledby="settings-title">
     <div class="section-heading">
       <div>
         <p class="eyebrow">PREFERENCES</p>
@@ -55,6 +55,7 @@ function capture(action: string, event: KeyboardEvent): void {
     <p class="section-description">保存后应用界面和终端偏好。连接参数在新建连接时生效。</p>
     <form v-if="draft" class="settings-form" @submit.prevent="submit">
       <fieldset :disabled="application.saving">
+        <legend>界面与运行</legend>
         <label
           >每主机并发传输数<input
             v-model.number="draft.transferConcurrency"
@@ -77,10 +78,6 @@ function capture(action: string, event: KeyboardEvent): void {
           <input v-model.number="draft.sidebarWidth" type="range" min="200" max="400" />
         </label>
         <label
-          >终端字号 <span class="subtle">应用于已打开及新建终端</span>
-          <input v-model.number="draft.terminalFontSize" type="number" min="10" max="32" required />
-        </label>
-        <label
           >SSH 连接超时（秒）
           <input
             v-model.number="draft.connectTimeoutSecs"
@@ -90,6 +87,34 @@ function capture(action: string, event: KeyboardEvent): void {
             required
           />
         </label>
+        <label
+          >监控采样间隔<select v-model.number="draft.monitorIntervalSecs">
+            <option :value="3">3 秒</option>
+            <option :value="5">5 秒</option>
+            <option :value="10">10 秒</option>
+            <option :value="30">30 秒</option>
+          </select></label
+        >
+        <label
+          >日志级别 <span class="subtle">重启后生效</span
+          ><select v-model="draft.logLevel">
+            <option value="error">ERROR</option>
+            <option value="warn">WARN</option>
+            <option value="info">INFO</option>
+            <option value="debug">DEBUG</option>
+          </select></label
+        >
+      </fieldset>
+      <fieldset :disabled="application.saving">
+        <legend>终端显示与输入</legend>
+        <label
+          >终端字号<input
+            v-model.number="draft.terminalFontSize"
+            type="number"
+            min="10"
+            max="32"
+            required
+        /></label>
         <label
           >终端字体<input
             v-model="draft.terminal.fontFamily"
@@ -141,24 +166,6 @@ function capture(action: string, event: KeyboardEvent): void {
             max="65536"
             required
         /></label>
-        <label
-          >监控采样间隔
-          <select v-model.number="draft.monitorIntervalSecs">
-            <option :value="3">3 秒</option>
-            <option :value="5">5 秒</option>
-            <option :value="10">10 秒</option>
-            <option :value="30">30 秒</option>
-          </select>
-        </label>
-        <label
-          >日志级别 <span class="subtle">重启后生效</span>
-          <select v-model="draft.logLevel">
-            <option value="error">ERROR</option>
-            <option value="warn">WARN</option>
-            <option value="info">INFO</option>
-            <option value="debug">DEBUG</option>
-          </select>
-        </label>
       </fieldset>
       <fieldset :disabled="application.saving">
         <legend>终端快捷键</legend>
@@ -181,7 +188,7 @@ function capture(action: string, event: KeyboardEvent): void {
           恢复默认快捷键
         </button>
       </fieldset>
-      <ProductSettings v-model="draft.product" />
+      <ProductSettings v-model="draft.product" :disabled="application.saving" />
       <div class="form-footer">
         <p class="subtle">配置不包含密码、私钥或私钥口令。</p>
         <button class="button primary" type="submit" :disabled="application.saving">

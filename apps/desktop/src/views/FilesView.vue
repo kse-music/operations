@@ -1,5 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import {
+  ArrowUp,
+  ArrowRight,
+  Copy,
+  FolderOpen,
+  FolderPlus,
+  FileUp,
+  FolderUp,
+  RefreshCw,
+  Upload,
+  Download,
+  Trash2,
+} from '@lucide/vue';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import FilePane from '../components/FilePane.vue';
@@ -339,7 +352,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section class="files-view">
+  <section class="files-view page-view">
     <div class="section-heading">
       <div>
         <p class="eyebrow">SFTP WORKSPACE</p>
@@ -387,32 +400,69 @@ onBeforeUnmount(() => {
         <h2>本地文件</h2>
         <form class="path-bar" @submit.prevent="store.localLoad(localPath)">
           <button
-            class="button"
+            class="tool-button"
+            aria-label="本地上级"
+            title="本地上级"
             type="button"
             :disabled="!store.local?.parent"
             @click="store.local?.parent && store.localLoad(store.local.parent)"
           >
-            本地上级</button
-          ><input v-model="localPath" aria-label="本地路径" required /><button class="button">
-            前往
+            <ArrowUp :size="15" aria-hidden="true" /></button
+          ><input v-model="localPath" aria-label="本地路径" required /><button
+            class="tool-button"
+            aria-label="前往"
+            title="前往本地路径"
+          >
+            <ArrowRight :size="15" aria-hidden="true" />
           </button>
         </form>
         <div class="toolbar">
-          <button class="button" @click="browseLocal">选择本地目录</button
-          ><button class="button" @click="store.localLoad(store.local?.path ?? null)">
-            刷新本地</button
+          <button
+            class="tool-button"
+            aria-label="选择本地目录"
+            title="选择本地目录"
+            @click="browseLocal"
+          >
+            <FolderOpen :size="15" aria-hidden="true" /></button
           ><button
-            class="button"
+            class="tool-button"
+            aria-label="刷新本地"
+            title="刷新本地"
+            @click="store.localLoad(store.local?.path ?? null)"
+          >
+            <RefreshCw :size="14" aria-hidden="true" /></button
+          ><button
+            class="tool-button"
+            aria-label="复制本地路径"
+            title="复制本地路径"
             :disabled="!store.local"
             @click="store.local && copy(store.local.path)"
           >
-            复制本地路径</button
+            <Copy :size="14" aria-hidden="true" /></button
           ><button
             class="button"
             :disabled="store.current?.state !== 'connected'"
             @click="prepareTransfer('upload', localSelection)"
           >
-            上传选中
+            <Upload :size="14" aria-hidden="true" />上传选中
+          </button>
+          <button
+            class="tool-button"
+            aria-label="选择上传文件…"
+            title="选择上传文件"
+            :disabled="store.current?.state !== 'connected'"
+            @click="picked()"
+          >
+            <FileUp :size="15" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            aria-label="选择上传文件夹…"
+            title="选择上传文件夹"
+            :disabled="store.current?.state !== 'connected'"
+            @click="picked(true)"
+          >
+            <FolderUp :size="15" aria-hidden="true" />
           </button>
         </div>
         <FilePane
@@ -435,7 +485,9 @@ onBeforeUnmount(() => {
           "
         >
           <button
-            class="button"
+            class="tool-button"
+            aria-label="远程上级"
+            title="远程上级"
             type="button"
             :disabled="!store.current?.listing?.parent"
             @click="
@@ -443,57 +495,61 @@ onBeforeUnmount(() => {
               store.current?.listing?.parent && store.navigate(store.current.listing.parent);
             "
           >
-            远程上级</button
+            <ArrowUp :size="15" aria-hidden="true" /></button
           ><input
             v-model="remotePath"
             aria-label="远程路径"
             :disabled="store.current?.state !== 'connected'"
             required
-          /><button class="button" :disabled="store.current?.state !== 'connected'">前往</button>
+          /><button
+            class="tool-button"
+            aria-label="前往"
+            title="前往远程路径"
+            :disabled="store.current?.state !== 'connected'"
+          >
+            <ArrowRight :size="15" aria-hidden="true" />
+          </button>
         </form>
         <div class="toolbar">
           <button
-            class="button"
+            class="tool-button"
+            aria-label="新建文件夹"
+            title="新建文件夹"
             :disabled="store.current?.state !== 'connected'"
             @click="mutate('mkdir')"
           >
-            新建文件夹</button
+            <FolderPlus :size="15" aria-hidden="true" /></button
           ><button
-            class="button"
+            class="tool-button"
+            aria-label="刷新远程"
+            title="刷新远程"
             :disabled="!store.current?.id"
             @click="store.navigate(store.current.path)"
           >
-            刷新远程</button
+            <RefreshCw :size="14" aria-hidden="true" /></button
           ><button
-            class="button"
+            class="tool-button"
+            aria-label="复制远程路径"
+            title="复制远程路径"
             :disabled="!store.current?.listing"
             @click="store.current && copy(store.current.path)"
           >
-            复制远程路径</button
+            <Copy :size="14" aria-hidden="true" /></button
           ><button
             class="button"
             :disabled="!remoteSelection.length"
             @click="prepareTransfer('download', remoteSelection)"
           >
-            下载选中</button
-          ><button class="button" :disabled="!remoteSelection.length" @click="mutate('delete')">
-            删除选中
-          </button>
-        </div>
-        <div class="toolbar">
-          <button
-            class="text-button"
-            :disabled="store.current?.state !== 'connected'"
-            @click="picked()"
-          >
-            选择上传文件…</button
+            <Download :size="14" aria-hidden="true" />下载选中</button
           ><button
-            class="text-button"
-            :disabled="store.current?.state !== 'connected'"
-            @click="picked(true)"
+            class="tool-button danger"
+            aria-label="删除选中"
+            title="删除选中"
+            :disabled="!remoteSelection.length"
+            @click="mutate('delete')"
           >
-            选择上传文件夹…</button
-          ><span class="subtle">可将本地文件或目录拖到此栏；传输不跟随符号链接</span>
+            <Trash2 :size="14" aria-hidden="true" />
+          </button>
         </div>
         <FilePane
           side="remote"

@@ -143,7 +143,7 @@ async function copy() {
 }
 </script>
 <template>
-  <section class="operations-view tasks-view">
+  <section class="operations-view tasks-view network-view page-view">
     <header>
       <p class="eyebrow">NETWORK</p>
       <h1>网络诊断</h1>
@@ -152,7 +152,7 @@ async function copy() {
         KiB；离页后任务继续到完成或超时。
       </p>
     </header>
-    <div class="ops-toolbar" role="tablist" aria-label="诊断工具">
+    <div class="page-tabs" role="tablist" aria-label="诊断工具">
       <button
         v-for="(label, key) in tools"
         :key="key"
@@ -164,8 +164,8 @@ async function copy() {
         {{ label }}
       </button>
     </div>
-    <form class="ops-detail" @submit.prevent="start">
-      <div class="ops-toolbar">
+    <form class="work-section" @submit.prevent="start">
+      <div class="form-row">
         <label
           >执行来源
           <select v-model="source" aria-label="诊断来源">
@@ -184,7 +184,7 @@ async function copy() {
         >
       </div>
       <TaskConnections v-if="source === 'remote' && host" :ids="[host]" />
-      <div class="ops-toolbar">
+      <div class="form-row">
         <label v-if="!['interfaces', 'connections', 'ssh_latency'].includes(tool)"
           >目标
           <input
@@ -231,7 +231,7 @@ async function copy() {
         {{ taskLabels[t.state] }}
       </button>
     </div>
-    <section v-if="current" class="ops-detail">
+    <section v-if="current" class="work-section result-section">
       <h2>{{ tools[current.input.tool] }} · {{ taskLabels[current.state] }}</h2>
       <p>
         {{ origin(current) }} · {{ new Date(current.startedAt).toLocaleString() }} · TaskId={{

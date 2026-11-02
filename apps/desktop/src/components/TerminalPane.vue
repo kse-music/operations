@@ -1,5 +1,19 @@
 <script setup lang="ts">
 import { opsApi } from '../services/ops';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChartNoAxesCombined,
+  ClipboardPaste,
+  Copy,
+  Download,
+  FolderSync,
+  Network,
+  Play,
+  Search,
+  Wrench,
+  X,
+} from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -356,40 +370,98 @@ onBeforeUnmount(() => {
 <template>
   <section class="terminal-pane" :aria-label="`终端 ${tab.host.name}`">
     <div class="terminal-toolbar">
-      <strong>{{ tab.host.name }}</strong
-      ><span class="subtle"
-        >{{ tab.host.username }}@{{ tab.host.hostname }}:{{ tab.host.port }}</span
-      >
-      <span :class="['session-state', tab.state]" role="status">{{
-        stateLabels[tab.state] ?? tab.state
-      }}</span>
-      <button
-        class="button"
-        :disabled="working || !['closed', 'failed', 'idle'].includes(tab.state)"
-        @click="connect"
-      >
-        {{ tab.state === 'idle' ? '连接' : '重新连接' }}
-      </button>
-      <button class="button" @click="emit('automation', tab.host)">自动化</button
-      ><button
-        v-if="['failed', 'disconnected'].includes(tab.state)"
-        class="button"
-        @click="emit('network', tab.host)"
-      >
-        诊断连接异常
-      </button>
-      <button class="button" @click="emit('operations', tab.host)">运维</button>
-      <button class="button" @click="emit('monitor', tab.host)">监控</button>
-      <button class="button" @click="emit('files', tab.host, tab.cwd, tab.key)">SFTP 文件</button>
-      <button class="button" @click="toggleFind">查找</button
-      ><button class="button" @click="copy">复制</button>
-      <button class="button" :disabled="tab.state !== 'connected'" @click="paste">粘贴</button
-      ><button class="button" @click="emit('close')">关闭终端</button>
-      <button class="button" :disabled="tab.state !== 'connected'" @click="forwards = true">
-        端口转发
-      </button>
-      <button class="button" @click="exporting = true">导出内容</button>
-      <button v-if="trust" class="button" @click="store.focused = tab.key">查看主机指纹</button>
+      <div class="terminal-identity">
+        <strong>{{ tab.host.name }}</strong
+        ><span class="subtle"
+          >{{ tab.host.username }}@{{ tab.host.hostname }}:{{ tab.host.port }}</span
+        >
+        <span :class="['session-state', tab.state]" role="status">{{
+          stateLabels[tab.state] ?? tab.state
+        }}</span>
+      </div>
+      <div class="terminal-actions">
+        <button
+          class="button"
+          :disabled="working || !['closed', 'failed', 'idle'].includes(tab.state)"
+          @click="connect"
+        >
+          {{ tab.state === 'idle' ? '连接' : '重新连接' }}
+        </button>
+        <button
+          class="tool-button"
+          aria-label="自动化"
+          title="自动化"
+          @click="emit('automation', tab.host)"
+        >
+          <Play :size="14" aria-hidden="true" /></button
+        ><button
+          v-if="['failed', 'disconnected'].includes(tab.state)"
+          class="button"
+          @click="emit('network', tab.host)"
+        >
+          诊断连接异常
+        </button>
+        <button
+          class="tool-button"
+          aria-label="运维"
+          title="Linux 运维"
+          @click="emit('operations', tab.host)"
+        >
+          <Wrench :size="14" aria-hidden="true" />
+        </button>
+        <button
+          class="tool-button"
+          aria-label="监控"
+          title="服务器监控"
+          @click="emit('monitor', tab.host)"
+        >
+          <ChartNoAxesCombined :size="14" aria-hidden="true" />
+        </button>
+        <button
+          class="tool-button"
+          aria-label="SFTP 文件"
+          title="SFTP 文件"
+          @click="emit('files', tab.host, tab.cwd, tab.key)"
+        >
+          <FolderSync :size="14" aria-hidden="true" />
+        </button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <button class="tool-button" aria-label="查找" title="查找" @click="toggleFind">
+          <Search :size="14" aria-hidden="true" /></button
+        ><button class="tool-button" aria-label="复制" title="复制" @click="copy">
+          <Copy :size="14" aria-hidden="true" />
+        </button>
+        <button
+          class="tool-button"
+          aria-label="粘贴"
+          title="粘贴"
+          :disabled="tab.state !== 'connected'"
+          @click="paste"
+        >
+          <ClipboardPaste :size="14" aria-hidden="true" />
+        </button>
+        <button
+          class="tool-button"
+          aria-label="端口转发"
+          title="端口转发"
+          :disabled="tab.state !== 'connected'"
+          @click="forwards = true"
+        >
+          <Network :size="14" aria-hidden="true" />
+        </button>
+        <button
+          class="tool-button"
+          aria-label="导出内容"
+          title="导出内容"
+          @click="exporting = true"
+        >
+          <Download :size="14" aria-hidden="true" />
+        </button>
+        <button class="tool-button" aria-label="关闭终端" title="关闭终端" @click="emit('close')">
+          <X :size="14" aria-hidden="true" />
+        </button>
+        <button v-if="trust" class="button" @click="store.focused = tab.key">查看主机指纹</button>
+      </div>
     </div>
     <div v-if="finding" class="terminal-find">
       <input
@@ -398,8 +470,11 @@ onBeforeUnmount(() => {
         aria-label="终端查找内容"
         placeholder="在终端滚动缓冲中查找"
         @keydown.enter="find()"
-      /><button class="button" @click="find(true)">上一个</button
-      ><button class="button" @click="find()">下一个</button>
+      /><button class="tool-button" aria-label="上一个" title="上一个匹配" @click="find(true)">
+        <ArrowUp :size="14" aria-hidden="true" /></button
+      ><button class="tool-button" aria-label="下一个" title="下一个匹配" @click="find()">
+        <ArrowDown :size="14" aria-hidden="true" />
+      </button>
     </div>
     <div v-if="message" class="banner error" role="alert">{{ message }}</div>
     <div ref="container" class="xterm-container" aria-label="交互式 Shell"></div>

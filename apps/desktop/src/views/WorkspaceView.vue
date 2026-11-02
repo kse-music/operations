@@ -1,62 +1,34 @@
 <script setup lang="ts">
 import { useApplicationStore } from '../stores/application';
+import { RefreshCw, Settings2 } from '@lucide/vue';
 
 const application = useApplicationStore();
 defineEmits<{ settings: [] }>();
 </script>
 
 <template>
-  <section class="workspace-view" aria-labelledby="workspace-title">
+  <section class="workspace-view page-view" aria-labelledby="workspace-title">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">YOUR LOCAL WORKSPACE</p>
-        <h1 id="workspace-title">运维，从一个工作区开始。</h1>
+        <h1 id="workspace-title">本地环境</h1>
       </div>
-      <span class="stage-label">阶段 02 / 主机与凭据</span>
-    </div>
-    <p class="section-description">
-      ServerDeck 围绕主机组织运维操作。<br />主机、安全凭据与 SSH
-      终端已开放，文件与监控将在后续阶段接入。
-    </p>
-    <div class="workspace-empty">
-      <div class="terminal-mark" aria-hidden="true">&gt;_</div>
-      <h2>本地运行环境</h2>
-      <p>在左侧管理主机，双击主机打开 SSH 终端。SFTP 和资源监控尚未实现。</p>
-      <button class="button primary" type="button" @click="$emit('settings')">
-        配置我的工作台 <span aria-hidden="true">↗</span>
-      </button>
-    </div>
-    <div class="module-grid">
-      <article>
-        <span class="module-icon" aria-hidden="true">01</span>
-        <h3>Terminal</h3>
-        <p>独立 PTY 与多会话终端</p>
-        <span class="planned">阶段三 · 未实现</span>
-      </article>
-      <article>
-        <span class="module-icon" aria-hidden="true">02</span>
-        <h3>Files</h3>
-        <p>基于 SFTP 的文件与传输</p>
-        <span class="planned">阶段四 · 未实现</span>
-      </article>
-      <article>
-        <span class="module-icon" aria-hidden="true">03</span>
-        <h3>Monitor</h3>
-        <p>无需 Agent 的 Linux 资源采集</p>
-        <span class="planned">阶段五 · 未实现</span>
-      </article>
-    </div>
-    <section class="system-panel" aria-labelledby="system-title">
-      <div class="system-heading">
-        <h2 id="system-title">本地运行环境</h2>
+      <div class="action-row">
         <button
-          class="text-button"
+          class="button"
           :disabled="application.loading || application.saving"
           @click="application.initialize"
         >
-          {{ application.loading ? '检查中…' : '重新检查' }}
+          <RefreshCw :size="14" aria-hidden="true" />{{
+            application.loading ? '检查中…' : '重新检查'
+          }}
+        </button>
+        <button class="button" type="button" @click="$emit('settings')">
+          <Settings2 :size="14" aria-hidden="true" />全局设置
         </button>
       </div>
+    </div>
+    <section class="work-section" aria-labelledby="system-title">
+      <h2 id="system-title">运行状态</h2>
       <dl v-if="application.state" class="system-details" data-testid="backend-ready">
         <div>
           <dt>IPC / Rust</dt>

@@ -41,7 +41,7 @@ const credential = computed(() =>
 );
 </script>
 <template>
-  <section class="hosts-view">
+  <section class="hosts-view page-view">
     <div class="section-heading">
       <div>
         <p class="eyebrow">HOST INVENTORY</p>
@@ -203,13 +203,15 @@ const credential = computed(() =>
       </dl>
       <p v-if="credential?.keyPath" class="path">私钥路径：{{ credential.keyPath }}</p>
       <p class="host-description">{{ store.selected.description || '暂无备注' }}</p>
-      <button class="button" @click="$emit('automation', store.selected)">运维自动化</button>
-      <button class="button" @click="$emit('operations', store.selected)">Linux 运维</button>
-      <button class="button" @click="$emit('monitor', store.selected)">服务器监控</button>
-      <button class="button" @click="$emit('files', store.selected)">打开 SFTP 文件</button>
-      <button class="button primary" @click="$emit('connect', store.selected)">
-        连接 / 新建终端
-      </button>
+      <div class="action-row">
+        <button class="button" @click="$emit('automation', store.selected)">运维自动化</button>
+        <button class="button" @click="$emit('operations', store.selected)">Linux 运维</button>
+        <button class="button" @click="$emit('monitor', store.selected)">服务器监控</button>
+        <button class="button" @click="$emit('files', store.selected)">打开 SFTP 文件</button>
+        <button class="button primary" @click="$emit('connect', store.selected)">
+          连接 / 新建终端
+        </button>
+      </div>
     </article>
   </section>
 </template>

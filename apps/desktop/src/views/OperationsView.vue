@@ -344,7 +344,7 @@ async function relatedPorts() {
 }
 </script>
 <template>
-  <section class="operations-view" aria-label="主机运维工作区">
+  <section class="operations-view page-view" aria-label="主机运维工作区">
     <div class="section-heading">
       <div>
         <h1>Linux 运维</h1>

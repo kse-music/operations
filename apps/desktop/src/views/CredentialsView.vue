@@ -30,7 +30,7 @@ async function remove(): Promise<void> {
 }
 </script>
 <template>
-  <section>
+  <section class="credentials-view page-view">
     <div class="section-heading">
       <div>
         <p class="eyebrow">SYSTEM CREDENTIAL STORE</p>

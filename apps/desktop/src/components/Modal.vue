@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { X } from '@lucide/vue';
 const props = defineProps<{ title: string; busy?: boolean; wide?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -17,10 +18,11 @@ function close(): void {
           class="icon-button"
           type="button"
           aria-label="关闭对话框"
+          title="关闭对话框"
           :disabled="busy"
           @click="close"
         >
-          ×
+          <X :size="16" aria-hidden="true" />
         </button>
       </header>
       <slot />

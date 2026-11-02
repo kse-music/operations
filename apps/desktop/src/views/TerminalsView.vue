@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
+import { Columns2, Rows2, Pencil, Save, X } from '@lucide/vue';
 import { useTerminalsStore } from '../stores/terminals';
 import { useApplicationStore } from '../stores/application';
 import { stateLabels } from '../types/terminal';
@@ -175,16 +176,44 @@ onBeforeUnmount(() => {
                 ? `${item.panes.length} 个窗格`
                 : stateLabels[item.panes[0]?.state ?? 'idle']
             }}</small></button
-          ><button :aria-label="`关闭标签 ${item.title}`" @click="store.close(item.key)">×</button>
+          ><button
+            :aria-label="`关闭标签 ${item.title}`"
+            title="关闭标签"
+            @click="store.close(item.key)"
+          >
+            <X :size="14" aria-hidden="true" />
+          </button>
         </div>
       </div>
       <div class="split-toolbar">
-        <button class="button" @click="split('rows')">水平分屏（上下）</button
-        ><button class="button" @click="split('columns')">垂直分屏（左右）</button
-        ><button class="button" @click="rename(store.active)">重命名标签</button
-        ><button class="button" @click="store.closeOthers(store.active)">关闭其他标签</button
+        <button
+          class="tool-button"
+          aria-label="水平分屏（上下）"
+          title="水平分屏（上下）"
+          @click="split('rows')"
+        >
+          <Rows2 :size="15" aria-hidden="true" /></button
+        ><button
+          class="tool-button"
+          aria-label="垂直分屏（左右）"
+          title="垂直分屏（左右）"
+          @click="split('columns')"
+        >
+          <Columns2 :size="15" aria-hidden="true" /></button
+        ><button
+          class="tool-button"
+          aria-label="重命名标签"
+          title="重命名标签"
+          @click="rename(store.active)"
+        >
+          <Pencil :size="14" aria-hidden="true" />
+        </button>
+        <span class="toolbar-divider" aria-hidden="true"></span>
+        <button class="button" @click="store.closeOthers(store.active)">关闭其他标签</button
         ><button class="button" @click="store.closeOthers(store.active, true)">关闭右侧标签</button
-        ><button class="button" @click="store.saveLayout()">保存布局</button>
+        ><button class="button" @click="store.saveLayout()">
+          <Save :size="14" aria-hidden="true" />保存布局
+        </button>
       </div>
     </template>
     <div ref="area" class="split-area">

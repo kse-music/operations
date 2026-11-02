@@ -93,7 +93,7 @@ async function restore() {
 }
 </script>
 <template>
-  <section class="operations-view" aria-label="备份恢复工作区">
+  <section class="operations-view backup-view page-view" aria-label="备份恢复工作区">
     <header>
       <p class="eyebrow">LOCAL BACKUP</p>
       <h1>备份与恢复</h1>
@@ -102,84 +102,106 @@ async function restore() {
         MiB。包含主机、分组、标签、命令/脚本定义和非敏感偏好。不会包含凭据、私钥路径、秘密参数值、信任记录、运行历史或自动执行计划。请自行检查正文/备注/普通默认值中是否写入了秘密。
       </p>
     </header>
-    <button class="button primary" :disabled="busy" @click="exportBackup">导出非敏感备份</button>
-    <details v-if="exported">
-      <summary>查看导出内容</summary>
-      <textarea class="export-text" :value="exported" readonly aria-label="非敏感备份内容" />
-    </details>
-    <h2>导入预览</h2>
-    <input
-      type="file"
-      accept=".json,application/json"
-      aria-label="选择备份文件"
-      :disabled="busy"
-      @change="file"
-    /><textarea
-      v-model="text"
-      class="export-text"
-      aria-label="待恢复备份 JSON"
-      placeholder="选择文件或粘贴备份 JSON"
-      :disabled="busy"
-      @input="reset"
-    /><button class="button" :disabled="busy || !text" @click="inspect">校验并预览备份</button>
+    <section class="work-section" aria-label="备份导出">
+      <h2>导出备份</h2>
+      <div class="action-row">
+        <button class="button primary" :disabled="busy" @click="exportBackup">
+          导出非敏感备份
+        </button>
+      </div>
+      <details v-if="exported">
+        <summary>查看导出内容</summary>
+        <textarea class="export-text" :value="exported" readonly aria-label="非敏感备份内容" />
+      </details>
+    </section>
+    <section class="work-section" aria-label="导入备份">
+      <h2>导入预览</h2>
+      <input
+        type="file"
+        accept=".json,application/json"
+        aria-label="选择备份文件"
+        :disabled="busy"
+        @change="file"
+      />
+      <textarea
+        v-model="text"
+        class="export-text"
+        aria-label="待恢复备份 JSON"
+        placeholder="选择文件或粘贴备份 JSON"
+        :disabled="busy"
+        @input="reset"
+      />
+      <div class="action-row">
+        <button class="button" :disabled="busy || !text" @click="inspect">校验并预览备份</button>
+      </div>
+    </section>
     <p v-if="busy" role="status">正在处理本地备份…</p>
     <p v-if="error" class="banner error" role="alert">{{ error }}</p>
-    <section v-if="preview" aria-label="备份恢复预览">
+    <section v-if="preview" class="work-section result-section" aria-label="备份恢复预览">
       <h2>格式 v{{ preview.version }} · {{ preview.items.length }} 个条目</h2>
       <p v-for="w in preview.warnings" :key="w" class="subtle">{{ w }}</p>
-      <label
-        >冲突处理<select v-model="policy" aria-label="备份冲突策略">
-          <option value="skip">跳过已有条目</option>
-          <option value="copy">新增副本，不覆盖</option>
-        </select></label
-      ><button
-        class="text-button"
-        @click="
-          selected = preview.items
-            .filter((i) => !i.blocked && (policy === 'copy' || !i.duplicate))
-            .map((i) => i.id)
-        "
-      >
-        选择所有可恢复项</button
-      ><button class="text-button" @click="selected = []">取消选择</button>
-      <div v-for="i in preview.items.slice(0, limit)" :key="i.id" class="ops-detail">
+      <div class="form-row">
         <label
-          ><input
-            v-model="selected"
-            type="checkbox"
-            :value="i.id"
-            :disabled="i.blocked || busy"
-            :aria-label="`恢复 ${i.name}`"
-          />{{ i.kind === 'host' ? '主机' : '命令/脚本' }} · {{ i.name }} · {{ i.detail }}
-          {{ i.duplicate ? '（重复）' : '' }} {{ i.blocked ? '（阻止恢复）' : '' }}</label
+          >冲突处理<select v-model="policy" aria-label="备份冲突策略">
+            <option value="skip">跳过已有条目</option>
+            <option value="copy">新增副本，不覆盖</option>
+          </select></label
+        ><button
+          class="text-button"
+          @click="
+            selected = preview.items
+              .filter((i) => !i.blocked && (policy === 'copy' || !i.duplicate))
+              .map((i) => i.id)
+          "
         >
-        <p v-for="w in i.warnings" :key="w" class="subtle">{{ w }}</p>
+          选择所有可恢复项</button
+        ><button class="text-button" @click="selected = []">取消选择</button>
+      </div>
+      <div class="restore-items">
+        <div v-for="i in preview.items.slice(0, limit)" :key="i.id" class="restore-item">
+          <label
+            ><input
+              v-model="selected"
+              type="checkbox"
+              :value="i.id"
+              :disabled="i.blocked || busy"
+              :aria-label="`恢复 ${i.name}`"
+            />{{ i.kind === 'host' ? '主机' : '命令/脚本' }} · {{ i.name }} · {{ i.detail }}
+            {{ i.duplicate ? '（重复）' : '' }} {{ i.blocked ? '（阻止恢复）' : '' }}</label
+          >
+          <p v-for="w in i.warnings" :key="w" class="subtle">{{ w }}</p>
+        </div>
       </div>
       <button v-if="preview.items.length > limit" class="button" @click="limit += 200">
         显示更多恢复条目
       </button>
       <p>将恢复选中的 {{ selected.length }} 个条目；主机/命令分组始终按名称合并。已有数据保留。</p>
-      <label
-        ><input
-          v-model="preferences"
-          type="checkbox"
-          aria-label="恢复备份偏好"
-        />同时替换全局非敏感偏好设置</label
-      ><label
-        ><input
-          v-model="confirmed"
-          type="checkbox"
-          aria-label="确认备份恢复"
-        />我已核对上述内容、选择项和冲突策略，同意新增配置。</label
-      ><button
-        class="button primary"
-        :disabled="busy || !confirmed || (!selected.length && !preferences)"
-        @click="restore"
-      >
-        确认恢复所选配置
-      </button>
+      <div class="confirmation-list">
+        <label
+          ><input
+            v-model="preferences"
+            type="checkbox"
+            aria-label="恢复备份偏好"
+          />同时替换全局非敏感偏好设置</label
+        ><label
+          ><input
+            v-model="confirmed"
+            type="checkbox"
+            aria-label="确认备份恢复"
+          />我已核对上述内容、选择项和冲突策略，同意新增配置。</label
+        >
+      </div>
+      <div class="action-row">
+        <button
+          class="button primary"
+          :disabled="busy || !confirmed || (!selected.length && !preferences)"
+          @click="restore"
+        >
+          确认恢复所选配置
+        </button>
+      </div>
     </section>
-    <section v-if="result" role="status">
+    <section v-if="result" class="work-section result-section" role="status">
       <h2>恢复完成</h2>
       <p>
         新增 {{ result.hosts }} 台主机、{{ result.entries }} 条命令/脚本，跳过

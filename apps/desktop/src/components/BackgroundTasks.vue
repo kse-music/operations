@@ -55,9 +55,14 @@ async function stop() {
         <li v-for="name in names(t.hostIds)" :key="name">{{ name }}</li>
       </ul>
       <p v-else>执行来源：本机</p>
-      <button class="button" @click="open(t.kind === 'batch' ? 'batch' : 'network', t.hostIds[0])">
-        查看任务结果</button
-      ><button v-if="t.active" class="button" @click="stopping = t">请求停止此任务</button>
+      <div class="action-row">
+        <button
+          class="button"
+          @click="open(t.kind === 'batch' ? 'batch' : 'network', t.hostIds[0])"
+        >
+          查看任务结果</button
+        ><button v-if="t.active" class="button" @click="stopping = t">请求停止此任务</button>
+      </div>
     </article>
     <h2>自动化任务</h2>
     <p>
@@ -74,7 +79,9 @@ async function stop() {
       <li v-for="name in names(stopping.hostIds)" :key="name">{{ name }}</li>
     </ul>
     <p>将取消排队并请求停止在途操作；远端进程可能仍在运行，已提交文件不会回滚。</p>
-    <button class="button" @click="stopping = null">继续执行</button
-    ><button class="button danger" @click="stop">确认请求停止</button></Modal
+    <footer class="dialog-actions">
+      <button class="button" @click="stopping = null">继续执行</button
+      ><button class="button danger" @click="stop">确认请求停止</button>
+    </footer></Modal
   >
 </template>

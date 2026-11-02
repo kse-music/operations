@@ -78,8 +78,10 @@ async function trust(h: Host, accept: boolean) {
         {{ connection(host)?.trust?.algorithm }} ·
         <code>{{ connection(host)?.trust?.fingerprint }}</code>
         <p>请通过可信渠道核对该指纹。</p>
-        <button type="button" class="button" @click="trust(host, true)">已核对，信任此指纹</button
-        ><button type="button" class="button" @click="trust(host, false)">拒绝</button>
+        <div class="action-row">
+          <button type="button" class="button" @click="trust(host, true)">已核对，信任此指纹</button
+          ><button type="button" class="button" @click="trust(host, false)">拒绝</button>
+        </div>
       </div>
     </div>
   </section>

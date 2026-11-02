@@ -245,7 +245,7 @@ async function copy(value: string) {
 }
 </script>
 <template>
-  <section class="operations-view automation-view">
+  <section class="operations-view automation-view page-view">
     <header>
       <p class="eyebrow">OPERATIONS AUTOMATION</p>
       <h1>运维任务库</h1>
@@ -255,27 +255,35 @@ async function copy(value: string) {
         }}。复用可信 SSH 上下文，非交互执行；不自动提权、修复或重试。
       </p>
     </header>
-    <div class="ops-tabs" role="tablist" aria-label="自动化工作区">
-      <button class="button" role="tab" :aria-selected="tab === 'library'" @click="tab = 'library'">
-        命令与脚本库</button
-      ><button
-        class="button"
-        role="tab"
-        :aria-selected="tab === 'schedules'"
-        @click="tab = 'schedules'"
-      >
-        本地计划</button
-      ><button
-        class="button"
-        role="tab"
-        :aria-selected="tab === 'history'"
-        @click="
-          tab = 'history';
-          histories();
-        "
-      >
-        执行历史</button
-      ><button
+    <div class="tabs-heading">
+      <div class="ops-tabs" role="tablist" aria-label="自动化工作区">
+        <button
+          class="button"
+          role="tab"
+          :aria-selected="tab === 'library'"
+          @click="tab = 'library'"
+        >
+          命令与脚本库</button
+        ><button
+          class="button"
+          role="tab"
+          :aria-selected="tab === 'schedules'"
+          @click="tab = 'schedules'"
+        >
+          本地计划</button
+        ><button
+          class="button"
+          role="tab"
+          :aria-selected="tab === 'history'"
+          @click="
+            tab = 'history';
+            histories();
+          "
+        >
+          执行历史
+        </button>
+      </div>
+      <button
         class="button"
         @click="
           load();

@@ -55,14 +55,19 @@ function capture(action: string, e: KeyboardEvent) {
         <option value="zh-CN">简体中文</option>
       </select></label
     >
-    <p class="subtle">界面文案使用语言字典；当前完整语言为简体中文。</p>
-    <label
-      >默认下载目录<input
-        v-model="model.downloadDirectory"
-        placeholder="未设置时使用本地文件栏当前目录"
-        aria-label="默认下载目录"
-        @change="model.downloadDirectory ||= null" /></label
-    ><button type="button" class="button" @click="browse">选择下载目录</button>
+    <div class="full-width">
+      <label for="default-download-directory">默认下载目录</label>
+      <div class="input-action">
+        <input
+          id="default-download-directory"
+          v-model="model.downloadDirectory"
+          placeholder="未设置时使用本地文件栏当前目录"
+          aria-label="默认下载目录"
+          @change="model.downloadDirectory ||= null"
+        />
+        <button type="button" class="button" @click="browse">选择下载目录</button>
+      </div>
+    </div>
     <label
       >默认认证超时（秒）<input
         v-model.number="model.sshDefaults.authTimeoutSecs"
@@ -108,7 +113,8 @@ function capture(action: string, e: KeyboardEvent) {
           min="1"
           max="65535"
           required /></label
-      ><label><input v-model="authenticated" type="checkbox" />代理需要认证</label
+      ><label class="checkbox-label"
+        ><input v-model="authenticated" type="checkbox" />代理需要认证</label
       ><template v-if="authenticated"
         ><label>代理用户名<input v-model="model.sshDefaults.proxy.username" required /></label
         ><label

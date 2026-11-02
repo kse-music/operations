@@ -25,7 +25,7 @@
 .file-side {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 12px;
   background: var(--panel-soft);
 }
@@ -56,8 +56,9 @@
   margin-bottom: 8px;
 }
 .file-side .button {
-  padding: 6px 8px;
-  font-size: 11px;
+  min-height: var(--compact-height);
+  padding: 3px 10px;
+  font-size: 12px;
 }
 .file-list-tools {
   display: flex;
@@ -66,9 +67,15 @@
   gap: 8px;
   font-size: 11px;
   margin: 8px 0;
+  flex-wrap: wrap;
+}
+.file-list-tools label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 .file-table {
-  height: 360px;
+  height: clamp(240px, 42vh, 420px);
   overflow: auto;
 }
 .file-table table {
