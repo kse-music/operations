@@ -34,6 +34,7 @@
     "allow-forward-list",
     "allow-forward-stop",
     "allow-terminal-open",
+    "allow-terminal-local-open",
     "allow-terminal-input",
     "allow-terminal-resize",
     "allow-terminal-ack",

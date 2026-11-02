@@ -53,7 +53,7 @@ const deletion = ref<{
   id: string;
   name: string;
 } | null>(null);
-const initialHost = computed(() => props.hostId || hosts.selectedId || '');
+const initialHost = computed(() => props.hostId ?? '');
 const entries = computed(() =>
   catalog.value.entries
     .filter(

@@ -49,7 +49,7 @@ mod tests {
                 title: "My shell".into(),
                 panes: vec![SavedPane {
                     key: key.clone(),
-                    host_id: host,
+                    host_id: Some(host),
                 }],
                 layout: LayoutNode::Leaf { pane: key },
             }],
@@ -59,6 +59,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&saved).expect("saved"),
             serde_json::to_value(&layout).expect("original")
+        );
+        layout.tabs[0].panes[0].host_id = None;
+        db.save_workspace(&layout)
+            .expect("save local terminal metadata");
+        assert!(
+            db.load_workspace().expect("load").expect("layout").tabs[0].panes[0]
+                .host_id
+                .is_none()
         );
         layout.tabs[0].layout = LayoutNode::Leaf {
             pane: uuid::Uuid::new_v4().to_string(),

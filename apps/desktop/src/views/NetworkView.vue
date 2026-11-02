@@ -6,11 +6,10 @@ import TaskConnections from '../components/TaskConnections.vue';
 import { tasksApi, downloadResult } from '../services/tasks';
 import { errorMessage } from '../services/ipc';
 import { type Diagnostic, type Tool, taskLabels, active } from '../types/tasks';
-const props = defineProps<{ hostId?: string }>();
-const emit = defineEmits<{ context: [hostId: string] }>();
+const props = defineProps<{ hostId?: string; requestId?: number }>();
 const hosts = useHostsStore(),
   ops = useOpsStore(),
-  host = ref(props.hostId || hosts.selectedId || ''),
+  host = ref(props.hostId ?? ''),
   source = ref('local');
 const contextHost = hosts.catalog?.hosts.find((h) => h.id === props.hostId);
 const tool = ref<Tool>(contextHost ? 'tcp' : 'ping'),
@@ -22,13 +21,11 @@ const tool = ref<Tool>(contextHost ? 'tcp' : 'ping'),
   busy = ref(false);
 const tasks = shallowRef<Diagnostic[]>([]),
   selected = ref('');
-// The workspace follows a host selected in this form. Preserve the user's origin/tool/target
-// during that round-trip; an external workspace switch must update the displayed endpoint.
+// Only an explicit "diagnose this host" action seeds this independent tool.
 watch(
-  () => props.hostId,
-  (id) => {
-    if ((id || '') === host.value) return;
-    host.value = id || '';
+  () => [props.hostId, props.requestId] as const,
+  ([id]) => {
+    host.value = id ?? '';
     if (!id) {
       source.value = 'local';
       target.value = '';
@@ -174,14 +171,14 @@ async function copy() {
           </select></label
         >
         <label v-if="source === 'remote'"
-          >主机
-          <select v-model="host" aria-label="诊断主机" @change="emit('context', host)">
-            <option value="" disabled>选择主机</option>
-            <option v-for="h in hosts.catalog?.hosts" :key="h.id" :value="h.id">
-              {{ h.name }} · {{ h.hostname }}
+          >远程主机
+          <select v-model="host" aria-label="诊断主机" required>
+            <option value="" disabled>选择执行诊断的主机</option>
+            <option v-for="item in hosts.catalog?.hosts" :key="item.id" :value="item.id">
+              {{ item.name }} · {{ item.username }}@{{ item.hostname }}:{{ item.port }}
             </option>
-          </select></label
-        >
+          </select>
+        </label>
       </div>
       <TaskConnections v-if="source === 'remote' && host" :ids="[host]" />
       <div class="form-row">

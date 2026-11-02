@@ -72,6 +72,8 @@ async fn real_protocol_crud_unicode_properties_and_terminal_lease_independence()
     assert_eq!(listing.entries[0].size, Some(12));
     assert_eq!(listing.parent, Some("/".into()));
     assert_eq!(listing.entries[0].permissions, Some(0o600));
+    assert_eq!(listing.entries[0].uid, Some(1000));
+    assert_eq!(listing.entries[0].owner.as_deref(), Some("sftp-owner"));
     files
         .action(
             &info.id,

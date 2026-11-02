@@ -106,6 +106,24 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         .build()
         .expect("window");
     assert!(get_ipc_response(&other, request("app_bootstrap", json!({}), origin)).is_err());
+    let local = json!({"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"});
+    let invalid = get_ipc_response(&main, request("terminal_local_open", local.clone(), origin))
+        .expect_err("invalid local PTY size");
+    assert_eq!(invalid["code"], "VALIDATION");
+    assert!(
+        get_ipc_response(
+            &other,
+            request("terminal_local_open", local.clone(), origin)
+        )
+        .is_err()
+    );
+    assert!(
+        get_ipc_response(
+            &main,
+            request("terminal_local_open", local, "https://example.com")
+        )
+        .is_err()
+    );
     assert!(get_ipc_response(&main, request("plugin:shell|execute", json!({}), origin)).is_err());
 }
 

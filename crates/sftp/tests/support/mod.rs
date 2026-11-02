@@ -41,6 +41,7 @@ fn io(e: std::io::Error) -> StatusCode {
 fn attrs(m: &std::fs::Metadata) -> FileAttributes {
     let mut a = FileAttributes::from(m);
     a.uid = Some(1000);
+    a.user = Some("sftp-owner".into());
     a.gid = Some(1000);
     a.permissions = Some(if m.is_dir() {
         0o040700

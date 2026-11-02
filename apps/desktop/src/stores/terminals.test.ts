@@ -11,6 +11,7 @@ vi.mock('../services/terminal', () => ({
 import { terminalApi } from '../services/terminal';
 import { useTerminalsStore } from './terminals';
 import type { Host } from '../types/hosts';
+import { nextTick } from 'vue';
 const host = { id: 'host', name: 'Host' } as Host;
 beforeEach(() => {
   setActivePinia(createPinia());
@@ -21,6 +22,63 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('independent terminal tabs', () => {
+  it('switches hosts without reopening sessions and remembers the last selected session per host', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    store.open(host);
+    const last = store.active;
+    await nextTick();
+    store.open({ ...host, id: 'other' });
+    const other = store.active;
+    await nextTick();
+    store.activateHost(host.id);
+    expect(store.active).toBe(last);
+    store.cycle(1);
+    expect(store.active).toBe(store.tabs[0]!.key);
+    store.cycle(1);
+    expect(store.active).toBe(last);
+    store.activateHost('other');
+    expect(store.active).toBe(other);
+    store.activateHost('');
+    expect(store.active).toBe('');
+    expect(store.panes).toHaveLength(3);
+    expect(terminalApi.close).not.toHaveBeenCalled();
+  });
+  it('close other/right sessions only affects the current host and never switches to another host on last close', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const first = store.active;
+    store.open({ ...host, id: 'other' });
+    const other = store.active;
+    store.open(host);
+    const last = store.active;
+    await store.closeOthers(first, true);
+    expect(store.tabs.map((t) => t.key)).toEqual([first, other]);
+    expect(store.tabs.some((t) => t.key === last)).toBe(false);
+    store.open(host);
+    const keep = store.active;
+    await store.closeOthers(keep);
+    expect(store.tabs.map((t) => t.key)).toEqual([other, keep]);
+    await store.close(keep);
+    expect(store.active).toBe('');
+    expect(store.focused).toBe('');
+    expect(store.tabs.map((t) => t.key)).toEqual([other]);
+  });
+  it('opens and restores local PTY metadata without a fabricated SSH host or stored commands', async () => {
+    const store = useTerminalsStore();
+    store.open(null);
+    expect(store.panes[0]!.host).toBeNull();
+    store.split(store.focused, 'columns');
+    const saved = store.snapshot();
+    expect(saved.tabs[0]!.panes.every((p) => p.hostId === null)).toBe(true);
+    vi.mocked(terminalApi.workspaceLoad).mockResolvedValueOnce(saved);
+    store.tabs = [];
+    await store.restore([]);
+    expect(store.panes).toHaveLength(2);
+    expect(
+      store.panes.every((p) => p.host === null && p.state === 'idle' && !p.connectRequested),
+    ).toBe(true);
+  });
   it('closing one session targets only its ID and selects the surviving tab', async () => {
     const store = useTerminalsStore();
     store.open(host);
@@ -33,6 +91,21 @@ describe('independent terminal tabs', () => {
     expect(terminalApi.close).toHaveBeenCalledExactlyOnceWith('second');
     expect(store.tabs.map((tab) => tab.key)).toEqual([first.key]);
     expect(store.active).toBe(first.key);
+  });
+  it('closing the last pane selects a sibling session of the same host instead of a local terminal', async () => {
+    const store = useTerminalsStore();
+    store.open(null);
+    const local = store.active;
+    store.open(host);
+    const first = store.active;
+    store.open(host);
+    await store.closePane(store.focused);
+    expect(store.active).toBe(first);
+    expect(store.panes.find((p) => p.key === store.focused)?.host?.id).toBe(host.id);
+    await store.closePane(store.focused);
+    expect(store.active).toBe('');
+    expect(store.focused).toBe('');
+    expect(store.tabs.map((t) => t.key)).toEqual([local]);
   });
   it('retains a tab on close failure and bounds the number of views', async () => {
     const store = useTerminalsStore();

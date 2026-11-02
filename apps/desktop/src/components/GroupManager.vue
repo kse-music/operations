@@ -20,11 +20,15 @@ function reset(): void {
   draft.sortOrder = 0;
 }
 async function save(): Promise<void> {
+  const creating = editingId.value === null;
   const result = await store.run(
     () => hostsApi.groupSave(editingId.value, { ...draft }),
     '分组已保存。',
   );
-  if (result.ok) reset();
+  if (result.ok) {
+    reset();
+    if (creating) emit('close');
+  }
 }
 async function remove(): Promise<void> {
   if (!deleting.value) return;

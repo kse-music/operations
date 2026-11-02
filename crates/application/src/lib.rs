@@ -1,6 +1,7 @@
 mod automation;
 mod files;
 mod hosts;
+mod local_terminal;
 pub mod logging;
 mod monitor;
 mod ops;
@@ -24,6 +25,7 @@ use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 pub struct Application {
+    local_terminals: local_terminal::LocalTerminals,
     terminals: serverdeck_ssh::Engine,
     files: serverdeck_sftp::Files,
     monitors: serverdeck_monitor::Monitors,
@@ -60,6 +62,7 @@ impl Application {
             tasks.clone(),
         )?;
         Ok(Self {
+            local_terminals: local_terminal::LocalTerminals::new(),
             automation,
             tasks,
             operations_host,
@@ -148,6 +151,9 @@ impl Application {
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        if let Err(error) = self.local_terminals.close_all(true).await {
+            tracing::error!(operation = "local_terminal_shutdown", error = %error);
+        }
         self.automation.shutdown().await;
         self.tasks.shutdown().await;
         self.operations_host.shutdown().await;

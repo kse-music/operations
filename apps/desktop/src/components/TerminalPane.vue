@@ -23,7 +23,12 @@ import { osc7Path } from '../services/osc7';
 import type { Host } from '../types/hosts';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
-import { stateLabels, type TerminalEvent, type TerminalSession } from '../types/terminal';
+import {
+  stateLabels,
+  type LocalTerminalSession,
+  type TerminalEvent,
+  type TerminalSession,
+} from '../types/terminal';
 import { useTerminalsStore, type TerminalPaneModel } from '../stores/terminals';
 import { defaultTerminalPreferences, terminalThemes, shortcutKey } from '../types/preferences';
 import { TerminalInputQueue } from '../services/terminal-input';
@@ -44,6 +49,7 @@ const emit = defineEmits<{
 }>();
 const application = useApplicationStore();
 const store = useTerminalsStore();
+const name = computed(() => props.tab.host?.name ?? '本地设备');
 const container = ref<HTMLElement>();
 const searchInput = ref<HTMLInputElement>();
 const message = ref<string | null>(null);
@@ -61,7 +67,7 @@ let terminal: Terminal;
 let fit: FitAddon;
 let search: SearchAddon;
 let observer: ResizeObserver;
-let session: TerminalSession | undefined;
+let session: TerminalSession | LocalTerminalSession | undefined;
 let generation = 0;
 let disposed = false;
 let approvedPaste = false;
@@ -112,7 +118,9 @@ async function connect(): Promise<void> {
     session = undefined;
     store.update(props.tab.key, { sessionId: undefined, state: 'opening' });
     fitTerminal();
-    terminal.write('\r\n\x1b[90m── 新的 SSH Shell ──\x1b[0m\r\n');
+    terminal.write(
+      `\r\n\x1b[90m── ${props.tab.host ? '新的 SSH Shell' : '本地 Shell'} ──\x1b[0m\r\n`,
+    );
     const open = props.tab.containerShell
       ? (
           hostId: string,
@@ -126,31 +134,31 @@ async function connect(): Promise<void> {
             receive: (event: TerminalEvent) => void,
           ) => filesApi.terminal(hostId, size, props.tab.fileAction!, receive)
         : terminalApi.open;
-    const opening = open(
-      props.tab.host.id,
-      { cols: terminal.cols, rows: terminal.rows },
-      (event) => {
-        if (disposed || attempt !== generation) return;
-        if (event.type === 'data') {
-          terminal.write(new Uint8Array(event.data), () => {
-            void opening
-              .then((value) => terminalApi.ack(value.id, event.sequence))
-              .catch((cause: unknown) => {
-                if (attempt === generation && props.tab.state === 'connected')
-                  message.value = errorMessage(cause);
-              });
-          });
-        } else if (event.type === 'state') {
-          store.update(props.tab.key, { state: event.state });
-          if (event.message) message.value = event.message;
-          if (event.state !== 'awaiting_trust') trust.value = null;
-        } else if (event.type === 'trust') trust.value = event;
-        else if (event.type === 'exit')
-          terminal.write(
-            `\r\n\x1b[90m[Shell 已结束${event.status === null ? '' : `，退出码 ${event.status}`}]\x1b[0m\r\n`,
-          );
-      },
-    );
+    const receive = (event: TerminalEvent) => {
+      if (disposed || attempt !== generation) return;
+      if (event.type === 'data') {
+        terminal.write(new Uint8Array(event.data), () => {
+          void opening
+            .then((value) => terminalApi.ack(value.id, event.sequence))
+            .catch((cause: unknown) => {
+              if (attempt === generation && props.tab.state === 'connected')
+                message.value = errorMessage(cause);
+            });
+        });
+      } else if (event.type === 'state') {
+        store.update(props.tab.key, { state: event.state });
+        if (event.message) message.value = event.message;
+        if (event.state !== 'awaiting_trust') trust.value = null;
+      } else if (event.type === 'trust') trust.value = event;
+      else if (event.type === 'exit')
+        terminal.write(
+          `\r\n\x1b[90m[Shell 已结束${event.status === null ? '' : `，退出码 ${event.status}`}]\x1b[0m\r\n`,
+        );
+    };
+    const size = { cols: terminal.cols, rows: terminal.rows };
+    const opening = props.tab.host
+      ? open(props.tab.host.id, size, receive)
+      : terminalApi.openLocal(size, receive);
     const value = await opening;
     if (disposed || attempt !== generation) {
       await terminalApi.close(value.id);
@@ -161,8 +169,9 @@ async function connect(): Promise<void> {
     focusTerminal();
     store.update(props.tab.key, {
       sessionId: value.id,
-      transportId: value.transportId,
-      routeHostIds: value.routeHostIds,
+      ...('transportId' in value
+        ? { transportId: value.transportId, routeHostIds: value.routeHostIds }
+        : { shell: value.shell }),
     });
   } catch (cause) {
     store.update(props.tab.key, { state: 'failed' });
@@ -328,6 +337,12 @@ onMounted(() => {
   if (props.tab.connectRequested) void connect();
 });
 watch(
+  () => props.tab.connectRequested,
+  (requested) => {
+    if (requested && props.tab.state === 'idle') void connect();
+  },
+);
+watch(
   preferences,
   () => {
     if (terminal) {
@@ -362,19 +377,23 @@ onBeforeUnmount(() => {
   clearTimeout(resizeTimer);
   observer?.disconnect();
   container.value?.removeEventListener('paste', nativePaste, true);
-  if (session) void terminalApi.close(session.id).catch(() => {});
+  if (session)
+    void terminalApi.close(session.id).catch((cause: unknown) => {
+      store.error = errorMessage(cause);
+    });
   terminal?.dispose();
   inputQueue.dispose();
 });
 </script>
 <template>
-  <section class="terminal-pane" :aria-label="`终端 ${tab.host.name}`">
+  <section class="terminal-pane" :aria-label="`终端 ${name}`">
     <div class="terminal-toolbar">
       <div class="terminal-identity">
-        <strong>{{ tab.host.name }}</strong
-        ><span class="subtle"
+        <strong>{{ name }}</strong
+        ><span v-if="tab.host" class="subtle"
           >{{ tab.host.username }}@{{ tab.host.hostname }}:{{ tab.host.port }}</span
         >
+        <span v-else class="subtle">{{ tab.shell ?? '本地 Shell' }}</span>
         <span :class="['session-state', tab.state]" role="status">{{
           stateLabels[tab.state] ?? tab.state
         }}</span>
@@ -387,44 +406,45 @@ onBeforeUnmount(() => {
         >
           {{ tab.state === 'idle' ? '连接' : '重新连接' }}
         </button>
-        <button
-          class="tool-button"
-          aria-label="自动化"
-          title="自动化"
-          @click="emit('automation', tab.host)"
-        >
-          <Play :size="14" aria-hidden="true" /></button
-        ><button
-          v-if="['failed', 'disconnected'].includes(tab.state)"
-          class="button"
-          @click="emit('network', tab.host)"
-        >
-          诊断连接异常
-        </button>
-        <button
-          class="tool-button"
-          aria-label="运维"
-          title="Linux 运维"
-          @click="emit('operations', tab.host)"
-        >
-          <Wrench :size="14" aria-hidden="true" />
-        </button>
-        <button
-          class="tool-button"
-          aria-label="监控"
-          title="服务器监控"
-          @click="emit('monitor', tab.host)"
-        >
-          <ChartNoAxesCombined :size="14" aria-hidden="true" />
-        </button>
-        <button
-          class="tool-button"
-          aria-label="SFTP 文件"
-          title="SFTP 文件"
-          @click="emit('files', tab.host, tab.cwd, tab.key)"
-        >
-          <FolderSync :size="14" aria-hidden="true" />
-        </button>
+        <template v-if="tab.host"
+          ><button
+            class="tool-button"
+            aria-label="自动化"
+            title="自动化"
+            @click="emit('automation', tab.host)"
+          >
+            <Play :size="14" aria-hidden="true" /></button
+          ><button
+            v-if="['failed', 'disconnected'].includes(tab.state)"
+            class="button"
+            @click="emit('network', tab.host)"
+          >
+            诊断连接异常
+          </button>
+          <button
+            class="tool-button"
+            aria-label="运维"
+            title="Linux 运维"
+            @click="emit('operations', tab.host)"
+          >
+            <Wrench :size="14" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            aria-label="监控"
+            title="服务器监控"
+            @click="emit('monitor', tab.host)"
+          >
+            <ChartNoAxesCombined :size="14" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            aria-label="SFTP 文件"
+            title="SFTP 文件"
+            @click="emit('files', tab.host, tab.cwd, tab.key)"
+          >
+            <FolderSync :size="14" aria-hidden="true" /></button
+        ></template>
         <span class="toolbar-divider" aria-hidden="true"></span>
         <button class="tool-button" aria-label="查找" title="查找" @click="toggleFind">
           <Search :size="14" aria-hidden="true" /></button
@@ -441,6 +461,7 @@ onBeforeUnmount(() => {
           <ClipboardPaste :size="14" aria-hidden="true" />
         </button>
         <button
+          v-if="tab.host"
           class="tool-button"
           aria-label="端口转发"
           title="端口转发"
@@ -481,7 +502,7 @@ onBeforeUnmount(() => {
     <div class="terminal-footnote">
       <span v-if="tab.fileAction">此窗格是已确认的文件命令，手动重连将重新运行该命令。 · </span>
       {{ preferences.shortcuts.copy }} / {{ preferences.shortcuts.paste }} 复制粘贴 ·
-      {{ preferences.shortcuts.find }} 查找 · Ctrl+C / Z 发送到远端
+      {{ preferences.shortcuts.find }} 查找 · Ctrl+C / Z 发送到{{ tab.host ? '远端' : '本地终端' }}
     </div>
     <Modal
       v-if="trust && active && store.focused === tab.key"
@@ -503,13 +524,13 @@ onBeforeUnmount(() => {
     </Modal>
     <Modal v-if="pendingPaste !== null" title="确认大文本粘贴" @close="pendingPaste = null"
       ><p>
-        将向 {{ tab.host.name }} 发送 {{ pendingPaste.length }} 个字符、约
+        将向 {{ name }} 发送 {{ pendingPaste.length }} 个字符、约
         {{ pendingPaste.split(/\r?\n/).length }} 行。换行可能执行命令，请核对目标和内容。
       </p>
       <pre class="paste-preview"
         >{{ pendingPaste.slice(0, 300) }}{{ pendingPaste.length > 300 ? '…' : '' }}</pre>
       <p class="subtle">
-        远端启用 Bracketed Paste 时将保留粘贴边界。Shell 的启动配置和应用行为仍由远端决定。
+        终端启用 Bracketed Paste 时将保留粘贴边界。Shell 的启动配置和应用行为由目标设备决定。
       </p>
       <footer class="dialog-actions">
         <button class="button" @click="pendingPaste = null">取消</button
@@ -528,7 +549,7 @@ onBeforeUnmount(() => {
       </footer></Modal
     >
     <ForwardDialog
-      v-if="forwards && session"
+      v-if="forwards && session && tab.host"
       :session-id="session.id"
       :host-name="tab.host.name"
       @close="forwards = false"

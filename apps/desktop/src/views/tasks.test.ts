@@ -109,6 +109,8 @@ function button(text: string, scope: ParentNode = root) {
 }
 it('network preserves source, scopes cancellation to one task and exports actual bounded result', async () => {
   const { hosts } = await mount(NetworkView);
+  hosts.selectedId = 'a';
+  await nextTick();
   const d = {
     id: 'diag-a',
     input: {
@@ -203,26 +205,37 @@ it('batch confirmation freezes all targets and command, connection buttons never
   expect(api.retryFile).not.toHaveBeenCalled();
 });
 
-it('network context selection preserves remote inputs and external host navigation updates the endpoint', async () => {
+it('network owns its source host and accepts only explicit endpoint intents', async () => {
   const context = ref('a');
+  const requestId = ref(0);
   const Parent = defineComponent(
     () => () =>
       h(NetworkView, {
         hostId: context.value,
-        onContext: (id: string) => {
-          context.value = id;
-        },
+        requestId: requestId.value,
       }),
   );
-  await mount(Parent);
+  const { hosts } = await mount(Parent);
   await set('[aria-label="诊断来源"]', 'remote');
   await set('[aria-label="诊断目标"]', 'explicit.example');
-  await set('[aria-label="诊断主机"]', 'b');
+  expect((root.querySelector('[aria-label="诊断主机"]') as HTMLSelectElement).value).toBe('a');
+  hosts.selectedId = 'b';
+  await nextTick();
+  expect((root.querySelector('[aria-label="诊断主机"]') as HTMLSelectElement).value).toBe('a');
+  expect((root.querySelector('[aria-label="诊断目标"]') as HTMLInputElement).value).toBe(
+    'explicit.example',
+  );
+  requestId.value++;
+  await nextTick();
+  expect((root.querySelector('[aria-label="诊断目标"]') as HTMLInputElement).value).toBe(
+    'a.example',
+  );
+  context.value = 'b';
   await nextTick();
   expect(context.value).toBe('b');
   expect((root.querySelector('[aria-label="诊断来源"]') as HTMLSelectElement).value).toBe('remote');
   expect((root.querySelector('[aria-label="诊断目标"]') as HTMLInputElement).value).toBe(
-    'explicit.example',
+    'b.example',
   );
   expect(root.textContent).toContain('连接所选目标');
   context.value = 'a';

@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { hostsApi } from '../services/hosts';
 import { errorMessage } from '../services/ipc';
 import type { Catalog, Host } from '../types/hosts';
+import { hostInput } from '../types/hosts';
 
 export type HostSort = 'name' | 'hostname' | 'updated';
 export function filterHosts(
@@ -98,6 +99,16 @@ export const useHostsStore = defineStore('hosts', () => {
       busy.value = false;
     }
   }
+  async function move(id: string, groupId: string | null): Promise<void> {
+    const host = catalog.value?.hosts.find((host) => host.id === id);
+    if (
+      !host ||
+      host.groupId === groupId ||
+      (groupId !== null && !catalog.value?.groups.some((group) => group.id === groupId))
+    )
+      return;
+    await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), '主机分组已更新。');
+  }
   return {
     catalog,
     busy,
@@ -112,5 +123,6 @@ export const useHostsStore = defineStore('hosts', () => {
     selected,
     load,
     run,
+    move,
   };
 });

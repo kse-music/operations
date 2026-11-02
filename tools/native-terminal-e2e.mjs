@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
+import { showHostTree } from './ui-navigation.mjs';
 import { randomUUID, createHash } from 'node:crypto';
 import { chromium } from 'playwright-core';
 import { advancedTerminalChecks } from './native-terminal-advanced.mjs';
@@ -221,6 +222,9 @@ try {
   );
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
+  // SSH scenarios start from an empty terminal baseline; startup now opens a local PTY.
+  const localPane = page.locator('.terminal-pane').filter({ hasText: '本地设备' });
+  await localPane.getByRole('button', { name: '关闭终端', exact: true }).click();
   const setup = await page.evaluate(
     async ({ hostname, username, secret, product }) => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
@@ -266,15 +270,15 @@ try {
   credentialId = setup.credentialId;
   await page.getByRole('button', { name: '刷新', exact: true }).click();
   async function openTerminal() {
+    await showHostTree(page);
+    const panes = await page.locator('.terminal-pane').count();
+    await page.locator('.tree-host').filter({ hasText: 'Linux SSH verification' }).click();
     await page
-      .getByRole('navigation')
-      .getByRole('button', { name: '主机管理', exact: true })
-      .click();
-    await page
-      .locator('tbody')
-      .getByRole('button', { name: 'Linux SSH verification', exact: true })
-      .click();
-    await page.getByRole('button', { name: '连接 / 新建终端', exact: true }).click();
+      .locator('.terminal-pane:visible .terminal-identity strong')
+      .filter({ hasText: 'Linux SSH verification' })
+      .waitFor();
+    if ((await page.locator('.terminal-pane').count()) === panes)
+      await page.getByRole('button', { name: '新建终端', exact: true }).click();
   }
   const active = () => page.locator('.terminal-pane:visible');
   const screen = () => active().locator('.xterm-rows');
@@ -511,6 +515,7 @@ try {
       page,
       artifacts,
       passed,
+      processId: () => child.pid,
       registerCleanup: (fn) => {
         cleanupFiles = fn;
       },
@@ -521,6 +526,7 @@ try {
       artifacts,
       hostId,
       passed,
+      processId: () => child.pid,
       command,
       contains,
       registerCleanup: (fn) => {
@@ -534,10 +540,13 @@ try {
         .getByRole('button', { name: '监控', exact: true })
         .click();
       await page.getByRole('button', { name: '查看资源占用进程', exact: true }).click();
-      assert.equal(await page.getByLabel('运维主机', { exact: true }).inputValue(), hostId);
+      assert.equal(
+        await page.locator('.workspace-tab.active').getAttribute('data-host-id'),
+        hostId,
+      );
       passed('native monitor-to-process navigation preserves the selected server');
       await page
-        .getByRole('navigation', { name: '主导航' })
+        .getByRole('navigation', { name: '当前主机工具', exact: true })
         .getByRole('button', { name: /^SSH 终端/ })
         .click();
       await sftpChecks(shared);

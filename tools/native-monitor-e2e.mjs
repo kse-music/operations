@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { navigateWorkspace } from './ui-navigation.mjs';
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -116,7 +117,7 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
   assert.equal(current.sessionId, session, 'reopening charts must reuse one host sampler');
   await page
     .getByRole('navigation', { name: '主导航' })
-    .getByRole('button', { name: '主机管理', exact: true })
+    .getByRole('button', { name: '全局设置', exact: true })
     .click();
   const paused = await until((s) => s.state === 'paused');
   await delay(4000);
@@ -124,10 +125,7 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
   assert.equal(current.history.length, paused.history.length);
   assert.equal(current.revision, paused.revision);
   passed('native host sampler reuse and page-switch pause without additional samples');
-  await page
-    .getByRole('navigation', { name: '主导航' })
-    .getByRole('button', { name: '服务器监控', exact: true })
-    .click();
+  await navigateWorkspace(page, '服务器监控');
   current = await until(
     (s) =>
       ['partial', 'running'].includes(s.state) &&
@@ -154,10 +152,7 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
     }
   }, hostId);
   assert.equal(code, 'NOT_FOUND');
-  await page
-    .getByRole('navigation', { name: '主导航' })
-    .getByRole('button', { name: /SSH 终端/ })
-    .click();
+  await navigateWorkspace(page, 'SSH 终端');
   await command("printf '\\n__SD_%s__\\n' MONITOR_STOP_SURVIVED");
   await contains('__SD_MONITOR_STOP_SURVIVED__');
   passed('native resume and stop release monitor lease while shared Linux shell remains usable');

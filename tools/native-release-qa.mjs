@@ -1,5 +1,6 @@
 // Real release WebView, application stores, IPC and authorized SSH; no substituted implementations.
 import assert from 'node:assert/strict';
+import { showHostTree } from './ui-navigation.mjs';
 import { spawnSync } from 'node:child_process';
 import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
@@ -312,17 +313,12 @@ export async function releaseChecks({
         hostIds.push(h.id);
       }
       const t = performance.now();
-      await page
-        .getByRole('navigation')
-        .getByRole('button', { name: '主机管理', exact: true })
-        .click();
+      await showHostTree(page);
       await page.getByRole('button', { name: '刷新', exact: true }).click();
-      await page.waitForFunction(
-        () => document.querySelectorAll('.host-table tbody tr').length >= 100,
-      );
+      await page.waitForFunction(() => document.querySelectorAll('.tree-host').length >= 100);
       report.metrics.hostCatalog1000 = {
         elapsedMs: performance.now() - t,
-        tableRows: await page.locator('.host-table tbody tr').count(),
+        treeRows: await page.locator('.tree-host').count(),
       };
     } finally {
       for (const id of hostIds) await rpc('host_delete', { id });

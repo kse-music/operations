@@ -7,29 +7,33 @@ afterEach(() => {
   app?.unmount();
   root?.remove();
 });
-it('keeps every module accessible with named icons, current page and task counts', () => {
+it('puts only workspaces and independent tools in global navigation', () => {
   const navigate = vi.fn();
+  const workspace = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(AppNavigation, {
     active: 'operations',
     terminals: 3,
-    transfers: 2,
     tasks: 1,
     onNavigate: navigate,
+    onWorkspace: workspace,
   });
   app.mount(root);
   const buttons = root.querySelectorAll<HTMLButtonElement>('button');
-  expect(buttons).toHaveLength(12);
+  expect(buttons).toHaveLength(8);
   for (const button of buttons) {
     expect(button.getAttribute('aria-label')).toBe(button.getAttribute('data-tooltip'));
     expect(button.querySelector('svg')).not.toBeNull();
     button.click();
   }
-  expect(navigate).toHaveBeenCalledTimes(12);
-  expect(navigate).toHaveBeenCalledWith('files');
+  expect(navigate).toHaveBeenCalledTimes(7);
+  expect(workspace).toHaveBeenCalledOnce();
+  expect(root.querySelector('[aria-label="SFTP 文件"]')).toBeNull();
+  expect(root.querySelector('[aria-label="主机管理"]')).toBeNull();
   expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
-    'Linux 运维',
+    '主机工作区',
   );
-  expect(root.querySelector('[aria-label="SSH 终端"] small')?.textContent).toBe('3');
+  expect(root.querySelector('[aria-label="主机工作区"] small')?.textContent).toBe('3');
+  expect(root.querySelector('[aria-label="运维自动化"] small')?.textContent).toBe('1');
 });

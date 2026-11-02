@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
+import { navigateWorkspace, selectHostWorkspace, showHostTree } from './ui-navigation.mjs';
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { closeNativeWindow } from './native-window-close.mjs';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function createProductHost(page, target, credentialId, description) {
+  await showHostTree(page);
   await page.getByRole('button', { name: '刷新', exact: true }).click();
-  await page.locator('main').getByRole('button', { name: '＋ 新建主机', exact: true }).click();
+  await page
+    .locator('.host-sidebar-actions')
+    .getByRole('button', { name: '新建主机', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: '新建主机', exact: true });
   await dialog.getByLabel('主机名称', { exact: true }).fill('Linux SSH verification');
   await dialog.getByLabel('地址（IP / 域名）', { exact: true }).fill(target.hostname);
@@ -76,11 +82,7 @@ export async function productChecks(context) {
       name,
       args,
     });
-  const nav = (name) =>
-    page
-      .getByRole('navigation', { name: '主导航' })
-      .getByRole('button', { name: new RegExp(`^${name}`) })
-      .click();
+  const nav = (name) => navigateWorkspace(page, name);
   const until = async (fn) => {
     for (let i = 0; i < 300; i++) {
       const r = await fn();
@@ -102,8 +104,8 @@ export async function productChecks(context) {
           .click()
           .catch(() => {});
     if (scope.remotePaths.length) {
+      await selectHostWorkspace(page, hostId);
       await nav('SFTP 文件');
-      await page.getByLabel('当前工作区主机', { exact: true }).selectOption(hostId);
       const lease = await until(async () =>
         (await rpc('files_connections')).find((s) => s.hostId === hostId),
       );
@@ -238,7 +240,7 @@ export async function productChecks(context) {
   input.description = description;
   await rpc('host_update', { id, input });
   await page.getByRole('button', { name: '刷新', exact: true }).click();
-  await page.getByLabel('当前工作区主机', { exact: true }).selectOption(id);
+  await selectHostWorkspace(page, id);
   await page.locator('.workspace-context').filter({ hasText: input.name }).waitFor();
   await page
     .locator('.workspace-context')
@@ -258,7 +260,7 @@ export async function productChecks(context) {
       (c) => c.hostId === hostId && c.state === 'connected',
     ),
   );
-  await page.getByLabel('当前工作区主机', { exact: true }).selectOption(hostId);
+  await selectHostWorkspace(page, hostId);
   await nav('SSH 终端');
   await command("printf '\\n__SD_%s__\\n' PRODUCT_CONTEXT_SURVIVED");
   await contains('__SD_PRODUCT_CONTEXT_SURVIVED__');
@@ -411,7 +413,11 @@ export async function productChecks(context) {
     async () =>
       (await rpc('app_bootstrap')).config.product.sshDefaults.keepaliveIntervalSecs === 33,
   );
-  await page.getByRole('button', { name: '＋ 新建主机', exact: true }).click();
+  await showHostTree(page);
+  await page
+    .locator('.host-sidebar-actions')
+    .getByRole('button', { name: '新建主机', exact: true })
+    .click();
   dialog = page.getByRole('dialog', { name: '新建主机', exact: true });
   await dialog.getByText('SSH 高级连接设置', { exact: true }).click();
   assert.equal(await dialog.getByLabel('网络代理', { exact: true }).inputValue(), 'socks5');
@@ -421,6 +427,7 @@ export async function productChecks(context) {
     (await rpc('host_list')).hosts.find((h) => h.id === hostId).ssh.keepaliveIntervalSecs,
     originalHost.ssh.keepaliveIntervalSecs,
   );
+  await nav('全局设置');
   await page.getByLabel('全局默认代理', { exact: true }).selectOption('direct');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await until(async () => (await rpc('app_bootstrap')).config.product.sshDefaults.proxy === null);
@@ -537,7 +544,7 @@ export async function productChecks(context) {
   await dialog.waitFor();
   await page.screenshot({ path: path.join(artifacts, 'product-close-review.png') });
   await dialog.getByRole('button', { name: '继续使用', exact: true }).click();
-  await page.getByRole('button', { name: '退出应用', exact: true }).click();
+  closeNativeWindow(processId());
   dialog = page.getByRole('dialog', { name: '确认退出 ServerDeck', exact: true });
   await dialog.waitFor();
   await dialog.getByRole('button', { name: '继续使用', exact: true }).click();
@@ -546,9 +553,15 @@ export async function productChecks(context) {
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
   await page.getByRole('button', { name: '刷新', exact: true }).click();
-  await nav('主机管理');
-  await page.locator('tbody').getByRole('button', { name: originalHost.name, exact: true }).click();
-  await page.getByRole('button', { name: '连接 / 新建终端', exact: true }).click();
+  await showHostTree(page);
+  const previousPanes = await page.locator('.terminal-pane').count();
+  await page.locator('.tree-host').filter({ hasText: originalHost.name }).click();
+  await page
+    .locator('.terminal-pane:visible .terminal-identity strong')
+    .filter({ hasText: originalHost.name })
+    .waitFor();
+  if ((await page.locator('.terminal-pane').count()) === previousPanes)
+    await page.getByRole('button', { name: '新建终端', exact: true }).click();
   await page
     .locator('.terminal-pane:visible')
     .getByRole('status')

@@ -14,7 +14,6 @@ export const defaultProductPreferences = (): ProductPreferences => ({
 // Locale registry: add a complete dictionary before advertising another UI language.
 export const messages = {
   'zh-CN': {
-    hosts: '主机管理',
     credentials: '安全凭据',
     overview: '本地环境',
     settings: '全局设置',
@@ -29,15 +28,7 @@ export const messages = {
   },
 } as const;
 export type WorkspaceView = keyof (typeof messages)['zh-CN'];
-export const hostViews = new Set<WorkspaceView>([
-  'hosts',
-  'terminals',
-  'files',
-  'monitor',
-  'operations',
-  'network',
-  'automation',
-]);
+export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'monitor', 'operations']);
 export function globalKey(event: KeyboardEvent): string | null {
   if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.isComposing || event.repeat)
     return null;

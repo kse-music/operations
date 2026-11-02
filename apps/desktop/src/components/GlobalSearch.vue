@@ -8,6 +8,7 @@ import { messages, type WorkspaceView } from '../types/product';
 import type { Entry } from '../types/automation';
 const emit = defineEmits<{
   close: [];
+  selectHost: [hostId: string];
   navigate: [view: WorkspaceView, hostId?: string, entryId?: string];
 }>();
 const hosts = useHostsStore(),
@@ -21,6 +22,7 @@ const results = computed(() => {
   return [
     ...Object.entries(messages['zh-CN']).map(([view, name]) => ({
       key: view,
+      kind: 'view',
       name: `工作区 · ${name}`,
       view: view as WorkspaceView,
       hostId: hosts.selectedId ?? '',
@@ -28,13 +30,15 @@ const results = computed(() => {
     })),
     ...(hosts.catalog?.hosts ?? []).map((h) => ({
       key: h.id,
+      kind: 'host',
       name: `主机 · ${h.name} · ${h.username}@${h.hostname}:${h.port}`,
-      view: 'hosts' as WorkspaceView,
+      view: 'terminals' as WorkspaceView,
       hostId: h.id,
       entryId: '',
     })),
     ...entries.value.map((e) => ({
       key: e.id,
+      kind: 'entry',
       name: `任务 · ${e.name} · ${e.description}`,
       view: 'automation' as WorkspaceView,
       hostId: hosts.selectedId ?? '',
@@ -47,7 +51,8 @@ const results = computed(() => {
 function choose(n: number) {
   const r = results.value[n];
   if (r) {
-    emit('navigate', r.view, r.hostId, r.entryId);
+    if (r.kind === 'host') emit('selectHost', r.hostId);
+    else emit('navigate', r.view, r.hostId, r.entryId);
     emit('close');
   }
 }

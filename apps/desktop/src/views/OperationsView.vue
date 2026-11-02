@@ -26,13 +26,12 @@ const props = defineProps<{
   initialTab?: 'containers' | 'images' | 'processes' | 'ports' | 'services' | 'logs';
 }>();
 const emit = defineEmits<{
-  context: [hostId: string];
   section: [value: NonNullable<typeof props.initialTab>];
   shell: [host: Host, shell: ContainerShell];
 }>();
 const hosts = useHostsStore(),
   ops = useOpsStore();
-const chosen = ref(props.hostId || ops.active || hosts.selectedId || ''),
+const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   tab = ref<'containers' | 'images' | 'processes' | 'ports' | 'services' | 'logs'>(
     props.initialTab ?? 'containers',
   ),
@@ -197,16 +196,6 @@ async function connect(): Promise<void> {
     error.value = errorMessage(cause);
   }
 }
-async function changeHost(): Promise<void> {
-  ++generation;
-  emit('context', chosen.value);
-  ops.active = chosen.value;
-  rows.value = [];
-  capabilities.value = null;
-  detail.value = null;
-  processDetail.value = null;
-  if (connected.value) await ready();
-}
 async function inspect(request: OpsRequest, title: string): Promise<void> {
   busy.value = true;
   error.value = null;
@@ -351,18 +340,12 @@ async function relatedPorts() {
         <p class="subtle">当前 SSH 账号执行 · 不自动提权 · Docker 使用远端 Unix Socket</p>
       </div>
       <div class="ops-toolbar">
-        <select v-model="chosen" aria-label="运维主机" @change="changeHost">
-          <option value="">选择主机</option>
-          <option v-for="host in hosts.catalog?.hosts ?? []" :key="host.id" :value="host.id">
-            {{ host.name }}
-          </option></select
-        ><button class="button primary" :disabled="!chosen || busy" @click="connect">
-          连接运维</button
+        <button class="button primary" :disabled="!chosen || busy" @click="connect">连接运维</button
         ><button class="button" :disabled="!connected" @click="disconnect">断开运维连接</button>
       </div>
     </div>
     <p class="ops-connection-status" role="status">
-      {{ connection?.host.name ?? '未选择主机' }} ·
+      {{ connection?.host.name ?? (chosen ? '当前主机尚未连接' : '请打开远程主机工作区') }} ·
       {{ stateLabels[connection?.state ?? 'idle'] ?? connection?.state }}
     </p>
     <div v-if="connection?.error || error" role="alert" class="banner error">

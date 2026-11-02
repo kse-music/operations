@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
+import { navigateWorkspace } from './ui-navigation.mjs';
 
-const output = '/tmp/serverdeck-pages';
+const output = process.env.SERVERDECK_PAGES_OUTPUT ?? '/tmp/serverdeck-pages';
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({
   executablePath: process.env.SERVERDECK_BROWSER ?? '/opt/google/chrome/chrome',
@@ -10,7 +11,6 @@ const browser = await chromium.launch({
   args: ['--no-sandbox'],
 });
 const pages = [
-  ['主机管理', 'hosts'],
   ['SSH 终端', 'terminals'],
   ['SFTP 文件', 'files'],
   ['服务器监控', 'monitor'],
@@ -84,6 +84,8 @@ async function fixtures(page, theme) {
     };
     useNotificationsStore(pinia).items = [];
     const host = hosts.catalog.hosts[0];
+    const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
+    useWorkspaceStore(pinia).selectHost(host.id);
     const session = {
       id: 'ui-session',
       hostId: host.id,
@@ -160,8 +162,9 @@ async function fixtures(page, theme) {
         kind: n ? 'file' : 'directory',
         size: n ? 2048 : null,
         modified: 1700000000,
-        permissions: 420,
-        uid: 1000,
+        permissions: n ? 0o644 : 0o755,
+        uid: 0,
+        owner: 'root',
         gid: 1000,
       })),
     };
@@ -329,19 +332,36 @@ try {
     await page.getByText('后端未连接', { exact: true }).waitFor();
     await fixtures(page, theme);
     for (const [label, view] of pages) {
-      await page
-        .getByRole('navigation', { name: '主导航' })
-        .getByRole('button', { name: label, exact: true })
-        .click();
+      await navigateWorkspace(page, label);
       await page.waitForFunction((view) => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
-        return pinia._s.get('workspace').current.view === view;
+        return pinia._s.get('workspace').current?.view === view;
       }, view);
       await page
-        .locator(view === 'terminals' ? '.terminal-pane' : '.page-view')
+        .locator(view === 'terminals' ? '.terminal-pane:visible' : '.page-view:visible')
         .waitFor({ state: 'visible' });
       await page.evaluate(() => (document.querySelector('.content-scroll').scrollTop = 0));
       if (view === 'files') {
+        const remote = page.getByRole('table', { name: '远程文件', exact: true });
+        assert.equal(
+          await remote.getByRole('columnheader', { name: '权限', exact: true }).count(),
+          1,
+        );
+        assert.equal(
+          await remote.getByRole('columnheader', { name: '拥有者', exact: true }).count(),
+          1,
+        );
+        assert.deepEqual(
+          await remote.locator('tbody tr').first().locator('.file-metadata').allTextContents(),
+          ['rwxr-xr-x', 'root'],
+        );
+        assert.equal(
+          await page
+            .getByRole('table', { name: '本地文件', exact: true })
+            .locator('.file-metadata')
+            .count(),
+          0,
+        );
         // A plain browser cannot register Tauri's native drag/drop listener.
         await page
           .getByText(/^拖放入口不可用/)
@@ -366,10 +386,10 @@ try {
       await page.mouse.move(width - 8, height - 8);
       await inspect(page, `${variant}/${view}`);
       await page.screenshot({ path: `${output}/${variant}-${view}.png` });
-      if (view === 'hosts' || view === 'credentials') {
+      if (view === 'credentials') {
         await page
           .locator('.page-view')
-          .getByRole('button', { name: view === 'hosts' ? /新建主机/ : /新建凭据/ })
+          .getByRole('button', { name: /新建凭据/ })
           .click();
         await page.getByRole('dialog').waitFor();
         await inspect(page, `${variant}/${view}-dialog`);

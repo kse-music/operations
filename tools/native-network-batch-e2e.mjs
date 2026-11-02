@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
 import net from 'node:net';
 import { remotePython } from './native-ops-e2e.mjs';
+import { navigateWorkspace, showHostTree } from './ui-navigation.mjs';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const quote = (s) => `'${s.replaceAll("'", "'\"'\"'")}'`;
 export async function networkBatchChecks(context) {
@@ -16,14 +17,7 @@ export async function networkBatchChecks(context) {
       name,
       args,
     });
-  const nav = (name) =>
-    page
-      .getByRole('navigation', { name: '主导航' })
-      .getByRole('button', {
-        name: name === 'SSH 终端' ? /^SSH 终端/ : name,
-        exact: name !== 'SSH 终端',
-      })
-      .click();
+  const nav = (name) => navigateWorkspace(page, name);
   async function until(check, seconds = 30) {
     const end = Date.now() + seconds * 1000;
     while (Date.now() < end) {
@@ -319,7 +313,7 @@ export async function networkBatchChecks(context) {
     });
     hostIds.push(h.id);
   }
-  await nav('主机管理');
+  await showHostTree(page);
   await page.getByRole('button', { name: '刷新', exact: true }).first().click();
   await nav('批量运维');
   for (let n = 0; n < 2; n++)

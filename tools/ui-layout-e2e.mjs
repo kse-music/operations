@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
+import { navigateWorkspace } from './ui-navigation.mjs';
 
 // In-memory UI fixtures only. No IPC replacement, stored hosts, or remote operations.
 const url = process.env.SERVERDECK_LAYOUT_URL ?? 'http://127.0.0.1:1421';
@@ -78,10 +79,40 @@ try {
     });
     assert(!geometry.overflow, `${name}: page overflows horizontally`);
     assert(!geometry.railOverflows, `${name}: navigation overflows`);
+    assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 0);
     assert(geometry.list.height > height * 0.55, `${name}: host list is too small`);
     assert(geometry.listScrolls, `${name}: long host list cannot scroll`);
     if (width > 720)
       assert(geometry.main.x >= geometry.sidebar.right, `${name}: workspace overlaps sidebar`);
+    await page.getByRole('button', { name: '主机树工具', exact: true }).click();
+    const tools = page.getByRole('group', { name: '主机树工具选项', exact: true });
+    await tools.waitFor();
+    assert.equal(
+      await tools.getByRole('button', { name: '导入 OpenSSH', exact: true }).isEnabled(),
+      true,
+    );
+    assert.equal(
+      await tools.getByRole('button', { name: '导出配置', exact: true }).isEnabled(),
+      true,
+    );
+    assert.equal(await tools.getByLabel('主机排序', { exact: true }).count(), 1);
+    assert.equal(await tools.getByLabel('按标签筛选主机', { exact: true }).count(), 1);
+    const toolsFit = await tools.evaluate((element) => element.scrollWidth <= element.clientWidth);
+    assert(toolsFit, `${name}: tree tools overflow`);
+    await page.locator('.tree-host-actions [aria-label^="编辑主机 "]').first().click();
+    const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
+    assert.equal(
+      await edit.getByLabel('主机名称', { exact: true }).inputValue(),
+      'Production API / 长名称主机布局检查',
+    );
+    assert.equal(
+      await page.locator('.terminal-tab').count(),
+      0,
+      `${name}: management opened a terminal`,
+    );
+    await edit.getByRole('button', { name: '取消', exact: true }).click();
+    await page.screenshot({ path: `${output}/${name}-tree-tools.png` });
+    await page.getByRole('button', { name: '主机树工具', exact: true }).click();
     await page.locator('.host-tree-scroll').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
@@ -105,16 +136,33 @@ try {
     );
     await page.getByRole('button', { name: '全部主机', exact: true }).click();
     await page.locator('.tree-host').first().click();
+    await page.locator('.terminal-tab').first().waitFor();
+    await page.locator('.tree-host').first().dblclick();
+    assert.equal(await page.locator('.terminal-tab').count(), 1, `${name}: duplicate terminal`);
+    assert.equal(await page.locator('.topbar [aria-label="退出应用"]').count(), 0);
+    assert.equal(await page.locator('.topbar [aria-label="打开全局设置"]').count(), 0);
+    await page.locator('.tree-host').first().click({ button: 'right' });
+    assert.equal(await page.getByRole('menu').count(), 0);
+    assert.equal(await page.getByRole('button', { name: '关闭操作菜单', exact: true }).count(), 0);
+    assert.equal(
+      await page.locator('.tree-host-more, .host-tree-scroll [aria-haspopup=menu]').count(),
+      0,
+    );
+    await page.screenshot({ path: `${output}/${name}-host-no-menu.png` });
+    if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+    await page.locator('.workspace-tab.active [role=tab]').click({ button: 'middle' });
+    assert.equal(await page.locator('.terminal-tab').count(), 1, `${name}: terminal was lost`);
+    await navigateWorkspace(page, 'SSH 终端');
+    await page.locator('.terminal-tab [role=tab]').first().click({ button: 'middle' });
+    assert.equal(await page.locator('.terminal-tab').count(), 0, `${name}: terminal not closed`);
+    if (width <= 720) await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
     await page.locator('.host-tree-scroll').evaluate((el) => {
       el.scrollTop = 0;
     });
     await page.screenshot({ path: `${output}/${name}.png` });
     await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     assert.equal(await page.locator('.sidebar').isVisible(), false);
-    await page
-      .getByRole('navigation', { name: '主导航' })
-      .getByRole('button', { name: 'Linux 运维', exact: true })
-      .click();
+    await navigateWorkspace(page, 'Linux 运维');
     await page.getByRole('heading', { name: 'Linux 运维', exact: true }).waitFor();
     await page.screenshot({ path: `${output}/${name}-workspace.png` });
     assert.equal(

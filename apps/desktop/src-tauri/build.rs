@@ -73,6 +73,7 @@ fn main() {
             "forward_list",
             "forward_stop",
             "terminal_open",
+            "terminal_local_open",
             "terminal_input",
             "terminal_resize",
             "terminal_ack",

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import { Columns2, Rows2, Pencil, Save, X } from '@lucide/vue';
-import { useTerminalsStore } from '../stores/terminals';
+import { Columns2, Rows2, Pencil, Plus, Save, X } from '@lucide/vue';
+import { useTerminalsStore, type TerminalTab } from '../stores/terminals';
 import { useApplicationStore } from '../stores/application';
+import { useHostsStore } from '../stores/hosts';
 import { stateLabels } from '../types/terminal';
 import { geometry, type Divider } from '../services/layout';
 import TerminalPane from '../components/TerminalPane.vue';
@@ -16,7 +17,26 @@ const emit = defineEmits<{
 }>();
 const store = useTerminalsStore(),
   application = useApplicationStore();
-const props = withDefaults(defineProps<{ visible?: boolean }>(), { visible: true });
+const props = withDefaults(defineProps<{ visible?: boolean; hostId?: string }>(), {
+  visible: true,
+  hostId: '',
+});
+const hosts = useHostsStore();
+const tabs = computed(() => store.hostTabs(props.hostId));
+const host = computed(
+  () =>
+    hosts.catalog?.hosts.find((h) => h.id === props.hostId) ??
+    tabs.value[0]?.panes[0]?.host ??
+    null,
+);
+function newTerminal(): void {
+  if (!props.hostId || host.value) store.open(host.value);
+}
+function sessionTitle(item: TerminalTab, index: number): string {
+  return item.title === (item.panes[0]?.host?.name ?? '本地设备')
+    ? `会话 ${index + 1}`
+    : item.title;
+}
 const area = ref<HTMLElement>();
 const menu = ref<{ key: string; x: number; y: number } | null>(null);
 const renaming = ref<string | null>(null),
@@ -148,17 +168,22 @@ onBeforeUnmount(() => {
         知道了
       </button>
     </div>
-    <div v-if="!store.tabs.length" class="workspace-empty">
+    <div v-if="!tabs.length" class="workspace-empty">
       <h2>没有打开的终端</h2>
-      <p>从主机详情或主机树连接主机。</p>
+      <p>当前主机尚无终端。可新建会话，或通过工作区标签切换主机。</p>
+      <button class="button" :disabled="!!props.hostId && !host" @click="newTerminal">
+        {{ props.hostId ? '新建终端' : '打开本地终端' }}
+      </button>
     </div>
-    <template v-else>
+    <template v-if="tabs.length">
       <div class="terminal-tabs" role="tablist" aria-label="终端标签">
         <div
-          v-for="item in store.tabs"
+          v-for="(item, index) in tabs"
           :key="item.key"
           :class="['terminal-tab', { active: store.active === item.key }]"
           draggable="true"
+          @mousedown.middle.prevent
+          @auxclick.middle.prevent="store.close(item.key)"
           @dragstart="dragTab($event, item.key)"
           @dragover.prevent
           @drop.prevent="dropTab($event, item.key)"
@@ -170,14 +195,14 @@ onBeforeUnmount(() => {
             @click="store.select(item.key)"
             @dblclick="rename(item.key)"
           >
-            {{ item.title }}
+            {{ sessionTitle(item, index) }}
             <small>{{
               item.panes.length > 1
                 ? `${item.panes.length} 个窗格`
                 : stateLabels[item.panes[0]?.state ?? 'idle']
             }}</small></button
           ><button
-            :aria-label="`关闭标签 ${item.title}`"
+            :aria-label="`关闭标签 ${sessionTitle(item, index)}`"
             title="关闭标签"
             @click="store.close(item.key)"
           >
@@ -186,6 +211,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <div class="split-toolbar">
+        <button
+          class="tool-button"
+          :aria-label="props.hostId ? '新建终端' : '新建本地终端'"
+          title="为当前主机新建终端会话"
+          @click="newTerminal"
+        >
+          <Plus :size="15" aria-hidden="true" />
+        </button>
         <button
           class="tool-button"
           aria-label="水平分屏（上下）"

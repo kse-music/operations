@@ -111,7 +111,7 @@ impl Remote {
                 }
                 match self.raw.readdir(&handle).await {
                     Ok(batch) => {
-                        for file in batch.files {
+                        for mut file in batch.files {
                             if matches!(file.filename.as_str(), "." | "..") {
                                 continue;
                             }
@@ -123,6 +123,7 @@ impl Remote {
                                     "单目录文件名数据超过 8 MiB，请缩小目录范围",
                                 ));
                             }
+                            file.attrs.user = owner_name(&file.longname);
                             entries.push((file.filename, file.attrs));
                             if entries.len() > LIST_LIMIT {
                                 return Err(fail(
@@ -389,7 +390,66 @@ pub(crate) fn entry(name: String, path: String, attrs: &FileAttributes) -> FileE
         size: attrs.size,
         modified: attrs.mtime.map(u64::from),
         permissions: attrs.permissions.map(|p| p & 0o7777),
+        owner: attrs.user.clone(),
         uid: attrs.uid,
         gid: attrs.gid,
+    }
+}
+
+// SFTP v3 carries numeric IDs in ATTRS. Common Unix servers provide the display
+// name in NAME.longname; only accept its recognizable ls-style prefix.
+fn owner_name(longname: &str) -> Option<String> {
+    let mut fields = longname.split_whitespace();
+    let mode = fields.next()?.as_bytes();
+    if !(mode.len() == 10 || (mode.len() == 11 && b"+.@".contains(&mode[10])))
+        || !b"-dlbcps".contains(&mode[0])
+        || mode[1..10].iter().enumerate().any(|(index, value)| {
+            !match index {
+                0 | 3 | 6 => b"r-".as_slice(),
+                1 | 4 | 7 => b"w-".as_slice(),
+                2 | 5 => b"xsS-".as_slice(),
+                _ => b"xtT-".as_slice(),
+            }
+            .contains(value)
+        })
+    {
+        return None;
+    }
+    fields.next()?.parse::<u64>().ok()?;
+    let owner = fields.next()?;
+    if owner.len() > 256 || owner.chars().any(char::is_control) {
+        return None;
+    }
+    Some(owner.to_owned())
+}
+
+#[cfg(test)]
+mod owner_tests {
+    use super::owner_name;
+    #[test]
+    fn reads_server_supplied_names_without_guessing_from_uid_or_filename() {
+        for text in [
+            "-rw-r--r-- 1 root root 12 Nov 2 12:00 file name.txt",
+            "drwxr-xr-x+ 2 root root 4096 Nov 2 12:00 folder",
+            "lrwxrwxrwx 1 root root 5 Nov 2 12:00 link -> other file",
+            "-rwsr-Sr-t 1 root wheel 5 Nov 2 12:00 executable",
+        ] {
+            assert_eq!(owner_name(text).as_deref(), Some("root"));
+        }
+        assert_eq!(
+            owner_name("-rw-r--r-- 1 deploy wheel 1 Nov 2 12:00 root.txt").as_deref(),
+            Some("deploy")
+        );
+        for text in [
+            "",
+            "root",
+            "a file called root",
+            "-rw-r--r-- invalid root",
+            "-zz-r--r-- 1 root",
+            "-rw-r--r-- 1 ro\0ot",
+            "drwxr-xr-x",
+        ] {
+            assert_eq!(owner_name(text), None, "{text:?}");
+        }
     }
 }

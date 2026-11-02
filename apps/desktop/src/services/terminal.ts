@@ -1,10 +1,24 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { ensureDesktop } from './ipc';
-import type { TerminalEvent, TerminalSession, TerminalSize } from '../types/terminal';
+import type {
+  LocalTerminalSession,
+  TerminalEvent,
+  TerminalSession,
+  TerminalSize,
+} from '../types/terminal';
 import type { WorkspaceLayout } from '../types/workspace';
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
+  openLocal(
+    size: TerminalSize,
+    receive: (event: TerminalEvent) => void,
+  ): Promise<LocalTerminalSession> {
+    ensureDesktop();
+    const events = new Channel<TerminalEvent>();
+    events.onmessage = receive;
+    return invoke('terminal_local_open', { size, events });
+  },
   workspaceLoad: (): Promise<WorkspaceLayout | null> => invoke('workspace_load'),
   workspaceSave: (layout: WorkspaceLayout): Promise<void> => invoke('workspace_save', { layout }),
   forwardStart: (id: string, input: ForwardInput): Promise<ForwardInfo> =>

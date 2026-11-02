@@ -8,6 +8,10 @@ export interface TerminalSession {
   transportId: string;
   hostId: string;
 }
+export interface LocalTerminalSession {
+  id: string;
+  shell: string;
+}
 export type TerminalEvent =
   | { type: 'state'; state: string; code: string | null; message: string | null }
   | { type: 'trust'; hostname: string; port: number; algorithm: string; fingerprint: string }

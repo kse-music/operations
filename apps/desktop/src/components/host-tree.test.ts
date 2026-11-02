@@ -1,16 +1,56 @@
-import { it, expect, afterEach, vi } from 'vitest';
+import { it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import HostSidebar from './HostSidebar.vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostInput } from '../types/hosts';
 import { useBackgroundStore } from '../stores/background';
+import { hostsApi } from '../services/hosts';
 let app: App, pinia: Pinia, root: HTMLDivElement;
+const pointerMethods = ['setPointerCapture', 'hasPointerCapture', 'releasePointerCapture'] as const;
+const originalPointerMethods = pointerMethods.map((name) =>
+  Object.getOwnPropertyDescriptor(HTMLElement.prototype, name),
+);
+const originalPoint = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
+const hitTarget = vi.fn();
+beforeEach(() => {
+  const captured = new Set<number>();
+  for (const [name, value] of [
+    ['setPointerCapture', (id: number) => captured.add(id)],
+    ['hasPointerCapture', (id: number) => captured.has(id)],
+    ['releasePointerCapture', (id: number) => captured.delete(id)],
+  ] as const)
+    Object.defineProperty(HTMLElement.prototype, name, { configurable: true, value });
+  Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: hitTarget });
+  hitTarget.mockReset();
+});
 afterEach(() => {
   app?.unmount();
   if (pinia) disposePinia(pinia);
   root?.remove();
+  pointerMethods.forEach((name, index) => {
+    const descriptor = originalPointerMethods[index];
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    else Reflect.deleteProperty(HTMLElement.prototype, name);
+  });
+  if (originalPoint) Object.defineProperty(document, 'elementFromPoint', originalPoint);
+  else Reflect.deleteProperty(document, 'elementFromPoint');
 });
+function pointer(target: EventTarget, type: string, x: number, y: number, button = 0) {
+  const event = Object.assign(
+    new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      button,
+      buttons: type === 'pointerup' ? 0 : 1,
+      clientX: x,
+      clientY: y,
+    }),
+    { pointerId: 1, pointerType: 'mouse' },
+  );
+  target.dispatchEvent(event);
+  return event;
+}
 it('bounds initial host DOM, exposes further rows, and supports arrow/Home/End keyboard focus', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
@@ -49,6 +89,9 @@ it('bounds initial host DOM, exposes further rows, and supports arrow/Home/End k
   await nextTick();
   rows = root.querySelectorAll('.tree-host');
   expect(rows).toHaveLength(400);
+  hosts.selectedId = 'host-449';
+  await nextTick();
+  expect(root.querySelector('.tree-host[data-host-id="host-449"]')).not.toBeNull();
   hosts.search = 'Host 449';
   await nextTick();
   expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
@@ -66,28 +109,29 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
     hostname: 'prod.example',
     groupId: 'group',
     favorite: true,
+    tags: ['production'],
     createdAt: '',
     updatedAt: '',
   };
   hosts.catalog = {
-    hosts: [first, { ...first, id: 'second', name: 'Staging', favorite: false }],
+    hosts: [first, { ...first, id: 'second', name: 'Staging', favorite: false, tags: ['staging'] }],
     groups: [{ id: 'group', name: 'Servers', sortOrder: 0 }],
     credentials: [],
     pendingSecretDeletions: 0,
   };
   const select = vi.fn(),
-    connect = vi.fn(),
-    menu = vi.fn(),
     create = vi.fn(),
-    groups = vi.fn();
+    groups = vi.fn(),
+    importHosts = vi.fn(),
+    exportHosts = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(HostSidebar, {
     onSelect: select,
-    onConnect: connect,
-    onMenu: menu,
     onCreate: create,
     onGroups: groups,
+    onImport: importHosts,
+    onExport: exportHosts,
   }).use(pinia);
   app.mount(root);
   await nextTick();
@@ -101,22 +145,47 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
   await nextTick();
   expect(hosts.selectedId).toBe('first');
   expect(select).toHaveBeenCalledOnce();
+  expect(select).toHaveBeenCalledWith(first);
   expect(row.getAttribute('aria-current')).toBe('true');
   row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-  expect(connect).toHaveBeenCalledWith(first);
-  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true }));
-  expect(menu).toHaveBeenCalledWith(first, expect.any(MouseEvent));
+  expect(select).toHaveBeenCalledOnce();
+  const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
+  row.dispatchEvent(context);
+  expect(context.defaultPrevented).toBe(true);
+  expect(root.querySelector('[aria-haspopup="menu"]')).toBeNull();
+  expect(root.querySelector('.tree-host-more')).toBeNull();
+  expect(select).toHaveBeenCalledOnce();
   root.querySelector<HTMLButtonElement>('[aria-label="新建主机"]')!.click();
   root.querySelector<HTMLButtonElement>('[aria-label="管理分组"]')!.click();
   expect(create).toHaveBeenCalledOnce();
   expect(groups).toHaveBeenCalledOnce();
+  root.querySelector<HTMLButtonElement>('[aria-label="主机树工具"]')!.click();
+  await nextTick();
+  expect(scroll.querySelector('#host-tree-tools')).toBeNull();
+  const tools = root.querySelector('#host-tree-tools')!;
+  for (const button of tools.querySelectorAll<HTMLButtonElement>('button')) button.click();
+  expect(importHosts).toHaveBeenCalledOnce();
+  expect(exportHosts).toHaveBeenCalledOnce();
+  const sort = root.querySelector<HTMLSelectElement>('[aria-label="主机排序"]')!;
+  sort.value = 'updated';
+  sort.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(hosts.sort).toBe('updated');
+  const tag = root.querySelector<HTMLSelectElement>('[aria-label="按标签筛选主机"]')!;
+  tag.value = 'production';
+  tag.dispatchEvent(new Event('change', { bubbles: true }));
+  await nextTick();
+  expect(hosts.tag).toBe('production');
+  expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
   root.querySelector<HTMLButtonElement>('.host-filter button:last-child')!.click();
   await nextTick();
   expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
-  root.querySelector<HTMLButtonElement>('.group-toggle')!.click();
+  const group = [...root.querySelectorAll<HTMLButtonElement>('.group-toggle')].find((button) =>
+    button.textContent?.includes('Servers'),
+  )!;
+  group.click();
   await nextTick();
   expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
-  expect(root.querySelector('.group-toggle')?.getAttribute('aria-expanded')).toBe('false');
+  expect(group.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('renders loading, failure and empty states without inventing online hosts', async () => {
@@ -148,4 +217,137 @@ it('renders loading, failure and empty states without inventing online hosts', a
   await nextTick();
   expect(root.querySelector('.disconnected-dot')?.getAttribute('aria-label')).toBe('未连接');
   expect(root.textContent).toContain('0 已连接');
+});
+
+async function mountDragTree() {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const store = useHostsStore();
+  const host = {
+    ...hostInput(),
+    id: 'host',
+    name: 'Server',
+    hostname: 'server.example',
+    groupId: 'a',
+    createdAt: '',
+    updatedAt: '',
+  };
+  store.catalog = {
+    hosts: [host],
+    groups: [
+      { id: 'a', name: 'A', sortOrder: 0 },
+      { id: 'b', name: 'B', sortOrder: 1 },
+    ],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  };
+  const update = vi.spyOn(hostsApi, 'update').mockImplementation(async (_id, input) => {
+    Object.assign(host, input);
+    return host;
+  });
+  vi.spyOn(hostsApi, 'list').mockImplementation(async () => ({
+    ...store.catalog!,
+    hosts: [{ ...host }],
+  }));
+  const select = vi.fn();
+  const props = { onSelect: select };
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(HostSidebar, props).use(pinia);
+  app.mount(root);
+  await nextTick();
+  return { store, host, select, update };
+}
+it('moves hosts with pointer dragging into empty, collapsed and ungrouped targets and saves through the host API', async () => {
+  const { store, host, select, update } = await mountDragTree();
+  const collapsed = root.querySelector<HTMLButtonElement>('[data-group-id="b"] .group-toggle')!;
+  collapsed.click();
+  await nextTick();
+  expect(collapsed.getAttribute('aria-expanded')).toBe('false');
+  for (const target of ['b', null]) {
+    if (target === null) {
+      collapsed.click();
+      await nextTick();
+    }
+    const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
+    expect(row.draggable).toBe(false);
+    pointer(row, 'pointerdown', 10, 10);
+    const group = [...root.querySelectorAll('.tree-group')].find(
+      (el) => el.querySelector('.group-name')?.textContent === (target === null ? '未分组' : 'B'),
+    )!;
+    hitTarget.mockReturnValue(group.querySelector('.group-name'));
+    const move = pointer(window, 'pointermove', 50, 90);
+    await nextTick();
+    expect(move.defaultPrevented).toBe(true);
+    expect(group.classList.contains('drop-target')).toBe(true);
+    expect(root.querySelector('.host-drag-preview')?.textContent).toContain('移动到');
+    pointer(window, 'pointerup', 50, 90);
+    row.click();
+    await vi.waitFor(() => expect(store.busy).toBe(false));
+    await nextTick();
+    expect(update).toHaveBeenLastCalledWith('host', { ...hostInput(host), groupId: target });
+    expect(store.catalog!.hosts[0]!.groupId).toBe(target);
+    expect(root.querySelector('.drop-target, .host-drag-preview')).toBeNull();
+  }
+  expect(select).not.toHaveBeenCalled();
+  update.mockRejectedValueOnce({ message: 'permission denied' });
+  await store.move('host', 'a');
+  expect(store.catalog!.hosts[0]!.groupId).toBeNull();
+  expect(store.error).toBe('permission denied');
+});
+
+it.each(['Escape', 'pointercancel', 'outside', 'same-group'])(
+  'cancels a host drag on %s without changing groups or connecting',
+  async (reason) => {
+    const { update, select, store } = await mountDragTree();
+    const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
+    pointer(row, 'pointerdown', 10, 10);
+    hitTarget.mockReturnValue(root.querySelector('[data-group-id="b"] .group-toggle'));
+    pointer(window, 'pointermove', 50, 90);
+    if (reason === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    else if (reason === 'pointercancel') pointer(window, 'pointercancel', 50, 90);
+    else {
+      hitTarget.mockReturnValue(reason === 'outside' ? document.body : row);
+      pointer(window, 'pointerup', 50, 90);
+    }
+    row.click();
+    await nextTick();
+    expect(update).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(store.catalog!.hosts[0]!.groupId).toBe('a');
+    expect(root.querySelector('.drop-target, .host-drag-preview')).toBeNull();
+  },
+);
+it('keeps normal clicks and ignores tiny moves, right buttons and dragging while saving', async () => {
+  const { store, select, update } = await mountDragTree();
+  const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
+  pointer(row, 'pointerdown', 10, 10);
+  pointer(window, 'pointermove', 13, 12);
+  pointer(window, 'pointerup', 13, 12);
+  row.click();
+  expect(select).toHaveBeenCalledOnce();
+  pointer(row, 'pointerdown', 10, 10, 2);
+  pointer(window, 'pointermove', 50, 90);
+  pointer(window, 'pointerup', 50, 90);
+  store.busy = true;
+  pointer(row, 'pointerdown', 10, 10);
+  pointer(window, 'pointermove', 50, 90);
+  pointer(window, 'pointerup', 50, 90);
+  await nextTick();
+  expect(update).not.toHaveBeenCalled();
+  expect(root.querySelector('.host-drag-preview')).toBeNull();
+});
+it('drops onto a host row inside another group without selecting either host', async () => {
+  const { store, host, update, select } = await mountDragTree();
+  store.catalog!.hosts.push({ ...host, id: 'other', name: 'Other', groupId: 'b' });
+  await nextTick();
+  const row = root.querySelector<HTMLButtonElement>('[data-group-id="a"] .tree-host')!;
+  hitTarget.mockReturnValue(root.querySelector('[data-group-id="b"] .host-name'));
+  pointer(row, 'pointerdown', 10, 10);
+  pointer(window, 'pointermove', 50, 90);
+  pointer(window, 'pointerup', 50, 90);
+  row.click();
+  await vi.waitFor(() => expect(store.busy).toBe(false));
+  expect(update).toHaveBeenCalledWith('host', { ...hostInput(host), groupId: 'b' });
+  expect(select).not.toHaveBeenCalled();
 });

@@ -629,3 +629,17 @@
 | pinia 3.0.4                             | MIT                                                 | npm production |
 
 未找到顶层许可证文件（需复核）：alloc-stdlib 0.3.0, block2 0.6.2, cesu8 1.1.0, delegate 0.13.5, dispatch2 0.3.1, dlopen2 0.8.2, dlopen2_derive 0.4.3, gloo-timers 0.4.0, jni-sys-macros 0.4.1, libappindicator-sys 0.9.0, ndk 0.9.0, ndk-context 0.1.1, ndk-sys 0.6.0+11769913, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-cloud-kit 0.3.2, objc2-core-data 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-core-image 0.3.2, objc2-core-location 0.3.2, objc2-core-text 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-io-surface 0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, pageant 0.2.5, plist 1.10.3, r-efi 5.3.0, r-efi 6.0.0, rsqlite-vfs 0.1.1, russh 0.65.0, russh-cryptovec 0.62.0, russh-util 0.52.0, selectors 0.38.0, tauri-plugin 2.7.2, valuable 0.1.1, webview2-com 0.39.1, webview2-com-macros 0.8.1, webview2-com-sys 0.39.1, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0。
+
+## 本地终端新增依赖（2026-11-02）
+
+| 名称与版本           | 声明许可证                 | 来源  |
+| -------------------- | -------------------------- | ----- |
+| cfg_aliases-0.1.1    | MIT                        | Cargo |
+| downcast-rs-1.2.1    | MIT OR Apache-2.0          | Cargo |
+| filedescriptor-0.8.3 | MIT                        | Cargo |
+| nix-0.28.0           | MIT                        | Cargo |
+| portable-pty-0.9.0   | MIT                        | Cargo |
+| serial2-0.2.39       | BSD-2-Clause OR Apache-2.0 | Cargo |
+| shared_library-0.1.9 | Apache-2.0 OR MIT          | Cargo |
+| shell-words-1.1.1    | MIT OR Apache-2.0          | Cargo |
+| winreg-0.10.1        | MIT                        | Cargo |

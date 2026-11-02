@@ -1,5 +1,5 @@
 import { afterEach, it, expect, vi } from 'vitest';
-import { createApp, nextTick, type App } from 'vue';
+import { createApp, h, ref, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -84,7 +84,8 @@ it('binds confirmation to its SSH session and sends only the strict process iden
   }));
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(OperationsView).use(pinia);
+  const hostId = ref('a');
+  app = createApp({ render: () => h(OperationsView, { hostId: hostId.value }) }).use(pinia);
   app.mount(root);
   await flush();
   const click = async (label: string) => {
@@ -98,9 +99,8 @@ it('binds confirmation to its SSH session and sends only the strict process iden
   await click('进程');
   await click('进程详情 / 信号');
   await click('发送信号…');
-  const hostSelector = root.querySelector<HTMLSelectElement>('[aria-label="运维主机"]')!;
-  hostSelector.value = 'b';
-  hostSelector.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(root.querySelector('[aria-label="运维主机"]')).toBeNull();
+  hostId.value = 'b';
   await flush();
   let input = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
   input.value = '123';
@@ -109,8 +109,7 @@ it('binds confirmation to its SSH session and sends only the strict process iden
   await click('确认执行');
   expect(mocks.query.mock.calls.some(([, request]) => request.kind === 'signal')).toBe(false);
   expect(root.textContent).toContain('主机上下文已变化');
-  hostSelector.value = 'a';
-  hostSelector.dispatchEvent(new Event('change', { bubbles: true }));
+  hostId.value = 'a';
   await flush();
   await click('进程详情 / 信号');
   await click('发送信号…');

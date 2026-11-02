@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import type { DirectoryListing, FileEntry } from '../types/files';
-import { bytes } from '../types/files';
+import { bytes, permissionText } from '../types/files';
 const props = defineProps<{
   side: 'local' | 'remote';
   listing: DirectoryListing | null;
@@ -98,6 +98,10 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
           <th>大小</th>
           <th>修改时间</th>
           <th>类型</th>
+          <template v-if="side === 'remote'">
+            <th>权限</th>
+            <th>拥有者</th>
+          </template>
         </tr>
       </thead>
       <tbody>
@@ -133,6 +137,14 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
             {{ entry.modified === null ? '—' : new Date(entry.modified * 1000).toLocaleString() }}
           </td>
           <td>{{ kinds[entry.kind] }}</td>
+          <template v-if="side === 'remote'">
+            <td class="file-metadata">
+              {{ permissionText(entry.permissions) }}
+            </td>
+            <td class="file-metadata" :title="entry.uid === null ? undefined : `UID ${entry.uid}`">
+              {{ entry.owner ?? entry.uid ?? '—' }}
+            </td>
+          </template>
         </tr>
       </tbody>
     </table>

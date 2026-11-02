@@ -14,29 +14,63 @@ describe('product integration boundaries', () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
   });
-  it('keys workspaces by host and module, keeps independent contexts, and never creates sessions', () => {
+  it('has no fixed navigation tabs and returns to an empty workspace after the last close', () => {
+    const workspace = useWorkspaceStore();
+    expect(workspace.tabs).toEqual([]);
+    expect(workspace.current).toBeUndefined();
+    workspace.navigate('terminals');
+    expect(workspace.tabs.map((tab) => tab.view)).toEqual(['terminals']);
+    workspace.close('host:');
+    expect(workspace.tabs).toEqual([]);
+    expect(workspace.active).toBe('');
+    expect(workspace.current).toBeUndefined();
+    workspace.navigate('settings');
+    expect(workspace.current?.view).toBe('settings');
+    workspace.close('settings:');
+    expect(workspace.tabs).toEqual([]);
+  });
+  it('keeps one workspace per host, restores its tool and isolates global navigation', () => {
     const w = useWorkspaceStore();
     w.navigate('files', 'a');
-    const a = w.current.key;
+    const a = w.current!.key;
     w.navigate('files', 'b');
     expect(w.tabs.filter((t) => t.view === 'files')).toHaveLength(2);
+    expect(w.current?.hostId).toBe('b');
     w.navigate('operations', 'a', 'processes');
-    expect(w.current.section).toBe('processes');
+    expect(w.current?.section).toBe('processes');
     w.navigate('files', 'a');
-    expect(w.current.key).toBe(a);
-    w.close(a);
-    expect(w.current.key).not.toBe(a);
+    expect(w.current?.key).toBe(a);
+    w.selectHost('b');
+    expect(w.current).toMatchObject({ view: 'files', hostId: 'b' });
+    w.selectHost('a');
+    expect(w.current).toMatchObject({ view: 'files', hostId: 'a', section: 'processes' });
     w.navigate('settings', 'b');
-    expect(w.current.hostId).toBe('');
+    expect(w.current?.hostId).toBe('');
+    expect(w.hostId).toBe('a');
+    w.selectHost('b');
+    w.navigate('operations');
+    expect(w.current).toMatchObject({ hostId: 'b', view: 'operations', section: undefined });
+    w.navigate('network', 'a');
+    expect(w.current).toMatchObject({ hostId: '', view: 'network' });
+    expect(w.hostId).toBe('b');
+    w.selectHost('');
+    expect(w.current?.view).toBe('terminals');
+    expect(w.current?.hostId).toBe('');
+    expect(w.hostId).toBe('');
     expect(opsApi.close).not.toHaveBeenCalled();
   });
-  it('closing a navigation tab leaves background sessions alone and caps retained navigation', () => {
+  it('closing one host workspace activates the adjacent host without closing background sessions', () => {
     const w = useWorkspaceStore();
     for (let n = 0; n < 40; n++) w.navigate('monitor', `host-${n}`);
-    expect(w.tabs).toHaveLength(24);
-    const last = w.current.key;
+    expect(w.tabs).toHaveLength(40);
+    const last = w.current!.key;
     w.close(last);
-    expect(w.current.key).not.toBe(last);
+    expect(w.current?.key).not.toBe(last);
+    expect(w.hostId).toBe('host-38');
+    expect(w.tabs).toHaveLength(39);
+    w.selectHost('host-0');
+    expect(w.tabs).toHaveLength(39);
+    expect(w.current).toMatchObject({ view: 'monitor', hostId: 'host-0' });
     expect(opsApi.close).not.toHaveBeenCalled();
   });
   it('targets trust and close by explicit host even when a multi-host dialog changes active host', async () => {

@@ -149,6 +149,7 @@ pub(crate) fn connection_plan(
 
 impl Application {
     pub async fn terminal_reset(&self) -> Result<(), Error> {
+        self.local_terminals.close_all(false).await?;
         self.operations_host.close_all_logs().await?;
         self.monitors.pause_all();
         self.files.reset_editors();
@@ -189,21 +190,43 @@ impl Application {
         self.terminals.open_plan(host, plan, size, sink)
     }
     pub fn terminal_input(&self, id: &str, data: Vec<u8>) -> Result<(), Error> {
+        if id.starts_with("local:") {
+            return self.local_terminals.input(id, data);
+        }
         self.terminals.input(id, data)
     }
     pub fn terminal_resize(&self, id: &str, size: TerminalSize) -> Result<(), Error> {
+        if id.starts_with("local:") {
+            return self.local_terminals.resize(id, size);
+        }
         self.terminals.resize(id, size)
     }
     pub fn terminal_ack(&self, id: &str, sequence: u64) -> Result<(), Error> {
+        if id.starts_with("local:") {
+            return self.local_terminals.ack(id, sequence);
+        }
         self.terminals.acknowledge(id, sequence)
     }
     pub fn terminal_trust(&self, id: &str, accept: bool) -> Result<(), Error> {
         self.terminals.confirm(id, accept)
     }
     pub async fn terminal_close(&self, id: &str) -> Result<(), Error> {
+        if id.starts_with("local:") {
+            return self.local_terminals.close(id).await;
+        }
         self.terminals.close(id).await
     }
     pub async fn terminal_close_host(&self, host_id: &str) -> Result<(), Error> {
         self.terminals.close_host(host_id).await
+    }
+    pub async fn terminal_local_open(
+        &self,
+        size: TerminalSize,
+        sink: Sink,
+    ) -> Result<serverdeck_core::terminal::LocalTerminalSession, Error> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        self.local_terminals.open(size, sink).await
     }
 }

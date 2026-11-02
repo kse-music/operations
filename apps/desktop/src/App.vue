@@ -14,8 +14,8 @@ import WorkspaceView from './views/WorkspaceView.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
-import { PanelLeftClose, PanelLeftOpen, Power, Search, Settings2, X } from '@lucide/vue';
-import HostsView from './views/HostsView.vue';
+import HostTools from './components/HostTools.vue';
+import { Monitor, PanelLeftClose, PanelLeftOpen, Search, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import GroupManager from './components/GroupManager.vue';
@@ -23,7 +23,7 @@ import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
 import { useHostsStore } from './stores/hosts';
 import { hostsApi } from './services/hosts';
-import { hostInput, type Host } from './types/hosts';
+import type { Host } from './types/hosts';
 const TerminalsView = defineAsyncComponent(() => import('./views/TerminalsView.vue'));
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useFilesStore } from './stores/files';
@@ -39,9 +39,10 @@ import {
   messages,
   globalKey,
   defaultProductPreferences,
+  hostViews,
   type WorkspaceView as View,
 } from './types/product';
-import type { WorkspaceTab } from './stores/workspace';
+import type { WorkspaceCloseScope, WorkspaceTab } from './stores/workspace';
 import GlobalSearch from './components/GlobalSearch.vue';
 import BackgroundTasks from './components/BackgroundTasks.vue';
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
@@ -52,12 +53,14 @@ const workspace = useWorkspaceStore(),
 const searching = ref(false),
   taskPanel = ref(false),
   entryIntent = ref(''),
-  closingHost = ref<Host | null>(null);
-const currentHostId = computed(() => workspace.current.hostId);
+  automationHost = ref(''),
+  networkHost = ref(''),
+  networkRequest = ref(0);
+const currentHostId = computed(() => workspace.hostId);
 function knownHost(id: string) {
   return (
     store.catalog?.hosts.find((h) => h.id === id) ??
-    terminals.panes.find((p) => p.host.id === id)?.host ??
+    terminals.panes.find((p) => p.host?.id === id)?.host ??
     files.connections[id]?.host ??
     operations.connections[id]?.host
   );
@@ -66,7 +69,7 @@ const currentHost = computed(() => {
   const id = currentHostId.value,
     configured = knownHost(id);
   if (!configured) return;
-  const module = workspace.current.view,
+  const module = workspace.current?.view,
     kind =
       module === 'terminals'
         ? 'terminal'
@@ -77,9 +80,10 @@ const currentHost = computed(() => {
             : module === 'operations'
               ? 'operations'
               : '';
+  const terminal = terminals.panes.find((p) => p.key === terminals.focused && p.host?.id === id);
   const snapshot =
     kind === 'terminal'
-      ? terminals.panes.find((p) => p.key === terminals.focused)?.host
+      ? terminal?.host
       : kind === 'files'
         ? files.connections[id]?.host
         : kind === 'operations'
@@ -87,7 +91,7 @@ const currentHost = computed(() => {
           : undefined;
   const session =
     kind === 'terminal'
-      ? terminals.panes.find((p) => p.key === terminals.focused)?.sessionId
+      ? terminal?.sessionId
       : kind === 'files'
         ? files.connections[id]?.id
         : kind === 'operations'
@@ -105,51 +109,138 @@ const connectionChanged = computed(() => {
     c = store.catalog?.hosts.find((h) => h.id === currentHostId.value);
   return h && c && (h.hostname !== c.hostname || h.port !== c.port || h.username !== c.username);
 });
-const view = computed({
-  get: () => workspace.current.view,
-  set: (value: View) => navigate(value, store.selectedId ?? currentHostId.value),
+const view = computed<View | null>({
+  get: () => workspace.current?.view ?? null,
+  set: (value) => {
+    if (value) navigate(value);
+  },
 });
+const isHostWorkspace = computed(() => view.value !== null && hostViews.has(view.value));
+const showSidebar = computed(
+  () => sidebarOpen.value && (isHostWorkspace.value || view.value === null),
+);
+const cachedTools = computed(() =>
+  (['automation', 'network', 'batch'] as const)
+    .filter((tool) => workspace.tabs.some((tab) => tab.view === tool))
+    .map((tool) => `${tool[0]!.toUpperCase()}${tool.slice(1)}View`),
+);
 function navigate(
   value: View,
-  hostId = store.selectedId ?? currentHostId.value,
+  hostId = currentHostId.value,
   section?: WorkspaceTab['section'],
 ): void {
   if (value !== 'automation') entryIntent.value = '';
   const host = knownHost(hostId);
-  if (value === 'terminals' && host) {
-    const tab =
-      terminals.tabs.find(
-        (t) => t.key === terminals.active && t.panes.some((p) => p.host.id === host.id),
-      ) ?? terminals.tabs.find((t) => t.panes.some((p) => p.host.id === host.id));
-    if (tab) {
-      terminals.select(tab.key);
-      terminals.focused = tab.panes.find((p) => p.host.id === host.id)!.key;
-    } else terminals.open(host);
+  if (value === 'terminals' && (host || !hostId)) {
+    terminals.activateHost(host?.id ?? '');
+    if (!terminals.active) terminals.open(host ?? null);
+    const pane = terminals.panes.find((p) => p.key === terminals.focused);
+    if (pane && !pane.host && pane.state === 'idle') pane.connectRequested = true;
   }
   if (value === 'files') files.active = hostId;
   if (value === 'operations') operations.active = hostId;
-  workspace.navigate(value, host ? hostId : '', section);
-  if (host) store.selectedId = host.id;
-  menu.value = null;
+  workspace.navigate(value, hostId, section);
+  if (hostViews.has(value)) store.selectedId = host?.id ?? null;
 }
-function fromSearch(value: View, hostId = '', entryId = '') {
+function fromSearch(value: View, hostId = currentHostId.value, entryId = '') {
   entryIntent.value = entryId;
+  if (value === 'automation' && entryId) automationHost.value = hostId;
   navigate(value, hostId);
 }
 function setContext(hostId: string) {
-  navigate(view.value, hostId);
+  const existing = workspace.tabs.some((tab) => hostViews.has(tab.view) && tab.hostId === hostId);
+  workspace.selectHost(hostId);
+  const tab = workspace.current;
+  if (tab && !existing) navigate(tab.view, tab.hostId, tab.section);
 }
 function tabName(tab: WorkspaceTab) {
-  const h = store.catalog?.hosts.find((h) => h.id === tab.hostId);
-  return `${messages['zh-CN'][tab.view]}${h ? ` · ${h.name}` : ''}`;
+  return hostViews.has(tab.view)
+    ? tab.hostId
+      ? (knownHost(tab.hostId)?.name ?? '已删除主机')
+      : '本地设备'
+    : messages['zh-CN'][tab.view];
 }
 function activate(tab: WorkspaceTab) {
-  navigate(tab.view, tab.hostId, tab.section);
+  if (tab.view !== 'automation') entryIntent.value = '';
+  workspace.activate(tab.key);
 }
 function revealActiveTab() {
   document
     .querySelector('.workspace-tab.active')
     ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+const tabMenu = ref<{ key: string; x: number; y: number } | null>(null);
+const tabMenuElement = ref<HTMLElement>();
+let tabMenuTrigger: HTMLButtonElement | null = null;
+const tabMenuIndex = computed(() =>
+  workspace.tabs.findIndex((tab) => tab.key === tabMenu.value?.key),
+);
+const tabCloseActions: { scope: WorkspaceCloseScope; label: string }[] = [
+  { scope: 'current', label: '关闭' },
+  { scope: 'right', label: '关闭右侧' },
+  { scope: 'others', label: '关闭其它' },
+  { scope: 'all', label: '关闭所有' },
+];
+function dismissTabMenu(event?: Event) {
+  if (event?.target instanceof Node && tabMenuElement.value?.contains(event.target)) return;
+  tabMenu.value = null;
+}
+function restoreTabFocus() {
+  if (tabMenuTrigger?.isConnected) tabMenuTrigger.focus({ preventScroll: true });
+  else document.querySelector<HTMLButtonElement>('.workspace-tabs [aria-selected=true]')?.focus();
+}
+async function openTabMenu(tab: WorkspaceTab, event: MouseEvent | KeyboardEvent) {
+  const target = event.currentTarget as HTMLElement;
+  tabMenuTrigger = target.querySelector<HTMLButtonElement>('[role=tab]');
+  const anchor = target.getBoundingClientRect();
+  const keyboard = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  tabMenu.value = {
+    key: tab.key,
+    x: keyboard ? anchor.left : event.clientX,
+    y: keyboard ? anchor.bottom : event.clientY,
+  };
+  await nextTick();
+  if (!tabMenu.value || !tabMenuElement.value) return;
+  const bounds = tabMenuElement.value.getBoundingClientRect();
+  tabMenu.value.x = Math.max(8, Math.min(tabMenu.value.x, window.innerWidth - bounds.width - 8));
+  tabMenu.value.y = Math.max(8, Math.min(tabMenu.value.y, window.innerHeight - bounds.height - 8));
+  tabMenuElement.value
+    .querySelector<HTMLButtonElement>('[role=menuitem]')
+    ?.focus({ preventScroll: true });
+}
+function tabContextKeys(tab: WorkspaceTab, event: KeyboardEvent) {
+  if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  void openTabMenu(tab, event);
+}
+function closeFromTabMenu(scope: WorkspaceCloseScope) {
+  if (!tabMenu.value) return;
+  workspace.close(tabMenu.value.key, scope);
+  dismissTabMenu();
+  void nextTick(restoreTabFocus);
+}
+function tabMenuKeys(event: KeyboardEvent) {
+  if (event.key === 'Escape' || event.key === 'Tab') {
+    if (event.key === 'Escape') event.preventDefault();
+    event.stopPropagation();
+    dismissTabMenu();
+    restoreTabFocus();
+    return;
+  }
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const items = [
+    ...(tabMenuElement.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+  ];
+  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+  items[next]?.focus();
 }
 async function workspaceKeys(event: KeyboardEvent) {
   if (
@@ -236,7 +327,7 @@ function currentConfiguration(host: Host): boolean {
   const configured = store.catalog?.hosts.find((h) => h.id === host.id);
   if (!configured || !sameHostConnection(host, configured)) {
     notifications.push(
-      '主机连接配置已变更。当前会话保持原连接；请从主机管理确认新配置后打开模块，或先断开并重新连接。',
+      '主机连接配置已变更。当前会话保持原连接；请从主机树确认新配置后打开模块，或先断开并重新连接。',
       true,
     );
     return false;
@@ -245,13 +336,16 @@ function currentConfiguration(host: Host): boolean {
 }
 function openAutomation(host: Host): void {
   if (!currentConfiguration(host)) return;
-  navigate('automation', host.id);
+  automationHost.value = host.id;
+  navigate('automation');
 }
 const NetworkView = defineAsyncComponent(() => import('./views/NetworkView.vue'));
 const BatchView = defineAsyncComponent(() => import('./views/BatchView.vue'));
 function openNetwork(host: Host): void {
   if (!currentConfiguration(host)) return;
-  navigate('network', host.id);
+  networkHost.value = host.id;
+  networkRequest.value++;
+  navigate('network');
 }
 const OperationsView = defineAsyncComponent(() => import('./views/OperationsView.vue'));
 function openOperations(host: Host): void {
@@ -287,13 +381,9 @@ async function confirmExit(): Promise<void> {
     exitBusy.value = false;
   }
 }
-async function requestExit(): Promise<void> {
-  files.exitReview = true;
-}
-
 function openFiles(host: Host, path?: string, pane?: string): void {
   if (!currentConfiguration(host)) return;
-  menu.value = null;
+  dismissTabMenu();
   navigate('files', host.id);
   void files.open(host, path, pane);
 }
@@ -303,61 +393,25 @@ function fileTerminal(host: Host, action: import('./types/files').FileTerminalAc
   navigate('terminals', host.id);
 }
 
-function connect(host: Host): void {
-  menu.value = null;
-  terminals.open(host);
-  navigate('terminals', host.id);
-}
 const hostDialog = ref(false);
-const editing = ref<Host>();
 const groups = ref(false);
 const importing = ref(false);
-const deleting = ref<Host | null>(null);
 const exportText = ref<string | null>(null);
-const menu = ref<{ host: Host; x: number; y: number } | null>(null);
-function openHost(host?: Host): void {
+function openHost(): void {
   store.error = null;
-  editing.value = host;
   hostDialog.value = true;
-  menu.value = null;
 }
-function openMenu(host: Host, event: MouseEvent): void {
-  menu.value = {
-    host,
-    x: Math.max(8, Math.min(event.clientX, window.innerWidth - 195)),
-    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 330)),
-  };
-}
-async function copy(host: Host): Promise<void> {
-  menu.value = null;
-  const result = await store.run(
-    () => hostsApi.copy(host.id),
-    '主机配置已复制，共享原安全凭据引用。',
-  );
-  if (result.ok) {
-    store.selectedId = result.value.id;
-    view.value = 'hosts';
+function revealHost(host: Host): void {
+  if (!store.visible.some((item) => item.id === host.id)) {
+    store.search = '';
+    store.tag = '';
+    store.favorites = false;
   }
-}
-async function favorite(host: Host): Promise<void> {
-  menu.value = null;
-  const input = hostInput(host);
-  input.favorite = !input.favorite;
-  await store.run(() => hostsApi.update(host.id, input), '收藏状态已保存。');
-}
-function confirmDelete(host: Host): void {
-  menu.value = null;
-  store.error = null;
-  deleting.value = host;
-}
-async function remove(): Promise<void> {
-  if (!deleting.value) return;
-  const id = deleting.value.id;
-  const result = await store.run(
-    () => hostsApi.remove(id),
-    '主机已删除，安全凭据保留供其他主机使用。',
+  store.selectedId = host.id;
+  sidebarOpen.value = true;
+  void nextTick(() =>
+    document.querySelector('.tree-host.selected')?.scrollIntoView({ block: 'nearest' }),
   );
-  if (result.ok) deleting.value = null;
 }
 async function exportHosts(): Promise<void> {
   const result = await store.run(hostsApi.export);
@@ -381,7 +435,16 @@ useTheme(theme);
 const layoutStyle = computed(() => ({
   '--sidebar-width': `${sidebarDraft.value ?? application.state?.config.sidebarWidth ?? 248}px`,
 }));
+function preventNativeContextMenu(event: MouseEvent): void {
+  event.preventDefault();
+}
 onMounted(async () => {
+  // Capture also covers teleported dialogs and children that stop propagation (e.g. xterm).
+  document.addEventListener('contextmenu', preventNativeContextMenu, true);
+  document.addEventListener('pointerdown', dismissTabMenu, true);
+  document.addEventListener('contextmenu', dismissTabMenu, true);
+  window.addEventListener('resize', dismissTabMenu);
+  document.addEventListener('scroll', dismissTabMenu, true);
   await application.initialize();
   if (application.ready) {
     await store.load();
@@ -390,6 +453,7 @@ onMounted(async () => {
     window.addEventListener('keydown', globalShortcut, true);
     window.addEventListener('resize', revealActiveTab);
     await terminals.restore(store.catalog?.hosts ?? []);
+    navigate('terminals', '');
     void files.poll();
     try {
       releaseExit = await listen<[number, number]>('app-exit-review', (event) => {
@@ -409,6 +473,11 @@ function protectDraft(event: BeforeUnloadEvent): void {
 }
 window.addEventListener('beforeunload', protectDraft);
 onBeforeUnmount(() => {
+  document.removeEventListener('contextmenu', preventNativeContextMenu, true);
+  document.removeEventListener('pointerdown', dismissTabMenu, true);
+  document.removeEventListener('contextmenu', dismissTabMenu, true);
+  window.removeEventListener('resize', dismissTabMenu);
+  document.removeEventListener('scroll', dismissTabMenu, true);
   automation.stop();
   background.stop();
   window.removeEventListener('keydown', globalShortcut, true);
@@ -417,18 +486,14 @@ onBeforeUnmount(() => {
   releaseExit?.();
 });
 watch(
-  () => terminals.focused,
-  () => {
-    if (view.value !== 'terminals') return;
-    const pane = terminals.panes.find((p) => p.key === terminals.focused);
-    if (pane) {
-      workspace.navigate('terminals', pane.host.id);
-      store.selectedId = pane.host.id;
-    }
+  () => terminals.panes.length,
+  (count) => {
+    if (!count)
+      for (const tab of [...workspace.tabs]) if (tab.view === 'terminals') workspace.close(tab.key);
   },
 );
 watch(
-  () => workspace.active,
+  () => [workspace.active, workspace.hostId, workspace.current?.view],
   () => {
     void nextTick(() => {
       revealActiveTab();
@@ -436,25 +501,11 @@ watch(
       if (content) content.scrollTop = 0;
     });
     const t = workspace.current;
-    if (t.hostId) store.selectedId = t.hostId;
+    if (!t) return;
+    if (hostViews.has(t.view)) store.selectedId = currentHostId.value || null;
     if (t.view === 'files') files.active = t.hostId;
     if (t.view === 'operations') operations.active = t.hostId;
-    if (t.view === 'terminals') {
-      const tab =
-        terminals.tabs.find(
-          (tab) => tab.key === terminals.active && tab.panes.some((p) => p.host.id === t.hostId),
-        ) ?? terminals.tabs.find((tab) => tab.panes.some((p) => p.host.id === t.hostId));
-      if (tab) {
-        terminals.select(tab.key);
-        terminals.focused = tab.panes.find((p) => p.host.id === t.hostId)!.key;
-      }
-    }
-  },
-);
-watch(
-  () => store.selectedId,
-  (id) => {
-    if (view.value === 'hosts') workspace.navigate('hosts', id ?? '');
+    if (t.view === 'terminals') terminals.activateHost(currentHostId.value);
   },
 );
 watch(
@@ -500,31 +551,17 @@ watch(
   () => automation.error,
   (v) => notifications.push(v, true),
 );
-async function disconnectHost() {
-  if (!closingHost.value) return;
-  if (files.dirty) {
-    notifications.push('请先保存或关闭未保存的远程文档，再关闭主机全部连接。', true);
-    return;
-  }
-  try {
-    if (!(await terminals.closeHost(closingHost.value.id))) return;
-    await operations.sync();
-    await files.poll();
-    closingHost.value = null;
-  } catch (cause) {
-    notifications.push(errorMessage(cause), true);
-  }
-}
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'hosts-hidden': !sidebarOpen }" :style="layoutStyle">
+  <div class="app-shell" :class="{ 'hosts-hidden': !showSidebar }" :style="layoutStyle">
     <header class="topbar">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">S<span>▸</span></span
         ><strong>ServerDeck</strong><span class="version">v0.1</span>
       </div>
       <button
+        v-if="isHostWorkspace || view === null"
         class="shell-icon-button"
         :aria-label="sidebarOpen ? '收起主机栏' : '展开主机栏'"
         :title="sidebarOpen ? '收起主机栏' : '展开主机栏'"
@@ -536,25 +573,8 @@ async function disconnectHost() {
         <PanelLeftOpen v-else :size="18" aria-hidden="true" />
       </button>
       <div class="topbar-context" aria-label="当前主机上下文">
-        <span v-if="view === 'batch'">多主机任务 · 以目标预览为准</span
-        ><template v-else
-          ><select
-            :value="currentHostId"
-            aria-label="当前工作区主机"
-            @change="setContext(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">本地设备 / 未选择主机</option>
-            <option
-              v-if="currentHost && !store.catalog?.hosts.some((h) => h.id === currentHost?.id)"
-              :value="currentHost.id"
-            >
-              {{ currentHost.name }}（配置已删除，已有连接）
-            </option>
-            <option v-for="h in store.catalog?.hosts" :key="h.id" :value="h.id">
-              {{ h.name }} · {{ h.username }}@{{ h.hostname }}:{{ h.port }}
-            </option>
-          </select></template
-        >
+        <span v-if="isHostWorkspace || view === null">主机工作区</span>
+        <span v-else>{{ messages['zh-CN'][view] }}</span>
       </div>
       <button
         class="button global-search-button"
@@ -564,36 +584,26 @@ async function disconnectHost() {
         <Search :size="15" aria-hidden="true" /><span>搜索</span>
         <kbd>{{ application.state?.config.product?.shortcuts.search ?? 'Ctrl+K' }}</kbd>
       </button>
-      <button class="shell-icon-button" aria-label="退出应用" title="退出应用" @click="requestExit">
-        <Power :size="17" aria-hidden="true" />
-      </button>
-      <button
-        class="shell-icon-button"
-        aria-label="打开全局设置"
-        title="全局设置"
-        @click="view = 'settings'"
-      >
-        <Settings2 :size="18" aria-hidden="true" />
-      </button>
     </header>
     <AppNavigation
       :active="view"
       :terminals="terminals.tabs.length"
-      :transfers="files.pending"
       :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
       @navigate="navigate($event)"
+      @workspace="setContext(currentHostId)"
     />
-    <aside v-show="sidebarOpen" id="host-sidebar" class="sidebar" aria-label="主机管理栏">
+    <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机工作区侧栏">
       <HostSidebar
         @create="openHost()"
         @groups="groups = true"
-        @select="navigate(view, store.selectedId ?? '')"
-        @menu="openMenu"
-        @connect="connect"
+        @import="importing = true"
+        @export="exportHosts"
+        @select="setContext($event.id)"
+        @saved="revealHost"
       />
     </aside>
     <div
-      v-if="sidebarOpen"
+      v-if="showSidebar"
       class="sidebar-resizer"
       role="separator"
       aria-label="调整主机侧栏宽度"
@@ -609,14 +619,23 @@ async function disconnectHost() {
       <div
         class="tabbar workspace-tabs"
         role="tablist"
-        aria-label="主机工作区标签"
+        aria-label="工作区标签"
         @keydown="workspaceKeys"
       >
         <div
           v-for="tab in workspace.tabs"
           :key="tab.key"
+          :data-host-id="hostViews.has(tab.view) ? tab.hostId : undefined"
+          :data-view="tab.view"
           class="workspace-tab"
-          :class="{ active: workspace.active === tab.key }"
+          :class="{
+            active: workspace.active === tab.key,
+            'global-workspace-tab': !hostViews.has(tab.view),
+          }"
+          @mousedown.middle.prevent
+          @auxclick.middle.prevent="workspace.close(tab.key)"
+          @contextmenu.prevent.stop="openTabMenu(tab, $event)"
+          @keydown="tabContextKeys(tab, $event)"
         >
           <button
             role="tab"
@@ -625,6 +644,8 @@ async function disconnectHost() {
             :title="tabName(tab)"
             @click="activate(tab)"
           >
+            <Server v-if="hostViews.has(tab.view) && tab.hostId" :size="14" aria-hidden="true" />
+            <Monitor v-else-if="hostViews.has(tab.view)" :size="14" aria-hidden="true" />
             {{ tabName(tab) }}</button
           ><button
             class="tab-close"
@@ -635,26 +656,36 @@ async function disconnectHost() {
             <X :size="14" aria-hidden="true" />
           </button>
         </div>
+        <button
+          v-if="!workspace.tabs.some((tab) => hostViews.has(tab.view) && !tab.hostId)"
+          class="workspace-local-button"
+          aria-label="打开本地工作区"
+          title="打开本地终端"
+          @click="setContext('')"
+        >
+          <Monitor :size="16" aria-hidden="true" />
+        </button>
       </div>
-      <div v-if="currentHost" class="workspace-context">
-        <strong>{{ currentHost.name }}</strong
-        ><span>{{ currentHost.username }}@{{ currentHost.hostname }}:{{ currentHost.port }}</span
-        ><span>{{
-          background.connections
-            ? background.hostState(currentHost.id)
-            : files.hostState(currentHost.id)
-        }}</span
-        ><button class="text-button" @click="navigate('operations', currentHost.id, 'containers')">
-          Docker</button
-        ><button class="text-button" @click="navigate('operations', currentHost.id, 'logs')">
-          Logs</button
-        ><button class="text-button" @click="navigate('operations', currentHost.id, 'processes')">
-          Processes</button
-        ><button class="text-button" @click="navigate('operations', currentHost.id, 'services')">
-          Services</button
-        ><button class="text-button" @click="openNetwork(currentHost)">诊断连接</button>
+      <div v-if="isHostWorkspace" class="workspace-context">
+        <strong>{{ currentHost?.name ?? (currentHostId ? '已删除主机' : '本地设备') }}</strong>
+        <template v-if="currentHost">
+          <span>{{ currentHost.username }}@{{ currentHost.hostname }}:{{ currentHost.port }}</span>
+          <span>{{
+            background.connections
+              ? background.hostState(currentHost.id)
+              : files.hostState(currentHost.id)
+          }}</span>
+          <button class="text-button" @click="openNetwork(currentHost)">诊断连接</button>
+        </template>
+        <button v-else class="text-button" @click="openHost()">新建主机</button>
       </div>
-      <p v-if="connectionChanged" class="banner" role="status">
+      <HostTools
+        v-if="isHostWorkspace && view"
+        :active="view"
+        :local="!currentHostId"
+        @navigate="navigate($event)"
+      />
+      <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
         当前仍操作建立时的连接：{{ currentHost?.username }}@{{ currentHost?.hostname }}:{{
           currentHost?.port
         }}。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。
@@ -696,67 +727,62 @@ async function disconnectHost() {
 
         <div v-if="store.error" class="banner error" role="alert">{{ store.error }}</div>
 
-        <HostsView
-          v-if="view === 'hosts'"
-          @create="openHost()"
-          @edit="openHost"
-          @remove="confirmDelete"
-          @copy="copy"
-          @favorite="favorite"
-          @menu="openMenu"
-          @import="importing = true"
-          @export="exportHosts"
-          @connect="connect"
-          @files="openFiles"
-          @monitor="openMonitor"
-          @operations="openOperations"
-          @automation="openAutomation"
-        />
-        <AutomationView
-          v-else-if="view === 'automation'"
-          :key="`automation:${currentHostId}`"
-          :host-id="currentHostId"
-          :entry-id="entryIntent"
-          @intent-consumed="entryIntent = ''"
-        />
-        <NetworkView
-          v-else-if="view === 'network'"
-          :host-id="currentHostId"
-          @context="setContext"
-        />
-        <BatchView v-else-if="view === 'batch'" />
+        <section v-if="view === null" class="workspace-empty" aria-label="欢迎页面">
+          <h1>欢迎使用 ServerDeck</h1>
+          <p>打开本地终端，或从左侧主机列表连接服务器。</p>
+          <div class="action-row">
+            <button class="button primary" @click="navigate('terminals', '')">打开本地终端</button>
+            <button class="button" @click="openHost()">新建主机</button>
+          </div>
+        </section>
+        <KeepAlive :include="cachedTools">
+          <AutomationView
+            v-if="view === 'automation'"
+            :host-id="automationHost"
+            :entry-id="entryIntent"
+            @intent-consumed="entryIntent = ''"
+          />
+          <NetworkView
+            v-else-if="view === 'network'"
+            :host-id="networkHost"
+            :request-id="networkRequest"
+          />
+          <BatchView v-else-if="view === 'batch'" />
+        </KeepAlive>
         <OperationsView
-          v-else-if="view === 'operations'"
+          v-if="view === 'operations'"
           :key="`operations:${currentHostId}`"
           :host-id="currentHostId"
-          :initial-tab="workspace.current.section"
-          @context="setContext"
-          @section="(s) => (workspace.current.section = s)"
+          :initial-tab="workspace.current?.section"
+          @section="
+            (s) => {
+              if (workspace.current?.view === 'operations') workspace.current.section = s;
+            }
+          "
           @shell="containerTerminal"
         />
         <MonitorView
           v-else-if="view === 'monitor'"
           :key="`monitor:${currentHostId}`"
           :host-id="currentHostId"
-          @context="setContext"
           @processes="(id) => navigate('operations', id, 'processes')"
         />
         <FilesView
           v-else-if="view === 'files'"
           :key="`files:${currentHostId}`"
           :host-id="currentHostId"
-          @context="setContext"
           @terminal="fileTerminal"
         />
         <BackupView v-else-if="view === 'backup'" />
         <CredentialsView v-else-if="view === 'credentials'" />
         <WorkspaceView v-else-if="view === 'overview'" @settings="view = 'settings'" />
-        <SettingsPanel v-else />
+        <SettingsPanel v-else-if="view === 'settings'" />
       </div>
       <div v-show="view === 'terminals'" class="terminal-workspace">
         <TerminalsView
           v-if="view === 'terminals' || terminals.tabs.length"
           :visible="view === 'terminals'"
+          :host-id="currentHostId"
           @files="openFiles"
           @monitor="openMonitor"
           @operations="openOperations"
@@ -775,7 +801,8 @@ async function disconnectHost() {
       <span
         >{{ store.catalog ? `${store.catalog.hosts.length} 台主机` : '主机列表未加载' }} ·
         {{ store.busy ? '操作中' : `${terminals.connectedCount} 个已连接终端` }}</span
-      ><button class="text-button" @click="view = 'files'">{{ files.pending }} 个未完成传输</button
+      ><button class="text-button" @click="taskPanel = true">
+        {{ files.pending }} 个未完成传输</button
       ><button class="text-button" @click="taskPanel = true">
         后台任务 {{ background.pending + (automation.status?.active ?? 0) }}</button
       ><span class="statusbar-right"
@@ -796,20 +823,13 @@ async function disconnectHost() {
       </button>
     </div>
   </div>
-  <GlobalSearch v-if="searching" @close="searching = false" @navigate="fromSearch" />
+  <GlobalSearch
+    v-if="searching"
+    @close="searching = false"
+    @navigate="fromSearch"
+    @select-host="setContext"
+  />
   <BackgroundTasks v-if="taskPanel" @close="taskPanel = false" @navigate="navigate" />
-  <Modal v-if="closingHost" title="关闭主机全部连接" @close="closingHost = null"
-    ><p>
-      {{ closingHost.name }} · {{ closingHost.username }}@{{ closingHost.hostname }}:{{
-        closingHost.port
-      }}
-    </p>
-    <p>
-      将关闭此主机及使用此跳板的终端、文件、运维和监控连接，并中断相关任务。传输可能留下待恢复临时文件；远端命令是否停止仍需核对。未保存文本须先处理。
-    </p>
-    <button class="button" @click="closingHost = null">继续使用</button
-    ><button class="button danger" @click="disconnectHost">确认关闭全部连接</button></Modal
-  >
   <RemoteEditor v-if="files.document" />
   <Modal
     v-if="files.exitReview"
@@ -828,18 +848,9 @@ async function disconnectHost() {
       </button>
     </footer></Modal
   >
-  <HostDialog v-if="hostDialog" :host="editing" @close="hostDialog = false" />
+  <HostDialog v-if="hostDialog" @saved="revealHost" @close="hostDialog = false" />
   <GroupManager v-if="groups" @close="groups = false" />
   <ImportDialog v-if="importing" @close="importing = false" />
-  <Modal v-if="deleting" title="确认删除主机" :busy="store.busy" @close="deleting = null"
-    ><p>删除“{{ deleting.name }}”（{{ deleting.hostname }}）？此操作无法撤销。</p>
-    <p class="subtle">只删除此主机配置，不删除关联凭据、私钥文件或其他主机。</p>
-    <p v-if="store.error" class="banner error" role="alert">{{ store.error }}</p>
-    <footer class="dialog-actions">
-      <button class="button" :disabled="store.busy" @click="deleting = null">取消</button
-      ><button class="button danger" :disabled="store.busy" @click="remove">确认删除主机</button>
-    </footer></Modal
-  >
   <Modal v-if="exportText !== null" title="导出非敏感主机配置" @close="exportText = null"
     ><p class="subtle">
       JSON
@@ -851,40 +862,29 @@ async function disconnectHost() {
       ><button class="button primary" @click="download">下载 JSON</button>
     </footer></Modal
   >
-  <template v-if="menu"
-    ><button class="context-backdrop" aria-label="关闭操作菜单" @click="menu = null"></button>
+  <Teleport to="body">
     <div
-      class="context-menu"
+      v-if="tabMenu && tabMenuIndex >= 0"
+      ref="tabMenuElement"
+      class="context-menu workspace-tab-menu"
       role="menu"
-      :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
-      @keydown.esc="menu = null"
+      aria-label="工作区标签操作"
+      :style="{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }"
+      @keydown="tabMenuKeys"
     >
-      <button role="menuitem" @click="openAutomation(menu.host)">打开运维自动化</button>
-      <button role="menuitem" @click="openNetwork(menu.host)">打开网络诊断</button>
-      <button role="menuitem" @click="openOperations(menu.host)">打开 Linux 运维</button>
-      <button role="menuitem" @click="openMonitor(menu.host)">打开服务器监控</button>
-      <button role="menuitem" @click="openFiles(menu.host)">打开 SFTP 文件</button>
-      <button role="menuitem" @click="connect(menu.host)">连接 / 新建终端</button
-      ><button
+      <button
+        v-for="action in tabCloseActions"
+        :key="action.scope"
         role="menuitem"
-        @click="
-          closingHost = menu.host;
-          menu = null;
+        tabindex="-1"
+        :disabled="
+          (action.scope === 'right' && tabMenuIndex === workspace.tabs.length - 1) ||
+          (action.scope === 'others' && workspace.tabs.length < 2)
         "
+        @click="closeFromTabMenu(action.scope)"
       >
-        关闭此主机全部连接</button
-      ><button role="menuitem" :disabled="store.busy" @click="openHost(menu.host)">编辑主机</button
-      ><button role="menuitem" :disabled="store.busy" @click="copy(menu.host)">复制配置</button
-      ><button role="menuitem" :disabled="store.busy" @click="favorite(menu.host)">
-        {{ menu.host.favorite ? '取消收藏' : '收藏主机' }}</button
-      ><button
-        role="menuitem"
-        class="danger"
-        :disabled="store.busy"
-        @click="confirmDelete(menu.host)"
-      >
-        删除主机…
+        {{ action.label }}
       </button>
-    </div></template
-  >
+    </div>
+  </Teleport>
 </template>

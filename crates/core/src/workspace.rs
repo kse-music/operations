@@ -25,7 +25,7 @@ pub enum SplitAxis {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SavedPane {
     pub key: String,
-    pub host_id: String,
+    pub host_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -68,7 +68,9 @@ impl WorkspaceLayout {
             let mut panes = HashSet::new();
             for pane in &tab.panes {
                 identifier(&pane.key)?;
-                identifier(&pane.host_id)?;
+                if let Some(id) = &pane.host_id {
+                    identifier(id)?;
+                }
                 if !keys.insert(&pane.key) || !panes.insert(pane.key.as_str()) {
                     return Err(Error::Validation("窗格标识重复"));
                 }

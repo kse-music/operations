@@ -242,7 +242,7 @@ async function copy() {
             :aria-label="`选择批量目标 ${host.name}`"
           />{{ host.name }} · {{ host.username }}@{{ host.hostname }}:{{ host.port }}</label
         >
-        <p v-if="!hosts.catalog?.hosts.length">暂无主机，请先在主机管理中添加。</p>
+        <p v-if="!hosts.catalog?.hosts.length">暂无主机，请先在主机工作区的主机树中添加。</p>
       </fieldset>
       <TaskConnections v-if="selected.length" :ids="selected" :file="mode === 'file'" />
       <label v-if="mode === 'command'" class="task-command-label"

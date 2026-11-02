@@ -1,38 +1,26 @@
 <script setup lang="ts">
 import {
   ArchiveRestore,
-  ChartNoAxesCombined,
-  FolderSync,
   KeyRound,
   Layers,
   Network,
   Play,
-  Server,
+  PanelsTopLeft,
   Settings2,
-  SquareTerminal,
   Waypoints,
-  Wrench,
 } from '@lucide/vue';
-import { messages, type WorkspaceView } from '../types/product';
+import { hostViews, messages, type WorkspaceView } from '../types/product';
 
 defineProps<{
-  active: WorkspaceView;
+  active: WorkspaceView | null;
   terminals: number;
-  transfers: number;
   tasks: number;
 }>();
-defineEmits<{ navigate: [view: WorkspaceView] }>();
+defineEmits<{ navigate: [view: WorkspaceView]; workspace: [] }>();
 const groups = [
   [
-    { view: 'hosts', icon: Server },
-    { view: 'terminals', icon: SquareTerminal },
-    { view: 'files', icon: FolderSync },
-    { view: 'monitor', icon: ChartNoAxesCombined },
-    { view: 'operations', icon: Wrench },
-  ],
-  [
-    { view: 'automation', icon: Play },
     { view: 'batch', icon: Layers },
+    { view: 'automation', icon: Play },
     { view: 'network', icon: Network },
   ],
   [
@@ -46,6 +34,19 @@ const groups = [
 
 <template>
   <nav class="activity-rail" aria-label="主导航">
+    <div class="activity-group">
+      <button
+        :class="['nav-item', { active: active !== null && hostViews.has(active) }]"
+        aria-label="主机工作区"
+        :aria-current="active !== null && hostViews.has(active) ? 'page' : undefined"
+        data-tooltip="主机工作区"
+        @click="$emit('workspace')"
+      >
+        <PanelsTopLeft :size="20" :stroke-width="1.6" aria-hidden="true" />
+        <span class="nav-label">主机工作区</span>
+        <small v-if="terminals" class="nav-badge">{{ Math.min(99, terminals) }}</small>
+      </button>
+    </div>
     <div v-for="(group, index) in groups" :key="index" class="activity-group">
       <button
         v-for="item in group"
@@ -57,20 +58,10 @@ const groups = [
         @click="$emit('navigate', item.view)"
       >
         <component :is="item.icon" :size="20" :stroke-width="1.6" aria-hidden="true" />
-        <small
-          v-if="
-            (item.view === 'terminals' && terminals) ||
-            (item.view === 'files' && transfers) ||
-            (item.view === 'automation' && tasks)
-          "
-          class="nav-badge"
-          >{{
-            Math.min(
-              99,
-              item.view === 'terminals' ? terminals : item.view === 'files' ? transfers : tasks,
-            )
-          }}</small
-        >
+        <span class="nav-label">{{ messages['zh-CN'][item.view] }}</span>
+        <small v-if="item.view === 'automation' && tasks" class="nav-badge">{{
+          Math.min(99, tasks)
+        }}</small>
       </button>
     </div>
   </nav>

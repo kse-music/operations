@@ -5,6 +5,7 @@ import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { remotePython } from './native-ops-e2e.mjs';
+import { navigateWorkspace, showHostTree } from './ui-navigation.mjs';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function automationChecks(context) {
   let { page } = context;
@@ -15,14 +16,7 @@ export async function automationChecks(context) {
       name,
       args,
     });
-  const nav = (name) =>
-    page
-      .getByRole('navigation', { name: '主导航' })
-      .getByRole('button', {
-        name: name === 'SSH 终端' ? /^SSH 终端/ : name === '运维自动化' ? /^运维自动化/ : name,
-        exact: !['SSH 终端', '运维自动化'].includes(name),
-      })
-      .click();
+  const nav = (name) => navigateWorkspace(page, name);
   async function until(fn, seconds = 40) {
     const end = Date.now() + seconds * 1000;
     while (Date.now() < end) {
@@ -312,7 +306,7 @@ export async function automationChecks(context) {
     scope.hosts.push(h.id);
     await remember();
   }
-  await nav('主机管理');
+  await showHostTree(page);
   await page.getByRole('button', { name: '刷新', exact: true }).first().click();
   const make = async (name, body, parameters = [], risk = 'normal') => {
     const e = await rpc('automation_entry_save', {

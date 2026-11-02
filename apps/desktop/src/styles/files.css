@@ -10,7 +10,6 @@
   font-size: 15px;
   margin: 10px 0;
 }
-.files-host-tabs,
 .files-status {
   display: flex;
   gap: 10px;
@@ -218,4 +217,8 @@
   gap: 10px;
   margin-top: 8px;
   font-size: 11px;
+}
+.file-metadata {
+  font-family: Consolas, monospace;
+  white-space: nowrap;
 }

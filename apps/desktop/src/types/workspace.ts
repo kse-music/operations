@@ -12,7 +12,7 @@ export type LayoutNode =
 export interface SavedTab {
   key: string;
   title: string;
-  panes: { key: string; hostId: string }[];
+  panes: { key: string; hostId: string | null }[];
   layout: LayoutNode;
 }
 export interface WorkspaceLayout {

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), desktop: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: mocks.invoke,
@@ -9,6 +9,18 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('./ipc', () => ({ ensureDesktop: mocks.desktop }));
 import { terminalApi } from './terminal';
 describe('terminal IPC contract', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+  it('opens the fixed local shell through a streaming IPC without host or command input', async () => {
+    const receive = vi.fn();
+    mocks.invoke.mockResolvedValueOnce({ id: 'local:session', shell: 'PowerShell' });
+    await terminalApi.openLocal({ cols: 80, rows: 24 }, receive);
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_open', {
+      size: { cols: 80, rows: 24 },
+      events: expect.objectContaining({ onmessage: receive }),
+    });
+  });
   it('uses a streaming channel and preserves binary input and acknowledgement sequence', async () => {
     mocks.invoke.mockResolvedValue({ id: 's', transportId: 't', hostId: 'h' });
     const receive = vi.fn();

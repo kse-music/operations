@@ -25,6 +25,8 @@ pub struct FileEntry {
     pub size: Option<u64>,
     pub modified: Option<u64>,
     pub permissions: Option<u32>,
+    #[serde(default)]
+    pub owner: Option<String>,
     pub uid: Option<u32>,
     pub gid: Option<u32>,
 }

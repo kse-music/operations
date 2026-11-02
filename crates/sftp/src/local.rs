@@ -107,6 +107,7 @@ pub async fn listing(path: Option<String>) -> Result<DirectoryListing, Error> {
                 .and_then(|v| v.duration_since(UNIX_EPOCH).ok())
                 .map(|v| v.as_secs()),
             permissions,
+            owner: None,
             uid: None,
             gid: None,
         });

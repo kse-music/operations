@@ -33,7 +33,7 @@ button {
   color: inherit;
 }
 .app-shell {
-  --rail-width: 56px;
+  --rail-width: 80px;
   --host-panel-width: var(--sidebar-width);
   height: 100dvh;
   min-height: 560px;

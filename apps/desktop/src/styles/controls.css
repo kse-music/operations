@@ -34,7 +34,6 @@
   margin: 8px 0 0;
 }
 .page-view > .section-description,
-.page-view > .list-controls,
 .page-view > .credential-list,
 .page-view > .banner,
 .page-view > p {
@@ -46,7 +45,6 @@
 .toolbar,
 .ops-toolbar,
 .monitor-actions,
-.row-actions,
 .ops-row-actions,
 .action-row {
   display: flex;
@@ -83,6 +81,7 @@
 :is(.content-scroll, .modal, .terminal-find)
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
 :is(.content-scroll, .modal, .terminal-find) select,
+.host-tree-tools select,
 :is(.content-scroll, .modal) textarea {
   min-width: 0;
   max-width: 100%;
@@ -394,13 +393,6 @@ input[type='file']::file-selector-button {
 }
 .credential-list > li > .toolbar {
   flex-shrink: 0;
-}
-.page-view .host-detail {
-  border: 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  padding: 20px 0 0;
-  margin: 0;
 }
 .system-details {
   margin: 0;

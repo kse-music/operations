@@ -140,6 +140,13 @@ impl TerminalSize {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LocalTerminalSession {
+    pub id: String,
+    pub shell: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSession {
     pub id: String,
     pub transport_id: String,

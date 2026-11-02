@@ -176,6 +176,7 @@ pub fn command_handler<R: tauri::Runtime>()
         commands::forward_list,
         commands::forward_stop,
         commands::terminal_open,
+        commands::terminal_local_open,
         commands::terminal_input,
         commands::terminal_resize,
         commands::terminal_ack,

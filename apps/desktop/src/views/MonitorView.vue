@@ -11,10 +11,10 @@ import { bytes } from '../types/files';
 import TrendChart from '../components/TrendChart.vue';
 import Modal from '../components/Modal.vue';
 const props = defineProps<{ hostId?: string }>();
-const emit = defineEmits<{ context: [hostId: string]; processes: [hostId: string] }>();
+const emit = defineEmits<{ processes: [hostId: string] }>();
 const hosts = useHostsStore(),
   application = useApplicationStore();
-const chosen = ref(props.hostId || hosts.selectedId || ''),
+const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   snapshot = ref<MonitorSnapshot | null>(null),
   error = ref<string | null>(null),
   connection = ref(''),
@@ -147,17 +147,6 @@ async function visibility(): Promise<void> {
       error.value = errorMessage(cause);
     }
 }
-async function selected(): Promise<void> {
-  emit('context', chosen.value);
-  ++generation;
-  await pauseHost();
-  clearTimeout(timer);
-  snapshot.value = null;
-  session.value = '';
-  trust.value = null;
-  error.value = null;
-  connection.value = '请选择开始监控';
-}
 function uptime(value: number | null | undefined): string {
   if (value == null) return '不可用';
   const n = Math.floor(value);
@@ -199,12 +188,7 @@ onBeforeUnmount(() => {
         <p class="subtle">固定只读 SSH 采集 · 页面隐藏暂停 · 不安装 Agent</p>
       </div>
       <div class="monitor-actions">
-        <select v-model="chosen" aria-label="监控主机" :disabled="busy" @change="selected">
-          <option value="">选择主机</option>
-          <option v-for="host in hosts.catalog?.hosts ?? []" :key="host.id" :value="host.id">
-            {{ host.name }}
-          </option></select
-        ><button class="button primary" :disabled="!chosen || busy" @click="start">
+        <button class="button primary" :disabled="!chosen || busy" @click="start">
           {{ busy ? '正在连接…' : snapshot ? '重新连接 / 继续' : '开始监控' }}</button
         ><button class="button" :disabled="!session || busy" @click="stop">停止监控</button
         ><button class="button" :disabled="!chosen" @click="emit('processes', chosen)">
@@ -227,7 +211,7 @@ onBeforeUnmount(() => {
       {{
         session
           ? '正在建立安全连接或等待首个样本；CPU 和网络需要连续采样。'
-          : '选择已配置主机，开始查看服务器资源使用情况。'
+          : '请打开远程主机工作区后查看服务器资源使用情况。'
       }}
     </div>
     <div v-if="sample" :class="{ 'monitor-stale': stale }">

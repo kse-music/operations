@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
+import { showHostTree, openHostTreeTools } from './ui-navigation.mjs';
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
 
@@ -100,8 +101,8 @@ async function start() {
   page = browser.contexts()[0].pages()[0];
   assert(page, 'missing native WebView page');
   page.setDefaultTimeout(10000);
-  await page.getByRole('heading', { name: '主机管理', exact: true }).waitFor();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
+  await showHostTree(page);
   const bootstrap = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('app_bootstrap'));
   assert.equal(
     path.resolve(bootstrap.dataDirectory),
@@ -110,8 +111,8 @@ async function start() {
   );
   safeScope = true;
   await page
-    .getByRole('main')
-    .getByRole('button', { name: '＋ 新建主机', exact: true })
+    .locator('.host-sidebar-actions')
+    .getByRole('button', { name: '新建主机', exact: true })
     .waitFor({ state: 'visible' });
 }
 async function stop() {
@@ -128,9 +129,22 @@ async function stop() {
 }
 const dialog = (name) => page.getByRole('dialog', { name, exact: true });
 const row = (name) =>
-  page.locator('tbody tr').filter({ has: page.getByRole('button', { name, exact: true }) });
+  page.locator('.tree-host-row').filter({ has: page.getByText(name, { exact: true }) });
+const invoke = (command, args = {}) =>
+  page.evaluate(({ command, args }) => window.__TAURI_INTERNALS__.invoke(command, args), {
+    command,
+    args,
+  });
+// Host context actions were removed; retain backend contract coverage as explicitly named IPC tests.
+async function updateTestHost(name, changes) {
+  const host = (await invoke('host_list')).hosts.find((item) => item.name === name);
+  assert(host, `missing isolated host: ${name}`);
+  const { id, createdAt: _createdAt, updatedAt: _updatedAt, ...input } = host;
+  await invoke('host_update', { id, input: { ...input, ...changes } });
+  await page.getByRole('button', { name: '刷新', exact: true }).click();
+}
 async function showHosts() {
-  await page.getByRole('navigation').getByRole('button', { name: '主机管理', exact: true }).click();
+  await showHostTree(page);
 }
 async function showCredentials() {
   await page.getByRole('navigation').getByRole('button', { name: '安全凭据', exact: true }).click();
@@ -166,9 +180,11 @@ try {
     let form = dialog('管理主机分组');
     await form.getByLabel('分组名称', { exact: true }).fill('验收分组');
     await form.getByRole('button', { name: '新建分组', exact: true }).click();
-    await form.locator('li').filter({ hasText: '验收分组' }).waitFor();
-    await form.getByRole('button', { name: '关闭对话框', exact: true }).click();
-    await page.getByRole('main').getByRole('button', { name: '＋ 新建主机', exact: true }).click();
+    await form.waitFor({ state: 'hidden' });
+    await page
+      .locator('.host-sidebar-actions')
+      .getByRole('button', { name: '新建主机', exact: true })
+      .click();
     form = dialog('新建主机');
     await form.getByLabel('主机名称', { exact: true }).fill('E2E-Host');
     await form.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.25');
@@ -178,17 +194,25 @@ try {
     await saveHost('新建主机');
     await row('E2E-Host').waitFor();
     results.push('native host + group create');
-    await row('E2E-Host').getByRole('button', { name: '编辑', exact: true }).click();
-    form = dialog('编辑主机');
-    await form.getByLabel('地址（IP / 域名）', { exact: true }).fill('updated.example.com');
-    await form.getByLabel('备注', { exact: true }).fill('端到端修改与重启验证');
-    await saveHost('编辑主机');
-    await row('E2E-Host').getByText('ops@updated.example.com:22', { exact: true }).waitFor();
-    results.push('native host update');
-    await row('E2E-Host').getByRole('button', { name: '更多', exact: true }).click();
-    await page.getByRole('menuitem', { name: '复制配置', exact: true }).click();
+    await updateTestHost('E2E-Host', {
+      hostname: 'updated.example.com',
+      description: '端到端修改与重启验证',
+    });
+    await row('E2E-Host').getByText('updated.example.com', { exact: true }).waitFor();
+    assert(
+      (await row('E2E-Host').locator('.tree-host').getAttribute('title')).includes(
+        'ops@updated.example.com:22',
+      ),
+    );
+    results.push('native host update via real IPC, reflected in the sidebar');
+    await page.getByRole('button', { name: '主机工作区', exact: true }).click();
+    const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
+    if (await expand.isVisible()) await expand.click();
+    const original = (await invoke('host_list')).hosts.find((item) => item.name === 'E2E-Host');
+    await invoke('host_copy', { id: original.id });
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
     await row('E2E-Host 副本').waitFor();
-    results.push('native host copy');
+    results.push('native host copy via real IPC, without a host menu UI');
     await newCredential('E2E 密码', 'password', secret);
     await newCredential('E2E 私钥', 'private_key', passphrase);
     const cards = page.locator('.credential-list li');
@@ -205,11 +229,10 @@ try {
     );
     await form.getByRole('button', { name: '取消', exact: true }).click();
     await showHosts();
-    await row('E2E-Host').getByRole('button', { name: '编辑', exact: true }).click();
-    form = dialog('编辑主机');
-    await form.getByLabel('认证方式', { exact: true }).selectOption('password');
-    await form.getByLabel('安全凭据引用', { exact: true }).selectOption({ label: 'E2E 密码' });
-    await saveHost('编辑主机');
+    const credential = (await invoke('host_list')).credentials.find(
+      (item) => item.name === 'E2E 密码',
+    );
+    await updateTestHost('E2E-Host', { authType: 'password', credentialId: credential.id });
     const database = await readFile(path.join(artifacts, 'serverdeck.sqlite3'));
     assert(
       !database.includes(Buffer.from(secret)) && !database.includes(Buffer.from(passphrase)),
@@ -221,10 +244,13 @@ try {
     await stop();
     await start();
     await row('E2E-Host').waitFor();
-    assert.equal(await page.locator('tbody tr').count(), 2);
-    await row('E2E-Host').getByRole('button', { name: 'E2E-Host', exact: true }).click();
-    await page.getByText('端到端修改与重启验证', { exact: true }).waitFor();
+    assert.equal(await page.locator('.tree-host-row').count(), 2);
+    assert.equal(
+      (await invoke('host_list')).hosts.find((item) => item.name === 'E2E-Host').description,
+      '端到端修改与重启验证',
+    );
     results.push('native process restart restores SQLite data');
+    await openHostTreeTools(page);
     await page.getByRole('button', { name: '导入 OpenSSH', exact: true }).click();
     form = dialog('导入 OpenSSH Config');
     await form
@@ -268,14 +294,12 @@ try {
     results.push('native non-sensitive JSON export and actual download');
     await page.screenshot({ path: path.join(artifacts, 'hosts.png') });
     for (const name of ['E2E-Host', 'E2E-Host 副本', 'imported-new']) {
-      await row(name).getByRole('button', { name: '更多', exact: true }).click();
-      await page.getByRole('menuitem', { name: '删除主机…', exact: true }).click();
-      form = dialog('确认删除主机');
-      await form.getByRole('button', { name: '确认删除主机', exact: true }).click();
-      await form.waitFor({ state: 'hidden' });
+      const host = (await invoke('host_list')).hosts.find((item) => item.name === name);
+      await invoke('host_delete', { id: host.id });
     }
-    await page.getByRole('heading', { name: '还没有主机', exact: true }).waitFor();
-    results.push('native confirmed host deletion');
+    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await page.getByText('尚未添加主机', { exact: true }).waitFor();
+    results.push('native host deletion via real IPC in the isolated test scope');
     await showCredentials();
     for (const name of ['E2E 密码', 'E2E 私钥']) {
       await page
@@ -293,7 +317,7 @@ try {
     results.push('native OS secret deletion');
     await stop();
     await start();
-    await page.getByRole('heading', { name: '还没有主机', exact: true }).waitFor();
+    await page.getByText('尚未添加主机', { exact: true }).waitFor();
     results.push('deletion persists after a second restart');
     await writeFile(
       path.join(artifacts, 'results.json'),

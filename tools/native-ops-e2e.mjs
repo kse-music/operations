@@ -102,7 +102,7 @@ export async function operationsChecks(context) {
   const { page, artifacts, passed, hostId, command, contains, registerCleanup } = context;
   page.setDefaultTimeout(30000);
   const source = await readFile(new URL('./ops-fixture.py', import.meta.url), 'utf8');
-  const nav = () => page.getByRole('navigation', { name: '主导航' });
+  const nav = () => page.getByRole('navigation', { name: '当前主机工具', exact: true });
   async function hostShell() {
     const dialog = page.getByRole('dialog', { name: '确认主机运维操作', exact: true });
     if (await dialog.isVisible())

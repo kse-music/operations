@@ -7,7 +7,7 @@ import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
 import { hostInput, type Host } from '../types/hosts';
 const props = defineProps<{ host?: Host }>();
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; saved: [host: Host] }>();
 const store = useHostsStore();
 const application = useApplicationStore();
 const draft = reactive(hostInput(props.host, application.state?.config.connectTimeoutSecs));
@@ -55,6 +55,7 @@ async function submit(): Promise<void> {
   );
   if (result.ok) {
     store.selectedId = result.value.id;
+    emit('saved', result.value);
     emit('close');
   }
 }

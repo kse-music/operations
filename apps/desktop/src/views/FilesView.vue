@@ -38,13 +38,12 @@ import { stateLabels } from '../types/terminal';
 const props = defineProps<{ hostId?: string }>();
 const application = useApplicationStore();
 const emit = defineEmits<{
-  context: [hostId: string];
   terminal: [host: Host, action: FileTerminalAction];
 }>();
 const store = useFilesStore(),
   hosts = useHostsStore(),
   terminals = useTerminalsStore();
-const chosen = ref(props.hostId || store.active || hosts.selectedId || ''),
+const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   localPath = ref(''),
   remotePath = ref(''),
   localSelection = ref<string[]>([]),
@@ -95,8 +94,7 @@ watch(
 );
 watch(
   () => store.active,
-  (value) => {
-    chosen.value = value;
+  () => {
     remoteSelection.value = [];
     following.value = false;
   },
@@ -359,28 +357,20 @@ onBeforeUnmount(() => {
         <h1>文件管理</h1>
       </div>
       <div class="toolbar">
-        <select v-model="chosen" aria-label="文件管理主机" @change="emit('context', chosen)">
-          <option value="" disabled>选择主机</option>
-          <option v-for="host in hosts.catalog?.hosts ?? []" :key="host.id" :value="host.id">
-            {{ host.name }}
-          </option></select
-        ><button class="button primary" :disabled="!chosen" @click="connect">连接 SFTP</button>
+        <button
+          class="button primary"
+          :disabled="!chosen || store.current?.state === 'connected'"
+          @click="connect"
+        >
+          {{ store.current?.state === 'connected' ? 'SFTP 已连接' : '连接 SFTP' }}
+        </button>
       </div>
     </div>
     <p v-if="store.error" class="banner error" role="alert">
       {{ store.error }} <button class="text-button" @click="store.error = null">关闭提示</button>
     </p>
     <p v-if="store.notice" class="banner success" role="status">{{ store.notice }}</p>
-    <div v-if="Object.keys(store.connections).length" class="files-host-tabs">
-      <button
-        v-for="connection in store.connections"
-        :key="connection.host.id"
-        :class="['button', { primary: store.active === connection.host.id }]"
-        @click="store.active = connection.host.id"
-      >
-        {{ connection.host.name }} · {{ stateLabels[connection.state] ?? connection.state }}
-      </button>
-    </div>
+    <p v-if="!chosen" class="banner" role="status">请打开远程主机工作区后使用 SFTP 文件管理。</p>
     <div v-if="store.current" class="files-status">
       <strong>{{ store.current.host.name }}</strong
       ><span>{{ stateLabels[store.current.state] ?? store.current.state }}</span
