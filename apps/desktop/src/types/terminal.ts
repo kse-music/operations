@@ -2,6 +2,10 @@ export interface TerminalSize {
   cols: number;
   rows: number;
 }
+export interface TerminalUploadSelection {
+  token: string;
+  files: { name: string; size: number }[];
+}
 export interface TerminalSession {
   routeHostIds: string[];
   id: string;

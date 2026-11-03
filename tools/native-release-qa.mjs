@@ -1,3 +1,4 @@
+import { reloadHosts } from './ui-navigation.mjs';
 import { terminalAction } from './ui-navigation.mjs';
 // Real release WebView, application stores, IPC and authorized SSH; no substituted implementations.
 import assert from 'node:assert/strict';
@@ -312,7 +313,7 @@ export async function releaseChecks({
       }
       const t = performance.now();
       await showHostTree(page);
-      await page.getByRole('button', { name: '刷新', exact: true }).click();
+      await reloadHosts(page);
       await page.waitForFunction(() => document.querySelectorAll('.tree-host').length >= 100);
       report.metrics.hostCatalog1000 = {
         elapsedMs: performance.now() - t,

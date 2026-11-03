@@ -60,6 +60,17 @@ node tools/tauri.mjs build --debug --no-bundle
 
 产物为 `target/debug/serverdeck-desktop.exe`。只构建 Release 二进制可运行 `node tools/tauri.mjs build --no-bundle`。Windows 会锁定运行中的 EXE，重新构建前先关闭该程序。
 
+## Release 依赖加载失败排查
+
+Vite 的 `Some chunks are larger than 500 kB` 是体积警告，后面的 Rust 编译错误需单独处理。`E0463: can't find crate` 表示编译器未能加载依赖，并不只意味着 Cargo.toml 缺少声明，参见 [Rust 错误说明](https://doc.rust-lang.org/error_codes/E0463.html)。先确认依赖声明、当前 Rust 工具链和构建目标；若依赖已声明且已有产物，却在复用 Release 缓存时持续失败，可在没有其他构建进程运行时重新生成缓存：
+
+```powershell
+cargo clean --release
+node tools/tauri.mjs build --bundles nsis
+```
+
+`cargo clean --release` 清理当前 target 目录的 Release 生成产物，包括旧安装包，下次构建会重新编译全部 Release 依赖；需要保留的旧包应先另存。它不清理 Debug 产物或应用数据目录，具体范围见 [Cargo clean 文档](https://doc.rust-lang.org/cargo/commands/cargo-clean.html)。不要用删除数据库、用户配置或 Cargo.lock 来排查这类编译错误。若错误仍存在，保留完整构建日志继续定位，不自动反复清理或掩盖错误。
+
 ## 原生验收
 
 常规编译、类型与单元测试入口见 [README](../README.md#测试)。Windows 受限执行环境可能禁止 Vitest 缓存重命名或 loopback TCP；这些测试需要正常本地进程权限。

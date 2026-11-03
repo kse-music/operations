@@ -10,7 +10,6 @@ import {
 } from 'vue';
 import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
-import WorkspaceView from './views/WorkspaceView.vue';
 import AboutView from './views/AboutView.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import HostSidebar from './components/HostSidebar.vue';
@@ -21,7 +20,6 @@ import HostTools from './components/HostTools.vue';
 import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
-import GroupManager from './components/GroupManager.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
 import { useHostsStore } from './stores/hosts';
@@ -44,9 +42,11 @@ import {
   globalKey,
   defaultProductPreferences,
   hostViews,
+  settingsCategories,
   type WorkspaceView as View,
 } from './types/product';
 import type { WorkspaceCloseScope, WorkspaceTab } from './stores/workspace';
+import { isMonitorSection } from './types/server';
 import GlobalSearch from './components/GlobalSearch.vue';
 const TaskCenterView = defineAsyncComponent(() => import('./views/TaskCenterView.vue'));
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
@@ -78,11 +78,11 @@ const currentHost = computed(() => {
         ? 'terminal'
         : module === 'files'
           ? 'files'
-          : module === 'monitor'
-            ? 'monitor'
-            : module === 'operations'
-              ? 'operations'
-              : '';
+          : module === 'server'
+            ? isMonitorSection(workspace.current?.section ?? 'overview')
+              ? 'monitor'
+              : 'operations'
+            : '';
   const terminal = terminals.panes.find((p) => p.key === terminals.focused && p.host?.id === id);
   const snapshot =
     kind === 'terminal'
@@ -119,6 +119,12 @@ const view = computed<View | null>({
   },
 });
 const isHostWorkspace = computed(() => view.value !== null && hostViews.has(view.value));
+const settingsCategory = computed(() =>
+  settingsCategories.find((item) => item.view === view.value),
+);
+const settingsOpen = computed(() =>
+  workspace.tabs.some((tab) => settingsCategories.some((item) => item.view === tab.view)),
+);
 const showSidebar = computed(() => sidebarOpen.value);
 const showHostTree = computed(() => workspace.module === 'hosts');
 const cachedTools = computed(() =>
@@ -140,7 +146,7 @@ function navigate(
     if (pane?.state === 'idle') pane.connectRequested = true;
   }
   if (value === 'files') files.active = hostId;
-  if (value === 'operations') operations.active = hostId;
+  if (value === 'server') operations.active = hostId;
   workspace.navigate(value, hostId, section);
   if (hostViews.has(value)) store.selectedId = host?.id ?? null;
 }
@@ -365,20 +371,15 @@ function openNetwork(host: Host): void {
   networkRequest.value++;
   navigate('network');
 }
-const OperationsView = defineAsyncComponent(() => import('./views/OperationsView.vue'));
-function openOperations(host: Host): void {
+const ServerView = defineAsyncComponent(() => import('./views/ServerView.vue'));
+function openServer(host: Host): void {
   if (!currentConfiguration(host)) return;
-  navigate('operations', host.id);
+  navigate('server', host.id);
 }
 function containerTerminal(host: Host, shell: import('./types/ops').ContainerShell): void {
   if (!currentConfiguration(host)) return;
   terminals.open(host, undefined, shell);
   navigate('terminals', host.id);
-}
-const MonitorView = defineAsyncComponent(() => import('./views/MonitorView.vue'));
-function openMonitor(host: Host): void {
-  if (!currentConfiguration(host)) return;
-  navigate('monitor', host.id);
 }
 const FilesView = defineAsyncComponent(() => import('./views/FilesView.vue'));
 const RemoteEditor = defineAsyncComponent(() => import('./components/RemoteEditor.vue'));
@@ -412,18 +413,17 @@ function fileTerminal(host: Host, action: import('./types/files').FileTerminalAc
 }
 
 const hostDialog = ref(false);
-const groups = ref(false);
+const hostFolderId = ref<string | null>(null);
 const importing = ref(false);
 const exportText = ref<string | null>(null);
-function openHost(): void {
+function openHost(groupId: string | null = null): void {
   store.error = null;
+  hostFolderId.value = groupId;
   hostDialog.value = true;
 }
 function revealHost(host: Host): void {
   if (!store.visible.some((item) => item.id === host.id)) {
     store.search = '';
-    store.tag = '';
-    store.favorites = false;
   }
   store.selectedId = host.id;
   sidebarOpen.value = true;
@@ -520,7 +520,7 @@ watch(
     if (!t) return;
     if (hostViews.has(t.view)) store.selectedId = currentHostId.value || null;
     if (t.view === 'files') files.active = t.hostId;
-    if (t.view === 'operations') operations.active = t.hostId;
+    if (t.view === 'server') operations.active = t.hostId;
     if (t.view === 'terminals') terminals.activateHost(currentHostId.value);
   },
 );
@@ -558,10 +558,10 @@ watch(
       >
         <HostSidebar
           v-show="showHostTree"
+          :active="showHostTree && sidebarOpen"
           :local-active="view === 'terminals' && !currentHostId"
           @local-terminal="navigate('terminals', '')"
-          @create="openHost()"
-          @groups="groups = true"
+          @create="openHost($event)"
           @import="importing = true"
           @export="exportHosts"
           @select="setContext($event.id, true)"
@@ -678,23 +678,17 @@ watch(
           />
           <BatchView v-else-if="view === 'batch'" />
         </KeepAlive>
-        <OperationsView
-          v-if="view === 'operations'"
-          :key="`operations:${currentHostId}`"
+        <ServerView
+          v-if="view === 'server'"
+          :key="`server:${currentHostId}`"
           :host-id="currentHostId"
-          :initial-tab="workspace.current?.section"
+          :initial-section="workspace.current?.section"
           @section="
             (s) => {
-              if (workspace.current?.view === 'operations') workspace.current.section = s;
+              if (workspace.current?.view === 'server') workspace.current.section = s;
             }
           "
           @shell="containerTerminal"
-        />
-        <MonitorView
-          v-else-if="view === 'monitor'"
-          :key="`monitor:${currentHostId}`"
-          :host-id="currentHostId"
-          @processes="(id) => navigate('operations', id, 'processes')"
         />
         <FilesView
           v-else-if="view === 'files'"
@@ -706,8 +700,12 @@ watch(
         <TaskCenterView v-else-if="view === 'tasks'" @navigate="navigate" />
         <AboutView v-else-if="view === 'about'" />
         <CredentialsView v-else-if="view === 'credentials'" />
-        <WorkspaceView v-else-if="view === 'overview'" @settings="view = 'settings'" />
-        <SettingsPanel v-else-if="view === 'settings'" />
+        <SettingsPanel
+          v-if="settingsOpen"
+          v-show="settingsCategory"
+          :category="settingsCategory?.id ?? 'general'"
+          @category="(id) => navigate(settingsCategories.find((item) => item.id === id)!.view)"
+        />
       </div>
       <div v-show="view === 'terminals'" class="terminal-workspace">
         <div class="terminal-primary">
@@ -717,8 +715,7 @@ watch(
             :host-id="currentHostId"
             toolbar-target="#terminal-session-tools"
             @files="openFiles"
-            @monitor="openMonitor"
-            @operations="openOperations"
+            @server="openServer"
             @automation="openAutomation"
             @network="openNetwork"
           />
@@ -763,13 +760,17 @@ watch(
       </button>
     </footer></Modal
   >
-  <HostDialog v-if="hostDialog" @saved="revealHost" @close="hostDialog = false" />
-  <GroupManager v-if="groups" @close="groups = false" />
+  <HostDialog
+    v-if="hostDialog"
+    :group-id="hostFolderId"
+    @saved="revealHost"
+    @close="hostDialog = false"
+  />
   <ImportDialog v-if="importing" @close="importing = false" />
   <Modal v-if="exportText !== null" title="导出非敏感主机配置" @close="exportText = null"
     ><p class="subtle">
       JSON
-      格式，仅包含主机、分组、标签及备注。排除凭据、凭据引用、私钥路径、密码和私钥口令。请确认备注中没有自行填写的秘密。
+      格式，包含主机、分组和连接配置。排除凭据、凭据引用、私钥路径、密码和私钥口令。请检查导出内容中是否有自行填写的秘密。
     </p>
     <textarea class="export-text" :value="exportText" readonly aria-label="导出内容"></textarea>
     <footer class="dialog-actions">

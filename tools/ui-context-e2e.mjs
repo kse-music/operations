@@ -115,7 +115,7 @@ try {
       (await page.locator('.workspace-header .host-tools button').allTextContents()).map((text) =>
         text.trim(),
       ),
-      ['SSH 终端', 'SFTP 文件', '服务器监控', 'Linux 运维'],
+      ['SSH 终端', 'SFTP 文件', '服务器管理'],
     );
     assert.equal(await page.locator('.terminal-tab').count(), 1);
     assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
@@ -194,7 +194,7 @@ try {
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'files');
     assert.equal(await page.getByLabel('远程路径', { exact: true }).inputValue(), '/b');
-    await nav('全局设置');
+    await nav('通用');
     assert.equal(await page.locator('.host-tree-section').isVisible(), false);
     assert.equal(await page.getByRole('navigation', { name: '当前主机工具' }).count(), 0);
     await selectHostWorkspace(page, 'a');
@@ -284,13 +284,13 @@ try {
       ['安全凭据', '备份恢复'],
     );
     await page.screenshot({ path: `${output}/${name}-assets-module.png` });
-    await nav('本地环境');
+    await nav('关于');
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['全局设置', '本地环境', '关于'],
+      ['通用', '终端', '快捷键', '工作区与连接', '关于'],
     );
     await page.locator('.module-navigation [data-module="assets"]').click();
-    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'overview');
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'about');
     await nav('备份恢复');
     await page.locator('.module-navigation [data-module="tools"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'backup');

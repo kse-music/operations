@@ -1,4 +1,4 @@
-import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
+import { terminalAction, terminalTabAction, navigateWorkspace } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -109,12 +109,13 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   await send(panes().nth(0), 'printf \'\\n__SD_VALUE_%s__\\n\' "$SD_PANE_VALUE"');
   await contains(panes().nth(0), '__SD_VALUE_alpha__');
   passed('tab rename, drag reorder and closing individual extra sessions retain live split shells');
-  await page.getByRole('navigation').getByRole('button', { name: '全局设置', exact: true }).click();
+  await navigateWorkspace(page, '终端');
   await page.getByLabel('终端字体', { exact: true }).fill('Consolas, monospace');
   await page.getByLabel('终端行高', { exact: true }).fill('120');
   await page.getByLabel('滚动历史行数', { exact: true }).fill('1024');
   await page.getByLabel('终端主题', { exact: true }).selectOption('nord');
   await page.getByLabel('光标样式', { exact: true }).selectOption('bar');
+  await navigateWorkspace(page, '快捷键');
   await page.getByLabel('查找快捷键', { exact: true }).focus();
   await page.keyboard.press('Control+Shift+g');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();

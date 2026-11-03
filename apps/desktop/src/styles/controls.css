@@ -81,7 +81,6 @@
 :is(.content-scroll, .modal, .terminal-find)
   input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
 :is(.content-scroll, .modal, .terminal-find) select,
-.host-tree-tools select,
 :is(.content-scroll, .modal) textarea {
   min-width: 0;
   max-width: 100%;
@@ -281,15 +280,7 @@ input[type='file']::file-selector-button {
   gap: 28px;
   margin: 0;
 }
-.settings-tabs {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-}
-.settings-tabs > .button {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-.settings-tabpanel > fieldset {
+.settings-category > fieldset {
   min-width: 0;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px 24px;
@@ -419,7 +410,7 @@ input[type='file']::file-selector-button {
 @container workspace (max-width: 700px) {
   .file-columns,
   .monitor-charts,
-  .settings-tabpanel > fieldset {
+  .settings-category > fieldset {
     grid-template-columns: minmax(0, 1fr);
   }
   .monitor-cards {

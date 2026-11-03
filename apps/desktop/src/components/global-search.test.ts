@@ -20,7 +20,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
-it.each(['主机 ·', '工作区 · 全局设置'])(
+it.each(['主机 ·', '工作区 · 通用'])(
   'distinguishes host selection from global asset navigation: %s',
   async (label) => {
     pinia = createPinia();

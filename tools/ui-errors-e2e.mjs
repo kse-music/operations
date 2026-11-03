@@ -51,15 +51,17 @@ try {
   for (const view of [
     'terminals',
     'files',
-    'monitor',
-    'operations',
+    'server',
     'automation',
     'batch',
     'network',
     'credentials',
     'backup',
     'settings',
-    'overview',
+    'settingsTerminal',
+    'settingsShortcuts',
+    'settingsWorkspace',
+    'about',
   ]) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors = [];
@@ -151,11 +153,8 @@ try {
         };
         useNotificationsStore(pinia).items = [];
         if (view === 'terminals') useTerminalsStore(pinia).open(null);
-        useWorkspaceStore(pinia).navigate(
-          view,
-          ['files', 'monitor', 'operations'].includes(view) ? host.id : '',
-        );
-        if (view === 'overview') application.error = message;
+        useWorkspaceStore(pinia).navigate(view, ['files', 'server'].includes(view) ? host.id : '');
+        if (view === 'about') application.error = message;
       },
       { view, message },
     );
@@ -165,11 +164,11 @@ try {
       await page.getByLabel('待恢复备份 JSON', { exact: true }).fill('invalid');
       await page.getByRole('button', { name: '校验并预览备份', exact: true }).click();
     }
-    if (view === 'settings') {
+    if (view.startsWith('settings')) {
       // Real browser preview has no Tauri IPC; saving must surface the safe desktop error.
       await page.getByRole('button', { name: '保存设置', exact: true }).click();
     }
-    const expected = view === 'settings' ? '当前为浏览器预览，未连接 Rust 后端。' : message;
+    const expected = view.startsWith('settings') ? '当前为浏览器预览，未连接 Rust 后端。' : message;
     const toast = page.locator('.toast[role="alert"]').filter({ hasText: expected });
     await toast.waitFor({ state: 'visible' });
     assert.equal(await toast.count(), 1, `${view}: duplicate toast`);

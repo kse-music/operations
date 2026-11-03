@@ -190,7 +190,7 @@ impl Request {
     }
     pub fn command(&self) -> Result<String, Error> {
         let body = match self {
-            Self::Capabilities => include_str!("ops_capabilities.sh").into(),
+            Self::Capabilities => include_str!("ops_capabilities.sh").replace("\r\n", "\n"),
             Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
             Self::Images => "d image ls --no-trunc --digests --format '{{json .}}'".into(),
             Self::ContainerDetails {

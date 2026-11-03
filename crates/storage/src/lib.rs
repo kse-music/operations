@@ -96,6 +96,11 @@ impl Database {
                 .execute_batch(include_str!("../migrations/006_optional_host_name.sql"))
                 .map_err(storage_error)?;
         }
+        if version < 7 {
+            transaction
+                .execute_batch(include_str!("../migrations/007_host_folders.sql"))
+                .map_err(storage_error)?;
+        }
         transaction
             .pragma_update(None, "user_version", DATABASE_VERSION)
             .map_err(storage_error)?;

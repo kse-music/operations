@@ -20,11 +20,13 @@ import { pidPorts } from '../services/product-links';
 import { hostDisplayName, type Host } from '../types/hosts';
 import { stateLabels } from '../types/terminal';
 import Modal from '../components/Modal.vue';
+import OpsDetails from '../components/OpsDetails.vue';
+import type { OperationsSection } from '../types/server';
 import OpsTable from '../components/OpsTable.vue';
 import OpsLogPanel from '../components/OpsLogPanel.vue';
 const props = defineProps<{
   hostId?: string;
-  initialTab?: 'containers' | 'images' | 'processes' | 'ports' | 'services' | 'logs';
+  initialTab?: OperationsSection;
 }>();
 const emit = defineEmits<{
   section: [value: NonNullable<typeof props.initialTab>];
@@ -33,9 +35,7 @@ const emit = defineEmits<{
 const hosts = useHostsStore(),
   ops = useOpsStore();
 const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
-  tab = ref<'containers' | 'images' | 'processes' | 'ports' | 'services' | 'logs'>(
-    props.initialTab ?? 'containers',
-  ),
+  tab = ref<OperationsSection>(props.initialTab ?? 'containers'),
   scope = ref<Scope>('system'),
   filter = ref(''),
   rows = ref<Record<string, unknown>[]>([]),
@@ -62,6 +62,20 @@ const probe = ref(false),
   probeTarget = ref('127.0.0.1'),
   probePort = ref(22),
   probeLocation = ref<'local' | 'remote'>('remote');
+const detailOpen = ref(false),
+  detailLoading = ref(false),
+  detailError = ref<string | null>(null),
+  historyOpen = ref(false);
+let detailGeneration = 0;
+function closeDetail() {
+  ++detailGeneration;
+  detailOpen.value = false;
+  detailLoading.value = false;
+  detail.value = null;
+  processDetail.value = null;
+  processPorts.value = null;
+  detailError.value = null;
+}
 const processPorts = ref<Record<string, unknown>[] | null>(null);
 watch(
   () => props.initialTab,
@@ -170,6 +184,7 @@ async function ready(): Promise<void> {
 watch(
   () => [connection.value?.session?.id, connection.value?.state],
   () => {
+    closeDetail();
     if (connected.value) void ready();
     else {
       ++generation;
@@ -183,8 +198,7 @@ watch(
 );
 watch([tab, scope], () => {
   filter.value = '';
-  detail.value = null;
-  processDetail.value = null;
+  closeDetail();
   void load();
 });
 async function connect(): Promise<void> {
@@ -198,26 +212,26 @@ async function connect(): Promise<void> {
   }
 }
 async function inspect(request: OpsRequest, title: string): Promise<void> {
-  busy.value = true;
-  error.value = null;
-  processDetail.value = null;
-  processPorts.value = null;
+  closeDetail();
+  const token = ++detailGeneration;
+  detailTitle.value = title;
+  detailOpen.value = true;
+  detailLoading.value = true;
   try {
     const id = session();
     const result = await query(request);
-    if (id !== connection.value?.session?.id) return;
+    if (token !== detailGeneration || id !== connection.value?.session?.id) return;
     detail.value = result.detail ?? { resources: result.records };
-    detailTitle.value = title;
-    if (request.kind === 'process_details' && detail.value)
+    if (request.kind === 'process_details')
       processDetail.value = {
         pid: Number(detail.value.pid),
         startTicks: String(detail.value.startTicks),
         bootId: String(detail.value.bootId),
       };
   } catch (cause) {
-    error.value = errorMessage(cause);
+    if (token === detailGeneration) detailError.value = errorMessage(cause);
   } finally {
-    busy.value = false;
+    if (token === detailGeneration) detailLoading.value = false;
   }
 }
 function ask(
@@ -293,6 +307,7 @@ async function disconnect(): Promise<void> {
   }
 }
 async function runProbe(): Promise<void> {
+  probe.value = false;
   await inspect(
     {
       kind: 'probe',
@@ -304,7 +319,11 @@ async function runProbe(): Promise<void> {
   );
 }
 let healthTimer: ReturnType<typeof setInterval> | undefined;
-onBeforeUnmount(() => clearInterval(healthTimer));
+onBeforeUnmount(() => {
+  clearInterval(healthTimer);
+  ++generation;
+  closeDetail();
+});
 onMounted(async () => {
   healthTimer = setInterval(
     () =>
@@ -332,19 +351,14 @@ async function relatedPorts() {
     error.value = errorMessage(cause);
   }
 }
-useErrorNotifications(error);
+useErrorNotifications(() => [error.value, detailError.value]);
 </script>
 <template>
-  <section class="operations-view page-view" aria-label="主机运维工作区">
-    <div class="section-heading">
-      <div>
-        <h1>Linux 运维</h1>
-        <p class="subtle">当前 SSH 账号执行 · 不自动提权 · Docker 使用远端 Unix Socket</p>
-      </div>
-      <div class="ops-toolbar">
-        <button class="button primary" :disabled="!chosen || busy" @click="connect">连接运维</button
-        ><button class="button" :disabled="!connected" @click="disconnect">断开运维连接</button>
-      </div>
+  <section class="operations-view" aria-label="主机运维工作区">
+    <div class="ops-toolbar">
+      <button class="button primary" :disabled="!chosen || busy || connected" @click="connect">
+        {{ connected ? '运维已连接' : '连接运维' }}</button
+      ><button class="button" :disabled="!connected" @click="disconnect">断开运维连接</button>
     </div>
     <p class="ops-connection-status" role="status">
       {{
@@ -370,43 +384,14 @@ useErrorNotifications(error);
         ><button
           class="text-button"
           @click="
+            closeDetail();
             detail = capabilities;
             detailTitle = '主机能力与 Docker 版本';
+            detailOpen = true;
           "
         >
           版本 / 能力详情</button
         ><button class="text-button" @click="probe = !probe">TCP 连通性检测</button>
-      </div>
-      <div v-if="probe" class="ops-toolbar">
-        <select v-model="probeLocation" aria-label="检测位置">
-          <option value="remote">从远端主机</option>
-          <option value="local">从本地设备</option></select
-        ><input v-model="probeTarget" aria-label="连通性目标" placeholder="IP / 域名" /><input
-          v-model.number="probePort"
-          type="number"
-          min="1"
-          max="65535"
-          aria-label="连通性端口"
-        /><button class="button" :disabled="busy" @click="runProbe">检测 TCP 端口</button>
-      </div>
-      <div class="ops-tabs" role="tablist">
-        <button
-          v-for="item in [
-            { key: 'containers', label: 'Docker 容器' },
-            { key: 'images', label: '镜像' },
-            { key: 'processes', label: '进程' },
-            { key: 'ports', label: '监听端口' },
-            { key: 'services', label: 'systemd 服务' },
-            { key: 'logs', label: '日志' },
-          ]"
-          :key="item.key"
-          role="tab"
-          :aria-selected="tab === item.key"
-          class="button"
-          @click="tab = item.key as typeof tab"
-        >
-          {{ item.label }}
-        </button>
       </div>
       <div v-if="tab !== 'logs'" class="ops-toolbar">
         <input
@@ -424,7 +409,9 @@ useErrorNotifications(error);
       </div>
       <OpsTable
         v-if="tab !== 'logs'"
+        :key="tab"
         :rows="rows"
+        :loading="busy"
         :columns="columns"
         :filter="filter"
         :row-key="rowKey"
@@ -550,79 +537,96 @@ useErrorNotifications(error);
         ></OpsTable
       >
       <OpsLogPanel
-        v-show="tab === 'logs'"
-        v-if="connection?.session"
+        v-if="tab === 'logs' && connection?.session"
         :key="connection.session.id"
         ref="logs"
         :session-id="connection.session.id"
         :host-name="hostDisplayName(connection.host)"
       />
-      <section v-if="detail" class="ops-detail">
-        <div class="section-heading">
-          <h2>{{ detailTitle }}</h2>
-          <button
-            class="button"
-            @click="
-              detail = null;
-              processDetail = null;
-            "
-          >
-            关闭详情
-          </button>
+      <Modal v-if="detailOpen" :title="detailTitle" wide :busy="busy" @close="closeDetail">
+        <div class="ops-detail-content" :aria-busy="detailLoading">
+          <p v-if="detailLoading" class="host-empty" role="status">正在读取详情…</p>
+          <p v-else-if="detailError" class="banner error" role="alert">{{ detailError }}</p>
+          <template v-else-if="detail">
+            <p v-if="detail.environmentRevealed" class="banner error">
+              敏感环境值正在显示，离开详情即清除；不会记录到操作历史。
+            </p>
+            <button
+              v-if="detail.environment && !detail.environmentRevealed"
+              class="button"
+              @click="
+                ask(
+                  '显式显示容器环境变量',
+                  String(detail.id),
+                  undefined,
+                  undefined,
+                  String(detail.id),
+                )
+              "
+            >
+              显示环境变量值…
+            </button>
+            <div v-if="processDetail" class="ops-toolbar">
+              <span>PID {{ processDetail.pid }}</span
+              ><button class="button" @click="relatedPorts">查看关联监听端口</button
+              ><select v-model="signal" aria-label="进程信号">
+                <option>TERM</option>
+                <option>KILL</option>
+                <option>INT</option>
+                <option>HUP</option></select
+              ><button
+                class="button danger"
+                @click="
+                  ask(`向 PID ${processDetail.pid} 发送 ${signal}`, String(processDetail.pid), {
+                    kind: 'signal',
+                    ...processDetail,
+                    signal,
+                    confirmed: true,
+                  })
+                "
+              >
+                发送信号…
+              </button>
+            </div>
+            <section v-if="processPorts" aria-label="进程关联端口">
+              <p class="subtle">只显示 ss 明确报告此 PID 的监听项；权限不足时可能没有关联信息。</p>
+              <OpsTable
+                :rows="processPorts"
+                :columns="[
+                  { key: 'protocol', label: '协议' },
+                  { key: 'local', label: '地址' },
+                  { key: 'process', label: '进程' },
+                ]"
+                row-key="local"
+                filter=""
+              />
+            </section>
+            <OpsDetails :detail="detail" />
+          </template>
         </div>
-        <p v-if="detail.environmentRevealed" class="banner error">
-          敏感环境值正在显示，离开详情即清除；不会记录到操作历史。
-        </p>
-        <button
-          v-if="detail.environment && !detail.environmentRevealed"
-          class="button"
-          @click="
-            ask('显式显示容器环境变量', String(detail.id), undefined, undefined, String(detail.id))
-          "
-        >
-          显示环境变量值…
-        </button>
-        <div v-if="processDetail" class="ops-toolbar">
-          <span>PID {{ processDetail.pid }}</span
-          ><button class="button" @click="relatedPorts">查看关联监听端口</button
-          ><select v-model="signal" aria-label="进程信号">
-            <option>TERM</option>
-            <option>KILL</option>
-            <option>INT</option>
-            <option>HUP</option></select
-          ><button
-            class="button danger"
-            @click="
-              ask(`向 PID ${processDetail.pid} 发送 ${signal}`, String(processDetail.pid), {
-                kind: 'signal',
-                ...processDetail,
-                signal,
-                confirmed: true,
-              })
-            "
-          >
-            发送信号…
-          </button>
-        </div>
-        <section v-if="processPorts" aria-label="进程关联端口">
-          <p class="subtle">只显示 ss 明确报告此 PID 的监听项；权限不足时可能没有关联信息。</p>
-          <OpsTable
-            :rows="processPorts"
-            :columns="[
-              { key: 'protocol', label: '协议' },
-              { key: 'local', label: '地址' },
-              { key: 'process', label: '进程' },
-            ]"
-            row-key="local"
-            filter=""
-          />
-        </section>
-        <pre data-testid="operations-detail">{{ JSON.stringify(detail, null, 2) }}</pre>
-      </section>
+      </Modal>
     </template>
     <p v-else class="host-empty">从主机管理连接后，查看真实 Docker、进程、端口、服务和指定日志。</p>
-    <details class="ops-history">
-      <summary>本次应用内操作反馈（仅目标与结果，不记录输出）</summary>
+    <footer class="ops-footer">
+      <span class="subtle">当前 SSH 账号执行 · 不自动提权</span
+      ><button class="text-button" @click="historyOpen = true">操作反馈</button>
+    </footer>
+    <Modal v-if="probe" title="TCP 连通性检测" @close="probe = false">
+      <div class="ops-toolbar">
+        <select v-model="probeLocation" aria-label="检测位置">
+          <option value="remote">从远端主机</option>
+          <option value="local">从本地设备</option></select
+        ><input v-model="probeTarget" aria-label="连通性目标" placeholder="IP / 域名" /><input
+          v-model.number="probePort"
+          type="number"
+          min="1"
+          max="65535"
+          aria-label="连通性端口"
+        /><button class="button" :disabled="busy" @click="runProbe">检测 TCP 端口</button>
+      </div>
+    </Modal>
+    <Modal v-if="historyOpen" title="本次操作反馈" wide @close="historyOpen = false">
+      <p class="subtle">仅记录目标与结果，不记录输出。</p>
       <p
         v-for="(event, index) in history.filter((e) => e.hostId === connection?.host.id)"
         :key="index"
@@ -630,7 +634,10 @@ useErrorNotifications(error);
         {{ new Date(event.at).toLocaleTimeString() }} · {{ event.operation }} · {{ event.target }} ·
         {{ event.outcome }}
       </p>
-    </details>
+      <p v-if="!history.some((e) => e.hostId === connection?.host.id)" class="host-empty">
+        当前主机暂无操作记录。
+      </p>
+    </Modal>
     <Modal v-if="pending" title="确认主机运维操作" :busy="busy" @close="pending = null"
       ><p>{{ pending.title }}</p>
       <p>

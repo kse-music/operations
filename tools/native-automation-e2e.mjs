@@ -1,3 +1,4 @@
+import { reloadHosts } from './ui-navigation.mjs';
 // Actual native app, SQLite, SSH stdin script execution, two isolated Linux servers and wall-clock scheduling.
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -306,7 +307,7 @@ export async function automationChecks(context) {
     await remember();
   }
   await showHostTree(page);
-  await page.getByRole('button', { name: '刷新', exact: true }).first().click();
+  await reloadHosts(page);
   const make = async (name, body, parameters = [], risk = 'normal') => {
     const e = await rpc('automation_entry_save', {
       id: null,

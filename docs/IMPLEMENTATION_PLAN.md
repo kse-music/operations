@@ -5,6 +5,18 @@
 
 ## 当前状态
 
+- 2026-11-03 设置导航调整：顶栏改为右对齐的“设置”，原四个分类提升为通用、终端、快捷键、工作区与连接侧栏菜单；独立工作区标签共用草稿和完整配置保存，无效字段同步菜单定位。本地环境及重新检查合入关于，删除独立入口和页面。完成标准为导航/草稿/保存与异常定位回归、合并内容及四组布局通过；验证见 `VALIDATION_SETTINGS_NAVIGATION.md`。本阶段完成后停止。
+
+- 2026-11-03 主机行图标移除：删除主机行内编辑/删除图标和专用显隐样式，回收右侧按钮预留空间；保留右键菜单中的编辑、复制和确认删除。完成标准为默认/悬停/焦点均无行内图标、键盘菜单可编辑、删除确认/取消/失败及既有主机选择与会话行为正确；验证见文末对应阶段。本阶段完成后停止。
+
+- 2026-11-03 根目录与多级文件夹：移除顶部管理分组/刷新/新建工具栏，搜索移至“全部主机”下方；默认根目录保留未分组主机，旧分组转为根下文件夹。用户确认多级目录和原文件夹内复制，新增按目标区分的右键菜单及固定归属新建主机，移除主机表单分组字段。SQLite v7、parentId DTO、备份/配置导出 v2 及旧 v1 备份兼容同步。完成标准为迁移/重启/层级恢复无数据丢失、文件夹新建仅在文件夹菜单、复制与删除确认绑定真实目标、搜索/拖动/键盘及四组布局回归；验证见文末对应阶段。本阶段完成后停止。
+
+- 2026-11-03 主机列表操作调整：移除顶部三点工具入口、展开面板和主机排序设置，删除对应前端状态及专用样式。导入/导出移至紧贴远程主机列表的“全部主机”标题右侧，本地设备位于其上方；标题和操作不随列表滚动，沿用原导入/导出用例。完成标准为入口位置、悬浮提示/键盘操作、忙碌与未加载禁用、导出失败提示、搜索/分组/列表滚动及四组布局回归通过；验证见文末对应阶段。本阶段完成后停止。
+
+- 2026-11-03 主机管理精简：移除标签、备注和收藏表单、主机树标签/收藏筛选及收藏标记；搜索仅匹配名称、地址和用户名，保留静态“全部主机”总数、排序、分组和连接操作。历史 IPC/SQLite/备份字段保留，编辑和移动分组不清空旧数据。完成标准为新建/编辑字段消失、历史元数据不参与查询、正常操作与失败状态回归通过；验证结果见文末对应阶段。本阶段完成后停止。
+
+- 2026-11-03 NSIS 构建恢复：复现 Release E0463 依赖加载失败后，重新生成 Release 编译缓存并成功构建 Windows x64 安装包；保留业务源码、依赖版本、Debug 产物和用户数据。构建证据与限制见文末对应阶段。
+
 - 2026-11-03 原生剪贴板：复制/粘贴统一接入 Tauri 原生文本剪贴板，移除网页 Clipboard API 读取及写入，不再触发 WebView2 网页授权提示。仅主窗口开放文本读写，保留大文本确认、大小限制及断线保护；相关依赖、权限和文档同步，验证见文末对应阶段。本阶段完成后停止。
 
 - 2026-11-03 系统页面统一铺满：按最新纠正，保留关于等页面的铺满布局，移除全局设置和本地环境共用的 1080px 最大宽度与自动居中限制，统一铺满中央显示区并保留响应式内边距；验证见文末对应阶段。本阶段完成后停止。
@@ -32,7 +44,7 @@
 - S4 已交付；S5 当前完成真实 Agentless 采集、差分、任务管理、Monitor 页面和 Linux 交叉验证，保留完整发布矩阵门禁。
 
 - S1/S2 已交付；保留原配置和数据、SSH 信任表及已有 v3→v4 SSH 选项迁移；本轮新增 v4→v5 自动化迁移。
-- S2.1–S2.3 主机/单层分组/标签/收藏/搜索/排序/复制/确认删除及详情已实现。
+- S2.1–S2.3 主机/单层分组/搜索/排序/确认删除及详情已实现；标签、备注和收藏管理于 2026-11-03 移除，历史字段保留兼容，主机树复制入口已移除。
 - S3.1–S3.5 中的凭据使用、TOFU 信任/变更阻断、SSH 认证、PTY、流式 IPC、背压、多标签和手动重连已实现；真实 Windows → Ubuntu OpenSSH Shell、vim/top/htop/less、Ctrl+C/Z 已通过。本轮分屏已实现；系统 known_hosts 哈希/撤销/CA 导入未实现。
 - S6.3 中 OpenSSH 预览、重复识别、选择导入及非敏感 JSON 导出按本轮授权提前交付；完整备份恢复仍未实现。
 - S0.3 已覆盖授权真实 Ubuntu、密码认证与隔离 Windows named-pipe Agent 签名认证；系统 Agent 实际加载身份、其他平台/发行版及 20 会话性能矩阵未完成。S0.4 RSA 门禁保留，本地 RSA 私钥签名明确拒绝。
@@ -568,3 +580,121 @@ Windows 测试及普通配置的 Tauri debug 构建均通过，隔离 WebView2 �
 隔离 WebView2 的 19 项原生场景通过，结果位于 .local/native-ui-e2e/e54f0674-6b5e-48e0-8e7f-2f30fd16d95b/results.json。新增场景将网页剪贴板读写替换为抛错陷阱，核对实际调用次数为零；通过真实系统剪贴板和本地 PowerShell 验证中文、emoji、CRLF、菜单/右键/快捷键粘贴、选中/快捷键复制及大文本确认。辅助程序独立读取 Windows 剪贴板，原始各格式只在内存备份并在测试结束恢复；若用户期间复制新内容则不覆盖。首轮中文比对失败源于辅助 PowerShell 的输出编码，改为 UTF-8 后复验通过。测试数据目录独立，原生程序、浏览器与剪贴板辅助进程均已退出，不修改正式配置。
 
 普通配置调试程序为 .local/native-clipboard/ServerDeck.exe，与构建输出 SHA256 一致：C26E36F85E945151F35960B34900F0C583FE0543553774E787BB3451443C7A78。未安装或替换运行版本，未生成 Release 安装包，未重跑真实远程 SSH/SFTP、Rust 全量测试或 macOS/Linux 验收。保留既有 Monaco 大 chunk 与增量缓存硬链接回退提示；系统剪贴板被其他程序占用时仍可能读写失败，并沿用明确失败提示，未发现其他新增风险。无新增阶段依赖，本阶段完成后停止。
+
+## NSIS Release 构建恢复（2026-11-03）
+
+复现用户原命令 `node tools/tauri.mjs build --bundles nsis`，前端构建成功，Rust 在 window_state.rs 导入 serverdeck_application 时发生 E0463。检查确认依赖已声明，Rust 为 stable 1.99.1 / x86_64-pc-windows-msvc，原 Release 依赖产物存在。单独重新生成 application 缓存后错误转移至 serverdeck_ssh，仅重新生成项目自身 Release 缓存后继续转移至 russh/tokio_util，局部清理不能恢复。只读检查显示内存和磁盘仍有余量。
+
+核实 target/release 的绝对路径及非目录链接属性后，执行 `cargo clean --release --target-dir D:/CodexProjects/operations/target --offline`，重新生成完整 Release 编译缓存；Debug、源码、Cargo.lock、用户配置和应用数据均保留。随后原 NSIS 命令完整构建成功，Rust Release 耗时 4m44s；继续复跑同一命令、复用新依赖缓存，再次成功，Rust Release 耗时 3m04s。两轮均包含 TypeScript/Vite 生产构建、优化 Rust 编译/链接和实际 makensis 打包。Vite 的既有 500kB chunk 体积警告保留，不影响两次构建成功。该结果确认重新生成 Release 缓存后恢复，但未定位旧缓存加载异常的最初触发原因，不宣称已证明某个依赖文件损坏。
+
+主要修改文件仅 docs/RELEASE_CHECKLIST.md 和本计划，补充 E0463 排查、清理范围及原命令复建方法；不增加自动清理或重试逻辑，不变更业务代码、权限、依赖版本或数据库。修改文档 Prettier 与差异检查通过。原始失败、局部重建、完整重建及复跑日志保存在 .local/nsis-build-fix，产物大小、版本、签名和 SHA256 见同目录 artifacts.json 与 SHA256SUMS。
+
+最终安装包为 target/release/bundle/nsis/ServerDeck_0.1.0-beta.1_x64-setup.exe，7,303,285 字节，SHA256 为 812F6E81AC3F26FABBDA2406E279ACF69B92B9C34C612592742C92EECC19F242；Release 程序为 target/release/serverdeck-desktop.exe，26,402,304 字节，SHA256 为 CE83117D3BB5D2FA544AB9F2D2D5D7473E77B17C49A9FF6B2FEFD3A653C03962。两者版本均为 0.1.0-beta.1，Authenticode 状态均为 NotSigned。未执行安装、替换运行程序或复测原生功能、真实远程操作、Rust/前端功能单测及其他平台，本轮没有业务源码变更。现有测试版发布阻断项保持，成功打包不等于稳定版验收；无新增下一阶段依赖，本阶段完成后停止。
+
+## 移除模块与工作区标签选中横线（2026-11-03）
+
+按用户截图移除 styles/product.css 中顶部模块选中项的 border-bottom-color 和工作区活动标签的 border-top-color，保留原有透明边框占位、文字及背景高亮，避免控件尺寸变化。同步 PRD 的选中态约定，其他已有与并行修改保持原样。
+
+验证：TypeScript/Vite 生产构建通过，既有 Monaco 大 chunk 提示保留。独立无头 Edge 在 1440×900 深/浅、900×600 深、390×844 浅四组下，完成 16 次模块选中和 12 次设备/全局工作区标签切换的真实计算样式检查：选中边框均透明，文字或背景区分保留，工作区标签高度仍为 41px。已查看深浅主题截图；脚本、结果及截图位于 .local/selection-lines，测试仅使用内存布局数据，不连接远程主机或写正式配置，结束已关闭浏览器与临时服务。修改文件 Prettier 和限定本次文件的差异检查通过；全库差异检查曾发现并行修改的 crates/core/src/terminal.rs:257 有末尾多余空行，未修改该任务外文件。
+
+本轮仅改样式，未执行功能单测、原生 WebView2、Rust 或真实远程验收；未生成安装包。未发现本次变更新增风险，无新增下一阶段依赖。本阶段完成后停止。
+
+## SSH 终端 rz / ZMODEM 上传（2026-11-03）
+
+已接入真实 ZMODEM 上传：远端 rz 握手自动打开原生多文件选择器，经原 SSH PTY 流式发送，支持中文名、二进制、空文件、多文件、进度、跳过计数和取消。传输期间普通输入/粘贴隔离，Ctrl+C / Ctrl+X 可取消；选择器等待继续 ACK 和保活，断线、关闭及重连不向新会话发送旧文件。原生选择器显示实际 SSH 连接快照，文件路径留在 Rust，仅授予绑定活跃终端与批次 token 的 8 KiB 分块读取；退出沿用未完成任务确认。每批最多 100 个普通文件、单文件小于 4 GiB，sz 下载和目录传输继续使用 SFTP，不增加持久配置或数据库迁移。
+
+主要修改 TerminalPane.vue、services/zmodem.ts、terminal-input.ts、terminal.ts、application/terminal_upload.rs、SSH 就绪校验、Tauri 上传命令及最小 main ACL，新增前后端回归和真实 rz/PTTY 验收工具。PRD、ARCHITECTURE、DECISIONS、USER_GUIDE 和依赖许可同步更新；固定新增 npm 依赖 zmodem.js 0.1.10 与 crc-32 1.2.2，完整许可加入 THIRD_PARTY_NOTICES.txt。保留工作区原有及并行的样式、构建文档修改。
+
+验证：最终全量前端 36 文件、238 项通过；Application 11 项、SSH Agent 1 项与 Engine 18 项、真实 IPC 2 项通过。SSH live 测试因没有授权远端环境按原标记忽略。首次前端/日志测试受沙箱临时目录限制，切至 .local/zmodem/tmp 后通过；SSH 测试首次被回环套接字权限阻断，允许本机套接字后通过。SSH/Application/Desktop 的 Clippy（--all-targets --no-deps -- -D warnings）通过，core 的独立 Clippy 仍被原有 openssh.rs:290 single_element_loop 阻断，未改无关实现。最终 TypeScript/Vite 生产构建、普通配置 Tauri debug 构建、ESLint、修改文件 Prettier、rustfmt、测试工具语法和差异检查通过。
+
+真实 Ubuntu lrzsz 0.12.21-10 在隔离 Linux PTY 上完成五项验收：2 MiB 二进制/中文名/空文件/多文件逐字节核对、取消选择、同名拒收保护、6.5 秒选择保活和中途取消，均通过；同时核对授权释放、输入恢复和协议结束后 Shell 输出。结果位于 .local/zmodem/protocol-e4e95975-e02f-4c1b-8b5a-ea1902e3f41b/results.json。未连接用户服务器、安装系统软件或改正式应用数据。详细验证见 VALIDATION_ZMODEM.md。
+
+普通配置调试程序为 .local/zmodem/ServerDeck.exe，42,712,064 字节，SHA256 为 BA755B4E86B362352DC6FE9DFFDE81973311571E81ABA085E69D74DFBCB0FB47；对应构建清单 .local/zmodem/build.json。未安装或替换运行程序，使用前退出旧版本。未生成 Release/安装包，未完成完整原生选择器操作到实际远端文件的端到端验收、用户服务器验收或 macOS/Linux 桌面验收。中途取消可能保留远端部分文件，不自动执行删除；同名处理取决于远端 rz 参数。既有 Monaco 大 chunk 和增量缓存硬链接回退提示保留。无新增下一阶段实现依赖，本阶段完成后停止。
+
+## Windows 构建的监控与运维采集脚本换行修复（2026-11-03）
+
+复现截图中的 Bash else 语法错误：Windows core.autocrlf=true 将 monitor.sh 和 ops_capabilities.sh 检出为 CRLF，include_str! 又把回车原样编入远端 exec 命令。两个原脚本均在本机 WSL 的 Bash/sh 语法检查中失败，运维错误与截图的 else printf 分支一致。core::ops::Request::Capabilities 与 SSH collector_command 在发送前将 CRLF 转为 LF；新增 .gitattributes 的 *.sh text eol=lf，并规范本地两份脚本。保留采集内容、协议、权限、取消及连接所有权。
+
+主要修改 .gitattributes、crates/core/src/ops.rs、crates/ssh/src/monitor.rs，新增 crates/core/tests/ops.rs 并补充 crates/monitor/tests/engine.rs 的实际 SSH exec 换行断言；同步 ARCHITECTURE 和本计划。原有 monitor 精确载荷比对改为 Unix 换行后的完整脚本比对，仍验证所有采集内容，不删除有效断言。保留工作区原有及其他任务修改。
+
+验证：先运行新能力命令回归，原 CRLF 版本失败；仅修复命令生成、仍保留 CRLF 源文件时，能力命令和监控命令回归均通过。最终 Core/SSH/Monitor/Ops 共 66 项测试通过，1 项依赖授权远端的 live 测试按原规则忽略；覆盖真实本机 SSH 通道、凭据与主机密钥、监控暂停/恢复、超时、权限、断线、输出上限、运维确认及日志取消。SSH 单元测试初次受沙箱回环套接字 10013 限制，获批后全量通过。SSH/Monitor/Ops 的 Clippy --all-targets --no-deps -- -D warnings 通过；含 Core 的严格检查被原有 openssh.rs:290 single_element_loop 告警阻断，未修改无关实现。
+
+本机 Linux 实测：修复后两脚本均通过 Bash/sh 语法检查，并实际执行只读采集。运维使用 Rust Request::Capabilities.command() 导出的完整命令；监控使用规范后的固定脚本。输出分别符合 SDOPS1/SDMON1，并由项目现有 Rust 解析器成功解析，断言 CPU、内存与 uptime 有效、能力响应成功。未连接用户服务器。原失败脚本、临时验证工具与结果位于 .local/collector-lf-fix；linux-results.json 记录原版失败与修复后通过，原始采集输出仅保留在该忽略目录，不进入业务日志。
+
+TypeScript/Vite 生产构建和普通配置 Windows Tauri debug 构建通过。默认 target/debug 输出首次因覆盖现有 serverdeck-desktop.exe 被系统拒绝（os error 5）而失败，随后使用 .local/native-ui-build 构建目录完成编译；未结束用户进程或删除原程序。修复版保存为 .local/collector-lf-fix/ServerDeck.exe，42,745,856 字节，与本轮输出 SHA256 一致：A34B2A1146E4E1B0567E838914C63C5ADE4236FC0369A5047B5AD4E6B2E2517E。build.json 记录构建来源与校验值，两个构建日志保留。修改 Rust 文件 rustfmt、文档 Prettier 及限定本次文件的差异检查通过。
+
+未执行用户服务器连接与原生界面点击到实际远端的验收，未重跑前端功能单测或其他平台验收；未安装、替换正在运行的程序或生成 Release 安装包。保留已有 Monaco 大 chunk 和增量缓存硬链接回退复制提示，Core 严格 Clippy 的原有告警仍待独立处理；未发现本次修复新增风险，无新增阶段依赖。本阶段完成后停止。
+
+## 2026-11-03：主机管理移除标签、备注和收藏
+
+已移除主机表单三个字段、标签/收藏筛选及行内收藏图标，删除对应 Pinia 状态和专用样式；搜索仅匹配名称、地址及用户名。全部主机保留静态标题与真实总数。旧 IPC/数据库/备份字段继续兼容，编辑旧主机和移动分组不清空历史数据，未新增迁移或依赖。主要修改 HostDialog、HostSidebar、hosts store、hosts 类型和样式、App 定位/导出文案，以及相关测试与既有 E2E 工具；需求、架构、使用说明和决策已同步。
+
+验证：相关五个文件 87 项测试通过，TypeScript/Vite 生产构建通过，本次 Vue/TypeScript 的严格 ESLint、格式检查、四个工具语法检查及限定差异检查通过；四组尺寸/主题的浏览器布局回归通过，已查看表单与主机树截图。完整命令、环境调整和截图位置见 `VALIDATION_REMOVE_HOST_METADATA.md`。
+
+当前工作区全量测试为 243 项通过、2 项失败，另有 1 项服务器管理测试未处理异常；涉及主机工具数量、终端菜单和日志关闭测试 Promise，均超出本次范围。全项目 lint 另有监控页面可选属性默认值告警，本次新增测试告警已修复并通过限定检查。未执行原生/远端/跨平台验收或 Rust/Tauri/安装包重建；既有 Monaco 大 chunk 提示保留。未发现本次新增风险，历史元数据仅作兼容保留，无新增阶段依赖。本阶段完成后停止。
+
+## 2026-11-03：服务器监控与 Linux 运维统一为服务器管理
+
+已将两个主机工具入口合并为服务器管理，统一工具栏、终端右键与全局搜索。ServerView 使用资源概览、磁盘、网络、Docker 容器、镜像、进程、监听端口、systemd 服务、日志九个 Tab，每台主机独立记住最近分类。概览仅展示关键指标和 CPU/内存趋势；磁盘、网络独立布局，长列表在表格内部滚动。系统、核心、警告、进程/容器/服务详情、能力、TCP 探测及操作反馈按需弹窗，进程常用字段优先、完整状态折叠。详情晚到结果不能重开已关闭弹窗，离开日志分类关闭流，原有会话绑定、稳定进程身份、指纹和危险操作确认保留。
+
+主要文件：ServerView、MonitorView、OperationsView、OpsDetails、OpsTable、HostTools、App、server 类型/样式及相关导航状态、测试和文档。全量前端 37 个文件 / 245 项测试通过，最后默认值修正后相关八项回归通过；全项目严格 ESLint、本次 Prettier、九个 E2E 工具语法检查和限定差异检查通过。四种尺寸/主题浏览器检查通过并审阅截图，桌面概览无纵向溢出，小窗口滚动显著减少。TypeScript/Vite 与 Windows Tauri debug 构建通过，校验产物为 .local/server-management/ServerDeck.exe。详细命令、证据与范围见 VALIDATION_SERVER_MANAGEMENT.md。
+
+未执行用户服务器连接、原生到远端界面验收、Release 安装包或跨平台验收；保留既有大 chunk 与增量缓存硬链接回退提示。未发现新增阻断问题，无新增依赖或数据库迁移，无新增阶段依赖。未替换用户运行中的程序；本阶段完成后停止。
+
+## 2026-11-03：主机列表导入导出入口调整
+
+已移除三点工具入口、展开面板及排序设置，清理对应状态、非默认排序分支和专用样式；列表保持原默认名称顺序。按用户追加建议，将“全部主机”移到固定本地设备下方、远程列表正上方，右侧提供常驻导入/导出图标按钮。标题与按钮不随主机列表滚动，保留提示、键盘操作、未加载/忙碌禁用及原导入导出流程。
+
+主要修改 HostSidebar、hosts store、主机/公共控件样式、相关单测及 App 集成回归，共享导航与三个既有 E2E 工具同步。PRD、架构、技术决策和使用说明已更新，无 IPC、数据库、权限或依赖变化。
+
+验证：全量 37 个测试文件、246 项测试通过，TypeScript/Vite 生产构建及全项目严格 ESLint 通过；修改文件格式、工具语法和限定差异检查通过。四组尺寸/主题的浏览器回归通过，已查看新入口的桌面/窄屏截图，导入弹窗及导出成功/失败集成回归通过。截图、范围和限制见 `VALIDATION_HOST_LIST_ACTIONS.md`。
+
+未执行原生/真实远端/跨平台 E2E、Rust/Tauri 编译或安装包重建；既有 Monaco 大 chunk 提示保留。未发现新增风险，无新增阶段依赖。本阶段完成后停止。
+
+## 2026-11-03：服务器管理磁盘容量误报
+
+已复现并修复进入服务器管理后把隐藏的伪文件系统、只读镜像、重复挂载缺少 df 容量记录当作错误通知的问题。MonitorView 的默认磁盘列表与错误订阅共用持久挂载集合；查看全部挂载不扩大告警范围，真实持久盘与独立 overlay 故障仍提示具体挂载路径，整体错误与采集警告保留。
+
+主要修改 MonitorView、monitor.test.ts、ui-server-e2e.mjs 和相关说明。修复前两项回归断言失败，修复后三个文件 13 项相关测试通过，四组浏览器检查通过，本次文件严格 ESLint、Prettier、脚本语法和限定差异检查通过。TypeScript/Vite 和 Windows debug 构建最终通过；修复版 .local/monitor-mount-notice/ServerDeck.exe 已校验与来源一致。全项目 ESLint 最后检查仍受现有 HostSidebar 无指令 template 告警影响；初次构建的并行分组类型错误随原工作更新后解除，未修改该组文件。
+
+未连接用户服务器，未重跑全项目/Rust 测试及跨平台验收，无法确认原来已消失的那条具体磁盘采集警告；真实告警没有被屏蔽。保留既有大包和缓存硬链接回退提示，无新增依赖或阶段依赖。详情与证据见 VALIDATION_MONITOR_MOUNT_NOTICE.md，本阶段完成后停止。
+
+## 2026-11-03：移除 SSH 终端启动提示文案
+
+已按截图移除 TerminalPane.vue 在远程连接/重连开始时写入的“── 新的 SSH Shell ──”及附带空行，不过滤远端登录信息或命令输出。新建/重连 SSH 会话生效，已有终端滚动历史不做清除。仅修改该连接处的提示写入条件。
+
+执行终端剪贴板与 ZMODEM 两个现有测试文件，共 14 项通过；该组件严格 ESLint、Prettier 与限定差异检查通过。TypeScript/Vite 及 Windows Tauri debug 构建通过，产物 .local/remove-ssh-banner/ServerDeck.exe 与构建来源 SHA256 一致，清单和日志位于同目录。未新增文案实现镜像测试，未执行真实远端/原生界面验收或跨平台测试，未替换用户运行中的程序。保留既有 Monaco 大包与缓存硬链接回退提示，未发现新增风险，无新增阶段依赖。本阶段完成后停止。
+
+## 2026-11-03：一并移除本地 Shell 启动提示
+
+按用户补充要求，删除 TerminalPane.vue 中剩余的本地 Shell 提示写入；本地与 SSH 新建/重连均不再由应用插入 Shell 分隔文案或附带空行。原始终端输出及连接流程保留，已有滚动历史不清除。
+
+现有终端组件测试 12 项通过（使用本地终端挂载并覆盖剪贴板、连接与菜单流程），该文件严格 ESLint、Prettier 和限定差异检查通过；TypeScript/Vite 与 Windows Tauri debug 构建通过。新版 .local/remove-local-banner/ServerDeck.exe 已与构建来源校验 SHA256 一致，日志和清单位于同目录。未执行原生界面实机或跨平台验收；保留既有大包和缓存硬链接回退警告，未发现新增风险，无新增阶段依赖。本阶段完成后停止。
+
+## 2026-11-03：根目录、多级文件夹及右键主机管理
+
+按用户截图删除顶部管理分组/刷新/新建整条工具栏，搜索放在“全部主机”下方；保留标题右侧导入/导出及固定本地设备入口。主机表单移除分组，由右键目标锁定新建位置。用户确认支持多级文件夹及原文件夹内复制：新增根目录、文件夹专属新建/重命名/确认删除菜单，以及主机连接/编辑/复制/确认删除菜单，打开菜单不切换或连接主机，根目录不能删改。删除文件夹将主机和子目录提升至父目录并保留。
+
+主要修改 HostSidebar/HostDialog/HostTreeControls/GroupManager/ImportDialog、层级服务、App 与相关类型/样式；SQLite v7 迁移、父目录 DTO、事务校验、备份与配置导出 v2 和旧 v1 备份兼容同步。原分组及主机归属保留，继续沿用名称全局唯一，更新 PRD、架构、决策、使用说明、单元/集成测试及 E2E 导航和脚本。
+
+验证：前端全量 39 个文件 261 项测试通过，Core/Storage/Application 共 69 项及真实 Tauri dispatcher IPC 2 项（合计 71 项 Rust）通过。覆盖迁移重启、父目录循环拒绝、复制完整配置与共享凭据、删除内容保留、层级备份恢复及回滚；保留 v5 完整 catalog 比对断言。TypeScript/Vite、全项目严格 ESLint、Storage 严格 Clippy、Rust fmt、修改文件格式/差异和脚本语法检查通过；四组窗口/主题浏览器回归及截图检查通过。具体证据、环境调整及产物见 `VALIDATION_HOST_TREE_FOLDERS.md`。
+
+默认 Cargo 输出覆盖已有 EXE 被系统拒绝，改用独立输出目录完成 Windows debug 编译和 IPC 验证；未结束用户程序或改写用户配置。包含 Core 的严格 Clippy 仍被原有 openssh 单元素循环告警阻断；保留既有 Monaco 大 chunk、硬链接回退复制提示。未运行完整原生 UI/真实远端/跨平台 E2E 或重建 Release 安装包；文件夹仍全局不可重名，旧程序不能打开 v7/v2 结构。未发现本次新增数据丢失风险，无新增阶段依赖，本阶段完成后停止。
+
+## 2026-11-03：主机行编辑和删除统一使用右键菜单
+
+按用户截图移除主机行内编辑/删除图标，删除图标导入、按钮容器、悬停/焦点显隐样式及绝对定位；主机行右侧内边距从两个按钮的 57px 预留恢复为 10px。HostTreeControls 继续提供原编辑表单和确认删除弹窗，由 HostSidebar 右键菜单调用，不改主机数据、连接或后端接口。
+
+主要修改 HostTreeControls.vue、hosts.css、host-tree-controls.test.ts；更新共享 E2E 主机菜单操作、浏览器布局及原生 UI 脚本。PRD、架构、技术决策和使用说明同步。原编辑/删除回归改为从真实右键菜单进入，保留对准确主机、当前会话、保存、确认、取消及失败提示的断言，没有用删除有效断言代替功能验证。
+
+验证：四个相关测试文件共 90 项通过；TypeScript/Vite 生产构建、全项目严格 ESLint、修改文件 Prettier、三个工具 node --check 和限定 git diff --check 通过。四组浏览器尺寸/主题（1440×900 深/浅色、900×600 深色、390×844 浅色）回归通过：主机行只有一个按钮，默认/悬停/键盘焦点都没有行内编辑删除图标，名称布局稳定，右侧预留已释放，Shift+F10 与方向键可进入编辑；原文件夹/主机菜单、列表滚动和定位正常。已查看桌面及窄屏截图，产物和 results.json 位于 .local/host-row-context-only/layout。浏览器仅使用内存夹具，实际修改/删除的成功、取消及失败由现有服务边界测试验证。
+
+未重跑全量前端/Rust/IPC、完整原生 UI、远端及跨平台验收，未重建安装包；本次无后端或数据结构修改。保留既有 Monaco 大 chunk 提示，未发现新增风险，无新增阶段依赖。本阶段完成后停止。
+
+## 2026-11-03：补齐桌面虚拟挂载分类，消除磁盘容量误报
+
+后续截图明确暴露文档门户、GVFS、GNOME 远程桌面剪贴板挂载未被后端识别为 pseudo；之前前端通知过滤不能覆盖此遗漏。修改 monitor/src/disk.rs，将已知 subtype 及严格匹配会话路径的普通 FUSE 剪贴板标为伪文件系统，后端容量警告统计与前端默认列表、气泡自动采用一致结果；全部挂载保留原始不可用原因。没有批量过滤 FUSE 或 /run/user，真实磁盘、SSHFS、rclone、普通 FUSE 数据盘及 df 命令失败继续告警。
+
+新增 metrics.rs 回归先复现三个挂载点误报，再验证多个 UID、路径边界及真实故障保留。Rust 解析 11 项、历史 1 项、SSH 回环集成 3 项，前端监控/服务器管理/通知 13 项全部通过；严格 Monitor Clippy、cargo fmt、文档格式和限定差异检查通过。将生产 Rust 解析出的 DTO 注入 Edge，正常三类虚拟挂载得到零警告、零气泡；加入真实 /data 故障后恰保留一条告警/气泡，全部挂载仍可查看。TypeScript/Vite 和 Windows Tauri debug 构建通过，新版 .local/desktop-mount-fix/ServerDeck.exe 已校验来源哈希一致。
+
+主要文件为 disk.rs、metrics.rs、架构与验证文档。详细证据见 VALIDATION_DESKTOP_MOUNTS.md。首次 SSH 测试在沙箱内超时，沙箱外同代码连接本机测试服务后通过；未连接用户服务器、未执行完整原生 UI、跨平台或 Release 安装包验收。保留既有大包/硬链接回退提示，自定义运行目录或其他虚拟类型仍可能需要补充识别。无新增依赖、IPC、数据库变更及下一阶段依赖，本阶段完成后停止。

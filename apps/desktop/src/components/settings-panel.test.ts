@@ -1,14 +1,20 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createApp, nextTick, type App } from 'vue';
+import { createApp, h, nextTick, ref, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import SettingsPanel from './SettingsPanel.vue';
 import { useApplicationStore } from '../stores/application';
 import * as ipc from '../services/ipc';
-import { defaultProductPreferences } from '../types/product';
+import {
+  defaultProductPreferences,
+  settingsCategories,
+  type SettingsCategory,
+} from '../types/product';
 import { defaultTerminalPreferences } from '../types/preferences';
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
+const category = ref<SettingsCategory>('general');
 beforeEach(() => {
+  category.value = 'general';
   pinia = createPinia();
   setActivePinia(pinia);
   useApplicationStore().state = {
@@ -31,7 +37,15 @@ beforeEach(() => {
   };
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(SettingsPanel).use(pinia);
+  app = createApp({
+    render: () =>
+      h(SettingsPanel, {
+        category: category.value,
+        onCategory: (value) => {
+          category.value = value;
+        },
+      }),
+  }).use(pinia);
   app.mount(root);
 });
 afterEach(() => {
@@ -40,13 +54,12 @@ afterEach(() => {
   root.remove();
 });
 
-const tabs = () => [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
 const visiblePanels = () =>
-  [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')].filter(
+  [...root.querySelectorAll<HTMLElement>('.settings-category')].filter(
     (panel) => panel.style.display !== 'none',
   );
 async function select(index: number) {
-  tabs()[index]!.click();
+  category.value = settingsCategories[index]!.id;
   await nextTick();
 }
 async function input(selector: string, value: string, event = 'input') {
@@ -63,21 +76,14 @@ async function submit() {
   await nextTick();
 }
 
-it('shows one category at a time and saves drafts from all four tabs together', async () => {
+it('shows the selected menu category and saves drafts from all four categories together', async () => {
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
-  expect(tabs().map((tab) => tab.textContent?.trim())).toEqual([
-    '界面与运行',
-    '终端显示与输入',
-    '终端快捷键',
-    '工作区与连接',
-  ]);
-  for (let index = 0; index < tabs().length; index++) {
+  expect(root.querySelector('[role="tablist"]')).toBeNull();
+  for (let index = 0; index < settingsCategories.length; index++) {
     await select(index);
     expect(visiblePanels()).toHaveLength(1);
-    const tab = tabs()[index]!;
-    expect(tab.getAttribute('aria-selected')).toBe('true');
-    expect(visiblePanels()[0]!.id).toBe(tab.getAttribute('aria-controls'));
-    expect(visiblePanels()[0]!.getAttribute('aria-labelledby')).toBe(tab.id);
+    expect(root.querySelector('h1')?.textContent).toBe(settingsCategories[index]!.label);
+    expect(visiblePanels()[0]!.id).toBe(`settings-panel-${settingsCategories[index]!.id}`);
   }
   await input('[aria-label="默认下载目录"]', 'D:\\Downloads');
   await select(2);
@@ -109,24 +115,6 @@ it('shows one category at a time and saves drafts from all four tabs together', 
   expect(useApplicationStore().notice).toContain('设置已保存');
 });
 
-it('supports arrow keys, Home and End with one tab stop and matching focus', async () => {
-  for (const [key, index] of [
-    ['ArrowLeft', 3],
-    ['ArrowRight', 0],
-    ['End', 3],
-    ['Home', 0],
-    ['ArrowRight', 1],
-  ] as const) {
-    tabs()
-      .find((tab) => tab.getAttribute('aria-selected') === 'true')!
-      .dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
-    await nextTick();
-    expect(document.activeElement).toBe(tabs()[index]);
-    expect(tabs().filter((tab) => tab.tabIndex === 0)).toEqual([tabs()[index]]);
-    expect(visiblePanels()[0]!.id).toBe(tabs()[index]!.getAttribute('aria-controls'));
-  }
-});
-
 it('keeps quick copy and paste off by default and saves it only after enabling and submitting', async () => {
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
   await select(1);
@@ -147,14 +135,14 @@ it('keeps quick copy and paste off by default and saves it only after enabling a
   expect(useApplicationStore().state?.config.terminal.quickCopyPaste).toBe(true);
 });
 
-it('opens the tab containing an invalid field before reporting validity', async () => {
+it('requests the menu containing an invalid field before reporting validity', async () => {
   const save = vi.spyOn(ipc, 'saveConfig');
   await select(1);
   const invalid = await input('[aria-label="终端行高"]', '99');
   const report = vi.spyOn(invalid, 'reportValidity');
   await select(0);
   await submit();
-  expect(tabs()[1]!.getAttribute('aria-selected')).toBe('true');
+  expect(category.value).toBe('terminal');
   expect(visiblePanels()[0]!.contains(invalid)).toBe(true);
   expect(document.activeElement).toBe(invalid);
   expect(report).toHaveBeenCalledOnce();

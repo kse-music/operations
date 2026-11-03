@@ -5,46 +5,44 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
-  FolderCog,
-  MoreHorizontal,
-  Plus,
-  RefreshCw,
+  Download,
   Search,
   Server,
   SquareTerminal,
-  Star,
+  Upload,
 } from '@lucide/vue';
 const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
-import { hostDisplayName, type Host } from '../types/hosts';
+import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
 import HostTreeControls from './HostTreeControls.vue';
+import GroupManager from './GroupManager.vue';
+import Modal from './Modal.vue';
+import { hostsApi } from '../services/hosts';
+import { folderAncestors, hostFolderRows } from '../services/host-tree';
 const store = useHostsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
-defineProps<{ localActive?: boolean }>();
+const props = withDefaults(defineProps<{ localActive?: boolean; active?: boolean }>(), {
+  active: true,
+});
 const hostState = (id: string) =>
   background.connections
     ? background.hostState(id)
     : operations.hostState(id) !== '未连接'
       ? operations.hostState(id)
       : files.hostState(id);
-defineEmits<{
+const emit = defineEmits<{
   localTerminal: [];
-  create: [];
-  groups: [];
+  create: [groupId: string | null];
   import: [];
   export: [];
   select: [host: Host];
   saved: [host: Host];
 }>();
 const collapsed = ref<string[]>([]);
-const toolsOpen = ref(false);
-const tags = computed(() =>
-  [...new Set(store.catalog?.hosts.flatMap((host) => host.tags) ?? [])].sort(),
-);
 const tree = ref<HTMLElement>();
 const dragged = ref<string | null>(null),
   dropTarget = ref<string | null>(null),
@@ -59,7 +57,7 @@ function targetGroup(event: PointerEvent): string | null {
     ?.closest<HTMLElement>('.tree-group');
   if (!group || !tree.value?.contains(group)) return null;
   const id = group.dataset.groupId || null;
-  return id === pendingDrag?.host.groupId ? null : (id ?? 'ungrouped');
+  return id === pendingDrag?.host.groupId ? null : (id ?? 'root');
 }
 function beginDrag(host: Host, event: PointerEvent): void {
   if (event.button !== 0 || event.pointerType === 'touch' || store.busy) return;
@@ -118,7 +116,7 @@ function dropHost(event: PointerEvent): void {
     target = id ? targetGroup(event) : null;
   if (id) blockDragClick();
   endDrag();
-  if (id && target !== null) void store.move(id, target === 'ungrouped' ? null : target);
+  if (id && target !== null) void store.move(id, target === 'root' ? null : target);
 }
 function cancelDrag(): void {
   if (dragged.value) blockDragClick();
@@ -144,7 +142,7 @@ const connectedCount = computed(
 );
 const limit = ref(200);
 watch(
-  () => [store.search, store.favorites, store.sort, store.tag],
+  () => store.search,
   () => (limit.value = 200),
 );
 watch(
@@ -152,24 +150,25 @@ watch(
   ([id]) => {
     const host = store.catalog?.hosts.find((item) => item.id === id);
     if (!host) return;
-    collapsed.value = collapsed.value.filter((group) => group !== (host.groupId ?? 'ungrouped'));
+    const ancestors = ['root', ...folderAncestors(store.catalog?.groups ?? [], host.groupId)];
+    collapsed.value = collapsed.value.filter((group) => !ancestors.includes(group));
     const index = store.visible.findIndex((item) => item.id === id);
     if (index >= limit.value) limit.value = Math.ceil((index + 1) / 200) * 200;
   },
 );
-const nodes = computed(() => {
-  const map = new Map<string | null, Host[]>();
-  for (const host of store.visible.slice(0, limit.value)) {
-    const list = map.get(host.groupId) ?? [];
-    list.push(host);
-    map.set(host.groupId, list);
-  }
-  return [{ id: null, name: '未分组' }, ...(store.catalog?.groups ?? [])].map((g) => ({
-    ...g,
-    hosts: map.get(g.id) ?? [],
-  }));
-});
+const nodes = computed(() =>
+  hostFolderRows(
+    store.catalog?.groups ?? [],
+    store.visible,
+    collapsed.value,
+    !!store.search.trim(),
+    limit.value,
+  ),
+);
+const isCollapsed = (id: string | null) =>
+  !store.search.trim() && collapsed.value.includes(id ?? 'root');
 function keys(event: KeyboardEvent) {
+  if (event.defaultPrevented) return;
   const target = event.target as HTMLElement;
   if (!target.matches('.tree-host') || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key))
     return;
@@ -192,6 +191,168 @@ function toggle(id: string): void {
     ? collapsed.value.filter((i) => i !== id)
     : [...collapsed.value, id];
 }
+
+type ContextTarget = { kind: 'folder'; id: string | null } | { kind: 'host'; id: string };
+type MenuAction =
+  'newHost' | 'newFolder' | 'rename' | 'deleteFolder' | 'connect' | 'edit' | 'copy' | 'deleteHost';
+const context = ref<{ target: ContextTarget; x: number; y: number }>();
+const menuElement = ref<HTMLElement>();
+let contextTrigger: HTMLElement | undefined;
+let contextScrollTop = 0;
+const controls = new Map<string, InstanceType<typeof HostTreeControls>>();
+function setControls(id: string, component: unknown): void {
+  if (component) controls.set(id, component as InstanceType<typeof HostTreeControls>);
+  else controls.delete(id);
+}
+const folderEditor = ref<{ parentId: string | null; group?: HostGroup }>();
+const deletingFolder = ref<HostGroup>();
+const menuItems = computed<{ key: MenuAction; label: string; danger?: boolean }[]>(() => {
+  const target = context.value?.target;
+  if (!target) return [];
+  if (target.kind === 'host')
+    return [
+      { key: 'connect', label: '连接主机' },
+      { key: 'edit', label: '编辑主机' },
+      { key: 'copy', label: '复制主机' },
+      { key: 'deleteHost', label: '删除主机', danger: true },
+    ];
+  return [
+    { key: 'newHost', label: '新建主机' },
+    { key: 'newFolder', label: '新建文件夹' },
+    ...(target.id === null
+      ? []
+      : [
+          { key: 'rename' as const, label: '重命名文件夹' },
+          { key: 'deleteFolder' as const, label: '删除文件夹', danger: true },
+        ]),
+  ];
+});
+function dismissContext(restoreFocus = false): void {
+  context.value = undefined;
+  if (restoreFocus && contextTrigger?.isConnected) contextTrigger.focus({ preventScroll: true });
+}
+function treeScrolled(event: Event): void {
+  if (context.value && (event.currentTarget as HTMLElement).scrollTop !== contextScrollTop)
+    dismissContext();
+}
+async function openContext(
+  target: ContextTarget,
+  event: MouseEvent | KeyboardEvent,
+): Promise<void> {
+  if (
+    props.active === false ||
+    !store.catalog ||
+    document.querySelector('dialog[open]') ||
+    dragged.value
+  )
+    return;
+  contextTrigger = event.currentTarget as HTMLElement;
+  contextScrollTop = tree.value?.querySelector<HTMLElement>('.host-tree-scroll')?.scrollTop ?? 0;
+  const anchor = contextTrigger.getBoundingClientRect();
+  const keyboard = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  context.value = {
+    target,
+    x: keyboard ? anchor.left : event.clientX,
+    y: keyboard ? anchor.bottom : event.clientY,
+  };
+  await nextTick();
+  if (!context.value || !menuElement.value) return;
+  const bounds = menuElement.value.getBoundingClientRect();
+  context.value.x = Math.max(8, Math.min(context.value.x, window.innerWidth - bounds.width - 8));
+  context.value.y = Math.max(8, Math.min(context.value.y, window.innerHeight - bounds.height - 8));
+  menuElement.value
+    .querySelector<HTMLButtonElement>('button:not(:disabled)')
+    ?.focus({ preventScroll: true });
+}
+function contextKeys(target: ContextTarget, event: KeyboardEvent): void {
+  if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  void openContext(target, event);
+}
+function menuKeys(event: KeyboardEvent): void {
+  if (event.key === 'Escape' || event.key === 'Tab') {
+    event.preventDefault();
+    dismissContext(true);
+    return;
+  }
+  if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const items = [
+    ...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+  ];
+  if (!items.length) return;
+  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+  items[
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? items.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+  ]?.focus();
+}
+async function runContext(action: MenuAction): Promise<void> {
+  const target = context.value?.target;
+  if (!target || store.busy) return;
+  dismissContext(true);
+  if (target.kind === 'folder') {
+    const group = store.catalog?.groups.find((group) => group.id === target.id);
+    if (target.id !== null && !group) {
+      store.error = '目标文件夹已不存在，请刷新后重试。';
+      return;
+    }
+    if (action === 'newHost') emit('create', target.id);
+    else if (action === 'newFolder') folderEditor.value = { parentId: target.id };
+    else if (action === 'rename' && group)
+      folderEditor.value = { parentId: group.parentId ?? null, group: { ...group } };
+    else if (action === 'deleteFolder' && group) deletingFolder.value = { ...group };
+    return;
+  }
+  const host = store.catalog?.hosts.find((host) => host.id === target.id);
+  if (!host) {
+    store.error = '目标主机已不存在，请刷新后重试。';
+    return;
+  }
+  if (action === 'connect') {
+    store.selectedId = host.id;
+    emit('select', host);
+  } else if (action === 'edit') controls.get(host.id)?.edit();
+  else if (action === 'deleteHost') controls.get(host.id)?.confirmDelete();
+  else if (action === 'copy') {
+    const result = await store.run(() => hostsApi.copy(host.id), '主机已复制。');
+    if (result.ok) emit('saved', result.value);
+  }
+}
+function folderSaved(group: HostGroup): void {
+  store.search = '';
+  const ancestors = ['root', ...folderAncestors(store.catalog?.groups ?? [], group.id)];
+  collapsed.value = collapsed.value.filter((id) => !ancestors.includes(id));
+}
+async function removeFolder(): Promise<void> {
+  const group = deletingFolder.value;
+  if (!group) return;
+  const result = await store.run(
+    () => hostsApi.groupRemove(group.id),
+    '文件夹已删除，主机和子文件夹已保留在父目录。',
+  );
+  if (result.ok) deletingFolder.value = undefined;
+}
+const closeContext = () => dismissContext();
+watch(() => store.catalog, closeContext);
+watch(
+  () => props.active,
+  (active) => {
+    if (active === false) dismissContext();
+  },
+);
+onMounted(() => {
+  window.addEventListener('blur', closeContext);
+  window.addEventListener('resize', closeContext);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('blur', closeContext);
+  window.removeEventListener('resize', closeContext);
+});
 </script>
 <template>
   <section
@@ -202,108 +363,6 @@ function toggle(id: string): void {
     @keydown="keys"
     @click.capture="ignoreDragClick"
   >
-    <header class="host-sidebar-heading">
-      <div class="host-sidebar-actions">
-        <button
-          class="shell-icon-button"
-          aria-label="主机树工具"
-          title="导入、导出和筛选排序"
-          :aria-expanded="toolsOpen"
-          aria-controls="host-tree-tools"
-          @click="toolsOpen = !toolsOpen"
-        >
-          <MoreHorizontal :size="16" aria-hidden="true" />
-        </button>
-        <button
-          class="shell-icon-button"
-          aria-label="管理分组"
-          title="管理分组"
-          :disabled="!store.catalog || store.busy"
-          @click="$emit('groups')"
-        >
-          <FolderCog :size="16" aria-hidden="true" />
-        </button>
-        <button
-          class="shell-icon-button"
-          aria-label="刷新"
-          title="刷新主机"
-          :disabled="store.busy"
-          @click="store.load"
-        >
-          <RefreshCw :size="15" :class="{ spinning: store.busy }" aria-hidden="true" />
-        </button>
-        <button
-          class="shell-icon-button add-host-button"
-          aria-label="新建主机"
-          title="新建主机"
-          :disabled="!store.catalog || store.busy"
-          @click="$emit('create')"
-        >
-          <Plus :size="18" aria-hidden="true" />
-        </button>
-      </div>
-    </header>
-    <div class="host-sidebar-controls">
-      <div
-        v-if="toolsOpen"
-        id="host-tree-tools"
-        class="host-tree-tools"
-        role="group"
-        aria-label="主机树工具选项"
-      >
-        <div class="host-tree-import-export">
-          <button class="button" :disabled="!store.catalog || store.busy" @click="$emit('import')">
-            导入 OpenSSH
-          </button>
-          <button class="button" :disabled="!store.catalog || store.busy" @click="$emit('export')">
-            导出配置
-          </button>
-        </div>
-        <label
-          >标签
-          <select
-            v-model="store.tag"
-            aria-label="按标签筛选主机"
-            :disabled="!store.catalog || store.busy"
-          >
-            <option value="">全部标签</option>
-            <option v-for="tag in tags" :key="tag" :value="tag">{{ tag }}</option>
-          </select>
-        </label>
-        <label
-          >排序
-          <select
-            v-model="store.sort"
-            aria-label="主机排序"
-            :disabled="!store.catalog || store.busy"
-          >
-            <option value="name">名称排序</option>
-            <option value="hostname">地址排序</option>
-            <option value="updated">最近修改</option>
-          </select>
-        </label>
-      </div>
-      <label class="host-search-field">
-        <Search :size="14" aria-hidden="true" />
-        <input
-          id="host-tree-search"
-          v-model="store.search"
-          class="sidebar-search"
-          aria-label="搜索主机"
-          placeholder="搜索主机、地址、标签…"
-        />
-      </label>
-      <div class="host-filter" role="group" aria-label="主机筛选">
-        <button :aria-pressed="!store.favorites" @click="store.favorites = false">
-          全部主机<small v-if="store.catalog" class="host-count" aria-hidden="true">{{
-            store.catalog.hosts.length
-          }}</small>
-        </button>
-        <button :aria-pressed="store.favorites" @click="store.favorites = true">
-          <Star :size="12" aria-hidden="true" />收藏
-        </button>
-      </div>
-    </div>
     <div class="sidebar-local-device">
       <p class="sidebar-context-name">本地设备</p>
       <nav class="host-tools" aria-label="本地设备工具">
@@ -317,81 +376,114 @@ function toggle(id: string): void {
         </button>
       </nav>
     </div>
-    <div class="host-tree-scroll" :aria-busy="store.busy">
-      <p v-if="store.busy && !store.catalog" class="host-empty" role="status">正在读取主机…</p>
-      <p v-else-if="!store.catalog" class="host-empty" role="status">未能读取主机，请刷新重试。</p>
-      <div v-else-if="!store.visible.length" class="host-empty">
-        <Server :size="26" :stroke-width="1.3" aria-hidden="true" />
-        <p>{{ store.catalog.hosts.length ? '没有匹配的主机' : '尚未添加主机' }}</p>
+    <div class="host-list-heading">
+      全部主机<small v-if="store.catalog" class="host-count">{{
+        store.catalog.hosts.length
+      }}</small>
+      <div class="host-list-actions" role="group" aria-label="主机导入导出">
         <button
-          v-if="!store.catalog.hosts.length"
-          class="text-button"
-          :disabled="store.busy"
-          @click="$emit('create')"
+          class="shell-icon-button"
+          aria-label="导入 OpenSSH"
+          title="导入 OpenSSH"
+          :disabled="!store.catalog || store.busy"
+          @click="$emit('import')"
         >
-          新建主机
+          <Upload :size="15" aria-hidden="true" />
+        </button>
+        <button
+          class="shell-icon-button"
+          aria-label="导出配置"
+          title="导出配置"
+          :disabled="!store.catalog || store.busy"
+          @click="$emit('export')"
+        >
+          <Download :size="15" aria-hidden="true" />
         </button>
       </div>
+    </div>
+    <div class="host-sidebar-controls">
+      <label class="host-search-field">
+        <Search :size="14" aria-hidden="true" />
+        <input
+          id="host-tree-search"
+          v-model="store.search"
+          class="sidebar-search"
+          aria-label="搜索主机"
+          placeholder="搜索主机、地址、用户名…"
+        />
+      </label>
+    </div>
+    <div class="host-tree-scroll" :aria-busy="store.busy" @scroll="treeScrolled">
+      <p v-if="store.busy && !store.catalog" class="host-empty" role="status">正在读取主机…</p>
+      <p v-else-if="!store.catalog" class="host-empty" role="status">未能读取主机，请刷新重试。</p>
       <div
-        v-for="group in nodes"
-        :key="group.id ?? 'ungrouped'"
+        v-for="group in store.catalog ? nodes : []"
+        :key="group.id ?? 'root'"
         class="tree-group"
         :data-group-id="group.id ?? ''"
-        :class="{ 'drop-target': dropTarget === (group.id ?? 'ungrouped') }"
+        :class="{ 'drop-target': dropTarget === (group.id ?? 'root') }"
       >
-        <template v-if="group.hosts.length || group.id || store.catalog?.hosts.length">
-          <button
-            class="group-toggle"
-            :aria-expanded="!collapsed.includes(group.id ?? 'ungrouped')"
-            @click="toggle(group.id ?? 'ungrouped')"
+        <button
+          class="group-toggle"
+          :aria-expanded="!isCollapsed(group.id)"
+          :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
+          @contextmenu.prevent.stop="openContext({ kind: 'folder', id: group.id }, $event)"
+          @keydown="contextKeys({ kind: 'folder', id: group.id }, $event)"
+          @click="toggle(group.id ?? 'root')"
+        >
+          <ChevronRight v-if="isCollapsed(group.id)" :size="12" aria-hidden="true" />
+          <ChevronDown v-else :size="12" aria-hidden="true" />
+          <Folder v-if="isCollapsed(group.id)" :size="14" aria-hidden="true" />
+          <FolderOpen v-else :size="14" aria-hidden="true" />
+          <span class="group-name">{{ group.name }}</span
+          ><span class="group-count">{{ group.count }}</span>
+        </button>
+        <template v-if="!isCollapsed(group.id)">
+          <div
+            v-for="host in group.hosts"
+            :key="host.id"
+            class="tree-host-row"
+            :style="{ paddingLeft: `${group.depth * 14}px` }"
           >
-            <ChevronRight
-              v-if="collapsed.includes(group.id ?? 'ungrouped')"
-              :size="12"
-              aria-hidden="true"
-            />
-            <ChevronDown v-else :size="12" aria-hidden="true" />
-            <Folder
-              v-if="collapsed.includes(group.id ?? 'ungrouped')"
-              :size="14"
-              aria-hidden="true"
-            />
-            <FolderOpen v-else :size="14" aria-hidden="true" />
-            <span class="group-name">{{ group.name }}</span
-            ><span class="group-count">{{ group.hosts.length }}</span>
-          </button>
-          <template v-if="!collapsed.includes(group.id ?? 'ungrouped')">
-            <div v-for="host in group.hosts" :key="host.id" class="tree-host-row">
-              <button
-                :data-host-id="host.id"
-                :class="['tree-host', { selected: store.selectedId === host.id }]"
-                :title="`${host.username}@${host.hostname}:${host.port} · 拖动可移动到其他分组`"
-                :aria-current="store.selectedId === host.id ? 'true' : undefined"
-                :draggable="false"
-                @pointerdown="beginDrag(host, $event)"
-                @dragstart.prevent
-                @click="
-                  store.selectedId = host.id;
-                  $emit('select', host);
-                "
-                @contextmenu.prevent
-              >
-                <span
-                  :class="['disconnected-dot', { connected: hostState(host.id) === '已连接' }]"
-                  :aria-label="hostState(host.id)"
+            <button
+              :data-host-id="host.id"
+              :class="['tree-host', { selected: store.selectedId === host.id }]"
+              :title="`${host.username}@${host.hostname}:${host.port} · 拖动可移动到其他文件夹`"
+              :aria-current="store.selectedId === host.id ? 'true' : undefined"
+              :draggable="false"
+              @pointerdown="beginDrag(host, $event)"
+              @dragstart.prevent
+              @click="
+                store.selectedId = host.id;
+                $emit('select', host);
+              "
+              @contextmenu.prevent.stop="openContext({ kind: 'host', id: host.id }, $event)"
+              @keydown="contextKeys({ kind: 'host', id: host.id }, $event)"
+            >
+              <span
+                :class="['disconnected-dot', { connected: hostState(host.id) === '已连接' }]"
+                :aria-label="hostState(host.id)"
+              ></span
+              ><span class="host-label"
+                ><span class="host-name">{{ hostDisplayName(host) }}</span
+                ><span class="host-address"
+                  >{{ host.hostname
+                  }}<template v-if="host.port !== 22">:{{ host.port }}</template></span
                 ></span
-                ><span class="host-label"
-                  ><span class="host-name">{{ hostDisplayName(host) }}</span
-                  ><span class="host-address"
-                    >{{ host.hostname
-                    }}<template v-if="host.port !== 22">:{{ host.port }}</template></span
-                  ></span
-                ><Star v-if="host.favorite" class="favorite" :size="12" aria-label="已收藏" />
-              </button>
-              <HostTreeControls :host="host" @saved="$emit('saved', $event)" />
-            </div>
-          </template>
+              >
+            </button>
+            <HostTreeControls
+              :ref="(component) => setControls(host.id, component)"
+              :host="host"
+              @saved="$emit('saved', $event)"
+            />
+          </div>
         </template>
+      </div>
+      <div v-if="store.catalog && !store.visible.length" class="host-empty">
+        <Server :size="26" :stroke-width="1.3" aria-hidden="true" />
+        <p>{{ store.catalog.hosts.length ? '没有匹配的主机' : '尚未添加主机' }}</p>
+        <p v-if="!store.catalog.hosts.length" class="subtle">右键根目录新建主机或文件夹</p>
       </div>
       <button
         v-if="store.visible.length > limit"
@@ -421,9 +513,66 @@ function toggle(id: string): void {
       {{ hostDisplayName(store.catalog?.hosts.find((h) => h.id === dragged)) }}
       <span>{{
         dropTarget
-          ? `移动到 ${dropTarget === 'ungrouped' ? '未分组' : store.catalog?.groups.find((g) => g.id === dropTarget)?.name}`
-          : '拖到其他分组，Esc 取消'
+          ? `移动到 ${dropTarget === 'root' ? '根目录' : store.catalog?.groups.find((g) => g.id === dropTarget)?.name}`
+          : '拖到其他文件夹，Esc 取消'
       }}</span>
     </div>
+    <GroupManager
+      v-if="folderEditor"
+      :parent-id="folderEditor.parentId"
+      :group="folderEditor.group"
+      @saved="folderSaved"
+      @close="folderEditor = undefined"
+    />
+    <Modal
+      v-if="deletingFolder"
+      title="确认删除文件夹"
+      :busy="store.busy"
+      @close="deletingFolder = undefined"
+    >
+      <p>
+        删除“{{
+          deletingFolder.name
+        }}”？其中的主机和子文件夹会保留并移到父目录，不会删除主机配置或关闭连接。
+      </p>
+      <footer class="dialog-actions">
+        <button class="button" :disabled="store.busy" @click="deletingFolder = undefined">
+          取消
+        </button>
+        <button class="button danger" :disabled="store.busy" @click="removeFolder">
+          确认删除文件夹
+        </button>
+      </footer>
+    </Modal>
+    <Teleport to="body">
+      <template v-if="context">
+        <button
+          class="context-backdrop"
+          aria-label="关闭主机树菜单"
+          @click="dismissContext(true)"
+          @contextmenu.prevent="dismissContext(true)"
+        ></button>
+        <div
+          ref="menuElement"
+          class="context-menu host-tree-menu"
+          role="menu"
+          aria-label="主机树操作"
+          :style="{ left: `${context.x}px`, top: `${context.y}px` }"
+          @keydown="menuKeys"
+          @contextmenu.prevent
+        >
+          <button
+            v-for="item in menuItems"
+            :key="item.key"
+            role="menuitem"
+            :class="{ danger: item.danger }"
+            :disabled="store.busy"
+            @click="runContext(item.key)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+      </template>
+    </Teleport>
   </section>
 </template>

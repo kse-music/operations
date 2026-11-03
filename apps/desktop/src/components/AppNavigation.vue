@@ -9,7 +9,9 @@ import {
   Play,
   PanelLeftClose,
   Settings2,
-  Waypoints,
+  Keyboard,
+  Terminal,
+  PanelsTopLeft,
 } from '@lucide/vue';
 import { messages, type WorkspaceView } from '../types/product';
 import { computed } from 'vue';
@@ -35,7 +37,9 @@ const groups = {
   ],
   system: [
     { view: 'settings', icon: Settings2 },
-    { view: 'overview', icon: Waypoints },
+    { view: 'settingsTerminal', icon: Terminal },
+    { view: 'settingsShortcuts', icon: Keyboard },
+    { view: 'settingsWorkspace', icon: PanelsTopLeft },
     { view: 'about', icon: Info },
   ],
 } as const;

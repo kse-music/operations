@@ -6,16 +6,16 @@ import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
 import { hostDisplayName, hostInput, type Host } from '../types/hosts';
-const props = defineProps<{ host?: Host }>();
+const props = defineProps<{ host?: Host; groupId?: string | null }>();
 const emit = defineEmits<{ close: []; saved: [host: Host] }>();
 const store = useHostsStore();
 const application = useApplicationStore();
 const draft = reactive(hostInput(props.host, application.state?.config.connectTimeoutSecs));
+if (!props.host) draft.groupId = props.groupId ?? null;
 if (!props.host && application.state?.config.product)
   draft.ssh = JSON.parse(
     JSON.stringify(application.state.config.product.sshDefaults),
   ) as typeof draft.ssh;
-const tags = ref(draft.tags.join(', '));
 const newCredential = ref(false);
 const proxyMode = computed({
   get: () => draft.ssh.proxy?.kind ?? 'direct',
@@ -42,13 +42,7 @@ watch(
   },
 );
 async function submit(): Promise<void> {
-  const input = {
-    ...draft,
-    tags: tags.value
-      .split(/[,，]/)
-      .map((t) => t.trim())
-      .filter(Boolean),
-  };
+  const input = { ...draft };
   const result = await store.run(
     () => (props.host ? hostsApi.update(props.host.id, input) : hostsApi.create(input)),
     props.host ? '主机已更新。' : '主机已创建。',
@@ -127,23 +121,6 @@ function credentialSaved(id: string): void {
           使用系统 SSH Agent，请预先启动 Agent 并加载密钥。不会转发
           Agent，也不会自动回退其他认证方式。
         </p>
-        <label
-          >分组<select v-model="draft.groupId" aria-label="分组">
-            <option :value="null">未分组</option>
-            <option v-for="group in store.catalog?.groups" :key="group.id" :value="group.id">
-              {{ group.name }}
-            </option>
-          </select></label
-        >
-        <label
-          >标签（逗号分隔）<input v-model="tags" maxlength="2048" placeholder="生产, Linux"
-        /></label>
-        <label class="full-width"
-          >备注<textarea v-model="draft.description" rows="3" maxlength="8192"></textarea>
-        </label>
-        <label class="checkbox-label"
-          ><input v-model="draft.favorite" type="checkbox" />收藏此主机</label
-        >
         <details class="full-width">
           <summary>SSH 高级连接设置</summary>
           <div class="form-grid">

@@ -9,6 +9,7 @@ export interface HostInput {
   authType: AuthType;
   credentialId: string | null;
   groupId: string | null;
+  /** Legacy metadata retained for database/backup compatibility; no management UI. */
   tags: string[];
   description: string;
   favorite: boolean;
@@ -23,6 +24,7 @@ export interface HostGroup {
   id: string;
   name: string;
   sortOrder: number;
+  parentId: string | null;
 }
 export interface Credential {
   id: string;

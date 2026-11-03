@@ -168,6 +168,8 @@ pub struct Host {
 pub struct GroupInput {
     pub name: String,
     pub sort_order: i32,
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,6 +177,8 @@ pub struct HostGroup {
     pub id: String,
     pub name: String,
     pub sort_order: i32,
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

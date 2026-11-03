@@ -1,3 +1,4 @@
+import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
 import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
 import { automationChecks } from './native-automation-e2e.mjs';
 import { networkBatchChecks } from './native-network-batch-e2e.mjs';
@@ -263,12 +264,12 @@ try {
   credentialId = setup.credentialId;
   const productDescription = `Product integration ${path.basename(artifacts)}`;
   if (productMode || installedExecutable) {
-    setup.hostId = await createProductHost(page, target, setup.credentialId, productDescription);
+    setup.hostId = await createProductHost(page, target, setup.credentialId);
     passed('native host creation through UI with a single existing secure credential reference');
   }
   hostId = setup.hostId;
   credentialId = setup.credentialId;
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
   async function openTerminal() {
     await showHostTree(page);
     const panes = await page.locator('.terminal-pane').count();

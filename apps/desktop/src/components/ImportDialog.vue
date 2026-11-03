@@ -4,6 +4,7 @@ import { ref, watch } from 'vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
+import { folderPath } from '../services/host-tree';
 import { authLabels, type ImportPreview } from '../types/hosts';
 const emit = defineEmits<{ close: [] }>();
 const store = useHostsStore();
@@ -80,8 +81,10 @@ useErrorNotifications(fileError);
       ><label
         >导入到
         <select v-model="group" :disabled="store.busy">
-          <option :value="null">未分组</option>
-          <option v-for="g in store.catalog?.groups" :key="g.id" :value="g.id">{{ g.name }}</option>
+          <option :value="null">根目录</option>
+          <option v-for="g in store.catalog?.groups" :key="g.id" :value="g.id">
+            {{ folderPath(store.catalog?.groups ?? [], g.id) }}
+          </option>
         </select></label
       >
     </div>

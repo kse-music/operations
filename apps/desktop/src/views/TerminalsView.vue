@@ -10,10 +10,9 @@ import { geometry, type Divider } from '../services/layout';
 import TerminalPane from '../components/TerminalPane.vue';
 import Modal from '../components/Modal.vue';
 const emit = defineEmits<{
-  operations: [host: import('../types/hosts').Host];
+  server: [host: import('../types/hosts').Host];
   network: [host: import('../types/hosts').Host];
   automation: [host: import('../types/hosts').Host];
-  monitor: [host: import('../types/hosts').Host];
   files: [host: import('../types/hosts').Host, path: string | undefined, pane: string];
 }>();
 const store = useTerminalsStore(),
@@ -252,8 +251,7 @@ onBeforeUnmount(() => {
           @close="store.closePane(item.pane.key)"
           @action="action"
           @files="(host, path, pane) => emit('files', host, path, pane)"
-          @monitor="(host) => emit('monitor', host)"
-          @operations="(host) => emit('operations', host)"
+          @server="(host) => emit('server', host)"
           @automation="(host) => emit('automation', host)"
           @network="(host) => emit('network', host)"
         />

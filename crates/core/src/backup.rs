@@ -43,7 +43,7 @@ impl Backup {
         Ok(b)
     }
     pub fn validate(&self) -> Result<(), Error> {
-        if self.format != "serverdeck-backup" || self.version != 1 {
+        if self.format != "serverdeck-backup" || ![1, 2].contains(&self.version) {
             return Err(Error::Validation("不支持的备份格式或版本"));
         }
         if self.hosts.len() > 5000
@@ -96,6 +96,23 @@ impl Backup {
             .iter()
             .map(|g| g.id.as_str())
             .collect::<HashSet<_>>();
+        for group in &self.groups {
+            if self.version == 1 && group.parent_id.is_some() {
+                return Err(Error::Validation("多级文件夹需要备份格式版本 2"));
+            }
+            let mut seen = HashSet::from([group.id.as_str()]);
+            let mut parent = group.parent_id.as_deref();
+            while let Some(id) = parent {
+                if !group_ids.contains(id) || !seen.insert(id) {
+                    return Err(Error::Validation("备份文件夹的父目录缺失或存在循环"));
+                }
+                parent = self
+                    .groups
+                    .iter()
+                    .find(|g| g.id == id)
+                    .and_then(|g| g.parent_id.as_deref());
+            }
+        }
         for host in &self.hosts {
             host.config.clone().normalize()?;
             if host.config.credential_id.is_some()

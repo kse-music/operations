@@ -36,7 +36,7 @@ describe('product integration boundaries', () => {
     w.navigate('files', 'b');
     expect(w.tabs.filter((t) => t.view === 'files')).toHaveLength(2);
     expect(w.current?.hostId).toBe('b');
-    w.navigate('operations', 'a', 'processes');
+    w.navigate('server', 'a', 'processes');
     expect(w.current?.section).toBe('processes');
     w.navigate('files', 'a');
     expect(w.current?.key).toBe(a);
@@ -48,8 +48,8 @@ describe('product integration boundaries', () => {
     expect(w.current?.hostId).toBe('');
     expect(w.hostId).toBe('a');
     w.selectHost('b');
-    w.navigate('operations');
-    expect(w.current).toMatchObject({ hostId: 'b', view: 'operations', section: undefined });
+    w.navigate('server');
+    expect(w.current).toMatchObject({ hostId: 'b', view: 'server', section: undefined });
     w.navigate('network', 'a');
     expect(w.current).toMatchObject({ hostId: '', view: 'network' });
     expect(w.hostId).toBe('b');
@@ -61,7 +61,7 @@ describe('product integration boundaries', () => {
   });
   it('closing one host workspace activates the adjacent host without closing background sessions', () => {
     const w = useWorkspaceStore();
-    for (let n = 0; n < 40; n++) w.navigate('monitor', `host-${n}`);
+    for (let n = 0; n < 40; n++) w.navigate('server', `host-${n}`);
     expect(w.tabs).toHaveLength(40);
     const last = w.current!.key;
     w.close(last);
@@ -70,7 +70,7 @@ describe('product integration boundaries', () => {
     expect(w.tabs).toHaveLength(39);
     w.selectHost('host-0');
     expect(w.tabs).toHaveLength(39);
-    expect(w.current).toMatchObject({ view: 'monitor', hostId: 'host-0' });
+    expect(w.current).toMatchObject({ view: 'server', hostId: 'host-0' });
     expect(opsApi.close).not.toHaveBeenCalled();
   });
   it('targets trust and close by explicit host even when a multi-host dialog changes active host', async () => {

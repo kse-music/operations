@@ -5,11 +5,20 @@ import type {
   TerminalEvent,
   TerminalSession,
   TerminalSize,
+  TerminalUploadSelection,
 } from '../types/terminal';
 import type { WorkspaceLayout } from '../types/workspace';
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
+  uploadPick: (id: string): Promise<TerminalUploadSelection> => {
+    ensureDesktop();
+    return invoke('terminal_upload_pick', { id });
+  },
+  uploadRead: (id: string, token: string, index: number, offset: number): Promise<number[]> =>
+    invoke('terminal_upload_read', { id, token, index, offset }),
+  uploadRelease: (id: string, token: string): Promise<void> =>
+    invoke('terminal_upload_release', { id, token }),
   openLocal(
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,

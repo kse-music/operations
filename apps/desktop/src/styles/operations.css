@@ -76,16 +76,6 @@
   background: var(--panel);
   padding: 16px;
 }
-.ops-history {
-  margin-top: 8px;
-  padding: 14px 0;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 12px;
-}
-.ops-history summary {
-  cursor: pointer;
-}
 .ops-tabs {
   gap: 0;
   border-bottom: 1px solid var(--border);

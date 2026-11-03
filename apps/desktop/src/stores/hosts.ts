@@ -6,32 +6,18 @@ import { errorMessage } from '../services/ipc';
 import type { Catalog, Host } from '../types/hosts';
 import { hostDisplayName, hostInput } from '../types/hosts';
 
-export type HostSort = 'name' | 'hostname' | 'updated';
-export function filterHosts(
-  hosts: Host[],
-  search: string,
-  favorites: boolean,
-  tag: string,
-  sort: HostSort,
-): Host[] {
+export function filterHosts(hosts: Host[], search: string): Host[] {
   const query = search.trim().toLocaleLowerCase();
   return hosts
     .filter(
       (h) =>
-        (!favorites || h.favorite) &&
-        (!tag || h.tags.includes(tag)) &&
-        (!query ||
-          [hostDisplayName(h), h.hostname, h.username, h.description, ...h.tags].some((s) =>
-            s.toLocaleLowerCase().includes(query),
-          )),
+        !query ||
+        [hostDisplayName(h), h.hostname, h.username].some((s) =>
+          s.toLocaleLowerCase().includes(query),
+        ),
     )
     .sort((a, b) => {
-      const value =
-        sort === 'updated'
-          ? b.updatedAt.localeCompare(a.updatedAt)
-          : sort === 'hostname'
-            ? a.hostname.localeCompare(b.hostname)
-            : hostDisplayName(a).localeCompare(hostDisplayName(b), 'zh-CN');
+      const value = hostDisplayName(a).localeCompare(hostDisplayName(b), 'zh-CN');
       return value || a.id.localeCompare(b.id);
     });
 }
@@ -41,13 +27,8 @@ export const useHostsStore = defineStore('hosts', () => {
   const error = ref<string | null>(null);
   const notice = ref<string | null>(null);
   const search = ref('');
-  const favorites = ref(false);
-  const tag = ref('');
-  const sort = ref<HostSort>('name');
   const selectedId = ref<string | null>(null);
-  const visible = computed(() =>
-    filterHosts(catalog.value?.hosts ?? [], search.value, favorites.value, tag.value, sort.value),
-  );
+  const visible = computed(() => filterHosts(catalog.value?.hosts ?? [], search.value));
   const selected = computed(() => catalog.value?.hosts.find((h) => h.id === selectedId.value));
   async function reload(): Promise<void> {
     const data = await hostsApi.list();
@@ -117,9 +98,6 @@ export const useHostsStore = defineStore('hosts', () => {
     error,
     notice,
     search,
-    favorites,
-    tag,
-    sort,
     selectedId,
     visible,
     selected,

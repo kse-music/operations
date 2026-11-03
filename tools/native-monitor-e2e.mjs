@@ -25,7 +25,8 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
   const match = text.match(/__SD_MONITOR_REF__([A-Za-z0-9+/=]+)__SD_MONITOR_END__/);
   assert(match, 'real Linux reference command must return a complete response');
   const reference = JSON.parse(Buffer.from(match[1], 'base64').toString());
-  await terminalAction(page, page.locator('.terminal-pane:visible'), '监控');
+  await terminalAction(page, page.locator('.terminal-pane:visible'), '服务器管理');
+  await page.getByRole('tab', { name: '资源概览', exact: true }).click();
   const snapshot = () =>
     page.evaluate(async (hostId) => {
       try {
@@ -115,7 +116,7 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
   assert.equal(current.sessionId, session, 'reopening charts must reuse one host sampler');
   await page
     .getByRole('navigation', { name: '主导航' })
-    .getByRole('button', { name: '全局设置', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const paused = await until((s) => s.state === 'paused');
   await delay(4000);
@@ -123,7 +124,7 @@ print('__SD_MON'+'ITOR_REF__'+base64.b64encode(json.dumps(r).encode()).decode()+
   assert.equal(current.history.length, paused.history.length);
   assert.equal(current.revision, paused.revision);
   passed('native host sampler reuse and page-switch pause without additional samples');
-  await navigateWorkspace(page, '服务器监控');
+  await navigateWorkspace(page, '服务器管理');
   current = await until(
     (s) =>
       ['partial', 'running'].includes(s.state) &&

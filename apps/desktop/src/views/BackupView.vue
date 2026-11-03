@@ -47,7 +47,7 @@ async function exportBackup() {
   error.value = '';
   try {
     exported.value = await productApi.export();
-    downloadResult('serverdeck-backup-v1.json', exported.value);
+    downloadResult('serverdeck-backup-v2.json', exported.value);
     notifications.push('非敏感备份已生成，请妥善保管脚本正文和备注。');
   } catch (e) {
     error.value = errorMessage(e);

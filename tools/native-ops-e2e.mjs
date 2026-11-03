@@ -159,10 +159,8 @@ export async function operationsChecks(context) {
   });
   assert(!created.error, created.error);
   assert.equal(fixture.container.length, 64);
-  await page
-    .locator('.terminal-pane:visible')
-    .getByRole('button', { name: '运维', exact: true })
-    .click();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), '服务器管理');
+  await page.getByRole('tab', { name: 'Docker 容器', exact: true }).click();
   async function connections() {
     return page.evaluate(() => window.__TAURI_INTERNALS__.invoke('ops_connections'));
   }
@@ -179,8 +177,13 @@ export async function operationsChecks(context) {
       { id: session.id, request },
     );
   const showOps = async () =>
-    nav().getByRole('button', { name: 'Linux 运维', exact: true }).click();
+    nav().getByRole('button', { name: '服务器管理', exact: true }).click();
   const switchTab = async (name) => {
+    const detailDialog = page
+      .getByRole('dialog')
+      .filter({ has: page.getByTestId('operations-detail') });
+    if (await detailDialog.count())
+      await detailDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await showOps();
     await page.getByRole('tab', { name, exact: true }).click();
     if (name !== '日志')
@@ -234,10 +237,10 @@ export async function operationsChecks(context) {
   await page.getByRole('button', { name: '显示环境变量值…', exact: true }).click();
   await confirm(fixture.container);
   await detail.filter({ hasText: 'protect-' + fixture.uuid }).waitFor();
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await (await row(fixture.container)).getByRole('button', { name: '资源', exact: true }).click();
   await detail.filter({ hasText: 'CPUPerc' }).waitFor();
-  await page.getByRole('button', { name: '关闭详情', exact: true }).click();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   passed(
     'native Docker detection/version, container list/start, masked environment, explicit reveal, ports/mounts and stats',
   );
@@ -267,8 +270,9 @@ export async function operationsChecks(context) {
     const samples = [];
     await page
       .getByRole('navigation')
-      .getByRole('button', { name: '服务器监控', exact: true })
+      .getByRole('button', { name: '服务器管理', exact: true })
       .click();
+    await page.getByRole('tab', { name: '资源概览', exact: true }).click();
     for (let n = 0; n < 100; n++) {
       const ready = await page.evaluate(async (hostId) => {
         try {
@@ -282,7 +286,7 @@ export async function operationsChecks(context) {
       if (ready) break;
       await delay(100);
     }
-    await nav().getByRole('button', { name: 'Linux 运维', exact: true }).click();
+    await nav().getByRole('button', { name: '服务器管理', exact: true }).click();
     await switchTab('Docker 容器');
     await page.getByLabel('运维项目搜索').fill(fixture.uuid);
     await (await row(fixture.container)).getByRole('button', { name: '日志', exact: true }).click();
@@ -333,7 +337,7 @@ export async function operationsChecks(context) {
       (hostId) => window.__TAURI_INTERNALS__.invoke('monitor_stop', { hostId }),
       hostId,
     );
-    await nav().getByRole('button', { name: 'Linux 运维', exact: true }).click();
+    await nav().getByRole('button', { name: '服务器管理', exact: true }).click();
     passed(
       'five-minute simultaneous real Monitor/Docker logs, bounded histories and resource samples',
     );

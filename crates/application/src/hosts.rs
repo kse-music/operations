@@ -209,9 +209,9 @@ impl Application {
                 let config = host.config;
                 json!({"name":config.name,"hostname":config.hostname,"port":config.port,"username":config.username,
                     "authType":config.auth_type,"tags":config.tags,"description":config.description,"favorite":config.favorite,
-                    "connectTimeoutSecs":config.connect_timeout_secs,"group":catalog.groups.iter().find(|g|Some(&g.id)==config.group_id.as_ref()).map(|g|&g.name)})
+                    "connectTimeoutSecs":config.connect_timeout_secs,"groupId":config.group_id,"group":catalog.groups.iter().find(|g|Some(&g.id)==config.group_id.as_ref()).map(|g|&g.name)})
             }).collect();
-            serde_json::to_string_pretty(&json!({"format":"serverdeck-hosts","version":1,"hosts":hosts,"groups":catalog.groups.into_iter().map(|g|json!({"name":g.name,"sortOrder":g.sort_order})).collect::<Vec<_>>(),"notice":"不含凭据、凭据引用或私钥路径"})).map_err(|e|Error::Storage(Box::new(e)))
+            serde_json::to_string_pretty(&json!({"format":"serverdeck-hosts","version":2,"hosts":hosts,"groups":catalog.groups.into_iter().map(|g|json!({"id":g.id,"name":g.name,"sortOrder":g.sort_order,"parentId":g.parent_id})).collect::<Vec<_>>(),"notice":"不含凭据、凭据引用或私钥路径"})).map_err(|e|Error::Storage(Box::new(e)))
         }).await
     }
 }

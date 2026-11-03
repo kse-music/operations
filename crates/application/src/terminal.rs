@@ -149,6 +149,7 @@ pub(crate) fn connection_plan(
 
 impl Application {
     pub async fn terminal_reset(&self) -> Result<(), Error> {
+        self.terminal_uploads.clear()?;
         self.local_terminals.close_all(false).await?;
         self.operations_host.close_all_logs().await?;
         self.monitors.pause_all();

@@ -86,7 +86,16 @@ impl server::Handler for Handler {
         command: &[u8],
         s: &mut Session,
     ) -> Result<(), Self::Error> {
-        assert_eq!(command, include_bytes!("../../ssh/src/monitor.sh"));
+        assert_eq!(
+            command,
+            include_str!("../../ssh/src/monitor.sh")
+                .replace("\r\n", "\n")
+                .as_bytes()
+        );
+        assert!(
+            !command.contains(&b'\r'),
+            "the SSH collector must send Unix line endings"
+        );
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         let mode = self.mode.load(Ordering::SeqCst);
         s.channel_success(id)?;

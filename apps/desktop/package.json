@@ -19,7 +19,8 @@
     "@xterm/xterm": "^6.0.0",
     "monaco-editor": "^0.57.0",
     "pinia": "^3.0.0",
-    "vue": "^3.5.44"
+    "vue": "^3.5.44",
+    "zmodem.js": "0.1.10"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.4",

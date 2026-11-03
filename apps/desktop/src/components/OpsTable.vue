@@ -6,6 +6,7 @@ const props = defineProps<{
   rowKey: string;
   filter: string;
   sort?: string;
+  loading?: boolean;
 }>();
 const page = ref(1),
   order = ref(props.sort ?? ''),
@@ -42,8 +43,9 @@ function changeSort(key: string): void {
 }
 </script>
 <template>
-  <div class="ops-table">
-    <table>
+  <div class="ops-table" :aria-busy="loading">
+    <p v-if="loading" class="host-empty" role="status">正在读取列表…</p>
+    <table v-else>
       <thead>
         <tr>
           <th v-for="column in columns" :key="column.key">
@@ -69,8 +71,8 @@ function changeSort(key: string): void {
         </tr>
       </tbody>
     </table>
-    <p v-if="!filtered.length" class="host-empty">没有匹配项目。</p>
-    <div v-if="pages > 1" class="ops-toolbar">
+    <p v-if="!loading && !filtered.length" class="host-empty">没有匹配项目。</p>
+    <div v-if="!loading && pages > 1" class="ops-toolbar">
       <button class="button" :disabled="page === 1" @click="page--">上一页</button
       ><span>{{ page }} / {{ pages }} · {{ filtered.length }} 项</span
       ><button class="button" :disabled="page === pages" @click="page++">下一页</button>

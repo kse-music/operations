@@ -14,7 +14,7 @@ pub mod terminal;
 pub mod workspace;
 
 pub const CONFIG_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 6;
+pub const DATABASE_VERSION: u32 = 7;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

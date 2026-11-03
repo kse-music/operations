@@ -4,8 +4,30 @@
 
 ## 范围与原则
 
+2026-11-03 主机行操作入口归并：HostTreeControls 不再渲染行内编辑/删除按钮，仅保留供 HostSidebar 右键菜单调用的编辑与删除确认弹窗。移除图标导入、悬停/焦点显隐样式和两个按钮的右侧预留空间；主机行保留单个主机按钮。右键菜单、键盘入口、目标绑定、保存/删除失败处理及连接生命周期继续复用原流程。此项替代下文历史行内操作区约定，无 IPC、数据库或依赖变化。
+
+2026-11-03 根目录与多级主机文件夹：HostSidebar 删除顶部整条管理分组/刷新/新建工具栏，布局为固定本地设备、全部主机/导入导出、搜索框、可滚动树。新增 services/host-tree 的层级/祖先/路径计算；内置 null ID 根目录容纳旧未分组主机，旧分组的 parentId 默认 null，按真实父目录显示多级文件夹。选择深层主机展开祖先，搜索展示匹配祖先，有界主机加载不变。
+
+右键目标为 folder（含根目录）或 host 的联合类型。仅文件夹菜单提供新建，根目录没有删除/重命名，主机菜单复用 HostTreeControls 的编辑/删除确认与 host_copy 用例；复制结果通过 saved 定位，不发起连接。GroupManager 改为按固定父目录创建/重命名文件夹的单一表单；App 将 create(groupId) 传入 HostDialog，主机表单不再选择分组。菜单处理键盘焦点、窗口边界及失焦/缩放/滚动/模块隐藏时关闭，不替代系统剪贴板或终端菜单。
+
+SQLite v7 追加 007_host_folders.sql，为 host_groups 增加 parent_id 自引用外键、禁止自身引用的 CHECK 及索引，保留旧表、ID、唯一名称和主机归属。group_save 在 IMMEDIATE 事务内校验父目录存在及祖先无环；group_delete 在同一事务内将主机和直接子文件夹提升至父目录后删除当前文件夹，不递归删除内容。HostGroup/GroupInput 与 TypeScript 同步 parentId，旧输入缺省为 null。
+
+备份导出升级 version=2 并携带 parentId，仍接收旧平面 v1 备份。恢复先校验父目录引用和循环，再拓扑合并文件夹及重映射主机归属；全局同名文件夹仅在父目录相同情况下合并，父目录不一致则整体回滚，避免静默扁平化。主机配置导出同样升级 v2 并包含文件夹 ID/parentId 和主机 groupId。旧应用拒绝 v7 数据库及 v2 备份，避免误降级。此项替代下文历史单层分组、禁止主机右键和顶部工具栏的约定。
+
+2026-11-03 根目录与多级主机文件夹：HostSidebar 删除顶部整条管理分组/刷新/新建工具栏，布局为固定本地设备、全部主机/导入导出、搜索框、可滚动树。新增 services/host-tree 的层级/祖先/路径计算；内置 null ID 根目录容纳旧未分组主机，旧分组的 parentId 默认 null，按真实父目录显示多级文件夹。选择深层主机展开祖先，搜索展示匹配祖先，有界主机加载不变。
+
+右键目标为 folder（含根目录）或 host 的联合类型。仅文件夹菜单提供新建，根目录没有删除/重命名，主机菜单复用 HostTreeControls 的编辑/删除确认与 host_copy 用例；复制结果通过 saved 定位，不发起连接。GroupManager 改为按固定父目录创建/重命名文件夹的单一表单；App 将 create(groupId) 传入 HostDialog，主机表单不再选择分组。菜单处理键盘焦点、窗口边界及失焦/缩放/滚动/模块隐藏时关闭，不替代系统剪贴板或终端菜单。
+
+SQLite v7 追加 007_host_folders.sql，为 host_groups 增加 parent_id 自引用外键、禁止自身引用的 CHECK 及索引，保留旧表、ID、唯一名称和主机归属。group_save 在 IMMEDIATE 事务内校验父目录存在及祖先无环；group_delete 在同一事务内将主机和直接子文件夹提升至父目录后删除当前文件夹，不递归删除内容。HostGroup/GroupInput 与 TypeScript 同步 parentId，旧输入缺省为 null。
+
+备份导出升级 version=2 并携带 parentId，仍接收旧平面 v1 备份。恢复先校验父目录引用和循环，再拓扑合并文件夹及重映射主机归属；全局同名文件夹仅在父目录相同情况下合并，父目录不一致则整体回滚，避免静默扁平化。主机配置导出同样升级 v2 并包含文件夹 ID/parentId 和主机 groupId。旧应用拒绝 v7 数据库及 v2 备份，避免误降级。此项替代下文历史单层分组、禁止主机右键和顶部工具栏的约定。
+
+2026-11-03 主机列表操作调整：移除 HostSidebar 的三点入口、toolsOpen 及折叠工具面板；hosts store 删除 HostSort/sort 及地址、修改时间排序分支，查询结果保持原默认名称和 ID 顺序。“全部主机”标题移到本地设备下方、远程列表正上方，右侧以两个独立图标按钮触发原 import/export 事件，沿用原 App 弹窗、API 和错误提示；标题及操作不参与列表滚动。保留未加载/操作中的禁用状态，清理面板专用样式和验收工具的旧入口定位。不增加 IPC、迁移、配置或依赖。此项替代下文历史布局中的主机树工具和排序设置描述。
+
 应用运行于本地，通过 SSH/SFTP 管理 Linux，不需要云账号、HTTP 后端或远端 Agent。
-当前实现应用壳、主机/分组 CRUD、收藏搜索排序、安全凭据引用、OpenSSH 预览导入及非敏感 JSON 导出，保留第一阶段配置/日志/生命周期。
+当前实现应用壳、主机/分组 CRUD、搜索排序、安全凭据引用、OpenSSH 预览导入及非敏感 JSON 导出，保留第一阶段配置/日志/生命周期。
+
+2026-11-03 主机管理精简：HostDialog 移除标签、备注和收藏控件；HostSidebar 移除标签/收藏筛选及收藏图标，“全部主机”改为静态标题并保留总数。hosts store 删除 tag/favorites 状态，filterHosts 仅按名称、地址和用户名查询，保留排序、分组和有界加载。HostInput 的历史字段与 Rust IPC、SQLite、导出/备份格式保持兼容，hostInput 在编辑及移动分组时原样传回，避免清空用户数据；无需数据库迁移。下文历史布局中的标签/收藏筛选描述由本条替代。
 生产 SSH 位于 `crates/ssh`，已链接桌面应用；终端使用真实 Linux PTY，无模拟数据，支持多标签、可调整分屏、代理/跳板和端口转发。SFTP 文件管理、后台传输和 Monaco 文本编辑已接入；原有探针独立保留，Agentless 监控和 Docker/日志/进程/端口/systemd 运维已接入。
 
 ## 工程与依赖
@@ -18,7 +40,7 @@ apps/desktop/
     components/SettingsPanel.vue   settings form
     views/HostsView.vue            real host inventory and details
     views/CredentialsView.vue      secret reference management (no readback)
-    views/WorkspaceView.vue        real backend diagnostics
+    views/AboutView.vue            product information and real backend diagnostics
     stores/                       Pinia: application + host catalog/loading/error
     services/                     typed IPC boundaries
     composables/theme.ts          theme resolution and OS preference subscription
@@ -100,9 +122,9 @@ Rust 与 TS 都显式定义 DTO；Rust IPC 测试验证实际序列化、命令�
 
 2026-11-03 模块导航布局：AppModules 提供顶部四个大模块，AppNavigation 接收明确的当前模块并显示其菜单。`types/navigation.ts` 穷举视图所属模块；workspace.module 独立保存顶部选择，selectModule 只更新该值，不改变 active、current 或 hostId。中央继续渲染原活动页，原终端保持挂载、可见和会话上下文；无活动页时保留欢迎页，不渲染“请选择功能”卡片。显式点击左侧功能或页面标签调用 navigate/activate 时，同步顶部模块与对应菜单。移除最近模块标签 Map，不再因顶部切换自动恢复另一个页面。仅主机运维模块展示主机树，已有草稿、PTY、SFTP 和后台任务保留。
 
-主机运维侧栏使用 HostSidebar，其他模块隐藏主机树并保留其状态。HostTools 移至中央 workspace-header 右侧，在四个远程主机页面显示并沿用 navigate 和 HostId；本地及全局页面不显示这组菜单。终端会话和新建按钮仍由 TerminalsView Teleport 到稳定容器，PTY 组件、Pane key 和连接所有权不变。移除 WorkspaceTab.filesOpen、文件面板入口及挂载逻辑，窄窗口通过工具栏换行和菜单内部滚动适配。
+主机运维侧栏使用 HostSidebar，其他模块隐藏主机树并保留其状态。HostTools 移至中央 workspace-header 右侧，在三个远程主机页面显示并沿用 navigate 和 HostId；本地及全局页面不显示这组菜单。终端会话和新建按钮仍由 TerminalsView Teleport 到稳定容器，PTY 组件、Pane key 和连接所有权不变。移除 WorkspaceTab.filesOpen、文件面板入口及挂载逻辑，窄窗口通过工具栏换行和菜单内部滚动适配。
 
-AppNavigation 在 system 模块的 module-menu 末尾提供“关于”，排在全局设置、本地环境之后。about 作为普通 WorkspaceView 纳入消息字典、模块映射和全局搜索，菜单通过 navigate 打开唯一的 about: 全局标签，由 AboutView 在中央页面展示产品说明、技术栈及 application.state.appVersion。重复进入复用该标签，切换或关闭沿用 workspace 的导航行为，原终端保持挂载。移除 about 事件、aboutOpen 状态、closeAbout 焦点处理和 App 内的关于 Modal；版本仍保留成功、读取中与后端未就绪状态，不增加 IPC 或配置。
+AppNavigation 在 system（设置）模块依次展示通用、终端、快捷键、工作区与连接、关于；顶栏 system 按钮用 margin-left: auto 贴齐最右侧。types/product.ts 中 settingsCategories 统一分类 ID、WorkspaceView 和标签，原 settings: 保留为通用入口，新增 settingsTerminal:/settingsShortcuts:/settingsWorkspace:，移除未持久化的 overview: 页面。各分类仍复用一个 SettingsPanel，App 只要存在设置分类标签就保持实例挂载，按当前分类控制显示；关闭全部设置分类标签销毁草稿。校验通过 category 事件请求 App 导航后聚焦字段，侧栏、顶栏与工作区标签同步。about: 继续是唯一全局标签，AboutView 合并产品信息和原 WorkspaceView 的后端诊断及重新检查，删除旧页面组件；加载、保存时禁用重新检查，保留版本/诊断读取中及未就绪状态。全局搜索沿消息字典自动覆盖新分类。配置、IPC、数据库及连接所有权不变。
 
 FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样式。终端文件事件经原 currentConfiguration 校验后 navigate 到 files，继续向 files.open 传递路径与来源窗格。切换主机前同步 files.active，沿用每主机 FileConnection 的实际连接快照、路径及传输/编辑/安全确认流程；卸载页面仅清理拖放监听，不关闭 SFTP、终端或传输。无新增 IPC、数据库迁移或依赖。
 
@@ -110,7 +132,7 @@ FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样�
 
 - 数据路径通过 `tauri::Manager::path().app_data_dir()` 获取；日志通过 `app_log_dir()` 获取。安装目录不参与数据写入。
 - SQLite 绑定 bundled SQLite，避免依赖用户预装数据库。
-- `PRAGMA user_version = 6`；001 设置、002 主机/分组/凭据/清理、003 SSH 信任记录、004 主机 SSH 选项、005 自动化库/计划/历史、006 主机名称可空在 IMMEDIATE 事务内顺序迁移。v1–v5 数据保留，失败回滚，未来版本拒绝降级。
+- `PRAGMA user_version = 7`；001 设置、002 主机/分组/凭据/清理、003 SSH 信任记录、004 主机 SSH 选项、005 自动化库/计划/历史、006 主机名称可空、007 多级主机文件夹在 IMMEDIATE 事务内顺序迁移。v1–v6 数据保留，失败回滚，未来版本拒绝降级。
 - `application_settings` 的 `app_config` 保存版本化偏好 JSON，是配置唯一真源；不维护第二份普通 JSON 配置。
 - hosts 使用 UUID、强类型字段、端口/超时 CHECK、分组和凭据外键。tags 为经过校验/去重的 JSON 数组。凭据类型在事务内与主机认证类型匹配；Agent 禁止附带 credential_id。
 - `HostInput.name` 仍为字符串，空字符串表示未填写；后端 trim 后只校验非空名称的 128 字符及控制字符限制，分组/凭据名称仍必填。006 重建 hosts 时保留 ID、时间、关联、SSH 选项和索引，仅放宽名称长度下界。前端 `hostDisplayName` 与 Rust `display_name` 优先使用名称，否则按地址及非 22 端口展示；树、标签、主机选项、自动化目标快照及备份预览保持一致。备份按非空名称或端点判重，空名称不互相冲突，恢复保留空值；复制主机以显示名称加“副本”生成名称。编辑继续读取原始 name，地址/端口变化可实时改变未命名主机的显示名。
@@ -180,6 +202,10 @@ Application 拥有 Engine，Engine 注册表拥有 Transport/Session。复用键
 数据流：远端 PTY → russh ChannelReadHalf → 每块最多 16 KiB 的 Tauri Channel 消息 → Uint8Array → xterm.write(callback) → terminal_ack → 读取下一块。最多一块尚未解析的输出，不进入 Pinia/日志，不在后端拼接 UTF-8。SSH window 64 KiB、每 Channel 队列 16 条；前端滚动缓冲默认 5000、可配 0–20000 行。russh 内部控制队列不是全有界，应用只开放有限会话及输入/resize/ACK；不承诺对恶意服务端具备进程级硬内存配额。
 
 输入每次最多 16 KiB、后端 8 条、前端普通输入最多 128 KiB；用户确认的单次粘贴最多 2 MiB（含边界预留）。输入按 16 KiB 分块，BUSY 时等待重试，超限明确提示未发送，重连清空旧代队列。resize 用 watch 合并为最新尺寸（2–500 列、1–300 行），前端 80ms 合并，只传 cols/rows，排除 xterm 6 未在类型中声明的内部字段。大量输出及未 ACK 时不继续发送的行为均有测试。
+
+SSH 输出在 xterm 前经过 services/zmodem.ts 的有界握手识别器，保留最多一个未完成初始化头，跨 IPC 分片校验 CRC；普通文本直接显示。协议编解码使用固定 zmodem.js 0.1.10，识别 `rz` 后自动调原生选择器，不向远端注入 Shell 命令或另建 SFTP 连接。传输响应按字节消费以保留同一 SSH 块中的 ZFIN 和后续提示符；即使等待文件选择，当前块仍经 xterm 写入完成屏障 ACK，不能因 UI 等待停止接收保活响应。
+
+新增仅本地 main 窗口允许的 terminal_upload_pick(id)、terminal_upload_read(id, token, index, offset)、terminal_upload_release(id, token)。后端仅为已就绪的 SSH 终端生成批次 token；原生选择器返回的路径直接在 Rust 中打开，只向前端返回 token、文件名和大小。读取不接受路径，校验会话与批次，单块 8 KiB、最多 32 个在途读取，文件变更则失败。每会话最多一批，全应用最多 32 批，每批最多 100 个文件，单文件小于 4 GiB。文件数据复用有界终端输入队列，并等待 flush 后读取下一块。协议步骤 30 秒超时，选择器等待期间发送保活；取消选择正常关闭协议，取消上传发送 CAN，断线/关闭自动释放批次和文件句柄，晚返回的选择无法附着到新会话。退出确认将待选或上传中的批次计入未完成任务。ZMODEM 状态归属终端，不纳入可脱离终端的 SFTP 后台队列；不记录内容、自动重试或支持 sz 下载。
 
 终端命令：terminal_open（流式 Channel）、terminal_input、terminal_resize、terminal_ack、terminal_trust、terminal_close、terminal_close_host。没有读取秘密或任意本地执行命令的接口。终端模拟器处理 ANSI/VT、UTF-8、256/True Color、alternate screen、鼠标协议与组合键；查找只搜索本地滚动缓冲，复制粘贴通过受控原生文本剪贴板 IPC，不请求网页剪贴板授权。
 
@@ -270,13 +296,17 @@ CSP 限制本地资源/IPC，开发额外允许固定 loopback Vite/HMR；没有
 
 `ssh/src/monitor.sh` 是编译时固定的 POSIX 只读脚本，设置 LC_ALL=C 和固定系统 PATH，读取 procfs、os-release、uname/date、ip 地址及 df。各节 NUL 分隔，附命令状态；不 eval/source 远端文件，不插入用户路径或主机输入，不记录 stdout/stderr。单次 exec 创建不带 PTY 的 Channel；创建 3 秒、执行 8 秒，成功/失败/取消均请求关闭 Channel；stdout 总上限 2 MiB、stderr 16 KiB，df 使用远端 timeout 4 秒。缺少工具/权限或异常数据返回分项警告，协议破损为整个采样错误。
 
+监控脚本和 `core/src/ops_capabilities.sh` 的嵌入文本在生成远端命令时统一将 CRLF 转为 LF，避免 Windows 检出内容经 SSH exec 原样发送后触发 Bash/sh 语法错误。`.gitattributes` 同时约束 Shell 脚本按 LF 检出；回归检查生成命令及实际监控 SSH exec 载荷不含回车。命令内容、权限、协议、超时和取消边界不变。
+
 Monitors 注册表以 HostId 为键，最多 8 台；同主机多次打开返回同一 SessionId，不因图表数量创建任务。每个 Control 有取消 token、设置 watch、JoinHandle、当前快照及 revision。同步锁只短暂更新状态，不跨 await。设置值未变化不通知 worker，避免重新打开视图触发过密采样。3/5/10/30 秒为采集完成后的等待间隔，实际时间以远端 uptime 为准，不承诺严格墙钟定时。
 
 状态：connecting → sampling → running/partial，失败为 error（保留旧样本并标过期）或 failed（连接结束）。隐藏页面/文档不可见时设 visible=false，在途采集完成后 paused，不采集新指标；恢复清空差分基线。WebView 重载先 pause_all，保留已认证 Monitor 租约；重载后只在用户打开该视图时继续。停止等待 worker 取消和 Channel 清理，再释放自身 SSH 租约；应用退出先停止监控，再执行 SFTP/SSH/数据库顺序。Engine 在任何会话结束后通知租约 token，暂停中的任务也能检测断线。
 
 CPU 取 /proc/stat 前八项，排除 guest/guest_nice 重复计数；busy 不含 idle/iowait。iowait 负差钳为 0，其余负差或总差为 0 返回未知；支持每核心及热插拔。网络以远端 uptime 连续差值计算 bytes/s，结合接口名和 ifindex，计数回退、换接口、异常速率、不同 boot_id、时间差小于 0.1 秒或大于 120 秒均等待新基线。累计计数仍显示实际值。内存 used=MemTotal−MemAvailable；老内核以 Free+Buffers+Cached+SReclaimable−Shmem 近似并标注，不把所有缓存算作已用。Swap 未启用与采集失败分开表示。
 
-disk 解析 mountinfo 的八进制路径转义，与 df -P -k -T 完整挂载路径后缀匹配；设备 major:minor 和文件系统类型去重，优先根/短路径。保留重复关系、容器 overlay 标识、伪文件系统、只读镜像标识及每挂载点不可用原因。UI 默认隐藏伪文件系统/镜像/重复挂载，可查看全部；容量按 df 的 1024 字节单位转换，使用率沿用 df 的非特权可用空间口径，允许满盘超过 100% 和负可用量归零。持久盘达到 90% 标示高占用，未实现系统通知或持续告警服务。
+disk 解析 mountinfo 的八进制路径转义，与 df -P -k -T 完整挂载路径后缀匹配；设备 major:minor 和文件系统类型去重，优先根/短路径。保留重复关系、容器 overlay 标识、伪文件系统、只读镜像标识及每挂载点不可用原因。UI 默认隐藏伪文件系统/镜像/重复挂载，可查看全部。磁盘错误气泡与默认列表共用持久挂载筛选，不将上述正常缺失的 df 数据作为错误通知；勾选全部挂载也不改变告警范围。真实持久盘（含独立 overlay 挂载）的错误注明挂载路径，整体采集失败与采集警告继续保留；容量按 df 的 1024 字节单位转换，使用率沿用 df 的非特权可用空间口径，允许满盘超过 100% 和负可用量归零。持久盘达到 90% 标示高占用，未实现系统通知或持续告警服务。
+
+桌面虚拟挂载在 Rust disk 分类阶段识别：`fuse.portal`、`fuse.gvfsd-fuse`，以及文件系统为 `fuse` 且路径严格符合 `/run/user/<数字 UID>/gnome-remote-desktop/cliprdr-<非空单级名称>` 的剪贴板挂载标为 pseudo。后端容量不可用统计与前端默认列表、通知因此保持一致；原始容量缺失和原因仍在全部挂载中可查。不按所有 FUSE 或整个 `/run/user` 目录过滤，SSHFS、rclone、普通 FUSE 数据盘及整体 df 命令失败继续保留诊断。
 
 当前样本最多 1024 个每核计数、256 接口（每接口 32 地址）、2048 挂载。历史仅保存 CPU、内存及非 lo 接口收发合计，最多 600 点且裁剪至 30 分钟；不把所有每核/每接口历史复制进内存。失败点为 null，图表留空，不补 0。snapshot(afterRevision) 未变化返回 null，避免每秒重复传输历史；页面每秒只轮询当前主机。
 
@@ -364,7 +394,7 @@ SQLite schema 通过事务从 v4 迁移到 v5，新增 automation_groups、autom
 
 ## 产品整合：统一工作区、全局偏好与备份
 
-前端 workspace Pinia 状态以 `host:<HostId>` 保存每台主机唯一的一级工作区标签，本地设备使用 `host:`；全局工具仍以模块为键。主机标签保存当前工具及最近的 Linux 运维分类，`hostId` 是最近活动主机的上下文。`selectHost` 恢复该主机工作区，新主机默认进入终端；切换工具只更新该主机标签，激活其他主机不会改写已有标签的目标。主机树和一级标签可直接切换主机，原顶部主机选择器及独立主机管理页面移除。HostSidebar 提供树内新建、分组、搜索、标签筛选、排序和导入导出；每行的 HostTreeControls 提供编辑和确认删除，移除复制按钮及前端处理，复用 HostDialog、hostsApi 和 store.run。操作区默认透明并禁用鼠标命中，只在对应行 hover 或包含 focus-visible 时显示并允许点击，保留 Tab 顺序和键盘可访问性；选中或鼠标点击后的普通焦点不使按钮常驻，预留两个按钮的宽度，显隐不移动名称。管理操作通过 saved 事件定位树中主机，保持工作区及实际会话，不依赖右键菜单。`HostTools` 在主机工作区内提供 Shell、SFTP、监控、Linux 运维二级导航，本地设备仅展示 Shell。终端内部仍只展示当前主机的会话，切回时恢复最近会话；轮换及关闭所有会话保持当前主机边界。关闭一级设备工作区先关闭该 HostId 的全部终端会话及分屏，关闭失败保留工作区与失败会话；SFTP 和后台任务继续保留。关闭最后一个工作区后显示欢迎页。
+前端 workspace Pinia 状态以 `host:<HostId>` 保存每台主机唯一的一级工作区标签，本地设备使用 `host:`；全局工具仍以模块为键。主机标签保存当前工具及最近的服务器管理分类，`hostId` 是最近活动主机的上下文。`selectHost` 恢复该主机工作区，新主机默认进入终端；切换工具只更新该主机标签，激活其他主机不会改写已有标签的目标。主机树和一级标签可直接切换主机，原顶部主机选择器及独立主机管理页面移除。HostSidebar 提供树内新建、分组、搜索、标签筛选、排序和导入导出；每行的 HostTreeControls 提供编辑和确认删除，移除复制按钮及前端处理，复用 HostDialog、hostsApi 和 store.run。操作区默认透明并禁用鼠标命中，只在对应行 hover 或包含 focus-visible 时显示并允许点击，保留 Tab 顺序和键盘可访问性；选中或鼠标点击后的普通焦点不使按钮常驻，预留两个按钮的宽度，显隐不移动名称。管理操作通过 saved 事件定位树中主机，保持工作区及实际会话，不依赖右键菜单。`HostTools` 在主机工作区内提供 Shell、SFTP、服务器管理二级导航，本地设备仅展示 Shell。终端内部仍只展示当前主机的会话，切回时恢复最近会话；轮换及关闭所有会话保持当前主机边界。关闭一级设备工作区先关闭该 HostId 的全部终端会话及分屏，关闭失败保留工作区与失败会话；SFTP 和后台任务继续保留。关闭最后一个工作区后显示欢迎页。
 
 批量运维、自动化、网络诊断及资产/设置属于全局入口，不依赖 `workspace.hostId` 或 `hosts.selectedId` 来隐式选择执行目标。独立工具页面通过 `KeepAlive` 在导航标签打开期间保留草稿、已选目标和结果；关闭对应标签后释放页面缓存，后台任务仍由原执行引擎管理。网络诊断在页内明确选择本机/远程来源及远程 HostId；“诊断连接”的独立请求序号支持重复预填同一主机的端点。自动化只接受显式快捷入口的主机预填，执行对话框继续冻结目标并要求预览确认。全局页收起主机侧栏和二级工具，返回主机工作区恢复侧栏偏好。导航元数据在本次运行内保持，不新增数据库或配置项，不自动恢复远端连接或重放命令。
 
@@ -388,7 +418,7 @@ OperationsView 的连接按自己的 chosen HostId 取值，不再借用会被�
 
 AppConfig 保持 version=1，新增 serde(default) product 偏好，旧数据可直接读取，不新增数据库表或重置配置。内容为当前支持的 zh-CN 语言标识、下载目录、新建主机默认 SshOptions（不设置全局跳板）、全局快捷键。语言字典先覆盖工作区/搜索导航，当前完整 UI 仍仅简体中文，不宣称已完成英文翻译。现有主题、终端字体/字号/快捷键、监控间隔、传输并发及日志等级继续真实生效。默认连接超时、认证超时、Keepalive、代理仅复制到新建主机，不改写已有主机或在途连接。默认下载目录用于新下载任务的预选目标，仍可选择其他目录。代理密码只引用原生凭据库；不存在/类型不匹配拒绝保存，删除仍被全局默认代理引用的凭据会被拒绝，要求先修改设置。
 
-备份为严格 `format=serverdeck-backup, version=1` JSON，最多 8 MiB、5000 主机、512 主机分组、256 条目、64 命令分组。导出在只读事务中取得一致快照：主机/分组/标签/说明/收藏/连接参数、命令/脚本定义及非敏感 AppConfig；不包含凭据 ID/秘密引用、私钥路径/正文、秘密参数值、信任、执行历史、调度计划或窗口位置。用户自己写进脚本、说明、普通默认值的秘密无法可靠识别，界面要求审查。
+备份导出为严格 `format=serverdeck-backup, version=2` JSON，仍可读取平面 v1 备份，最多 8 MiB、5000 主机、512 主机分组、256 条目、64 命令分组。导出在只读事务中取得一致快照：主机/分组/标签/说明/收藏/连接参数、命令/脚本定义及非敏感 AppConfig；不包含凭据 ID/秘密引用、私钥路径/正文、秘密参数值、信任、执行历史、调度计划或窗口位置。用户自己写进脚本、说明、普通默认值的秘密无法可靠识别，界面要求审查。
 
 恢复先用 Rust 校验格式/版本/类型/范围/ID/链接/跳板循环并生成逐项重复/阻止提示，再选择条目和 skip/copy 策略及是否替换非敏感偏好，最后明确确认。提交重新校验、在 IMMEDIATE 事务中按当前数据判断冲突：只新增或跳过，copy 使用新 UUID 和不冲突名称，不覆盖已有内容。分组按名称合并，跳板按依赖顺序重映射；缺失所选跳板则整笔回滚，不静默直连。未选/跳过跳板只允许复用同原 ID 且完整公开配置一致的本地记录。SSH 密码/私钥主机恢复后无凭据关联，需用户重新配置；认证代理主机在预览中明确阻止自动恢复，防止匿名降级。认证代理的全局默认值不导出，恢复偏好会明确替换当前默认设置。恢复不会创建连接或执行计划。
 
@@ -405,3 +435,11 @@ AppConfig 保持 version=1，新增 serde(default) product 偏好，旧数据可
 发布 QA 复用真实前后端代码。`native-terminal-e2e.mjs --installed-exe` 驱动 NSIS 安装出的实际程序，拒绝非空用户主机目录，不清空普通安装的数据；保存/恢复原偏好，临时凭据只进入系统凭据库。CDP 只通过 QA 子进程环境开启回环端口，包默认不启用该入口。临时容器、远端文件、主机和任务都有 UUID 所有权边界；正常退出通过实际 IPC 触发完整 shutdown。
 
 基准输出是测量证据，不是生产指标承诺；进程树内存包含 WebView 子进程，RSS 可能含共享页，另列 private bytes。性能门禁、未支持的 SFTP 面板模式及平台风险以 TEST_REPORT/RELEASE_CHECKLIST 为准。CI 只准备 Windows x64、macOS arm64/x64、Linux x64 候选构建，RustSec 门禁故意保留失败，不把未运行 CI 写成通过。
+
+## 2026-11-03：服务器管理统一视图
+
+WorkspaceView 使用 server 替代 monitor/operations 两个界面入口；HostTools、终端上下文菜单、全局搜索均进入 ServerView。types/server.ts 定义九个分类，WorkspaceTab.section 按 HostId 保存本次运行内的选择。App 按当前分类查询实际 monitor/operations 连接快照，主机配置变更提示仍使用建立连接时的端点。
+
+ServerView 组合 MonitorView 与 OperationsView，不合并后端 IPC 或租约。三个资源 Tab 复用同一 MonitorView，切到运维分类时卸载并暂停采样；重新进入沿用后端既有主机采样器。运维六个分类复用 OperationsView 与已连接会话；日志分类离开时卸载 OpsLogPanel，关闭流，终端/SFTP 不受影响。
+
+Modal 统一承载系统、核心、警告、运维详情、探测和操作反馈。详情使用独立请求序号，关闭、分类/连接变化及卸载后忽略晚到结果；进程信号仍冻结 sessionId、PID/startTicks/bootId，危险操作保留目标输入确认。OpsDetails 展示常用字段并折叠原始状态，敏感环境值沿用显式确认，关闭详情清除。列表高度受限并使用内部滚动，分类 Tab 保持可见且支持标准键盘切换。无新增数据库、IPC 或生产依赖。

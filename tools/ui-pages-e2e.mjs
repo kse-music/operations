@@ -13,15 +13,17 @@ const browser = await chromium.launch({
 const pages = [
   ['SSH 终端', 'terminals'],
   ['SFTP 文件', 'files'],
-  ['服务器监控', 'monitor'],
-  ['Linux 运维', 'operations'],
+  ['服务器管理', 'server'],
   ['自动运维', 'automation'],
   ['批量运维', 'batch'],
   ['网络诊断', 'network'],
   ['安全凭据', 'credentials'],
   ['备份恢复', 'backup'],
-  ['本地环境', 'overview'],
-  ['全局设置', 'settings'],
+  ['关于', 'about'],
+  ['通用', 'settings'],
+  ['终端', 'settingsTerminal'],
+  ['快捷键', 'settingsShortcuts'],
+  ['工作区与连接', 'settingsWorkspace'],
 ];
 
 // Browser-only rendering fixtures; no production fallback, disk changes, or remote commands.
@@ -396,7 +398,7 @@ try {
         await page.screenshot({ path: `${output}/${variant}-${view}-dialog.png` });
         await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
       }
-      if (view === 'network' || view === 'operations') {
+      if (view === 'network' || view === 'server') {
         const tabs = page.locator('.page-view [role=tablist]').getByRole('tab');
         for (let n = 0; n < (await tabs.count()); n++) {
           await tabs.nth(n).click();
@@ -429,7 +431,7 @@ try {
           await inspect(page, `${variant}/${tab}`);
         }
       }
-      if (view === 'settings') {
+      if (view === 'settingsWorkspace') {
         await page.getByLabel('全局默认代理').selectOption('socks5');
         await page.getByText('代理需要认证', { exact: true }).click();
         await inspect(page, `${variant}/proxy-settings`);

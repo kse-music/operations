@@ -540,6 +540,16 @@ impl Engine {
             .cloned()
             .ok_or(Error::NotFound)
     }
+    pub fn terminal_connected(&self, id: &str) -> Result<CancellationToken, Error> {
+        let control = self.control(id)?;
+        if control.kind != SessionKind::Terminal
+            || !control.ready.load(Ordering::Acquire)
+            || control.cancel.is_cancelled()
+        {
+            return Err(Error::NotFound);
+        }
+        Ok(control.cancel.clone())
+    }
     pub fn input(&self, id: &str, data: Vec<u8>) -> Result<(), Error> {
         if data.is_empty() || data.len() > 16 * 1024 {
             return Err(Error::Validation("终端输入每次须为 1–16384 字节"));

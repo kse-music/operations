@@ -34,11 +34,21 @@ const fixtures: Host[] = [
   },
 ];
 describe('host search and mutation boundary', () => {
-  it('searches the actual fields, filters tags/favorites, and sorts deterministically', () => {
-    expect(filterHosts(fixtures, 'linux', true, 'Linux', 'name').map((h) => h.id)).toEqual(['a']);
-    expect(filterHosts(fixtures, '备注', false, '', 'name').map((h) => h.id)).toEqual(['b']);
-    expect(filterHosts(fixtures, '', false, '', 'hostname').map((h) => h.id)).toEqual(['b', 'a']);
-    expect(filterHosts(fixtures, '', false, '', 'updated').map((h) => h.id)).toEqual(['a', 'b']);
+  it('searches names, addresses and usernames using the fixed default name order', () => {
+    for (const query of ['生产', ' PROD.EXAMPLE ', 'OPS'])
+      expect(filterHosts(fixtures, query).map((h) => h.id)).toEqual(['a']);
+    const named = [
+      { ...fixtures[0]!, name: 'B' },
+      { ...fixtures[1]!, name: 'A' },
+      { ...fixtures[1]!, id: 'c', name: 'A' },
+    ];
+    expect(filterHosts(named, '').map((h) => h.id)).toEqual(['b', 'c', 'a']);
+    expect(named.map((h) => h.id)).toEqual(['a', 'b', 'c']);
+  });
+  it('ignores legacy tags, notes and favorite status when listing hosts', () => {
+    expect(filterHosts(fixtures, 'linux')).toEqual([]);
+    expect(filterHosts(fixtures, '备注')).toEqual([]);
+    expect(filterHosts(fixtures, '')).toHaveLength(2);
   });
   it('does not pass display-only host fields into create/update payloads', () => {
     expect(hostInput(fixtures[0])).not.toHaveProperty('id');
@@ -52,10 +62,8 @@ describe('host search and mutation boundary', () => {
       hostname,
       port: 2222,
     }));
-    expect(filterHosts(hosts, '192.0.2.10:2222', false, '', 'name').map((h) => h.id)).toEqual([
-      '1',
-    ]);
-    expect(filterHosts(hosts, '', false, '', 'name').map((h) => h.id)).toEqual(['1', '0']);
+    expect(filterHosts(hosts, '192.0.2.10:2222').map((h) => h.id)).toEqual(['1']);
+    expect(filterHosts(hosts, '').map((h) => h.id)).toEqual(['1', '0']);
   });
   it('keeps the dialog failure observable and does not create a frontend-only host', async () => {
     Reflect.set(window, 'isTauri', true);

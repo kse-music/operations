@@ -5,48 +5,9 @@
   flex: 1;
   overflow: hidden;
 }
-.host-sidebar-heading {
-  height: 34px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 10px;
-}
-.host-sidebar-actions {
-  display: flex;
-  gap: 2px;
-  width: 100%;
-  justify-content: space-between;
-}
 .host-sidebar-controls {
-  padding: 4px 12px 0;
+  padding: 4px 12px 8px;
   flex-shrink: 0;
-}
-.host-tree-tools {
-  display: grid;
-  gap: 8px;
-  padding-bottom: 12px;
-}
-.host-tree-tools label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-size: 11px;
-}
-.host-tree-tools select {
-  flex: 1;
-  min-width: 0;
-  width: 100%;
-}
-.host-tree-import-export {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.host-tree-import-export .button {
-  font-size: 11px;
 }
 .host-search-field {
   display: flex;
@@ -72,27 +33,21 @@
 .sidebar-search:focus-visible {
   outline: none;
 }
-.host-filter {
+.host-list-heading {
   display: flex;
-  gap: 16px;
-  margin-top: 8px;
-  border-bottom: 1px solid var(--border);
-}
-.host-filter button {
-  display: flex;
+  flex-shrink: 0;
   align-items: center;
-  justify-content: center;
   gap: 5px;
-  background: transparent;
   color: var(--muted);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  padding: 7px 2px 9px;
+  margin: 0 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 2px;
   font-size: 11px;
 }
-.host-filter [aria-pressed='true'] {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
+.host-list-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
 }
 .host-count {
   min-width: 16px;
@@ -182,28 +137,6 @@
 .tree-host-row {
   display: flex;
   align-items: center;
-  position: relative;
-}
-.tree-host-actions {
-  position: absolute;
-  right: 3px;
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-.tree-host-row:hover .tree-host-actions,
-.tree-host-row:has(:focus-visible) .tree-host-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-.tree-host-actions .shell-icon-button {
-  width: 24px;
-  height: 28px;
-}
-.tree-host-actions button:last-child:hover {
-  color: var(--error);
 }
 .tree-host {
   width: 100%;
@@ -213,7 +146,7 @@
   border: 0;
   border-radius: 4px;
   background: none;
-  padding: 7px 57px 7px 26px;
+  padding: 7px 10px 7px 26px;
   min-height: 46px;
   text-align: left;
 }
@@ -252,11 +185,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.favorite {
-  color: var(--accent);
-  margin-left: auto;
-  flex-shrink: 0;
 }
 .editor-form input:not([type='checkbox']),
 .editor-form select,

@@ -183,6 +183,20 @@ pub enum TerminalEvent {
     },
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalUploadFile {
+    pub name: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalUploadSelection {
+    pub token: String,
+    pub files: Vec<TerminalUploadFile>,
+}
+
 #[cfg(test)]
 mod preference_tests {
     use super::*;

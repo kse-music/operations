@@ -6,11 +6,13 @@ export class TerminalInputQueue {
   private bytes = 0;
   private sending = false;
   private disposed = false;
+  private waiters: { resolve: () => void; reject: (error: unknown) => void }[] = [];
   constructor(
     private send: (id: string, data: Uint8Array) => Promise<void>,
     private failed: (error: unknown) => void,
   ) {}
   reset(target?: string): void {
+    this.settle(new Error('终端会话已改变，输入已取消。'));
     this.target = target;
     this.generation++;
     this.queue = [];
@@ -28,6 +30,16 @@ export class TerminalInputQueue {
     this.bytes += data.length;
     void this.drain();
     return true;
+  }
+  flush(): Promise<void> {
+    if (!this.queue.length) return Promise.resolve();
+    return new Promise((resolve, reject) => this.waiters.push({ resolve, reject }));
+  }
+  private settle(error?: unknown): void {
+    for (const waiter of this.waiters.splice(0)) {
+      if (error) waiter.reject(error);
+      else waiter.resolve();
+    }
   }
   private async drain(): Promise<void> {
     if (this.sending) return;
@@ -60,9 +72,11 @@ export class TerminalInputQueue {
         this.queue = [];
         this.bytes = 0;
         this.failed(error);
+        this.settle(error);
       }
     } finally {
       this.sending = false;
+      if (!this.queue.length && generation === this.generation) this.settle();
       if (this.queue.length && generation !== this.generation && !this.disposed) void this.drain();
     }
   }

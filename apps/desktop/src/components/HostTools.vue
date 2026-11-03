@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChartNoAxesCombined, FolderSync, SquareTerminal, Wrench } from '@lucide/vue';
+import { ChartNoAxesCombined, FolderSync, SquareTerminal } from '@lucide/vue';
 import { messages, type WorkspaceView } from '../types/product';
 
 defineProps<{ active: WorkspaceView; local: boolean }>();
@@ -7,8 +7,7 @@ defineEmits<{ navigate: [view: WorkspaceView] }>();
 const tools = [
   { view: 'terminals', label: 'SSH 终端', icon: SquareTerminal },
   { view: 'files', label: 'SFTP 文件', icon: FolderSync },
-  { view: 'monitor', label: '服务器监控', icon: ChartNoAxesCombined },
-  { view: 'operations', label: 'Linux 运维', icon: Wrench },
+  { view: 'server', label: '服务器管理', icon: ChartNoAxesCombined },
 ] as const;
 </script>
 

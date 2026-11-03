@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
-import HostTreeControls from './HostTreeControls.vue';
+import HostSidebar from './HostSidebar.vue';
 import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
 import { useWorkspaceStore } from '../stores/workspace';
@@ -47,7 +47,7 @@ async function mount() {
   });
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(HostTreeControls, { host: hosts.catalog.hosts[1]!, onSaved: saved }).use(pinia);
+  app = createApp(HostSidebar, { onSaved: saved }).use(pinia);
   app.mount(root);
   await nextTick();
   return { hosts, saved };
@@ -56,12 +56,19 @@ const button = (label: string, scope: ParentNode = document) =>
   [...scope.querySelectorAll<HTMLButtonElement>('button')].find(
     (item) => item.textContent?.trim() === label,
   )!;
+async function openAction(label: string): Promise<void> {
+  root
+    .querySelector('[data-host-id="b"]')!
+    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await nextTick();
+  button(label, document.querySelector('[aria-label="主机树操作"]')!).click();
+  await nextTick();
+}
 
 it('reads and edits the exact host while leaving the active host and terminal intact', async () => {
   const { hosts, saved } = await mount();
   const focused = useTerminalsStore().focused;
-  root.querySelector<HTMLButtonElement>('[aria-label="编辑主机 Host b"]')!.click();
-  await nextTick();
+  await openAction('编辑主机');
   const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="编辑主机"]')!;
   const fields = dialog.querySelectorAll<HTMLInputElement>('.form-grid > label input');
   expect(fields[1]!.value).toBe('b.example');
@@ -89,13 +96,14 @@ it('reads and edits the exact host while leaving the active host and terminal in
   expect(useTerminalsStore().focused).toBe(focused);
 });
 
-it('only exposes edit and delete actions without a host copy operation', async () => {
+it('removes inline actions while retaining context menu operations without changing the workspace', async () => {
   const { saved } = await mount();
-  expect(
-    [...root.querySelectorAll('.tree-host-actions button')].map((item) =>
-      item.getAttribute('aria-label'),
-    ),
-  ).toEqual(['编辑主机 Host b', '删除主机 Host b']);
+  expect(root.querySelector('.tree-host-actions')).toBeNull();
+  expect(root.querySelector('[aria-label^="编辑主机 "], [aria-label^="删除主机 "]')).toBeNull();
+  const host = root.querySelector<HTMLElement>('[data-host-id="b"]')!;
+  host.focus();
+  host.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  expect(root.querySelectorAll('.tree-host-row button')).toHaveLength(2);
   expect(root.querySelector('[aria-label^="复制主机 "]')).toBeNull();
   expect(saved).not.toHaveBeenCalled();
   expect(useWorkspaceStore().current?.hostId).toBe('a');
@@ -113,8 +121,7 @@ it.each([true, false])(
       ...hosts.catalog!,
       hosts: [hosts.catalog!.hosts[0]!],
     });
-    root.querySelector<HTMLButtonElement>('[aria-label="删除主机 Host b"]')!.click();
-    await nextTick();
+    await openAction('删除主机');
     let dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
     expect(dialog.open).toBe(true);
     expect(dialog.textContent).toContain('b.example');
@@ -122,8 +129,7 @@ it.each([true, false])(
     button('取消', dialog).click();
     await nextTick();
     expect(document.querySelector('dialog')).toBeNull();
-    root.querySelector<HTMLButtonElement>('[aria-label="删除主机 Host b"]')!.click();
-    await nextTick();
+    await openAction('删除主机');
     dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
     button('确认删除主机', dialog).click();
     await vi.waitFor(() => expect(hosts.busy).toBe(false));

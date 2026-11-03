@@ -86,7 +86,9 @@ it('binds confirmation to its SSH session and sends only the strict process iden
   root = document.createElement('div');
   document.body.append(root);
   const hostId = ref('a');
-  app = createApp({ render: () => h(OperationsView, { hostId: hostId.value }) }).use(pinia);
+  app = createApp({
+    render: () => h(OperationsView, { hostId: hostId.value, initialTab: 'processes' }),
+  }).use(pinia);
   app.mount(root);
   await flush();
   const click = async (label: string) => {
@@ -97,8 +99,11 @@ it('binds confirmation to its SSH session and sends only the strict process iden
     button!.click();
     await flush();
   };
-  await click('进程');
   await click('进程详情 / 信号');
+  expect(root.querySelector('[data-testid=operations-detail]')).toBeNull();
+  expect(document.querySelector('dialog[aria-label=进程详情]')?.textContent).toContain(
+    '/bin/sleep',
+  );
   await click('发送信号…');
   expect(root.querySelector('[aria-label="运维主机"]')).toBeNull();
   hostId.value = 'b';

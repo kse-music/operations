@@ -27,7 +27,7 @@ it.each([true, false])(
     pinia = createPinia();
     setActivePinia(pinia);
     useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
-    const group = { id: 'group', name: 'Production', sortOrder: 0 };
+    const group = { id: 'group', name: 'Production', sortOrder: 0, parentId: null };
     const save = vi.spyOn(hostsApi, 'groupSave');
     if (success) save.mockResolvedValue(group);
     else save.mockRejectedValue({ message: 'save failed' });
@@ -37,7 +37,9 @@ it.each([true, false])(
     document.body.append(root);
     app = createApp({
       setup: () => () =>
-        visible.value ? h(GroupManager, { onClose: () => (visible.value = false) }) : null,
+        visible.value
+          ? h(GroupManager, { parentId: null, onClose: () => (visible.value = false) })
+          : null,
     }).use(pinia);
     app.mount(root);
     const dialog = document.querySelector('dialog')!;
@@ -48,7 +50,7 @@ it.each([true, false])(
       .querySelector('form')!
       .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await vi.waitFor(() => expect(useHostsStore().busy).toBe(false));
-    expect(save).toHaveBeenCalledWith(null, { name: 'Production', sortOrder: 0 });
+    expect(save).toHaveBeenCalledWith(null, { name: 'Production', sortOrder: 0, parentId: null });
     expect(document.querySelector('dialog') === null).toBe(success);
     if (!success) {
       expect(useNotificationsStore().items).toContainEqual(

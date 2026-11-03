@@ -39,13 +39,14 @@ fn unique_name(name: &str, used: &mut HashSet<String>) -> String {
 }
 fn read(c: &Connection) -> Result<Backup, Error> {
     let groups = c
-        .prepare("SELECT id,name,sort_order FROM host_groups")
+        .prepare("SELECT id,name,sort_order,parent_id FROM host_groups")
         .map_err(storage_error)?
         .query_map([], |r| {
             Ok(HostGroup {
                 id: r.get(0)?,
                 name: r.get(1)?,
                 sort_order: r.get(2)?,
+                parent_id: r.get(3)?,
             })
         })
         .map_err(storage_error)?
@@ -130,7 +131,7 @@ fn read(c: &Connection) -> Result<Backup, Error> {
     }
     Ok(Backup {
         format: "serverdeck-backup".into(),
-        version: 1,
+        version: 2,
         groups,
         hosts,
         command_groups,
@@ -187,50 +188,93 @@ fn preview(c: &Connection, b: &Backup) -> Result<BackupPreview, Error> {
             warnings: vec![],
         });
     }
-    Ok(BackupPreview{version:b.version,items,warnings:vec!["只新增数据或跳过冲突，不覆盖已有主机/条目；分组按名称合并。".into(),"备份没有凭据、私钥路径、秘密参数值、信任记录、任务历史或可自动执行的计划。正文/描述/普通默认值可能包含你自行填写的秘密，请自行审查。".into(),"恢复偏好需单独选择，将替换当前非敏感设置（包括新建主机的默认代理）；认证代理默认值不会导出。".into()]})
+    Ok(BackupPreview{version:b.version,items,warnings:vec!["只新增数据或跳过冲突，不覆盖已有主机/条目；文件夹按名称与父目录合并；父目录冲突时拒绝恢复。".into(),"备份没有凭据、私钥路径、秘密参数值、信任记录、任务历史或可自动执行的计划。正文/描述/普通默认值可能包含你自行填写的秘密，请自行审查。".into(),"恢复偏好需单独选择，将替换当前非敏感设置（包括新建主机的默认代理）；认证代理默认值不会导出。".into()]})
 }
-fn merge_groups(
+fn merge_host_groups(
     c: &Connection,
-    groups: impl IntoIterator<Item = (String, String, i64)>,
-    commands: bool,
+    groups: Vec<HostGroup>,
 ) -> Result<HashMap<String, String>, Error> {
     let mut map = HashMap::new();
-    for (old, name, order) in groups {
-        let sql = if commands {
-            "SELECT id FROM automation_groups WHERE name=?1 COLLATE NOCASE"
-        } else {
-            "SELECT id FROM host_groups WHERE name=?1 COLLATE NOCASE"
-        };
+    let mut pending = groups;
+    while !pending.is_empty() {
+        let mut rest = Vec::new();
+        let mut progressed = false;
+        for group in pending {
+            if group
+                .parent_id
+                .as_ref()
+                .is_some_and(|id| !map.contains_key(id))
+            {
+                rest.push(group);
+                continue;
+            }
+            let parent = group.parent_id.as_ref().and_then(|id| map.get(id)).cloned();
+            let existing = c
+                .query_row(
+                    "SELECT id,parent_id FROM host_groups WHERE name=?1 COLLATE NOCASE",
+                    [&group.name],
+                    |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+                )
+                .optional()
+                .map_err(storage_error)?;
+            let id = if let Some((id, old_parent)) = existing {
+                if old_parent != parent {
+                    return Err(Error::Validation(
+                        "同名文件夹的父目录不同，请先调整本地文件夹名称后恢复",
+                    ));
+                }
+                id
+            } else {
+                let id = Uuid::new_v4().to_string();
+                c.execute(
+                    "INSERT INTO host_groups(id,name,sort_order,parent_id) VALUES(?1,?2,?3,?4)",
+                    params![id, group.name, group.sort_order, parent],
+                )
+                .map_err(storage_error)?;
+                id
+            };
+            map.insert(group.id, id);
+            progressed = true;
+        }
+        if !progressed {
+            return Err(Error::Validation("备份文件夹的父目录缺失或存在循环"));
+        }
+        pending = rest;
+    }
+    Ok(map)
+}
+
+fn merge_command_groups(
+    c: &Connection,
+    groups: impl IntoIterator<Item = (String, String)>,
+) -> Result<HashMap<String, String>, Error> {
+    let mut map = HashMap::new();
+    for (old, name) in groups {
         let existing = c
-            .query_row(sql, [&name], |r| r.get::<_, String>(0))
+            .query_row(
+                "SELECT id FROM automation_groups WHERE name=?1 COLLATE NOCASE",
+                [&name],
+                |r| r.get::<_, String>(0),
+            )
             .optional()
             .map_err(storage_error)?;
         let id = if let Some(id) = existing {
             id
         } else {
-            if commands
-                && c.query_row("SELECT count(*) FROM automation_groups", [], |r| {
-                    r.get::<_, u32>(0)
-                })
-                .map_err(storage_error)?
-                    >= 64
+            if c.query_row("SELECT count(*) FROM automation_groups", [], |r| {
+                r.get::<_, u32>(0)
+            })
+            .map_err(storage_error)?
+                >= 64
             {
                 return Err(Error::Validation("恢复后命令分组超过 64 个"));
             }
             let id = Uuid::new_v4().to_string();
-            if commands {
-                c.execute(
-                    "INSERT INTO automation_groups(id,name) VALUES(?1,?2)",
-                    params![id, name],
-                )
-                .map_err(storage_error)?;
-            } else {
-                c.execute(
-                    "INSERT INTO host_groups(id,name,sort_order) VALUES(?1,?2,?3)",
-                    params![id, name, order],
-                )
-                .map_err(storage_error)?;
-            }
+            c.execute(
+                "INSERT INTO automation_groups(id,name) VALUES(?1,?2)",
+                params![id, name],
+            )
+            .map_err(storage_error)?;
             id
         };
         map.insert(old, id);
@@ -288,18 +332,9 @@ impl Database {
             preferences_restored: input.restore_preferences,
             warnings: vec![],
         };
-        let host_groups = merge_groups(
-            &tx,
-            b.groups
-                .into_iter()
-                .map(|g| (g.id, g.name, i64::from(g.sort_order))),
-            false,
-        )?;
-        let command_groups = merge_groups(
-            &tx,
-            b.command_groups.into_iter().map(|g| (g.id, g.name, 0)),
-            true,
-        )?;
+        let host_groups = merge_host_groups(&tx, b.groups)?;
+        let command_groups =
+            merge_command_groups(&tx, b.command_groups.into_iter().map(|g| (g.id, g.name)))?;
         let current = read(&tx)?;
         let mut host_map = HashMap::new();
         let mut host_names = names(&tx, "hosts")?;

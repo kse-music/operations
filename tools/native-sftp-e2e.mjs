@@ -1,4 +1,4 @@
-import { terminalAction } from './ui-navigation.mjs';
+import { terminalAction, navigateWorkspace } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile, open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
@@ -168,7 +168,7 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
   let dialog = page.getByRole('dialog', { name: '确认文件传输', exact: true });
   await dialog.getByRole('button', { name: '加入传输队列', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
-  await page.getByRole('navigation').getByRole('button', { name: '全局设置', exact: true }).click();
+  await navigateWorkspace(page, '通用');
   const uploaded = await waitTask('upload');
   session = uploaded.sessionId;
   assert.equal(uploaded.filesDone, 3);

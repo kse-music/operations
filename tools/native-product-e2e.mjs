@@ -1,3 +1,4 @@
+import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
 import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { navigateWorkspace, selectHostWorkspace, showHostTree } from './ui-navigation.mjs';
@@ -7,28 +8,26 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeNativeWindow } from './native-window-close.mjs';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-export async function createProductHost(page, target, credentialId, description) {
+export async function createProductHost(page, target, credentialId) {
+  const name = `Linux SSH verification ${randomUUID()}`;
   await showHostTree(page);
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
-  await page
-    .locator('.host-sidebar-actions')
-    .getByRole('button', { name: '新建主机', exact: true })
-    .click();
+  await reloadHosts(page);
+  await hostTreeAction(page, null, '新建主机');
   const dialog = page.getByRole('dialog', { name: '新建主机', exact: true });
-  await dialog.getByLabel('主机名称（可选）', { exact: true }).fill('Linux SSH verification');
+  await dialog.getByLabel('主机名称（可选）', { exact: true }).fill(name);
   await dialog.getByLabel('地址（IP / 域名）', { exact: true }).fill(target.hostname);
   await dialog.getByLabel('用户名', { exact: true }).fill(target.username);
   await dialog.getByLabel('认证方式', { exact: true }).selectOption('password');
   await dialog.getByLabel('安全凭据引用', { exact: true }).selectOption(credentialId);
-  await dialog.getByLabel('备注', { exact: true }).fill(description);
+  assert.equal(await dialog.getByLabel('备注', { exact: true }).count(), 0);
   await dialog.getByRole('button', { name: '保存主机', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
-  return page.evaluate(async (description) => {
+  return page.evaluate(async (name) => {
     const c = await window.__TAURI_INTERNALS__.invoke('host_list');
-    const h = c.hosts.find((h) => h.description === description);
+    const h = c.hosts.find((h) => h.name === name);
     if (!h) throw new Error('created host not persisted');
     return h.id;
-  }, description);
+  }, name);
 }
 function ownWindow(pid, executable, bounds) {
   assert(Number.isSafeInteger(pid) && pid > 0);
@@ -154,8 +153,7 @@ export async function productChecks(context) {
     const s = await rpc('files_connections');
     return s.some((s) => s.hostId === hostId);
   });
-  await nav('Linux 运维');
-  await page.getByRole('button', { name: '连接运维', exact: true }).click();
+  await nav('服务器管理');
   await page.getByRole('tab', { name: '进程', exact: true }).click();
   await page.getByRole('button', { name: '刷新运维列表', exact: true }).waitFor();
   await until(async () => {
@@ -197,6 +195,10 @@ export async function productChecks(context) {
   passed(
     'native unified host identity and shared SSH Transport across independent terminal/files/operations leases, with explicit PID-to-port lookup',
   );
+  await page
+    .getByRole('dialog', { name: '进程详情', exact: true })
+    .getByRole('button', { name: '关闭对话框', exact: true })
+    .click();
   const {
     id: originalId,
     createdAt: originalCreated,
@@ -207,7 +209,7 @@ export async function productChecks(context) {
   void originalCreated;
   void originalUpdated;
   await rpc('host_update', { id: hostId, input: { ...originalInput, port: 23 } });
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
   await page.getByRole('status').filter({ hasText: '当前仍操作建立时的连接' }).waitFor();
   await nav('SSH 终端');
   const beforeCross = (await rpc('files_connections')).map((s) => s.id);
@@ -218,7 +220,7 @@ export async function productChecks(context) {
     beforeCross,
   );
   await rpc('host_update', { id: hostId, input: originalInput });
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
   passed(
     'native edited host configuration does not relabel an existing SSH connection or silently open another endpoint',
   );
@@ -233,7 +235,7 @@ export async function productChecks(context) {
   input.port = 1;
   input.description = description;
   await rpc('host_update', { id, input });
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
   await selectHostWorkspace(page, id);
   await terminalAction(page, page.locator('.terminal-pane:visible'), '诊断连接异常');
   assert.equal(
@@ -348,7 +350,7 @@ export async function productChecks(context) {
   await page.getByRole('button', { name: '导出非敏感备份', exact: true }).click();
   const backup = await rpc('backup_export');
   const parsed = JSON.parse(backup);
-  assert.equal(parsed.version, 1);
+  assert.equal(parsed.version, 2);
   assert(!backup.includes(originalHost.credentialId));
   assert(!parsed.credentials && !parsed.schedules && !parsed.runs);
   assert(parsed.hosts.every((h) => h.config.credentialId === null));
@@ -391,10 +393,12 @@ export async function productChecks(context) {
     'native versioned backup preview, duplicate skip and confirmed copy restore preserve originals and omit credentials/automatic plans',
   );
   // Settings and logical panel/window persistence. Only manipulate this test process window.
-  await nav('全局设置');
+  await nav('工作区与连接');
   await page.getByLabel('默认 Keepalive 间隔', { exact: true }).fill('33');
   await page.getByLabel('默认下载目录', { exact: true }).fill(artifacts);
+  await nav('通用');
   await page.getByTestId('theme-select').selectOption('light');
+  await nav('工作区与连接');
   await page.getByLabel('全局默认代理', { exact: true }).selectOption('socks5');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await until(
@@ -402,10 +406,7 @@ export async function productChecks(context) {
       (await rpc('app_bootstrap')).config.product.sshDefaults.keepaliveIntervalSecs === 33,
   );
   await showHostTree(page);
-  await page
-    .locator('.host-sidebar-actions')
-    .getByRole('button', { name: '新建主机', exact: true })
-    .click();
+  await hostTreeAction(page, null, '新建主机');
   dialog = page.getByRole('dialog', { name: '新建主机', exact: true });
   await dialog.getByText('SSH 高级连接设置', { exact: true }).click();
   assert.equal(await dialog.getByLabel('网络代理', { exact: true }).inputValue(), 'socks5');
@@ -415,7 +416,7 @@ export async function productChecks(context) {
     (await rpc('host_list')).hosts.find((h) => h.id === hostId).ssh.keepaliveIntervalSecs,
     originalHost.ssh.keepaliveIntervalSecs,
   );
-  await nav('全局设置');
+  await nav('工作区与连接');
   await page.getByLabel('全局默认代理', { exact: true }).selectOption('direct');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await until(async () => (await rpc('app_bootstrap')).config.product.sshDefaults.proxy === null);
@@ -477,7 +478,7 @@ export async function productChecks(context) {
   passed(
     'native configured download directory is used by an actual SFTP UI transfer and default proxy is copied only to new host forms',
   );
-  await nav('全局设置');
+  await nav('通用');
   await page.getByRole('separator', { name: '调整主机侧栏宽度', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
   await until(
@@ -540,7 +541,7 @@ export async function productChecks(context) {
   registerCleanup(undefined);
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
   await showHostTree(page);
   const previousPanes = await page.locator('.terminal-pane').count();
   await page.locator('.tree-host').filter({ hasText: originalHost.name }).click();

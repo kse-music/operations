@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { Pencil, Trash2 } from '@lucide/vue';
 import HostDialog from './HostDialog.vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
@@ -29,29 +28,10 @@ async function remove() {
   );
   if (result.ok) deleting.value = undefined;
 }
+defineExpose({ edit, confirmDelete });
 </script>
 
 <template>
-  <div class="tree-host-actions" role="group" :aria-label="`${hostDisplayName(host)} 的主机操作`">
-    <button
-      class="shell-icon-button"
-      :aria-label="`编辑主机 ${hostDisplayName(host)}`"
-      title="编辑主机"
-      :disabled="store.busy"
-      @click="edit"
-    >
-      <Pencil :size="13" aria-hidden="true" />
-    </button>
-    <button
-      class="shell-icon-button"
-      :aria-label="`删除主机 ${hostDisplayName(host)}`"
-      title="删除主机"
-      :disabled="store.busy"
-      @click="confirmDelete"
-    >
-      <Trash2 :size="13" aria-hidden="true" />
-    </button>
-  </div>
   <HostDialog
     v-if="editing"
     :host="editing"

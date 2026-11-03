@@ -1,3 +1,4 @@
+import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
 // Real packaged WebView2 + Rust IPC + SQLite + OS credential store. No IPC mocking.
 // Test config and browser debugging apply only to a copied, isolated test executable.
 import { spawn, spawnSync } from 'node:child_process';
@@ -6,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
-import { showHostTree, openHostTreeTools } from './ui-navigation.mjs';
+import { showHostTree } from './ui-navigation.mjs';
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
 
@@ -110,10 +111,7 @@ async function start() {
     'refusing to mutate a non-test data directory',
   );
   safeScope = true;
-  await page
-    .locator('.host-sidebar-actions')
-    .getByRole('button', { name: '新建主机', exact: true })
-    .waitFor({ state: 'visible' });
+  await page.locator('.tree-group[data-group-id=""] > .group-toggle').waitFor();
 }
 async function stop() {
   if (browser) {
@@ -141,7 +139,7 @@ async function updateTestHost(name, changes) {
   assert(host, `missing isolated host: ${name}`);
   const { id, createdAt: _createdAt, updatedAt: _updatedAt, ...input } = host;
   await invoke('host_update', { id, input: { ...input, ...changes } });
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
 }
 async function showHosts() {
   await showHostTree(page);
@@ -176,21 +174,24 @@ try {
   if (cleanupOnly) {
     process.stdout.write('Connected to isolated test run for cleanup.\n');
   } else {
-    await page.getByRole('button', { name: '管理分组', exact: true }).click();
-    let form = dialog('管理主机分组');
-    await form.getByLabel('分组名称', { exact: true }).fill('验收分组');
-    await form.getByRole('button', { name: '新建分组', exact: true }).click();
+    await hostTreeAction(page, null, '新建文件夹');
+    let form = dialog('新建文件夹');
+    await form.getByLabel('文件夹名称', { exact: true }).fill('验收分组');
+    await form.getByRole('button', { name: '新建文件夹', exact: true }).click();
     await form.waitFor({ state: 'hidden' });
-    await page
-      .locator('.host-sidebar-actions')
-      .getByRole('button', { name: '新建主机', exact: true })
-      .click();
+    await hostTreeAction(
+      page,
+      (await invoke('host_list')).groups.find((g) => g.name === '验收分组').id,
+      '新建主机',
+    );
     form = dialog('新建主机');
     await form.getByLabel('主机名称（可选）', { exact: true }).fill('E2E-Host');
     await form.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.25');
     await form.getByLabel('用户名', { exact: true }).fill('ops');
-    await form.getByLabel('分组', { exact: true }).selectOption({ label: '验收分组' });
-    await form.getByLabel('标签（逗号分隔）', { exact: true }).fill('验收, Linux');
+    assert.equal(await form.getByLabel('分组', { exact: true }).count(), 0);
+    assert.equal(await form.getByLabel('标签（逗号分隔）', { exact: true }).count(), 0);
+    assert.equal(await form.getByLabel('备注', { exact: true }).count(), 0);
+    assert.equal(await form.getByLabel('收藏此主机', { exact: true }).count(), 0);
     await saveHost('新建主机');
     await row('E2E-Host').waitFor();
     results.push('native host + group create');
@@ -210,7 +211,7 @@ try {
     if (await expand.isVisible()) await expand.click();
     const original = (await invoke('host_list')).hosts.find((item) => item.name === 'E2E-Host');
     await invoke('host_copy', { id: original.id });
-    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await reloadHosts(page);
     await row('E2E-Host 副本').waitFor();
     results.push('native host copy via real IPC, without a host menu UI');
     await newCredential('E2E 密码', 'password', secret);
@@ -250,7 +251,7 @@ try {
       '端到端修改与重启验证',
     );
     results.push('native process restart restores SQLite data');
-    await openHostTreeTools(page);
+    await showHostTree(page);
     await page.getByRole('button', { name: '导入 OpenSSH', exact: true }).click();
     form = dialog('导入 OpenSSH Config');
     await form
@@ -297,7 +298,7 @@ try {
       const host = (await invoke('host_list')).hosts.find((item) => item.name === name);
       await invoke('host_delete', { id: host.id });
     }
-    await page.getByRole('button', { name: '刷新', exact: true }).click();
+    await reloadHosts(page);
     await page.getByText('尚未添加主机', { exact: true }).waitFor();
     results.push('native host deletion via real IPC in the isolated test scope');
     await showCredentials();

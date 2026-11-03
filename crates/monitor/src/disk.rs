@@ -1,6 +1,27 @@
 use serverdeck_core::monitor::Disk;
 use std::collections::HashMap;
 
+fn is_desktop_fuse(filesystem: &str, mount: &str) -> bool {
+    if matches!(filesystem, "fuse.portal" | "fuse.gvfsd-fuse") {
+        return true;
+    }
+    // GNOME clipboard mounts have no FUSE subtype. Keep other FUSE storage monitored.
+    if filesystem != "fuse" {
+        return false;
+    }
+    let Some((uid, path)) = mount
+        .strip_prefix("/run/user/")
+        .and_then(|p| p.split_once('/'))
+    else {
+        return false;
+    };
+    !uid.is_empty()
+        && uid.bytes().all(|b| b.is_ascii_digit())
+        && path
+            .strip_prefix("gnome-remote-desktop/cliprdr-")
+            .is_some_and(|suffix| !suffix.is_empty() && !suffix.contains('/'))
+}
+
 fn unescape(value: &str) -> Option<String> {
     let mut bytes = Vec::new();
     let mut i = 0;
@@ -71,7 +92,7 @@ pub fn parse(mountinfo: &str, df: &str, warnings: &mut Vec<String>) -> Vec<Disk>
                 | "nsfs"
                 | "efivarfs"
                 | "bpf"
-        );
+        ) || is_desktop_fuse(filesystem, &mount);
         disks.push(Disk {
             mount,
             source,

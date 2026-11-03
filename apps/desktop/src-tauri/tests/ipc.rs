@@ -107,6 +107,32 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         .build()
         .expect("window");
     assert!(get_ipc_response(&other, request("app_bootstrap", json!({}), origin)).is_err());
+    for (command, body) in [
+        ("terminal_upload_pick", json!({"id":"missing"})),
+        (
+            "terminal_upload_read",
+            json!({"id":"missing","token":"forged","index":0,"offset":0}),
+        ),
+        (
+            "terminal_upload_release",
+            json!({"id":"missing","token":"forged"}),
+        ),
+    ] {
+        for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+            let error = get_ipc_response(window, request(command, body.clone(), url))
+                .expect_err("upload commands must be restricted to the local main window");
+            assert!(
+                error
+                    .as_str()
+                    .is_some_and(|message| message.contains("not allowed"))
+            );
+        }
+        if command != "terminal_upload_release" {
+            let error = get_ipc_response(&main, request(command, body, origin))
+                .expect_err("invalid terminal must be rejected before opening a picker or file");
+            assert_eq!(error["code"], "NOT_FOUND");
+        }
+    }
     // Permission checks must reject these before touching the system clipboard.
     for (command, body) in [
         ("plugin:clipboard-manager|read_text", json!({})),
@@ -197,16 +223,36 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
         "group_save",
         json!({"id":null,"input":{"name":"IPC 分组","sortOrder":1}}),
     );
-    let mut input = json!({"name":"IPC 主机","hostname":"example.com","port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":group["id"],"tags":["linux"],"description":"原备注","favorite":false,"connectTimeoutSecs":15});
+    assert!(group["parentId"].is_null());
+    let child = invoke(
+        "group_save",
+        json!({"id":null,"input":{"name":"IPC 子文件夹","sortOrder":0,"parentId":group["id"]}}),
+    );
+    assert_eq!(child["parentId"], group["id"]);
+    assert!(get_ipc_response(&main, request("group_save", json!({"id":group["id"],"input":{"name":"IPC 分组","sortOrder":1,"parentId":child["id"]}}), origin)).is_err());
+    let mut input = json!({"name":"IPC 主机","hostname":"example.com","port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":child["id"],"tags":["linux"],"description":"原备注","favorite":false,"connectTimeoutSecs":15});
     let host = invoke("host_create", json!({"input":input}));
     input["description"] = json!("新备注");
     invoke("host_update", json!({"id":host["id"],"input":input}));
     let copy = invoke("host_copy", json!({"id":host["id"]}));
     assert_ne!(copy["id"], host["id"]);
+    assert_eq!(copy["groupId"], child["id"]);
     let catalog = invoke("host_list", json!({}));
     assert_eq!(catalog["hosts"].as_array().expect("hosts").len(), 2);
     let export = invoke("hosts_export", json!({}));
     assert!(!export.as_str().expect("export").contains("credentialId"));
+    let exported: Value =
+        serde_json::from_str(export.as_str().expect("export")).expect("json export");
+    assert_eq!(exported["version"], 2);
+    assert_eq!(
+        exported["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .find(|g| g["id"] == child["id"])
+            .expect("child")["parentId"],
+        group["id"]
+    );
     let credential = invoke(
         "credential_save",
         json!({"id":null,"expectedRevision":null,"input":{"name":"IPC 私钥路径","kind":"private_key","keyPath":"~/.ssh/id_ed25519","secret":null,"clearSecret":false}}),
@@ -239,6 +285,17 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
         json!({"id":credential["value"]["id"],"detachHosts":false}),
     );
     invoke("group_delete", json!({"id":group["id"]}));
+    let remaining = invoke("host_list", json!({}));
+    assert!(
+        remaining["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .find(|g| g["id"] == child["id"])
+            .expect("preserved child")["parentId"]
+            .is_null()
+    );
+    invoke("group_delete", json!({"id":child["id"]}));
     assert!(
         invoke("host_list", json!({}))["hosts"]
             .as_array()

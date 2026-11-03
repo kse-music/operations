@@ -269,3 +269,89 @@ fn disk_images_containers_unavailable_mounts_and_overfull_filesystems_are_explic
     );
     assert!(s.warnings.iter().any(|w| w.starts_with("1 个挂载点")));
 }
+
+const DESKTOP_MOUNTS: &str = "1 0 8:1 / / rw - ext4 /dev/sda1 rw\n\
+    2 1 0:2 / /run/user/1000/doc rw - fuse.portal portal rw\n\
+    3 1 0:3 / /run/user/1000/gvfs rw - fuse.gvfsd-fuse gvfsd-fuse rw\n\
+    4 1 0:4 / /run/user/1000/gnome-remote-desktop/cliprdr-WR3kdo rw - fuse grd-fuse-clipboard rw";
+const ROOT_DF: &str = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n\
+    /dev/sda1 ext4 1000 500 500 50% /\n";
+
+#[test]
+fn desktop_virtual_mounts_without_capacity_do_not_degrade_monitoring() {
+    for uid in ["1000", "1001", "65534"] {
+        let mounts = DESKTOP_MOUNTS.replace("/1000/", &format!("/{uid}/"));
+        let sample = Processor::default()
+            .ingest(&payload(&[("mounts", &mounts), ("df", ROOT_DF)]), 1)
+            .expect("sample");
+        assert!(sample.warnings.is_empty(), "{:?}", sample.warnings);
+        assert_eq!(sample.disks.len(), 4);
+        let root = &sample.disks[0];
+        assert_eq!(root.mount, "/");
+        assert!(!root.pseudo);
+        assert_eq!(root.total, Some(1000 * 1024));
+        assert!(root.error.is_none());
+        for disk in &sample.disks[1..] {
+            assert!(disk.pseudo, "{}: {}", disk.filesystem, disk.mount);
+            assert!(disk.total.is_none());
+            assert!(
+                disk.error.is_some(),
+                "raw unavailability must remain inspectable"
+            );
+        }
+    }
+}
+
+#[test]
+fn desktop_mount_filter_keeps_real_disks_fuse_storage_and_similar_paths() {
+    for (filesystem, mount) in [
+        ("ext4", "/data"),
+        ("xfs", "/run/user/1000/doc"),
+        ("fuse.sshfs", "/run/user/1000/gvfs"),
+        ("fuse.rclone", "/run/user/1000/cloud"),
+        ("fuse", "/run/user/1000/encrypted"),
+        (
+            "fuse.sshfs",
+            "/run/user/1000/gnome-remote-desktop/cliprdr-WR3kdo",
+        ),
+        ("ext4", "/run/user/1000/gnome-remote-desktop/cliprdr-WR3kdo"),
+        ("fuse", "/run/user/name/gnome-remote-desktop/cliprdr-WR3kdo"),
+        ("fuse", "/run/user//gnome-remote-desktop/cliprdr-WR3kdo"),
+        ("fuse", "/run/user/1000/gnome-remote-desktop/cliprdr-"),
+        (
+            "fuse",
+            "/run/user/1000/gnome-remote-desktop/cliprdr-WR3kdo/data",
+        ),
+        ("fuse", "/data/gnome-remote-desktop/cliprdr-WR3kdo"),
+    ] {
+        let mounts = format!("{DESKTOP_MOUNTS}\n5 1 0:5 / {mount} rw - {filesystem} storage rw");
+        let sample = Processor::default()
+            .ingest(&payload(&[("mounts", &mounts), ("df", ROOT_DF)]), 1)
+            .expect("sample");
+        let disk = sample
+            .disks
+            .iter()
+            .find(|d| d.device == "0:5")
+            .expect("storage");
+        assert!(!disk.pseudo, "{filesystem}: {mount}");
+        assert!(disk.error.is_some());
+        assert!(disk.total.is_none());
+        assert_eq!(sample.warnings, ["1 个挂载点容量不可用，详见磁盘列表"]);
+    }
+}
+
+#[test]
+fn desktop_mount_filter_does_not_suppress_df_command_failures() {
+    let raw = String::from_utf8(payload(&[("mounts", DESKTOP_MOUNTS), ("df", ROOT_DF)]))
+        .expect("UTF8")
+        .replace("df_code\0\x30\0", "df_code\0\x31\0");
+    let sample = Processor::default()
+        .ingest(raw.as_bytes(), 1)
+        .expect("sample");
+    assert_eq!(
+        sample.warnings,
+        ["df：读取失败，可能是权限不足或命令不可用"]
+    );
+    assert!(sample.disks[0].error.is_none());
+    assert_eq!(sample.disks[0].total, Some(1000 * 1024));
+}

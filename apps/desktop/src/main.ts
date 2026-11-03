@@ -21,3 +21,4 @@ import './styles/operations.css';
 
 import './styles/product.css';
 import './styles/controls.css';
+import './styles/server.css';

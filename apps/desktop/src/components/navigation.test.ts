@@ -17,7 +17,11 @@ it.each([
     ['batch', 'automation', 'network', 'tasks'],
   ],
   ['credentials', ['收起主机栏', '安全凭据', '备份恢复'], ['credentials', 'backup']],
-  ['settings', ['收起主机栏', '全局设置', '本地环境', '关于'], ['settings', 'overview', 'about']],
+  [
+    'settings',
+    ['收起主机栏', '通用', '终端', '快捷键', '工作区与连接', '关于'],
+    ['settings', 'settingsTerminal', 'settingsShortcuts', 'settingsWorkspace', 'about'],
+  ],
 ] as const)('shows only menus belonging to the module containing %s', (active, labels, views) => {
   const navigate = vi.fn(),
     collapse = vi.fn();

@@ -21,8 +21,10 @@ export const hostsApi = {
   update: (id: string, input: HostInput) => call<Host>('host_update', { id, input }),
   remove: (id: string) => call<void>('host_delete', { id }),
   copy: (id: string) => call<Host>('host_copy', { id }),
-  groupSave: (id: string | null, input: { name: string; sortOrder: number }) =>
-    call<HostGroup>('group_save', { id, input }),
+  groupSave: (
+    id: string | null,
+    input: { name: string; sortOrder: number; parentId: string | null },
+  ) => call<HostGroup>('group_save', { id, input }),
   groupRemove: (id: string) => call<void>('group_delete', { id }),
   credentialSave: (id: string | null, expectedRevision: number | null, input: CredentialInput) =>
     call<Mutation<Credential>>('credential_save', { id, expectedRevision, input }),

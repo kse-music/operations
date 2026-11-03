@@ -1,6 +1,32 @@
 import { describe, it, expect, vi } from 'vitest';
 import { TerminalInputQueue } from './terminal-input';
 describe('bounded terminal input', () => {
+  it('flushes only after queued bytes are accepted, and rejects a disconnected flush', async () => {
+    let accept!: () => void;
+    const send = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            accept = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+    const queue = new TerminalInputQueue(send, vi.fn());
+    queue.reset('first');
+    queue.enqueue(new Uint8Array(20000));
+    const flushed = vi.fn();
+    const pending = queue.flush().then(flushed);
+    expect(flushed).not.toHaveBeenCalled();
+    accept();
+    await pending;
+    expect(send).toHaveBeenCalledTimes(2);
+    queue.enqueue(Uint8Array.of(1));
+    const interrupted = expect(queue.flush()).rejects.toThrow('会话已改变');
+    queue.reset('replacement');
+    await interrupted;
+    queue.dispose();
+  });
   it('never replays old input or consumes new queue entries after reconnect', async () => {
     let finish: () => void = () => {};
     const pending = new Promise<void>((resolve) => {

@@ -15,12 +15,13 @@ export const defaultProductPreferences = (): ProductPreferences => ({
 export const messages = {
   'zh-CN': {
     credentials: '安全凭据',
-    overview: '本地环境',
-    settings: '全局设置',
+    settings: '通用',
+    settingsTerminal: '终端',
+    settingsShortcuts: '快捷键',
+    settingsWorkspace: '工作区与连接',
     terminals: 'SSH 终端',
     files: 'SFTP 文件',
-    monitor: '服务器监控',
-    operations: 'Linux 运维',
+    server: '服务器管理',
     network: '网络诊断',
     batch: '批量运维',
     automation: '自动运维',
@@ -30,7 +31,14 @@ export const messages = {
   },
 } as const;
 export type WorkspaceView = keyof (typeof messages)['zh-CN'];
-export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'monitor', 'operations']);
+export const settingsCategories = [
+  { id: 'general', view: 'settings', label: messages['zh-CN'].settings },
+  { id: 'terminal', view: 'settingsTerminal', label: messages['zh-CN'].settingsTerminal },
+  { id: 'shortcuts', view: 'settingsShortcuts', label: messages['zh-CN'].settingsShortcuts },
+  { id: 'workspace', view: 'settingsWorkspace', label: messages['zh-CN'].settingsWorkspace },
+] as const;
+export type SettingsCategory = (typeof settingsCategories)[number]['id'];
+export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'server']);
 export function globalKey(event: KeyboardEvent): string | null {
   if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.isComposing || event.repeat)
     return null;

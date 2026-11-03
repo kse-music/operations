@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace } from './ui-navigation.mjs';
+import { navigateWorkspace, hostTreeAction } from './ui-navigation.mjs';
 
 // In-memory UI fixtures only. No IPC replacement, stored hosts, or remote operations.
 const url = process.env.SERVERDECK_LAYOUT_URL ?? 'http://127.0.0.1:1421';
@@ -44,15 +44,15 @@ try {
                 ? 'Production API / 长名称主机布局检查'
                 : `Server ${String(n + 1).padStart(2, '0')}`,
             hostname: `192.0.2.${n + 1}`,
-            username: 'operator',
+            username: n < 3 ? 'short-list' : 'operator',
             groupId: n < 30 ? 'production' : 'staging',
             favorite: n < 3,
             createdAt: '',
             updatedAt: '',
           })),
           groups: [
-            { id: 'production', name: 'Production', sortOrder: 0 },
-            { id: 'staging', name: 'Staging', sortOrder: 1 },
+            { id: 'production', name: 'Production', sortOrder: 0, parentId: null },
+            { id: 'staging', name: 'Staging', sortOrder: 1, parentId: 'production' },
           ],
           credentials: [],
           pendingSecretDeletions: 0,
@@ -73,7 +73,7 @@ try {
     await page.locator('.module-navigation [data-module="system"]').click();
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['全局设置', '本地环境', '关于'],
+      ['通用', '终端', '快捷键', '工作区与连接', '关于'],
     );
     const about = page.getByRole('button', { name: '关于', exact: true });
     await about.click();
@@ -129,7 +129,7 @@ try {
       return {
         sidebar: box('.sidebar'),
         list: box('.host-tree-scroll'),
-        header: box('.host-sidebar-heading'),
+        header: box('.host-list-heading'),
         footer: box('.host-sidebar-footer'),
         main: box('main'),
         rail: box('.activity-rail'),
@@ -167,7 +167,7 @@ try {
       await page.locator('.activity-rail [aria-label="主机管理"] .nav-badge').count(),
       0,
     );
-    const total = page.locator('.host-filter button').first().locator('.host-count');
+    const total = page.locator('.host-list-heading .host-count');
     assert.equal((await total.textContent()).trim(), '60');
     const countPosition = await total.evaluate((badge) => {
       const label = document.createRange();
@@ -197,8 +197,10 @@ try {
     assert(geometry.listScrolls, `${name}: long host list cannot scroll`);
     if (width > 720)
       assert(geometry.main.x >= geometry.sidebar.right, `${name}: workspace overlaps sidebar`);
-    await page.getByRole('button', { name: '主机树工具', exact: true }).click();
-    const tools = page.getByRole('group', { name: '主机树工具选项', exact: true });
+    assert.equal(await page.getByRole('button', { name: '主机树工具', exact: true }).count(), 0);
+    assert.equal(await page.getByLabel('主机排序', { exact: true }).count(), 0);
+    assert.equal(await page.locator('#host-tree-tools').count(), 0);
+    const tools = page.getByRole('group', { name: '主机导入导出', exact: true });
     await tools.waitFor();
     assert.equal(
       await tools.getByRole('button', { name: '导入 OpenSSH', exact: true }).isEnabled(),
@@ -208,74 +210,89 @@ try {
       await tools.getByRole('button', { name: '导出配置', exact: true }).isEnabled(),
       true,
     );
-    assert.equal(await tools.getByLabel('主机排序', { exact: true }).count(), 1);
-    assert.equal(await tools.getByLabel('按标签筛选主机', { exact: true }).count(), 1);
+    assert.equal(await tools.getByLabel('按标签筛选主机', { exact: true }).count(), 0);
+    assert.equal(await page.getByRole('button', { name: '收藏', exact: true }).count(), 0);
+    assert.equal(await page.getByLabel('已收藏', { exact: true }).count(), 0);
     const toolsFit = await tools.evaluate((element) => element.scrollWidth <= element.clientWidth);
-    assert(toolsFit, `${name}: tree tools overflow`);
-    const hostRow = page.locator('.tree-host-row').first();
-    const actions = hostRow.locator('.tree-host-actions');
-    const actionsVisible = () =>
-      actions.evaluate((element) => {
-        const style = getComputedStyle(element);
-        return style.opacity === '1' && style.pointerEvents === 'auto';
-      });
-    assert.equal(await page.locator('[aria-label^="复制主机 "]').count(), 0);
-    assert.equal(await actions.locator('button').count(), 2);
-    await page.locator('.host-sidebar-heading').click({ position: { x: 4, y: 4 } });
-    assert.equal(await actionsVisible(), false, `${name}: actions visible without hover`);
-    assert.equal(await actions.evaluate((element) => getComputedStyle(element).opacity), '0');
+    assert(toolsFit, `${name}: host import/export actions overflow`);
+    const listHeading = page.locator('.host-list-heading');
+    const toolsPosition = await tools.boundingBox(),
+      listHeadingPosition = await listHeading.boundingBox();
+    assert(toolsPosition.x > listHeadingPosition.x + listHeadingPosition.width / 2);
     assert.equal(
-      await actions.evaluate((element) => getComputedStyle(element).pointerEvents),
-      'none',
+      await listHeading.evaluate(
+        (element) =>
+          element.nextElementSibling?.classList.contains('host-sidebar-controls') &&
+          element.nextElementSibling?.nextElementSibling?.classList.contains('host-tree-scroll'),
+      ),
+      true,
+    );
+    const importButton = tools.getByRole('button', { name: '导入 OpenSSH', exact: true });
+    const exportButton = tools.getByRole('button', { name: '导出配置', exact: true });
+    assert.equal(await importButton.getAttribute('title'), '导入 OpenSSH');
+    assert.equal(await exportButton.getAttribute('title'), '导出配置');
+    await importButton.focus();
+    await page.keyboard.press('Enter');
+    const importDialog = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
+    await importDialog.waitFor();
+    await importDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await importDialog.waitFor({ state: 'hidden' });
+    const folder = page.locator('[data-group-id="staging"] > .group-toggle');
+    await folder.scrollIntoViewIfNeeded();
+    await folder.press('Shift+F10');
+    const folderMenu = page.getByRole('menu', { name: '主机树操作', exact: true });
+    await folderMenu.waitFor();
+    assert.deepEqual(
+      (await folderMenu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
+      ['新建主机', '新建文件夹', '重命名文件夹', '删除文件夹'],
+    );
+    await page.screenshot({ path: `${output}/${name}-folder-context-menu.png` });
+    await folderMenu.getByRole('menuitem', { name: '新建文件夹', exact: true }).click();
+    const folderDialog = page.getByRole('dialog', { name: '新建文件夹', exact: true });
+    await folderDialog.waitFor();
+    assert.match(await folderDialog.textContent(), /根目录 \/ Production \/ Staging/);
+    await folderDialog.getByRole('button', { name: '取消', exact: true }).click();
+    await folderDialog.waitFor({ state: 'hidden' });
+    await hostTreeAction(page, null, '新建主机');
+    const hostDialog = page.getByRole('dialog', { name: '新建主机', exact: true });
+    await hostDialog.waitFor();
+    for (const label of ['标签（逗号分隔）', '备注', '收藏此主机'])
+      assert.equal(await hostDialog.getByLabel(label, { exact: true }).count(), 0);
+    assert.equal(await hostDialog.getByLabel('分组', { exact: true }).count(), 0);
+    await page.screenshot({ path: `${output}/${name}-host-dialog.png` });
+    await hostDialog.getByRole('button', { name: '取消', exact: true }).click();
+    await hostDialog.waitFor({ state: 'hidden' });
+    const hostRow = page.locator('.tree-host-row').first();
+    assert.equal(await page.locator('.tree-host-actions').count(), 0);
+    assert.equal(await hostRow.getByRole('button').count(), 1);
+    assert.equal(
+      await page.locator('[aria-label^="编辑主机 "], [aria-label^="删除主机 "]').count(),
+      0,
     );
     await hostRow.scrollIntoViewIfNeeded();
     const labelBefore = await hostRow.locator('.host-label').boundingBox();
     await hostRow.hover();
-    assert.equal(await actionsVisible(), true);
-    assert.deepEqual(
-      await hostRow.locator('.host-label').boundingBox(),
-      labelBefore,
-      `${name}: hover moved host label`,
-    );
+    assert.equal(await hostRow.getByRole('button').count(), 1);
+    assert.deepEqual(await hostRow.locator('.host-label').boundingBox(), labelBefore);
+    const hostButton = hostRow.locator('.tree-host');
     assert.equal(
-      await page
-        .locator('.tree-host-row')
-        .nth(1)
-        .locator('.tree-host-actions')
-        .evaluate((element) => getComputedStyle(element).opacity),
-      '0',
+      await hostButton.evaluate((element) => getComputedStyle(element).paddingRight),
+      '10px',
     );
-    await page.screenshot({ path: `${output}/${name}-host-actions-hover.png` });
-    await page.locator('.host-sidebar-heading').click({ position: { x: 4, y: 4 } });
-    assert.equal(await actionsVisible(), false);
-    assert.equal(await actions.evaluate((element) => getComputedStyle(element).opacity), '0');
-    await hostRow.locator('.tree-host').press('Shift+Tab');
-    await page.keyboard.press('Tab');
+    await hostButton.focus();
+    assert.equal(await hostRow.getByRole('button').count(), 1);
+    await page.screenshot({ path: `${output}/${name}-host-row-no-icons.png` });
+    await hostButton.press('Shift+F10');
+    const editMenu = page.getByRole('menu', { name: '主机树操作', exact: true });
+    await editMenu.waitFor();
+    await page.keyboard.press('ArrowDown');
     assert.equal(
-      await hostRow.locator('.tree-host').evaluate((button) => document.activeElement === button),
-      true,
-    );
-    assert.equal(await actionsVisible(), true, `${name}: keyboard row focus must reveal actions`);
-    await page.keyboard.press('Tab');
-    assert.equal(
-      await actions
-        .locator('[aria-label^="编辑主机 "]')
+      await editMenu
+        .getByRole('menuitem', { name: '编辑主机', exact: true })
         .evaluate((button) => document.activeElement === button),
       true,
     );
-    assert.equal(await actionsVisible(), true, `${name}: keyboard actions hidden`);
-    await page.keyboard.press('Tab');
-    assert.equal(
-      await actions
-        .locator('[aria-label^="删除主机 "]')
-        .evaluate((button) => document.activeElement === button),
-      true,
-    );
-    await page.locator('.host-sidebar-heading').click({ position: { x: 4, y: 4 } });
-    assert.equal(await actionsVisible(), false);
-    await page.screenshot({ path: `${output}/${name}-host-actions-hidden.png` });
-    await hostRow.hover();
-    await actions.locator('[aria-label^="编辑主机 "]').click();
+    await page.keyboard.press('Enter');
     const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
     assert.equal(
       await edit.getByLabel('主机名称（可选）', { exact: true }).inputValue(),
@@ -287,12 +304,13 @@ try {
       `${name}: management opened a terminal`,
     );
     await edit.getByRole('button', { name: '取消', exact: true }).click();
-    await page.screenshot({ path: `${output}/${name}-tree-tools.png` });
-    await page.getByRole('button', { name: '主机树工具', exact: true }).click();
+    await page.screenshot({ path: `${output}/${name}-host-list-actions.png` });
+    const fixedActions = await tools.boundingBox();
     await page.locator('.host-tree-scroll').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
-    assert.deepEqual(await page.locator('.host-sidebar-heading').boundingBox(), {
+    assert.deepEqual(await tools.boundingBox(), fixedActions);
+    assert.deepEqual(await page.locator('.host-list-heading').boundingBox(), {
       x: geometry.header.x,
       y: geometry.header.y,
       width: geometry.header.width,
@@ -304,7 +322,9 @@ try {
     await page.getByText('没有匹配的主机', { exact: true }).waitFor();
     assert.equal((await total.textContent()).trim(), '60');
     await page.getByLabel('搜索主机', { exact: true }).fill('');
-    await page.getByRole('button', { name: '收藏', exact: true }).click();
+    await page.getByLabel('搜索主机', { exact: true }).fill('192.0.2.60');
+    assert.equal(await page.locator('.tree-host').count(), 1);
+    await page.getByLabel('搜索主机', { exact: true }).fill('short-list');
     assert.equal(await page.locator('.tree-host').count(), 3);
     assert.equal((await total.textContent()).trim(), '60');
     if (height >= 800) {
@@ -314,30 +334,41 @@ try {
         `${name}: short list has an unnecessary scrollbar`,
       );
     } else {
-      const lastFavorite = page.locator('.tree-host').last();
-      await lastFavorite.scrollIntoViewIfNeeded();
-      const row = await lastFavorite.boundingBox(),
+      const lastMatch = page.locator('.tree-host').last();
+      await lastMatch.scrollIntoViewIfNeeded();
+      const row = await lastMatch.boundingBox(),
         list = await page.locator('.host-tree-scroll').boundingBox();
       assert(
         row.y >= list.y && row.y + row.height <= list.y + list.height + 1,
-        `${name}: short-window favorites cannot be reached by scrolling`,
+        `${name}: short-window search matches cannot be reached by scrolling`,
       );
     }
-    await page.getByRole('button', { name: '全部主机', exact: true }).click();
+    await page.getByLabel('搜索主机', { exact: true }).fill('');
     await page.locator('.tree-host').first().click();
     await page.locator('.terminal-tab').first().waitFor();
     await page.locator('.tree-host').first().dblclick();
     assert.equal(await page.locator('.terminal-tab').count(), 1, `${name}: duplicate terminal`);
     assert.equal(await page.locator('.topbar [aria-label="退出应用"]').count(), 0);
-    assert.equal(await page.locator('.topbar [aria-label="打开全局设置"]').count(), 0);
+    assert.equal(await page.locator('.topbar [aria-label="打开通用"]').count(), 0);
     await page.locator('.tree-host').first().click({ button: 'right' });
-    assert.equal(await page.getByRole('menu').count(), 0);
+    const hostMenu = page.getByRole('menu', { name: '主机树操作', exact: true });
+    assert.equal(await hostMenu.count(), 1);
+    assert.deepEqual(
+      (await hostMenu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
+      ['连接主机', '编辑主机', '复制主机', '删除主机'],
+    );
+    assert.equal(
+      await hostMenu.getByRole('menuitem', { name: '新建文件夹', exact: true }).count(),
+      0,
+    );
     assert.equal(await page.getByRole('button', { name: '关闭操作菜单', exact: true }).count(), 0);
     assert.equal(
       await page.locator('.tree-host-more, .host-tree-scroll [aria-haspopup=menu]').count(),
       0,
     );
-    await page.screenshot({ path: `${output}/${name}-host-no-menu.png` });
+    await page.screenshot({ path: `${output}/${name}-host-context-menu.png` });
+    await page.keyboard.press('Escape');
+    assert.equal(await hostMenu.count(), 0);
     if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     await page.locator('.workspace-tab.active [role=tab]').click({ button: 'middle' });
     assert.equal(
@@ -356,8 +387,8 @@ try {
     await page.locator('.tree-host').first().click();
     await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     assert.equal(await page.locator('.sidebar').isVisible(), false);
-    await navigateWorkspace(page, 'Linux 运维');
-    await page.getByRole('heading', { name: 'Linux 运维', exact: true }).waitFor();
+    await navigateWorkspace(page, '服务器管理');
+    await page.getByRole('heading', { name: '服务器管理', exact: true }).waitFor();
     await page.screenshot({ path: `${output}/${name}-workspace.png` });
     if (!(await page.locator('.sidebar').isVisible()))
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
@@ -366,10 +397,12 @@ try {
     assert.equal((await device.locator('.sidebar-context-name').textContent()).trim(), '本地设备');
     assert.equal((await device.locator('.host-tool').textContent()).trim(), '本地终端');
     const pinned = await device.boundingBox();
-    const filter = await page.locator('.host-filter').boundingBox();
+    const heading = await page.locator('.host-list-heading').boundingBox();
     const list = await page.locator('.host-tree-scroll').boundingBox();
-    assert(pinned.y >= filter.y + filter.height, `${name}: device must follow All Hosts`);
-    assert(list.y >= pinned.y + pinned.height, `${name}: list must follow the fixed device`);
+    assert(heading.y >= pinned.y + pinned.height, `${name}: All Hosts must follow the device`);
+    const searchBox = await page.getByLabel('搜索主机', { exact: true }).boundingBox();
+    assert(searchBox.y >= heading.y + heading.height, `${name}: search must follow All Hosts`);
+    assert(list.y >= searchBox.y + searchBox.height, `${name}: list must follow search`);
     assert.equal(await page.locator('.host-tree-scroll .sidebar-local-device').count(), 0);
     const scrollTop = await page.locator('.host-tree-scroll').evaluate((element) => {
       element.scrollTop = element.scrollHeight;
@@ -380,10 +413,8 @@ try {
     await page.getByLabel('搜索主机', { exact: true }).fill('no-matching-layout-host');
     await page.getByText('没有匹配的主机', { exact: true }).waitFor();
     assert.equal(await device.isVisible(), true);
-    await page.getByRole('button', { name: '收藏', exact: true }).click();
-    assert.equal(await device.isVisible(), true);
     await page.getByLabel('搜索主机', { exact: true }).fill('');
-    await page.getByRole('button', { name: '全部主机', exact: true }).click();
+    assert.equal(await device.isVisible(), true);
     await device.getByRole('button', { name: '本地终端', exact: true }).click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
     await page.locator('.terminal-pane:visible[data-host-id=""]').waitFor();

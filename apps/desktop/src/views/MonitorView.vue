@@ -11,7 +11,12 @@ import type { TerminalEvent } from '../types/terminal';
 import { bytes } from '../types/files';
 import TrendChart from '../components/TrendChart.vue';
 import Modal from '../components/Modal.vue';
-const props = defineProps<{ hostId?: string }>();
+import type { MonitorSection } from '../types/server';
+const props = withDefaults(defineProps<{ hostId?: string; section?: MonitorSection }>(), {
+  hostId: undefined,
+  section: 'overview',
+});
+const info = ref<'system' | 'cores' | 'warnings' | null>(null);
 const emit = defineEmits<{ processes: [hostId: string] }>();
 const hosts = useHostsStore(),
   application = useApplicationStore();
@@ -30,11 +35,11 @@ let timer: ReturnType<typeof setTimeout> | undefined,
 let ownedHost = '';
 const sample = computed(() => snapshot.value?.sample),
   cpu = computed(() => sample.value?.cpus.find((c) => c.name === 'cpu'));
-const disks = computed(
-  () =>
-    sample.value?.disks.filter(
-      (d) => allMounts.value || (!d.pseudo && !d.image && !d.duplicateOf),
-    ) ?? [],
+const persistentDisks = computed(
+  () => sample.value?.disks.filter((d) => !d.pseudo && !d.image && !d.duplicateOf) ?? [],
+);
+const disks = computed(() =>
+  allMounts.value ? (sample.value?.disks ?? []) : persistentDisks.value,
 );
 const stale = computed(() =>
   ['failed', 'error', 'paused', 'connecting'].includes(snapshot.value?.state ?? 'connecting'),
@@ -181,32 +186,32 @@ onBeforeUnmount(() => {
 });
 useErrorNotifications(() => [
   error.value,
-  ...(sample.value?.disks.map((disk) => disk.error) ?? []),
+  ...persistentDisks.value.map((disk) =>
+    disk.error ? `挂载点 ${disk.mount}：${disk.error}` : null,
+  ),
 ]);
 </script>
 <template>
-  <section class="monitor-view page-view" aria-label="Linux 服务器监控">
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">AGENTLESS MONITOR</p>
-        <h1>服务器监控</h1>
-        <p class="subtle">固定只读 SSH 采集 · 页面隐藏暂停 · 不安装 Agent</p>
-      </div>
-      <div class="monitor-actions">
-        <button class="button primary" :disabled="!chosen || busy" @click="start">
-          {{ busy ? '正在连接…' : snapshot ? '重新连接 / 继续' : '开始监控' }}</button
-        ><button class="button" :disabled="!session || busy" @click="stop">停止监控</button
-        ><button class="button" :disabled="!chosen" @click="emit('processes', chosen)">
-          查看资源占用进程
-        </button>
-      </div>
+  <section class="monitor-view" aria-label="Linux 服务器监控">
+    <div class="monitor-actions">
+      <button class="button primary" :disabled="!chosen || busy" @click="start">
+        {{ busy ? '正在连接…' : snapshot ? '重新连接 / 继续' : '开始监控' }}</button
+      ><button class="button" :disabled="!session || busy" @click="stop">停止监控</button
+      ><button
+        v-if="section === 'overview'"
+        class="button"
+        :disabled="!chosen"
+        @click="emit('processes', chosen)"
+      >
+        查看资源占用进程
+      </button>
     </div>
 
     <p class="monitor-status" role="status" data-testid="monitor-state">
       {{ snapshot ? (monitorLabels[snapshot.state] ?? snapshot.state) : connection || '尚未采样' }}
       · 间隔
       {{ snapshot?.intervalSecs ?? application.state?.config.monitorIntervalSecs ?? 3 }}
-      秒（全局设置）<span v-if="sample">
+      秒（设置 → 通用）<span v-if="sample">
         · 最后成功 {{ new Date(sample.sampledAt).toLocaleTimeString() }}</span
       >
     </p>
@@ -219,112 +224,83 @@ useErrorNotifications(() => [
       }}
     </div>
     <div v-if="sample" :class="{ 'monitor-stale': stale }">
-      <div class="monitor-cards">
-        <article class="panel">
-          <h2>CPU</h2>
-          <strong data-testid="monitor-cpu">{{
-            sample.cpus.length ? percent(cpu?.usage) : '不可用'
-          }}</strong>
-          <p>{{ sample.system.cores ?? '未知' }} 核 · iowait {{ percent(cpu?.iowait) }}</p>
-          <small>{{
-            sample.rateStatus === 'initial'
-              ? '首次采样，等待差值'
-              : sample.rateStatus === 'reset'
-                ? '差分基线已重置'
-                : '忙碌时间不含 idle / iowait'
-          }}</small>
-        </article>
-        <article class="panel">
-          <h2>内存</h2>
-          <strong>{{ sample.memory ? percent(sample.memory.usage) : '不可用' }}</strong>
-          <p>
-            {{
-              sample.memory
-                ? `${bytes(sample.memory.used)} / ${bytes(sample.memory.total)}`
-                : '采集失败'
-            }}
-          </p>
-          <small
-            >可用 {{ sample.memory ? bytes(sample.memory.available) : '—' }}
-            {{ sample.memory?.approximate ? '（近似）' : '' }}</small
-          >
-        </article>
-        <article class="panel">
-          <h2>Swap</h2>
-          <strong>{{
-            !sample.memory
-              ? '不可用'
-              : sample.memory.swapTotal === 0
-                ? '未启用'
-                : percent(sample.memory.swapUsage)
-          }}</strong>
-          <p>
-            {{
-              sample.memory
-                ? `${bytes(sample.memory.swapUsed)} / ${bytes(sample.memory.swapTotal)}`
-                : '—'
-            }}
-          </p>
-        </article>
-        <article class="panel">
-          <h2>系统负载 1 / 5 / 15 分钟</h2>
-          <strong class="load-value">{{
-            sample.load?.map((n) => n.toFixed(2)).join(' / ') ?? '不可用'
-          }}</strong>
-          <p>运行 {{ uptime(sample.uptime) }}</p>
-        </article>
-      </div>
-      <details class="panel">
-        <summary>每核心 CPU（新核心和无效差值显示待计算）</summary>
-        <div class="core-grid">
-          <span v-for="core in sample.cpus.filter((c) => c.name !== 'cpu')" :key="core.name"
-            >{{ core.name }} {{ percent(core.usage) }}</span
-          >
+      <template v-if="section === 'overview'">
+        <div class="monitor-cards">
+          <article class="panel">
+            <h2>CPU</h2>
+            <strong data-testid="monitor-cpu">{{
+              sample.cpus.length ? percent(cpu?.usage) : '不可用'
+            }}</strong>
+            <p>{{ sample.system.cores ?? '未知' }} 核 · iowait {{ percent(cpu?.iowait) }}</p>
+            <small>{{
+              sample.rateStatus === 'initial'
+                ? '首次采样，等待差值'
+                : sample.rateStatus === 'reset'
+                  ? '差分基线已重置'
+                  : '忙碌时间不含 idle / iowait'
+            }}</small>
+          </article>
+          <article class="panel">
+            <h2>内存</h2>
+            <strong>{{ sample.memory ? percent(sample.memory.usage) : '不可用' }}</strong>
+            <p>
+              {{
+                sample.memory
+                  ? `${bytes(sample.memory.used)} / ${bytes(sample.memory.total)}`
+                  : '采集失败'
+              }}
+            </p>
+            <small
+              >可用 {{ sample.memory ? bytes(sample.memory.available) : '—' }}
+              {{ sample.memory?.approximate ? '（近似）' : '' }}</small
+            >
+          </article>
+          <article class="panel">
+            <h2>Swap</h2>
+            <strong>{{
+              !sample.memory
+                ? '不可用'
+                : sample.memory.swapTotal === 0
+                  ? '未启用'
+                  : percent(sample.memory.swapUsage)
+            }}</strong>
+            <p>
+              {{
+                sample.memory
+                  ? `${bytes(sample.memory.swapUsed)} / ${bytes(sample.memory.swapTotal)}`
+                  : '—'
+              }}
+            </p>
+          </article>
+          <article class="panel">
+            <h2>系统负载 1 / 5 / 15 分钟</h2>
+            <strong class="load-value">{{
+              sample.load?.map((n) => n.toFixed(2)).join(' / ') ?? '不可用'
+            }}</strong>
+            <p>运行 {{ uptime(sample.uptime) }}</p>
+          </article>
         </div>
-      </details>
-      <div class="monitor-charts">
-        <TrendChart
-          :points="snapshot?.history ?? []"
-          field="cpu"
-          label="CPU 使用率"
-          unit="%"
-          :max="100"
-        /><TrendChart
-          :points="snapshot?.history ?? []"
-          field="memory"
-          label="内存使用率"
-          unit="%"
-          :max="100"
-        /><TrendChart
-          :points="networkPoints"
-          field="receiveRate"
-          label="接收速率（非 lo 接口合计）"
-          unit="KiB/s"
-        /><TrendChart
-          :points="networkPoints"
-          field="sendRate"
-          label="发送速率（非 lo 接口合计）"
-          unit="KiB/s"
-        />
-      </div>
-      <div class="panel monitor-system">
-        <h2>系统信息</h2>
-        <dl>
-          <dt>主机名</dt>
-          <dd>{{ sample.system.hostname ?? '不可用' }}</dd>
-          <dt>发行版</dt>
-          <dd>{{ sample.system.distribution ?? '不可用' }}</dd>
-          <dt>内核 / 架构</dt>
-          <dd>{{ sample.system.kernel ?? '—' }} / {{ sample.system.architecture ?? '—' }}</dd>
-          <dt>CPU</dt>
-          <dd>{{ sample.system.cpuModel ?? '不可用' }}</dd>
-          <dt>远程系统时间 / 时区</dt>
-          <dd>
-            {{ sample.system.systemTime ?? '不可用' }} / {{ sample.system.timezone ?? '不可用' }}
-          </dd>
-        </dl>
-      </div>
-      <section class="panel">
+        <div class="monitor-charts">
+          <TrendChart
+            :points="snapshot?.history ?? []"
+            field="cpu"
+            label="CPU 使用率"
+            unit="%"
+            :max="100"
+          /><TrendChart
+            :points="snapshot?.history ?? []"
+            field="memory"
+            label="内存使用率"
+            unit="%"
+            :max="100"
+          />
+        </div>
+        <div class="monitor-actions monitor-info-actions">
+          <button class="button" @click="info = 'system'">系统信息</button>
+          <button class="button" @click="info = 'cores'">每核心 CPU</button>
+        </div>
+      </template>
+      <section v-if="section === 'disks'" class="panel monitor-resource-panel">
         <h2>磁盘与挂载点</h2>
         <label
           ><input v-model="allMounts" type="checkbox" />显示伪文件系统、只读镜像与重复挂载</label
@@ -364,42 +340,98 @@ useErrorNotifications(() => [
         </div>
         <p v-if="!disks.length">没有可显示的持久文件系统，请检查采集警告或显示全部挂载。</p>
       </section>
-      <section class="panel">
-        <h2>网络接口</h2>
-        <p class="subtle">
-          速率由远端 uptime 间隔计算；虚拟接口可能重复计算同一流量，合计不是物理线路吞吐量。
-        </p>
-        <div class="monitor-table">
-          <table>
-            <thead>
-              <tr>
-                <th>接口 / 地址</th>
-                <th>接收速度</th>
-                <th>发送速度</th>
-                <th>累计接收</th>
-                <th>累计发送</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="net in sample.network" :key="net.name">
-                <td>
-                  {{ net.name
-                  }}<small>{{ net.addresses.join(', ') || '无地址或 ip 命令不可用' }}</small>
-                </td>
-                <td>{{ net.receiveRate == null ? '待计算' : bytes(net.receiveRate) + '/s' }}</td>
-                <td>{{ net.sendRate == null ? '待计算' : bytes(net.sendRate) + '/s' }}</td>
-                <td>{{ bytes(net.received) }}</td>
-                <td>{{ bytes(net.sent) }}</td>
-              </tr>
-            </tbody>
-          </table>
+      <template v-if="section === 'network'">
+        <div class="monitor-charts">
+          <TrendChart
+            :points="networkPoints"
+            field="receiveRate"
+            label="接收速率（非 lo 接口合计）"
+            unit="KiB/s"
+          /><TrendChart
+            :points="networkPoints"
+            field="sendRate"
+            label="发送速率（非 lo 接口合计）"
+            unit="KiB/s"
+          />
         </div>
-      </section>
-      <details v-if="sample.warnings.length" open class="panel monitor-warnings">
-        <summary>采集警告（{{ sample.warnings.length }}）</summary>
-        <p v-for="(warning, i) in sample.warnings" :key="i">{{ warning }}</p>
-      </details>
+        <section class="panel monitor-resource-panel">
+          <h2>网络接口</h2>
+          <p class="subtle">
+            速率由远端 uptime 间隔计算；虚拟接口可能重复计算同一流量，合计不是物理线路吞吐量。
+          </p>
+          <div class="monitor-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>接口 / 地址</th>
+                  <th>接收速度</th>
+                  <th>发送速度</th>
+                  <th>累计接收</th>
+                  <th>累计发送</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="net in sample.network" :key="net.name">
+                  <td>
+                    {{ net.name
+                    }}<small>{{ net.addresses.join(', ') || '无地址或 ip 命令不可用' }}</small>
+                  </td>
+                  <td>{{ net.receiveRate == null ? '待计算' : bytes(net.receiveRate) + '/s' }}</td>
+                  <td>{{ net.sendRate == null ? '待计算' : bytes(net.sendRate) + '/s' }}</td>
+                  <td>{{ bytes(net.received) }}</td>
+                  <td>{{ bytes(net.sent) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </template>
+      <button
+        v-if="sample.warnings.length"
+        class="text-button monitor-warning-button"
+        @click="info = 'warnings'"
+      >
+        查看采集警告（{{ sample.warnings.length }}）
+      </button>
     </div>
+    <Modal
+      v-if="info && sample"
+      :title="{ system: '系统信息', cores: '每核心 CPU', warnings: '采集警告' }[info]"
+      wide
+      @close="info = null"
+    >
+      <template v-if="info === 'system'">
+        <div class="monitor-system">
+          <dl>
+            <dt>主机名</dt>
+            <dd>{{ sample.system.hostname ?? '不可用' }}</dd>
+            <dt>发行版</dt>
+            <dd>{{ sample.system.distribution ?? '不可用' }}</dd>
+            <dt>内核 / 架构</dt>
+            <dd>{{ sample.system.kernel ?? '—' }} / {{ sample.system.architecture ?? '—' }}</dd>
+            <dt>CPU</dt>
+            <dd>{{ sample.system.cpuModel ?? '不可用' }}</dd>
+            <dt>远程系统时间 / 时区</dt>
+            <dd>
+              {{ sample.system.systemTime ?? '不可用' }} / {{ sample.system.timezone ?? '不可用' }}
+            </dd>
+          </dl>
+        </div>
+      </template>
+      <template v-else-if="info === 'cores'">
+        <div>
+          <p class="subtle">新核心和无效差值显示待计算。</p>
+          <div class="core-grid">
+            <span v-for="core in sample.cpus.filter((c) => c.name !== 'cpu')" :key="core.name"
+              >{{ core.name }} {{ percent(core.usage) }}</span
+            >
+          </div>
+        </div>
+      </template>
+      <div v-else class="monitor-warnings">
+        <p v-for="(warning, i) in sample.warnings" :key="i">{{ warning }}</p>
+      </div>
+    </Modal>
     <Modal v-if="trust" title="确认监控主机指纹" @close="confirmTrust(false)"
       ><p>请通过可信渠道核对后接受，认证信息将在确认后发送。</p>
       <p>{{ trust.hostname }}:{{ trust.port }} · {{ trust.algorithm }}</p>

@@ -3,11 +3,12 @@ import { computed, ref } from 'vue';
 import { hostViews, type WorkspaceView } from '../types/product';
 import { moduleForView, type NavigationModule } from '../types/navigation';
 import { useTerminalsStore } from './terminals';
+import type { ServerSection } from '../types/server';
 export interface WorkspaceTab {
   key: string;
   view: WorkspaceView;
   hostId: string;
-  section?: 'containers' | 'images' | 'processes' | 'ports' | 'services' | 'logs';
+  section?: ServerSection;
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';
 export const useWorkspaceStore = defineStore('workspace', () => {

@@ -85,6 +85,7 @@ fn backup_roundtrip_preserves_definitions_groups_tags_and_omits_credentials_and_
         .group_save(
             None,
             GroupInput {
+                parent_id: None,
                 name: "Production".into(),
                 sort_order: 2,
             },
@@ -166,7 +167,7 @@ fn invalid_version_unknown_fields_credentials_and_unconfirmed_restore_reject_ato
     let text = db.backup_export().unwrap();
     let original: serde_json::Value = serde_json::from_str(&text).unwrap();
     for (pointer, value) in [
-        ("/version", serde_json::json!(2)),
+        ("/version", serde_json::json!(99)),
         (
             "/hosts/0/config/credentialId",
             serde_json::json!(uuid::Uuid::new_v4().to_string()),
@@ -199,6 +200,7 @@ fn missing_jump_rolls_back_new_groups_hosts_and_preferences() {
         .group_save(
             None,
             GroupInput {
+                parent_id: None,
                 name: "new group".into(),
                 sort_order: 0,
             },

@@ -1,5 +1,9 @@
 use super::*;
 
+fn collector_command() -> String {
+    include_str!("monitor.sh").replace("\r\n", "\n")
+}
+
 impl Engine {
     pub fn monitor_ready(&self, id: &str) -> Result<bool, Error> {
         let owner = self.control(id)?;
@@ -37,7 +41,7 @@ impl Engine {
         };
         let collecting = async {
             channel
-                .exec(true, include_str!("monitor.sh"))
+                .exec(true, collector_command())
                 .await
                 .map_err(network)?;
             accepted(&mut channel).await?;
@@ -85,5 +89,20 @@ impl Engine {
         };
         let _ = tokio::time::timeout(Duration::from_millis(500), channel.close()).await;
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::collector_command;
+
+    #[test]
+    fn collector_command_uses_posix_line_endings() {
+        let command = collector_command();
+        assert!(
+            !command.contains('\r'),
+            "remote shell commands must not contain Windows carriage returns"
+        );
+        assert!(command.starts_with("export LC_ALL=C\n"));
     }
 }

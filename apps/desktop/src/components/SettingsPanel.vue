@@ -1,20 +1,21 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import ProductSettings from './ProductSettings.vue';
-import { defaultProductPreferences } from '../types/product';
+import {
+  defaultProductPreferences,
+  settingsCategories,
+  type SettingsCategory,
+} from '../types/product';
 import { useApplicationStore } from '../stores/application';
 import type { AppConfig } from '../types/ipc';
 import { shortcutLabels, shortcutKey, defaultTerminalPreferences } from '../types/preferences';
 
 const application = useApplicationStore();
-const tabs = [
-  { id: 'general', label: '界面与运行' },
-  { id: 'terminal', label: '终端显示与输入' },
-  { id: 'shortcuts', label: '终端快捷键' },
-  { id: 'workspace', label: '工作区与连接' },
-] as const;
-type SettingsTab = (typeof tabs)[number]['id'];
-const activeTab = ref<SettingsTab>('general');
+const props = withDefaults(defineProps<{ category?: SettingsCategory }>(), { category: 'general' });
+const emit = defineEmits<{ category: [category: SettingsCategory] }>();
+const categoryLabel = computed(
+  () => settingsCategories.find((item) => item.id === props.category)!.label,
+);
 const draft = ref<AppConfig | null>(null);
 let baseline = '';
 const submitting = ref(false);
@@ -33,41 +34,15 @@ watch(
   { immediate: true },
 );
 
-function navigateTabs(event: KeyboardEvent): void {
-  const index = tabs.findIndex((tab) => tab.id === activeTab.value);
-  let target: number;
-  switch (event.key) {
-    case 'ArrowRight':
-      target = (index + 1) % tabs.length;
-      break;
-    case 'ArrowLeft':
-      target = (index + tabs.length - 1) % tabs.length;
-      break;
-    case 'Home':
-      target = 0;
-      break;
-    case 'End':
-      target = tabs.length - 1;
-      break;
-    default:
-      return;
-  }
-  event.preventDefault();
-  activeTab.value = tabs[target]!.id;
-  (event.currentTarget as HTMLElement)
-    .querySelector<HTMLButtonElement>(`#settings-tab-${activeTab.value}`)
-    ?.focus();
-}
-
 async function submit(event: Event): Promise<void> {
   const form = event.currentTarget as HTMLFormElement;
   const invalid = form.querySelector<HTMLInputElement | HTMLSelectElement>(
     'input:invalid, select:invalid',
   );
   if (invalid) {
-    const panel = invalid.closest('[role="tabpanel"]');
-    const tab = tabs.find((tab) => panel?.id === `settings-panel-${tab.id}`);
-    if (tab) activeTab.value = tab.id;
+    const panel = invalid.closest('.settings-category');
+    const category = settingsCategories.find((item) => panel?.id === `settings-panel-${item.id}`);
+    if (category) emit('category', category.id);
     await nextTick();
     invalid.focus();
     invalid.reportValidity();
@@ -95,40 +70,13 @@ function capture(action: string, event: KeyboardEvent): void {
     <div class="section-heading">
       <div>
         <p class="eyebrow">PREFERENCES</p>
-        <h1 id="settings-title">全局设置</h1>
+        <h1 id="settings-title">{{ categoryLabel }}</h1>
       </div>
       <span class="subtle">仅保存在此设备</span>
     </div>
     <p class="section-description">保存后应用界面和终端偏好。连接参数在新建连接时生效。</p>
     <form v-if="draft" class="settings-form" novalidate @submit.prevent="submit">
-      <div
-        class="page-tabs settings-tabs"
-        role="tablist"
-        aria-label="设置分类"
-        @keydown="navigateTabs"
-      >
-        <button
-          v-for="tab in tabs"
-          :id="`settings-tab-${tab.id}`"
-          :key="tab.id"
-          class="button"
-          type="button"
-          role="tab"
-          :aria-selected="activeTab === tab.id"
-          :aria-controls="`settings-panel-${tab.id}`"
-          :tabindex="activeTab === tab.id ? 0 : -1"
-          @click="activeTab = tab.id"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-      <div
-        v-show="activeTab === 'general'"
-        id="settings-panel-general"
-        class="settings-tabpanel"
-        role="tabpanel"
-        aria-labelledby="settings-tab-general"
-      >
+      <div v-show="category === 'general'" id="settings-panel-general" class="settings-category">
         <fieldset :disabled="application.saving">
           <legend>界面与运行</legend>
           <label
@@ -181,13 +129,7 @@ function capture(action: string, event: KeyboardEvent): void {
           >
         </fieldset>
       </div>
-      <div
-        v-show="activeTab === 'terminal'"
-        id="settings-panel-terminal"
-        class="settings-tabpanel"
-        role="tabpanel"
-        aria-labelledby="settings-tab-terminal"
-      >
+      <div v-show="category === 'terminal'" id="settings-panel-terminal" class="settings-category">
         <fieldset :disabled="application.saving">
           <legend>终端显示与输入</legend>
           <label
@@ -259,11 +201,9 @@ function capture(action: string, event: KeyboardEvent): void {
         </fieldset>
       </div>
       <div
-        v-show="activeTab === 'shortcuts'"
+        v-show="category === 'shortcuts'"
         id="settings-panel-shortcuts"
-        class="settings-tabpanel"
-        role="tabpanel"
-        aria-labelledby="settings-tab-shortcuts"
+        class="settings-category"
       >
         <fieldset :disabled="application.saving">
           <legend>终端快捷键</legend>
@@ -288,11 +228,9 @@ function capture(action: string, event: KeyboardEvent): void {
         </fieldset>
       </div>
       <div
-        v-show="activeTab === 'workspace'"
+        v-show="category === 'workspace'"
         id="settings-panel-workspace"
-        class="settings-tabpanel"
-        role="tabpanel"
-        aria-labelledby="settings-tab-workspace"
+        class="settings-category"
       >
         <ProductSettings v-model="draft.product" :disabled="application.saving" />
       </div>

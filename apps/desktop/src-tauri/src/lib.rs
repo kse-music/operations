@@ -5,6 +5,7 @@ mod monitor_commands;
 mod ops_commands;
 mod product_commands;
 mod task_commands;
+mod terminal_upload_commands;
 mod window_state;
 
 use std::sync::{
@@ -177,6 +178,9 @@ pub fn command_handler<R: tauri::Runtime>()
         commands::forward_list,
         commands::forward_stop,
         commands::terminal_open,
+        terminal_upload_commands::terminal_upload_pick,
+        terminal_upload_commands::terminal_upload_read,
+        terminal_upload_commands::terminal_upload_release,
         commands::terminal_local_open,
         commands::terminal_input,
         commands::terminal_resize,

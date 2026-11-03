@@ -63,8 +63,7 @@ let app: App, pinia: Pinia, root: HTMLDivElement, tab: TerminalPaneModel;
 const active = ref(true);
 const events = {
   files: vi.fn(),
-  operations: vi.fn(),
-  monitor: vi.fn(),
+  server: vi.fn(),
   automation: vi.fn(),
   network: vi.fn(),
   close: vi.fn(),
@@ -75,8 +74,7 @@ const PaneHarness = {
       tab,
       active: active.value,
       onFiles: events.files,
-      onOperations: events.operations,
-      onMonitor: events.monitor,
+      onServer: events.server,
       onAutomation: events.automation,
       onNetwork: events.network,
       onClose: events.close,
@@ -273,8 +271,7 @@ it('routes remote menu actions to the same host, working directory and pane', as
     tab.key,
   );
   for (const [label, event] of [
-    ['运维', events.operations],
-    ['监控', events.monitor],
+    ['服务器管理', events.server],
     ['自动化', events.automation],
   ] as const) {
     await menuAction(label);

@@ -11,7 +11,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../services/monitor', () => ({ monitorApi: mocks }));
 import MonitorView from '../views/MonitorView.vue';
 import TrendChart from './TrendChart.vue';
-import type { HistoryPoint } from '../types/monitor';
+import type { Disk, HistoryPoint, MonitorSnapshot } from '../types/monitor';
+import type { MonitorSection } from '../types/server';
+import { useNotificationsStore } from '../stores/notifications';
 let app: App | undefined, pinia: Pinia | undefined, root: HTMLDivElement;
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
@@ -24,12 +26,13 @@ afterEach(() => {
   pinia = undefined;
   root?.remove();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
-function mount(component: typeof MonitorView): void {
+function mount(component: typeof MonitorView, section?: MonitorSection): void {
   root = document.createElement('div');
   document.body.append(root);
   pinia = createPinia();
-  app = createApp(component, { hostId: 'host-a' }).use(pinia);
+  app = createApp(component, { hostId: 'host-a', section }).use(pinia);
   app.mount(root);
 }
 describe('monitor view lifecycle and trends', () => {
@@ -89,5 +92,113 @@ describe('monitor view lifecycle and trends', () => {
     expect(root.querySelector('svg')).toBe(svg);
     expect(root.querySelectorAll('polyline')).toHaveLength(2);
     expect(root.textContent).toContain('4 点');
+  });
+});
+
+const missingCapacity = 'df 未返回该挂载点：可能是伪文件系统、重复挂载、无权限或不可访问';
+function disk(overrides: Partial<Disk>): Disk {
+  return {
+    mount: '/',
+    source: '/dev/sda1',
+    filesystem: 'ext4',
+    device: '8:1',
+    pseudo: false,
+    image: false,
+    container: false,
+    duplicateOf: null,
+    total: null,
+    used: null,
+    available: null,
+    usage: null,
+    error: missingCapacity,
+    ...overrides,
+  };
+}
+function sampled(disks: Disk[]): MonitorSnapshot {
+  return {
+    hostId: 'host-a',
+    sessionId: 'monitor-session',
+    revision: 1,
+    state: 'running',
+    intervalSecs: 3,
+    error: null,
+    history: [],
+    sample: {
+      sampledAt: 1,
+      uptime: 100,
+      load: [0, 0, 0],
+      cpus: [],
+      memory: null,
+      disks,
+      network: [],
+      warnings: [],
+      rateStatus: 'initial',
+      system: {
+        hostname: null,
+        distribution: null,
+        kernel: null,
+        architecture: null,
+        cpuModel: null,
+        cores: null,
+        systemTime: null,
+        timezone: null,
+      },
+    },
+  };
+}
+async function showSample(snapshot: MonitorSnapshot, section?: MonitorSection) {
+  mocks.open.mockResolvedValue({ id: 'monitor-session' });
+  mocks.visible.mockResolvedValue(undefined);
+  mocks.snapshot.mockResolvedValue(snapshot);
+  mount(MonitorView, section);
+  await flush();
+}
+describe('mount capacity notifications', () => {
+  it('does not report expected missing capacity on pseudo filesystems, images or duplicate mounts, even when showing all mounts', async () => {
+    await showSample(
+      sampled([
+        disk({ error: null, total: 1024, used: 512, available: 512, usage: 50 }),
+        disk({ mount: '/proc', filesystem: 'proc', pseudo: true }),
+        disk({ mount: '/snap/base', filesystem: 'squashfs', image: true }),
+        disk({ mount: '/bind', duplicateOf: '/' }),
+      ]),
+      'disks',
+    );
+    const notifications = useNotificationsStore(pinia);
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(notifications.items).toHaveLength(0);
+    root.querySelector<HTMLInputElement>('input[type=checkbox]')!.click();
+    await nextTick();
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(4);
+    expect(root.textContent).toContain('不可用');
+    expect(notifications.items).toHaveLength(0);
+  });
+  it('reports real persistent and container mount failures with their paths and does not repeat unchanged errors on polling', async () => {
+    vi.useFakeTimers();
+    const snapshot = sampled([
+      disk({ mount: '/data' }),
+      disk({ mount: '/containers/root', filesystem: 'overlay', container: true }),
+    ]);
+    snapshot.state = 'partial';
+    snapshot.sample!.warnings = ['2 个挂载点容量不可用，详见磁盘列表'];
+    await showSample(snapshot);
+    const notifications = useNotificationsStore(pinia);
+    expect(notifications.items.map((item) => item.text)).toEqual([
+      `挂载点 /data：${missingCapacity}`,
+      `挂载点 /containers/root：${missingCapacity}`,
+    ]);
+    expect(root.textContent).toContain('部分指标不可用');
+    expect(root.textContent).toContain('查看采集警告（1）');
+    for (const item of [...notifications.items]) notifications.dismiss(item.id);
+    mocks.snapshot.mockResolvedValue({ ...snapshot, revision: 2 });
+    await vi.advanceTimersByTimeAsync(1000);
+    await flush();
+    expect(notifications.items).toHaveLength(0);
+  });
+  it('still reports overall collector errors', async () => {
+    await showSample({ ...sampled([]), state: 'error', error: '采集命令执行超时', sample: null });
+    expect(useNotificationsStore(pinia).items).toEqual([
+      expect.objectContaining({ text: '采集命令执行超时', error: true }),
+    ]);
   });
 });

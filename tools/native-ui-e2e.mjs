@@ -1,3 +1,5 @@
+import { hostContextAction } from './ui-navigation.mjs';
+import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
 import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -9,12 +11,7 @@ import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
 import { closeNativeWindow } from './native-window-close.mjs';
 import { withPreservedClipboard } from './clipboard-guard.mjs';
-import {
-  navigateWorkspace,
-  selectHostWorkspace,
-  showHostTree,
-  openHostTreeTools,
-} from './ui-navigation.mjs';
+import { navigateWorkspace, selectHostWorkspace, showHostTree } from './ui-navigation.mjs';
 
 assert.equal(process.platform, 'win32', 'native UI suite requires Windows/WebView2');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -115,7 +112,7 @@ async function start() {
 }
 const active = () => page.locator('.terminal-pane:visible');
 const hoverHost = async (name) => {
-  await page.locator('.host-sidebar-heading').hover({ position: { x: 4, y: 4 } });
+  await page.locator('.host-list-heading').hover({ position: { x: 4, y: 4 } });
   await page
     .locator('.tree-host-row')
     .filter({ has: page.getByText(name, { exact: true }) })
@@ -256,7 +253,7 @@ try {
   );
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.topbar [aria-label="退出应用"]').count(), 0);
-  assert.equal(await page.locator('.topbar [aria-label="打开全局设置"]').count(), 0);
+  assert.equal(await page.locator('.topbar [aria-label="打开通用"]').count(), 0);
   passed.push(
     'welcome startup waits for local-menu click, then opens PowerShell with real input/output',
   );
@@ -400,14 +397,14 @@ try {
     assert.equal(await page.locator('.module-menu [aria-current="page"]').count(), 0);
   }
   await page.screenshot({ path: path.join(artifacts, 'module-without-default.png') });
-  await navigateWorkspace(page, '全局设置');
+  await navigateWorkspace(page, '通用');
   assert.equal(
     await page.locator('.module-navigation [aria-current="page"]').textContent(),
-    '系统设置',
+    '设置',
   );
   assert.deepEqual(
     (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-    ['全局设置', '本地环境', '关于'],
+    ['通用', '终端', '快捷键', '工作区与连接', '关于'],
   );
   assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'module-settings.png') });
@@ -481,11 +478,11 @@ try {
   );
   const groups = [];
   for (const name of ['UI A', 'UI B']) {
-    await page.getByRole('button', { name: '管理分组', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '管理主机分组', exact: true });
-    await assertNativeMenuSuppressed(dialog.getByLabel('分组名称', { exact: true }));
-    await dialog.getByLabel('分组名称', { exact: true }).fill(name);
-    await dialog.getByRole('button', { name: '新建分组', exact: true }).click();
+    await hostTreeAction(page, null, '新建文件夹');
+    const dialog = page.getByRole('dialog', { name: '新建文件夹', exact: true });
+    await assertNativeMenuSuppressed(dialog.getByLabel('文件夹名称', { exact: true }));
+    await dialog.getByLabel('文件夹名称', { exact: true }).fill(name);
+    await dialog.getByRole('button', { name: '新建文件夹', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
     groups.push((await rpc('host_list')).groups.find((group) => group.name === name));
   }
@@ -505,7 +502,7 @@ try {
       connectTimeoutSecs: 15,
     },
   });
-  await page.getByRole('button', { name: '刷新', exact: true }).click();
+  await reloadHosts(page);
   const row = page.locator('.tree-host').filter({ hasText: 'UI Host' });
   const target = page.locator('.group-toggle').filter({ hasText: 'UI B' });
   async function dragHostTo(target, cancel = false) {
@@ -539,7 +536,7 @@ try {
     { id: host.id, groupId: groups[1].id },
   );
   await target.click();
-  await dragHostTo(page.locator('.group-toggle').filter({ hasText: '未分组' }));
+  await dragHostTo(page.locator('.group-toggle').filter({ hasText: '根目录' }));
   await page.waitForFunction(
     async (id) =>
       (await window.__TAURI_INTERNALS__.invoke('host_list')).hosts.find((h) => h.id === id)
@@ -550,7 +547,8 @@ try {
     'native pointer dragging supports collapsed/empty/ungrouped targets, Escape cancellation and persisted group moves without opening SSH',
   );
   await assertNativeMenuSuppressed(row);
-  assert.equal(await page.getByRole('menu').count(), 0);
+  assert.equal(await page.getByRole('menu', { name: '主机树操作', exact: true }).count(), 1);
+  await page.keyboard.press('Escape');
   assert.equal(
     await page.locator('.tree-host-more, .host-tree-scroll [aria-haspopup=menu]').count(),
     0,
@@ -713,15 +711,12 @@ try {
   assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
   assert.equal(await page.locator('.hosts-view').count(), 0);
   await page.getByLabel('搜索主机', { exact: true }).fill('UI Host');
-  await page
-    .locator('.host-sidebar-actions')
-    .getByRole('button', { name: '新建主机', exact: true })
-    .click();
+  await hostTreeAction(page, groups[1].id, '新建主机');
   const createHost = page.getByRole('dialog', { name: '新建主机', exact: true });
   await createHost.getByLabel('主机名称（可选）', { exact: true }).fill('UI Created');
   await createHost.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.20');
   await createHost.getByLabel('用户名', { exact: true }).fill('operator');
-  await createHost.getByLabel('分组', { exact: true }).selectOption(groups[1].id);
+  assert.equal(await createHost.getByLabel('分组', { exact: true }).count(), 0);
   await createHost.getByRole('button', { name: '保存主机', exact: true }).click();
   await createHost.waitFor({ state: 'hidden' });
   await page.locator('.tree-host').filter({ hasText: 'UI Created' }).waitFor();
@@ -750,52 +745,17 @@ try {
   const hostRow = page
     .locator('.tree-host-row')
     .filter({ has: page.locator(`.tree-host[data-host-id="${host.id}"]`) });
-  const hostActions = hostRow.locator('.tree-host-actions');
-  const hostActionsVisible = () =>
-    hostActions.evaluate((element) => {
-      const style = getComputedStyle(element);
-      return style.opacity === '1' && style.pointerEvents === 'auto';
-    });
-  assert.equal(await page.locator('[aria-label^="复制主机 "]').count(), 0);
-  assert.equal(await hostActions.locator('button').count(), 2);
-  await page.locator('.host-sidebar-heading').click({ position: { x: 4, y: 4 } });
-  assert.equal(await hostActionsVisible(), false);
-  assert.equal(await hostActions.evaluate((element) => getComputedStyle(element).opacity), '0');
-  assert.equal(
-    await hostActions.evaluate((element) => getComputedStyle(element).pointerEvents),
-    'none',
-  );
+  assert.equal(await page.locator('.tree-host-actions').count(), 0);
+  assert.equal(await hostRow.getByRole('button').count(), 1);
   await hoverHost('UI Host');
-  assert.equal(await hostActionsVisible(), true);
-  await page.screenshot({ path: path.join(artifacts, 'host-actions-hover.png') });
-  await page.locator('.host-sidebar-heading').click({ position: { x: 4, y: 4 } });
-  assert.equal(await hostActionsVisible(), false);
-  await hostRow.locator('.tree-host').press('Shift+Tab');
-  await page.keyboard.press('Tab');
+  assert.equal(await hostRow.getByRole('button').count(), 1);
+  await hostRow.locator('.tree-host').focus();
   assert.equal(
-    await hostRow.locator('.tree-host').evaluate((button) => document.activeElement === button),
-    true,
+    await page.locator('[aria-label^="编辑主机 "], [aria-label^="删除主机 "]').count(),
+    0,
   );
-  assert.equal(await hostActionsVisible(), true);
-  await page.keyboard.press('Tab');
-  assert.equal(
-    await page
-      .getByRole('button', { name: '编辑主机 UI Host', exact: true })
-      .evaluate((button) => document.activeElement === button),
-    true,
-  );
-  await page.keyboard.press('Tab');
-  assert.equal(
-    await page
-      .getByRole('button', { name: '删除主机 UI Host', exact: true })
-      .evaluate((button) => document.activeElement === button),
-    true,
-  );
-  await page.locator('.host-sidebar-heading').click({ position: { x: 4, y: 4 } });
-  assert.equal(await hostActionsVisible(), false);
-  await page.screenshot({ path: path.join(artifacts, 'host-actions-hidden.png') });
-  await hoverHost('UI Host');
-  await page.getByRole('button', { name: '编辑主机 UI Host', exact: true }).click();
+  await page.screenshot({ path: path.join(artifacts, 'host-row-no-icons.png') });
+  await hostContextAction(page, hostRow.locator('.tree-host'), '编辑主机');
   const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
   assert.equal(
     await edit.getByLabel('地址（IP / 域名）', { exact: true }).inputValue(),
@@ -812,21 +772,21 @@ try {
   assert.equal(await page.locator('.terminal-pane').count(), 0);
   assert.equal(await page.locator('.workspace-tab').count(), currentTabs);
   await hoverHost('UI Host edited');
-  await page.getByRole('button', { name: '删除主机 UI Host edited', exact: true }).press('Enter');
+  await hostContextAction(page, hostRow.locator('.tree-host'), '删除主机');
   const deletion = page.getByRole('dialog', { name: '确认删除主机', exact: true });
   await deletion.getByText(/UI Host edited.*192\.0\.2\.33/).waitFor();
   await deletion.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal((await rpc('host_list')).hosts.length, 2);
   await hoverHost('UI Host edited');
-  await page.getByRole('button', { name: '删除主机 UI Host edited', exact: true }).press('Enter');
+  await hostContextAction(page, hostRow.locator('.tree-host'), '删除主机');
   await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
   await deletion.waitFor({ state: 'hidden' });
   assert(!(await rpc('host_list')).hosts.some((item) => item.id === host.id));
   assert.equal((await page.locator('.host-count').textContent()).trim(), '1');
   passed.push(
-    'host tree has no copy; hover/keyboard reveal edit/delete, hidden actions stay out of mouse interaction, real IPC edits and confirmed deletion preserve sessions',
+    'host rows contain no inline action icons; context editing and confirmed deletion preserve sessions',
   );
-  await openHostTreeTools(page);
+  await showHostTree(page);
   await page.getByRole('button', { name: '导入 OpenSSH', exact: true }).click();
   const importHosts = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
   await importHosts
@@ -850,7 +810,7 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });
   for (const name of ['UI Created', 'tree-imported']) {
     await hoverHost(name);
-    await page.getByRole('button', { name: `删除主机 ${name}`, exact: true }).press('Enter');
+    await hostContextAction(page, page.locator('.tree-host').filter({ hasText: name }), '删除主机');
     await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
     await deletion.waitFor({ state: 'hidden' });
   }
@@ -862,10 +822,7 @@ try {
   );
   const unnamed = [];
   for (const port of [22, 2222]) {
-    await page
-      .locator('.host-sidebar-actions')
-      .getByRole('button', { name: '新建主机', exact: true })
-      .click();
+    await hostTreeAction(page, null, '新建主机');
     const dialog = page.getByRole('dialog', { name: '新建主机', exact: true });
     const name = dialog.getByLabel('主机名称（可选）', { exact: true });
     assert.equal(await name.getAttribute('required'), null);
@@ -896,7 +853,11 @@ try {
     assert.equal((await rpc('host_list')).hosts.find((h) => h.id === id).name, '');
     assert.equal(await page.locator(`[data-host-id="${id}"] .host-name`).textContent(), display);
     await hoverHost(display);
-    await page.getByRole('button', { name: `删除主机 ${display}`, exact: true }).press('Enter');
+    await hostContextAction(
+      page,
+      page.locator('.tree-host').filter({ hasText: display }),
+      '删除主机',
+    );
     await unnamedDeletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
     await unnamedDeletion.waitFor({ state: 'hidden' });
   }

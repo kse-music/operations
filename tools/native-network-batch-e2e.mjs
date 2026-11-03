@@ -1,3 +1,4 @@
+import { reloadHosts } from './ui-navigation.mjs';
 // Real WebView2 IPC, local sockets, trusted Linux SSH and two isolated Linux SSH containers.
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -314,7 +315,7 @@ export async function networkBatchChecks(context) {
     hostIds.push(h.id);
   }
   await showHostTree(page);
-  await page.getByRole('button', { name: '刷新', exact: true }).first().click();
+  await reloadHosts(page);
   await nav('批量运维');
   for (let n = 0; n < 2; n++)
     await page.getByLabel(`选择批量目标 Isolated batch ${n}`, { exact: true }).check();

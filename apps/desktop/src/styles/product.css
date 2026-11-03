@@ -54,6 +54,9 @@ kbd {
   font-weight: 500;
   white-space: nowrap;
 }
+.module-navigation [data-module='system'] {
+  margin-left: auto;
+}
 .module-navigation button:hover {
   color: var(--text);
   background: var(--hover);
@@ -61,7 +64,6 @@ kbd {
 .module-navigation [aria-current='page'] {
   color: var(--accent);
   background: var(--raised);
-  border-bottom-color: var(--accent);
 }
 .shell-icon-button {
   display: inline-flex;
@@ -181,7 +183,6 @@ kbd {
   border-top: 2px solid transparent;
 }
 .workspace-tab.active {
-  border-top-color: var(--accent);
   background: var(--bg);
 }
 .workspace-tab button {

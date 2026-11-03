@@ -21,6 +21,7 @@ import {
 import { useTerminalsStore, type TerminalPaneModel } from '../stores/terminals';
 import { defaultTerminalPreferences, terminalThemes, shortcutKey } from '../types/preferences';
 import { TerminalInputQueue } from '../services/terminal-input';
+import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
 import ForwardDialog from './ForwardDialog.vue';
 import { useApplicationStore } from '../stores/application';
 import Modal from './Modal.vue';
@@ -29,8 +30,7 @@ import '@xterm/xterm/css/xterm.css';
 const props = defineProps<{ tab: TerminalPaneModel; active: boolean }>();
 const emit = defineEmits<{
   close: [];
-  monitor: [host: Host];
-  operations: [host: Host];
+  server: [host: Host];
   automation: [host: Host];
   network: [host: Host];
   action: [key: string, name: string];
@@ -52,6 +52,8 @@ const preferences = computed(
   () => application.state?.config.terminal ?? defaultTerminalPreferences(),
 );
 const working = ref(false);
+const uploadProgress = ref<UploadProgress | null>(null);
+let upload: ZmodemUpload | undefined;
 const menu = ref<{ x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuActions = computed(() => [
@@ -66,8 +68,7 @@ const menuActions = computed(() => [
   ...(props.tab.host
     ? [
         { key: 'automation', label: '自动化', disabled: false },
-        { key: 'operations', label: '运维', disabled: false },
-        { key: 'monitor', label: '监控', disabled: false },
+        { key: 'server', label: '服务器管理', disabled: false },
         { key: 'files', label: 'SFTP 文件', disabled: false },
         ...(['failed', 'disconnected'].includes(props.tab.state)
           ? [{ key: 'network', label: '诊断连接异常', disabled: false }]
@@ -118,6 +119,10 @@ async function toggleFind(): Promise<void> {
 }
 function queueInput(data: Uint8Array): void {
   if (props.tab.state !== 'connected' || !data.length) return;
+  if (upload?.busy) {
+    if (data.includes(3) || data.includes(24)) upload.cancel();
+    return;
+  }
   if (!inputQueue.enqueue(data, approvedPaste))
     message.value = '输入队列已满或已断线，本次输入未发送。';
 }
@@ -125,6 +130,9 @@ async function connect(): Promise<void> {
   if (working.value) return;
   working.value = true;
   const attempt = ++generation;
+  upload?.dispose();
+  upload = undefined;
+  uploadProgress.value = null;
   pendingPaste.value = null;
   message.value = null;
   trust.value = null;
@@ -134,9 +142,6 @@ async function connect(): Promise<void> {
     session = undefined;
     store.update(props.tab.key, { sessionId: undefined, state: 'opening' });
     fitTerminal();
-    terminal.write(
-      `\r\n\x1b[90m── ${props.tab.host ? '新的 SSH Shell' : '本地 Shell'} ──\x1b[0m\r\n`,
-    );
     const open = props.tab.containerShell
       ? (
           hostId: string,
@@ -150,10 +155,43 @@ async function connect(): Promise<void> {
             receive: (event: TerminalEvent) => void,
           ) => filesApi.terminal(hostId, size, props.tab.fileAction!, receive)
         : terminalApi.open;
+    const ready = async () => {
+      await Promise.resolve();
+      const value = await opening;
+      if (disposed || attempt !== generation) throw new Error('终端会话已改变，上传已取消。');
+      return value.id;
+    };
+    const receiver = props.tab.host
+      ? new ZmodemUpload({
+          write: (data) => terminal.write(data),
+          send: async (data) => {
+            await ready();
+            if (!inputQueue.enqueue(data)) throw new Error('ZMODEM 输入队列已满，上传已停止。');
+            await inputQueue.flush();
+          },
+          pick: async () => terminalApi.uploadPick(await ready()),
+          read: async (token, index, offset) =>
+            terminalApi.uploadRead(await ready(), token, index, offset),
+          release: async (token) => terminalApi.uploadRelease((await opening).id, token),
+          progress: (value) => {
+            if (!disposed && attempt === generation) uploadProgress.value = value;
+          },
+          failed: (cause) => {
+            if (!disposed && attempt === generation) message.value = errorMessage(cause);
+            else store.error = errorMessage(cause);
+          },
+          notice: (text) => {
+            if (!disposed && attempt === generation) terminal.write(`\r\n[${text}]\r\n`);
+          },
+        })
+      : undefined;
+    upload = receiver;
     const receive = (event: TerminalEvent) => {
       if (disposed || attempt !== generation) return;
       if (event.type === 'data') {
-        terminal.write(new Uint8Array(event.data), () => {
+        if (receiver) receiver.consume(new Uint8Array(event.data));
+        else terminal.write(new Uint8Array(event.data));
+        terminal.write(new Uint8Array(), () => {
           void opening
             .then((value) => terminalApi.ack(value.id, event.sequence))
             .catch((cause: unknown) => {
@@ -162,14 +200,17 @@ async function connect(): Promise<void> {
             });
         });
       } else if (event.type === 'state') {
+        if (['closed', 'failed', 'disconnected'].includes(event.state)) receiver?.dispose();
         store.update(props.tab.key, { state: event.state });
         if (event.message) message.value = event.message;
         if (event.state !== 'awaiting_trust') trust.value = null;
       } else if (event.type === 'trust') trust.value = event;
-      else if (event.type === 'exit')
+      else if (event.type === 'exit') {
+        receiver?.dispose();
         terminal.write(
           `\r\n\x1b[90m[Shell 已结束${event.status === null ? '' : `，退出码 ${event.status}`}]\x1b[0m\r\n`,
         );
+      }
     };
     const size = { cols: terminal.cols, rows: terminal.rows };
     const opening = props.tab.host
@@ -300,11 +341,8 @@ function runMenuAction(key: string): void {
     case 'automation':
       if (props.tab.host) emit('automation', props.tab.host);
       break;
-    case 'operations':
-      if (props.tab.host) emit('operations', props.tab.host);
-      break;
-    case 'monitor':
-      if (props.tab.host) emit('monitor', props.tab.host);
+    case 'server':
+      if (props.tab.host) emit('server', props.tab.host);
       break;
     case 'files':
       if (props.tab.host) emit('files', props.tab.host, props.tab.cwd, props.tab.key);
@@ -337,6 +375,10 @@ async function paste(): Promise<void> {
   }
 }
 function requestPaste(text: string): void {
+  if (upload?.busy) {
+    message.value = 'ZMODEM 上传期间无法粘贴，请先完成或取消上传。';
+    return;
+  }
   if (props.tab.state !== 'connected') {
     message.value = '请先连接终端再粘贴。';
     return;
@@ -521,6 +563,7 @@ watch(
 );
 onBeforeUnmount(() => {
   disposed = true;
+  upload?.dispose();
   ++generation;
   clearTimeout(resizeTimer);
   observer?.disconnect();
@@ -566,6 +609,20 @@ useErrorNotifications(message);
       @mousedown.capture="preventTerminalRightClick"
       @contextmenu.capture="terminalContextMenu"
     ></div>
+    <div v-if="uploadProgress" class="terminal-upload" role="status" aria-live="polite">
+      <span v-if="uploadProgress.phase === 'choosing'">ZMODEM：请选择要上传的本地文件…</span>
+      <template v-else-if="uploadProgress.phase === 'uploading'">
+        <span>{{ uploadProgress.name }}</span>
+        <progress
+          :value="uploadProgress.sent"
+          :max="uploadProgress.size || 1"
+          aria-label="ZMODEM 上传进度"
+        ></progress>
+        <span>{{ uploadProgress.sent }} / {{ uploadProgress.size }} 字节</span>
+      </template>
+      <span v-else>ZMODEM：等待远端确认完成…</span>
+      <button class="button" @click="upload?.cancel()">取消上传</button>
+    </div>
     <div class="terminal-footnote">
       <span v-if="tab.fileAction">此窗格是已确认的文件命令，手动重连将重新运行该命令。 · </span>
       {{ preferences.quickCopyPaste ? 'Shift+右键' : '右键' }} 打开终端操作 ·

@@ -2,6 +2,8 @@
 
 生成于 2026-11-02，基于 Cargo.lock 全平台解析及 npm 生产树；清单包括当前 Windows 未编译的跨平台依赖，不表示所有条目都进入安装包。以下为元数据整理，仍需发布者法律复核。
 
+2026-11-03 补充 rz 上传使用的 zmodem.js 0.1.10 和 crc-32 1.2.2；两项完整许可文本已加入 THIRD_PARTY_NOTICES.txt。
+
 | 名称与版本                              | 声明许可证                                          | 来源           |
 | --------------------------------------- | --------------------------------------------------- | -------------- |
 | adler2 2.0.1                            | 0BSD OR MIT OR Apache-2.0                           | Cargo          |
@@ -685,5 +687,7 @@
 | zune-core 0.5.3                            | MIT OR Apache-2.0 OR Zlib         | Cargo |
 | zune-jpeg 0.5.15                           | MIT OR Apache-2.0 OR Zlib         | Cargo |
 | @tauri-apps/plugin-clipboard-manager 2.5.0 | MIT OR Apache-2.0                 | npm   |
+| zmodem.js 0.1.10                           | Apache-2.0                        | npm   |
+| crc-32 1.2.2                               | Apache-2.0                        | npm   |
 
 clipboard-win 5.4.3 发布包未包含 LICENSE，文本取自其固定源码提交 ed27008ae5d1f10cfbb266de039f0fb35fd05a56 的上游 LICENSE；前端插件随附 SPDX，完整 MIT/Apache 文本补自同版本官方 Rust 插件包。其余文本取自已解析依赖包。清单包含跨平台依赖，不表示已验证全部平台。

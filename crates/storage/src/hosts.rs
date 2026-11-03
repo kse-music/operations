@@ -135,8 +135,8 @@ impl Database {
             .map_err(storage_error)?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(storage_error)?;
-        let groups = tx.prepare("SELECT id,name,sort_order FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id").map_err(storage_error)?
-            .query_map([], |r| Ok(HostGroup{id:r.get(0)?,name:r.get(1)?,sort_order:r.get(2)?})).map_err(storage_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?;
+        let groups = tx.prepare("SELECT id,name,sort_order,parent_id FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id").map_err(storage_error)?
+            .query_map([], |r| Ok(HostGroup{id:r.get(0)?,name:r.get(1)?,sort_order:r.get(2)?,parent_id:r.get(3)?})).map_err(storage_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?;
         let ids = tx
             .prepare("SELECT id FROM credentials ORDER BY name COLLATE NOCASE,id")
             .map_err(storage_error)?
@@ -212,41 +212,78 @@ impl Database {
     pub fn group_save(&self, id: Option<&str>, input: GroupInput) -> Result<HostGroup, Error> {
         let name = input.name.trim();
         validate_name(name)?;
-        let connection = self.connect()?;
-        if connection.query_row("SELECT EXISTS(SELECT 1 FROM host_groups WHERE name=?1 COLLATE NOCASE AND id != coalesce(?2,''))",params![name,id],|r|r.get::<_,bool>(0)).map_err(storage_error)? { return Err(Error::Conflict); }
+        let mut connection = self.connect()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage_error)?;
+        if tx.query_row("SELECT EXISTS(SELECT 1 FROM host_groups WHERE name=?1 COLLATE NOCASE AND id != coalesce(?2,''))",params![name,id],|r|r.get::<_,bool>(0)).map_err(storage_error)? { return Err(Error::Conflict); }
         let group_id = id
             .map(str::to_owned)
             .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let mut seen = std::collections::HashSet::from([group_id.clone()]);
+        let mut parent = input.parent_id.clone();
+        while let Some(parent_id) = parent {
+            if !seen.insert(parent_id.clone()) {
+                return Err(Error::Validation("文件夹不能移动到自身或其子文件夹中"));
+            }
+            parent = tx
+                .query_row(
+                    "SELECT parent_id FROM host_groups WHERE id=?1",
+                    [&parent_id],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .map_err(storage_error)?
+                .ok_or(Error::Validation("父文件夹不存在"))?;
+        }
         let count = if id.is_some() {
-            connection.execute(
-                "UPDATE host_groups SET name=?2,sort_order=?3 WHERE id=?1",
-                params![group_id, name, input.sort_order],
+            tx.execute(
+                "UPDATE host_groups SET name=?2,sort_order=?3,parent_id=?4 WHERE id=?1",
+                params![group_id, name, input.sort_order, input.parent_id],
             )
         } else {
-            connection.execute(
-                "INSERT INTO host_groups(id,name,sort_order) VALUES(?1,?2,?3)",
-                params![group_id, name, input.sort_order],
+            tx.execute(
+                "INSERT INTO host_groups(id,name,sort_order,parent_id) VALUES(?1,?2,?3,?4)",
+                params![group_id, name, input.sort_order, input.parent_id],
             )
         }
         .map_err(storage_error)?;
         if count == 0 {
             return Err(Error::NotFound);
         }
+        tx.commit().map_err(storage_error)?;
         Ok(HostGroup {
             id: group_id,
             name: name.into(),
             sort_order: input.sort_order,
+            parent_id: input.parent_id,
         })
     }
     pub fn group_delete(&self, id: &str) -> Result<(), Error> {
-        if self
-            .connect()?
-            .execute("DELETE FROM host_groups WHERE id=?1", [id])
+        let mut connection = self.connect()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage_error)?;
+        let parent: Option<String> = tx
+            .query_row("SELECT parent_id FROM host_groups WHERE id=?1", [id], |r| {
+                r.get(0)
+            })
+            .optional()
             .map_err(storage_error)?
-            == 0
-        {
-            return Err(Error::NotFound);
-        }
+            .ok_or(Error::NotFound)?;
+        tx.execute(
+            "UPDATE hosts SET group_id=?2 WHERE group_id=?1",
+            params![id, parent],
+        )
+        .map_err(storage_error)?;
+        tx.execute(
+            "UPDATE host_groups SET parent_id=?2 WHERE parent_id=?1",
+            params![id, parent],
+        )
+        .map_err(storage_error)?;
+        tx.execute("DELETE FROM host_groups WHERE id=?1", [id])
+            .map_err(storage_error)?;
+        tx.commit().map_err(storage_error)?;
         Ok(())
     }
     pub fn credential_record(&self, id: &str) -> Result<CredentialRecord, Error> {

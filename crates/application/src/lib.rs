@@ -8,6 +8,7 @@ mod ops;
 mod product;
 mod tasks;
 mod terminal;
+mod terminal_upload;
 pub use hosts::SecureStatus;
 
 use std::{
@@ -25,6 +26,7 @@ use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 pub struct Application {
+    terminal_uploads: terminal_upload::TerminalUploads,
     local_terminals: local_terminal::LocalTerminals,
     terminals: serverdeck_ssh::Engine,
     files: serverdeck_sftp::Files,
@@ -62,6 +64,7 @@ impl Application {
             tasks.clone(),
         )?;
         Ok(Self {
+            terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
             automation,
             tasks,
@@ -151,6 +154,9 @@ impl Application {
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        if let Err(error) = self.terminal_uploads.clear() {
+            tracing::error!(operation = "terminal_upload_shutdown", error = %error);
+        }
         if let Err(error) = self.local_terminals.close_all(true).await {
             tracing::error!(operation = "local_terminal_shutdown", error = %error);
         }

@@ -59,15 +59,13 @@ fn migrates_v5_hosts_without_changing_configuration_or_links() {
         .pragma_update(None, "user_version", 5)
         .expect("v5");
     let legacy = Database { path: path.clone() };
-    let group = legacy
-        .group_save(
-            None,
-            GroupInput {
-                name: "生产".into(),
-                sort_order: 2,
-            },
+    let group_id = uuid::Uuid::new_v4().to_string();
+    connection
+        .execute(
+            "INSERT INTO host_groups(id,name,sort_order) VALUES(?1,'生产',2)",
+            [&group_id],
         )
-        .expect("group");
+        .expect("legacy group");
     let credential = legacy
         .credential_save(
             "private-key",
@@ -81,17 +79,55 @@ fn migrates_v5_hosts_without_changing_configuration_or_links() {
     let jump = legacy.host_create(input()).expect("jump");
     let mut config = input();
     config.name = "应用".into();
-    config.group_id = Some(group.id);
+    config.group_id = Some(group_id.clone());
     config.auth_type = AuthType::PrivateKey;
-    config.credential_id = Some(credential.id);
-    config.ssh.jump_host_id = Some(jump.id);
+    config.credential_id = Some(credential.id.clone());
+    config.ssh.jump_host_id = Some(jump.id.clone());
     legacy.host_create(config).expect("child");
     let settings = AppConfig {
         theme: Theme::Light,
         ..Default::default()
     };
     legacy.save_config(&settings).expect("settings");
-    let before = serde_json::to_value(legacy.catalog().expect("before")).expect("json");
+    let old_hosts = connection
+        .prepare(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts ORDER BY name COLLATE NOCASE,id"
+        ))
+        .expect("old hosts")
+        .query_map([], host_row)
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("hosts");
+    let old_groups = connection
+        .prepare(
+            "SELECT id,name,sort_order FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id",
+        )
+        .expect("old groups")
+        .query_map([], |row| {
+            Ok(HostGroup {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                sort_order: row.get(2)?,
+                parent_id: None,
+            })
+        })
+        .expect("query")
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .expect("groups");
+    let before = serde_json::to_value(Catalog {
+        hosts: old_hosts,
+        groups: old_groups,
+        credentials: vec![
+            legacy
+                .credential_record(&credential.id)
+                .expect("credential metadata")
+                .public,
+        ],
+        pending_secret_deletions: connection
+            .query_row("SELECT count(*) FROM secret_gc", [], |r| r.get(0))
+            .expect("pending deletions"),
+    })
+    .expect("old catalog");
     drop(connection);
     let migrated = Database::open(&path).expect("migrate");
     assert_eq!(
@@ -102,6 +138,10 @@ fn migrates_v5_hosts_without_changing_configuration_or_links() {
         serde_json::to_value(migrated.catalog().expect("after")).expect("json"),
         before
     );
+    let groups = migrated.catalog().expect("catalog").groups;
+    assert_eq!(groups[0].id, group_id);
+    assert_eq!(groups[0].name, "生产");
+    assert_eq!(groups[0].parent_id, None);
     assert_eq!(migrated.load_config().expect("settings"), settings);
     let mut unnamed = input();
     unnamed.name.clear();
@@ -133,6 +173,7 @@ fn host_crud_copy_groups_and_restart_preserve_real_data() {
         .group_save(
             None,
             GroupInput {
+                parent_id: None,
                 name: "生产".into(),
                 sort_order: 4,
             },
@@ -155,6 +196,7 @@ fn host_crud_copy_groups_and_restart_preserve_real_data() {
     db.group_save(
         Some(&group.id),
         GroupInput {
+            parent_id: None,
             name: "正式环境".into(),
             sort_order: 1,
         },
@@ -164,6 +206,7 @@ fn host_crud_copy_groups_and_restart_preserve_real_data() {
         db.group_save(
             None,
             GroupInput {
+                parent_id: None,
                 name: "正式环境".into(),
                 sort_order: 0
             }
