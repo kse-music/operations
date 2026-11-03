@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { opsApi } from '../services/ops';
 import { ArrowDown, ArrowUp } from '@lucide/vue';
@@ -206,7 +207,7 @@ async function confirm(accept: boolean): Promise<void> {
 }
 async function copy(): Promise<void> {
   try {
-    await navigator.clipboard.writeText(terminal.getSelection());
+    await clipboardApi.writeText(terminal.getSelection());
   } catch {
     message.value = '无法写入剪贴板，请检查系统权限。';
   }
@@ -329,7 +330,7 @@ async function paste(): Promise<void> {
   }
   const attempt = generation;
   try {
-    const text = await navigator.clipboard.readText();
+    const text = await clipboardApi.readText();
     if (!disposed && attempt === generation) requestPaste(text);
   } catch {
     message.value = '无法读取剪贴板，请检查系统权限。';

@@ -26,6 +26,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             app.manage(file_commands::ExitApproval(AtomicBool::new(false)));
             let data = app.path().app_data_dir()?;

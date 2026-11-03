@@ -69,16 +69,13 @@ try {
       await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(),
       0,
     );
-    assert.equal(
-      await page.getByRole('button', { name: '关于 ServerDeck', exact: true }).count(),
-      0,
-    );
+    assert.equal(await page.getByRole('button', { name: '关于', exact: true }).count(), 0);
     await page.locator('.module-navigation [data-module="system"]').click();
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['全局设置', '本地环境', '关于 ServerDeck'],
+      ['全局设置', '本地环境', '关于'],
     );
-    const about = page.getByRole('button', { name: '关于 ServerDeck', exact: true });
+    const about = page.getByRole('button', { name: '关于', exact: true });
     await about.click();
     const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
     await aboutPage.waitFor();

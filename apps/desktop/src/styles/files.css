@@ -6,55 +6,6 @@
 .files-view h1 {
   margin: 0;
 }
-.files-view-compact {
-  gap: 10px;
-}
-.files-view-compact .file-columns {
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0;
-}
-.files-view-compact .file-side {
-  padding: 0;
-  border: 0;
-  background: transparent;
-}
-.files-view-compact .file-side h2 {
-  display: none;
-}
-.files-view-compact .file-table {
-  height: auto;
-  min-height: 160px;
-  max-height: 420px;
-}
-.files-view-compact .file-table :is(th, td):nth-child(n + 4) {
-  display: none;
-}
-.files-view-compact .file-table table {
-  table-layout: fixed;
-}
-.files-view-compact .file-table :is(th, td):first-child {
-  width: 25px;
-}
-.files-view-compact .file-table :is(th, td):nth-child(3) {
-  width: 70px;
-}
-.files-view-compact .file-name {
-  white-space: nowrap;
-}
-.files-view-compact .files-status {
-  font-size: 11px;
-  gap: 5px 8px;
-}
-.files-panel-endpoint {
-  flex-basis: 100%;
-  overflow-wrap: anywhere;
-  color: var(--muted);
-}
-.files-panel-connect .button {
-  min-height: var(--compact-height);
-  padding: 3px 9px;
-  font-size: 11px;
-}
 .files-view h2 {
   font-size: 15px;
   margin: 10px 0;

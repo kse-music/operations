@@ -17,11 +17,7 @@ it.each([
     ['batch', 'automation', 'network', 'tasks'],
   ],
   ['credentials', ['收起主机栏', '安全凭据', '备份恢复'], ['credentials', 'backup']],
-  [
-    'settings',
-    ['收起主机栏', '全局设置', '本地环境', '关于 ServerDeck'],
-    ['settings', 'overview', 'about'],
-  ],
+  ['settings', ['收起主机栏', '全局设置', '本地环境', '关于'], ['settings', 'overview', 'about']],
 ] as const)('shows only menus belonging to the module containing %s', (active, labels, views) => {
   const navigate = vi.fn(),
     collapse = vi.fn();
@@ -46,7 +42,7 @@ it.each([
   expect(root.querySelector('.activity-about')).toBeNull();
   if (active === 'settings')
     expect(root.querySelector('.module-menu button:last-child')?.getAttribute('aria-label')).toBe(
-      '关于 ServerDeck',
+      '关于',
     );
   const heading = root.querySelector('.sidebar-module-title')!;
   expect(heading.tagName).toBe('STRONG');

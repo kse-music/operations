@@ -258,7 +258,6 @@ kbd {
   color: var(--accent);
   background: var(--accent-bg);
 }
-.sidebar-host-tools,
 .sidebar-local-device {
   padding: 10px;
   border-bottom: 1px solid var(--border);
@@ -272,12 +271,10 @@ kbd {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.sidebar-host-tools .host-tools,
 .sidebar-local-device .host-tools {
   flex-direction: column;
   gap: 3px;
 }
-.sidebar-host-tools .host-tool,
 .sidebar-local-device .host-tool {
   min-height: 32px;
   width: 100%;
@@ -293,22 +290,14 @@ kbd {
   padding: 0;
   min-height: 30px;
 }
-.file-panel-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 8px;
-  min-height: 30px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--muted);
-  font-size: 12px;
+.workspace-header > .host-tools {
+  margin-left: auto;
+  max-width: 100%;
+  overflow-x: auto;
 }
-.file-panel-toggle[aria-expanded='true'] {
-  background: var(--accent-bg);
-  border-color: var(--accent-bg);
-  color: var(--accent);
+.workspace-header .host-tool {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .workspace-tab.active button {
   color: var(--text);

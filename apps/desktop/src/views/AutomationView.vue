@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { ChevronRight } from '@lucide/vue';
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
@@ -240,7 +241,7 @@ async function cancel(running: boolean) {
 }
 async function copy(value: string) {
   try {
-    await navigator.clipboard.writeText(value);
+    await clipboardApi.writeText(value);
   } catch (e) {
     error.value = errorMessage(e);
   }

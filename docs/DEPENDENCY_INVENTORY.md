@@ -643,3 +643,47 @@
 | shared_library-0.1.9 | Apache-2.0 OR MIT          | Cargo |
 | shell-words-1.1.1    | MIT OR Apache-2.0          | Cargo |
 | winreg-0.10.1        | MIT                        | Cargo |
+
+## 原生剪贴板新增依赖（2026-11-03）
+
+| 名称与版本                                 | 声明许可证                        | 来源  |
+| ------------------------------------------ | --------------------------------- | ----- |
+| arboard 3.7.0                              | MIT OR Apache-2.0                 | Cargo |
+| byteorder-lite 0.1.0                       | Unlicense OR MIT                  | Cargo |
+| clipboard-win 5.4.3                        | BSL-1.0                           | Cargo |
+| crunchy 0.2.4                              | MIT                               | Cargo |
+| error-code 3.4.0                           | BSL-1.0                           | Cargo |
+| fax 0.2.7                                  | MIT                               | Cargo |
+| fixedbitset 0.5.7                          | MIT OR Apache-2.0                 | Cargo |
+| foldhash 0.1.5                             | Zlib                              | Cargo |
+| gethostname 1.1.0                          | Apache-2.0                        | Cargo |
+| half 2.7.1                                 | MIT OR Apache-2.0                 | Cargo |
+| hashbrown 0.15.5                           | MIT OR Apache-2.0                 | Cargo |
+| image 0.25.10                              | MIT OR Apache-2.0                 | Cargo |
+| moxcms 0.8.1                               | BSD-3-Clause OR Apache-2.0        | Cargo |
+| nom 8.0.0                                  | MIT                               | Cargo |
+| os_pipe 1.2.3                              | MIT                               | Cargo |
+| petgraph 0.8.3                             | MIT OR Apache-2.0                 | Cargo |
+| pxfm 0.1.30                                | BSD-3-Clause OR Apache-2.0        | Cargo |
+| quick-error 2.0.1                          | MIT/Apache-2.0                    | Cargo |
+| quick-xml 0.41.0                           | MIT                               | Cargo |
+| tauri-plugin-clipboard-manager 2.5.0       | Apache-2.0 OR MIT                 | Cargo |
+| tiff 0.11.3                                | MIT                               | Cargo |
+| tree_magic_mini 3.2.2                      | MIT                               | Cargo |
+| wayland-backend 0.3.17                     | MIT                               | Cargo |
+| wayland-client 0.31.15                     | MIT                               | Cargo |
+| wayland-protocols 0.32.13                  | MIT                               | Cargo |
+| wayland-protocols-wlr 0.3.12               | MIT                               | Cargo |
+| wayland-scanner 0.31.11                    | MIT                               | Cargo |
+| wayland-sys 0.31.11                        | MIT                               | Cargo |
+| weezl 0.1.12                               | MIT OR Apache-2.0                 | Cargo |
+| wl-clipboard-rs 0.9.5                      | MIT OR Apache-2.0                 | Cargo |
+| x11rb 0.13.2                               | MIT OR Apache-2.0                 | Cargo |
+| x11rb-protocol 0.13.2                      | MIT OR Apache-2.0                 | Cargo |
+| zerocopy 0.8.63                            | BSD-2-Clause OR Apache-2.0 OR MIT | Cargo |
+| zerocopy-derive 0.8.63                     | BSD-2-Clause OR Apache-2.0 OR MIT | Cargo |
+| zune-core 0.5.3                            | MIT OR Apache-2.0 OR Zlib         | Cargo |
+| zune-jpeg 0.5.15                           | MIT OR Apache-2.0 OR Zlib         | Cargo |
+| @tauri-apps/plugin-clipboard-manager 2.5.0 | MIT OR Apache-2.0                 | npm   |
+
+clipboard-win 5.4.3 发布包未包含 LICENSE，文本取自其固定源码提交 ed27008ae5d1f10cfbb266de039f0fb35fd05a56 的上游 LICENSE；前端插件随附 SPDX，完整 MIT/Apache 文本补自同版本官方 Rust 插件包。其余文本取自已解析依赖包。清单包含跨平台依赖，不表示已验证全部平台。

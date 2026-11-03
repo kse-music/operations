@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import { useHostsStore } from '../stores/hosts';
@@ -190,7 +191,7 @@ function label(id: string, sessionId: string | null) {
 async function copy() {
   if (!current.value) return;
   try {
-    await navigator.clipboard.writeText(JSON.stringify(current.value, null, 2));
+    await clipboardApi.writeText(JSON.stringify(current.value, null, 2));
   } catch (e) {
     error.value = errorMessage(e);
   }

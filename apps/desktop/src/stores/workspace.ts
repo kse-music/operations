@@ -7,7 +7,6 @@ export interface WorkspaceTab {
   key: string;
   view: WorkspaceView;
   hostId: string;
-  filesOpen?: boolean;
   section?: 'containers' | 'images' | 'processes' | 'ports' | 'services' | 'logs';
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';

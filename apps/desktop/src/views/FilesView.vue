@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clipboardApi } from '../services/clipboard';
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import {
   ArrowUp,
@@ -35,8 +36,7 @@ import {
 } from '../types/files';
 import { hostDisplayName, type Host } from '../types/hosts';
 import { stateLabels } from '../types/terminal';
-import { sameHostConnection } from '../services/product-links';
-const props = defineProps<{ hostId?: string; compact?: boolean }>();
+const props = defineProps<{ hostId?: string }>();
 const application = useApplicationStore();
 const emit = defineEmits<{
   terminal: [host: Host, action: FileTerminalAction];
@@ -53,10 +53,6 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   over = ref(false),
   following = ref(false),
   remoteArea = ref<HTMLElement>();
-const connectionChanged = computed(() => {
-  const configured = hosts.catalog?.hosts.find((h) => h.id === chosen.value);
-  return configured && store.current && !sameHostConnection(configured, store.current.host);
-});
 const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: number } | null>(null),
   operation = ref<{
     kind: 'mkdir' | 'rename' | 'delete';
@@ -120,7 +116,7 @@ async function connect(): Promise<void> {
 }
 async function copy(path: string): Promise<void> {
   try {
-    await navigator.clipboard.writeText(path);
+    await clipboardApi.writeText(path);
     store.notice = '绝对路径已复制。';
   } catch {
     store.error = '无法写入剪贴板。';
@@ -355,9 +351,9 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section :class="['files-view', 'page-view', { 'files-view-compact': compact }]">
-    <div :class="compact ? 'files-panel-connect' : 'section-heading'">
-      <div v-if="!compact">
+  <section class="files-view page-view">
+    <div class="section-heading">
+      <div>
         <p class="eyebrow">SFTP WORKSPACE</p>
         <h1>文件管理</h1>
       </div>
@@ -385,27 +381,18 @@ onBeforeUnmount(() => {
       <strong>{{ hostDisplayName(store.current.host) }}</strong
       ><span>{{ stateLabels[store.current.state] ?? store.current.state }}</span
       ><button class="text-button" @click="disconnecting = true">断开文件连接</button
-      ><span v-if="compact" class="files-panel-endpoint"
-        >{{ store.current.host.username }}@{{ store.current.host.hostname }}:{{
-          store.current.host.port
-        }}</span
       ><label class="checkbox-label"
         ><input
           v-model="following"
           type="checkbox"
           :disabled="!cwd"
           @change="following && cwd && store.navigate(cwd)"
-        />{{ compact ? '跟随终端目录' : '跟随来源终端的 OSC 7 目录' }}</label
-      ><span v-if="!compact" class="subtle">{{
-        cwd ?? '来源终端未报告目录；不从屏幕文本猜测 pwd'
-      }}</span>
+        />跟随来源终端的 OSC 7 目录</label
+      ><span class="subtle">{{ cwd ?? '来源终端未报告目录；不从屏幕文本猜测 pwd' }}</span>
     </div>
-    <p v-if="compact && connectionChanged" class="banner" role="status">
-      文件连接使用上方显示的原地址和账号。配置已变更，请断开文件连接后重连以应用新配置。
-    </p>
 
     <div class="file-columns">
-      <section v-if="!compact" class="file-side">
+      <section class="file-side">
         <h2>本地文件</h2>
         <form class="path-bar" @submit.prevent="store.localLoad(localPath)">
           <button
@@ -528,25 +515,6 @@ onBeforeUnmount(() => {
             @click="mutate('mkdir')"
           >
             <FolderPlus :size="15" aria-hidden="true" /></button
-          ><template v-if="compact">
-            <button
-              class="tool-button"
-              aria-label="选择上传文件…"
-              title="选择上传文件"
-              :disabled="store.current?.state !== 'connected'"
-              @click="picked()"
-            >
-              <FileUp :size="15" aria-hidden="true" />
-            </button>
-            <button
-              class="tool-button"
-              aria-label="选择上传文件夹…"
-              title="选择上传文件夹"
-              :disabled="store.current?.state !== 'connected'"
-              @click="picked(true)"
-            >
-              <FolderUp :size="15" aria-hidden="true" />
-            </button> </template
           ><button
             class="tool-button"
             aria-label="刷新远程"
@@ -590,7 +558,7 @@ onBeforeUnmount(() => {
         />
       </section>
     </div>
-    <TransferPanel v-if="!compact" @retry="retry" />
+    <TransferPanel @retry="retry" />
   </section>
   <template v-if="menu"
     ><button class="context-backdrop" aria-label="关闭文件菜单" @click="menu = null"></button>

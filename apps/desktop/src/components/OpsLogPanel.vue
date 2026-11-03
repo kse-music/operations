@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onBeforeUnmount, ref, shallowRef, triggerRef, nextTick } from 'vue';
 import { opsApi } from '../services/ops';
@@ -116,7 +117,7 @@ function changed(): void {
 }
 async function copy(): Promise<void> {
   try {
-    await navigator.clipboard.writeText(visible.value);
+    await clipboardApi.writeText(visible.value);
   } catch {
     error.value = '无法写入剪贴板。';
   }

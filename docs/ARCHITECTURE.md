@@ -98,13 +98,13 @@ Rust 与 TS 都显式定义 DTO；Rust IPC 测试验证实际序列化、命令�
 
 ## 主机工作区布局
 
-2026-11-03 模块导航布局：AppModules 提供顶部四个大模块，AppNavigation 接收明确的当前模块并显示其菜单。`types/navigation.ts` 穷举视图所属模块；workspace.module 独立保存顶部选择，selectModule 只更新该值，不改变 active、current 或 hostId。中央继续渲染原活动页，原终端与文件面板保持挂载、可见和会话上下文；无活动页时保留欢迎页，不渲染“请选择功能”卡片。显式点击左侧功能或页面标签调用 navigate/activate 时，同步顶部模块与对应菜单。移除最近模块标签 Map，不再因顶部切换自动恢复另一个页面。仅主机运维模块展示主机树，已有草稿、PTY、SFTP 和后台任务保留。
+2026-11-03 模块导航布局：AppModules 提供顶部四个大模块，AppNavigation 接收明确的当前模块并显示其菜单。`types/navigation.ts` 穷举视图所属模块；workspace.module 独立保存顶部选择，selectModule 只更新该值，不改变 active、current 或 hostId。中央继续渲染原活动页，原终端保持挂载、可见和会话上下文；无活动页时保留欢迎页，不渲染“请选择功能”卡片。显式点击左侧功能或页面标签调用 navigate/activate 时，同步顶部模块与对应菜单。移除最近模块标签 Map，不再因顶部切换自动恢复另一个页面。仅主机运维模块展示主机树，已有草稿、PTY、SFTP 和后台任务保留。
 
-主机运维侧栏组合 HostTools 与 HostSidebar，其他模块隐藏主机树并保留其状态。中央保留统一的已打开标签及终端会话工具栏，TerminalsView 仅将会话标签 Teleport 到稳定容器，PTY 组件、Pane key 和连接所有权不变。WorkspaceTab.filesOpen 仅保存本次运行的每主机文件面板开合状态，不写入用户配置或数据库。
+主机运维侧栏使用 HostSidebar，其他模块隐藏主机树并保留其状态。HostTools 移至中央 workspace-header 右侧，在四个远程主机页面显示并沿用 navigate 和 HostId；本地及全局页面不显示这组菜单。终端会话和新建按钮仍由 TerminalsView Teleport 到稳定容器，PTY 组件、Pane key 和连接所有权不变。移除 WorkspaceTab.filesOpen、文件面板入口及挂载逻辑，窄窗口通过工具栏换行和菜单内部滚动适配。
 
-AppNavigation 在 system 模块的 module-menu 末尾提供“关于 ServerDeck”，排在全局设置、本地环境之后。about 作为普通 WorkspaceView 纳入消息字典、模块映射和全局搜索，菜单通过 navigate 打开唯一的 about: 全局标签，由 AboutView 在中央页面展示产品说明、技术栈及 application.state.appVersion。重复进入复用该标签，切换或关闭沿用 workspace 的导航行为，原终端保持挂载。移除 about 事件、aboutOpen 状态、closeAbout 焦点处理和 App 内的关于 Modal；版本仍保留成功、读取中与后端未就绪状态，不增加 IPC 或配置。
+AppNavigation 在 system 模块的 module-menu 末尾提供“关于”，排在全局设置、本地环境之后。about 作为普通 WorkspaceView 纳入消息字典、模块映射和全局搜索，菜单通过 navigate 打开唯一的 about: 全局标签，由 AboutView 在中央页面展示产品说明、技术栈及 application.state.appVersion。重复进入复用该标签，切换或关闭沿用 workspace 的导航行为，原终端保持挂载。移除 about 事件、aboutOpen 状态、closeAbout 焦点处理和 App 内的关于 Modal；版本仍保留成功、读取中与后端未就绪状态，不增加 IPC 或配置。
 
-FilesView 的 compact 展示复用同一 useFilesStore、FilePane、传输/编辑及安全确认流程，完整页和面板互斥挂载。切换主机前同步 files.active，仍使用每主机 FileConnection 的实际连接快照和路径；收起仅卸载视图及拖放监听，不关闭 SFTP、终端或传输。窄窗口上下排列，宽窗口右侧伴随；无新增 IPC、数据库迁移或依赖。
+FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样式。终端文件事件经原 currentConfiguration 校验后 navigate 到 files，继续向 files.open 传递路径与来源窗格。切换主机前同步 files.active，沿用每主机 FileConnection 的实际连接快照、路径及传输/编辑/安全确认流程；卸载页面仅清理拖放监听，不关闭 SFTP、终端或传输。无新增 IPC、数据库迁移或依赖。
 
 ## 存储、配置与日志
 
@@ -181,7 +181,7 @@ Application 拥有 Engine，Engine 注册表拥有 Transport/Session。复用键
 
 输入每次最多 16 KiB、后端 8 条、前端普通输入最多 128 KiB；用户确认的单次粘贴最多 2 MiB（含边界预留）。输入按 16 KiB 分块，BUSY 时等待重试，超限明确提示未发送，重连清空旧代队列。resize 用 watch 合并为最新尺寸（2–500 列、1–300 行），前端 80ms 合并，只传 cols/rows，排除 xterm 6 未在类型中声明的内部字段。大量输出及未 ACK 时不继续发送的行为均有测试。
 
-终端命令：terminal_open（流式 Channel）、terminal_input、terminal_resize、terminal_ack、terminal_trust、terminal_close、terminal_close_host。没有读取秘密或任意本地执行命令的接口。终端模拟器处理 ANSI/VT、UTF-8、256/True Color、alternate screen、鼠标协议与组合键；查找只搜索本地滚动缓冲，复制粘贴需系统剪贴板权限。
+终端命令：terminal_open（流式 Channel）、terminal_input、terminal_resize、terminal_ack、terminal_trust、terminal_close、terminal_close_host。没有读取秘密或任意本地执行命令的接口。终端模拟器处理 ANSI/VT、UTF-8、256/True Color、alternate screen、鼠标协议与组合键；查找只搜索本地滚动缓冲，复制粘贴通过受控原生文本剪贴板 IPC，不请求网页剪贴板授权。
 
 ### 终端布局、偏好与生命周期
 
@@ -201,9 +201,9 @@ Pinia 区分 Tab、Pane 和 Session：一个标签包含 1–8 个窗格，全�
 
 终端顶部采用紧凑组合：App 的 workspace-header 仅承载 HostTools；TerminalsView 的 terminal-session-header 只承载可横向滚动的会话标签，移除七个操作图标及专用样式。页签菜单按“复制、重命名、关闭所有、关闭”排序，移除关闭其它入口与专用 store 方法。“复制”从右键目标标签取主机快照，复用 store.open 创建并选中一个新窗格，不复制运行 ID、分屏、cwd、文件动作或容器命令；本地标签使用 host=null，错误沿用 store.error。closeAll 按右键目标主机生成页签快照并逐一复用 close，包含目标本身及所有分屏，不关闭其他主机的连接。关闭失败保留页签并通过 store.error 报错，继续处理剩余目标；终端布局仅保留在运行内。重命名/关闭菜单、新建/分屏快捷键保留。TerminalPane 移除常驻的 terminal-toolbar、主机信息和按钮区，画面紧接会话栏；原窗格操作移到 Teleport 至 body 的终端菜单，继续调用同一 connect/copy/paste/find/forward/export/emit 逻辑，绑定原 PaneKey、主机快照、cwd 和会话 ID。会话标签显示状态，菜单可查看主机端点，窗格保留可访问名称/状态描述。默认右键打开菜单；快捷粘贴开启后右键仍粘贴，Shift+右键、Shift+F10 或菜单键打开菜单，支持方向键/Home/End/Esc、外部关闭和视口边缘约束。操作不改变挂载、连接或取消生命周期；导出、粘贴、主机信任和配置变化保护保留，收到待确认指纹时关闭菜单并使用原对话框。
 
-AppConfig v1 新增有默认值的 terminal 偏好，兼容旧设置：字体、10–32 字号、100–200% 行高、历史上限、四种主题、光标和 11 个快捷键。快捷键必须包含约束修饰键并去重，不占用远端 Ctrl+C/Z。大于阈值或 50 行的粘贴须确认，通过 xterm.paste 尊重远端 Bracketed Paste；不会承诺远端关闭此模式时换行安全。复制走系统剪贴板；导出需主动确认，只下载当前普通屏幕和滚动历史 UTF-8 文本，无自动录制。
+AppConfig v1 新增有默认值的 terminal 偏好，兼容旧设置：字体、10–32 字号、100–200% 行高、历史上限、四种主题、光标和 11 个快捷键。快捷键必须包含约束修饰键并去重，不占用远端 Ctrl+C/Z。大于阈值或 50 行的粘贴须确认，通过 xterm.paste 尊重远端 Bracketed Paste；不会承诺远端关闭此模式时换行安全。复制走原生系统文本剪贴板；导出需主动确认，只下载当前普通屏幕和滚动历史 UTF-8 文本，无自动录制。
 
-终端快捷复制粘贴使用同一偏好中的 `quickCopyPaste: boolean`，Rust 默认和旧 JSON 缺失字段均为 false，无数据库结构迁移。开启时 xterm 非空选区变化写入系统剪贴板，仅活动窗格响应；终端内容容器捕获右键按下及菜单事件，避免同时触发 xterm 的鼠标上报或右键选词，再复用原剪贴板读取、大文本确认、2 MiB 限制和有界输入。快捷开启时 Shift+右键与键盘菜单操作不读取剪贴板，菜单、查找框和其他页面不触发右键粘贴。剪贴板读取绑定终端连接 generation，重连或卸载后丢弃旧读取结果，重连时取消旧待确认粘贴；剪贴板权限失败沿用安全错误提示，不记录内容。
+终端快捷复制粘贴使用同一偏好中的 `quickCopyPaste: boolean`，Rust 默认和旧 JSON 缺失字段均为 false，无数据库结构迁移。开启时 xterm 非空选区变化写入系统剪贴板，仅活动窗格响应；终端内容容器捕获右键按下及菜单事件，避免同时触发 xterm 的鼠标上报或右键选词，再复用原剪贴板读取、大文本确认、2 MiB 限制和有界输入。快捷开启时 Shift+右键与键盘菜单操作不读取剪贴板，菜单、查找框和其他页面不触发右键粘贴。剪贴板读取绑定终端连接 generation，重连或卸载后丢弃旧读取结果，重连时取消旧待确认粘贴；剪贴板不可用或读写失败沿用安全错误提示，不记录内容。services/clipboard.ts 复用 ensureDesktop，并调用 @tauri-apps/plugin-clipboard-manager 2.5.0 的 readText/writeText；Rust 注册同版本插件，main capability 只增加 allow-read-text/allow-write-text，其他窗口、远程来源及图片/HTML/清空等命令不获授权。终端快捷键、菜单、选中复制及全应用的路径/结果/日志复制共用此服务；只在用户动作后读写，不申请网页权限，也不回退 navigator.clipboard。浏览器原生 paste 事件仍从 clipboardData 取得用户已粘贴的文本，并复用原确认和输入流程。
 
 terminals store 不再提供布局快照、恢复或自动保存，App 启动不调用 workspace_load。旧 workspace_load/workspace_save IPC 与 application_settings.terminal_workspace 的 v1 格式保留兼容，产品不再读写，也不删除已有记录或修改主机、分组、凭据及偏好。启动或 WebView 重载时会话列表为空；用户显式打开设备后才创建一个新 Shell。WebView 重新加载会关闭旧终端及未认证的文件租约，保留已认证文件租约和后台传输；应用退出先排空文件操作，再取消全部 Session/转发，最后等待数据库任务。
 

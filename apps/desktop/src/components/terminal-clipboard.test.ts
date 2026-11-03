@@ -9,6 +9,11 @@ import { terminalApi } from '../services/terminal';
 import { defaultTerminalPreferences } from '../types/preferences';
 import { defaultProductPreferences } from '../types/product';
 import { hostInput } from '../types/hosts';
+import { clipboardApi } from '../services/clipboard';
+
+vi.mock('../services/clipboard', () => ({
+  clipboardApi: { writeText: vi.fn(), readText: vi.fn() },
+}));
 
 const xterm = vi.hoisted(() => ({
   selection: '',
@@ -77,8 +82,14 @@ const PaneHarness = {
       onClose: events.close,
     }),
 };
-const writeText = vi.fn(),
-  readText = vi.fn();
+const writeText = vi.mocked(clipboardApi.writeText),
+  readText = vi.mocked(clipboardApi.readText);
+const browserRead = vi.fn(() => {
+    throw new Error('Browser clipboard must not be used');
+  }),
+  browserWrite = vi.fn(() => {
+    throw new Error('Browser clipboard must not be used');
+  });
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 beforeEach(async () => {
@@ -89,7 +100,7 @@ beforeEach(async () => {
   readText.mockResolvedValue('clipboard text');
   Object.defineProperty(navigator, 'clipboard', {
     configurable: true,
-    value: { writeText, readText },
+    value: { writeText: browserWrite, readText: browserRead },
   });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -150,6 +161,8 @@ afterEach(() => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.unstubAllGlobals();
+  expect(browserRead).not.toHaveBeenCalled();
+  expect(browserWrite).not.toHaveBeenCalled();
 });
 function enable(value = true) {
   useApplicationStore().state!.config.terminal.quickCopyPaste = value;

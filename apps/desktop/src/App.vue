@@ -18,7 +18,7 @@ import AppNavigation from './components/AppNavigation.vue';
 import AppModules from './components/AppModules.vue';
 import type { NavigationModule } from './types/navigation';
 import HostTools from './components/HostTools.vue';
-import { Monitor, PanelLeftOpen, PanelRight, Server, X } from '@lucide/vue';
+import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import GroupManager from './components/GroupManager.vue';
@@ -121,24 +121,6 @@ const view = computed<View | null>({
 const isHostWorkspace = computed(() => view.value !== null && hostViews.has(view.value));
 const showSidebar = computed(() => sidebarOpen.value);
 const showHostTree = computed(() => workspace.module === 'hosts');
-const filePanelOpen = computed(
-  () => view.value === 'terminals' && !!currentHostId.value && !!workspace.current?.filesOpen,
-);
-async function toggleFilePanel(): Promise<void> {
-  const tab = workspace.current;
-  if (!tab || !currentHostId.value) return;
-  if (!tab.filesOpen && currentHost.value && !currentConfiguration(currentHost.value)) return;
-  files.active = currentHostId.value;
-  tab.filesOpen = !tab.filesOpen;
-  await nextTick();
-  document
-    .querySelector<HTMLButtonElement>(
-      filePanelOpen.value
-        ? '.workspace-file-panel [aria-label="收起文件面板"]'
-        : '[aria-controls="workspace-file-panel"]',
-    )
-    ?.focus({ preventScroll: true });
-}
 const cachedTools = computed(() =>
   (['automation', 'network', 'batch'] as const)
     .filter((tool) => workspace.tabs.some((tab) => tab.view === tool))
@@ -420,8 +402,7 @@ async function confirmExit(): Promise<void> {
 function openFiles(host: Host, path?: string, pane?: string): void {
   if (!currentConfiguration(host)) return;
   dismissTabMenu();
-  navigate('terminals', host.id);
-  if (workspace.current) workspace.current.filesOpen = true;
+  navigate('files', host.id);
   void files.open(host, path, pane);
 }
 function fileTerminal(host: Host, action: import('./types/files').FileTerminalAction): void {
@@ -538,7 +519,7 @@ watch(
     const t = workspace.current;
     if (!t) return;
     if (hostViews.has(t.view)) store.selectedId = currentHostId.value || null;
-    if (t.view === 'files' || (t.view === 'terminals' && t.filesOpen)) files.active = t.hostId;
+    if (t.view === 'files') files.active = t.hostId;
     if (t.view === 'operations') operations.active = t.hostId;
     if (t.view === 'terminals') terminals.activateHost(currentHostId.value);
   },
@@ -585,16 +566,7 @@ watch(
           @export="exportHosts"
           @select="setContext($event.id, true)"
           @saved="revealHost"
-        >
-          <template #tools>
-            <div v-if="isHostWorkspace && view && currentHostId" class="sidebar-host-tools">
-              <p class="sidebar-context-name">
-                {{ hostDisplayName(currentHost) || '已删除主机' }}
-              </p>
-              <HostTools :active="view" :local="false" @navigate="navigate($event)" />
-            </div>
-          </template>
-        </HostSidebar>
+        />
       </AppNavigation>
     </aside>
     <div
@@ -664,17 +636,14 @@ watch(
           </button>
         </div>
       </div>
-      <div v-show="view === 'terminals'" class="workspace-header">
+      <div v-show="isHostWorkspace" class="workspace-header">
         <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
-        <button
-          v-if="view === 'terminals' && currentHostId"
-          class="file-panel-toggle"
-          :aria-expanded="filePanelOpen"
-          aria-controls="workspace-file-panel"
-          @click="toggleFilePanel"
-        >
-          <PanelRight :size="15" aria-hidden="true" />文件面板
-        </button>
+        <HostTools
+          v-if="isHostWorkspace && view && currentHostId"
+          :active="view"
+          :local="false"
+          @navigate="navigate($event)"
+        />
       </div>
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
         当前仍操作建立时的连接：{{ currentHost?.username }}@{{ currentHost?.hostname }}:{{
@@ -740,10 +709,7 @@ watch(
         <WorkspaceView v-else-if="view === 'overview'" @settings="view = 'settings'" />
         <SettingsPanel v-else-if="view === 'settings'" />
       </div>
-      <div
-        v-show="view === 'terminals'"
-        :class="['terminal-workspace', { 'with-file-panel': filePanelOpen }]"
-      >
+      <div v-show="view === 'terminals'" class="terminal-workspace">
         <div class="terminal-primary">
           <TerminalsView
             v-if="view === 'terminals' || terminals.tabs.length"
@@ -757,28 +723,6 @@ watch(
             @network="openNetwork"
           />
         </div>
-        <aside
-          v-if="filePanelOpen"
-          id="workspace-file-panel"
-          class="workspace-file-panel"
-          aria-label="当前主机文件面板"
-        >
-          <header class="file-panel-heading">
-            <strong>SFTP</strong>
-            <button class="text-button" @click="navigate('files')">完整文件页</button>
-            <button class="shell-icon-button" aria-label="收起文件面板" @click="toggleFilePanel">
-              <X :size="16" aria-hidden="true" />
-            </button>
-          </header>
-          <div class="file-panel-scroll">
-            <FilesView
-              :key="`panel:${currentHostId}`"
-              :host-id="currentHostId"
-              compact
-              @terminal="fileTerminal"
-            />
-          </div>
-        </aside>
       </div>
     </main>
     <footer class="statusbar">

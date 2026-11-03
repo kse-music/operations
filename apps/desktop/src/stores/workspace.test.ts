@@ -126,12 +126,11 @@ it('handles empty ranges and closing the last tab without creating replacements'
   expect(workspace.current).toBeUndefined();
 });
 
-it('switches module menus without changing the active page, host context or file-panel state', () => {
+it('switches module menus without changing the active page or host context', () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
-  workspace.current!.filesOpen = true;
   workspace.selectModule('tools');
-  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a', filesOpen: true });
+  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
   workspace.navigate('batch');
   workspace.navigate('network');
   workspace.selectModule('assets');
@@ -150,7 +149,7 @@ it('switches module menus without changing the active page, host context or file
   expect(workspace.current?.view).toBe('settings');
   workspace.activate('host:a');
   expect(workspace.module).toBe('hosts');
-  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a', filesOpen: true });
+  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
 });
 
 it('does not choose another page or create a default when selecting a module after a tab closes', () => {

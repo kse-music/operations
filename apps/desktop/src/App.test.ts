@@ -248,8 +248,8 @@ it('opens About as a single system workspace page and preserves the existing ter
   await flush();
   const original = JSON.stringify(terminals.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
-  expect(root.querySelector('[aria-label="关于 ServerDeck"]')).toBeNull();
-  await sidebarMenu('system', '关于 ServerDeck');
+  expect(root.querySelector('[aria-label="关于"]')).toBeNull();
+  await sidebarMenu('system', '关于');
   const page = root.querySelector('.about-view')!;
   expect(page).not.toBeNull();
   expect(page.querySelector('h1')?.textContent).toBe('关于 ServerDeck');
@@ -259,14 +259,15 @@ it('opens About as a single system workspace page and preserves the existing ter
   expect(document.querySelector('dialog[aria-label="关于 ServerDeck"]')).toBeNull();
   expect(workspace.current).toMatchObject({ key: 'about:', view: 'about', hostId: '' });
   expect(root.querySelector('.module-menu [aria-current="page"]')?.getAttribute('aria-label')).toBe(
-    '关于 ServerDeck',
+    '关于',
   );
   expect(
-    root
-      .querySelector('.module-menu [aria-label="关于 ServerDeck"]')
-      ?.getAttribute('aria-haspopup'),
+    root.querySelector('.module-menu [aria-label="关于"]')?.getAttribute('aria-haspopup'),
   ).toBeNull();
-  await sidebarMenu('system', '关于 ServerDeck');
+  expect(
+    root.querySelector('.workspace-tab[data-view="about"] [role="tab"]')?.textContent?.trim(),
+  ).toBe('关于');
+  await sidebarMenu('system', '关于');
   expect(workspace.tabs.filter((tab) => tab.view === 'about')).toHaveLength(1);
   root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!.click();
   await flush();
@@ -284,7 +285,7 @@ it('opens About as a single system workspace page and preserves the existing ter
 });
 
 it('keeps the About page available before bootstrap and updates its real version state', async () => {
-  await sidebarMenu('system', '关于 ServerDeck');
+  await sidebarMenu('system', '关于');
   const page = root.querySelector('.about-view')!;
   expect(page).not.toBeNull();
   expect(page.textContent).toContain('暂不可用（本地后端未就绪）');
@@ -575,7 +576,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
-  expect(root.querySelector('.sidebar-host-tools .host-tools')).not.toBeNull();
+  expect(root.querySelector('.workspace-header .host-tools')).not.toBeNull();
   expect(root.querySelector('.activity-rail [aria-label="批量运维"]')).toBeNull();
   expect(terminals.panes[0]?.key).toBe(pane.key);
   expect(terminals.panes[0]?.connectRequested).toBe(false);
@@ -583,7 +584,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   expect(close).not.toHaveBeenCalled();
 });
 
-it('keeps file-panel visibility and paths per host without closing file or terminal sessions', async () => {
+it('switches full file pages from the toolbar without closing file or terminal sessions', async () => {
   const files = useFilesStore(),
     workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
@@ -607,68 +608,88 @@ it('keeps file-panel visibility and paths per host without closing file or termi
   const pane = terminals.panes[0]!;
   pane.state = 'connected';
   pane.sessionId = 'ssh-a';
-  root.querySelector<HTMLButtonElement>('[aria-controls="workspace-file-panel"]')!.click();
-  await flush();
-  expect(files.active).toBe('a');
-  expect(
-    root.querySelector<HTMLInputElement>('.workspace-file-panel [aria-label="远程路径"]')?.value,
-  ).toBe('/srv/a');
-  expect(root.querySelector('.workspace-file-panel [aria-label="本地路径"]')).toBeNull();
-  root.querySelector<HTMLButtonElement>('[aria-label="收起文件面板"]')!.click();
-  await flush();
-  expect(root.querySelector('.workspace-file-panel')).toBeNull();
-  expect(files.connections.a?.id).toBe('sftp-a');
+  const tool = async (label: string) => {
+    root.querySelector<HTMLButtonElement>(`.workspace-header [aria-label="${label}"]`)!.click();
+    await flush();
+  };
+  expect(root.querySelector('.sidebar [aria-label="当前主机工具"]')).toBeNull();
+  expect(root.querySelector('[aria-controls="workspace-file-panel"]')).toBeNull();
+  await tool('SFTP 文件');
+  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
+  expect(root.querySelectorAll('.files-view')).toHaveLength(1);
+  expect(root.querySelector('[aria-label="本地路径"]')).not.toBeNull();
+  expect(root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')?.value).toBe('/srv/a');
+  expect(root.querySelector('.workspace-header [aria-current="page"]')?.textContent).toContain(
+    'SFTP 文件',
+  );
+  await tool('服务器监控');
+  expect(workspace.current).toMatchObject({ view: 'monitor', hostId: 'a' });
+  expect(root.querySelector('.workspace-header [aria-current="page"]')?.textContent).toContain(
+    '服务器监控',
+  );
+  await tool('Linux 运维');
+  expect(workspace.current).toMatchObject({ view: 'operations', hostId: 'a' });
+  expect(root.querySelector('.workspace-header [aria-current="page"]')?.textContent).toContain(
+    'Linux 运维',
+  );
+  await tool('SSH 终端');
+  expect(root.querySelector('.files-view, .workspace-file-panel')).toBeNull();
+  expect(terminals.focused).toBe(pane.key);
   expect(pane.sessionId).toBe('ssh-a');
-  expect(closeFiles).not.toHaveBeenCalled();
-  expect(closeTerminal).not.toHaveBeenCalled();
-  root.querySelector<HTMLButtonElement>('[aria-controls="workspace-file-panel"]')!.click();
-  await flush();
   root.querySelector<HTMLButtonElement>('.tree-host[data-host-id="b"]')!.click();
   await flush();
-  expect(root.querySelector('.workspace-file-panel')).toBeNull();
-  root.querySelector<HTMLButtonElement>('[aria-controls="workspace-file-panel"]')!.click();
-  await flush();
+  await tool('SFTP 文件');
   expect(files.active).toBe('b');
   expect(root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')?.value).toBe('/srv/b');
   root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!.click();
   await flush();
+  await tool('SFTP 文件');
   expect(files.active).toBe('a');
   expect(root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')?.value).toBe('/srv/a');
-  [...root.querySelectorAll<HTMLButtonElement>('.file-panel-heading button')]
-    .find((b) => b.textContent?.trim() === '完整文件页')!
-    .click();
-  await flush();
-  expect(workspace.current?.view).toBe('files');
-  expect(root.querySelector('.files-view-compact')).toBeNull();
-  expect(root.querySelectorAll('.files-view')).toHaveLength(1);
-  root.querySelector<HTMLButtonElement>('.host-tools [aria-label="SSH 终端"]')!.click();
-  await flush();
-  expect(root.querySelectorAll('.files-view')).toHaveLength(1);
-  expect(root.querySelector('.workspace-file-panel .files-view-compact')).not.toBeNull();
-  expect(files.connections.a?.path).toBe('/srv/a');
+  expect(files.connections.a?.id).toBe('sftp-a');
+  expect(files.connections.b?.id).toBe('sftp-b');
   expect(closeFiles).not.toHaveBeenCalled();
   expect(closeTerminal).not.toHaveBeenCalled();
-});
-
-it('does not offer a remote file panel in the local workspace or silently use changed SSH settings', async () => {
-  const terminals = useTerminalsStore(),
-    workspace = useWorkspaceStore();
-  terminals.open(null);
+  workspace.navigate('settings');
+  await flush();
+  expect(root.querySelector('.workspace-header .host-tools')).toBeNull();
   workspace.navigate('terminals', '');
   await flush();
+  expect(root.querySelector('.workspace-header .host-tools')).toBeNull();
   expect(root.querySelector('[aria-controls="workspace-file-panel"]')).toBeNull();
+});
+
+it('opens the full file page with the terminal directory and rejects changed connection settings', async () => {
+  const workspace = useWorkspaceStore(),
+    terminals = useTerminalsStore(),
+    files = useFilesStore();
   root.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
   await flush();
-  const pane = terminals.panes.find((p) => p.host?.id === 'a')!;
+  const pane = terminals.panes[0]!;
   pane.state = 'connected';
   pane.sessionId = 'existing';
-  useHostsStore().catalog!.hosts[0] = { ...pane.host!, hostname: 'changed.example' };
+  const open = vi.spyOn(files, 'open').mockResolvedValue();
+  const terminalView = root.querySelector('.terminals-view') as HTMLElement & {
+    __vueParentComponent: { emit: (event: string, ...args: unknown[]) => void };
+  };
+  terminalView.__vueParentComponent.emit('files', pane.host, '/srv/project', pane.key);
   await flush();
-  root.querySelector<HTMLButtonElement>('[aria-controls="workspace-file-panel"]')!.click();
-  await flush();
-  expect(workspace.current?.filesOpen).not.toBe(true);
+  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
+  expect(open).toHaveBeenCalledWith(pane.host, '/srv/project', pane.key);
+  expect(root.querySelector('.files-view')).not.toBeNull();
   expect(root.querySelector('.workspace-file-panel')).toBeNull();
+  root.querySelector<HTMLButtonElement>('.workspace-header [aria-label="SSH 终端"]')!.click();
+  await flush();
+  open.mockClear();
+  useHostsStore().catalog!.hosts[0] = { ...pane.host!, hostname: 'changed.example' };
+  terminalView.__vueParentComponent.emit('files', pane.host, '/srv/project', pane.key);
+  await flush();
+  expect(workspace.current?.view).toBe('terminals');
+  expect(open).not.toHaveBeenCalled();
   expect(pane.sessionId).toBe('existing');
+  expect(
+    [...document.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent).join(' '),
+  ).toContain('主机连接配置已变更');
 });
 
 it.each(['a', 'b'])(
@@ -1001,11 +1022,11 @@ it('merges session controls into the host toolbar and retains names within the c
   await flush();
   expect(terminals.panes[0]).toMatchObject({ state: 'opening', connectRequested: true });
   expect(root.textContent).not.toContain('已恢复布局');
-  expect(root.querySelector('.sidebar-host-tools .host-tools')).not.toBeNull();
-  expect(root.querySelector('.workspace-header .host-tools')).toBeNull();
+  expect(root.querySelector('.workspace-header .host-tools')).not.toBeNull();
+  expect(root.querySelector('.sidebar [aria-label="当前主机工具"]')).toBeNull();
   expect(root.querySelector('.workspace-header .workspace-context')).toBeNull();
   expect(
-    [...root.querySelectorAll('.sidebar-host-tools .host-tools button')].map((button) =>
+    [...root.querySelectorAll('.workspace-header .host-tools button')].map((button) =>
       button.textContent?.trim(),
     ),
   ).toEqual(['SSH 终端', 'SFTP 文件', '服务器监控', 'Linux 运维']);
@@ -1265,7 +1286,7 @@ it('restores each host tool, file connection and terminal session through primar
   expect(workspace.hostId).toBe('b');
   expect((root.querySelector('.sidebar') as HTMLElement).style.display).not.toBe('none');
   expect((root.querySelector('.host-tree-section') as HTMLElement).style.display).toBe('none');
-  expect(root.querySelector('.sidebar-host-tools .host-tools')).toBeNull();
+  expect(root.querySelector('.workspace-header .host-tools')).toBeNull();
   await selectHost('a');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
   expect(root.querySelector('[aria-label="当前工作区主机"]')).toBeNull();

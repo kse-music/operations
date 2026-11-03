@@ -26,7 +26,7 @@ export const messages = {
     automation: '自动运维',
     backup: '备份恢复',
     tasks: '任务中心',
-    about: '关于 ServerDeck',
+    about: '关于',
   },
 } as const;
 export type WorkspaceView = keyof (typeof messages)['zh-CN'];

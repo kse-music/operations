@@ -96,48 +96,23 @@ try {
     await page.screenshot({ path: `${output}/${name}-module-without-default.png` });
     await page.locator('.module-navigation [data-module="hosts"]').click();
     await assertHost('a', 'terminals');
-    await page.locator('[aria-controls="workspace-file-panel"]').click();
-    const filePanel = page.getByRole('complementary', { name: '当前主机文件面板', exact: true });
-    await filePanel.getByLabel('远程路径', { exact: true }).waitFor();
-    assert.equal(await filePanel.getByLabel('远程路径', { exact: true }).inputValue(), '/a');
-    assert.equal(await filePanel.getByLabel('本地路径', { exact: true }).count(), 0);
-    assert.equal(
-      await filePanel.getByRole('button', { name: '选择上传文件…', exact: true }).isEnabled(),
-      true,
-    );
-    const panelGeometry = await page.evaluate(() => {
-      const terminal = document.querySelector('.terminal-primary').getBoundingClientRect();
-      const panel = document.querySelector('.workspace-file-panel').getBoundingClientRect();
-      return {
-        sideBySide: panel.left >= terminal.right - 1,
-        stacked: panel.top >= terminal.bottom - 1,
-        terminalWidth: terminal.width,
-        terminalHeight: terminal.height,
-        panelWidth: panel.width,
-        panelHeight: panel.height,
-        overflow: document.documentElement.scrollWidth > innerWidth,
-      };
-    });
-    assert.equal(panelGeometry.overflow, false);
-    assert(
-      panelGeometry.terminalWidth > 100 && panelGeometry.terminalHeight > 100,
-      JSON.stringify(panelGeometry),
-    );
-    assert(
-      width > 1100 ? panelGeometry.sideBySide : panelGeometry.stacked,
-      JSON.stringify(panelGeometry),
-    );
-    await page.screenshot({ path: `${output}/${name}-file-panel.png` });
-    await filePanel.getByRole('button', { name: '收起文件面板', exact: true }).click();
-    assert.equal(await filePanel.count(), 0);
+    assert.equal(await page.locator('[aria-controls="workspace-file-panel"]').count(), 0);
+    assert.equal(await page.locator('.workspace-file-panel').count(), 0);
+    assert.equal(await page.locator('.sidebar [aria-label="当前主机工具"]').count(), 0);
+    await nav('SFTP 文件');
+    assert.equal(await page.getByLabel('远程路径', { exact: true }).inputValue(), '/a');
+    assert.equal(await page.getByLabel('本地路径', { exact: true }).count(), 1);
+    assert.equal(await page.locator('.files-view').count(), 1);
+    await nav('SSH 终端');
+    assert.equal(await page.locator('.files-view').count(), 0);
     await page.evaluate(async () => {
       const { useFilesStore } = await import('/src/stores/files.ts');
       if (useFilesStore().connections.a.id !== 'files-a')
-        throw new Error('closing the panel disconnected SFTP');
+        throw new Error('switching tools disconnected SFTP');
     });
     assert.equal(await page.locator('.workspace-context').count(), 0);
     assert.deepEqual(
-      (await page.locator('.sidebar-host-tools .host-tools button').allTextContents()).map((text) =>
+      (await page.locator('.workspace-header .host-tools button').allTextContents()).map((text) =>
         text.trim(),
       ),
       ['SSH 终端', 'SFTP 文件', '服务器监控', 'Linux 运维'],
@@ -171,15 +146,27 @@ try {
       const host = box('.workspace-header'),
         sessions = box('.terminal-session-header'),
         area = box('.split-area'),
-        workspace = box('.workspace-tabs');
+        workspace = box('.workspace-tabs'),
+        tools = box('.workspace-header .host-tools'),
+        add = box('[aria-label="新建终端会话"]');
       return {
         hostHeight: host.height,
+        toolsInsideToolbar:
+          tools.left >= host.left &&
+          tools.right <= host.right &&
+          tools.top >= host.top &&
+          tools.bottom <= host.bottom,
+        toolsAfterSessions: tools.left >= add.right || tools.top >= sessions.bottom,
+        toolsSameRow: Math.abs(tools.top - sessions.top) <= 4,
         sessionHeight: sessions.height,
         terminalGap: area.top - host.bottom,
         sessionsInsideToolbar: sessions.top >= host.top && sessions.bottom <= host.bottom,
         totalHeight: area.top - workspace.bottom,
       };
     });
+    assert(compactHeader.toolsInsideToolbar, JSON.stringify({ name, compactHeader }));
+    assert(compactHeader.toolsAfterSessions, JSON.stringify({ name, compactHeader }));
+    if (width >= 900) assert(compactHeader.toolsSameRow, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.terminalGap <= 4, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.sessionsInsideToolbar, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.sessionHeight <= 40, JSON.stringify({ name, compactHeader }));
@@ -300,7 +287,7 @@ try {
     await nav('本地环境');
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['全局设置', '本地环境', '关于 ServerDeck'],
+      ['全局设置', '本地环境', '关于'],
     );
     await page.locator('.module-navigation [data-module="assets"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'overview');
@@ -320,7 +307,7 @@ try {
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();
     assert.equal(await page.locator('.module-navigation button').count(), 4);
-    assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
+    assert.equal(await page.locator('.workspace-header .host-tools').count(), 1);
     assert.deepEqual(errors, []);
     results.push({ name, width, height, theme, compactHeader, passed: true });
     await page.close();

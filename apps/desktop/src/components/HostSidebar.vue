@@ -317,7 +317,6 @@ function toggle(id: string): void {
         </button>
       </nav>
     </div>
-    <slot name="tools" />
     <div class="host-tree-scroll" :aria-busy="store.busy">
       <p v-if="store.busy && !store.catalog" class="host-empty" role="status">正在读取主机…</p>
       <p v-else-if="!store.catalog" class="host-empty" role="status">未能读取主机，请刷新重试。</p>

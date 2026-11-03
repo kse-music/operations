@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
@@ -135,7 +136,7 @@ function result(t: Diagnostic) {
 async function copy() {
   if (!current.value) return;
   try {
-    await navigator.clipboard.writeText(result(current.value));
+    await clipboardApi.writeText(result(current.value));
   } catch (e) {
     error.value = errorMessage(e);
   }

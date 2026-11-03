@@ -9,7 +9,7 @@ const menuModules = {
   备份恢复: 'assets',
   全局设置: 'system',
   本地环境: 'system',
-  '关于 ServerDeck': 'system',
+  关于: 'system',
 };
 
 export async function terminalAction(page, pane, name) {
@@ -43,17 +43,22 @@ export async function navigateWorkspace(page, name) {
   const module = hostTools.has(name) ? 'hosts' : menuModules[name];
   if (!module) throw new Error(`Unknown navigation target: ${name}`);
   await page.locator(`.module-navigation [data-module="${module}"]`).click();
-  if (!(await page.locator('.sidebar').isVisible()))
-    await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
   if (hostTools.has(name)) {
     const remote = page.getByRole('navigation', { name: '当前主机工具', exact: true });
     if (!(await remote.count())) {
+      await showHostTree(page);
       const selectedHost = page.locator('.tree-host[aria-current="true"]');
       if (await selectedHost.count()) await selectedHost.click();
     }
     if (name === 'SSH 终端' && !(await remote.count()))
       await page.getByRole('button', { name: '本地终端', exact: true }).click();
-    else await remote.getByRole('button', { name, exact: true }).click();
+    else {
+      if (await page.evaluate(() => innerWidth <= 720)) {
+        const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
+        if (await collapse.isVisible()) await collapse.click();
+      }
+      await remote.getByRole('button', { name, exact: true }).click();
+    }
   } else {
     if (!(await page.locator('.sidebar').isVisible()))
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();

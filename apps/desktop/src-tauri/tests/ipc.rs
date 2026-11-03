@@ -25,6 +25,7 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         Application::initialize(directory.path().join("data"), directory.path().join("logs"))
             .expect("initialize");
     let app = mock_builder()
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(application)
         .invoke_handler(serverdeck_desktop_lib::command_handler())
         .build(tauri::generate_context!())
@@ -106,6 +107,46 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         .build()
         .expect("window");
     assert!(get_ipc_response(&other, request("app_bootstrap", json!({}), origin)).is_err());
+    // Permission checks must reject these before touching the system clipboard.
+    for (command, body) in [
+        ("plugin:clipboard-manager|read_text", json!({})),
+        (
+            "plugin:clipboard-manager|write_text",
+            json!({"text":"ACL test"}),
+        ),
+    ] {
+        for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+            let error = get_ipc_response(window, request(command, body.clone(), url))
+                .expect_err("clipboard access must be denied");
+            assert!(
+                error
+                    .as_str()
+                    .is_some_and(|message| message.contains("not allowed"))
+            );
+        }
+    }
+    for command in [
+        "clear",
+        "read_image",
+        "write_image",
+        "write_html",
+        "write_secret",
+    ] {
+        let error = get_ipc_response(
+            &main,
+            request(
+                &format!("plugin:clipboard-manager|{command}"),
+                json!({}),
+                origin,
+            ),
+        )
+        .expect_err("only text clipboard commands are permitted");
+        assert!(
+            error
+                .as_str()
+                .is_some_and(|message| message.contains("not allowed"))
+        );
+    }
     let local = json!({"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"});
     let invalid = get_ipc_response(&main, request("terminal_local_open", local.clone(), origin))
         .expect_err("invalid local PTY size");

@@ -8,6 +8,7 @@ import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
 import { closeNativeWindow } from './native-window-close.mjs';
+import { withPreservedClipboard } from './clipboard-guard.mjs';
 import {
   navigateWorkspace,
   selectHostWorkspace,
@@ -165,9 +166,9 @@ try {
   assert.equal(await page.locator('.topbar').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
-  assert.equal(await page.getByRole('button', { name: '关于 ServerDeck', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '关于', exact: true }).count(), 0);
   await page.locator('.module-navigation [data-module="system"]').click();
-  const about = page.getByRole('button', { name: '关于 ServerDeck', exact: true });
+  const about = page.getByRole('button', { name: '关于', exact: true });
   await about.click();
   const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
   await aboutPage.waitFor();
@@ -259,6 +260,126 @@ try {
   passed.push(
     'welcome startup waits for local-menu click, then opens PowerShell with real input/output',
   );
+  const clipboardToken = `SD_CLIPBOARD_${randomUUID().replaceAll('-', '')}`;
+  await withPreservedClipboard(clipboardToken, async (readSystemText) => {
+    const originalQuickPaste = await page.evaluate(() => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+      const config = pinia.state.value.application.state.config;
+      window.__sdOriginalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+      window.__sdWebClipboardCalls = 0;
+      const blocked = () => {
+        window.__sdWebClipboardCalls++;
+        throw new Error('Web clipboard is disabled in the native clipboard test');
+      };
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: { readText: blocked, writeText: blocked },
+      });
+      return config.terminal.quickCopyPaste;
+    });
+    try {
+      const unicode = `${clipboardToken}_中文🙂\r\nsecond line`;
+      await rpc('plugin:clipboard-manager|write_text', { text: unicode });
+      assert(
+        (await readSystemText()) === unicode,
+        'Native text write did not reach the OS clipboard',
+      );
+      assert(
+        (await rpc('plugin:clipboard-manager|read_text')) === unicode,
+        'Native Unicode read failed',
+      );
+      let outputMarker;
+      for (const mode of ['menu', 'quick', 'shortcut']) {
+        await page.evaluate((quick) => {
+          document.querySelector(
+            '#app',
+          ).__vue_app__.config.globalProperties.$pinia.state.value.application.state.config.terminal.quickCopyPaste =
+            quick;
+        }, mode === 'quick');
+        outputMarker = `SD_NATIVE_${clipboardToken}_${mode}`;
+        const input = `[Console]::WriteLine(('SD_NATIVE_' + '${clipboardToken}_${mode}'))`;
+        await rpc('plugin:clipboard-manager|write_text', { text: input });
+        if (mode === 'menu') await terminalAction(page, active(), '粘贴');
+        else if (mode === 'quick')
+          await active().locator('.xterm-container').click({ button: 'right' });
+        else {
+          await active().locator('.xterm-helper-textarea').focus();
+          await page.keyboard.press('Control+Shift+V');
+        }
+        await page.waitForFunction(
+          (text) =>
+            [...document.querySelectorAll('.terminal-pane')].some(
+              (pane) =>
+                pane.getBoundingClientRect().width > 0 &&
+                pane.textContent.replaceAll('\u00a0', ' ').includes(text),
+            ),
+          input,
+        );
+        await page.keyboard.press('Enter');
+        await active().locator('.xterm-rows').filter({ hasText: outputMarker }).waitFor();
+      }
+      await page.evaluate(() => {
+        document.querySelector(
+          '#app',
+        ).__vue_app__.config.globalProperties.$pinia.state.value.application.state.config.terminal.quickCopyPaste =
+          true;
+      });
+      await rpc('plugin:clipboard-manager|write_text', { text: `${clipboardToken}_COPY_SEED` });
+      const line = active().locator('.xterm-rows > div').filter({ hasText: outputMarker }).last();
+      const bounds = await line.boundingBox();
+      assert(bounds, 'Missing output row for native selection copy');
+      await page.mouse.move(bounds.x + 1, bounds.y + bounds.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(bounds.x + bounds.width - 2, bounds.y + bounds.height / 2, {
+        steps: 8,
+      });
+      await page.mouse.up();
+      await page.waitForFunction(
+        async (marker) =>
+          (await window.__TAURI_INTERNALS__.invoke('plugin:clipboard-manager|read_text')).includes(
+            marker,
+          ),
+        outputMarker,
+      );
+      assert(
+        (await readSystemText()).includes(outputMarker),
+        'Selection copy did not reach OS clipboard',
+      );
+      await rpc('plugin:clipboard-manager|write_text', { text: `${clipboardToken}_SHORTCUT_SEED` });
+      await page.keyboard.press('Control+Shift+C');
+      await page.waitForFunction(
+        async (marker) =>
+          (await window.__TAURI_INTERNALS__.invoke('plugin:clipboard-manager|read_text')).includes(
+            marker,
+          ),
+        outputMarker,
+      );
+      assert(
+        (await readSystemText()).includes(outputMarker),
+        'Copy shortcut did not reach OS clipboard',
+      );
+      await rpc('plugin:clipboard-manager|write_text', { text: clipboardToken + 'x'.repeat(4096) });
+      await active().locator('.xterm-container').click({ button: 'right' });
+      const confirmation = page.getByRole('dialog', { name: '确认大文本粘贴', exact: true });
+      await confirmation.waitFor();
+      await confirmation.getByRole('button', { name: '取消', exact: true }).click();
+      assert.equal(await page.evaluate(() => window.__sdWebClipboardCalls), 0);
+    } finally {
+      await page.evaluate((quick) => {
+        document.querySelector(
+          '#app',
+        ).__vue_app__.config.globalProperties.$pinia.state.value.application.state.config.terminal.quickCopyPaste =
+          quick;
+        if (window.__sdOriginalClipboard)
+          Object.defineProperty(navigator, 'clipboard', window.__sdOriginalClipboard);
+        else delete navigator.clipboard;
+        delete window.__sdOriginalClipboard;
+      }, originalQuickPaste);
+    }
+  });
+  passed.push(
+    'native OS clipboard handles Unicode, menu/right-click/shortcut paste and selection/shortcut copy with web clipboard disabled; large paste confirmation remains and the original clipboard is preserved',
+  );
   await terminalTabAction(page, '复制');
   await active().locator('.xterm-container[data-state="connected"]').waitFor();
   assert.equal(await page.locator('.terminal-tab').count(), 2);
@@ -286,9 +407,9 @@ try {
   );
   assert.deepEqual(
     (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-    ['全局设置', '本地环境', '关于 ServerDeck'],
+    ['全局设置', '本地环境', '关于'],
   );
-  assert.equal(await page.locator('.sidebar-host-tools').count(), 0);
+  assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'module-settings.png') });
   await page.locator('.module-navigation [data-module="hosts"]').click();
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'settings');

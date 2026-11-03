@@ -52,7 +52,7 @@ beforeEach(async () => {
   };
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(FilesView, { hostId: 'a', compact: true }).use(pinia);
+  app = createApp(FilesView, { hostId: 'a' }).use(pinia);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value() {
@@ -72,7 +72,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
-it('uses the existing SFTP connection to navigate and keeps it alive when the panel unmounts', async () => {
+it('uses the existing SFTP connection to navigate and keeps it alive when the page unmounts', async () => {
   const list = vi
     .spyOn(filesApi, 'list')
     .mockResolvedValue({ path: '/srv/api/config', parent: '/srv/api', entries: [] });
@@ -80,7 +80,7 @@ it('uses the existing SFTP connection to navigate and keeps it alive when the pa
   root.querySelector('.file-name')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await vi.waitFor(() => expect(useFilesStore(pinia).current?.path).toBe('/srv/api/config'));
   expect(list).toHaveBeenCalledWith('sftp-a', '/srv/api/config');
-  expect(root.querySelector('[aria-label="本地文件"]')).toBeNull();
+  expect(root.querySelector('[aria-label="本地路径"]')).not.toBeNull();
   expect(root.querySelector('[aria-label="选择上传文件…"]')).not.toBeNull();
   app!.unmount();
   app = undefined;
@@ -109,7 +109,7 @@ it('opens the existing upload confirmation with the current session and destinat
   expect(dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')?.required).toBe(true);
 });
 
-it('keeps failures retryable and shows the established endpoint when host settings change', async () => {
+it('keeps failures retryable and retains the established endpoint when host settings change', async () => {
   const files = useFilesStore(pinia),
     hosts = useHostsStore(pinia);
   hosts.catalog!.hosts[0] = { ...hosts.catalog!.hosts[0]!, hostname: 'changed.example' };
@@ -121,8 +121,7 @@ it('keeps failures retryable and shows the established endpoint when host settin
   expect(list).toHaveBeenCalledWith('sftp-a', '/srv/api');
   expect(files.current?.error).toBe('连接中断');
   await nextTick();
-  expect(root.querySelector('.files-panel-endpoint')?.textContent).toBe('operator@192.0.2.11:22');
-  expect(root.textContent).toContain('配置已变更');
+  expect(files.current?.host).toMatchObject({ hostname: '192.0.2.11', username: 'operator' });
   expect(
     [...root.querySelectorAll<HTMLButtonElement>('button')].find(
       (b) => b.textContent?.trim() === '连接 SFTP',

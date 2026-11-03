@@ -4,6 +4,8 @@
   "description": "Only the local main window may manage validated hosts and write secrets to the OS store; no secret read IPC or unrestricted filesystem/shell API.",
   "windows": ["main"],
   "permissions": [
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "allow-backup-export",
     "allow-backup-preview",
     "allow-backup-restore",
