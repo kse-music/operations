@@ -5,9 +5,9 @@ import { messages, type WorkspaceView } from '../types/product';
 defineProps<{ active: WorkspaceView; local: boolean }>();
 defineEmits<{ navigate: [view: WorkspaceView] }>();
 const tools = [
-  { view: 'terminals', label: 'Shell', icon: SquareTerminal },
-  { view: 'files', label: 'SFTP', icon: FolderSync },
-  { view: 'monitor', label: '监控', icon: ChartNoAxesCombined },
+  { view: 'terminals', label: 'SSH 终端', icon: SquareTerminal },
+  { view: 'files', label: 'SFTP 文件', icon: FolderSync },
+  { view: 'monitor', label: '服务器监控', icon: ChartNoAxesCombined },
   { view: 'operations', label: 'Linux 运维', icon: Wrench },
 ] as const;
 </script>
@@ -22,7 +22,9 @@ const tools = [
       :aria-current="active === tool.view ? 'page' : undefined"
       @click="$emit('navigate', tool.view)"
     >
-      <component :is="tool.icon" :size="16" aria-hidden="true" />{{ tool.label }}
+      <component :is="tool.icon" :size="16" aria-hidden="true" />{{
+        local ? '本地终端' : tool.label
+      }}
     </button>
   </nav>
 </template>

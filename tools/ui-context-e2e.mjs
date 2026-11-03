@@ -78,10 +78,69 @@ try {
     };
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
     await assertHost('a', 'terminals');
+    const existingTabs = await page.locator('.workspace-tab').count();
+    for (const module of ['tools', 'assets', 'system']) {
+      await page.locator(`.module-navigation [data-module="${module}"]`).click();
+      assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
+      await assertHost('a', 'terminals');
+      assert.equal(await page.locator('.terminal-pane:visible[data-host-id="a"]').count(), 1);
+      assert.equal(await page.locator('.workspace-tab').count(), existingTabs);
+      assert.equal(await page.locator('.workspace-tab.active').count(), 1);
+      assert.equal(await page.locator('.module-menu [aria-current="page"]').count(), 0);
+      assert.equal(await page.locator('.host-tree-section').isVisible(), false);
+      assert.equal(
+        await page.locator('.module-navigation [aria-current="page"]').getAttribute('data-module'),
+        module,
+      );
+    }
+    await page.screenshot({ path: `${output}/${name}-module-without-default.png` });
+    await page.locator('.module-navigation [data-module="hosts"]').click();
+    await assertHost('a', 'terminals');
+    await page.locator('[aria-controls="workspace-file-panel"]').click();
+    const filePanel = page.getByRole('complementary', { name: '当前主机文件面板', exact: true });
+    await filePanel.getByLabel('远程路径', { exact: true }).waitFor();
+    assert.equal(await filePanel.getByLabel('远程路径', { exact: true }).inputValue(), '/a');
+    assert.equal(await filePanel.getByLabel('本地路径', { exact: true }).count(), 0);
+    assert.equal(
+      await filePanel.getByRole('button', { name: '选择上传文件…', exact: true }).isEnabled(),
+      true,
+    );
+    const panelGeometry = await page.evaluate(() => {
+      const terminal = document.querySelector('.terminal-primary').getBoundingClientRect();
+      const panel = document.querySelector('.workspace-file-panel').getBoundingClientRect();
+      return {
+        sideBySide: panel.left >= terminal.right - 1,
+        stacked: panel.top >= terminal.bottom - 1,
+        terminalWidth: terminal.width,
+        terminalHeight: terminal.height,
+        panelWidth: panel.width,
+        panelHeight: panel.height,
+        overflow: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    assert.equal(panelGeometry.overflow, false);
+    assert(
+      panelGeometry.terminalWidth > 100 && panelGeometry.terminalHeight > 100,
+      JSON.stringify(panelGeometry),
+    );
+    assert(
+      width > 1100 ? panelGeometry.sideBySide : panelGeometry.stacked,
+      JSON.stringify(panelGeometry),
+    );
+    await page.screenshot({ path: `${output}/${name}-file-panel.png` });
+    await filePanel.getByRole('button', { name: '收起文件面板', exact: true }).click();
+    assert.equal(await filePanel.count(), 0);
+    await page.evaluate(async () => {
+      const { useFilesStore } = await import('/src/stores/files.ts');
+      if (useFilesStore().connections.a.id !== 'files-a')
+        throw new Error('closing the panel disconnected SFTP');
+    });
     assert.equal(await page.locator('.workspace-context').count(), 0);
     assert.deepEqual(
-      (await page.locator('.workspace-header button').allTextContents()).map((text) => text.trim()),
-      ['Shell', 'SFTP', '监控', 'Linux 运维'],
+      (await page.locator('.sidebar-host-tools .host-tools button').allTextContents()).map((text) =>
+        text.trim(),
+      ),
+      ['SSH 终端', 'SFTP 文件', '服务器监控', 'Linux 运维'],
     );
     assert.equal(await page.locator('.terminal-tab').count(), 1);
     assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
@@ -116,11 +175,13 @@ try {
       return {
         hostHeight: host.height,
         sessionHeight: sessions.height,
-        terminalGap: area.top - sessions.bottom,
+        terminalGap: area.top - host.bottom,
+        sessionsInsideToolbar: sessions.top >= host.top && sessions.bottom <= host.bottom,
         totalHeight: area.top - workspace.bottom,
       };
     });
     assert(compactHeader.terminalGap <= 4, JSON.stringify({ name, compactHeader }));
+    assert(compactHeader.sessionsInsideToolbar, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.sessionHeight <= 40, JSON.stringify({ name, compactHeader }));
     assert(
       compactHeader.totalHeight <= (width >= 1200 ? 84 : width > 720 ? 116 : 200),
@@ -147,7 +208,7 @@ try {
     await assertHost('b', 'files');
     assert.equal(await page.getByLabel('远程路径', { exact: true }).inputValue(), '/b');
     await nav('全局设置');
-    assert.equal(await page.locator('.sidebar').isVisible(), false);
+    assert.equal(await page.locator('.host-tree-section').isVisible(), false);
     assert.equal(await page.getByRole('navigation', { name: '当前主机工具' }).count(), 0);
     await selectHostWorkspace(page, 'a');
     await assertHost('a', 'files');
@@ -209,6 +270,58 @@ try {
         throw new Error('close-all must close only the target host sessions');
     });
     await page.screenshot({ path: `${output}/${name}-closed-all.png` });
+    await nav('网络诊断');
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').textContent(),
+      '运维工具',
+    );
+    assert.deepEqual(
+      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
+      ['批量运维', '自动运维', '网络诊断', '任务中心'],
+    );
+    await nav('任务中心');
+    await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
+    assert.equal(await page.locator('.statusbar button').count(), 0);
+    assert.equal(
+      await page.getByRole('dialog', { name: '后台任务与传输', exact: true }).count(),
+      0,
+    );
+    await page.screenshot({ path: `${output}/${name}-task-center.png` });
+    await nav('备份恢复');
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').textContent(),
+      '资产管理',
+    );
+    assert.deepEqual(
+      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
+      ['安全凭据', '备份恢复'],
+    );
+    await page.screenshot({ path: `${output}/${name}-assets-module.png` });
+    await nav('本地环境');
+    assert.deepEqual(
+      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
+      ['全局设置', '本地环境', '关于 ServerDeck'],
+    );
+    await page.locator('.module-navigation [data-module="assets"]').click();
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'overview');
+    await nav('备份恢复');
+    await page.locator('.module-navigation [data-module="tools"]').click();
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'backup');
+    await nav('网络诊断');
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'network');
+    assert.equal(
+      await page.getByLabel('诊断目标', { exact: true }).inputValue(),
+      'independent.example',
+    );
+    await page.locator('.module-navigation [data-module="hosts"]').click();
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'network');
+    assert.equal(await page.locator('.terminal-pane[data-host-id="b"]').count(), 0);
+    await selectHostWorkspace(page, 'b');
+    await assertHost('b', 'terminals');
+    await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();
+    assert.equal(await page.locator('.module-navigation button').count(), 4);
+    assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
+    assert.deepEqual(errors, []);
     results.push({ name, width, height, theme, compactHeader, passed: true });
     await page.close();
   }

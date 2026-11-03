@@ -1,10 +1,10 @@
 import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
-import { computed, ref, watch, onScopeDispose } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { hostDisplayName, type Host } from '../types/hosts';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
-import type { LayoutNode, SplitAxis, WorkspaceLayout } from '../types/workspace';
+import type { LayoutNode, SplitAxis } from '../types/workspace';
 import { removeLeaf, replaceLeaf, resizeNode } from '../services/layout';
 
 export interface TerminalPaneModel {
@@ -23,6 +23,7 @@ export interface TerminalPaneModel {
 export interface TerminalTab {
   key: string;
   title: string;
+  sessionNumber: number;
   panes: TerminalPaneModel[];
   layout: LayoutNode;
 }
@@ -30,11 +31,16 @@ export const useTerminalsStore = defineStore('terminals', () => {
   const tabs = ref<TerminalTab[]>([]),
     active = ref(''),
     focused = ref(''),
-    error = ref<string | null>(null),
-    initialized = ref(false);
+    error = ref<string | null>(null);
   const panes = computed(() => tabs.value.flatMap((t) => t.panes));
   const connectedCount = computed(() => panes.value.filter((p) => p.state === 'connected').length);
   const lastHostTabs = new Map<string, string>();
+  const sessionNumbers = new Map<string, number>();
+  function nextSessionNumber(hostId: string): number {
+    const number = (sessionNumbers.get(hostId) ?? 0) + 1;
+    sessionNumbers.set(hostId, number);
+    return number;
+  }
   function hostTabs(hostId: string): TerminalTab[] {
     return tabs.value.filter((tab) => tab.panes.every((pane) => (pane.host?.id ?? '') === hostId));
   }
@@ -64,16 +70,12 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const pane = panes.value.find((p) => p.key === key);
     if (pane) Object.assign(pane, values);
   }
-  function newPane(
-    host: Host | null,
-    connect = true,
-    key: string = crypto.randomUUID(),
-  ): TerminalPaneModel {
+  function newPane(host: Host | null): TerminalPaneModel {
     return {
-      key,
+      key: crypto.randomUUID(),
       host: host ? { ...host } : null,
-      state: connect ? 'opening' : 'idle',
-      connectRequested: connect,
+      state: 'opening',
+      connectRequested: true,
     };
   }
   function open(
@@ -92,6 +94,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     tabs.value.push({
       key,
       title: host ? hostDisplayName(host) : '本地设备',
+      sessionNumber: nextSessionNumber(host?.id ?? ''),
       panes: [pane],
       layout: { kind: 'leaf', pane: pane.key },
     });
@@ -163,6 +166,10 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const available = hostTabs(hostId),
       position = available.findIndex((t) => t.key === key);
     tabs.value.splice(index, 1);
+    if (!hostTabs(hostId).length) {
+      sessionNumbers.delete(hostId);
+      lastHostTabs.delete(hostId);
+    }
     if (active.value === key)
       select(hostTabs(hostId)[Math.min(position, available.length - 2)]?.key ?? '');
   }
@@ -186,14 +193,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   async function close(key: string): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
-    try {
-      await Promise.all(
-        tab.panes.filter((p) => p.sessionId).map((p) => terminalApi.close(p.sessionId!)),
-      );
-      removeTab(key);
-    } catch (cause) {
-      error.value = errorMessage(cause);
-    }
+    for (const pane of [...tab.panes]) await closePane(pane.key);
   }
   async function closeAll(key: string): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
@@ -210,72 +210,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
       return false;
     }
   }
-  function snapshot(): WorkspaceLayout {
-    return {
-      version: 1,
-      active: active.value,
-      tabs: tabs.value.map((t) => ({
-        key: t.key,
-        title: t.title,
-        panes: t.panes.map((p) => ({ key: p.key, hostId: p.host?.id ?? null })),
-        layout: t.layout,
-      })),
-    };
-  }
-  async function restore(hosts: Host[]): Promise<void> {
-    try {
-      const saved = await terminalApi.workspaceLoad();
-      if (!saved) return;
-      for (const tab of saved.tabs) {
-        let layout: LayoutNode | null = tab.layout;
-        const restoredPanes: TerminalPaneModel[] = [];
-        for (const pane of tab.panes) {
-          const host = pane.hostId === null ? null : hosts.find((h) => h.id === pane.hostId);
-          if (host !== undefined) restoredPanes.push(newPane(host, false, pane.key));
-          else if (layout) layout = removeLeaf(layout, pane.key);
-        }
-        if (layout && restoredPanes.length)
-          tabs.value.push({ ...tab, panes: restoredPanes, layout });
-      }
-      select(tabs.value.find((t) => t.key === saved.active)?.key ?? tabs.value[0]?.key ?? '');
-    } catch (cause) {
-      error.value = errorMessage(cause);
-    } finally {
-      initialized.value = true;
-    }
-  }
-  let saveTimer: ReturnType<typeof setTimeout> | undefined,
-    disposed = false;
-  async function saveLayout(retry = 0): Promise<void> {
-    clearTimeout(saveTimer);
-    if (disposed) return;
-    try {
-      await terminalApi.workspaceSave(snapshot());
-    } catch (cause) {
-      if (
-        typeof cause === 'object' &&
-        cause !== null &&
-        'code' in cause &&
-        cause.code === 'BUSY' &&
-        retry < 5 &&
-        !disposed
-      )
-        saveTimer = setTimeout(() => void saveLayout(retry + 1), 250);
-      else if (!disposed) error.value = errorMessage(cause);
-    }
-  }
-  watch(
-    () => JSON.stringify(snapshot()),
-    () => {
-      if (!initialized.value) return;
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(() => void saveLayout(), 300);
-    },
-  );
-  onScopeDispose(() => {
-    disposed = true;
-    clearTimeout(saveTimer);
-  });
   useErrorNotifications(error);
   return {
     tabs,
@@ -283,7 +217,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
     active,
     focused,
     error,
-    initialized,
     connectedCount,
     hostState,
     hostTabs,
@@ -300,8 +233,5 @@ export const useTerminalsStore = defineStore('terminals', () => {
     close,
     closeAll,
     closeHost,
-    snapshot,
-    saveLayout,
-    restore,
   };
 });

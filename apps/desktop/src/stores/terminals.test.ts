@@ -22,6 +22,46 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('independent terminal tabs', () => {
+  it('resets empty-host counters and does not consume numbers on rejected opens', async () => {
+    const store = useTerminalsStore();
+    store.open(null);
+    store.open(host);
+    store.open({ ...host, id: 'other' });
+    expect(store.tabs.map((tab) => tab.sessionNumber)).toEqual([1, 1, 1]);
+    await store.closePane(store.focused);
+    store.open({ ...host, id: 'other' });
+    expect(store.tabs.at(-1)!.sessionNumber).toBe(1);
+    for (let index = 0; index < 29; index++) store.open(host);
+    expect(store.panes).toHaveLength(32);
+    store.open(host);
+    expect(store.error).toContain('32');
+    await store.close(store.active);
+    store.open(host);
+    expect(store.tabs.at(-1)!.sessionNumber).toBe(31);
+    expect(store.hostTabs('').map((tab) => tab.sessionNumber)).toEqual([1]);
+    expect(store.hostTabs('other').map((tab) => tab.sessionNumber)).toEqual([1]);
+  });
+  it('starts a new application run with no tabs, split panes or runtime sessions', () => {
+    const original = useTerminalsStore();
+    original.open(host);
+    original.split(original.focused, 'rows');
+    original.open(null);
+    original.rename(original.active, '部署');
+    original.update(original.focused, { state: 'connected', sessionId: 'old-session' });
+    disposePinia(getActivePinia()!);
+    setActivePinia(createPinia());
+    const fresh = useTerminalsStore();
+    expect(fresh.tabs).toEqual([]);
+    expect(fresh.panes).toEqual([]);
+    expect(fresh.active).toBe('');
+    expect(fresh.focused).toBe('');
+    expect(fresh.connectedCount).toBe(0);
+    fresh.open(host);
+    fresh.open(null);
+    expect(fresh.tabs.map((tab) => tab.sessionNumber)).toEqual([1, 1]);
+    expect(fresh.panes.every((pane) => !pane.sessionId && pane.connectRequested)).toBe(true);
+    expect(terminalApi.workspaceLoad).not.toHaveBeenCalled();
+  });
   it('uses the address as the default terminal title for unnamed hosts', () => {
     const store = useTerminalsStore();
     store.open({ ...host, name: '', hostname: '192.0.2.10', port: 22 });
@@ -63,20 +103,13 @@ describe('independent terminal tabs', () => {
     expect(store.focused).toBe('');
     expect(store.tabs.map((t) => t.key)).toEqual([other]);
   });
-  it('opens and restores local PTY metadata without a fabricated SSH host or stored commands', async () => {
+  it('opens and splits local terminals without a fabricated SSH host', () => {
     const store = useTerminalsStore();
     store.open(null);
     expect(store.panes[0]!.host).toBeNull();
     store.split(store.focused, 'columns');
-    const saved = store.snapshot();
-    expect(saved.tabs[0]!.panes.every((p) => p.hostId === null)).toBe(true);
-    vi.mocked(terminalApi.workspaceLoad).mockResolvedValueOnce(saved);
-    store.tabs = [];
-    await store.restore([]);
     expect(store.panes).toHaveLength(2);
-    expect(
-      store.panes.every((p) => p.host === null && p.state === 'idle' && !p.connectRequested),
-    ).toBe(true);
+    expect(store.panes.every((p) => p.host === null && p.connectRequested)).toBe(true);
   });
   it('closing one session targets only its ID and selects the surviving tab', async () => {
     const store = useTerminalsStore();
@@ -178,6 +211,23 @@ describe('independent terminal tabs', () => {
     expect(terminalApi.close).toHaveBeenCalledWith('closed-session');
     expect(store.error).toBe('close failed');
   });
+  it('keeps only failed split panes when closing a tab and continues closing the other panes', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const tab = store.tabs[0]!;
+    store.update(store.focused, { sessionId: 'failed-pane' });
+    store.split(store.focused, 'columns');
+    store.update(store.focused, { sessionId: 'closed-pane' });
+    const failed = tab.panes[0]!;
+    vi.mocked(terminalApi.close).mockRejectedValueOnce({ message: 'close failed' });
+    await store.close(tab.key);
+    expect(tab.panes).toEqual([failed]);
+    expect(tab.layout).toEqual({ kind: 'leaf', pane: failed.key });
+    expect(terminalApi.close).toHaveBeenCalledWith('closed-pane');
+    expect(store.error).toBe('close failed');
+    store.open(host);
+    expect(store.tabs.at(-1)?.sessionNumber).toBe(2);
+  });
   it('keeps the current tab selected when closing another tab fails', async () => {
     const store = useTerminalsStore();
     store.open(host);
@@ -197,10 +247,10 @@ describe('independent terminal tabs', () => {
   it('ignores stale menu targets without closing any sessions', async () => {
     const store = useTerminalsStore();
     store.open(host);
-    const saved = store.snapshot();
+    const saved = JSON.stringify(store.tabs);
     await store.close('missing');
     await store.closeAll('missing');
-    expect(store.snapshot()).toEqual(saved);
+    expect(JSON.stringify(store.tabs)).toBe(saved);
     expect(terminalApi.close).not.toHaveBeenCalled();
   });
   it('preserves the focused split pane when closing another session', async () => {
@@ -215,42 +265,19 @@ describe('independent terminal tabs', () => {
     expect(store.tabs.map((t) => t.key)).toEqual([target]);
     expect(store.focused).toBe(focused);
   });
-  it('restores metadata as disconnected panes without runtime IDs or automatic connection', async () => {
-    const original = useTerminalsStore();
-    original.open(host);
-    const pane = original.panes[0]!;
-    original.update(pane.key, { sessionId: 'SECRET_RUNTIME', state: 'connected' });
-    original.split(pane.key, 'rows');
-    const saved = original.snapshot();
-    expect(JSON.stringify(saved)).not.toContain('SECRET_RUNTIME');
-    setActivePinia(createPinia());
-    vi.mocked(terminalApi.workspaceLoad).mockResolvedValueOnce(saved);
-    const restored = useTerminalsStore();
-    await restored.restore([host]);
-    expect(restored.panes).toHaveLength(2);
-    expect(
-      restored.panes.every((p) => p.state === 'idle' && !p.connectRequested && !p.sessionId),
-    ).toBe(true);
-  });
-  it('persists the empty workspace after the last tab closes without requiring a mounted view', async () => {
+  it('does not persist terminal tabs, names or split layouts as they change', async () => {
     vi.useFakeTimers();
-    vi.mocked(terminalApi.workspaceLoad).mockResolvedValueOnce(null);
     const store = useTerminalsStore();
-    await store.restore([host]);
     store.open(host);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(terminalApi.workspaceSave).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        tabs: [expect.objectContaining({ title: 'Host' })],
-      }),
-    );
+    store.split(store.focused, 'columns');
+    store.rename(store.active, '部署');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(terminalApi.workspaceSave).not.toHaveBeenCalled();
     store.open(host);
     await store.closeAll(store.tabs[0]!.key);
-    await vi.advanceTimersByTimeAsync(300);
-    expect(terminalApi.workspaceSave).toHaveBeenLastCalledWith({
-      version: 1,
-      active: '',
-      tabs: [],
-    });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(store.tabs).toEqual([]);
+    expect(terminalApi.workspaceSave).not.toHaveBeenCalled();
+    expect(terminalApi.workspaceLoad).not.toHaveBeenCalled();
   });
 });

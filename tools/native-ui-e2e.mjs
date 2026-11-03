@@ -97,7 +97,14 @@ async function start() {
   const bootstrap = await rpc('app_bootstrap');
   assert.equal(path.resolve(bootstrap.dataDirectory), artifacts, 'refusing to write non-test data');
   safe = true;
+  await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
+  assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 0);
+  assert.equal(await page.locator('.terminal-pane').count(), 0);
+  assert.equal(await page.locator('.xterm-container[data-state="connected"]').count(), 0);
+  await page.getByRole('button', { name: '本地终端', exact: true }).click();
   await page.locator('.terminal-pane:visible .xterm-container[data-state="connected"]').waitFor();
+  assert.equal(await page.locator('.terminal-tab').count(), 1);
+  assert.equal(await page.locator('.terminal-pane').count(), 1);
   assert.deepEqual(
     (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
       text.trim(),
@@ -128,6 +135,13 @@ async function assertNativeMenuSuppressed(target) {
   assert.equal(await page.evaluate(() => window.__nativeMenuPrevented), true);
 }
 async function command(text, marker) {
+  await page.waitForFunction(() => {
+    const state =
+      document.querySelector('#app').__vue_app__.config.globalProperties.$pinia.state.value
+        .terminals;
+    return state.tabs.flatMap((tab) => tab.panes).find((pane) => pane.key === state.focused)
+      ?.sessionId;
+  });
   await active().locator('.xterm-helper-textarea').focus();
   await page.keyboard.type(text);
   await page.keyboard.press('Enter');
@@ -151,20 +165,39 @@ try {
   assert.equal(await page.locator('.topbar').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
-  const about = page.getByRole('button', { name: '关于', exact: true });
+  assert.equal(await page.getByRole('button', { name: '关于 ServerDeck', exact: true }).count(), 0);
+  await page.locator('.module-navigation [data-module="system"]').click();
+  const about = page.getByRole('button', { name: '关于 ServerDeck', exact: true });
   await about.click();
-  const aboutDialog = page.getByRole('dialog', { name: '关于 ServerDeck', exact: true });
+  const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
+  await aboutPage.waitFor();
   const { appVersion } = await rpc('app_bootstrap');
-  assert((await aboutDialog.textContent()).includes(`v${appVersion}`));
+  assert((await aboutPage.textContent()).includes(`v${appVersion}`));
+  assert.equal(await page.getByRole('dialog', { name: '关于 ServerDeck', exact: true }).count(), 0);
+  assert.equal(await about.getAttribute('aria-current'), 'page');
+  await about.click();
+  assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 1);
   await page.screenshot({ path: path.join(artifacts, 'about.png') });
-  await aboutDialog.press('Escape');
-  assert.equal(await aboutDialog.count(), 0);
-  assert.equal(await about.evaluate((button) => document.activeElement === button), true);
+  await page.locator('.workspace-tab[data-view="about"] .tab-close').click();
+  assert.equal(await aboutPage.count(), 0);
+  assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
+  await page.locator('.module-navigation [data-module="hosts"]').click();
   assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
-  assert.equal(await page.locator('.workspace-header .host-tools').count(), 1);
+  assert.equal(await page.locator('.sidebar-local-device .host-tools').count(), 1);
+  assert.equal(
+    await page
+      .locator('.host-sidebar-controls + .sidebar-local-device + .host-tree-scroll')
+      .count(),
+    1,
+  );
+  assert.equal(await page.locator('.module-navigation button').count(), 4);
+  assert.equal(
+    await page.locator('.module-navigation [aria-current="page"]').textContent(),
+    '主机运维',
+  );
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
   await page
-    .locator('.host-sidebar-title')
+    .locator('.sidebar-workspace-heading')
     .getByRole('button', { name: '收起主机栏', exact: true })
     .click();
   assert.equal(await page.locator('.sidebar').isVisible(), false);
@@ -182,7 +215,7 @@ try {
   );
   await page.screenshot({ path: path.join(artifacts, 'header-host-toggle.png') });
   passed.push(
-    'brand header removed; About shows backend version; host collapse and expansion support keyboard focus',
+    'major modules appear above contextual sidebar; About shows backend version; sidebar collapse and expansion support keyboard focus',
   );
   for (const target of [
     page.locator('.activity-rail'),
@@ -223,7 +256,9 @@ try {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.topbar [aria-label="退出应用"]').count(), 0);
   assert.equal(await page.locator('.topbar [aria-label="打开全局设置"]').count(), 0);
-  passed.push('default local PowerShell with real input/output and no remote actions');
+  passed.push(
+    'welcome startup waits for local-menu click, then opens PowerShell with real input/output',
+  );
   await terminalTabAction(page, '复制');
   await active().locator('.xterm-container[data-state="connected"]').waitFor();
   assert.equal(await page.locator('.terminal-tab').count(), 2);
@@ -233,6 +268,52 @@ try {
   await command("[Console]::WriteLine(('SD_SURVIVED_' + $sdValue))", 'SD_SURVIVED_323');
   passed.push(
     'duplicate creates an independent PowerShell; middle-click close preserves the original',
+  );
+  const tabsBeforeModuleSwitch = await page.locator('.workspace-tab').count();
+  for (const module of ['tools', 'assets', 'system']) {
+    await page.locator(`.module-navigation [data-module="${module}"]`).click();
+    assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
+    assert.equal(await active().locator('.xterm-container[data-state="connected"]').count(), 1);
+    await command("[Console]::WriteLine(('SD_MENU_' + $sdValue))", 'SD_MENU_323');
+    assert.equal(await page.locator('.workspace-tab').count(), tabsBeforeModuleSwitch);
+    assert.equal(await page.locator('.module-menu [aria-current="page"]').count(), 0);
+  }
+  await page.screenshot({ path: path.join(artifacts, 'module-without-default.png') });
+  await navigateWorkspace(page, '全局设置');
+  assert.equal(
+    await page.locator('.module-navigation [aria-current="page"]').textContent(),
+    '系统设置',
+  );
+  assert.deepEqual(
+    (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
+    ['全局设置', '本地环境', '关于 ServerDeck'],
+  );
+  assert.equal(await page.locator('.sidebar-host-tools').count(), 0);
+  await page.screenshot({ path: path.join(artifacts, 'module-settings.png') });
+  await page.locator('.module-navigation [data-module="hosts"]').click();
+  assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'settings');
+  await page.getByRole('button', { name: '本地终端', exact: true }).click();
+  await command("[Console]::WriteLine(('SD_MODULE_' + $sdValue))", 'SD_MODULE_323');
+  await page.screenshot({ path: path.join(artifacts, 'module-hosts.png') });
+  await page.locator('.workspace-tab[data-view="settings"] .tab-close').click();
+  passed.push(
+    'top-level modules only change sidebar menus; the visible PowerShell and its state survive every switch',
+  );
+  await navigateWorkspace(page, '任务中心');
+  await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
+  assert.equal(await page.locator('.statusbar button').count(), 0);
+  assert.equal(await page.getByRole('dialog', { name: '后台任务与传输', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('region', { name: '传输任务', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('region', { name: '网络与批量任务', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('region', { name: '自动化任务', exact: true }).count(), 1);
+  await page.keyboard.press('Control+Shift+J');
+  assert.equal(await page.locator('.workspace-tab[data-view="tasks"]').count(), 1);
+  await page.screenshot({ path: path.join(artifacts, 'task-center.png') });
+  await page.locator('.workspace-tab[data-view="tasks"] .tab-close').click();
+  await selectHostWorkspace(page, '');
+  await command("[Console]::WriteLine(('SD_TASK_CENTER_' + $sdValue))", 'SD_TASK_CENTER_323');
+  passed.push(
+    'tools menu and shortcut share one task center page; footer entries are removed and closing the task center preserves the real local shell',
   );
   await navigateWorkspace(page, '自动运维');
   const templateCatalog = await rpc('automation_catalog');
@@ -272,6 +353,8 @@ try {
   await page
     .locator('.workspace-tab[data-view="automation"] [role="tab"]')
     .click({ button: 'middle' });
+  assert.equal(await page.locator('.workspace-tab[data-view="batch"]').count(), 0);
+  assert.equal(await page.locator('.workspace-tab').count(), 1);
   passed.push(
     'template drawers start collapsed; keyboard disclosure and full template editor leave stored entries and history unchanged',
   );
@@ -361,12 +444,16 @@ try {
     1,
     'single/double click must reuse one SSH pane',
   );
-  await active()
-    .getByText(/主机尚未绑定安全凭据/)
+  await active().locator('.xterm-container[data-state="failed"]').waitFor();
+  await page
+    .getByRole('alert')
+    .filter({ hasText: /主机尚未绑定安全凭据/ })
     .waitFor();
   await terminalTabAction(page, '复制');
-  await active()
-    .getByText(/主机尚未绑定安全凭据/)
+  await active().locator('.xterm-container[data-state="failed"]').waitFor();
+  await page
+    .getByRole('alert')
+    .filter({ hasText: /主机尚未绑定安全凭据/ })
     .waitFor();
   assert.equal(await page.locator('.terminal-tab').count(), 2);
   await terminalAction(page, active(), '关闭终端');
@@ -374,49 +461,117 @@ try {
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), host.id);
   assert.equal(await page.locator('.terminal-tab').count(), 1);
   await page.locator('.workspace-tab.active [role=tab]').click({ button: 'middle' });
-  assert.equal(
-    await page.locator('.terminal-tab').count(),
-    1,
-    'navigation close must retain sessions',
+  await page.waitForFunction(
+    (id) => !document.querySelector(`.terminal-pane[data-host-id="${id}"]`),
+    host.id,
   );
   passed.push(
-    'host clicks reuse SSH; last-pane close stays on the same host; navigation close retains sessions',
+    'host clicks reuse SSH; closing the host workspace closes all of its terminal sessions',
   );
   await selectHostWorkspace(page, '');
   await navigateWorkspace(page, 'SSH 终端');
   await command("[Console]::WriteLine(('SD_RETURN_' + $sdValue))", 'SD_RETURN_323');
   await page.screenshot({ path: path.join(artifacts, 'local-powershell.png') });
-  await page.locator('.workspace-tab.active [role=tab]').click({ button: 'middle' });
+  for (let i = 0; i < 2; i++) {
+    await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+    await active().locator('.xterm-container[data-state="connected"]').waitFor();
+  }
+  await page.getByRole('button', { name: '关闭标签 会话 3', exact: true }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 2);
+  await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+  await active().locator('.xterm-container[data-state="connected"]').waitFor();
+  assert.equal(await page.getByRole('tab', { name: /^会话 5/ }).count(), 1);
+  const localSessions = await page.evaluate(() =>
+    document
+      .querySelector('#app')
+      .__vue_app__.config.globalProperties.$pinia.state.value.terminals.tabs.flatMap(
+        (tab) => tab.panes,
+      )
+      .filter((pane) => !pane.host)
+      .map((pane) => pane.sessionId),
+  );
+  assert.equal(localSessions.length, 3);
+  assert(localSessions.every((id) => id?.startsWith('local:')));
+  await page.locator('.workspace-tab.active .tab-close').click();
   await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
+  assert.equal(await page.locator('.terminal-pane').count(), 0);
+  const closedCodes = await page.evaluate(
+    async (ids) =>
+      Promise.all(
+        ids.map(async (id) => {
+          try {
+            await window.__TAURI_INTERNALS__.invoke('terminal_resize', {
+              id,
+              size: { cols: 80, rows: 24 },
+            });
+            return 'STILL_OPEN';
+          } catch (error) {
+            return error.code;
+          }
+        }),
+      ),
+    localSessions,
+  );
+  assert.deepEqual(
+    closedCodes,
+    localSessions.map(() => 'NOT_FOUND'),
+  );
   assert.equal(await page.locator('.workspace-tabs [role=tab]').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
   await page.getByRole('button', { name: '打开本地终端', exact: true }).click();
-  await command("[Console]::WriteLine(('SD_WELCOME_' + $sdValue))", 'SD_WELCOME_323');
+  await command("[Console]::WriteLine(('SD_WELCOME_' + ($null -eq $sdValue)))", 'SD_WELCOME_True');
+  assert.equal(await page.getByRole('tab', { name: /^会话 1/ }).count(), 1);
+  passed.push(
+    'workspace close frees all three local PTYs; numbering continues with surviving sessions and resets to one only when empty',
+  );
+  await showHostTree(page);
+  await row.click();
+  await active().locator('.xterm-container[data-state="failed"]').waitFor();
+  await selectHostWorkspace(page, '');
+  for (let index = 0; index < 3; index++) {
+    await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+    await active().locator('.xterm-container[data-state="connected"]').waitFor();
+  }
+  assert.equal(await page.locator('.terminal-tab').count(), 4);
+  await command('$sdBeforeExit = 42', '42');
+  const legacyTabs = Array.from({ length: 5 }, (_, index) => {
+    const pane = randomUUID();
+    return {
+      key: randomUUID(),
+      title: `旧会话 ${index + 1}`,
+      panes: [{ key: pane, hostId: index === 4 ? host.id : null }],
+      layout: { kind: 'leaf', pane },
+    };
+  });
+  const legacyLayout = { version: 1, active: legacyTabs[0].key, tabs: legacyTabs };
+  await rpc('workspace_save', { layout: legacyLayout });
   await quit();
   await start();
   await command(
-    "[Console]::WriteLine(('SD_FRESH_' + [string]::IsNullOrEmpty($sdValue)))",
+    "[Console]::WriteLine(('SD_FRESH_' + ($null -eq $sdValue -and $null -eq $sdBeforeExit)))",
     'SD_FRESH_True',
   );
   const saved = await rpc('host_list');
   assert.equal(saved.groups.length, 2);
   assert.equal(saved.hosts.find((h) => h.id === host.id).groupId, null);
   passed.push(
-    'restart retains groups/moves and starts a fresh local Shell without replaying commands',
+    'exit with four local shells and a remote tab restarts on welcome; old five-tab layout is ignored and explicit local selection opens exactly one fresh shell',
   );
-  const restoredHost = page.locator(`.terminal-pane[data-host-id="${host.id}"]`);
-  assert.equal(await restoredHost.getAttribute('data-state'), 'idle');
+  assert.deepEqual(await rpc('workspace_load'), legacyLayout);
+  assert.equal(await page.locator(`.terminal-pane[data-host-id="${host.id}"]`).count(), 0);
   await showHostTree(page);
   await page.locator(`.tree-host[data-host-id="${host.id}"]`).click();
-  await active()
-    .getByText(/主机尚未绑定安全凭据/)
+  await active().locator('.xterm-container[data-state="failed"]').waitFor();
+  await page
+    .getByRole('alert')
+    .filter({ hasText: /主机尚未绑定安全凭据/ })
     .waitFor();
   assert.equal(await page.locator('.terminal-tab').count(), 1);
   await page.locator(`.tree-host[data-host-id="${host.id}"]`).dblclick();
   assert.equal(await page.locator('.terminal-tab').count(), 1);
   await selectHostWorkspace(page, '');
   passed.push(
-    'restored SSH stays idle until explicit host selection, then opens without pressing Connect and reuses the saved pane',
+    'remote tabs are absent after restart; explicit host selection opens one fresh shell and repeated selection reuses it',
   );
   await terminalTabAction(page, '关闭所有');
   // Other hosts remain in the background; closing the last local session must not switch host.
@@ -432,7 +587,8 @@ try {
     'host workspace tabs switch independently; local close preserves remote sessions; final close shows welcome',
   );
   await showHostTree(page);
-  assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 0);
+  assert.equal((await page.locator('.sidebar-module-title').textContent()).trim(), '主机管理');
   assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
   assert.equal(await page.locator('.hosts-view').count(), 0);
   await page.getByLabel('搜索主机', { exact: true }).fill('UI Host');

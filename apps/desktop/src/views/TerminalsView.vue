@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
-import { X } from '@lucide/vue';
+import { Plus, X } from '@lucide/vue';
 import { useTerminalsStore, type TerminalTab } from '../stores/terminals';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
@@ -18,10 +18,14 @@ const emit = defineEmits<{
 }>();
 const store = useTerminalsStore(),
   application = useApplicationStore();
-const props = withDefaults(defineProps<{ visible?: boolean; hostId?: string }>(), {
-  visible: true,
-  hostId: '',
-});
+const props = withDefaults(
+  defineProps<{ visible?: boolean; hostId?: string; toolbarTarget?: string }>(),
+  {
+    visible: true,
+    hostId: '',
+    toolbarTarget: '',
+  },
+);
 const hosts = useHostsStore();
 const tabs = computed(() => store.hostTabs(props.hostId));
 const host = computed(
@@ -33,10 +37,10 @@ const host = computed(
 function newTerminal(): void {
   if (!props.hostId || host.value) store.open(host.value);
 }
-function sessionTitle(item: TerminalTab, index: number): string {
+function sessionTitle(item: TerminalTab): string {
   const host = item.panes[0]?.host;
   return item.title === (host ? hostDisplayName(host) : '本地设备')
-    ? `会话 ${index + 1}`
+    ? `会话 ${item.sessionNumber}`
     : item.title;
 }
 const area = ref<HTMLElement>();
@@ -181,11 +185,15 @@ onBeforeUnmount(() => {
         {{ props.hostId ? '新建终端' : '打开本地终端' }}
       </button>
     </div>
-    <template v-if="tabs.length">
+    <Teleport
+      v-if="tabs.length"
+      :to="props.toolbarTarget || 'body'"
+      :disabled="!props.toolbarTarget"
+    >
       <div class="terminal-session-header">
         <div class="terminal-tabs" role="tablist" aria-label="终端标签">
           <div
-            v-for="(item, index) in tabs"
+            v-for="item in tabs"
             :key="item.key"
             :class="['terminal-tab', { active: store.active === item.key }]"
             draggable="true"
@@ -203,14 +211,14 @@ onBeforeUnmount(() => {
               @click="store.select(item.key)"
               @dblclick="rename(item.key)"
             >
-              {{ sessionTitle(item, index) }}
+              {{ sessionTitle(item) }}
               <small>{{
                 item.panes.length > 1
                   ? `${item.panes.length} 个窗格`
                   : stateLabels[item.panes[0]?.state ?? 'idle']
               }}</small></button
             ><button
-              :aria-label="`关闭标签 ${sessionTitle(item, index)}`"
+              :aria-label="`关闭标签 ${sessionTitle(item)}`"
               title="关闭标签"
               @click="store.close(item.key)"
             >
@@ -218,8 +226,16 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <button
+          class="shell-icon-button"
+          aria-label="新建终端会话"
+          title="新建终端会话"
+          @click="newTerminal"
+        >
+          <Plus :size="15" aria-hidden="true" />
+        </button>
       </div>
-    </template>
+    </Teleport>
     <div ref="area" class="split-area">
       <div
         v-for="item in paneViews"

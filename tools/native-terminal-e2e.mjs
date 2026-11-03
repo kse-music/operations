@@ -223,9 +223,8 @@ try {
   );
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
-  // SSH scenarios start from an empty terminal baseline; startup now opens a local PTY.
-  const localPane = page.locator('.terminal-pane[data-host-id=""]');
-  await terminalAction(page, localPane, '关闭终端');
+  await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
+  assert.equal(await page.locator('.terminal-pane').count(), 0);
   const setup = await page.evaluate(
     async ({ hostname, username, secret, product }) => {
       const invoke = window.__TAURI_INTERNALS__.invoke;

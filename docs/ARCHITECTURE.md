@@ -96,6 +96,16 @@ Rust 与 TS 都显式定义 DTO；Rust IPC 测试验证实际序列化、命令�
 
 `NotificationToasts.vue` 是唯一错误展示入口，固定右下角，保留告警语义与关闭按钮。它捕获原生表单 invalid 事件并替换浏览器字段气泡，聚焦本次首个无效字段；同一轮校验只提示一项。原生 dialog 打开时将通知容器移动到当前弹窗内并通过 manual popover 进入顶层，避免被 backdrop 遮挡或因 modal inert 而无法关闭；弹窗关闭后移回 body。页面不渲染错误文案，失败状态、重试动作、样本过期标记和安全确认继续独立呈现。不增加 IPC、数据库迁移或第三方依赖。
 
+## 主机工作区布局
+
+2026-11-03 模块导航布局：AppModules 提供顶部四个大模块，AppNavigation 接收明确的当前模块并显示其菜单。`types/navigation.ts` 穷举视图所属模块；workspace.module 独立保存顶部选择，selectModule 只更新该值，不改变 active、current 或 hostId。中央继续渲染原活动页，原终端与文件面板保持挂载、可见和会话上下文；无活动页时保留欢迎页，不渲染“请选择功能”卡片。显式点击左侧功能或页面标签调用 navigate/activate 时，同步顶部模块与对应菜单。移除最近模块标签 Map，不再因顶部切换自动恢复另一个页面。仅主机运维模块展示主机树，已有草稿、PTY、SFTP 和后台任务保留。
+
+主机运维侧栏组合 HostTools 与 HostSidebar，其他模块隐藏主机树并保留其状态。中央保留统一的已打开标签及终端会话工具栏，TerminalsView 仅将会话标签 Teleport 到稳定容器，PTY 组件、Pane key 和连接所有权不变。WorkspaceTab.filesOpen 仅保存本次运行的每主机文件面板开合状态，不写入用户配置或数据库。
+
+AppNavigation 在 system 模块的 module-menu 末尾提供“关于 ServerDeck”，排在全局设置、本地环境之后。about 作为普通 WorkspaceView 纳入消息字典、模块映射和全局搜索，菜单通过 navigate 打开唯一的 about: 全局标签，由 AboutView 在中央页面展示产品说明、技术栈及 application.state.appVersion。重复进入复用该标签，切换或关闭沿用 workspace 的导航行为，原终端保持挂载。移除 about 事件、aboutOpen 状态、closeAbout 焦点处理和 App 内的关于 Modal；版本仍保留成功、读取中与后端未就绪状态，不增加 IPC 或配置。
+
+FilesView 的 compact 展示复用同一 useFilesStore、FilePane、传输/编辑及安全确认流程，完整页和面板互斥挂载。切换主机前同步 files.active，仍使用每主机 FileConnection 的实际连接快照和路径；收起仅卸载视图及拖放监听，不关闭 SFTP、终端或传输。窄窗口上下排列，宽窗口右侧伴随；无新增 IPC、数据库迁移或依赖。
+
 ## 存储、配置与日志
 
 - 数据路径通过 `tauri::Manager::path().app_data_dir()` 获取；日志通过 `app_log_dir()` 获取。安装目录不参与数据写入。
@@ -108,7 +118,7 @@ Rust 与 TS 都显式定义 DTO；Rust IPC 测试验证实际序列化、命令�
 - credentials 仅保存名称、类型、私钥路径、opaque secret_ref、revision。密码正文和私钥口令从不进入 SQLite。被引用的凭据删除默认拒绝，用户明确确认解除关联后才删除；主机保留并显示待配置凭据。
 - 配置 version=1；默认深色、侧栏 248px、字号 14、连接超时 15s、采样 3s、INFO。后端拒绝非法数值与未知字段。仅界面/运行偏好，不允许密码或密钥字段。
 - 小规模设置读写每次创建连接，5s busy timeout、foreign_keys=ON。当前使用默认事务日志，不引入连接池或 WAL；正式主机模块与实际并发需要时再评估。
-- SQLite 与 OS 凭据操作在 `spawn_blocking` 内；本地元数据单任务执行，最多接纳 16 个在途/等待请求，等待额度最长 3 秒，超限返回 BUSY。布局自动保存与新窗格读取凭据可有界排队，避免普通分屏因瞬时竞争失败；SSH 输出完全独立。
+- SQLite 与 OS 凭据操作在 `spawn_blocking` 内；本地元数据单任务执行，最多接纳 16 个在途/等待请求，等待额度最长 3 秒，超限返回 BUSY。元数据写入与新窗格读取凭据可有界排队，避免普通分屏因瞬时竞争失败；SSH 输出完全独立。
 - tracing 仅记录固定操作名称/结果，不记录 DTO、终端内容、文件正文、凭据、私钥或任意错误对象。依赖库日志默认关闭，RUST_LOG 不覆盖本策略。
 - 日志后台队列上限 512 条，满时丢弃；当前文件及 3 个轮转文件，每个最大 1MiB，超大单条丢弃，总量上限 4MiB。Windows 先关闭句柄再 rename。WorkerGuard 保持到应用退出以刷出队列。
 - 日志等级更改保存后下次启动生效。主题和侧栏宽度在保存成功后生效；system 主题监听 OS media query。
@@ -173,27 +183,31 @@ Application 拥有 Engine，Engine 注册表拥有 Transport/Session。复用键
 
 终端命令：terminal_open（流式 Channel）、terminal_input、terminal_resize、terminal_ack、terminal_trust、terminal_close、terminal_close_host。没有读取秘密或任意本地执行命令的接口。终端模拟器处理 ANSI/VT、UTF-8、256/True Color、alternate screen、鼠标协议与组合键；查找只搜索本地滚动缓冲，复制粘贴需系统剪贴板权限。
 
-### 终端布局、偏好与恢复
+### 终端布局、偏好与生命周期
 
 用户追加的本地交互终端由 application 内的 `LocalTerminals` 管理，通过 portable-pty 0.9 使用 Windows ConPTY / Unix PTY；Windows 固定启动系统 Windows PowerShell（`-NoLogo -NoProfile`），Linux 固定 `/bin/sh -i`，初始目录为当前用户目录。`terminal_local_open(size, events)` 仅接受尺寸和事件 Channel，不接受可执行文件或启动命令，返回 `{id, shell}`；现有 input/resize/ack/close 根据 `local:` 会话 ID 分派。仅本地 main 窗口授权，不增加通用 shell 插件权限。输入和输出均不记录到日志。
 
-本地最多 16 个会话，每会话 64 条有界输入/尺寸消息，单次输入最多 16 KiB；输出每帧最多 8 KiB，解析 ACK 前不发送下一帧，30 秒未确认取消会话。阻塞 PTY 操作位于专用阻塞任务/输出线程，不占用 Tokio 异步执行线程。关闭会话、页面重新加载及应用退出均取消并回收本地 Shell 和 PTY；关闭超时明确失败。ConPTY 清理期间继续排空输出，避免关闭伪终端时管道阻塞。默认进入本地设备并创建新的本地 Shell；恢复的 SSH 窗格仍保持未连接，不自动登录或重放命令。本地 Shell 中主动脱离终端运行的进程不承诺随页签结束。
+本地最多 16 个会话，每会话 64 条有界输入/尺寸消息，单次输入最多 16 KiB；输出每帧最多 8 KiB，解析 ACK 前不发送下一帧，30 秒未确认取消会话。阻塞 PTY 操作位于专用阻塞任务/输出线程，不占用 Tokio 异步执行线程。关闭会话、页面重新加载及应用退出均取消并回收本地 Shell 和 PTY；关闭超时明确失败。ConPTY 清理期间继续排空输出，避免关闭伪终端时管道阻塞。启动仅显示欢迎页，终端列表为空，不创建本地 Shell、恢复旧标签、自动登录或重放命令。本地 Shell 中主动脱离终端运行的进程不承诺随页签结束。
 
-前端窗格以 `host: null` 表示本地，使用已有 xterm 输入、复制粘贴、查找、分屏和标签；隐藏 SSH 专用的文件/运维/监控/转发动作。保存布局中 `hostId: null` 表示本地，原字符串 HostId 继续兼容，SQLite schema 不变。单击主机树恢复对应工作区，终端工具显式新建独立会话；主机配置在树行编辑或确认删除，移除复制入口，按钮在悬停或键盘操作时显示。工作区和终端页签中键分别复用原关闭逻辑，不改变导航标签与实际连接的资源所有权。
+前端窗格以 `host: null` 表示本地，使用已有 xterm 输入、复制粘贴、查找、分屏和标签；隐藏 SSH 专用的文件/运维/监控/转发动作。旧版布局 IPC 中 `hostId: null` 表示本地，原字符串 HostId 继续兼容；产品不再读写该记录，SQLite schema 不变。单击主机树恢复对应工作区，终端工具显式新建独立会话；主机配置在树行编辑或确认删除，移除复制入口，按钮在悬停或键盘操作时显示。工作区和终端页签的关闭操作均复用原终端会话清理逻辑，工作区中键同样关闭该设备的全部终端。
 
-工作区导航没有固定默认页签，允许 tabs 为空、current 未定义；此时显示欢迎页。首次初始化后显式打开本地终端，不预置主机管理页签。最后一个导航页签关闭后不补页签；关闭某主机/本地设备的最后一个实际终端时，清除对应的空终端导航页签。欢迎页提供打开本地终端和新建主机，不在空工作区自动创建连接。标签栏移除独立“打开本地工作区”图标，本地终端可从欢迎页进入或切换已有标签。主机栏展开按钮固定在标签栏左侧，聚焦不重置横向滚动，收起/展开后重新定位当前标签，避免窄窗口活动标签移出可见范围。
+工作区导航没有固定默认页签，允许 tabs 为空、current 未定义；此时显示欢迎页。首次初始化和重启均不调用本地终端导航，不读取旧终端布局，用户显式打开设备工作区时才创建一个新会话。HostSidebar 内置的“本地设备 / 本地终端”独立于当前主机和筛选结果，位于固定筛选栏之后、滚动列表之前；通过 localTerminal 事件由 App 显式执行 navigate('terminals', '')，新建或复用本地会话。远程主机工具使用另一个插槽，不能替换该固定菜单。AppNavigation 的“主机管理”为无图标、不可点击的静态标题，不再发出 workspace 事件。最后一个导航页签关闭后不补页签；关闭某主机/本地设备的最后一个实际终端时，清除对应的空终端导航页签。欢迎页保留打开本地终端和新建主机，不在空工作区自动创建连接。主机栏展开按钮固定在标签栏左侧，聚焦不重置横向滚动，收起/展开后重新定位当前标签，避免窄窗口活动标签移出可见范围。
 
 Pinia 区分 Tab、Pane 和 Session：一个标签包含 1–8 个窗格，全应用最多 32 个。二叉树只描述 rows/columns、10–90 比例和 PaneKey；xterm 组件以固定 PaneKey 平铺挂载，通过百分比定位，拖动不会重建 Shell，后台标签持续消费 ACK。标签支持拖动、重命名、关闭单个或当前主机全部会话。焦点只在明确切换或连接时变更，ResizeObserver 不抢占搜索框。
 
-终端顶部采用紧凑组合：App 的 workspace-header 仅承载 HostTools；TerminalsView 的 terminal-session-header 只承载可横向滚动的会话标签，移除七个操作图标及专用样式。页签菜单按“复制、重命名、关闭所有、关闭”排序，移除关闭其它入口与专用 store 方法。“复制”从右键目标标签取主机快照，复用 store.open 创建并选中一个新窗格，不复制运行 ID、分屏、cwd、文件动作或容器命令；本地标签使用 host=null，错误沿用 store.error。closeAll 按右键目标主机生成页签快照并逐一复用 close，包含目标本身及所有分屏，不关闭其他主机的连接。关闭失败保留页签并通过 store.error 报错，继续处理剩余目标；空布局沿用 store 自动保存。重命名/关闭菜单、新建/分屏快捷键保留。TerminalPane 移除常驻的 terminal-toolbar、主机信息和按钮区，画面紧接会话栏；原窗格操作移到 Teleport 至 body 的终端菜单，继续调用同一 connect/copy/paste/find/forward/export/emit 逻辑，绑定原 PaneKey、主机快照、cwd 和会话 ID。会话标签显示状态，菜单可查看主机端点，窗格保留可访问名称/状态描述。默认右键打开菜单；快捷粘贴开启后右键仍粘贴，Shift+右键、Shift+F10 或菜单键打开菜单，支持方向键/Home/End/Esc、外部关闭和视口边缘约束。操作不改变挂载、连接或取消生命周期；导出、粘贴、主机信任和配置变化保护保留，收到待确认指纹时关闭菜单并使用原对话框。
+默认“会话 N”使用 terminals store 在创建标签时分配的固定 sessionNumber，不再依赖展示索引。计数按 HostId 独立保存在本次 store 生命周期中，本地设备使用空 HostId；仍有会话时持续递增，最后一个标签成功移除时删除该 HostId 的计数与最近会话记录，重新打开从 1 开始。失败保留会话与计数，分屏和创建受限不消耗编号。编号、计数器、自定义标题和分屏仅在本次运行内保留；重启后首次创建从 1 开始。
+
+设备工作区关闭由 workspace.close 异步协调：按 current/right/others/all 快照选取工作区，复用 terminals.closeAll 关闭每个目标 HostId 的终端标签及分屏；仍有关闭失败的终端时保留工作区，其余目标继续处理。closing 记录正在关闭的工作区 key，防止重复提交；App 的零窗格导航清理在此期间暂停，避免误删范围外的空工作区。成功后按原相邻标签规则移除导航，文件连接和后台任务继续由各自 store 管理。全局功能页关闭不触发终端关闭。
+
+终端顶部采用紧凑组合：App 的 workspace-header 仅承载 HostTools；TerminalsView 的 terminal-session-header 只承载可横向滚动的会话标签，移除七个操作图标及专用样式。页签菜单按“复制、重命名、关闭所有、关闭”排序，移除关闭其它入口与专用 store 方法。“复制”从右键目标标签取主机快照，复用 store.open 创建并选中一个新窗格，不复制运行 ID、分屏、cwd、文件动作或容器命令；本地标签使用 host=null，错误沿用 store.error。closeAll 按右键目标主机生成页签快照并逐一复用 close，包含目标本身及所有分屏，不关闭其他主机的连接。关闭失败保留页签并通过 store.error 报错，继续处理剩余目标；终端布局仅保留在运行内。重命名/关闭菜单、新建/分屏快捷键保留。TerminalPane 移除常驻的 terminal-toolbar、主机信息和按钮区，画面紧接会话栏；原窗格操作移到 Teleport 至 body 的终端菜单，继续调用同一 connect/copy/paste/find/forward/export/emit 逻辑，绑定原 PaneKey、主机快照、cwd 和会话 ID。会话标签显示状态，菜单可查看主机端点，窗格保留可访问名称/状态描述。默认右键打开菜单；快捷粘贴开启后右键仍粘贴，Shift+右键、Shift+F10 或菜单键打开菜单，支持方向键/Home/End/Esc、外部关闭和视口边缘约束。操作不改变挂载、连接或取消生命周期；导出、粘贴、主机信任和配置变化保护保留，收到待确认指纹时关闭菜单并使用原对话框。
 
 AppConfig v1 新增有默认值的 terminal 偏好，兼容旧设置：字体、10–32 字号、100–200% 行高、历史上限、四种主题、光标和 11 个快捷键。快捷键必须包含约束修饰键并去重，不占用远端 Ctrl+C/Z。大于阈值或 50 行的粘贴须确认，通过 xterm.paste 尊重远端 Bracketed Paste；不会承诺远端关闭此模式时换行安全。复制走系统剪贴板；导出需主动确认，只下载当前普通屏幕和滚动历史 UTF-8 文本，无自动录制。
 
 终端快捷复制粘贴使用同一偏好中的 `quickCopyPaste: boolean`，Rust 默认和旧 JSON 缺失字段均为 false，无数据库结构迁移。开启时 xterm 非空选区变化写入系统剪贴板，仅活动窗格响应；终端内容容器捕获右键按下及菜单事件，避免同时触发 xterm 的鼠标上报或右键选词，再复用原剪贴板读取、大文本确认、2 MiB 限制和有界输入。快捷开启时 Shift+右键与键盘菜单操作不读取剪贴板，菜单、查找框和其他页面不触发右键粘贴。剪贴板读取绑定终端连接 generation，重连或卸载后丢弃旧读取结果，重连时取消旧待确认粘贴；剪贴板权限失败沿用安全错误提示，不记录内容。
 
-workspace_load/workspace_save 只在 application_settings 保存版本 1 的 HostId、标题、顺序、分屏比例，限制 64 KiB，不存秘密、终端内容、SessionId 或命令。自动保存属于 store 生命周期，关闭最后一个标签再切视图也会保存。启动恢复窗格均为 idle，用户主动选择主机、远程 Shell 标签或点击窗格连接后，才为当前窗格创建新 Shell。WebView 重新加载会关闭旧终端及未认证的文件租约，保留已认证文件租约和后台传输；应用退出先排空文件操作，再取消全部 Session/转发，最后等待数据库任务。
+terminals store 不再提供布局快照、恢复或自动保存，App 启动不调用 workspace_load。旧 workspace_load/workspace_save IPC 与 application_settings.terminal_workspace 的 v1 格式保留兼容，产品不再读写，也不删除已有记录或修改主机、分组、凭据及偏好。启动或 WebView 重载时会话列表为空；用户显式打开设备后才创建一个新 Shell。WebView 重新加载会关闭旧终端及未认证的文件租约，保留已认证文件租约和后台传输；应用退出先排空文件操作，再取消全部 Session/转发，最后等待数据库任务。
 
-显式主机选择是 Shell 连接意图：主机树通过 setContext(hostId, true) 进入或恢复该主机工作区；已有远程主机 Shell 标签激活和 Shell 工具选择也复用 navigate。当前工具为 Shell 时，activateHost 选择最近会话，仅将当前 idle 窗格的 connectRequested 置为 true；没有 Shell 会话时复用 open 创建一个。TerminalPane 原有监听发起真实 terminal_open，保留认证、信任确认与取消。启动 restore 只恢复元数据、主菜单返回已有工作区及自动相邻导航不新增请求；Files/Monitor 等工具保持原上下文。连接中、等待指纹、已连接及失败状态不被重复点击重开；失败仍由显式重新连接重试，多标签/分屏不会全部自连。
+显式主机选择是 Shell 连接意图：主机树通过 setContext(hostId, true) 进入或恢复该主机工作区；已有远程主机 Shell 标签激活和 Shell 工具选择也复用 navigate。当前工具为 Shell 时，activateHost 选择最近会话，仅将当前 idle 窗格的 connectRequested 置为 true；没有 Shell 会话时复用 open 创建一个。TerminalPane 原有监听发起真实 terminal_open，保留认证、信任确认与取消。启动不恢复终端元数据，主菜单返回本次运行内已有工作区及自动相邻导航不新增请求；Files/Monitor 等工具保持原上下文。连接中、等待指纹、已连接及失败状态不被重复点击重开；失败仍由显式重新连接重试，多标签/分屏不会全部自连。
 
 ### 代理、跳板与转发
 
@@ -203,7 +217,7 @@ forward_start/list/stop 显式控制归属于 Session 的 Local/Remote/Dynamic�
 
 转发监听及 JoinSet 归属取消 token，停止/Session 关闭/SSH 断线都会关闭监听并取消流。Remote 注册表以监听地址/端口和 ForwardId 精确所有权匹配，重复请求不会撤销已有路由；拒绝未知服务端转发 Channel。远程取消若未获服务器确认，断开所属 Transport 以防残留监听并报告原因；此异常安全路径会使共享该 Transport 的其他窗格断线。转发不自动持久化、重启或重连。
 
-SFTP TaskId 和退出确认已接入，监控采样也已接入独立租约；不恢复远端旧 Shell，也不自动执行保存布局中的文件命令。
+SFTP TaskId 和退出确认已接入，监控采样也已接入独立租约；不恢复远端旧 Shell，也不持久化或自动重放文件终端动作。
 
 ## SFTP 文件工作区（已实现）
 
@@ -237,7 +251,7 @@ Transfers 保存独立 TaskId、状态、总字节/已传/剩余、速度、文�
 
 TerminalPane 的 SFTP 按钮携带同一 HostId 和来源 PaneKey。目录只接收经过 URI/长度/NUL 校验的 OSC 7 file:// 报告，不解析任意 Shell 输出猜 pwd。用户勾选跟随后，SFTP 按报告的绝对路径导航；未集成 OSC 7 的 Shell 显示未报告并保留手动导航，不修改远端启动文件。远端应用可以报告任意路径，这不是权限依据或命令授权。
 
-文件右键打开目录/less/tail 前显示主机与绝对路径并确认，后端只生成固定命令并做 POSIX 单引号转义，在新的 PTY exec Channel 执行，不向已有 Shell 注入输入。恢复布局不保存 FileTerminalAction，手动重连才重新执行已确认动作。退出信号（如 tail 的 Ctrl+C）是正常 Channel 结束，和 SSH Transport 断线分开处理。
+文件右键打开目录/less/tail 前显示主机与绝对路径并确认，后端只生成固定命令并做 POSIX 单引号转义，在新的 PTY exec Channel 执行，不向已有 Shell 注入输入。FileTerminalAction 仅保留在本次运行内，手动重连才重新执行已确认动作。退出信号（如 tail 的 Ctrl+C）是正常 Channel 结束，和 SSH Transport 断线分开处理。
 
 主窗口关闭先进入前端/后端退出评审，后端实时检查任务及 dirty 标志，不能用轮询缓存决定是否跳过提示。确认后拒绝新用例，先取消并等待监控，再清理传输和文件元数据操作，最后关闭 SFTP/SSH/转发，最后等待数据库工作并刷日志。异步提交/重试始终在 Tokio 运行时执行，错误线程入口返回安全错误而非 panic。
 
@@ -286,7 +300,7 @@ Vue TrendChart 使用持久 SVG 节点更新折线，没有引入 ECharts 或图
 
 每个日志标签拥有独立 LogId、Channel、取消 token、pause/ack watch 和 JoinHandle，全局最多 8 个。Docker logs --timestamps --tail/--follow、tail -n/-F 和 journalctl --unit 都只读用户主动选择的来源。数据每块最多 16 KiB，Rust 等待序号 ACK 才继续；前端分别解码 stdout/stderr，在 50ms 合并节奏渲染后 ACK，不在 Pinia 中无限追加。LogBuffer 同时限制 UTF-8 1 MiB 和 5000 行；过滤/复制/导出只基于当前有界文本，用 Vue 纯文本渲染，不执行 HTML/ANSI。暂停停止消费并依赖 SSH window 背压，继续后按现有流继续，不额外启动第二条流。
 
-关闭日志或离开运维页面取消 worker，向该 exec Channel 的远端命令请求 TERM 后 close；断线/连接关闭也结束流。切换主机通过 SessionId key 销毁原日志组件。认证后的运维租约可跨页面保留，ops_connections 用于健康同步；关闭运维连接只清理自身日志和租约，不关已有容器 PTY/SSH/SFTP。容器 Shell 是确认后的 docker exec -it /bin/sh 或 /bin/bash，独立 PTY 进入原终端体系；不持久化 ContainerShell 动作，恢复布局仍是 idle。
+关闭日志或离开运维页面取消 worker，向该 exec Channel 的远端命令请求 TERM 后 close；断线/连接关闭也结束流。切换主机通过 SessionId key 销毁原日志组件。认证后的运维租约可跨页面保留，ops_connections 用于健康同步；关闭运维连接只清理自身日志和租约，不关已有容器 PTY/SSH/SFTP。容器 Shell 是确认后的 docker exec -it /bin/sh 或 /bin/bash，独立 PTY 进入原终端体系；不持久化 ContainerShell 动作、终端标签或分屏，重启后不恢复容器 Shell。
 
 WebView 重载先关闭所有日志；应用退出先取消运维流/请求并排空槽，再停止 Monitor、SFTP、SSH/转发及数据库。操作反馈只保留本进程内最多 100 条 HostId/目标/动作/结果，不存敏感输出，不宣称提供持久审计或事务回滚。运维模块本身不新增数据库表；schema v5 的新增表属于自动化，v6 仅放宽主机名称约束。
 
@@ -350,15 +364,15 @@ SQLite schema 通过事务从 v4 迁移到 v5，新增 automation_groups、autom
 
 ## 产品整合：统一工作区、全局偏好与备份
 
-前端 workspace Pinia 状态以 `host:<HostId>` 保存每台主机唯一的一级工作区标签，本地设备使用 `host:`；全局工具仍以模块为键。主机标签保存当前工具及最近的 Linux 运维分类，`hostId` 是最近活动主机的上下文。`selectHost` 恢复该主机工作区，新主机默认进入终端；切换工具只更新该主机标签，激活其他主机不会改写已有标签的目标。主机树和一级标签可直接切换主机，原顶部主机选择器及独立主机管理页面移除。HostSidebar 提供树内新建、分组、搜索、标签筛选、排序和导入导出；每行的 HostTreeControls 提供编辑和确认删除，移除复制按钮及前端处理，复用 HostDialog、hostsApi 和 store.run。操作区默认透明并禁用鼠标命中，只在对应行 hover 或包含 focus-visible 时显示并允许点击，保留 Tab 顺序和键盘可访问性；选中或鼠标点击后的普通焦点不使按钮常驻，预留两个按钮的宽度，显隐不移动名称。管理操作通过 saved 事件定位树中主机，保持工作区及实际会话，不依赖右键菜单。`HostTools` 在主机工作区内提供 Shell、SFTP、监控、Linux 运维二级导航，本地设备仅展示 Shell。终端内部仍只展示当前主机的会话，切回时恢复最近会话；轮换及关闭所有会话保持当前主机边界。关闭一级导航不关闭 SSH Channel、SFTP 或后台任务；关闭最后一个导航后显示欢迎页。
+前端 workspace Pinia 状态以 `host:<HostId>` 保存每台主机唯一的一级工作区标签，本地设备使用 `host:`；全局工具仍以模块为键。主机标签保存当前工具及最近的 Linux 运维分类，`hostId` 是最近活动主机的上下文。`selectHost` 恢复该主机工作区，新主机默认进入终端；切换工具只更新该主机标签，激活其他主机不会改写已有标签的目标。主机树和一级标签可直接切换主机，原顶部主机选择器及独立主机管理页面移除。HostSidebar 提供树内新建、分组、搜索、标签筛选、排序和导入导出；每行的 HostTreeControls 提供编辑和确认删除，移除复制按钮及前端处理，复用 HostDialog、hostsApi 和 store.run。操作区默认透明并禁用鼠标命中，只在对应行 hover 或包含 focus-visible 时显示并允许点击，保留 Tab 顺序和键盘可访问性；选中或鼠标点击后的普通焦点不使按钮常驻，预留两个按钮的宽度，显隐不移动名称。管理操作通过 saved 事件定位树中主机，保持工作区及实际会话，不依赖右键菜单。`HostTools` 在主机工作区内提供 Shell、SFTP、监控、Linux 运维二级导航，本地设备仅展示 Shell。终端内部仍只展示当前主机的会话，切回时恢复最近会话；轮换及关闭所有会话保持当前主机边界。关闭一级设备工作区先关闭该 HostId 的全部终端会话及分屏，关闭失败保留工作区与失败会话；SFTP 和后台任务继续保留。关闭最后一个工作区后显示欢迎页。
 
 批量运维、自动化、网络诊断及资产/设置属于全局入口，不依赖 `workspace.hostId` 或 `hosts.selectedId` 来隐式选择执行目标。独立工具页面通过 `KeepAlive` 在导航标签打开期间保留草稿、已选目标和结果；关闭对应标签后释放页面缓存，后台任务仍由原执行引擎管理。网络诊断在页内明确选择本机/远程来源及远程 HostId；“诊断连接”的独立请求序号支持重复预填同一主机的端点。自动化只接受显式快捷入口的主机预填，执行对话框继续冻结目标并要求预览确认。全局页收起主机侧栏和二级工具，返回主机工作区恢复侧栏偏好。导航元数据在本次运行内保持，不新增数据库或配置项，不自动恢复远端连接或重放命令。
 
-OperationsView 的连接按自己的 chosen HostId 取值，不再借用会被批量连接器改变的全局 ops.active。信任和关闭操作也显式传 HostId；确认仍绑定原 SessionId，真正切换目标后旧确认不可执行。Files/Monitor/Operations 切换目标通过组件 key 隔离旧页面请求；原后台传输保留、监控隐藏暂停、日志离页结束，生命周期沿用原有所有权。Engine 只新增只读连接状态摘要，包含 SessionId/HostId/TransportId/租约类型/状态，不返回凭据。连接树、状态条和后台面板据真实注册表同步，Monitor 单独连接也能正确显示在线。
+OperationsView 的连接按自己的 chosen HostId 取值，不再借用会被批量连接器改变的全局 ops.active。信任和关闭操作也显式传 HostId；确认仍绑定原 SessionId，真正切换目标后旧确认不可执行。Files/Monitor/Operations 切换目标通过组件 key 隔离旧页面请求；原后台传输保留、监控隐藏暂停、日志离页结束，生命周期沿用原有所有权。Engine 只新增只读连接状态摘要，包含 SessionId/HostId/TransportId/租约类型/状态，不返回凭据。连接树、状态条和任务中心据真实注册表同步，Monitor 单独连接也能正确显示在线。
 
 跨模块入口保留原 SFTP/文件终端/tail、Docker 日志/Shell；新增 Monitor→Processes、进程详情→明确 PID 对应 ss 监听信息、连接异常→预填目标地址和 SSH 端口的本机 TCP 诊断。端口关联只匹配 ss 显式报告的完整 pid，权限不足保留未知，不根据端口或进程名称猜测。常用命令搜索打开当前主机的预览，意图消费后清空，不因再次进入页面而重复弹出或执行。
 
-全局搜索由可配置快捷键打开，顶部搜索按钮已移除，查询主机、模块和命令/脚本名称/说明，最多显示 50 项，支持方向键/Enter/Esc，不检索远端输出。快捷键只接收 Ctrl（macOS 同时接收 Command）及可选 Shift；后端拒绝重复组合及常见终端控制键，模态对话框中不触发全局导航。全局通知最多 5 条，普通通知 6 秒消失、错误手动关闭；任务失败仅提示元数据和查看入口，不把任务输出放入通知/日志。后台任务摘要不复制命令或 stdout/stderr，面板复用传输管理并列出批量任务全部 HostId 对应端点。
+全局搜索由可配置快捷键打开，顶部搜索按钮已移除，查询主机、模块和命令/脚本名称/说明，最多显示 50 项，支持方向键/Enter/Esc，不检索远端输出。快捷键只接收 Ctrl（macOS 同时接收 Command）及可选 Shift；后端拒绝重复组合及常见终端控制键，模态对话框中不触发全局导航。全局通知最多 5 条，普通通知 6 秒消失、错误手动关闭；任务失败仅提示元数据和查看入口，不把任务输出放入通知/日志。后台任务摘要不复制命令或 stdout/stderr。TaskCenterView 是运维工具下的全局 tasks 工作区，复用 TransferPanel 及 background/automation/files store，展示传输、网络与批量任务、自动化状态；保留取消传输、停止确认、错误气泡和按原 HostId 跳转查看结果/重试。底部两个任务按钮及 BackgroundTasks 弹窗移除，菜单、全局搜索、tasks 快捷键统一调用 navigate，重复进入复用 tasks: 标签。关闭任务中心只移除页面，不停止全局轮询或任务；未读和读取失败的状态明确显示。
 
 主机树按组一次计算，初始最多渲染 200 个主机，可继续加载，方向键和 Home/End 移动焦点；主机表初始 100 行。已有文件/运维分页保持。侧栏分隔条可拖动或键盘调整，完成后保存 200–400 逻辑像素偏好。窗口宽高/最大化状态由 Rust 原生事件获取，按 DPI 转为逻辑尺寸，单 watch 通道去抖 500ms，退出前刷新；独立 application_settings.window_geometry，不把最大化尺寸覆盖普通窗口尺寸，不保存可能跨屏失效的位置。恢复时按当前屏幕尺寸约束，窗口最小 900×600；不是跨平台/物理混合 DPI 验收的替代。
 

@@ -196,7 +196,6 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
     pendingSecretDeletions: 0,
   };
   const select = vi.fn(),
-    collapse = vi.fn(),
     create = vi.fn(),
     groups = vi.fn(),
     importHosts = vi.fn(),
@@ -205,7 +204,6 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
   document.body.append(root);
   app = createApp(HostSidebar, {
     onSelect: select,
-    onCollapse: collapse,
     onCreate: create,
     onGroups: groups,
     onImport: importHosts,
@@ -217,8 +215,6 @@ it('keeps host tools outside the scrolling list and preserves selection, groupin
   expect(scroll.querySelector('input')).toBeNull();
   expect(scroll.querySelector('[aria-label="新建主机"]')).toBeNull();
   expect(scroll.querySelector('footer')).toBeNull();
-  root.querySelector<HTMLButtonElement>('.host-sidebar-title [aria-label="收起主机栏"]')!.click();
-  expect(collapse).toHaveBeenCalledOnce();
   expect(root.querySelector('.host-search-field > svg')).not.toBeNull();
   expect(root.querySelector('.host-address')?.textContent).toBe('prod.example');
   const row = root.querySelector<HTMLButtonElement>('.tree-host')!;

@@ -20,7 +20,7 @@ it.each([false, true])('scopes secondary tools to the selected host (local=%s)',
   app.mount(root);
   expect(root.querySelectorAll('button')).toHaveLength(local ? 1 : 4);
   expect(root.querySelector('[aria-current="page"]')?.textContent).toContain(
-    local ? 'Shell' : 'SFTP',
+    local ? '本地终端' : 'SFTP 文件',
   );
   root.querySelector<HTMLButtonElement>('[aria-current="page"]')!.click();
   expect(navigate).toHaveBeenCalledWith(local ? 'terminals' : 'files');

@@ -35,7 +35,8 @@ import {
 } from '../types/files';
 import { hostDisplayName, type Host } from '../types/hosts';
 import { stateLabels } from '../types/terminal';
-const props = defineProps<{ hostId?: string }>();
+import { sameHostConnection } from '../services/product-links';
+const props = defineProps<{ hostId?: string; compact?: boolean }>();
 const application = useApplicationStore();
 const emit = defineEmits<{
   terminal: [host: Host, action: FileTerminalAction];
@@ -52,6 +53,10 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   over = ref(false),
   following = ref(false),
   remoteArea = ref<HTMLElement>();
+const connectionChanged = computed(() => {
+  const configured = hosts.catalog?.hosts.find((h) => h.id === chosen.value);
+  return configured && store.current && !sameHostConnection(configured, store.current.host);
+});
 const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: number } | null>(null),
   operation = ref<{
     kind: 'mkdir' | 'rename' | 'delete';
@@ -350,16 +355,21 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section class="files-view page-view">
-    <div class="section-heading">
-      <div>
+  <section :class="['files-view', 'page-view', { 'files-view-compact': compact }]">
+    <div :class="compact ? 'files-panel-connect' : 'section-heading'">
+      <div v-if="!compact">
         <p class="eyebrow">SFTP WORKSPACE</p>
         <h1>文件管理</h1>
       </div>
       <div class="toolbar">
         <button
           class="button primary"
-          :disabled="!chosen || store.current?.state === 'connected'"
+          :disabled="
+            !chosen ||
+            ['opening', 'connecting', 'authenticating', 'awaiting_trust', 'connected'].includes(
+              store.current?.state ?? '',
+            )
+          "
           @click="connect"
         >
           {{ store.current?.state === 'connected' ? 'SFTP 已连接' : '连接 SFTP' }}
@@ -375,18 +385,27 @@ onBeforeUnmount(() => {
       <strong>{{ hostDisplayName(store.current.host) }}</strong
       ><span>{{ stateLabels[store.current.state] ?? store.current.state }}</span
       ><button class="text-button" @click="disconnecting = true">断开文件连接</button
+      ><span v-if="compact" class="files-panel-endpoint"
+        >{{ store.current.host.username }}@{{ store.current.host.hostname }}:{{
+          store.current.host.port
+        }}</span
       ><label class="checkbox-label"
         ><input
           v-model="following"
           type="checkbox"
           :disabled="!cwd"
           @change="following && cwd && store.navigate(cwd)"
-        />跟随来源终端的 OSC 7 目录</label
-      ><span class="subtle">{{ cwd ?? '来源终端未报告目录；不从屏幕文本猜测 pwd' }}</span>
+        />{{ compact ? '跟随终端目录' : '跟随来源终端的 OSC 7 目录' }}</label
+      ><span v-if="!compact" class="subtle">{{
+        cwd ?? '来源终端未报告目录；不从屏幕文本猜测 pwd'
+      }}</span>
     </div>
+    <p v-if="compact && connectionChanged" class="banner" role="status">
+      文件连接使用上方显示的原地址和账号。配置已变更，请断开文件连接后重连以应用新配置。
+    </p>
 
     <div class="file-columns">
-      <section class="file-side">
+      <section v-if="!compact" class="file-side">
         <h2>本地文件</h2>
         <form class="path-bar" @submit.prevent="store.localLoad(localPath)">
           <button
@@ -509,6 +528,25 @@ onBeforeUnmount(() => {
             @click="mutate('mkdir')"
           >
             <FolderPlus :size="15" aria-hidden="true" /></button
+          ><template v-if="compact">
+            <button
+              class="tool-button"
+              aria-label="选择上传文件…"
+              title="选择上传文件"
+              :disabled="store.current?.state !== 'connected'"
+              @click="picked()"
+            >
+              <FileUp :size="15" aria-hidden="true" />
+            </button>
+            <button
+              class="tool-button"
+              aria-label="选择上传文件夹…"
+              title="选择上传文件夹"
+              :disabled="store.current?.state !== 'connected'"
+              @click="picked(true)"
+            >
+              <FolderUp :size="15" aria-hidden="true" />
+            </button> </template
           ><button
             class="tool-button"
             aria-label="刷新远程"
@@ -552,7 +590,7 @@ onBeforeUnmount(() => {
         />
       </section>
     </div>
-    <TransferPanel @retry="retry" />
+    <TransferPanel v-if="!compact" @retry="retry" />
   </section>
   <template v-if="menu"
     ><button class="context-backdrop" aria-label="关闭文件菜单" @click="menu = null"></button>

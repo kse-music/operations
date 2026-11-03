@@ -7,11 +7,11 @@ import {
   FolderOpen,
   FolderCog,
   MoreHorizontal,
-  PanelLeftClose,
   Plus,
   RefreshCw,
   Search,
   Server,
+  SquareTerminal,
   Star,
 } from '@lucide/vue';
 const background = useBackgroundStore();
@@ -24,6 +24,7 @@ import HostTreeControls from './HostTreeControls.vue';
 const store = useHostsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
+defineProps<{ localActive?: boolean }>();
 const hostState = (id: string) =>
   background.connections
     ? background.hostState(id)
@@ -31,7 +32,7 @@ const hostState = (id: string) =>
       ? operations.hostState(id)
       : files.hostState(id);
 defineEmits<{
-  collapse: [];
+  localTerminal: [];
   create: [];
   groups: [];
   import: [];
@@ -202,18 +203,6 @@ function toggle(id: string): void {
     @click.capture="ignoreDragClick"
   >
     <header class="host-sidebar-heading">
-      <div class="host-sidebar-title">
-        <button
-          class="shell-icon-button"
-          aria-label="收起主机栏"
-          title="收起主机栏"
-          :aria-expanded="true"
-          aria-controls="host-sidebar"
-          @click="$emit('collapse')"
-        >
-          <PanelLeftClose :size="16" aria-hidden="true" />
-        </button>
-      </div>
       <div class="host-sidebar-actions">
         <button
           class="shell-icon-button"
@@ -315,6 +304,20 @@ function toggle(id: string): void {
         </button>
       </div>
     </div>
+    <div class="sidebar-local-device">
+      <p class="sidebar-context-name">本地设备</p>
+      <nav class="host-tools" aria-label="本地设备工具">
+        <button
+          :class="['host-tool', { active: localActive }]"
+          aria-label="本地终端"
+          :aria-current="localActive ? 'page' : undefined"
+          @click="$emit('localTerminal')"
+        >
+          <SquareTerminal :size="16" aria-hidden="true" />本地终端
+        </button>
+      </nav>
+    </div>
+    <slot name="tools" />
     <div class="host-tree-scroll" :aria-busy="store.busy">
       <p v-if="store.busy && !store.catalog" class="host-empty" role="status">正在读取主机…</p>
       <p v-else-if="!store.catalog" class="host-empty" role="status">未能读取主机，请刷新重试。</p>

@@ -3,52 +3,69 @@ import {
   ArchiveRestore,
   Info,
   KeyRound,
+  ListChecks,
   Layers,
   Network,
   Play,
-  PanelsTopLeft,
+  PanelLeftClose,
   Settings2,
   Waypoints,
 } from '@lucide/vue';
-import { hostViews, messages, type WorkspaceView } from '../types/product';
+import { messages, type WorkspaceView } from '../types/product';
+import { computed } from 'vue';
+import { navigationModules, type NavigationModule } from '../types/navigation';
 
-defineProps<{
+const props = defineProps<{
   active: WorkspaceView | null;
   tasks: number;
+  module: NavigationModule;
 }>();
-defineEmits<{ navigate: [view: WorkspaceView]; workspace: []; about: [] }>();
-const groups = [
-  [
+defineEmits<{ navigate: [view: WorkspaceView]; collapse: [] }>();
+const groups = {
+  hosts: [],
+  tools: [
     { view: 'batch', icon: Layers },
     { view: 'automation', icon: Play },
     { view: 'network', icon: Network },
+    { view: 'tasks', icon: ListChecks },
   ],
-  [
+  assets: [
     { view: 'credentials', icon: KeyRound },
     { view: 'backup', icon: ArchiveRestore },
-    { view: 'overview', icon: Waypoints },
-    { view: 'settings', icon: Settings2 },
   ],
-] as const;
+  system: [
+    { view: 'settings', icon: Settings2 },
+    { view: 'overview', icon: Waypoints },
+    { view: 'about', icon: Info },
+  ],
+} as const;
+const module = computed(() => props.module);
+const moduleLabel = computed(
+  () => navigationModules.find((item) => item.id === module.value)!.label,
+);
 </script>
 
 <template>
   <nav class="activity-rail" aria-label="主导航">
-    <div class="activity-group">
+    <div class="sidebar-workspace-heading">
+      <strong class="sidebar-module-title">{{
+        module === 'hosts' ? '主机管理' : moduleLabel
+      }}</strong>
       <button
-        :class="['nav-item', { active: active !== null && hostViews.has(active) }]"
-        aria-label="主机管理"
-        :aria-current="active !== null && hostViews.has(active) ? 'page' : undefined"
-        data-tooltip="主机管理"
-        @click="$emit('workspace')"
+        class="shell-icon-button"
+        aria-label="收起主机栏"
+        title="收起侧栏"
+        :aria-expanded="true"
+        aria-controls="host-sidebar"
+        @click="$emit('collapse')"
       >
-        <PanelsTopLeft :size="20" :stroke-width="1.6" aria-hidden="true" />
-        <span class="nav-label">主机管理</span>
+        <PanelLeftClose :size="16" aria-hidden="true" />
       </button>
     </div>
-    <div v-for="(group, index) in groups" :key="index" class="activity-group">
+    <slot />
+    <div v-if="groups[module].length" class="activity-group module-menu">
       <button
-        v-for="item in group"
+        v-for="item in groups[module]"
         :key="item.view"
         :class="['nav-item', { active: active === item.view }]"
         :aria-label="messages['zh-CN'][item.view]"
@@ -56,23 +73,11 @@ const groups = [
         :data-tooltip="messages['zh-CN'][item.view]"
         @click="$emit('navigate', item.view)"
       >
-        <component :is="item.icon" :size="20" :stroke-width="1.6" aria-hidden="true" />
+        <component :is="item.icon" :size="16" :stroke-width="1.6" aria-hidden="true" />
         <span class="nav-label">{{ messages['zh-CN'][item.view] }}</span>
         <small v-if="item.view === 'automation' && tasks" class="nav-badge">{{
           Math.min(99, tasks)
         }}</small>
-      </button>
-    </div>
-    <div class="activity-group activity-about">
-      <button
-        class="nav-item"
-        aria-label="关于"
-        aria-haspopup="dialog"
-        data-tooltip="关于"
-        @click="$emit('about')"
-      >
-        <Info :size="20" :stroke-width="1.6" aria-hidden="true" />
-        <span class="nav-label">关于</span>
       </button>
     </div>
   </nav>

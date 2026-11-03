@@ -254,16 +254,14 @@ export async function productChecks(context) {
   await nav('SSH 终端');
   await command("printf '\\n__SD_%s__\\n' PRODUCT_CONTEXT_SURVIVED");
   await contains('__SD_PRODUCT_CONTEXT_SURVIVED__');
-  await page.getByRole('button', { name: /^后台任务 \d/ }).click();
+  await nav('任务中心');
   await page
-    .getByRole('dialog', { name: '后台任务与传输', exact: true })
+    .getByRole('region', { name: '任务中心', exact: true })
     .getByText(/TCP|Tcp/)
     .first()
     .waitFor();
-  await page
-    .getByRole('dialog', { name: '后台任务与传输', exact: true })
-    .getByRole('button', { name: '关闭对话框', exact: true })
-    .click();
+  await selectHostWorkspace(page, hostId);
+  await nav('SSH 终端');
   passed(
     'native host-context switching, real TCP failure notification and background task visibility leave the original SSH session usable',
   );

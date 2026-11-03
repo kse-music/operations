@@ -25,6 +25,9 @@ try {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(url);
     await page.getByText('后端未连接', { exact: true }).waitFor();
+    await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
+    assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 0);
+    assert.equal(await page.locator('.terminal-pane').count(), 0);
     await page.evaluate(
       async ({ theme }) => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
@@ -66,30 +69,50 @@ try {
       await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(),
       0,
     );
-    const about = page.getByRole('button', { name: '关于', exact: true });
+    assert.equal(
+      await page.getByRole('button', { name: '关于 ServerDeck', exact: true }).count(),
+      0,
+    );
+    await page.locator('.module-navigation [data-module="system"]').click();
+    assert.deepEqual(
+      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
+      ['全局设置', '本地环境', '关于 ServerDeck'],
+    );
+    const about = page.getByRole('button', { name: '关于 ServerDeck', exact: true });
     await about.click();
-    const aboutDialog = page.getByRole('dialog', { name: '关于 ServerDeck', exact: true });
-    assert.equal(await aboutDialog.isVisible(), true);
-    assert.match(await aboutDialog.textContent(), /暂不可用（本地后端未就绪）/);
+    const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
+    await aboutPage.waitFor();
+    assert.equal(
+      await page.getByRole('dialog', { name: '关于 ServerDeck', exact: true }).count(),
+      0,
+    );
+    assert.match(await aboutPage.textContent(), /暂不可用（本地后端未就绪）/);
+    assert.equal(await about.getAttribute('aria-current'), 'page');
+    await about.click();
+    assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 1);
+    if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     await page.screenshot({ path: `${output}/${name}-about.png` });
-    await aboutDialog.press('Escape');
-    assert.equal(await aboutDialog.count(), 0);
-    assert.equal(await about.evaluate((button) => document.activeElement === button), true);
+    await page.locator('.workspace-tab[data-view="about"] .tab-close').click();
+    assert.equal(await aboutPage.count(), 0);
+    if (width <= 720) await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+    await page.locator('.module-navigation [data-module="hosts"]').click();
     const collapseButton = page
-      .locator('.host-sidebar-title')
+      .locator('.sidebar-workspace-heading')
       .getByRole('button', { name: '收起主机栏', exact: true });
-    const collapsePosition = await page.locator('.host-sidebar-heading').evaluate((header) => {
+    const collapsePosition = await page.locator('.sidebar-workspace-heading').evaluate((header) => {
       const heading = header.getBoundingClientRect();
       const button = header.querySelector('[aria-label="收起主机栏"]').getBoundingClientRect();
       return {
         text: header.textContent.trim(),
-        atLeft: button.left >= heading.left && button.left <= heading.left + 20,
+        atRight: button.right <= heading.right && button.right >= heading.right - 20,
         sameRow: Math.abs(button.top + button.height / 2 - heading.top - heading.height / 2) < 2,
       };
     });
     assert(
-      collapsePosition.text === '' && collapsePosition.atLeft && collapsePosition.sameRow,
-      `${name}: header must have no text and keep the collapse icon aligned at the left`,
+      collapsePosition.text.includes('主机管理') &&
+        collapsePosition.atRight &&
+        collapsePosition.sameRow,
+      `${name}: combined sidebar must have a workspace entry and a collapse action`,
     );
     await collapseButton.click();
     assert.equal(await page.locator('.sidebar').isVisible(), false);
@@ -113,6 +136,7 @@ try {
         footer: box('.host-sidebar-footer'),
         main: box('main'),
         rail: box('.activity-rail'),
+        modules: box('.module-header'),
         overflow: document.documentElement.scrollWidth > innerWidth,
         listScrolls: list.scrollHeight > list.clientHeight,
         railOverflows:
@@ -123,8 +147,25 @@ try {
     assert(!geometry.overflow, `${name}: page overflows horizontally`);
     assert(!geometry.railOverflows, `${name}: navigation overflows`);
     for (const region of ['main', 'rail', 'sidebar'])
-      assert.equal(geometry[region].top, 0, `${name}: ${region} has a leftover header gap`);
-    assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 1);
+      assert.equal(
+        geometry[region].top,
+        geometry.modules.bottom,
+        `${name}: ${region} must start below the module header`,
+      );
+    assert.equal(await page.locator('.module-navigation button').count(), 4);
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').textContent(),
+      '主机运维',
+    );
+    assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 0);
+    assert.equal((await page.locator('.sidebar-module-title').textContent()).trim(), '主机管理');
+    assert.equal(await page.locator('.sidebar-module-title svg').count(), 0);
+    await page.locator('.sidebar-module-title').click();
+    assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 0);
+    assert.equal(
+      await page.getByRole('button', { name: '本地终端', exact: true }).isVisible(),
+      true,
+    );
     assert.equal(
       await page.locator('.activity-rail [aria-label="主机管理"] .nav-badge').count(),
       0,
@@ -147,7 +188,15 @@ try {
       `${name}: host total must follow All Hosts`,
     );
     assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
-    assert(geometry.list.height > height * 0.55, `${name}: host list is too small`);
+    assert(
+      geometry.list.height > height * 0.18,
+      `${name}: host list cannot share space with navigation`,
+    );
+    assert.equal(
+      geometry.sidebar.x,
+      geometry.rail.x,
+      `${name}: navigation is outside the combined sidebar`,
+    );
     assert(geometry.listScrolls, `${name}: long host list cannot scroll`);
     if (width > 720)
       assert(geometry.main.x >= geometry.sidebar.right, `${name}: workspace overlaps sidebar`);
@@ -182,6 +231,7 @@ try {
       await actions.evaluate((element) => getComputedStyle(element).pointerEvents),
       'none',
     );
+    await hostRow.scrollIntoViewIfNeeded();
     const labelBefore = await hostRow.locator('.host-label').boundingBox();
     await hostRow.hover();
     assert.equal(await actionsVisible(), true);
@@ -260,11 +310,22 @@ try {
     await page.getByRole('button', { name: '收藏', exact: true }).click();
     assert.equal(await page.locator('.tree-host').count(), 3);
     assert.equal((await total.textContent()).trim(), '60');
-    assert.equal(
-      await page.locator('.host-tree-scroll').evaluate((el) => el.scrollHeight > el.clientHeight),
-      false,
-      `${name}: short list has an unnecessary scrollbar`,
-    );
+    if (height >= 800) {
+      assert.equal(
+        await page.locator('.host-tree-scroll').evaluate((el) => el.scrollHeight > el.clientHeight),
+        false,
+        `${name}: short list has an unnecessary scrollbar`,
+      );
+    } else {
+      const lastFavorite = page.locator('.tree-host').last();
+      await lastFavorite.scrollIntoViewIfNeeded();
+      const row = await lastFavorite.boundingBox(),
+        list = await page.locator('.host-tree-scroll').boundingBox();
+      assert(
+        row.y >= list.y && row.y + row.height <= list.y + list.height + 1,
+        `${name}: short-window favorites cannot be reached by scrolling`,
+      );
+    }
     await page.getByRole('button', { name: '全部主机', exact: true }).click();
     await page.locator('.tree-host').first().click();
     await page.locator('.terminal-tab').first().waitFor();
@@ -282,7 +343,11 @@ try {
     await page.screenshot({ path: `${output}/${name}-host-no-menu.png` });
     if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     await page.locator('.workspace-tab.active [role=tab]').click({ button: 'middle' });
-    assert.equal(await page.locator('.terminal-tab').count(), 1, `${name}: terminal was lost`);
+    assert.equal(
+      await page.locator('.terminal-tab').count(),
+      0,
+      `${name}: host sessions were retained`,
+    );
     await navigateWorkspace(page, 'SSH 终端');
     await page.locator('.terminal-tab [role=tab]').first().click({ button: 'middle' });
     assert.equal(await page.locator('.terminal-tab').count(), 0, `${name}: terminal not closed`);
@@ -291,11 +356,42 @@ try {
       el.scrollTop = 0;
     });
     await page.screenshot({ path: `${output}/${name}.png` });
+    await page.locator('.tree-host').first().click();
     await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     assert.equal(await page.locator('.sidebar').isVisible(), false);
     await navigateWorkspace(page, 'Linux 运维');
     await page.getByRole('heading', { name: 'Linux 运维', exact: true }).waitFor();
     await page.screenshot({ path: `${output}/${name}-workspace.png` });
+    if (!(await page.locator('.sidebar').isVisible()))
+      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+    const device = page.locator('.sidebar-local-device');
+    await device.waitFor();
+    assert.equal((await device.locator('.sidebar-context-name').textContent()).trim(), '本地设备');
+    assert.equal((await device.locator('.host-tool').textContent()).trim(), '本地终端');
+    const pinned = await device.boundingBox();
+    const filter = await page.locator('.host-filter').boundingBox();
+    const list = await page.locator('.host-tree-scroll').boundingBox();
+    assert(pinned.y >= filter.y + filter.height, `${name}: device must follow All Hosts`);
+    assert(list.y >= pinned.y + pinned.height, `${name}: list must follow the fixed device`);
+    assert.equal(await page.locator('.host-tree-scroll .sidebar-local-device').count(), 0);
+    const scrollTop = await page.locator('.host-tree-scroll').evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      return element.scrollTop;
+    });
+    assert(scrollTop > 0, `${name}: test must actually scroll the host list`);
+    assert.deepEqual(await device.boundingBox(), pinned, `${name}: device scrolled with hosts`);
+    await page.getByLabel('搜索主机', { exact: true }).fill('no-matching-layout-host');
+    await page.getByText('没有匹配的主机', { exact: true }).waitFor();
+    assert.equal(await device.isVisible(), true);
+    await page.getByRole('button', { name: '收藏', exact: true }).click();
+    assert.equal(await device.isVisible(), true);
+    await page.getByLabel('搜索主机', { exact: true }).fill('');
+    await page.getByRole('button', { name: '全部主机', exact: true }).click();
+    await device.getByRole('button', { name: '本地终端', exact: true }).click();
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
+    await page.locator('.terminal-pane:visible[data-host-id=""]').waitFor();
+    await page.locator('.host-tree-scroll').evaluate((element) => (element.scrollTop = 0));
+    await page.screenshot({ path: `${output}/${name}-local-device.png` });
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,

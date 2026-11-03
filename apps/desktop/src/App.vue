@@ -11,11 +11,14 @@ import {
 import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
 import WorkspaceView from './views/WorkspaceView.vue';
+import AboutView from './views/AboutView.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
+import AppModules from './components/AppModules.vue';
+import type { NavigationModule } from './types/navigation';
 import HostTools from './components/HostTools.vue';
-import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
+import { Monitor, PanelLeftOpen, PanelRight, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import GroupManager from './components/GroupManager.vue';
@@ -45,24 +48,17 @@ import {
 } from './types/product';
 import type { WorkspaceCloseScope, WorkspaceTab } from './stores/workspace';
 import GlobalSearch from './components/GlobalSearch.vue';
-import BackgroundTasks from './components/BackgroundTasks.vue';
+const TaskCenterView = defineAsyncComponent(() => import('./views/TaskCenterView.vue'));
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
   background = useBackgroundStore(),
   operations = useOpsStore();
 const searching = ref(false),
-  aboutOpen = ref(false),
-  taskPanel = ref(false),
   entryIntent = ref(''),
   automationHost = ref(''),
   networkHost = ref(''),
   networkRequest = ref(0);
-async function closeAbout(): Promise<void> {
-  aboutOpen.value = false;
-  await nextTick();
-  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="关于"]')?.focus();
-}
 const currentHostId = computed(() => workspace.hostId);
 function knownHost(id: string) {
   return (
@@ -123,9 +119,26 @@ const view = computed<View | null>({
   },
 });
 const isHostWorkspace = computed(() => view.value !== null && hostViews.has(view.value));
-const showSidebar = computed(
-  () => sidebarOpen.value && (isHostWorkspace.value || view.value === null),
+const showSidebar = computed(() => sidebarOpen.value);
+const showHostTree = computed(() => workspace.module === 'hosts');
+const filePanelOpen = computed(
+  () => view.value === 'terminals' && !!currentHostId.value && !!workspace.current?.filesOpen,
 );
+async function toggleFilePanel(): Promise<void> {
+  const tab = workspace.current;
+  if (!tab || !currentHostId.value) return;
+  if (!tab.filesOpen && currentHost.value && !currentConfiguration(currentHost.value)) return;
+  files.active = currentHostId.value;
+  tab.filesOpen = !tab.filesOpen;
+  await nextTick();
+  document
+    .querySelector<HTMLButtonElement>(
+      filePanelOpen.value
+        ? '.workspace-file-panel [aria-label="收起文件面板"]'
+        : '[aria-controls="workspace-file-panel"]',
+    )
+    ?.focus({ preventScroll: true });
+}
 const cachedTools = computed(() =>
   (['automation', 'network', 'batch'] as const)
     .filter((tool) => workspace.tabs.some((tab) => tab.view === tool))
@@ -172,6 +185,10 @@ function activate(tab: WorkspaceTab) {
   if (tab.view !== 'automation') entryIntent.value = '';
   if (tab.view === 'terminals' && tab.hostId) navigate(tab.view, tab.hostId, tab.section);
   else workspace.activate(tab.key);
+}
+function selectModule(module: NavigationModule): void {
+  workspace.selectModule(module);
+  if (view.value !== 'automation') entryIntent.value = '';
 }
 function revealActiveTab() {
   document
@@ -223,10 +240,11 @@ function tabContextKeys(tab: WorkspaceTab, event: KeyboardEvent) {
   event.stopPropagation();
   void openTabMenu(tab, event);
 }
-function closeFromTabMenu(scope: WorkspaceCloseScope) {
+async function closeFromTabMenu(scope: WorkspaceCloseScope) {
   if (!tabMenu.value) return;
-  workspace.close(tabMenu.value.key, scope);
+  const key = tabMenu.value.key;
   dismissTabMenu();
+  await workspace.close(key, scope);
   void nextTick(restoreTabFocus);
 }
 function tabMenuKeys(event: KeyboardEvent) {
@@ -289,7 +307,7 @@ function globalShortcut(event: KeyboardEvent) {
   event.stopPropagation();
   if (action === 'search') searching.value = true;
   else if (action === 'settings') navigate('settings');
-  else taskPanel.value = true;
+  else if (action === 'tasks') navigate('tasks');
 }
 const sidebarDraft = ref<number | null>(null);
 const sidebarOpen = ref(!window.matchMedia('(max-width: 720px)').matches);
@@ -302,7 +320,7 @@ async function toggleSidebar(): Promise<void> {
   document
     .querySelector<HTMLButtonElement>(
       sidebarOpen.value
-        ? '.host-sidebar-title [aria-label="收起主机栏"]'
+        ? '.sidebar-workspace-heading [aria-label="收起主机栏"]'
         : '.workspace-tabs [aria-label="展开主机栏"]',
     )
     ?.focus({ preventScroll: true });
@@ -402,7 +420,8 @@ async function confirmExit(): Promise<void> {
 function openFiles(host: Host, path?: string, pane?: string): void {
   if (!currentConfiguration(host)) return;
   dismissTabMenu();
-  navigate('files', host.id);
+  navigate('terminals', host.id);
+  if (workspace.current) workspace.current.filesOpen = true;
   void files.open(host, path, pane);
 }
 function fileTerminal(host: Host, action: import('./types/files').FileTerminalAction): void {
@@ -470,8 +489,6 @@ onMounted(async () => {
     background.start();
     window.addEventListener('keydown', globalShortcut, true);
     window.addEventListener('resize', revealActiveTab);
-    await terminals.restore(store.catalog?.hosts ?? []);
-    navigate('terminals', '');
     void files.poll();
     try {
       releaseExit = await listen<[number, number]>('app-exit-review', (event) => {
@@ -506,7 +523,7 @@ onBeforeUnmount(() => {
 watch(
   () => terminals.panes.length,
   (count) => {
-    if (!count)
+    if (!count && !workspace.closing.length)
       for (const tab of [...workspace.tabs]) if (tab.view === 'terminals') workspace.close(tab.key);
   },
 );
@@ -521,7 +538,7 @@ watch(
     const t = workspace.current;
     if (!t) return;
     if (hostViews.has(t.view)) store.selectedId = currentHostId.value || null;
-    if (t.view === 'files') files.active = t.hostId;
+    if (t.view === 'files' || (t.view === 'terminals' && t.filesOpen)) files.active = t.hostId;
     if (t.view === 'operations') operations.active = t.hostId;
     if (t.view === 'terminals') terminals.activateHost(currentHostId.value);
   },
@@ -549,23 +566,36 @@ watch(
 
 <template>
   <div class="app-shell" :class="{ 'hosts-hidden': !showSidebar }" :style="layoutStyle">
-    <AppNavigation
-      :active="view"
-      :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
-      @navigate="navigate($event)"
-      @workspace="setContext(currentHostId)"
-      @about="aboutOpen = true"
-    />
+    <AppModules :active="workspace.module" @select="selectModule" />
     <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
-      <HostSidebar
+      <AppNavigation
+        :active="view"
+        :module="workspace.module"
+        :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
+        @navigate="navigate($event)"
         @collapse="toggleSidebar"
-        @create="openHost()"
-        @groups="groups = true"
-        @import="importing = true"
-        @export="exportHosts"
-        @select="setContext($event.id, true)"
-        @saved="revealHost"
-      />
+      >
+        <HostSidebar
+          v-show="showHostTree"
+          :local-active="view === 'terminals' && !currentHostId"
+          @local-terminal="navigate('terminals', '')"
+          @create="openHost()"
+          @groups="groups = true"
+          @import="importing = true"
+          @export="exportHosts"
+          @select="setContext($event.id, true)"
+          @saved="revealHost"
+        >
+          <template #tools>
+            <div v-if="isHostWorkspace && view && currentHostId" class="sidebar-host-tools">
+              <p class="sidebar-context-name">
+                {{ hostDisplayName(currentHost) || '已删除主机' }}
+              </p>
+              <HostTools :active="view" :local="false" @navigate="navigate($event)" />
+            </div>
+          </template>
+        </HostSidebar>
+      </AppNavigation>
     </aside>
     <div
       v-if="showSidebar"
@@ -588,7 +618,7 @@ watch(
         @keydown="workspaceKeys"
       >
         <button
-          v-if="!sidebarOpen && (isHostWorkspace || view === null)"
+          v-if="!sidebarOpen"
           class="workspace-sidebar-button"
           aria-label="展开主机栏"
           title="展开主机栏"
@@ -625,16 +655,26 @@ watch(
             {{ tabName(tab) }}</button
           ><button
             class="tab-close"
+            :disabled="workspace.closing.includes(tab.key)"
             :aria-label="`关闭工作区标签 ${tabName(tab)}`"
-            title="仅关闭导航标签；后台任务和独立终端保留"
+            :title="hostViews.has(tab.view) ? '关闭该设备的全部终端会话及分屏' : '关闭此页面'"
             @click="workspace.close(tab.key)"
           >
             <X :size="14" aria-hidden="true" />
           </button>
         </div>
       </div>
-      <div v-if="isHostWorkspace && view" class="workspace-header">
-        <HostTools :active="view" :local="!currentHostId" @navigate="navigate($event)" />
+      <div v-show="view === 'terminals'" class="workspace-header">
+        <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
+        <button
+          v-if="view === 'terminals' && currentHostId"
+          class="file-panel-toggle"
+          :aria-expanded="filePanelOpen"
+          aria-controls="workspace-file-panel"
+          @click="toggleFilePanel"
+        >
+          <PanelRight :size="15" aria-hidden="true" />文件面板
+        </button>
       </div>
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
         当前仍操作建立时的连接：{{ currentHost?.username }}@{{ currentHost?.hostname }}:{{
@@ -694,21 +734,51 @@ watch(
           @terminal="fileTerminal"
         />
         <BackupView v-else-if="view === 'backup'" />
+        <TaskCenterView v-else-if="view === 'tasks'" @navigate="navigate" />
+        <AboutView v-else-if="view === 'about'" />
         <CredentialsView v-else-if="view === 'credentials'" />
         <WorkspaceView v-else-if="view === 'overview'" @settings="view = 'settings'" />
         <SettingsPanel v-else-if="view === 'settings'" />
       </div>
-      <div v-show="view === 'terminals'" class="terminal-workspace">
-        <TerminalsView
-          v-if="view === 'terminals' || terminals.tabs.length"
-          :visible="view === 'terminals'"
-          :host-id="currentHostId"
-          @files="openFiles"
-          @monitor="openMonitor"
-          @operations="openOperations"
-          @automation="openAutomation"
-          @network="openNetwork"
-        />
+      <div
+        v-show="view === 'terminals'"
+        :class="['terminal-workspace', { 'with-file-panel': filePanelOpen }]"
+      >
+        <div class="terminal-primary">
+          <TerminalsView
+            v-if="view === 'terminals' || terminals.tabs.length"
+            :visible="view === 'terminals'"
+            :host-id="currentHostId"
+            toolbar-target="#terminal-session-tools"
+            @files="openFiles"
+            @monitor="openMonitor"
+            @operations="openOperations"
+            @automation="openAutomation"
+            @network="openNetwork"
+          />
+        </div>
+        <aside
+          v-if="filePanelOpen"
+          id="workspace-file-panel"
+          class="workspace-file-panel"
+          aria-label="当前主机文件面板"
+        >
+          <header class="file-panel-heading">
+            <strong>SFTP</strong>
+            <button class="text-button" @click="navigate('files')">完整文件页</button>
+            <button class="shell-icon-button" aria-label="收起文件面板" @click="toggleFilePanel">
+              <X :size="16" aria-hidden="true" />
+            </button>
+          </header>
+          <div class="file-panel-scroll">
+            <FilesView
+              :key="`panel:${currentHostId}`"
+              :host-id="currentHostId"
+              compact
+              @terminal="fileTerminal"
+            />
+          </div>
+        </aside>
       </div>
     </main>
     <footer class="statusbar">
@@ -721,41 +791,16 @@ watch(
       <span
         >{{ store.catalog ? `${store.catalog.hosts.length} 台主机` : '主机列表未加载' }} ·
         {{ store.busy ? '操作中' : `${terminals.connectedCount} 个已连接终端` }}</span
-      ><button class="text-button" @click="taskPanel = true">
-        {{ files.pending }} 个未完成传输</button
-      ><button class="text-button" @click="taskPanel = true">
-        后台任务 {{ background.pending + (automation.status?.active ?? 0) }}</button
-      ><span class="statusbar-right"
-        >Rust + Tauri 2<span class="status-separator">|</span>Local First · Agentless</span
       >
     </footer>
   </div>
   <NotificationToasts />
-  <Modal v-if="aboutOpen" title="关于 ServerDeck" @close="closeAbout">
-    <h3>ServerDeck</h3>
-    <p>本地优先的服务器运维工作台，集成 SSH 终端、SFTP 文件管理和服务器监控。</p>
-    <dl class="system-details">
-      <div>
-        <dt>应用版本</dt>
-        <dd v-if="application.state">v{{ application.state.appVersion }}</dd>
-        <dd v-else>{{ application.loading ? '读取中…' : '暂不可用（本地后端未就绪）' }}</dd>
-      </div>
-      <div>
-        <dt>技术栈</dt>
-        <dd>Rust · Tauri 2 · Vue 3</dd>
-      </div>
-    </dl>
-    <footer class="dialog-actions">
-      <button class="button" @click="closeAbout">关闭</button>
-    </footer>
-  </Modal>
   <GlobalSearch
     v-if="searching"
     @close="searching = false"
     @navigate="fromSearch"
     @select-host="setContext"
   />
-  <BackgroundTasks v-if="taskPanel" @close="taskPanel = false" @navigate="navigate" />
   <RemoteEditor v-if="files.document" />
   <Modal
     v-if="files.exitReview"

@@ -1,42 +1,63 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, type App } from 'vue';
 import AppNavigation from './AppNavigation.vue';
+import { moduleForView } from '../types/navigation';
 
 let app: App, root: HTMLDivElement;
 afterEach(() => {
   app?.unmount();
   root?.remove();
 });
-it('puts only workspaces and independent tools in global navigation', () => {
-  const navigate = vi.fn();
-  const workspace = vi.fn();
-  const about = vi.fn();
+
+it.each([
+  ['terminals', ['收起主机栏'], []],
+  [
+    'automation',
+    ['收起主机栏', '批量运维', '自动运维', '网络诊断', '任务中心'],
+    ['batch', 'automation', 'network', 'tasks'],
+  ],
+  ['credentials', ['收起主机栏', '安全凭据', '备份恢复'], ['credentials', 'backup']],
+  [
+    'settings',
+    ['收起主机栏', '全局设置', '本地环境', '关于 ServerDeck'],
+    ['settings', 'overview', 'about'],
+  ],
+] as const)('shows only menus belonging to the module containing %s', (active, labels, views) => {
+  const navigate = vi.fn(),
+    collapse = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(AppNavigation, {
-    active: 'operations',
+    active,
+    module: moduleForView(active),
     tasks: 1,
     onNavigate: navigate,
-    onWorkspace: workspace,
-    onAbout: about,
+    onCollapse: collapse,
   });
   app.mount(root);
-  const buttons = root.querySelectorAll<HTMLButtonElement>('button');
-  expect(buttons).toHaveLength(9);
+  const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')];
+  expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(labels);
   for (const button of buttons) {
-    expect(button.getAttribute('aria-label')).toBe(button.getAttribute('data-tooltip'));
     expect(button.querySelector('svg')).not.toBeNull();
     button.click();
   }
-  expect(navigate).toHaveBeenCalledTimes(7);
-  expect(workspace).toHaveBeenCalledOnce();
-  expect(about).toHaveBeenCalledOnce();
-  expect(root.querySelector('[aria-label="关于"] .nav-label')?.textContent).toBe('关于');
-  expect(root.querySelector('[aria-label="SFTP 文件"]')).toBeNull();
-  expect(root.querySelector('[aria-label="主机工作区"]')).toBeNull();
-  expect(root.querySelector('[aria-label="主机管理"] .nav-label')?.textContent).toBe('主机管理');
-  expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('主机管理');
-  expect(root.querySelector('[aria-label="主机管理"] small')).toBeNull();
-  expect(root.querySelector('[aria-label="自动运维"] .nav-label')?.textContent).toBe('自动运维');
-  expect(root.querySelector('[aria-label="自动运维"] small')?.textContent).toBe('1');
+  expect(navigate.mock.calls.map((call) => call[0])).toEqual(views);
+  expect(collapse).toHaveBeenCalledOnce();
+  expect(root.querySelector('.activity-about')).toBeNull();
+  if (active === 'settings')
+    expect(root.querySelector('.module-menu button:last-child')?.getAttribute('aria-label')).toBe(
+      '关于 ServerDeck',
+    );
+  const heading = root.querySelector('.sidebar-module-title')!;
+  expect(heading.tagName).toBe('STRONG');
+  expect(heading.querySelector('svg')).toBeNull();
+  expect(heading.closest('button, a, [role="button"]')).toBeNull();
+  expect(heading.hasAttribute('tabindex')).toBe(false);
+  if (active === 'terminals') expect(heading.textContent?.trim()).toBe('主机管理');
+  if (active === 'automation')
+    expect(root.querySelector('[aria-label="自动运维"] .nav-badge')?.textContent).toBe('1');
+  if (active !== 'terminals')
+    expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
+      labels[active === 'automation' ? 2 : 1],
+    );
 });
