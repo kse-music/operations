@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/storage", "crates/security", "crates/ssh", "crates/sftp", "crates/monitor", "crates/ops", "crates/tasks", "crates/automation", "crates/application", "apps/desktop/src-tauri", "tools/ssh-probe"]
+members = ["crates/core", "crates/storage", "crates/security", "crates/ssh", "crates/sftp", "crates/monitor", "crates/ops", "crates/tasks", "crates/automation", "crates/ai", "crates/application", "apps/desktop/src-tauri", "tools/ssh-probe"]
 default-members = ["crates/core", "crates/storage", "crates/security", "crates/application", "apps/desktop/src-tauri"]
 resolver = "3"
 
@@ -29,6 +29,7 @@ serverdeck-monitor = { path = "crates/monitor" }
 serverdeck-ops = { path = "crates/ops" }
 serverdeck-tasks = { path = "crates/tasks" }
 serverdeck-automation = { path = "crates/automation" }
+serverdeck-ai = { path = "crates/ai" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

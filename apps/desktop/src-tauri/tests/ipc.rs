@@ -47,6 +47,146 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         serverdeck_core::DATABASE_VERSION
     );
     assert_eq!(response["config"]["theme"], "dark");
+    let ai = get_ipc_response(&main, request("ai_models", json!({}), origin))
+        .expect("AI settings")
+        .deserialize::<Value>()
+        .unwrap();
+    assert!(ai.as_array().unwrap().is_empty());
+    // Real loopback completion verifies the test/save contract through the dispatcher.
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let fixture = std::thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut data = Vec::new();
+        loop {
+            let mut b = [0; 4096];
+            let n = socket.read(&mut b).unwrap();
+            assert_ne!(n, 0);
+            data.extend_from_slice(&b[..n]);
+            if let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&data[..end]).unwrap();
+                let len: usize = headers
+                    .lines()
+                    .find_map(|l| {
+                        l.to_ascii_lowercase()
+                            .strip_prefix("content-length: ")
+                            .map(str::to_owned)
+                    })
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                if data.len() >= end + 4 + len {
+                    break;
+                }
+            }
+        }
+        let body = r#"{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}]}"#;
+        write!(
+            socket,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .unwrap();
+    });
+    let model_config = serde_json::to_value(serverdeck_core::ai::Config {
+        model: "ipc-model".into(),
+        base_url: format!("http://{address}/v1"),
+        allow_insecure_http: true,
+        ..Default::default()
+    })
+    .unwrap();
+    let mut input = json!({"id":null,"expectedRevision":null,"name":"IPC 模型","config":model_config,"apiKey":"fixture-ipc-key","clearKey":false});
+    assert_eq!(
+        get_ipc_response(
+            &main,
+            request("ai_model_save", json!({"input":input}), origin)
+        )
+        .unwrap_err()["code"],
+        "VALIDATION"
+    );
+    let tested = get_ipc_response(
+        &main,
+        request("ai_model_test", json!({"input":input}), origin),
+    )
+    .unwrap()
+    .deserialize::<Value>()
+    .unwrap();
+    fixture.join().unwrap();
+    input["testId"] = tested["id"].clone();
+    let created = get_ipc_response(
+        &main,
+        request("ai_model_save", json!({"input":input}), origin),
+    )
+    .unwrap()
+    .deserialize::<Value>()
+    .unwrap();
+    let model = &created["value"];
+    let matched=get_ipc_response(&main,request("ai_resolve_hosts",json!({"input":{"modelId":model["id"],"requestId":"1e620bef-34bf-4ee0-a4f1-e102a2ba8c70","question":"有哪些服务器","previousHostIds":[],"maskAddresses":true,"redactValues":[]}}),origin)).unwrap().deserialize::<Value>().unwrap();
+    assert_eq!(matched["hostIds"], json!([]));
+    assert_eq!(matched["modelRevision"], model["revision"]);
+    assert_eq!(model["name"], "IPC 模型");
+    assert_eq!(model["hasKey"], true);
+    assert!(!created.to_string().contains("fixture-ipc-key"));
+    assert!(model.get("apiKey").is_none());
+    assert!(model.get("secretRef").is_none());
+    assert_eq!(
+        get_ipc_response(&main, request("ai_models", json!({}), origin))
+            .unwrap()
+            .deserialize::<Value>()
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(get_ipc_response(&main,request("ai_model_delete",json!({"input":{"id":model["id"],"expectedRevision":model["revision"],"confirmed":false}}),origin)).unwrap_err()["code"],"VALIDATION");
+    assert_eq!(
+        get_ipc_response(
+            &main,
+            request(
+                "ai_model_delete",
+                json!({"input":{"id":model["id"],"expectedRevision":"stale","confirmed":true}}),
+                origin
+            )
+        )
+        .unwrap_err()["code"],
+        "CONFLICT"
+    );
+    get_ipc_response(&main,request("ai_model_delete",json!({"input":{"id":model["id"],"expectedRevision":model["revision"],"confirmed":true}}),origin)).unwrap();
+    assert!(
+        get_ipc_response(&main, request("ai_models", json!({}), origin))
+            .unwrap()
+            .deserialize::<Value>()
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        get_ipc_response(
+            &main,
+            request("ai_send", json!({"id":"forged","confirmed":false}), origin)
+        )
+        .unwrap_err()["code"],
+        "VALIDATION"
+    );
+    assert_eq!(
+        get_ipc_response(
+            &main,
+            request(
+                "ai_execute",
+                json!({"input":{"proposalId":"forged","confirmed":true,"changeConfirmation":null}}),
+                origin
+            )
+        )
+        .unwrap_err()["code"],
+        "NOT_FOUND"
+    );
     let error=get_ipc_response(&main,request("transfer_start",json!({"input":{
         "sessionId":"fb29e64b-3628-46b0-8a22-66a6f450cc8a","direction":"upload","sources":["source"],"destination":"/tmp","conflict":"fail","confirmOverwrite":false
     }}),origin)).expect_err("no file connection");
@@ -106,6 +246,23 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     let other = tauri::WebviewWindowBuilder::new(&app, "untrusted", Default::default())
         .build()
         .expect("window");
+    for command in [
+        "ai_models",
+        "ai_model_save",
+        "ai_model_test",
+        "ai_model_delete",
+        "ai_prepare",
+        "ai_resolve_hosts",
+        "ai_send",
+        "ai_execute",
+        "ai_cancel",
+    ] {
+        for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+            let error = get_ipc_response(window, request(command, json!({}), url))
+                .expect_err("AI commands restricted to local main window");
+            assert!(error.as_str().is_some_and(|s| s.contains("not allowed")));
+        }
+    }
     assert!(get_ipc_response(&other, request("app_bootstrap", json!({}), origin)).is_err());
     for (command, body) in [
         ("terminal_upload_pick", json!({"id":"missing"})),

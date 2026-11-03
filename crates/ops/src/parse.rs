@@ -28,6 +28,7 @@ fn json_lines(text: &str) -> Result<Vec<Value>, Error> {
 pub fn response(request: &Request, bytes: &[u8]) -> Result<Response, Error> {
     let text = std::str::from_utf8(bytes).map_err(|_| invalid())?;
     Ok(match request {
+        Request::Diagnostic { .. } => Response::detail(json!({"output":text})),
         Request::Capabilities => {
             let p = text.split('\0').collect::<Vec<_>>();
             if p.len() != 9 || p[0] != "SDOPS1" {

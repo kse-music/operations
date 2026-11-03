@@ -17,7 +17,7 @@ pub struct SecureStatus {
     pub message: &'static str,
 }
 
-fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<String> {
+pub(crate) fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<String> {
     let pending = match database.pending_secret_gc() {
         Ok(pending) => pending,
         Err(_) => return vec!["配置已保存，但无法读取旧秘密清理状态，请重试清理。".into()],

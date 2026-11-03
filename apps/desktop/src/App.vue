@@ -50,6 +50,8 @@ import { isMonitorSection } from './types/server';
 import GlobalSearch from './components/GlobalSearch.vue';
 const TaskCenterView = defineAsyncComponent(() => import('./views/TaskCenterView.vue'));
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
+const AssistantView = defineAsyncComponent(() => import('./views/AssistantView.vue'));
+const ModelsView = defineAsyncComponent(() => import('./views/ModelsView.vue'));
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
   background = useBackgroundStore(),
@@ -697,6 +699,8 @@ watch(
           @terminal="fileTerminal"
         />
         <BackupView v-else-if="view === 'backup'" />
+        <AssistantView v-else-if="view === 'assistant'" />
+        <ModelsView v-else-if="view === 'models'" />
         <TaskCenterView v-else-if="view === 'tasks'" @navigate="navigate" />
         <AboutView v-else-if="view === 'about'" />
         <CredentialsView v-else-if="view === 'credentials'" />

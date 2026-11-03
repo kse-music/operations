@@ -120,6 +120,9 @@ pub enum ProbeLocation {
     deny_unknown_fields
 )]
 pub enum Request {
+    Diagnostic {
+        tool: ReadDiagnostic,
+    },
     Capabilities,
     Containers,
     Images,
@@ -190,6 +193,7 @@ impl Request {
     }
     pub fn command(&self) -> Result<String, Error> {
         let body = match self {
+            Self::Diagnostic { tool } => tool.command().into(),
             Self::Capabilities => include_str!("ops_capabilities.sh").replace("\r\n", "\n"),
             Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
             Self::Images => "d image ls --no-trunc --digests --format '{{json .}}'".into(),
@@ -310,6 +314,22 @@ impl Request {
             }
         };
         Ok(format!("{PRELUDE}{body}"))
+    }
+}
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadDiagnostic {
+    Uptime,
+    Memory,
+    Disk,
+}
+impl ReadDiagnostic {
+    pub fn command(self) -> &'static str {
+        match self {
+            Self::Uptime => "uptime",
+            Self::Memory => "free -m",
+            Self::Disk => "df -h",
+        }
     }
 }
 pub fn pid_valid(pid: u32) -> Result<(), Error> {

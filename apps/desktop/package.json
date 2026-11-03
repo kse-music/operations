@@ -20,7 +20,8 @@
     "monaco-editor": "^0.57.0",
     "pinia": "^3.0.0",
     "vue": "^3.5.44",
-    "zmodem.js": "0.1.10"
+    "zmodem.js": "0.1.10",
+    "marked": "14.0.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.4",

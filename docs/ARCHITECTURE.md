@@ -1,5 +1,49 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-03：关联全部资产、自动匹配与连接
+
+助手移除手动主机选择，发送链路为资产刷新→ai_resolve_hosts→既有 ops_open/事件→ai_prepare→ai_send。useAssistantHosts 管理匹配、顺序连接、120 秒等待和取消，ops.open(host, false) 不改变其他运维页面的 activeHostId。已有连接身份不一致明确拒绝复用；待信任的主机密钥仍由现有 SSH 流程验证，绝不自动接受。
+
+应用层从数据库投影最小 HostAsset（ID/name/hostname/port/username/group）。本地字面值、同名歧义、全部资产及追问规则优先；否则只将脱敏问题、最小目录和 previousHostIds 交给固定系统规则的路由请求。严格解析 HostChoice，拒绝额外字段、未知或重复 ID、超过八台及工具调用；路由不读取服务器内容或执行命令，取消/模型撤销复用 Assistant 的单并发与 active 请求表。HostRoute 返回模型 revision，准备前再次核验。
+
+PrepareInput 兼容保留 sessionId，新增缺省 sessionIds/autoHosts/expectedModelRevision；多连接最多八个且禁止重复主机。autoHosts 模式从当前目录核验连接的主机 ID/地址/端口/用户名；关联目录总是参与脱敏，命中项含 matchedHost，详细上下文仍按原 selection 授权。多主机使用 context.hosts，每项自带主机 ID；准备快照保留所有 related_bindings，发送前逐一核验，任一失效都拒绝。多主机建议一律 manual，单主机仍绑定唯一连接并单条审批。未启动监控时 server 信息可仅含 SSH 端点，只有 metrics 必须存在同 Transport 的有效样本，非 NotFound 监控错误继续传播。
+
+匹配失败、连接失败、取消及清理失败均显示真实原因；命中任一连接失败则不继续生成分析。页面只读展示全部资产数量、命中主机和首次指纹审核，无选择/批量连接控件。自动命中目标变化保留同一资产会话的历史，模型/授权/脱敏变化清空。新增一项本地主窗口 IPC，无数据库迁移、新依赖或任意 Shell 执行能力。验证与限制见 VALIDATION_ASSISTANT_HOSTS.md；本节替代历史手动选择服务器的交互约定。
+
+## 2026-11-03：直接对话与受限 Markdown
+
+按用户最新要求，助手聊天 UI 点击发送后直接调用原 prepare→send 管线，不再展示发送预览、费用批准或第二次发送。confirmed 表示用户明确发起发送，非预览审批；底层一次性模型版本/连接/凭据绑定保留。上下文复用原采集和脱敏，命令执行仍独立批准，受控变更仍须输入专属确认语句。
+
+PrepareInput/PreparedContext 增加 history（旧调用缺省为空）：最多十二条/六轮、48 KiB，严格 user/assistant 配对，无 system/tools 角色或额外字段。ai 在固定系统消息与当前 user JSON 之间插入重新脱敏的历史；历史权限声明仍是不可信数据，提供商不带工具。前端 useAssistant 管理最多二十轮内存消息、等待/失败/停止、六轮限量历史和过大回答摘要；不包含命令审批或执行输出，清空/切换模型服务器授权范围后撤销全部旧请求建议。输入草稿不触发撤销。
+
+AssistantMarkdown 使用已有 marked 14.0.0 词法分析，映射固定 Vue h 节点；无 v-html/HTML 注入/任意属性。HTML literal、图片不加载，链接仅 HTTP(S)。包声明为直接依赖，版本及许可已在原锁和清单中。消息区独立滚动，输入位于底部；CSS 使用工作区容器查询，在小窗口将服务器上下文放到聊天下方。没有新增 IPC、数据库迁移或模型执行能力。旧章节的 UI 预览要求由本段替代，历史阶段证据保留。
+
+## 2026-11-03：授权上下文 AI 辅助诊断
+
+新增 `application → ai → core/reqwest/rustls/Tokio`。ai 不依赖 SSH、数据库、凭据库或 Tauri，仅处理脱敏、协议、预览与单条建议授权；ModelProvider 预留其他协议，当前实现 OpenAI 兼容 Chat Completions。应用层负责 OS Key、实际 SSH 运维连接及身份核验，复用 monitor/ops 采集。模型没有工具，固定 system 规则与包含问题/不可信远程上下文的 user JSON 分离，回答以纯文本渲染。
+
+2026-11-03 模型管理升级：已有 application_settings 的 ai_models 行以格式版本 1 保存最多 100 个注册模型，每项含 UUID、名称、config、随机 secret_ref 和 revision。首次访问在 IMMEDIATE 事务内转换旧 ai_config 为“默认模型”，保留配置与原 Key 引用，成功才移除旧行；失败回滚，损坏 AI 数据不进入应用启动路径。无需数据库 schema 迁移或版本变化，不加入 AppConfig 或备份。ModelInput 不实现 Debug/Serialize，复用 SecretStore、不可变秘密版本及 durable GC；更改地址须替换/清除 Key，删除单项需明确确认和版本匹配，失败清理返回警告。HTTP 客户端禁止重定向/环境代理/自动重试，HTTPS 保留系统证书验证，HTTP 需显式允许。日志只记录错误类别或状态码。
+
+上下文按 server/metrics/processes/docker/指定日志独立授权，默认全关闭。系统/指标仅复用同一实际 Transport、60 秒内样本；进程/Docker 使用既有固定查询；日志使用类型化 LogSource 的非 follow 快照，1–200 行/32 KiB。PrepareInput 明确传 modelId，后端仅加载对应配置/Key，并在预览中冻结模型 ID/版本和完整脱敏请求，按同一 Value 发送；发送时从预览解析模型 ID，不能改传其他模型。编辑/删除通过 revoke_model 撤销本模型预览、在途 HTTP 和未消费建议，其他模型不受影响；版本变化和删除均不能发送旧预览，5 分钟/8 个上限。
+
+响应只解析 answer/commands，工具调用拒绝，非规范/截断结果只展示。固定命令映射为既有 Request 或新增 Diagnostic(Uptime/Memory/Disk)，未知命令无执行权限。变更仅限严格目标的既有 systemd/Docker start/stop/restart。后端令牌绑定 Session/Transport/profile，10 分钟/64 个、单次消费；变更单独校验完整确认语句。模型 HTTP/执行并发分别为 1；退出取消模型请求，命令沿用 ops 超时/断线取消。执行输出不自动进入模型上下文。
+
+| IPC              | 输入                                                      | 输出                                       |
+| ---------------- | --------------------------------------------------------- | ------------------------------------------ |
+| ai_models        | 无                                                        | Model 列表，只有 hasKey，无秘密或引用      |
+| ai_model_save    | ModelInput（新建或 ID/expectedRevision 编辑，Key 仅输入） | Mutation<Model> 与清理警告                 |
+| ai_model_test    | ModelInput（临时 Key 或读取当前模型的已有 Key）           | ModelTest：id、elapsedMs、expiresInSeconds |
+| ai_model_delete  | ID + expectedRevision + confirmed                         | Mutation<()> 与清理警告                    |
+| ai_resolve_hosts | 模型 ID、请求 UUID、问题、上次命中 ID、脱敏设置           | 已登记 hostIds、澄清信息、modelRevision    |
+| ai_prepare       | PrepareInput（单/多 Session、问题、授权、脱敏、模型版本） | 完整 Preview/Token/费用估算                |
+| ai_send          | 预览 ID + confirmed                                       | Answer/Proposal/Usage                      |
+| ai_execute       | Proposal ID + confirmed + 独立变更确认                    | Execution（脱敏本地输出）                  |
+| ai_cancel        | 预览 ID                                                   | 撤销预览/建议或取消模型请求                |
+
+九项 IPC 同步到 main capability/AppManifest/handler，仅本地主窗口可调用，删除旧 ai_settings/ai_configure。types/ai 定义 TS 契约，services/ai 封装 IPC，models store 共享列表/选中 ID/更新，ModelsView/ModelDialog 位于资产管理，model-form composable 持有临时 Key 和测试/保存状态，AssistantView 选择模型并承载聊天、授权与命令审核。列表/版本变化会撤销 UI 旧结果，不自动改选其他提供商。详情及验证见 AI_ASSISTANT.md、VALIDATION_MODEL_MANAGEMENT.md。
+
+注册测试调用同一 provider，用固定无服务器数据的消息及 256 Token 上限验证真实补全。成功才在 Assistant 内存签发随机单次 ID（五分钟/32 个），绑定 ID/旧 revision/config 与 Key 的 SHA-256 摘要；ai_model_save 对新建、配置修改或 Key 替换先核验并消费测试 ID，再写系统凭据/数据库。重命名及单独清除 Key 保留离线编辑能力。新增 model_test 模块复用同一 HTTP 并发、超时和退出取消；仅复用锁内已有 sha2 0.10，无新依赖包或存储迁移。
+
 基线：`docs/PRD.md` v1.0；当前实现基础设施、主机/凭据管理、真实 SSH 终端、SFTP 文件管理、Agentless Linux 监控、当前主机运维，网络诊断、显式批量运维，以及可复用命令/脚本与本地计划。2026-11-02。
 
 ## 范围与原则

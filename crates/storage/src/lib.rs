@@ -4,6 +4,7 @@ use std::{
 };
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+pub mod ai;
 pub mod automation;
 pub mod backup;
 pub mod hosts;

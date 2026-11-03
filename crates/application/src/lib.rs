@@ -1,3 +1,4 @@
+mod ai;
 mod automation;
 mod files;
 mod hosts;
@@ -26,6 +27,7 @@ use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 pub struct Application {
+    assistant: serverdeck_ai::Assistant,
     terminal_uploads: terminal_upload::TerminalUploads,
     local_terminals: local_terminal::LocalTerminals,
     terminals: serverdeck_ssh::Engine,
@@ -64,6 +66,7 @@ impl Application {
             tasks.clone(),
         )?;
         Ok(Self {
+            assistant: serverdeck_ai::Assistant::default(),
             terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
             automation,
@@ -154,6 +157,7 @@ impl Application {
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        self.assistant.shutdown().await;
         if let Err(error) = self.terminal_uploads.clear() {
             tracing::error!(operation = "terminal_upload_shutdown", error = %error);
         }

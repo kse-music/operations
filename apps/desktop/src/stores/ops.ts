@@ -10,8 +10,8 @@ export const useOpsStore = defineStore('operations', () => {
   const connections = ref<Record<string, OpsConnection>>({}),
     active = ref('');
   const current = computed(() => connections.value[active.value]);
-  async function open(host: Host): Promise<void> {
-    active.value = host.id;
+  async function open(host: Host, activate = true): Promise<void> {
+    if (activate) active.value = host.id;
     const previous = connections.value[host.id];
     if (
       previous &&

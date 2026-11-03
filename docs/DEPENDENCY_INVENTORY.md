@@ -691,3 +691,35 @@
 | crc-32 1.2.2                               | Apache-2.0                        | npm   |
 
 clipboard-win 5.4.3 发布包未包含 LICENSE，文本取自其固定源码提交 ed27008ae5d1f10cfbb266de039f0fb35fd05a56 的上游 LICENSE；前端插件随附 SPDX，完整 MIT/Apache 文本补自同版本官方 Rust 插件包。其余文本取自已解析依赖包。清单包含跨平台依赖，不表示已验证全部平台。
+
+## AI HTTPS 新增解析依赖（2026-11-03）
+
+来自固定 Cargo.lock 和 Cargo.toml；包含非 Windows 目标解析项，不表示已完成跨平台构建。完整许可见 THIRD_PARTY_NOTICES.txt。jni/jni-macros 发布包未附许可文件，选用 MIT 分支并核对对应源码提交的许可；Android verifier 复用同一源码提交的父包许可。
+
+| 名称与版本                             | 声明许可证                                                                                                                          | 来源  |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| aws-lc-rs 1.19.0                       | ISC AND (Apache-2.0 OR ISC)                                                                                                         | Cargo |
+| aws-lc-sys 0.47.0                      | ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) | Cargo |
+| cmake 0.1.58                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| fs_extra 1.3.0                         | MIT                                                                                                                                 | Cargo |
+| hyper-rustls 0.27.10                   | Apache-2.0 OR ISC OR MIT                                                                                                            | Cargo |
+| jni 0.22.4                             | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| jni-macros 0.22.4                      | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| jobserver 0.1.35                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| lru-slab 0.1.3                         | MIT OR Apache-2.0 OR Zlib                                                                                                           | Cargo |
+| openssl-probe 0.2.2                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| quinn 0.11.12                          | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| quinn-proto 0.11.19                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| quinn-udp 0.5.16                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| rand_pcg 0.10.2                        | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| rustls 0.23.46                         | Apache-2.0 OR ISC OR MIT                                                                                                            | Cargo |
+| rustls-native-certs 0.8.5              | Apache-2.0 OR ISC OR MIT                                                                                                            | Cargo |
+| rustls-pki-types 1.15.1                | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| rustls-platform-verifier 0.7.1         | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| rustls-platform-verifier-android 0.2.0 | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| rustls-webpki 0.103.16                 | ISC                                                                                                                                 | Cargo |
+| schannel 0.1.30                        | MIT                                                                                                                                 | Cargo |
+| simd_cesu8 1.2.0                       | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| simdutf8 0.1.5                         | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| tokio-rustls 0.26.6                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| webpki-root-certs 1.0.11               | CDLA-Permissive-2.0                                                                                                                 | Cargo |

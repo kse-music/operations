@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+serverdeck-ai.workspace = true
 serverdeck-core.workspace = true
 serverdeck-storage.workspace = true
 serverdeck-security.workspace = true
@@ -27,6 +28,8 @@ tracing-appender = "0.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
+rand = "0.10"
 
 [lints]
 workspace = true

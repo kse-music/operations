@@ -13,10 +13,14 @@ it.each([
   ['terminals', ['收起主机栏'], []],
   [
     'automation',
-    ['收起主机栏', '批量运维', '自动运维', '网络诊断', '任务中心'],
-    ['batch', 'automation', 'network', 'tasks'],
+    ['收起主机栏', '批量运维', '自动运维', '网络诊断', 'AI 运维助手', '任务中心'],
+    ['batch', 'automation', 'network', 'assistant', 'tasks'],
   ],
-  ['credentials', ['收起主机栏', '安全凭据', '备份恢复'], ['credentials', 'backup']],
+  [
+    'credentials',
+    ['收起主机栏', '安全凭据', '模型管理', '备份恢复'],
+    ['credentials', 'models', 'backup'],
+  ],
   [
     'settings',
     ['收起主机栏', '通用', '终端', '快捷键', '工作区与连接', '关于'],

@@ -8,6 +8,15 @@ fn main() {
     }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "ai_models",
+            "ai_model_save",
+            "ai_model_test",
+            "ai_model_delete",
+            "ai_prepare",
+            "ai_resolve_hosts",
+            "ai_send",
+            "ai_execute",
+            "ai_cancel",
             "backup_export",
             "backup_preview",
             "backup_restore",

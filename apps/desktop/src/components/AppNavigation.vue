@@ -6,6 +6,8 @@ import {
   ListChecks,
   Layers,
   Network,
+  Sparkles,
+  Boxes,
   Play,
   PanelLeftClose,
   Settings2,
@@ -29,10 +31,12 @@ const groups = {
     { view: 'batch', icon: Layers },
     { view: 'automation', icon: Play },
     { view: 'network', icon: Network },
+    { view: 'assistant', icon: Sparkles },
     { view: 'tasks', icon: ListChecks },
   ],
   assets: [
     { view: 'credentials', icon: KeyRound },
+    { view: 'models', icon: Boxes },
     { view: 'backup', icon: ArchiveRestore },
   ],
   system: [

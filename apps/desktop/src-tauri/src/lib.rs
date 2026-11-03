@@ -1,3 +1,4 @@
+mod ai_commands;
 mod automation_commands;
 pub mod commands;
 pub mod file_commands;
@@ -113,6 +114,15 @@ pub fn run() {
 pub fn command_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        ai_commands::ai_models,
+        ai_commands::ai_model_save,
+        ai_commands::ai_model_test,
+        ai_commands::ai_model_delete,
+        ai_commands::ai_prepare,
+        ai_commands::ai_resolve_hosts,
+        ai_commands::ai_send,
+        ai_commands::ai_execute,
+        ai_commands::ai_cancel,
         product_commands::backup_export,
         product_commands::backup_preview,
         product_commands::backup_restore,

@@ -53,6 +53,37 @@ impl Operations {
     pub fn feedback(&self) -> Result<Vec<Feedback>, Error> {
         Ok(lock(&self.feedback)?.iter().cloned().collect())
     }
+    /// One selected, bounded log excerpt. Never a follow stream or arbitrary shell command.
+    pub async fn log_excerpt(
+        &self,
+        id: &str,
+        source: LogSource,
+        lines: u16,
+    ) -> Result<Response, Error> {
+        if !(1..=200).contains(&lines) {
+            return Err(Error::Validation("AI 日志范围须为 1–200 行"));
+        }
+        let command = LogInput {
+            source,
+            lines,
+            follow: false,
+        }
+        .command()?;
+        let _slot = self.slots.try_acquire().map_err(|_| Error::Busy)?;
+        let output = self.execute(id, &command).await?;
+        if output.status != Some(0) {
+            return Err(error(
+                "AI_LOG_FAILED",
+                "选定日志读取失败或无权限，请检查路径和来源",
+            ));
+        }
+        let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+        text.push_str(&String::from_utf8_lossy(&output.stderr));
+        if text.len() > 32 * 1024 {
+            return Err(error("AI_CONTEXT_LIMIT", "选定日志超过 32 KiB，请减少行数"));
+        }
+        Ok(Response::detail(serde_json::json!({"output":text})))
+    }
     pub async fn query(&self, id: &str, request: Request) -> Result<Response, Error> {
         let command = request.command()?;
         if self.stop.is_cancelled() {

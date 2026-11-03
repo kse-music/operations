@@ -5,6 +5,7 @@ export type ContainerAction = 'start' | 'stop' | 'restart' | 'remove';
 export type ServiceAction = 'start' | 'stop' | 'restart' | 'enable' | 'disable';
 export type ProcessSignal = 'TERM' | 'KILL' | 'INT' | 'HUP';
 export type OpsRequest =
+  | { kind: 'diagnostic'; tool: 'uptime' | 'memory' | 'disk' }
   | { kind: 'capabilities' | 'containers' | 'images' | 'processes' | 'ports' }
   | { kind: 'container_details'; id: string; revealEnv: boolean; confirmed: boolean }
   | { kind: 'container_stats'; id: string }

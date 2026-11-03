@@ -690,12 +690,12 @@ it('keeps the current terminal visible across top module switches and navigates 
   await sidebarMenu('tools', '网络诊断');
   expect(workspace.module).toBe('tools');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['批量运维', '自动运维', '网络诊断', '任务中心'],
+    ['批量运维', '自动运维', '网络诊断', 'AI 运维助手', '任务中心'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
   await sidebarMenu('assets', '备份恢复');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['安全凭据', '备份恢复'],
+    ['安全凭据', '模型管理', '备份恢复'],
   );
   await sidebarMenu('system', '关于');
   root.querySelector<HTMLButtonElement>('.module-navigation [data-module="assets"]')!.click();
