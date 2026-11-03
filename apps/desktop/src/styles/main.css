@@ -38,43 +38,10 @@ button {
   height: 100dvh;
   min-height: 560px;
   display: grid;
-  grid-template: 48px minmax(0, 1fr) 28px / var(--rail-width) var(--host-panel-width) minmax(0, 1fr);
+  grid-template: minmax(0, 1fr) 28px / var(--rail-width) var(--host-panel-width) minmax(0, 1fr);
 }
 .app-shell.hosts-hidden {
   --host-panel-width: 0px;
-}
-.topbar {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel);
-}
-.brand {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  font-size: 16px;
-  letter-spacing: 0;
-}
-.brand-icon {
-  font-size: 21px;
-  color: var(--accent);
-  font-weight: 700;
-}
-.brand-icon span {
-  font-size: 14px;
-}
-.version {
-  font-size: 10px;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  padding: 2px 5px;
-  border-radius: 4px;
-  font-weight: 400;
-  letter-spacing: 0;
 }
 .icon-button {
   margin-left: auto;
@@ -87,7 +54,7 @@ button {
 }
 .sidebar {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1;
   background: var(--panel);
   border-right: 1px solid var(--border);
   min-width: 0;
@@ -212,7 +179,7 @@ button {
 }
 .main-content {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 1;
   min-width: 0;
   min-height: 0;
   overflow: hidden;

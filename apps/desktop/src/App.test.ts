@@ -157,7 +157,7 @@ it('keeps keyboard sidebar resizing in eight-pixel steps and within the saved bo
   await vi.waitFor(() => expect(useApplicationStore().state?.config.sidebarWidth).toBe(400));
 });
 
-it.each(['.topbar', '.sidebar', '.content-scroll', '.sidebar input'])(
+it.each(['.activity-rail', '.sidebar', '.content-scroll', '.sidebar input'])(
   'suppresses the native context menu in %s even before the backend is ready',
   (selector) => {
     const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
@@ -167,6 +167,53 @@ it.each(['.topbar', '.sidebar', '.content-scroll', '.sidebar input'])(
     expect(document.querySelector('[role="menu"]')).toBeNull();
   },
 );
+
+it('removes the brand header and opens About without changing the active workspace', async () => {
+  loadSidebarConfig();
+  useApplicationStore().state!.appVersion = '0.1.0-beta.1';
+  const workspace = useWorkspaceStore();
+  workspace.navigate('terminals', 'a');
+  await flush();
+  const tabs = workspace.tabs.map((tab) => ({ ...tab }));
+  const active = workspace.active;
+  expect(root.querySelector('.topbar')).toBeNull();
+  root.querySelector<HTMLButtonElement>('.activity-rail [aria-label="关于"]')!.click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="关于 ServerDeck"]')!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.textContent).toContain('v0.1.0-beta.1');
+  expect(dialog.textContent).toContain('SSH 终端、SFTP 文件管理和服务器监控');
+  expect(workspace.tabs).toEqual(tabs);
+  expect(workspace.active).toBe(active);
+  dialog.querySelector<HTMLButtonElement>('.dialog-actions button')!.click();
+  await nextTick();
+  expect(document.querySelector('dialog[aria-label="关于 ServerDeck"]')).toBeNull();
+  expect(document.activeElement).toBe(root.querySelector('.activity-rail [aria-label="关于"]'));
+});
+
+it('keeps About available before bootstrap and supports dismissing it with Escape', async () => {
+  const open = root.querySelector<HTMLButtonElement>('.activity-rail [aria-label="关于"]')!;
+  open.click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="关于 ServerDeck"]')!;
+  expect(dialog.textContent).toContain('暂不可用（本地后端未就绪）');
+  useApplicationStore().loading = true;
+  await nextTick();
+  expect(dialog.textContent).toContain('读取中…');
+  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  await nextTick();
+  expect(document.querySelector('dialog[aria-label="关于 ServerDeck"]')).toBeNull();
+  expect(document.activeElement).toBe(open);
+  open.click();
+  await nextTick();
+  document
+    .querySelector<HTMLButtonElement>(
+      'dialog[aria-label="关于 ServerDeck"] [aria-label="关闭对话框"]',
+    )!
+    .click();
+  await nextTick();
+  expect(document.querySelector('dialog[aria-label="关于 ServerDeck"]')).toBeNull();
+});
 
 it('covers body-level inputs and stops the native menu before a child stops propagation', () => {
   const input = document.createElement('textarea');
@@ -233,8 +280,7 @@ it('removes the host management page and keeps creation available in the workspa
 });
 
 it('removes the host heading text and keeps collapse and expansion available', async () => {
-  expect(root.querySelector('.topbar button')).toBeNull();
-  expect(root.querySelector('.topbar')?.textContent).not.toContain('主机管理');
+  expect(root.querySelector('.topbar')).toBeNull();
   const title = root.querySelector('.host-sidebar-title')!;
   const collapse = title.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!;
   expect(collapse).not.toBeNull();

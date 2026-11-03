@@ -52,11 +52,17 @@ const workspace = useWorkspaceStore(),
   background = useBackgroundStore(),
   operations = useOpsStore();
 const searching = ref(false),
+  aboutOpen = ref(false),
   taskPanel = ref(false),
   entryIntent = ref(''),
   automationHost = ref(''),
   networkHost = ref(''),
   networkRequest = ref(0);
+async function closeAbout(): Promise<void> {
+  aboutOpen.value = false;
+  await nextTick();
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="关于"]')?.focus();
+}
 const currentHostId = computed(() => workspace.hostId);
 function knownHost(id: string) {
   return (
@@ -543,17 +549,12 @@ watch(
 
 <template>
   <div class="app-shell" :class="{ 'hosts-hidden': !showSidebar }" :style="layoutStyle">
-    <header class="topbar">
-      <div class="brand">
-        <span class="brand-icon" aria-hidden="true">S<span>▸</span></span
-        ><strong>ServerDeck</strong><span class="version">v0.1</span>
-      </div>
-    </header>
     <AppNavigation
       :active="view"
       :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
       @navigate="navigate($event)"
       @workspace="setContext(currentHostId)"
+      @about="aboutOpen = true"
     />
     <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
       <HostSidebar
@@ -730,6 +731,24 @@ watch(
     </footer>
   </div>
   <NotificationToasts />
+  <Modal v-if="aboutOpen" title="关于 ServerDeck" @close="closeAbout">
+    <h3>ServerDeck</h3>
+    <p>本地优先的服务器运维工作台，集成 SSH 终端、SFTP 文件管理和服务器监控。</p>
+    <dl class="system-details">
+      <div>
+        <dt>应用版本</dt>
+        <dd v-if="application.state">v{{ application.state.appVersion }}</dd>
+        <dd v-else>{{ application.loading ? '读取中…' : '暂不可用（本地后端未就绪）' }}</dd>
+      </div>
+      <div>
+        <dt>技术栈</dt>
+        <dd>Rust · Tauri 2 · Vue 3</dd>
+      </div>
+    </dl>
+    <footer class="dialog-actions">
+      <button class="button" @click="closeAbout">关闭</button>
+    </footer>
+  </Modal>
   <GlobalSearch
     v-if="searching"
     @close="searching = false"

@@ -1,11 +1,3 @@
-.topbar {
-  gap: 10px;
-  min-width: 0;
-}
-.brand {
-  flex-shrink: 0;
-  min-width: 200px;
-}
 .context-address {
   white-space: nowrap;
   overflow: hidden;
@@ -43,7 +35,7 @@ kbd {
 }
 .activity-rail {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -63,6 +55,9 @@ kbd {
 }
 .activity-group + .activity-group {
   border-top: 1px solid var(--border);
+}
+.activity-about {
+  margin-top: auto;
 }
 .activity-rail .nav-item {
   position: relative;
@@ -126,7 +121,7 @@ kbd {
 .sidebar-resizer {
   position: absolute;
   left: calc(var(--rail-width) + var(--sidebar-width) - 3px);
-  top: 48px;
+  top: 0;
   bottom: 28px;
   width: 6px;
   cursor: col-resize;
@@ -342,10 +337,6 @@ textarea:focus-visible,
   .context-address {
     display: none;
   }
-  .topbar {
-    padding: 0 12px;
-    gap: 10px;
-  }
   .statusbar-right {
     display: none;
   }
@@ -354,9 +345,6 @@ textarea:focus-visible,
   }
 }
 @media (max-width: 960px) {
-  .brand {
-    min-width: 0;
-  }
   .content-scroll {
     padding: 18px;
   }
@@ -376,26 +364,14 @@ textarea:focus-visible,
   }
   .sidebar {
     position: absolute;
-    top: 48px;
+    top: 0;
     bottom: 28px;
     left: var(--rail-width);
     width: min(var(--sidebar-width), calc(100vw - 72px));
     z-index: 20;
     box-shadow: 8px 0 24px #0003;
   }
-  .sidebar-resizer,
-  .version {
-    display: none;
-  }
-  .topbar {
-    gap: 6px;
-    padding: 0 8px;
-  }
-  .brand {
-    font-size: 14px;
-  }
-  .brand strong,
-  .brand-icon {
+  .sidebar-resizer {
     display: none;
   }
   .workspace-header {

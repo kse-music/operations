@@ -133,6 +133,30 @@ function resizeKey(event: KeyboardEvent, divider: Divider): void {
     );
   }
 }
+let pendingFontSize: number | undefined;
+let zooming = false;
+async function zoomFontSize(delta: number): Promise<void> {
+  const config = application.state?.config;
+  if (!config || application.loading || (application.saving && !zooming)) return;
+  pendingFontSize = Math.min(
+    32,
+    Math.max(10, (pendingFontSize ?? config.terminalFontSize) + delta),
+  );
+  if (zooming) return;
+  zooming = true;
+  try {
+    while (pendingFontSize !== undefined) {
+      const current = application.state?.config;
+      const size: number = pendingFontSize;
+      if (!current || size === current.terminalFontSize) break;
+      await application.save({ ...current, terminalFontSize: size });
+      if (application.error || pendingFontSize === size) break;
+    }
+  } finally {
+    pendingFontSize = undefined;
+    zooming = false;
+  }
+}
 function action(key: string, name: string): void {
   const pane = store.panes.find((p) => p.key === key);
   if (!pane) return;
@@ -142,17 +166,7 @@ function action(key: string, name: string): void {
   else if (name === 'closePane') void store.closePane(key);
   else if (name === 'nextTab') store.cycle(1);
   else if (name === 'previousTab') store.cycle(-1);
-  else if (name === 'zoomIn' || name === 'zoomOut') {
-    const config = application.state?.config;
-    if (config)
-      void application.save({
-        ...config,
-        terminalFontSize: Math.min(
-          32,
-          Math.max(10, config.terminalFontSize + (name === 'zoomIn' ? 1 : -1)),
-        ),
-      });
-  }
+  else if (name === 'zoomIn' || name === 'zoomOut') void zoomFontSize(name === 'zoomIn' ? 1 : -1);
 }
 onBeforeUnmount(() => {
   finishDrag?.();

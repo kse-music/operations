@@ -148,10 +148,18 @@ try {
   await start();
   assert.equal(await page.locator('.activity-rail [aria-label="主机管理"] .nav-badge').count(), 0);
   assert.equal((await page.locator('.host-count').textContent()).trim(), '0');
-  assert.equal(await page.locator('.topbar [aria-label="当前主机上下文"]').count(), 0);
+  assert.equal(await page.locator('.topbar').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
-  assert.equal(await page.locator('.topbar button').count(), 0);
+  const about = page.getByRole('button', { name: '关于', exact: true });
+  await about.click();
+  const aboutDialog = page.getByRole('dialog', { name: '关于 ServerDeck', exact: true });
+  const { appVersion } = await rpc('app_bootstrap');
+  assert((await aboutDialog.textContent()).includes(`v${appVersion}`));
+  await page.screenshot({ path: path.join(artifacts, 'about.png') });
+  await aboutDialog.press('Escape');
+  assert.equal(await aboutDialog.count(), 0);
+  assert.equal(await about.evaluate((button) => document.activeElement === button), true);
   assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
   assert.equal(await page.locator('.workspace-header .host-tools').count(), 1);
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
@@ -174,10 +182,10 @@ try {
   );
   await page.screenshot({ path: path.join(artifacts, 'header-host-toggle.png') });
   passed.push(
-    'topbar context/search removed; collapse follows host title and workspace expand supports keyboard focus',
+    'brand header removed; About shows backend version; host collapse and expansion support keyboard focus',
   );
   for (const target of [
-    page.locator('.topbar'),
+    page.locator('.activity-rail'),
     page.locator('.sidebar'),
     page.locator('.sidebar input'),
     active().locator('.terminal-footnote'),

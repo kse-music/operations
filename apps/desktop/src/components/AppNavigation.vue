@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ArchiveRestore,
+  Info,
   KeyRound,
   Layers,
   Network,
@@ -15,7 +16,7 @@ defineProps<{
   active: WorkspaceView | null;
   tasks: number;
 }>();
-defineEmits<{ navigate: [view: WorkspaceView]; workspace: [] }>();
+defineEmits<{ navigate: [view: WorkspaceView]; workspace: []; about: [] }>();
 const groups = [
   [
     { view: 'batch', icon: Layers },
@@ -60,6 +61,18 @@ const groups = [
         <small v-if="item.view === 'automation' && tasks" class="nav-badge">{{
           Math.min(99, tasks)
         }}</small>
+      </button>
+    </div>
+    <div class="activity-group activity-about">
+      <button
+        class="nav-item"
+        aria-label="关于"
+        aria-haspopup="dialog"
+        data-tooltip="关于"
+        @click="$emit('about')"
+      >
+        <Info :size="20" :stroke-width="1.6" aria-hidden="true" />
+        <span class="nav-label">关于</span>
       </button>
     </div>
   </nav>

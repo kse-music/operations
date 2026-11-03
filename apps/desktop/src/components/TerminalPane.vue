@@ -220,6 +220,18 @@ function preventTerminalRightClick(event: MouseEvent): void {
     event.stopImmediatePropagation();
   }
 }
+function zoomWithWheel(event: WheelEvent): void {
+  if (
+    !props.active ||
+    !event.ctrlKey ||
+    event.deltaY === 0 ||
+    document.querySelector('dialog[open]')
+  )
+    return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  emit('action', props.tab.key, event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
+}
 function terminalContextMenu(event: MouseEvent): void {
   event.preventDefault();
   event.stopImmediatePropagation();
@@ -549,6 +561,7 @@ useErrorNotifications(message);
       class="xterm-container"
       aria-label="交互式 Shell"
       :data-state="tab.state"
+      @wheel.capture="zoomWithWheel"
       @mousedown.capture="preventTerminalRightClick"
       @contextmenu.capture="terminalContextMenu"
     ></div>
@@ -556,7 +569,9 @@ useErrorNotifications(message);
       <span v-if="tab.fileAction">此窗格是已确认的文件命令，手动重连将重新运行该命令。 · </span>
       {{ preferences.quickCopyPaste ? 'Shift+右键' : '右键' }} 打开终端操作 ·
       {{ preferences.shortcuts.copy }} / {{ preferences.shortcuts.paste }} 复制粘贴 ·
-      {{ preferences.shortcuts.find }} 查找 · Ctrl+C / Z 发送到{{ tab.host ? '远端' : '本地终端' }}
+      {{ preferences.shortcuts.find }} 查找 · Ctrl+滚轮 缩放字体 · Ctrl+C / Z 发送到{{
+        tab.host ? '远端' : '本地终端'
+      }}
     </div>
     <Modal
       v-if="trust && active && store.focused === tab.key"

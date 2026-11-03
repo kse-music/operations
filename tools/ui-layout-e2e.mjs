@@ -60,13 +60,21 @@ try {
     );
     if (width <= 720) await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
     await page.locator('.tree-host').first().waitFor();
-    assert.equal(await page.locator('.topbar [aria-label="当前主机上下文"]').count(), 0);
+    assert.equal(await page.locator('.topbar').count(), 0);
     assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
     assert.equal(
       await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(),
       0,
     );
-    assert.equal(await page.locator('.topbar button').count(), 0);
+    const about = page.getByRole('button', { name: '关于', exact: true });
+    await about.click();
+    const aboutDialog = page.getByRole('dialog', { name: '关于 ServerDeck', exact: true });
+    assert.equal(await aboutDialog.isVisible(), true);
+    assert.match(await aboutDialog.textContent(), /暂不可用（本地后端未就绪）/);
+    await page.screenshot({ path: `${output}/${name}-about.png` });
+    await aboutDialog.press('Escape');
+    assert.equal(await aboutDialog.count(), 0);
+    assert.equal(await about.evaluate((button) => document.activeElement === button), true);
     const collapseButton = page
       .locator('.host-sidebar-title')
       .getByRole('button', { name: '收起主机栏', exact: true });
@@ -114,6 +122,8 @@ try {
     });
     assert(!geometry.overflow, `${name}: page overflows horizontally`);
     assert(!geometry.railOverflows, `${name}: navigation overflows`);
+    for (const region of ['main', 'rail', 'sidebar'])
+      assert.equal(geometry[region].top, 0, `${name}: ${region} has a leftover header gap`);
     assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 1);
     assert.equal(
       await page.locator('.activity-rail [aria-label="主机管理"] .nav-badge').count(),
