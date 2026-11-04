@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "cn.hiboot.plugins.network",
+  "name": "网络诊断",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "从本机或已验证远端连接执行 Ping、TCP、DNS 与网络诊断。",
+  "apiVersion": "^1.2.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": [
+    "ui.contribute",
+    "network.run"
+  ],
+  "contributions": [
+    {
+      "id": "network",
+      "label": "网络诊断",
+      "kind": "tool",
+      "tool": "network"
+    }
+  ],
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "files": [],
+  "publisher": null
+}

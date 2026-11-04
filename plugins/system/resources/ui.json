@@ -1,0 +1,29 @@
+{
+  "uiVersion": 2,
+  "title": "资源监控",
+  "pages": [
+    {
+      "id": "server",
+      "title": "资源监控",
+      "fields": [],
+      "actions": [
+        {
+          "id": "bridge",
+          "label": "执行界面请求",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "initialAction": null,
+      "log": null,
+      "surface": {
+        "kind": "monitor",
+        "sections": [
+          "overview",
+          "disks",
+          "network"
+        ]
+      }
+    }
+  ]
+}

@@ -7,6 +7,11 @@ license.workspace = true
 
 [dependencies]
 serverdeck-ai.workspace = true
+serverdeck-plugin-core.workspace = true
+serverdeck-plugin-runtime.workspace = true
+serverdeck-plugin-sdk.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }
+base64 = "0.22.1"
 serverdeck-core.workspace = true
 serverdeck-storage.workspace = true
 serverdeck-security.workspace = true

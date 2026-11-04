@@ -1,0 +1,27 @@
+{
+  "uiVersion": 2,
+  "title": "日志查看",
+  "pages": [
+    {
+      "id": "server",
+      "title": "日志查看",
+      "fields": [],
+      "actions": [
+        {
+          "id": "bridge",
+          "label": "执行界面请求",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "initialAction": null,
+      "log": null,
+      "surface": {
+        "kind": "operations",
+        "sections": [
+          "logs"
+        ]
+      }
+    }
+  ]
+}

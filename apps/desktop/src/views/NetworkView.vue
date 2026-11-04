@@ -5,7 +5,9 @@ import { computed, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vu
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
 import TaskConnections from '../components/TaskConnections.vue';
-import { tasksApi, downloadResult } from '../services/tasks';
+import { downloadResult } from '../services/tasks';
+import { useTasksApi } from '../services/plugin-tool-services';
+const tasksApi = useTasksApi();
 import { errorMessage } from '../services/ipc';
 import { type Diagnostic, type Tool, taskLabels, active } from '../types/tasks';
 import { hostDisplayName } from '../types/hosts';

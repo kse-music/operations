@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '../composables/error-notifications';
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
 import { opsApi } from '../services/ops';
+import { pluginServerServices } from '../services/plugin-server-surface';
+const surface = inject(pluginServerServices, null);
+const api = surface?.operations ?? opsApi;
 import { errorMessage } from '../services/ipc';
 import type {
   OpsRequest,
@@ -27,10 +30,12 @@ import OpsLogPanel from '../components/OpsLogPanel.vue';
 const props = defineProps<{
   hostId?: string;
   initialTab?: OperationsSection;
+  logIntent?: { input: LogInput; title: string; sequence: number };
 }>();
 const emit = defineEmits<{
   section: [value: NonNullable<typeof props.initialTab>];
   shell: [host: Host, shell: ContainerShell];
+  log: [input: LogInput, title: string];
 }>();
 const hosts = useHostsStore(),
   ops = useOpsStore();
@@ -146,7 +151,7 @@ function session(): string {
   return connection.value.session.id;
 }
 async function query(request: OpsRequest): Promise<OpsResponse> {
-  const result = await opsApi.query(session(), request);
+  const result = await api.query(session(), request);
   if (!result.success)
     throw new Error(`${result.code ?? '操作失败'}：${result.message ?? '请刷新核对状态'}`);
   if (result.message) notice.value = result.message;
@@ -287,7 +292,7 @@ async function apply(): Promise<void> {
     notice.value = null;
   } finally {
     try {
-      history.value = await opsApi.feedback();
+      history.value = await api.feedback();
     } catch (cause) {
       if (!error.value) error.value = errorMessage(cause);
     }
@@ -295,10 +300,17 @@ async function apply(): Promise<void> {
   }
 }
 async function openLog(input: LogInput, title: string): Promise<void> {
-  tab.value = 'logs';
-  await nextTick();
-  await logs.value?.open(input, title);
+  emit('log', input, title);
 }
+watch(
+  [() => props.logIntent, connected],
+  async ([intent, ready]) => {
+    if (!intent || !ready || tab.value !== 'logs') return;
+    await nextTick();
+    await logs.value?.open(intent.input, intent.title);
+  },
+  { immediate: true, flush: 'post' },
+);
 async function disconnect(): Promise<void> {
   try {
     await ops.close(chosen.value);
@@ -332,9 +344,9 @@ onMounted(async () => {
       }),
     2000,
   );
-  if (props.hostId) await connect();
+  if (props.hostId && !surface) await connect();
   try {
-    history.value = await opsApi.feedback();
+    history.value = await api.feedback();
   } catch (cause) {
     error.value = errorMessage(cause);
   }
@@ -355,7 +367,7 @@ useErrorNotifications(() => [error.value, detailError.value]);
 </script>
 <template>
   <section class="operations-view" aria-label="主机运维工作区">
-    <div class="ops-toolbar">
+    <div v-if="!surface" class="ops-toolbar">
       <button class="button primary" :disabled="!chosen || busy || connected" @click="connect">
         {{ connected ? '运维已连接' : '连接运维' }}</button
       ><button class="button" :disabled="!connected" @click="disconnect">断开运维连接</button>

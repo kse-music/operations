@@ -53,8 +53,8 @@
     },
     "resources": {
       "../../../LICENSE": "LICENSE",
-      "../../../docs/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt",
-      "../../../docs/DEPENDENCY_INVENTORY.md": "DEPENDENCY_INVENTORY.md"
+      "../../../docs/release/THIRD_PARTY_NOTICES.txt": "THIRD_PARTY_NOTICES.txt",
+      "../../../docs/release/DEPENDENCY_INVENTORY.md": "DEPENDENCY_INVENTORY.md"
     }
   }
 }

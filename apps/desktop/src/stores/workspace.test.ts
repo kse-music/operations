@@ -3,9 +3,16 @@ import { createPinia, disposePinia, getActivePinia, setActivePinia } from 'pinia
 import { useWorkspaceStore } from './workspace';
 import { useTerminalsStore } from './terminals';
 import { terminalApi } from '../services/terminal';
+import { usePluginsStore } from './plugins';
+import { toolPluginState } from '../services/system-plugins.fixture';
+import { pluginsApi } from '../services/plugins';
 import type { Host } from '../types/hosts';
 
-beforeEach(() => setActivePinia(createPinia()));
+beforeEach(async () => {
+  setActivePinia(createPinia());
+  Object.assign(usePluginsStore(), toolPluginState());
+  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+});
 afterEach(() => disposePinia(getActivePinia()!));
 
 it.each(['', 'target'])(
@@ -43,7 +50,7 @@ it('waits for close completion and prevents duplicate close requests for the sam
   terminals.open(null);
   terminals.update(terminals.focused, { sessionId: 'pending' });
   workspace.navigate('terminals', '');
-  let finish: () => void = () => {};
+  let finish: () => void = async () => {};
   const close = vi.spyOn(terminalApi, 'close').mockImplementation(
     () =>
       new Promise<void>((resolve) => {
@@ -71,65 +78,73 @@ function openTabs() {
 }
 
 it.each([
-  ['current', ['host:', 'batch:', 'network:'], 'network:'],
+  [
+    'current',
+    [
+      'host:',
+      'extension:cn.hiboot.plugins.batch:batch:',
+      'extension:cn.hiboot.plugins.network:network:',
+    ],
+    'extension:cn.hiboot.plugins.network:network:',
+  ],
   ['right', ['host:', 'host:a'], 'host:a'],
   ['others', ['host:a'], 'host:a'],
   ['all', [], ''],
-] as const)('closes %s relative to the requested inactive tab', (scope, keys, active) => {
+] as const)('closes %s relative to the requested inactive tab', async (scope, keys, active) => {
   const workspace = openTabs();
-  workspace.close('host:a', scope);
+  await workspace.close('host:a', scope);
   expect(workspace.tabs.map((tab) => tab.key)).toEqual(keys);
   expect(workspace.active).toBe(active);
   expect(workspace.current?.key ?? '').toBe(active);
   if (active === 'host:a') expect(workspace.hostId).toBe('a');
 });
 
-it('preserves an active tab to the left of the closed range', () => {
+it('preserves an active tab to the left of the closed range', async () => {
   const workspace = openTabs();
   workspace.activate('host:');
-  workspace.close('host:a', 'right');
+  await workspace.close('host:a', 'right');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
   expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:', 'host:a']);
 });
 
-it('keeps adjacent-tab selection for closing the current tab', () => {
+it('keeps adjacent-tab selection for closing the current tab', async () => {
   const workspace = openTabs();
   workspace.activate('host:a');
-  workspace.close('host:a');
-  expect(workspace.active).toBe('batch:');
-  workspace.close('network:');
-  workspace.close('batch:');
+  await workspace.close('host:a');
+  expect(workspace.active).toBe('extension:cn.hiboot.plugins.batch:batch:');
+  await workspace.close('extension:cn.hiboot.plugins.network:network:');
+  await workspace.close('extension:cn.hiboot.plugins.batch:batch:');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
 });
 
 it.each(['current', 'right', 'others', 'all'] as const)(
   'ignores a stale target for %s',
-  (scope) => {
+  async (scope) => {
     const workspace = openTabs();
     const before = JSON.stringify(workspace.$state);
-    workspace.close('missing', scope);
+    await workspace.close('missing', scope);
     expect(JSON.stringify(workspace.$state)).toBe(before);
   },
 );
 
-it('handles empty ranges and closing the last tab without creating replacements', () => {
+it('handles empty ranges and closing the last tab without creating replacements', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
-  workspace.close('host:a', 'right');
-  workspace.close('host:a', 'others');
+  await workspace.close('host:a', 'right');
+  await workspace.close('host:a', 'others');
   expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:a']);
-  workspace.close('host:a', 'all');
+  await workspace.close('host:a', 'all');
   expect(workspace.tabs).toEqual([]);
   expect(workspace.active).toBe('');
   expect(workspace.current).toBeUndefined();
 });
 
-it('switches module menus without changing the active page or host context', () => {
+it('switches module menus without changing the active page or host context', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
-  workspace.selectModule('tools');
+  workspace.selectModule('plugins');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
   workspace.navigate('batch');
   workspace.navigate('network');
@@ -141,9 +156,9 @@ it('switches module menus without changing the active page or host context', () 
   expect(workspace.current?.view).toBe('settings');
   workspace.selectModule('hosts');
   expect(workspace.current?.view).toBe('settings');
-  workspace.selectModule('tools');
+  workspace.selectModule('plugins');
   expect(workspace.current?.view).toBe('settings');
-  expect(workspace.module).toBe('tools');
+  expect(workspace.module).toBe('plugins');
   expect(workspace.hostId).toBe('a');
   workspace.selectModule('assets');
   expect(workspace.current?.view).toBe('settings');
@@ -152,26 +167,28 @@ it('switches module menus without changing the active page or host context', () 
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
 });
 
-it('does not choose another page or create a default when selecting a module after a tab closes', () => {
+it('does not choose another page or create a default when selecting a module after a tab closes', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('batch');
   workspace.navigate('network');
   workspace.navigate('credentials');
-  workspace.close('network:');
-  workspace.selectModule('tools');
-  expect(workspace.module).toBe('tools');
+  await workspace.close('extension:cn.hiboot.plugins.network:network:');
+  workspace.selectModule('plugins');
+  expect(workspace.module).toBe('plugins');
   expect(workspace.current?.view).toBe('credentials');
-  expect(workspace.tabs.some((tab) => tab.view === 'batch')).toBe(true);
-  workspace.close('batch:');
-  workspace.selectModule('tools');
+  expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.batch')).toBe(true);
+  await workspace.close('extension:cn.hiboot.plugins.batch:batch:');
+  workspace.selectModule('plugins');
   expect(workspace.current?.view).toBe('credentials');
-  workspace.selectModule('tools');
-  expect(workspace.tabs.filter((tab) => tab.view === 'batch')).toHaveLength(0);
+  workspace.selectModule('plugins');
+  expect(workspace.tabs.filter((tab) => tab.pluginId === 'cn.hiboot.plugins.batch')).toHaveLength(
+    0,
+  );
   workspace.activate('credentials:');
   expect(workspace.module).toBe('assets');
 });
 
-it.each(['hosts', 'tools', 'assets', 'system'] as const)(
+it.each(['hosts', 'plugins', 'assets', 'system'] as const)(
   'selects the %s module without opening or selecting any page',
   (id) => {
     const workspace = useWorkspaceStore();
@@ -184,12 +201,12 @@ it.each(['hosts', 'tools', 'assets', 'system'] as const)(
   },
 );
 
-it('keeps the current page and selected module when an unrelated inactive tab is closed', () => {
+it('keeps the current page and selected module when an unrelated inactive tab is closed', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('terminals', 'a');
   workspace.navigate('files', 'b');
   workspace.selectModule('assets');
-  workspace.close('host:a');
+  await workspace.close('host:a');
   expect(workspace.module).toBe('assets');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'b' });
   expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:b']);

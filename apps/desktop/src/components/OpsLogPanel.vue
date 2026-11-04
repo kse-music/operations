@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
-import { computed, onBeforeUnmount, ref, shallowRef, triggerRef, nextTick } from 'vue';
+import { computed, inject, onBeforeUnmount, ref, shallowRef, triggerRef, nextTick } from 'vue';
 import { opsApi } from '../services/ops';
+import { pluginServerServices } from '../services/plugin-server-surface';
+const api = inject(pluginServerServices, null)?.operations ?? opsApi;
 import { LogBuffer } from '../services/log-buffer';
 import { errorMessage } from '../services/ipc';
 import type { LogInput, LogSession } from '../types/ops';
@@ -56,7 +58,7 @@ async function open(input: LogInput, title: string): Promise<void> {
   tabs.value = [...tabs.value, tab];
   active.value = tab.key;
   try {
-    const opening = opsApi.logOpen(props.sessionId, input, (event) => {
+    const opening = api.logOpen(props.sessionId, input, (event) => {
       if (disposed) return;
       if (event.type === 'state') {
         tab.state = event.state;
@@ -72,7 +74,7 @@ async function open(input: LogInput, title: string): Promise<void> {
           triggerRef(tabs);
           await nextTick();
           const session = await opening;
-          await opsApi.logAck(session.id, event.sequence);
+          await api.logAck(session.id, event.sequence);
         })().catch((cause) => {
           if (!disposed && tabs.value.includes(tab)) {
             tab.message = errorMessage(cause);
@@ -83,7 +85,7 @@ async function open(input: LogInput, title: string): Promise<void> {
     });
     const result = await opening;
     tab.session = result;
-    if (disposed || !tabs.value.includes(tab)) await opsApi.logClose(result.id);
+    if (disposed || !tabs.value.includes(tab)) await api.logClose(result.id);
     triggerRef(tabs);
   } catch (cause) {
     tab.state = 'failed';
@@ -96,7 +98,7 @@ async function toggle(): Promise<void> {
   const tab = current.value;
   if (!tab?.session) return;
   try {
-    await opsApi.logPause(tab.session.id, tab.state !== 'paused');
+    await api.logPause(tab.session.id, tab.state !== 'paused');
   } catch (cause) {
     error.value = errorMessage(cause);
   }
@@ -105,7 +107,7 @@ async function close(key: string): Promise<void> {
   const tab = tabs.value.find((t) => t.key === key);
   if (!tab) return;
   try {
-    if (tab.session) await opsApi.logClose(tab.session.id);
+    if (tab.session) await api.logClose(tab.session.id);
     tabs.value = tabs.value.filter((t) => t.key !== key);
     if (active.value === key) active.value = tabs.value.at(-1)?.key ?? '';
   } catch (cause) {
@@ -135,7 +137,7 @@ onBeforeUnmount(() => {
   disposed = true;
   for (const tab of tabs.value)
     if (tab.session)
-      void opsApi.logClose(tab.session.id).catch(() => {
+      void api.logClose(tab.session.id).catch(() => {
         /* The owner disconnect/exit path also cancels streams. */
       });
   tabs.value = [];

@@ -8,10 +8,13 @@ import { errorMessage } from '../services/ipc';
 import { messages, type WorkspaceView } from '../types/product';
 import type { Entry } from '../types/automation';
 import { hostDisplayName } from '../types/hosts';
+import { usePluginsStore } from '../stores/plugins';
+const plugins = usePluginsStore();
 const emit = defineEmits<{
   close: [];
   selectHost: [hostId: string];
   navigate: [view: WorkspaceView, hostId?: string, entryId?: string];
+  plugin: [id: string, contribution: string, hostId: string];
 }>();
 const hosts = useHostsStore(),
   query = ref(''),
@@ -22,14 +25,16 @@ const hosts = useHostsStore(),
 const results = computed(() => {
   const q = query.value.trim().toLowerCase();
   return [
-    ...Object.entries(messages['zh-CN']).map(([view, name]) => ({
-      key: view,
-      kind: 'view',
-      name: `工作区 · ${name}`,
-      view: view as WorkspaceView,
-      hostId: hosts.selectedId ?? '',
-      entryId: '',
-    })),
+    ...Object.entries(messages['zh-CN'])
+      .filter(([view]) => view !== 'extension')
+      .map(([view, name]) => ({
+        key: view,
+        kind: 'view',
+        name: `工作区 · ${name}`,
+        view: view as WorkspaceView,
+        hostId: hosts.selectedId ?? '',
+        entryId: '',
+      })),
     ...(hosts.catalog?.hosts ?? []).map((h) => ({
       key: h.id,
       kind: 'host',
@@ -46,6 +51,17 @@ const results = computed(() => {
       hostId: hosts.selectedId ?? '',
       entryId: e.id,
     })),
+    ...plugins.extensions
+      .filter((e) => e.kind === 'command')
+      .map((e) => ({
+        key: `${e.pluginId}:${e.id}`,
+        kind: 'plugin',
+        name: `插件命令 · ${e.pluginName} · ${e.label}`,
+        view: 'extension' as WorkspaceView,
+        hostId: hosts.selectedId ?? '',
+        entryId: e.id,
+        pluginId: e.pluginId,
+      })),
   ]
     .filter((r) => !q || r.name.toLowerCase().includes(q))
     .slice(0, 50);
@@ -54,6 +70,8 @@ function choose(n: number) {
   const r = results.value[n];
   if (r) {
     if (r.kind === 'host') emit('selectHost', r.hostId);
+    else if (r.kind === 'plugin' && 'pluginId' in r)
+      emit('plugin', String(r.pluginId), r.entryId, r.hostId);
     else emit('navigate', r.view, r.hostId, r.entryId);
     emit('close');
   }

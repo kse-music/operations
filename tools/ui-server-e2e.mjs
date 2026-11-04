@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
+import { navigateWorkspace } from './ui-navigation.mjs';
 
 // UI-only fixtures. Does not connect to a server or replace production data.
+const packages = await Promise.all(
+  ['resources', 'docker', 'processes', 'services', 'logs'].map(async (name) => ({
+    manifest: JSON.parse(await readFile(`plugins/system/${name}/manifest.json`, 'utf8')),
+    ui: JSON.parse(await readFile(`plugins/system/${name}/ui.json`, 'utf8')),
+  })),
+);
 const output = process.env.SERVERDECK_SERVER_OUTPUT ?? '.local/server-management/browser';
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({
@@ -25,8 +32,68 @@ try {
     await page.goto(process.env.SERVERDECK_SERVER_URL ?? 'http://127.0.0.1:1429');
     await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
     await page.evaluate(
-      async ({ theme }) => {
+      async ({ theme, packages }) => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+        const { usePluginsStore } = await import('/src/stores/plugins.ts');
+        const { pluginsApi } = await import('/src/services/plugins.ts');
+        const plugins = usePluginsStore(pinia);
+        let catalog = packages.map(({ manifest }) => ({
+          manifest,
+          source: 'system',
+          enabled: true,
+          revision: `fixture-${manifest.id}`,
+          trust: 'local_development_unverified',
+          packageDigest: 'fixture',
+          previousVersion: null,
+        }));
+        catalog.push({
+          ...catalog[0],
+          source: 'user',
+          manifest: { ...catalog[0].manifest, id: 'dev.upload', name: '上传资源插件' },
+        });
+        pluginsApi.list = async () => catalog.map((p) => ({ ...p }));
+        pluginsApi.permissions = async (id) => ({
+          version: 1,
+          pluginId: id,
+          pluginVersion: '1.0.0',
+          revision: `fixture-${id === 'dev.upload' ? 'cn.hiboot.plugins.resources' : id}`,
+          packageDigest: 'fixture',
+          publisher: null,
+          permissions: catalog.find((p) => p.manifest.id === id).manifest.permissions,
+          operations: [
+            'ui.contribute',
+            'metrics.read',
+            'system.read',
+            'system.manage',
+            'system.shell',
+            'logs.read',
+            'sftp.read',
+          ],
+          readRoots: ['/'],
+          writeRoots: [],
+        });
+        pluginsApi.statuses = async () => [];
+        pluginsApi.ui = async (id) =>
+          packages.find(
+            (p) => p.manifest.id === (id === 'dev.upload' ? 'cn.hiboot.plugins.resources' : id),
+          ).ui;
+        pluginsApi.context = async () => {};
+        pluginsApi.activate = async (id) => ({ id, state: 'active', errorCode: null });
+        pluginsApi.setEnabled = async (id, enabled) => {
+          const p = catalog.find((p) => p.manifest.id === id);
+          p.enabled = enabled;
+          return { ...p };
+        };
+        pluginsApi.uninstall = async (id) => {
+          catalog = catalog.filter((p) => p.manifest.id !== id);
+        };
+        pluginsApi.revoke = async () => {};
+        pluginsApi.grant = async (id, input) => ({
+          ...(await pluginsApi.permissions(id)),
+          ...input,
+        });
+        plugins.stop();
+        await plugins.refresh();
         const { useHostsStore } = await import('/src/stores/hosts.ts');
         const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
         const { useOpsStore } = await import('/src/stores/ops.ts');
@@ -194,10 +261,29 @@ try {
                 }))
               : [],
         });
+        window.__pluginCalls = [];
+        pluginsApi.call = async (id, payload) => {
+          const operation = JSON.parse(payload.values.request);
+          window.__pluginCalls.push({ id, operation });
+          let result = null;
+          if (operation.kind === 'metrics_open') result = await monitorApi.open();
+          else if (operation.kind === 'metrics_snapshot') result = await monitorApi.snapshot();
+          else if (operation.kind === 'metrics_visible') await monitorApi.visible();
+          else if (operation.kind === 'system_query')
+            result = await opsApi.query('ops-ui', operation.request);
+          else if (operation.kind === 'system_feedback') result = [];
+          else throw new Error('Unexpected UI fixture capability ' + operation.kind);
+          return { protocolVersion: 1, result, error: null };
+        };
         document.documentElement.dataset.theme = theme;
-        useWorkspaceStore(pinia).navigate('server', host.id);
+        await useWorkspaceStore(pinia).openPlugin(
+          'cn.hiboot.plugins.resources',
+          'server',
+          host.id,
+          'overview',
+        );
       },
-      { theme },
+      { theme, packages },
     );
     await page.getByTestId('monitor-cpu').waitFor();
     assert.equal(
@@ -213,9 +299,9 @@ try {
       (await page.locator('.workspace-header .host-tools button').allTextContents()).map((x) =>
         x.trim(),
       ),
-      ['SSH 终端', 'SFTP 文件', '服务器管理'],
+      ['SSH 终端', 'SFTP 文件', '工具'],
     );
-    assert.equal(await page.locator('.server-tabs [role=tab]').count(), 9);
+    assert.equal(await page.locator('.server-tabs [role=tab]').count(), 3);
     assert.equal(await page.locator('.trend-chart').count(), 2);
     assert.equal(await page.getByRole('heading', { name: '磁盘与挂载点', exact: true }).count(), 0);
     const overviewScroll = await page
@@ -235,7 +321,8 @@ try {
     );
     await page.getByRole('tab', { name: '网络', exact: true }).click();
     assert.equal(await page.locator('.trend-chart').count(), 2);
-    await page.getByRole('tab', { name: '进程', exact: true }).click();
+    await page.getByRole('tab', { name: '资源概览', exact: true }).click();
+    await page.getByRole('button', { name: '查看资源占用进程', exact: true }).click();
     await page.locator('[data-ops-target="1000"]').waitFor();
     assert(
       await page.locator('.ops-table').evaluate((el) => el.scrollHeight > el.clientHeight),
@@ -258,6 +345,127 @@ try {
     assert(await confirm.getByRole('button', { name: '确认执行', exact: true }).isDisabled());
     await confirm.getByRole('button', { name: '取消', exact: true }).click();
     await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await page.locator('[data-module="plugins"]').click();
+    if (!(await page.locator('.sidebar').isVisible()))
+      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+    const navigation = page.locator('[aria-label="运维工具导航"]');
+    assert.equal(await navigation.locator('[data-plugin-id]').count(), 6);
+    assert.equal(await navigation.locator('.plugin-source').count(), 0);
+    assert.equal(
+      await navigation.getByRole('button', { name: '插件管理', exact: true }).count(),
+      0,
+    );
+    await navigateWorkspace(page, '插件管理');
+    if (width <= 720) {
+      const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
+      if (await collapse.isVisible()) await collapse.click();
+    }
+    const manager = page.locator('.plugin-manager');
+    await manager.locator('[data-plugin-id]').nth(5).waitFor();
+    assert.equal(await manager.locator('[data-plugin-id]').count(), 6);
+    for (const id of ['cn.hiboot.plugins.docker', 'dev.upload']) {
+      const card = manager.locator(`[data-plugin-id="${id}"]`);
+      assert.equal(await card.getByRole('button', { name: '权限', exact: true }).count(), 0);
+      assert.equal(await card.locator('.plugin-row-actions button').count(), 1);
+      assert.equal(await card.locator('.plugin-source').count(), 0);
+      assert.equal(await card.getByRole('button', { name: /^(禁用|启用)$/ }).count(), 0);
+    }
+    assert.equal(await manager.locator('[aria-label="插件界面语言"]').count(), 0);
+    await page.screenshot({ path: `${output}/${name}-standard-manager.png` });
+    await manager
+      .locator('[data-plugin-id="cn.hiboot.plugins.docker"]')
+      .getByRole('button', { name: 'Docker 管理', exact: true })
+      .click();
+    await page.locator('.plugin-page').waitFor();
+    await page.getByRole('button', { name: '插件设置', exact: true }).click();
+    await page.locator('[aria-label="插件设置"] form').waitFor();
+    assert((await page.locator('.plugin-page > header').textContent()).includes('系统内置'));
+    const settings = page.locator('[aria-label="插件设置"]');
+    assert.equal(await settings.getByText('允许访问的主机', { exact: true }).count(), 0);
+    for (const field of await settings.locator('form input').all()) {
+      assert(await field.isChecked());
+      assert(await field.isDisabled());
+    }
+    assert.equal(
+      await settings.getByRole('button', { name: '保存并授权', exact: true }).count(),
+      0,
+    );
+    const widths = await page.locator('.plugin-page').evaluate((el) => ({
+      page: el.getBoundingClientRect().width,
+      area:
+        el.parentElement.clientWidth -
+        parseFloat(getComputedStyle(el.parentElement).paddingLeft) -
+        parseFloat(getComputedStyle(el.parentElement).paddingRight),
+    }));
+    assert(
+      Math.abs(widths.page - widths.area) <= 1,
+      `${name}: plugin settings must fill the workspace`,
+    );
+    await settings.getByRole('button', { name: '禁用插件', exact: true }).click();
+    const disable = page.getByRole('dialog', { name: '禁用插件？', exact: true });
+    await disable.getByRole('button', { name: '取消', exact: true }).click();
+    await settings.getByRole('button', { name: '禁用插件', exact: true }).click();
+    await disable.getByRole('button', { name: '明确确认', exact: true }).click();
+    await settings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
+    const tools = page
+      .locator('.workspace-header')
+      .getByRole('button', { name: '工具', exact: true });
+    await tools.click();
+    const toolMenu = page.getByRole('menu', { name: '已启用的插件', exact: true });
+    assert.equal(await toolMenu.getByRole('menuitem').count(), 5);
+    assert.equal(
+      await toolMenu.getByRole('menuitem', { name: 'Docker 管理', exact: true }).count(),
+      0,
+    );
+    assert.equal(
+      await toolMenu.getByRole('menuitem', { name: '上传资源插件', exact: true }).count(),
+      1,
+    );
+    await page.screenshot({ path: `${output}/${name}-tools-menu.png` });
+    await toolMenu.press('Escape');
+    await settings.getByRole('button', { name: '启用插件', exact: true }).click();
+    await settings.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
+    await page.screenshot({ path: `${output}/${name}-plugin-settings.png` });
+    await tools.click();
+    await toolMenu.getByRole('menuitem', { name: 'Docker 管理', exact: true }).click();
+    await page.getByRole('button', { name: '返回功能', exact: true }).click();
+    await navigateWorkspace(page, '插件管理');
+
+    await page.locator('[data-module="plugins"]').click();
+    if (!(await page.locator('.sidebar').isVisible()))
+      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+    await page.locator('[aria-label="运维工具导航"] [data-plugin-id="dev.upload"]').click();
+    await page.getByTestId('monitor-cpu').waitFor();
+    assert((await page.locator('.plugin-page > header').textContent()).includes('用户上传'));
+    await navigateWorkspace(page, '插件管理');
+    if (width <= 720) {
+      const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
+      if (await collapse.isVisible()) await collapse.click();
+    }
+    const upload = manager.locator('[data-plugin-id="dev.upload"]');
+    await upload.getByRole('button', { name: '卸载 上传资源插件', exact: true }).click();
+    await page
+      .getByRole('dialog', { name: '卸载插件？', exact: true })
+      .getByRole('button', { name: '确认卸载', exact: true })
+      .click();
+    await upload.waitFor({ state: 'detached' });
+    assert.equal(await manager.locator('[data-plugin-id]').count(), 5);
+    const calls = await page.evaluate(() => window.__pluginCalls);
+    assert(
+      calls.some((call) => call.id === 'dev.upload' && call.operation.kind === 'metrics_snapshot'),
+    );
+    assert(
+      calls.some(
+        (call) =>
+          call.id === 'cn.hiboot.plugins.resources' && call.operation.kind === 'metrics_snapshot',
+      ),
+    );
+    assert(
+      calls.some(
+        (call) =>
+          call.id === 'cn.hiboot.plugins.processes' && call.operation.request?.kind === 'processes',
+      ),
+    );
     assert.equal(
       await page.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,
@@ -266,9 +474,10 @@ try {
     results.push({
       name,
       overviewScroll,
-      tabs: 9,
+      resourceTabs: 3,
       dialogs: 'passed',
       boundedLists: 'passed',
+      unifiedManagementAndIndividualSource: 'passed',
       pageErrors: errors,
     });
     await page.close();

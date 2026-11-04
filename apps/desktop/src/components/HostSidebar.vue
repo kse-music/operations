@@ -13,6 +13,8 @@ import {
 } from '@lucide/vue';
 const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
+import { usePluginsStore } from '../stores/plugins';
+const plugins = usePluginsStore();
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
@@ -41,6 +43,7 @@ const emit = defineEmits<{
   export: [];
   select: [host: Host];
   saved: [host: Host];
+  plugin: [id: string, contribution: string, hostId: string];
 }>();
 const collapsed = ref<string[]>([]);
 const tree = ref<HTMLElement>();
@@ -194,7 +197,15 @@ function toggle(id: string): void {
 
 type ContextTarget = { kind: 'folder'; id: string | null } | { kind: 'host'; id: string };
 type MenuAction =
-  'newHost' | 'newFolder' | 'rename' | 'deleteFolder' | 'connect' | 'edit' | 'copy' | 'deleteHost';
+  | 'newHost'
+  | 'newFolder'
+  | 'rename'
+  | 'deleteFolder'
+  | 'connect'
+  | 'edit'
+  | 'copy'
+  | 'deleteHost'
+  | `plugin:${string}:${string}`;
 const context = ref<{ target: ContextTarget; x: number; y: number }>();
 const menuElement = ref<HTMLElement>();
 let contextTrigger: HTMLElement | undefined;
@@ -214,6 +225,9 @@ const menuItems = computed<{ key: MenuAction; label: string; danger?: boolean }[
       { key: 'connect', label: '连接主机' },
       { key: 'edit', label: '编辑主机' },
       { key: 'copy', label: '复制主机' },
+      ...plugins.extensions
+        .filter((e) => e.kind === 'host_menu')
+        .map((e) => ({ key: `plugin:${e.pluginId}:${e.id}` as MenuAction, label: e.label })),
       { key: 'deleteHost', label: '删除主机', danger: true },
     ];
   return [
@@ -313,7 +327,10 @@ async function runContext(action: MenuAction): Promise<void> {
     store.error = '目标主机已不存在，请刷新后重试。';
     return;
   }
-  if (action === 'connect') {
+  if (action.startsWith('plugin:')) {
+    const [, id, contribution] = action.split(':');
+    if (id && contribution) emit('plugin', id, contribution, host.id);
+  } else if (action === 'connect') {
     store.selectedId = host.id;
     emit('select', host);
   } else if (action === 'edit') controls.get(host.id)?.edit();

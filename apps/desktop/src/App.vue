@@ -47,10 +47,15 @@ import {
 } from './types/product';
 import type { WorkspaceCloseScope, WorkspaceTab } from './stores/workspace';
 import { isMonitorSection } from './types/server';
+import { serverPluginFor } from './services/server-plugins';
 import GlobalSearch from './components/GlobalSearch.vue';
+import { usePluginsStore } from './stores/plugins';
+import PluginDialogs from './components/PluginDialogs.vue';
+const PluginsView = defineAsyncComponent(() => import('./views/PluginsView.vue'));
+const PluginPage = defineAsyncComponent(() => import('./views/PluginPage.vue'));
+const plugins = usePluginsStore();
 const TaskCenterView = defineAsyncComponent(() => import('./views/TaskCenterView.vue'));
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
-const AssistantView = defineAsyncComponent(() => import('./views/AssistantView.vue'));
 const ModelsView = defineAsyncComponent(() => import('./views/ModelsView.vue'));
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
@@ -84,7 +89,9 @@ const currentHost = computed(() => {
             ? isMonitorSection(workspace.current?.section ?? 'overview')
               ? 'monitor'
               : 'operations'
-            : '';
+            : module === 'extension'
+              ? 'operations'
+              : '';
   const terminal = terminals.panes.find((p) => p.key === terminals.focused && p.host?.id === id);
   const snapshot =
     kind === 'terminal'
@@ -120,7 +127,11 @@ const view = computed<View | null>({
     if (value) navigate(value);
   },
 });
-const isHostWorkspace = computed(() => view.value !== null && hostViews.has(view.value));
+const isHostWorkspace = computed(
+  () =>
+    view.value !== null &&
+    (hostViews.has(view.value) || (view.value === 'extension' && !!workspace.current?.hostId)),
+);
 const settingsCategory = computed(() =>
   settingsCategories.find((item) => item.view === view.value),
 );
@@ -129,10 +140,16 @@ const settingsOpen = computed(() =>
 );
 const showSidebar = computed(() => sidebarOpen.value);
 const showHostTree = computed(() => workspace.module === 'hosts');
-const cachedTools = computed(() =>
-  (['automation', 'network', 'batch'] as const)
-    .filter((tool) => workspace.tabs.some((tab) => tab.view === tool))
-    .map((tool) => `${tool[0]!.toUpperCase()}${tool.slice(1)}View`),
+const cachedToolTabs = computed(() =>
+  workspace.tabs.filter((tab) => {
+    const contribution = plugins.installed
+      .find((plugin) => plugin.manifest.id === tab.pluginId)
+      ?.manifest.contributions.find((entry) => entry.id === tab.contributionId);
+    return contribution?.kind === 'tool' && contribution.tool !== 'assistant';
+  }),
+);
+const activeCachedTool = computed(() =>
+  cachedToolTabs.value.some((tab) => tab.key === workspace.active),
 );
 function navigate(
   value: View,
@@ -165,6 +182,8 @@ function setContext(hostId: string, connectShell = false) {
     navigate(tab.view, tab.hostId, tab.section);
 }
 function tabName(tab: WorkspaceTab) {
+  if (tab.pluginId)
+    return `${plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件'}${tab.hostId ? ` · ${hostDisplayName(knownHost(tab.hostId)) || '已删除主机'}` : ''}`;
   return hostViews.has(tab.view)
     ? tab.hostId
       ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机'
@@ -348,7 +367,6 @@ function sidebarKey(event: KeyboardEvent) {
 }
 
 const automation = useAutomationStore();
-const AutomationView = defineAsyncComponent(() => import('./views/AutomationView.vue'));
 function currentConfiguration(host: Host): boolean {
   const configured = store.catalog?.hosts.find((h) => h.id === host.id);
   if (!configured || !sameHostConnection(host, configured)) {
@@ -365,8 +383,6 @@ function openAutomation(host: Host): void {
   automationHost.value = host.id;
   navigate('automation');
 }
-const NetworkView = defineAsyncComponent(() => import('./views/NetworkView.vue'));
-const BatchView = defineAsyncComponent(() => import('./views/BatchView.vue'));
 function openNetwork(host: Host): void {
   if (!currentConfiguration(host)) return;
   networkHost.value = host.id;
@@ -470,6 +486,7 @@ onMounted(async () => {
     await store.load();
     automation.start();
     background.start();
+    plugins.start();
     window.addEventListener('keydown', globalShortcut, true);
     window.addEventListener('resize', revealActiveTab);
     void files.poll();
@@ -484,7 +501,7 @@ onMounted(async () => {
   }
 });
 function protectDraft(event: BeforeUnloadEvent): void {
-  if (files.dirty) {
+  if (files.dirty || plugins.dirtyCount) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -498,11 +515,71 @@ onBeforeUnmount(() => {
   document.removeEventListener('scroll', dismissTabMenu, true);
   automation.stop();
   background.stop();
+  plugins.stop();
   window.removeEventListener('keydown', globalShortcut, true);
   window.removeEventListener('resize', revealActiveTab);
   window.removeEventListener('beforeunload', protectDraft);
   releaseExit?.();
 });
+function openPlugin(
+  id: string,
+  contribution: string,
+  hostId = currentHostId.value,
+  section?: WorkspaceTab['section'],
+  logIntent?: WorkspaceTab['logIntent'],
+): void {
+  const installed = plugins.installed.find((p) => p.manifest.id === id);
+  const entry = installed?.manifest.contributions.find((entry) => entry.id === contribution);
+  if (installed)
+    void workspace
+      .openPlugin(
+        id,
+        contribution,
+        ['settings', 'tool'].includes(entry?.kind ?? '') ? '' : hostId,
+        section,
+        logIntent,
+      )
+      .catch((cause) => {
+        plugins.error = errorMessage(cause);
+      });
+}
+async function surfaceNavigate(
+  section: NonNullable<WorkspaceTab['section']>,
+  intent?: WorkspaceTab['logIntent'],
+) {
+  try {
+    const entry = await serverPluginFor(currentHostId.value, section);
+    if (entry) openPlugin(entry.pluginId, entry.id, currentHostId.value, section, intent);
+    else {
+      notifications.push('请先在插件管理中启用并授权提供此功能的插件。', true);
+      navigate('plugins');
+    }
+  } catch (cause) {
+    plugins.error = errorMessage(cause);
+  }
+}
+watch(
+  () => JSON.stringify([plugins.installed, plugins.grants]),
+  (next, previous) => {
+    const old = previous ? (JSON.parse(previous)[1] as typeof plugins.grants) : {};
+    const invalid = workspace.tabs.filter(
+      (tab) => tab.pluginId && !plugins.installed.some((p) => p.manifest.id === tab.pluginId),
+    );
+    for (const tab of invalid) {
+      plugins.forget(tab.key);
+      void workspace.close(tab.key);
+    }
+    for (const tab of workspace.tabs) {
+      if (
+        tab.pluginId &&
+        JSON.stringify(old[tab.pluginId]) !== JSON.stringify(plugins.grants[tab.pluginId])
+      ) {
+        plugins.forget(tab.key);
+        plugins.clearPlugin(tab.pluginId);
+      }
+    }
+  },
+);
 watch(
   () => terminals.panes.length,
   (count) => {
@@ -553,15 +630,18 @@ watch(
     <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
       <AppNavigation
         :active="view"
+        :active-plugin="workspace.current?.pluginId"
         :module="workspace.module"
         :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
         @navigate="navigate($event)"
+        @plugin="openPlugin"
         @collapse="toggleSidebar"
       >
         <HostSidebar
           v-show="showHostTree"
           :active="showHostTree && sidebarOpen"
           :local-active="view === 'terminals' && !currentHostId"
+          @plugin="openPlugin"
           @local-terminal="navigate('terminals', '')"
           @create="openHost($event)"
           @import="importing = true"
@@ -607,6 +687,7 @@ watch(
           :key="tab.key"
           :data-host-id="hostViews.has(tab.view) ? tab.hostId : undefined"
           :data-view="tab.view"
+          :data-plugin-id="tab.pluginId"
           class="workspace-tab"
           :class="{
             active: workspace.active === tab.key,
@@ -645,6 +726,7 @@ watch(
           :active="view"
           :local="false"
           @navigate="navigate($event)"
+          @plugin="openPlugin"
         />
       </div>
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
@@ -666,31 +748,26 @@ watch(
             <button class="button" @click="openHost()">新建主机</button>
           </div>
         </section>
-        <KeepAlive :include="cachedTools">
-          <AutomationView
-            v-if="view === 'automation'"
-            :host-id="automationHost"
-            :entry-id="entryIntent"
+        <KeepAlive v-for="tab in cachedToolTabs" :key="tab.key">
+          <PluginPage
+            v-if="workspace.active === tab.key"
+            :key="tab.key"
+            :plugin-id="tab.pluginId!"
+            :contribution-id="tab.contributionId!"
+            host-id=""
+            :tab-key="tab.key"
+            :tool-intent="{ automationHost, entryId: entryIntent, networkHost, networkRequest }"
             @intent-consumed="entryIntent = ''"
+            @contribution="(contribution) => openPlugin(tab.pluginId!, contribution)"
           />
-          <NetworkView
-            v-else-if="view === 'network'"
-            :host-id="networkHost"
-            :request-id="networkRequest"
-          />
-          <BatchView v-else-if="view === 'batch'" />
         </KeepAlive>
         <ServerView
           v-if="view === 'server'"
           :key="`server:${currentHostId}`"
           :host-id="currentHostId"
           :initial-section="workspace.current?.section"
-          @section="
-            (s) => {
-              if (workspace.current?.view === 'server') workspace.current.section = s;
-            }
-          "
-          @shell="containerTerminal"
+          @plugin="openPlugin"
+          @manage="navigate('plugins')"
         />
         <FilesView
           v-else-if="view === 'files'"
@@ -699,7 +776,35 @@ watch(
           @terminal="fileTerminal"
         />
         <BackupView v-else-if="view === 'backup'" />
-        <AssistantView v-else-if="view === 'assistant'" />
+        <PluginsView v-else-if="view === 'plugins'" @plugin="openPlugin" />
+        <PluginPage
+          v-else-if="
+            view === 'extension' &&
+            !activeCachedTool &&
+            workspace.current?.pluginId &&
+            workspace.current?.contributionId
+          "
+          :key="workspace.active"
+          :plugin-id="workspace.current.pluginId"
+          :contribution-id="workspace.current.contributionId"
+          :host-id="workspace.current.hostId"
+          :tab-key="workspace.active"
+          :initial-section="workspace.current.section"
+          :log-intent="workspace.current.logIntent"
+          :tool-intent="{ automationHost, entryId: entryIntent, networkHost, networkRequest }"
+          @intent-consumed="entryIntent = ''"
+          @section="
+            (section) => {
+              if (workspace.current) workspace.current.section = section;
+            }
+          "
+          @surface-navigate="surfaceNavigate"
+          @shell="containerTerminal"
+          @host="
+            (id) => openPlugin(workspace.current!.pluginId!, workspace.current!.contributionId!, id)
+          "
+          @contribution="(contribution) => openPlugin(workspace.current!.pluginId!, contribution)"
+        />
         <ModelsView v-else-if="view === 'models'" />
         <TaskCenterView v-else-if="view === 'tasks'" @navigate="navigate" />
         <AboutView v-else-if="view === 'about'" />
@@ -740,11 +845,13 @@ watch(
     </footer>
   </div>
   <NotificationToasts />
+  <PluginDialogs />
   <GlobalSearch
     v-if="searching"
     @close="searching = false"
     @navigate="fromSearch"
     @select-host="setContext"
+    @plugin="openPlugin"
   />
   <RemoteEditor v-if="files.document" />
   <Modal

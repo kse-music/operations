@@ -1,0 +1,171 @@
+{
+  "uiVersion": 1,
+  "title": {
+    "zh-CN": "主机信息",
+    "en-US": "Host Info"
+  },
+  "pages": [
+    {
+      "id": "host",
+      "title": {
+        "zh-CN": "当前主机",
+        "en-US": "Current host"
+      },
+      "initialAction": "host",
+      "fields": [],
+      "actions": [
+        {
+          "id": "host",
+          "label": {
+            "zh-CN": "读取主机信息",
+            "en-US": "Read host"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "diagnose",
+          "label": {
+            "zh-CN": "只读诊断 uname -a",
+            "en-US": "Read-only uname -a"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null
+    },
+    {
+      "id": "navigation",
+      "title": {
+        "zh-CN": "当前主机",
+        "en-US": "Current host"
+      },
+      "initialAction": "host",
+      "fields": [],
+      "actions": [
+        {
+          "id": "host",
+          "label": {
+            "zh-CN": "读取主机信息",
+            "en-US": "Read host"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "diagnose",
+          "label": {
+            "zh-CN": "只读诊断 uname -a",
+            "en-US": "Read-only uname -a"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null
+    },
+    {
+      "id": "menu",
+      "title": {
+        "zh-CN": "当前主机",
+        "en-US": "Current host"
+      },
+      "initialAction": "host",
+      "fields": [],
+      "actions": [
+        {
+          "id": "host",
+          "label": {
+            "zh-CN": "读取主机信息",
+            "en-US": "Read host"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "diagnose",
+          "label": {
+            "zh-CN": "只读诊断 uname -a",
+            "en-US": "Read-only uname -a"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null
+    },
+    {
+      "id": "diagnose",
+      "title": {
+        "zh-CN": "当前主机",
+        "en-US": "Current host"
+      },
+      "initialAction": "host",
+      "fields": [],
+      "actions": [
+        {
+          "id": "host",
+          "label": {
+            "zh-CN": "读取主机信息",
+            "en-US": "Read host"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "diagnose",
+          "label": {
+            "zh-CN": "只读诊断 uname -a",
+            "en-US": "Read-only uname -a"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null
+    },
+    {
+      "id": "settings",
+      "title": {
+        "zh-CN": "插件设置",
+        "en-US": "Plugin settings"
+      },
+      "initialAction": "settings_read",
+      "fields": [
+        {
+          "id": "note",
+          "label": {
+            "zh-CN": "备注（仅保存于本插件）",
+            "en-US": "Note (this plugin only)"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        }
+      ],
+      "actions": [
+        {
+          "id": "settings_read",
+          "label": {
+            "zh-CN": "读取设置",
+            "en-US": "Read settings"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "settings_write",
+          "label": {
+            "zh-CN": "保存设置",
+            "en-US": "Save settings"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null
+    }
+  ]
+}

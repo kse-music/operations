@@ -1,13 +1,14 @@
 import { ref, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
-import { aiApi } from '../services/ai';
+import { useAssistantApi } from '../services/plugin-tool-services';
 import { errorMessage } from '../services/ipc';
 import { hostDisplayName, type Host } from '../types/hosts';
 import type { AiPrepare } from '../types/ai';
 
 const cancelled = () => new DOMException('已停止', 'AbortError');
 export function useAssistantHosts() {
+  const aiApi = useAssistantApi();
   const hosts = useHostsStore(),
     ops = useOpsStore();
   const matched = ref<Host[]>([]),

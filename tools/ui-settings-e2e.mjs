@@ -62,7 +62,7 @@ try {
     assert.equal(await settings.getByRole('tablist').count(), 0);
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      [...categories, '关于'],
+      [...categories, '插件管理', '关于'],
     );
     for (let index = 0; index < categories.length; index++) {
       await select(index);

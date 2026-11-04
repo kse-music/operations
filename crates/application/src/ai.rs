@@ -232,7 +232,7 @@ impl Application {
                 context["server"] = json!({"hostname":binding.hostname,"username":binding.username,"port":binding.port});
             }
             if selection.server || selection.metrics {
-                let snapshot = match self.monitors.snapshot(&binding.session.host_id, None) {
+                let snapshot = match self.latest_monitor_snapshot(&binding.session.host_id) {
                     Ok(snapshot) => snapshot,
                     Err(Error::NotFound) => None,
                     Err(error) => return Err(error),

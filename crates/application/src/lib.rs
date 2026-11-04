@@ -1,16 +1,22 @@
 mod ai;
 mod automation;
+mod bundled_plugins;
 mod files;
 mod hosts;
 mod local_terminal;
 pub mod logging;
 mod monitor;
 mod ops;
+mod plugins;
 mod product;
 mod tasks;
 mod terminal;
 mod terminal_upload;
 pub use hosts::SecureStatus;
+pub use plugins::{
+    Approval as PluginApproval, ContextInput as PluginContextInput, Event as PluginEvent,
+    ToolInput, ToolTicket,
+};
 
 use std::{
     path::PathBuf,
@@ -27,6 +33,9 @@ use tokio::sync::Semaphore;
 
 #[derive(Clone)]
 pub struct Application {
+    plugins: serverdeck_plugin_core::Repository,
+    plugin_runtime: serverdeck_plugin_runtime::Runtime,
+    plugin_host: plugins::state::Host,
     assistant: serverdeck_ai::Assistant,
     terminal_uploads: terminal_upload::TerminalUploads,
     local_terminals: local_terminal::LocalTerminals,
@@ -65,7 +74,11 @@ impl Application {
             terminals.clone(),
             tasks.clone(),
         )?;
+        let plugins = serverdeck_plugin_core::Repository::open(data_directory.join("plugins"))?;
         Ok(Self {
+            plugin_runtime: serverdeck_plugin_runtime::Runtime::new(plugins.clone()),
+            plugin_host: plugins::state::Host::default(),
+            plugins,
             assistant: serverdeck_ai::Assistant::default(),
             terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
@@ -151,12 +164,25 @@ impl Application {
             })
             .await?;
         self.files.transfers.configure(concurrency);
-        self.monitors.configure(interval);
+        self.configure_monitors(interval)?;
         Ok(saved)
     }
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        match self.plugin_host.ids() {
+            Ok(ids) => {
+                for id in ids {
+                    if let Err(error) = self.plugin_stop_resources(&id).await {
+                        tracing::error!(operation="plugin_capability_shutdown", error=%error);
+                    }
+                }
+            }
+            Err(error) => tracing::error!(operation="plugin_capability_shutdown", error=%error),
+        }
+        if let Err(error) = self.plugin_runtime.shutdown().await {
+            tracing::error!(operation = "plugin_shutdown", error = %error);
+        }
         self.assistant.shutdown().await;
         if let Err(error) = self.terminal_uploads.clear() {
             tracing::error!(operation = "terminal_upload_shutdown", error = %error);

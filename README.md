@@ -8,32 +8,32 @@ ServerDeck 是面向开发者和运维人员的本地优先服务器运维桌面
 - **主机与凭据管理**：分组、标签、收藏、搜索、OpenSSH Config 预览导入，以及系统凭据库存储。
 - **SSH 终端**：多标签、分屏、搜索、主题与快捷键设置，支持密码、私钥、SSH Agent、跳板、代理和端口转发。
 - **SFTP 文件管理**：本地/远程双栏浏览、后台上传下载、冲突处理、校验和远程文本编辑。
-- **Linux 监控与运维**：资源指标与趋势、Docker、日志、进程、监听端口和 systemd 服务管理。
+- **Linux 监控与运维**：九个独立标准 WASM 插件提供资源、Docker、进程与端口、系统服务、日志、AI 助手、批量运维、自动运维和网络诊断；顶部统一为“运维工具”，终端 SFTP 右侧工具菜单只列启用项，管理列表仅卸载，启停在插件自己的设置中。全部插件适用于所有主机，内置权限/范围预置且只读，上传权限自行配置。见[内置插件说明](docs/plugins/BUILTIN_PLUGINS.md)。
 - **网络与批量操作**：本机/远端诊断、多主机命令执行和单文件分发。
 - **运维自动化**：命令/脚本库、执行历史和本地计划，执行前预览目标并确认。
-- **模型管理与 AI 助手**：注册、查看、编辑和删除 OpenAI 兼容模型，Key 独立存于系统凭据库；助手直接多轮对话，默认关联全部资产，按问题匹配并连接主机，提供授权上下文、脱敏、Markdown 回答和逐条命令审核。见 [AI 助手说明](docs/AI_ASSISTANT.md)。
+- **模型管理与 AI 助手**：注册、查看、编辑和删除 OpenAI 兼容模型，Key 独立存于系统凭据库；助手直接多轮对话，默认关联全部资产，按问题匹配并连接主机，提供授权上下文、脱敏、Markdown 回答和逐条命令审核。见 [AI 助手说明](docs/guides/AI_ASSISTANT.md)。
 - **统一工作区**：全局搜索、主题与偏好设置，以及不含凭据的配置备份与恢复。
 
-各项功能的完成范围和验证状态见[功能矩阵与测试报告](docs/TEST_REPORT.md)。
+各项功能的完成范围和验证状态见[功能矩阵与测试报告](docs/validation/TEST_REPORT.md)。
 
 ## 版本与平台
 
 当前版本为 **0.1.0-beta.1，未签名测试版**。
 Windows x64 安装与运行已验证，远端验收环境为 Ubuntu 24.04；macOS/Linux 客户端尚未完成构建和实机兼容性验证。当前完整界面语言为简体中文。
 
-依赖安全通告、内存目标和长期稳定性等发布条件尚未全部满足。详细状态见[安全说明](docs/SECURITY.md)和[发布检查表](docs/RELEASE_CHECKLIST.md)。
+依赖安全通告、内存目标和长期稳定性等发布条件尚未全部满足。详细状态见[安全说明](docs/release/SECURITY.md)和[发布检查表](docs/release/RELEASE_CHECKLIST.md)。
 
 ## 安装与快速开始
 
-本仓库提供源码和构建说明，安装器与校验文件不随 Git 仓库分发。Windows 测试安装包可按下方开发说明自行构建；产物位置见[发布检查表](docs/RELEASE_CHECKLIST.md)。
-安装前请阅读[安装与升级说明](docs/USER_GUIDE.md#安装与升级)，当前安装包未签名，SHA256 校验不能替代发布者身份验证。
+本仓库提供源码和构建说明，安装器与校验文件不随 Git 仓库分发。Windows 测试安装包可按下方开发说明自行构建；产物位置见[发布检查表](docs/release/RELEASE_CHECKLIST.md)。
+安装前请阅读[安装与升级说明](docs/guides/USER_GUIDE.md#安装与升级)，当前安装包未签名，SHA256 校验不能替代发布者身份验证。
 
 1. 在凭据管理中配置密码或私钥；使用 SSH Agent 时，先启动系统 Agent 并加载密钥。
 2. 新建主机，填写地址、端口、账号并关联凭据。
 3. 首次连接时，通过可信渠道核对服务器 SHA256 主机密钥指纹，再确认连接。
 4. 在同一主机工作区使用终端、文件、监控及运维模块。
 
-详细操作、升级和数据备份方法见[使用说明](docs/USER_GUIDE.md)。
+详细操作、升级和数据备份方法见[使用说明](docs/guides/USER_GUIDE.md)。
 
 ## 开发
 
@@ -59,7 +59,7 @@ npm run tauri -- dev
 node tools/tauri.mjs build --bundles nsis
 ```
 
-独立调试二进制、原生验收和发布复验步骤见[发布检查表](docs/RELEASE_CHECKLIST.md)。
+独立调试二进制、原生验收和发布复验步骤见[发布检查表](docs/release/RELEASE_CHECKLIST.md)。
 
 ## 测试
 
@@ -74,7 +74,7 @@ npm test
 npm run build
 ```
 
-以上命令用于本地检查，不代表所有平台均已通过。需要系统凭据库、桌面应用或授权 SSH 服务器的测试，另见[原生验收说明](docs/RELEASE_CHECKLIST.md#原生验收)；已执行结果见[测试报告](docs/TEST_REPORT.md)。
+以上命令用于本地检查，不代表所有平台均已通过。需要系统凭据库、桌面应用或授权 SSH 服务器的测试，另见[原生验收说明](docs/release/RELEASE_CHECKLIST.md#原生验收)；已执行结果见[测试报告](docs/validation/TEST_REPORT.md)。
 
 ## 重要限制
 
@@ -84,17 +84,18 @@ npm run build
 - 本地计划依赖应用运行和已有认证连接，退出、休眠或断线时不保证执行。超时、断线或在途取消后，远端任务可能仍在运行，需要人工核实。
 - 配置备份不包含凭据、私钥路径、主机信任、执行历史或自动计划；自行写入脚本和备注的秘密仍需在分享前检查。
 
-完整兼容性与安全边界见[使用说明](docs/USER_GUIDE.md)和[安全说明](docs/SECURITY.md)。
+完整兼容性与安全边界见[使用说明](docs/guides/USER_GUIDE.md)和[安全说明](docs/release/SECURITY.md)。
 
 ## 文档
 
-- [使用说明](docs/USER_GUIDE.md)：安装、连接、日常操作和备份。
-- [功能矩阵与测试报告](docs/TEST_REPORT.md)：完成范围、验收结果和已知缺口。
-- [安全说明](docs/SECURITY.md)：凭据保护、依赖风险与安全边界。
-- [发布检查表](docs/RELEASE_CHECKLIST.md)：构建、原生验收和发布条件。
-- [产品需求](docs/PRD.md)、[架构](docs/ARCHITECTURE.md)、[实施计划](docs/IMPLEMENTATION_PLAN.md)与[技术决策](docs/DECISIONS.md)。
+- [文档导航](docs/README.md)：按用途查看全部文档、模块验证记录及维护约定。
+- [使用说明](docs/guides/USER_GUIDE.md)：安装、连接、日常操作和备份。
+- [功能矩阵与测试报告](docs/validation/TEST_REPORT.md)：完成范围、验收结果和已知缺口。
+- [安全说明](docs/release/SECURITY.md)：凭据保护、依赖风险与安全边界。
+- [发布检查表](docs/release/RELEASE_CHECKLIST.md)：构建、原生验收和发布条件。
+- [产品需求](docs/product/PRD.md)、[架构](docs/architecture/ARCHITECTURE.md)、[实施计划](docs/product/IMPLEMENTATION_PLAN.md)与[技术决策](docs/architecture/DECISIONS.md)。
 - [变更记录](CHANGELOG.md)。
 
 ## 许可证
 
-项目采用 [MIT 许可证](LICENSE)。第三方依赖及其许可证见[依赖清单](docs/DEPENDENCY_INVENTORY.md)和[第三方声明](docs/THIRD_PARTY_NOTICES.txt)。
+项目采用 [MIT 许可证](LICENSE)。第三方依赖及其许可证见[依赖清单](docs/release/DEPENDENCY_INVENTORY.md)和[第三方声明](docs/release/THIRD_PARTY_NOTICES.txt)。

@@ -1,0 +1,28 @@
+{
+  "uiVersion": 2,
+  "title": "进程与端口",
+  "pages": [
+    {
+      "id": "server",
+      "title": "进程与端口",
+      "fields": [],
+      "actions": [
+        {
+          "id": "bridge",
+          "label": "执行界面请求",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "initialAction": null,
+      "log": null,
+      "surface": {
+        "kind": "operations",
+        "sections": [
+          "processes",
+          "ports"
+        ]
+      }
+    }
+  ]
+}

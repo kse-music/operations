@@ -9,6 +9,7 @@ import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
 import { tasksApi } from '../services/tasks';
 import { filesApi } from '../services/files';
+import { automationApi } from '../services/automation';
 import { hostInput } from '../types/hosts';
 import type { TransferInfo } from '../types/files';
 
@@ -30,6 +31,13 @@ beforeEach(() => {
   pinia = createPinia();
   setActivePinia(pinia);
   navigate.mockClear();
+  vi.spyOn(automationApi, 'catalog').mockResolvedValue({
+    entries: [],
+    groups: [],
+    templates: [],
+    schedules: [],
+  });
+  vi.spyOn(automationApi, 'history').mockResolvedValue([]);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -58,9 +66,60 @@ afterEach(() => {
   app?.unmount();
   disposePinia(pinia);
   root.remove();
+  vi.restoreAllMocks();
   if (originalShowModal)
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+});
+
+it('keeps shared automation stop controls available without an installed plugin and confirms each exact target', async () => {
+  const catalog = vi.mocked(automationApi.catalog);
+  catalog.mockResolvedValue({
+    entries: [],
+    groups: [],
+    templates: [],
+    schedules: [{ id: 'schedule', name: '每日检查', enabled: true } as never],
+  });
+  vi.mocked(automationApi.history).mockResolvedValue([
+    { id: 'run', entryName: '检查任务', state: 'Running', targets: 2 } as never,
+  ]);
+  const disable = vi.spyOn(automationApi, 'scheduleDisable').mockResolvedValue();
+  const cancel = vi
+    .spyOn(automationApi, 'cancel')
+    .mockRejectedValueOnce({ message: 'stop rejected' })
+    .mockResolvedValue();
+  vi.spyOn(useAutomationStore(), 'poll').mockResolvedValue();
+  await flush();
+  button('刷新任务与计划').click();
+  await flush();
+  await flush();
+  button('暂停计划').click();
+  await flush();
+  expect(disable).not.toHaveBeenCalled();
+  const scheduleDialog = document.querySelector('dialog[aria-label="确认暂停自动化计划"]')!;
+  expect(scheduleDialog.textContent).toContain('每日检查');
+  expect(scheduleDialog.textContent).toContain('已经提交的任务需要单独停止');
+  button('确认暂停计划', scheduleDialog).click();
+  await flush();
+  await flush();
+  expect(disable).toHaveBeenCalledExactlyOnceWith('schedule');
+  await vi.waitFor(() => expect(root.textContent).toContain('请求停止自动化任务'));
+  button('请求停止自动化任务').click();
+  await flush();
+  const runDialog = document.querySelector('dialog[aria-label="确认停止自动化任务"]')!;
+  button('确认停止任务', runDialog).click();
+  await flush();
+  expect(runDialog.isConnected).toBe(true);
+  expect(useNotificationsStore().items.some((item) => item.text === 'stop rejected')).toBe(true);
+  button('确认停止任务', runDialog).click();
+  await flush();
+  await flush();
+  expect(cancel.mock.calls).toEqual([
+    ['run', true],
+    ['run', true],
+  ]);
+  expect(document.querySelector('dialog[aria-label="确认停止自动化任务"]')).toBeNull();
+  expect(navigate).not.toHaveBeenCalled();
 });
 
 it('shows loading, unavailable and empty task states without presenting an unread status as zero', async () => {

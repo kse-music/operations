@@ -19,6 +19,368 @@ fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
 }
 
 #[test]
+fn system_packages_use_standard_ipc_and_main_window_acl() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let data = directory.path().join("data");
+    let logs = directory.path().join("logs");
+    let application = Application::initialize(data.clone(), logs.clone()).expect("initialize");
+    application
+        .provision_bundled_plugins()
+        .expect("standard packages");
+    let app = mock_builder()
+        .manage(application)
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .expect("app");
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "plugin", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let invoke = |command: &str, body: Value| {
+        get_ipc_response(&main, request(command, body, origin))
+            .expect("IPC")
+            .deserialize::<Value>()
+            .unwrap()
+    };
+    let initial = invoke("plugin_list", json!({}));
+    assert_eq!(initial.as_array().unwrap().len(), 9);
+    for plugin in initial.as_array().unwrap() {
+        assert_eq!(plugin["source"], "system");
+        assert_eq!(plugin["enabled"], true);
+        assert!(plugin["manifest"]["entry"]["backend"].is_string());
+        let grant = invoke("plugin_permissions", json!({"id":plugin["manifest"]["id"]}));
+        assert_eq!(grant["permissions"], plugin["manifest"]["permissions"]);
+        assert!(grant.get("hostIds").is_none());
+    }
+    let id = "cn.hiboot.plugins.docker";
+    assert_eq!(
+        invoke("plugin_set_enabled", json!({"id":id,"enabled":true}))["enabled"],
+        true
+    );
+    let revision = invoke("plugin_detail", json!({"id":id}))["revision"].clone();
+    for (command, body) in [
+        (
+            "plugin_grant",
+            json!({"id":id,"input":{"expectedRevision":revision,"permissions":["ui.contribute"],"operations":["ui.contribute"],"readRoots":[],"writeRoots":[],"confirmed":true}}),
+        ),
+        ("plugin_revoke", json!({"id":id})),
+    ] {
+        assert!(get_ipc_response(&main, request(command, body, origin)).is_err());
+    }
+    assert_eq!(
+        invoke("plugin_ui", json!({"id":id,"revision":revision}))["uiVersion"],
+        2
+    );
+    assert_eq!(
+        invoke("plugin_set_enabled", json!({"id":id,"enabled":false}))["enabled"],
+        false
+    );
+    assert!(
+        get_ipc_response(
+            &main,
+            request("plugin_ui", json!({"id":id,"revision":revision}), origin)
+        )
+        .is_err()
+    );
+    for (command, body) in [
+        ("plugin_list", json!({})),
+        ("plugin_set_enabled", json!({"id":id,"enabled":false})),
+        (
+            "plugin_tool_stage",
+            json!({"id":"cn.hiboot.plugins.network","input":{"operation":"diagnostic_list","args":{}}}),
+        ),
+        (
+            "plugin_tool_cancel_request",
+            json!({"id":"cn.hiboot.plugins.assistant","request":"forged"}),
+        ),
+        (
+            "plugin_tool_abort_input",
+            json!({"id":"cn.hiboot.plugins.assistant","inputId":"forged"}),
+        ),
+        (
+            "plugin_terminal_open",
+            json!({"id":id,"ticket":"forged","expectedHost":"x","expected":{"id":"abc123","bash":false,"confirmed":true},"size":{"cols":80,"rows":24},"events":"__CHANNEL__:0"}),
+        ),
+    ] {
+        assert!(get_ipc_response(&other, request(command, body.clone(), origin)).is_err());
+        assert!(
+            get_ipc_response(&main, request(command, body, "https://untrusted.invalid")).is_err()
+        );
+    }
+    invoke(
+        "plugin_uninstall",
+        json!({"input":{"id":id,"clearData":false,"confirmed":true}}),
+    );
+    let reopened = Application::initialize(data, logs).expect("reopen");
+    reopened
+        .provision_bundled_plugins()
+        .expect("provision after uninstall");
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    assert_eq!(runtime.block_on(reopened.plugin_list()).unwrap().len(), 8);
+}
+
+#[test]
+fn plugin_metadata_real_ipc_lifecycle_and_acl() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let application =
+        Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+            .expect("initialize");
+    let app = mock_builder()
+        .manage(application)
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .expect("app");
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("window");
+    let other = tauri::WebviewWindowBuilder::new(&app, "plugin", Default::default())
+        .build()
+        .expect("untrusted window");
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let invoke = |command: &str, body: Value| {
+        get_ipc_response(&main, request(command, body, origin))
+            .expect("IPC")
+            .deserialize::<Value>()
+            .expect("JSON")
+    };
+    let path = directory.path().join("metadata.sdplugin");
+    let mut manifest: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/plugins/metadata/manifest.json"
+    ))
+    .expect("manifest");
+    manifest["permissions"] = json!(["settings.read", "settings.write"]);
+    manifest["files"] = json!([{"path":"readme.txt", "size":8, "sha256":serverdeck_plugin_core::package::digest(b"metadata")}]);
+    std::fs::write(&path, serde_json::to_vec(&json!({"formatVersion":1,"manifest":manifest,"files":[{"path":"readme.txt","content":"bWV0YWRhdGE="}]})).unwrap()).unwrap();
+    assert!(
+        invoke("plugin_list", json!({}))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        invoke("plugin_preview", json!({"path":path}))["id"],
+        "dev.serverdeck.metadata"
+    );
+    let body = json!({"input":{"path":path,"developmentConfirmed":true,"expectedVersion":null}});
+    let installed = invoke("plugin_install", body.clone());
+    assert_eq!(installed["trust"], "local_development_unverified");
+    assert!(get_ipc_response(&main, request("plugin_install", body, origin)).is_err());
+    assert_eq!(
+        invoke(
+            "plugin_set_enabled",
+            json!({"id":"dev.serverdeck.metadata","enabled":true})
+        )["enabled"],
+        true
+    );
+    assert_eq!(
+        invoke("plugin_detail", json!({"id":"dev.serverdeck.metadata"}))["enabled"],
+        true
+    );
+    let capability = |operation: Value| json!({"id":"dev.serverdeck.metadata","request":{"apiVersion":1,"requestId":"ipc","operation":operation}});
+    assert_eq!(
+        invoke(
+            "plugin_capability",
+            capability(json!({"kind":"settings_read"}))
+        )["error"]["code"],
+        "PLUGIN_PERMISSION_DENIED"
+    );
+    invoke(
+        "plugin_grant",
+        json!({"id":"dev.serverdeck.metadata","input":{"expectedRevision":installed["revision"],"permissions":["settings.read","settings.write"],"hostIds":[],"operations":["settings.read","settings.write"],"readRoots":[],"writeRoots":[],"confirmed":true}}),
+    );
+    assert_eq!(
+        invoke(
+            "plugin_permissions",
+            json!({"id":"dev.serverdeck.metadata"})
+        )["revision"],
+        installed["revision"]
+    );
+    invoke(
+        "plugin_capability",
+        capability(json!({"kind":"settings_write","value":{"ipc":true}})),
+    );
+    assert_eq!(
+        invoke(
+            "plugin_capability",
+            capability(json!({"kind":"settings_read"}))
+        )["result"]["ipc"],
+        true
+    );
+    let mut forged = capability(json!({"kind":"settings_read"}));
+    forged["request"]["pluginId"] = json!("dev.other");
+    assert!(get_ipc_response(&main, request("plugin_capability", forged, origin)).is_err());
+    invoke("plugin_revoke", json!({"id":"dev.serverdeck.metadata"}));
+    invoke(
+        "plugin_set_enabled",
+        json!({"id":"dev.serverdeck.metadata","enabled":true}),
+    );
+    assert_eq!(
+        invoke(
+            "plugin_capability",
+            capability(json!({"kind":"settings_read"}))
+        )["error"]["code"],
+        "PLUGIN_PERMISSION_DENIED"
+    );
+    for command in [
+        "plugin_preview",
+        "plugin_preview_info",
+        "plugin_ui",
+        "plugin_pick",
+        "plugin_install",
+        "plugin_list",
+        "plugin_detail",
+        "plugin_set_enabled",
+        "plugin_uninstall",
+        "plugin_statuses",
+        "plugin_activate",
+        "plugin_call",
+        "plugin_health",
+        "plugin_cancel",
+        "plugin_grant",
+        "plugin_permissions",
+        "plugin_revoke",
+        "plugin_context",
+        "plugin_approve",
+        "plugin_events",
+        "plugin_capability",
+    ] {
+        for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+            let failure = get_ipc_response(window, request(command, json!({}), url))
+                .expect_err("plugin IPC restricted to local main");
+            assert!(failure.to_string().contains("not allowed"));
+        }
+    }
+    invoke(
+        "plugin_uninstall",
+        json!({"input":{"id":"dev.serverdeck.metadata","clearData":false,"confirmed":true}}),
+    );
+    assert!(
+        invoke("plugin_list", json!({}))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !directory
+            .path()
+            .join("data/plugins/packages/dev.serverdeck.metadata")
+            .exists()
+    );
+}
+
+#[test]
+fn real_wasm_backend_through_install_enable_call_disable_and_uninstall_ipc() {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+    let directory = tempfile::tempdir().unwrap();
+    let application =
+        Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+            .unwrap();
+    let app = mock_builder()
+        .manage(application)
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let invoke = |command: &str, body: Value| {
+        get_ipc_response(&main, request(command, body, origin))
+            .expect("IPC")
+            .deserialize::<Value>()
+            .unwrap()
+    };
+    let bytes = wat::parse_str(include_str!(
+        "../../../../tests/fixtures/plugins/hello-world/backend.wat"
+    ))
+    .unwrap();
+    let mut manifest: Value = serde_json::from_str(include_str!(
+        "../../../../tests/fixtures/plugins/hello-world/manifest.json"
+    ))
+    .unwrap();
+    manifest["files"] = json!([{"path":"backend.wasm","size":bytes.len(),"sha256":serverdeck_plugin_core::package::digest(&bytes)}]);
+    let path = directory.path().join("hello.sdplugin");
+    std::fs::write(&path, serde_json::to_vec(&json!({"formatVersion":1,"manifest":manifest,"files":[{"path":"backend.wasm","content":STANDARD.encode(bytes)}]})).unwrap()).unwrap();
+    invoke(
+        "plugin_install",
+        json!({"input":{"path":path,"developmentConfirmed":true,"expectedVersion":null}}),
+    );
+    assert!(
+        get_ipc_response(
+            &main,
+            request(
+                "plugin_activate",
+                json!({"id":"dev.serverdeck.hello"}),
+                origin
+            )
+        )
+        .is_err()
+    );
+    invoke(
+        "plugin_set_enabled",
+        json!({"id":"dev.serverdeck.hello","enabled":true}),
+    );
+    assert_eq!(invoke("plugin_statuses", json!({}))[0]["state"], "active");
+    assert_eq!(
+        invoke(
+            "plugin_call",
+            json!({"id":"dev.serverdeck.hello","payload":{}})
+        )["result"]["message"],
+        "hello from isolated wasm"
+    );
+    assert_eq!(
+        invoke("plugin_health", json!({"id":"dev.serverdeck.hello"}))["protocolVersion"],
+        1
+    );
+    invoke(
+        "plugin_set_enabled",
+        json!({"id":"dev.serverdeck.hello","enabled":false}),
+    );
+    assert!(
+        invoke("plugin_statuses", json!({}))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        get_ipc_response(
+            &main,
+            request(
+                "plugin_call",
+                json!({"id":"dev.serverdeck.hello","payload":{}}),
+                origin
+            )
+        )
+        .is_err()
+    );
+    invoke(
+        "plugin_uninstall",
+        json!({"input":{"id":"dev.serverdeck.hello","clearData":false,"confirmed":true}}),
+    );
+    assert!(
+        invoke("plugin_list", json!({}))
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     let directory = tempfile::tempdir().expect("tempdir");
     let application =

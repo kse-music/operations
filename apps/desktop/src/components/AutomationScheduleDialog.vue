@@ -3,7 +3,8 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { hostDisplayName } from '../types/hosts';
 import { onBeforeUnmount, ref, shallowRef } from 'vue';
 import Modal from './Modal.vue';
-import { automationApi } from '../services/automation';
+import { useAutomationApi } from '../services/plugin-tool-services';
+const automationApi = useAutomationApi();
 import { useHostsStore } from '../stores/hosts';
 import {
   offsetLabel,

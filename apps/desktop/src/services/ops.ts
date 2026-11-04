@@ -40,6 +40,11 @@ export const opsApi = {
   ): Promise<TerminalSession> {
     const events = new Channel<TerminalEvent>();
     events.onmessage = receive;
-    return call('ops_container_shell', { hostId, size, shell, events });
+    return call('ops_container_shell', {
+      hostId,
+      size,
+      shell: { id: shell.id, bash: shell.bash, confirmed: shell.confirmed },
+      events,
+    });
   },
 };

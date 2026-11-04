@@ -9,9 +9,12 @@ vi.mock('../services/ops', () => ({ opsApi: { close: vi.fn(), connections: vi.fn
 vi.mock('../services/terminal', () => ({ terminalApi: { trust: vi.fn() } }));
 import { opsApi } from '../services/ops';
 import { terminalApi } from '../services/terminal';
+import { usePluginsStore } from './plugins';
+import { toolPluginState } from '../services/system-plugins.fixture';
 describe('product integration boundaries', () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    Object.assign(usePluginsStore(), toolPluginState());
     vi.clearAllMocks();
   });
   it('has no fixed navigation tabs and returns to an empty workspace after the last close', () => {
@@ -51,7 +54,11 @@ describe('product integration boundaries', () => {
     w.navigate('server');
     expect(w.current).toMatchObject({ hostId: 'b', view: 'server', section: undefined });
     w.navigate('network', 'a');
-    expect(w.current).toMatchObject({ hostId: '', view: 'network' });
+    expect(w.current).toMatchObject({
+      hostId: '',
+      view: 'extension',
+      pluginId: 'cn.hiboot.plugins.network',
+    });
     expect(w.hostId).toBe('b');
     w.selectHost('');
     expect(w.current?.view).toBe('terminals');

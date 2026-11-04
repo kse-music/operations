@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref, shallowRef } from 'vue';
-import { aiApi } from '../services/ai';
+import { useAssistantApi } from '../services/plugin-tool-services';
 import { errorMessage } from '../services/ipc';
 import type { AiExecution, AiPrepare, AiProposal, AiTurn } from '../types/ai';
 import { useAssistantHosts } from './assistant-hosts';
@@ -25,6 +25,7 @@ function history(turns: AiTurn[]): NonNullable<AiPrepare['history']> {
   return result;
 }
 export function useAssistant() {
+  const aiApi = useAssistantApi();
   const hostContext = useAssistantHosts();
   let controller: AbortController | null = null;
   const turns = ref<AiTurn[]>([]),

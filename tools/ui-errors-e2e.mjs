@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 
 // Browser-only failure fixtures. No remote operations or persisted user settings are used.
 const url = process.env.SERVERDECK_ERRORS_URL ?? 'http://127.0.0.1:1422';
-const output = '.local/error-notifications';
+const output = process.env.SERVERDECK_ERRORS_OUTPUT ?? '.local/error-notifications';
 await mkdir(output, { recursive: true });
 const server = process.env.SERVERDECK_ERRORS_URL
   ? null
@@ -31,6 +31,48 @@ server?.stderr.on('data', (data) => {
 });
 let browser;
 const results = [];
+
+async function assertSelectableAndCopyable(page, toast, context) {
+  const text = toast.locator(':scope > span');
+  const expected = await text.textContent();
+  const points = await text.evaluate((element) => {
+    const node = element.firstChild;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, 1);
+    const first = range.getBoundingClientRect();
+    range.setStart(node, node.textContent.length - 1);
+    range.setEnd(node, node.textContent.length);
+    const last = range.getBoundingClientRect();
+    return {
+      start: { x: first.left + 0.5, y: first.top + first.height / 2 },
+      end: { x: last.right - 0.5, y: last.top + last.height / 2 },
+    };
+  });
+  await page.mouse.move(points.start.x, points.start.y);
+  await page.mouse.down();
+  await page.mouse.move(points.end.x, points.end.y, { steps: 20 });
+  await page.mouse.up();
+  assert.equal(
+    await page.evaluate(() => window.getSelection()?.toString()),
+    expected,
+    `${context}: mouse drag did not select the notification text`,
+  );
+  // Inspect the native copy event without overwriting the user's system clipboard.
+  await text.evaluate((element) => {
+    document.addEventListener(
+      'copy',
+      (event) => {
+        event.preventDefault();
+        element.dataset.copied = window.getSelection()?.toString() ?? '';
+      },
+      { once: true },
+    );
+  });
+  await page.keyboard.press('Control+c');
+  assert.equal(await text.getAttribute('data-copied'), expected, `${context}: copy failed`);
+}
+
 try {
   for (let attempt = 0; server; attempt++) {
     if (server.exitCode !== null || attempt === 100)
@@ -68,10 +110,14 @@ try {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(url);
     await page.getByText('后端未连接', { exact: true }).waitFor();
-    const message = `${view}：测试操作失败`;
+    const message =
+      view === 'about'
+        ? '数据已变化或存在关联，请刷新后重试。错误详情包含中文和 Unicode（🚀），较长的提示换行后也应能完整选中复制。'
+        : `${view}：测试操作失败`;
     await page.evaluate(
       async ({ view, message }) => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+
         const { useApplicationStore } = await import('/src/stores/application.ts');
         const { useHostsStore } = await import('/src/stores/hosts.ts');
         const { useTerminalsStore } = await import('/src/stores/terminals.ts');
@@ -91,6 +137,9 @@ try {
         const fail = async () => {
           throw new Error(message);
         };
+        const { pluginsApi } = await import('/src/services/plugins.ts');
+        pluginsApi.list = view === 'server' ? fail : async () => [];
+        pluginsApi.statuses = async () => [];
         tasksApi.diagnostics = view === 'network' ? fail : async () => [];
         tasksApi.batches = view === 'batch' ? fail : async () => [];
         automationApi.catalog =
@@ -184,6 +233,7 @@ try {
     );
     const box = await toast.boundingBox();
     assert.ok(box.x > 900 && box.y > 650, `${view}: toast is not bottom-right`);
+    await assertSelectableAndCopyable(page, toast, view);
     await page.screenshot({ path: `${output}/${view}.png` });
     await toast.getByRole('button', { name: '关闭通知', exact: true }).click();
     assert.equal(await toast.count(), 0, `${view}: dismiss did not remove toast`);
@@ -225,6 +275,7 @@ try {
       box.x >= 0 && box.x + box.width <= width && box.y + box.height <= height,
       `${name}: clipped toast`,
     );
+    await assertSelectableAndCopyable(page, toast, `modal-${name}`);
     await page.screenshot({ path: `${output}/modal-${name}.png` });
     await toast.getByRole('button', { name: '关闭通知', exact: true }).click();
     assert.equal(await page.locator('.toast').count(), 0);

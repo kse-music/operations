@@ -13,7 +13,7 @@ impl Application {
         if restore {
             let config = self.blocking(|db| db.load_config()).await?;
             self.files.transfers.configure(config.transfer_concurrency);
-            self.monitors.configure(config.monitor_interval_secs);
+            self.configure_monitors(config.monitor_interval_secs)?;
         }
         Ok(result)
     }

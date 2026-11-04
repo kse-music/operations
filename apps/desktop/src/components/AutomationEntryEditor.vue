@@ -2,7 +2,8 @@
 import { useErrorNotifications } from '../composables/error-notifications';
 import { reactive, ref } from 'vue';
 import Modal from './Modal.vue';
-import { automationApi } from '../services/automation';
+import { useAutomationApi } from '../services/plugin-tool-services';
+const automationApi = useAutomationApi();
 import { entryInput, type Entry, type EntryInput, type Group } from '../types/automation';
 import { errorMessage } from '../services/ipc';
 const props = defineProps<{ entry?: Entry; template?: EntryInput; groups: Group[] }>();

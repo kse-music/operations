@@ -4,6 +4,6 @@ dist
 gen
 Cargo.lock
 package-lock.json
-docs/PRD.md
+docs/product/PRD.md
 AGENTS.md
 .local

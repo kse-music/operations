@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.serverdeck.host-info",
+  "name": "Host Info",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "Public SDK UI example: sanitized host metadata and read-only uname diagnostic",
+  "apiVersion": "^1.0.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": ["hosts.read", "ssh.execute", "ui.contribute", "settings.read", "settings.write"],
+  "contributions": [
+    {
+      "id": "host",
+      "label": "Host Info",
+      "kind": "workspace"
+    },
+    {
+      "id": "navigation",
+      "label": "Host Info",
+      "kind": "navigation"
+    },
+    {
+      "id": "menu",
+      "label": "Host Info",
+      "kind": "host_menu"
+    },
+    {
+      "id": "diagnose",
+      "label": "Host Info",
+      "kind": "command"
+    },
+    {
+      "id": "settings",
+      "label": "Host Info 设置",
+      "kind": "settings"
+    }
+  ],
+  "platforms": ["windows", "linux", "macos"],
+  "files": [],
+  "publisher": null
+}

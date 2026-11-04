@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "cn.hiboot.plugins.resources",
+  "name": "资源监控",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "查看服务器资源使用情况、磁盘容量和网络流量。",
+  "apiVersion": "^1.1.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": [
+    "ui.contribute",
+    "metrics.read"
+  ],
+  "contributions": [
+    {
+      "id": "server",
+      "label": "资源监控",
+      "kind": "server"
+    }
+  ],
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "files": [],
+  "publisher": null
+}

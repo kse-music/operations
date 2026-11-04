@@ -8,6 +8,7 @@ pub mod ai;
 pub mod automation;
 pub mod backup;
 pub mod hosts;
+pub mod plugins;
 pub mod trust;
 pub mod workspace;
 use serverdeck_core::{AppConfig, DATABASE_VERSION, Error};

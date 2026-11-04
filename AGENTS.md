@@ -2,7 +2,7 @@
 
 ## 1. 基本要求
 
-- 每次开发前阅读相关 PRD、架构文档和现有实现。
+- 每次开发前通过 [文档导航](docs/README.md) 阅读相关 [PRD](docs/product/PRD.md)、[架构文档](docs/architecture/ARCHITECTURE.md) 和现有实现。
 - 优先修改现有代码，不重复实现已有能力。
 - 以可运行、可测试、可维护的真实功能为目标。
 - 不使用 Mock 数据冒充正式功能。
@@ -61,13 +61,15 @@
 
 ## 6. 文档
 
-重要架构变化更新 ARCHITECTURE.md。
+重要架构变化更新 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)。
 
-需求状态变化更新 IMPLEMENTATION_PLAN.md。
+需求状态变化更新 [IMPLEMENTATION_PLAN.md](docs/product/IMPLEMENTATION_PLAN.md)。
 
 接口发生变化时同步更新相关文档和前端类型。
 
-重要设计取舍记录到 DECISIONS.md。
+重要设计取舍记录到 [DECISIONS.md](docs/architecture/DECISIONS.md)。
+
+新增文档按 [文档维护约定](docs/README.md#维护约定) 归类；验证记录放入 docs/validation 对应模块并更新索引，同一主题优先补充已有文档。
 
 ## 7. 每阶段结束
 

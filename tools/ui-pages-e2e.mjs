@@ -30,6 +30,7 @@ const pages = [
 async function fixtures(page, theme) {
   await page.evaluate(async (theme) => {
     const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+
     const { useApplicationStore } = await import('/src/stores/application.ts');
     const { useHostsStore } = await import('/src/stores/hosts.ts');
     const { useNotificationsStore } = await import('/src/stores/notifications.ts');

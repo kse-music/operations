@@ -10,6 +10,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "plugins:build": "node tools/build-system-plugins.mjs",
     "dev": "npm run dev -w @serverdeck/desktop",
     "build": "npm run build -w @serverdeck/desktop",
     "typecheck": "npm run typecheck -w @serverdeck/desktop",

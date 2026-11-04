@@ -1,0 +1,25 @@
+{
+  "uiVersion": 3,
+  "title": "自动运维",
+  "pages": [
+    {
+      "id": "automation",
+      "title": "自动运维",
+      "initialAction": null,
+      "fields": [],
+      "actions": [
+        {
+          "id": "bridge",
+          "label": "执行操作",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null,
+      "surface": {
+        "kind": "tool",
+        "tool": "automation"
+      }
+    }
+  ]
+}

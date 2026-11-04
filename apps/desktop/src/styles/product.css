@@ -359,6 +359,9 @@ kbd {
 }
 .toast > span {
   flex: 1;
+  pointer-events: auto;
+  user-select: text;
+  cursor: text;
 }
 .global-search-input {
   width: 100%;

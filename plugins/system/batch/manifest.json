@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "cn.hiboot.plugins.batch",
+  "name": "批量运维",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "预览目标后执行批量命令或分发文件，统一查看结果并取消任务。",
+  "apiVersion": "^1.2.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": [
+    "ui.contribute",
+    "batch.run"
+  ],
+  "contributions": [
+    {
+      "id": "batch",
+      "label": "批量运维",
+      "kind": "tool",
+      "tool": "batch"
+    }
+  ],
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "files": [],
+  "publisher": null
+}

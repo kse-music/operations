@@ -16,6 +16,11 @@ import { hostInput } from './types/hosts';
 import * as ipc from './services/ipc';
 import { defaultTerminalPreferences } from './types/preferences';
 import { defaultProductPreferences } from './types/product';
+import type { NavigationModule } from './types/navigation';
+import { pluginsApi } from './services/plugins';
+import { usePluginsStore } from './stores/plugins';
+import { systemPluginFixtures, toolPluginState } from './services/system-plugins.fixture';
+import { aiApi } from './services/ai';
 
 // Exercise the shell and both tab bars without xterm's browser canvas or a remote connection.
 vi.mock('./components/TerminalPane.vue', () => ({ default: { render: () => null } }));
@@ -27,10 +32,7 @@ const flush = async () => {
   await vi.dynamicImportSettled();
   await nextTick();
 };
-async function sidebarMenu(
-  module: 'hosts' | 'tools' | 'assets' | 'system',
-  label: string,
-): Promise<void> {
+async function sidebarMenu(module: NavigationModule, label: string): Promise<void> {
   root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
   await flush();
   root.querySelector<HTMLButtonElement>(`.activity-rail [aria-label="${label}"]`)!.click();
@@ -84,6 +86,35 @@ beforeEach(async () => {
   });
   pinia = createPinia();
   setActivePinia(pinia);
+  const pluginState = toolPluginState();
+  Object.assign(usePluginsStore(), pluginState);
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(pluginState.installed);
+  vi.spyOn(pluginsApi, 'permissions').mockImplementation(
+    async (id) => pluginState.grants[id] ?? null,
+  );
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  vi.spyOn(pluginsApi, 'ui').mockImplementation(async (id) => pluginState.schemas[id]!.ui);
+  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
+  vi.spyOn(aiApi, 'models').mockResolvedValue([]);
+  const toolInputs = new Map<string, string>();
+  vi.spyOn(pluginsApi, 'toolStage').mockImplementation(async (_id, input) => {
+    const inputId = crypto.randomUUID();
+    toolInputs.set(inputId, input.operation);
+    return { inputId, operation: input.operation };
+  });
+  vi.spyOn(pluginsApi, 'call').mockImplementation(async (_id, payload) => {
+    const capability = JSON.parse((payload as { values: { request: string } }).values.request);
+    const operation = toolInputs.get(capability.inputId);
+    return {
+      protocolVersion: 1,
+      error: null,
+      result:
+        operation === 'automation_catalog'
+          ? { entries: [], groups: [], schedules: [], templates: [] }
+          : [],
+    };
+  });
   vi.spyOn(useApplicationStore(), 'initialize').mockResolvedValue();
   useHostsStore().catalog = {
     hosts: ['a', 'b'].map((id) => ({
@@ -103,6 +134,8 @@ beforeEach(async () => {
   app = createApp(AppShell).use(pinia);
   app.mount(root);
   await flush();
+  // Awaited plugin teardown from the previous app may finish during lazy imports.
+  setActivePinia(pinia);
 });
 afterEach(() => {
   app?.unmount();
@@ -288,6 +321,41 @@ it('opens About as a single system workspace page and preserves the existing ter
   expect(close).not.toHaveBeenCalled();
 });
 
+it('opens plugin management under settings, keeps language in settings and preserves the terminal', async () => {
+  loadSidebarConfig();
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue([]);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const workspace = useWorkspaceStore(),
+    terminals = useTerminalsStore();
+  terminals.open(useHostsStore().catalog!.hosts[0]!);
+  terminals.update(terminals.focused, { state: 'connected', sessionId: 'live-shell' });
+  workspace.navigate('terminals', 'a');
+  await flush();
+  const original = JSON.stringify(terminals.tabs);
+  const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  root.querySelector<HTMLButtonElement>('[data-module="plugins"]')!.click();
+  await flush();
+  expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
+  expect(root.querySelector('.module-menu [aria-label="插件管理"]')).toBeNull();
+  expect(root.querySelector('.module-menu [aria-label="通用"]')).toBeNull();
+  await sidebarMenu('system', '插件管理');
+  expect(workspace.module).toBe('system');
+  expect(root.querySelector('.plugin-manager h1')?.textContent).toBe('插件管理');
+  expect(root.querySelector('[aria-label="插件界面语言"]')).toBeNull();
+  await sidebarMenu('system', '工作区与连接');
+  expect(root.querySelector('.module-menu [aria-label="插件管理"]')).not.toBeNull();
+  expect(root.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')?.value).toBe('zh-CN');
+  root
+    .querySelector<HTMLButtonElement>('.workspace-tab[data-view="plugins"] [role="tab"]')!
+    .click();
+  await flush();
+  expect(workspace.module).toBe('system');
+  expect(root.querySelector('.plugin-manager')).not.toBeNull();
+  expect(workspace.tabs.filter((tab) => tab.view === 'plugins')).toHaveLength(1);
+  expect(JSON.stringify(terminals.tabs)).toBe(original);
+  expect(close).not.toHaveBeenCalled();
+});
+
 it('keeps the About page available before bootstrap and updates its real version state', async () => {
   await sidebarMenu('system', '关于');
   const page = root.querySelector('.about-view')!;
@@ -436,13 +504,13 @@ it('opens a single task center workspace from the tools menu and removes duplica
   const original = JSON.stringify(terminals.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
   expect(root.querySelectorAll('.statusbar button')).toHaveLength(0);
-  await sidebarMenu('tools', '任务中心');
+  await sidebarMenu('plugins', '任务中心');
   expect(useWorkspaceStore().current).toMatchObject({ key: 'tasks:', view: 'tasks', hostId: '' });
   expect(root.querySelector('section[aria-label="任务中心"] h1')?.textContent).toBe('任务中心');
   expect(document.querySelector('dialog[aria-label="后台任务与传输"]')).toBeNull();
   expect(root.textContent).toContain('没有传输任务');
   expect(root.textContent).toContain('没有网络或批量任务');
-  await sidebarMenu('tools', '任务中心');
+  await sidebarMenu('plugins', '任务中心');
   expect(useWorkspaceStore().tabs.filter((tab) => tab.view === 'tasks')).toHaveLength(1);
   await useWorkspaceStore().close('tasks:');
   await flush();
@@ -476,7 +544,7 @@ it('uses the configured task shortcut to open the task center without duplicatin
     await flush();
   }
   expect(useWorkspaceStore().current?.view).toBe('tasks');
-  expect(useWorkspaceStore().module).toBe('tools');
+  expect(useWorkspaceStore().module).toBe('plugins');
   expect(useWorkspaceStore().tabs.filter((tab) => tab.view === 'tasks')).toHaveLength(1);
   expect(root.querySelector('section[aria-label="任务中心"]')).not.toBeNull();
   expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
@@ -636,7 +704,7 @@ it('preserves welcome when switching unused module menus without opening a page 
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   const open = vi.spyOn(terminals, 'open');
-  for (const module of ['tools', 'assets', 'system'] as const) {
+  for (const module of ['plugins', 'assets', 'system'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -672,7 +740,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   const terminalElement = root.querySelector('.terminal-tab')!;
   const open = vi.spyOn(terminals, 'open');
   const close = vi.spyOn(terminalApi, 'close');
-  for (const module of ['tools', 'assets', 'system', 'hosts'] as const) {
+  for (const module of ['plugins', 'assets', 'system', 'hosts'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -687,10 +755,10 @@ it('keeps the current terminal visible across top module switches and navigates 
     expect(root.querySelector('[aria-label="欢迎页面"]')).toBeNull();
     expect(root.textContent).not.toContain('请选择功能');
   }
-  await sidebarMenu('tools', '网络诊断');
-  expect(workspace.module).toBe('tools');
+  await sidebarMenu('plugins', '网络诊断');
+  expect(workspace.module).toBe('plugins');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['批量运维', '自动运维', '网络诊断', 'AI 运维助手', '任务中心'],
+    ['AI 运维助手', '批量运维', '自动运维', '网络诊断', '任务中心'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
   await sidebarMenu('assets', '备份恢复');
@@ -702,7 +770,9 @@ it('keeps the current terminal visible across top module switches and navigates 
   await flush();
   expect(workspace.current?.view).toBe('about');
   root
-    .querySelector<HTMLButtonElement>('.workspace-tab[data-view="network"] [role="tab"]')!
+    .querySelector<HTMLButtonElement>(
+      '.workspace-tab[data-plugin-id="cn.hiboot.plugins.network"] [role="tab"]',
+    )!
     .click();
   await flush();
   expect(root.querySelector('.module-navigation [aria-current="page"]')?.textContent?.trim()).toBe(
@@ -713,7 +783,10 @@ it('keeps the current terminal visible across top module switches and navigates 
   ).not.toBeNull();
   root.querySelector<HTMLButtonElement>('.module-navigation [data-module="hosts"]')!.click();
   await flush();
-  expect(workspace.current?.view).toBe('network');
+  expect(workspace.current).toMatchObject({
+    view: 'extension',
+    pluginId: 'cn.hiboot.plugins.network',
+  });
   root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
@@ -763,14 +836,21 @@ it('switches full file pages from the toolbar without closing file or terminal s
   expect(root.querySelector('.workspace-header [aria-current="page"]')?.textContent).toContain(
     'SFTP 文件',
   );
-  await tool('服务器管理');
-  expect(workspace.current).toMatchObject({ view: 'server', hostId: 'a' });
-  expect(root.querySelector('.workspace-header [aria-current="page"]')?.textContent).toContain(
-    '服务器管理',
-  );
-  root.querySelector<HTMLButtonElement>('#server-tab-processes')!.click();
+  const plugin = { ...systemPluginFixtures()[0]!, enabled: true };
+  usePluginsStore().installed = [plugin];
+  root.querySelector<HTMLButtonElement>('.workspace-header [aria-haspopup="menu"]')!.click();
   await flush();
-  expect(workspace.current?.section).toBe('processes');
+  document
+    .querySelector<HTMLButtonElement>(`.host-plugin-menu [data-plugin-id="${plugin.manifest.id}"]`)!
+    .click();
+  await flush();
+  expect(workspace.current).toMatchObject({
+    view: 'extension',
+    hostId: 'a',
+    pluginId: plugin.manifest.id,
+  });
+  expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
+  expect(root.querySelector('.operations-view, .monitor-view')).toBeNull();
   await tool('SSH 终端');
   expect(root.querySelector('.files-view, .workspace-file-panel')).toBeNull();
   expect(terminals.focused).toBe(pane.key);
@@ -1170,7 +1250,7 @@ it('merges session controls into the host toolbar and retains names within the c
     [...root.querySelectorAll('.workspace-header .host-tools button')].map((button) =>
       button.textContent?.trim(),
     ),
-  ).toEqual(['SSH 终端', 'SFTP 文件', '服务器管理']);
+  ).toEqual(['SSH 终端', 'SFTP 文件', '工具']);
   expect(root.querySelector('.terminal-session-header .terminal-tabs')).not.toBeNull();
   expect(root.querySelector('.split-toolbar, [aria-label="会话操作"]')).toBeNull();
   expect(root.querySelector('#terminal-session-tools .terminal-session-header')).not.toBeNull();
@@ -1447,7 +1527,7 @@ it('restores each host tool, file connection and terminal session through primar
 it('retains a batch draft and explicit diagnostic source across host workspace switches', async () => {
   root.querySelector<HTMLButtonElement>('.tree-host')!.click();
   await flush();
-  await sidebarMenu('tools', '批量运维');
+  await sidebarMenu('plugins', '批量运维');
   await flush();
   const checkbox = root.querySelector<HTMLInputElement>('[aria-label="选择批量目标 Host b"]')!;
   checkbox.checked = true;
@@ -1458,7 +1538,7 @@ it('retains a batch draft and explicit diagnostic source across host workspace s
   await nextTick();
   root.querySelector<HTMLButtonElement>('.workspace-tabs [role="tab"]')!.click();
   await flush();
-  await sidebarMenu('tools', '批量运维');
+  await sidebarMenu('plugins', '批量运维');
   await flush();
   expect(root.querySelector<HTMLInputElement>('[aria-label="选择批量目标 Host b"]')!.checked).toBe(
     true,
@@ -1466,7 +1546,7 @@ it('retains a batch draft and explicit diagnostic source across host workspace s
   expect(root.querySelector<HTMLTextAreaElement>('[aria-label="批量统一命令"]')!.value).toBe(
     'hostname',
   );
-  await sidebarMenu('tools', '网络诊断');
+  await sidebarMenu('plugins', '网络诊断');
   await flush();
   const source = root.querySelector<HTMLSelectElement>('[aria-label="诊断来源"]')!;
   source.value = 'remote';
@@ -1480,14 +1560,22 @@ it('retains a batch draft and explicit diagnostic source across host workspace s
   await flush();
   root.querySelectorAll<HTMLButtonElement>('.tree-host')[1]!.click();
   await flush();
-  await sidebarMenu('tools', '网络诊断');
+  await sidebarMenu('plugins', '网络诊断');
   await flush();
   expect(root.querySelector<HTMLSelectElement>('[aria-label="诊断主机"]')!.value).toBe('b');
   expect(root.querySelector<HTMLSelectElement>('[aria-label="诊断来源"]')!.value).toBe('remote');
 });
 
 it.each([
-  ['关闭', ['host:', 'batch:', 'network:'], 'network:'],
+  [
+    '关闭',
+    [
+      'host:',
+      'extension:cn.hiboot.plugins.batch:batch:',
+      'extension:cn.hiboot.plugins.network:network:',
+    ],
+    'extension:cn.hiboot.plugins.network:network:',
+  ],
   ['关闭右侧', ['host:', 'host:a'], 'host:a'],
   ['关闭其它', ['host:a'], 'host:a'],
   ['关闭所有', [], ''],
@@ -1529,7 +1617,7 @@ it.each([
       }),
     );
     await nextTick();
-    expect(workspace.active).toBe('network:');
+    expect(workspace.active).toBe('extension:cn.hiboot.plugins.network:network:');
     const menu = document.querySelector('[role="menu"][aria-label="工作区标签操作"]')!;
     const buttons = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([

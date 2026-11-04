@@ -1,4 +1,5 @@
 @import url('./theme.css');
+@import url('./plugins.css');
 
 * {
   box-sizing: border-box;

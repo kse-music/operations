@@ -5,7 +5,8 @@ import { onBeforeUnmount, ref, shallowRef } from 'vue';
 import Modal from './Modal.vue';
 import TaskConnections from './TaskConnections.vue';
 import { useHostsStore } from '../stores/hosts';
-import { automationApi } from '../services/automation';
+import { useAutomationApi } from '../services/plugin-tool-services';
+const automationApi = useAutomationApi();
 import type { Entry, Run, RunInput, Target } from '../types/automation';
 import { errorMessage } from '../services/ipc';
 const props = defineProps<{ entry: Entry; initialHostId?: string; pendingRun?: Run }>(),

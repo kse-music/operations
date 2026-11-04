@@ -31,13 +31,18 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 serverdeck-core.workspace = true
+serverdeck-plugin-core.workspace = true
+serverdeck-plugin-runtime.workspace = true
+serverdeck-plugin-sdk.workspace = true
+serde_json.workspace = true
 serverdeck-application.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 tempfile.workspace = true
-serde_json.workspace = true
+wat = "1"
+base64 = "0.22.1"
 
 [lints]
 workspace = true

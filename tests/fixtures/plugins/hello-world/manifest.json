@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.serverdeck.hello",
+  "name": "Hello WASM",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "A real fuel-metered backend, without ambient host access",
+  "apiVersion": "^1.0.0",
+  "entry": { "backend": "backend.wasm", "ui": null },
+  "permissions": [],
+  "contributions": [],
+  "platforms": ["windows", "linux", "macos"],
+  "files": [],
+  "publisher": null
+}

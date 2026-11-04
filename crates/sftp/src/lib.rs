@@ -104,6 +104,13 @@ impl Files {
             &attrs,
         ))
     }
+    /// Resolve on the existing SFTP lease so capability callers can enforce canonical path scopes.
+    pub async fn canonical_path(&self, id: &str, path: &str) -> Result<String, Error> {
+        remote_absolute(path)?;
+        let _permit = self.slot().await?;
+        let remote = self.client(id).await?;
+        guard(&remote, remote.canonical(path)).await
+    }
     pub async fn action(&self, id: &str, action: RemoteAction) -> Result<(), Error> {
         let _permit = self.slot().await?;
         let remote = self.client(id).await?;

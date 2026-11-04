@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "cn.hiboot.plugins.assistant",
+  "name": "AI 运维助手",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "结合已配置模型分析问题、匹配主机并在确认后执行受控运维操作。",
+  "apiVersion": "^1.2.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": [
+    "ui.contribute",
+    "assistant.use"
+  ],
+  "contributions": [
+    {
+      "id": "assistant",
+      "label": "AI 运维助手",
+      "kind": "tool",
+      "tool": "assistant"
+    }
+  ],
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "files": [],
+  "publisher": null
+}

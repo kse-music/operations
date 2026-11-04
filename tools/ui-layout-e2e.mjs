@@ -31,6 +31,7 @@ try {
     await page.evaluate(
       async ({ theme }) => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+
         const { useHostsStore } = await import('/src/stores/hosts.ts');
         const { useNotificationsStore } = await import('/src/stores/notifications.ts');
         const { hostInput } = await import('/src/types/hosts.ts');
@@ -149,7 +150,7 @@ try {
         geometry.modules.bottom,
         `${name}: ${region} must start below the module header`,
       );
-    assert.equal(await page.locator('.module-navigation button').count(), 4);
+    assert.equal(await page.locator('.module-navigation button').count(), 5);
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
       '主机运维',

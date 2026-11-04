@@ -4,6 +4,7 @@ pub mod commands;
 pub mod file_commands;
 mod monitor_commands;
 mod ops_commands;
+mod plugin_commands;
 mod product_commands;
 mod task_commands;
 mod terminal_upload_commands;
@@ -34,6 +35,7 @@ pub fn run() {
             let data = app.path().app_data_dir()?;
             let logs = app.path().app_log_dir()?;
             let application = Application::initialize(data, logs.clone())?;
+            application.provision_bundled_plugins()?;
             let config = tauri::async_runtime::block_on(application.bootstrap())?.config;
             let guard = logging::initialize(&logs, config.log_level)?;
             app.manage(guard);
@@ -114,6 +116,31 @@ pub fn run() {
 pub fn command_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        plugin_commands::plugin_tool_stage,
+        plugin_commands::plugin_tool_abort_input,
+        plugin_commands::plugin_tool_cancel_request,
+        plugin_commands::plugin_preview,
+        plugin_commands::plugin_preview_info,
+        plugin_commands::plugin_ui,
+        plugin_commands::plugin_pick,
+        plugin_commands::plugin_statuses,
+        plugin_commands::plugin_activate,
+        plugin_commands::plugin_call,
+        plugin_commands::plugin_health,
+        plugin_commands::plugin_cancel,
+        plugin_commands::plugin_grant,
+        plugin_commands::plugin_permissions,
+        plugin_commands::plugin_revoke,
+        plugin_commands::plugin_context,
+        plugin_commands::plugin_approve,
+        plugin_commands::plugin_events,
+        plugin_commands::plugin_capability,
+        plugin_commands::plugin_install,
+        plugin_commands::plugin_list,
+        plugin_commands::plugin_terminal_open,
+        plugin_commands::plugin_detail,
+        plugin_commands::plugin_set_enabled,
+        plugin_commands::plugin_uninstall,
         ai_commands::ai_models,
         ai_commands::ai_model_save,
         ai_commands::ai_model_test,

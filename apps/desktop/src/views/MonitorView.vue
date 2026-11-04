@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '../composables/error-notifications';
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, inject, onMounted, onBeforeUnmount, ref } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useApplicationStore } from '../stores/application';
 import { monitorApi } from '../services/monitor';
+import { pluginServerServices } from '../services/plugin-server-surface';
+const surface = inject(pluginServerServices, null);
+const api = surface?.monitor ?? monitorApi;
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import { monitorLabels, percent, type MonitorSnapshot } from '../types/monitor';
@@ -58,7 +61,7 @@ async function poll(): Promise<void> {
   const host = ownedHost,
     token = generation;
   try {
-    const value = await monitorApi.snapshot(host, snapshot.value?.revision ?? null);
+    const value = await api.snapshot(host, snapshot.value?.revision ?? null);
     if (alive && token === generation && value) {
       snapshot.value = value;
       if (value.error) error.value = value.error;
@@ -76,7 +79,7 @@ async function pauseHost(): Promise<void> {
     const host = ownedHost;
     ownedHost = '';
     try {
-      await monitorApi.visible(host, false);
+      await api.visible(host, false);
     } catch (cause) {
       error.value = errorMessage(cause);
     }
@@ -95,7 +98,7 @@ async function start(): Promise<void> {
   session.value = '';
   connection.value = '连接中';
   try {
-    const value = await monitorApi.open(host, (event) => {
+    const value = await api.open(host, (event) => {
       if (!alive || token !== generation) return;
       if (event.type === 'trust') trust.value = event;
       else if (event.type === 'state') {
@@ -105,12 +108,12 @@ async function start(): Promise<void> {
       }
     });
     if (!alive || token !== generation) {
-      await monitorApi.visible(host, false);
+      await api.visible(host, false);
       return;
     }
     session.value = value.id;
     ownedHost = host;
-    await monitorApi.visible(host, !document.hidden);
+    await api.visible(host, !document.hidden);
     void poll();
   } catch (cause) {
     error.value = errorMessage(cause);
@@ -123,7 +126,7 @@ async function stop(): Promise<void> {
   busy.value = true;
   const host = ownedHost;
   try {
-    await monitorApi.stop(host);
+    await api.stop(host);
     ownedHost = '';
     snapshot.value = null;
     session.value = '';
@@ -148,7 +151,7 @@ async function confirmTrust(accept: boolean): Promise<void> {
 async function visibility(): Promise<void> {
   if (ownedHost)
     try {
-      await monitorApi.visible(ownedHost, !document.hidden);
+      await api.visible(ownedHost, !document.hidden);
     } catch (cause) {
       error.value = errorMessage(cause);
     }
@@ -163,12 +166,12 @@ onMounted(async () => {
   if (props.hostId) await start();
   else if (chosen.value) {
     try {
-      const current = await monitorApi.snapshot(chosen.value);
+      const current = await api.snapshot(chosen.value);
       if (current) {
         snapshot.value = current;
         session.value = current.sessionId;
         ownedHost = chosen.value;
-        await monitorApi.visible(ownedHost, !document.hidden);
+        await api.visible(ownedHost, !document.hidden);
         void poll();
       }
     } catch (cause) {

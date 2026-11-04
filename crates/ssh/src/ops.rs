@@ -73,7 +73,17 @@ impl Engine {
         if !self.ops_ready(id)? {
             return Err(Error::Validation("SSH 运维连接未就绪"));
         }
+        self.lease_profile(id)
+    }
+    /// Non-secret binding for existing file/operations leases; never exposed to plugins.
+    pub fn lease_profile(&self, id: &str) -> Result<String, Error> {
         let owner = self.control(id)?;
+        if !matches!(owner.kind, SessionKind::Files | SessionKind::Operations)
+            || !owner.ready.load(Ordering::Acquire)
+            || owner.cancel.is_cancelled()
+        {
+            return Err(failure("SSH_LEASE_CLOSED", "文件或运维租约未就绪或已关闭"));
+        }
         locked(&self.registry)?
             .transports
             .iter()

@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
-    "build": "vue-tsc --noEmit && vite build",
+    "dev": "node ../../tools/build-system-plugins.mjs && vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "node ../../tools/build-system-plugins.mjs && vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
     "test": "vitest run",
     "tauri": "tauri"

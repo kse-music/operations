@@ -1,103 +1,85 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { Server } from '@lucide/vue';
-import MonitorView from './MonitorView.vue';
-import OperationsView from './OperationsView.vue';
-import { serverSections, isMonitorSection, type ServerSection } from '../types/server';
+import { usePluginsStore } from '../stores/plugins';
 import { useHostsStore } from '../stores/hosts';
-import { hostDisplayName, type Host } from '../types/hosts';
-import type { ContainerShell } from '../types/ops';
-
+import { hostDisplayName } from '../types/hosts';
+import type { ServerSection } from '../types/server';
+import { serverPluginFor } from '../services/server-plugins';
+import { errorMessage } from '../services/ipc';
+import { useErrorNotifications } from '../composables/error-notifications';
 const props = defineProps<{ hostId: string; initialSection?: ServerSection }>();
 const emit = defineEmits<{
-  section: [value: ServerSection];
-  shell: [host: Host, shell: ContainerShell];
+  plugin: [id: string, contribution: string, hostId: string, section?: ServerSection];
+  manage: [];
 }>();
-const hosts = useHostsStore();
-const host = computed(() => hosts.catalog?.hosts.find((item) => item.id === props.hostId));
-const section = ref<ServerSection>(props.initialSection ?? 'overview');
-const tabs = ref<HTMLElement>();
-watch(
-  () => props.initialSection,
-  (value) => {
-    section.value = value ?? 'overview';
-  },
+const plugins = usePluginsStore(),
+  hosts = useHostsStore();
+const error = ref<string | null>(null);
+useErrorNotifications(error);
+const host = computed(() => hosts.catalog?.hosts.find((host) => host.id === props.hostId));
+const entries = computed(() =>
+  plugins.installed.flatMap((plugin) =>
+    plugin.manifest.contributions
+      .filter((entry) => entry.kind === 'server')
+      .map((entry) => ({
+        plugin,
+        entry,
+        ready: plugins.extensions.some(
+          (e) => e.pluginId === plugin.manifest.id && e.id === entry.id,
+        ),
+      })),
+  ),
 );
-watch(section, (value) => emit('section', value));
-async function tabKey(event: KeyboardEvent) {
-  const index = serverSections.findIndex((item) => item.key === section.value);
-  let target: number;
-  switch (event.key) {
-    case 'ArrowRight':
-      target = (index + 1) % serverSections.length;
-      break;
-    case 'ArrowLeft':
-      target = (index + serverSections.length - 1) % serverSections.length;
-      break;
-    case 'Home':
-      target = 0;
-      break;
-    case 'End':
-      target = serverSections.length - 1;
-      break;
-    default:
-      return;
+async function load() {
+  error.value = null;
+  await plugins.refresh();
+  if (!props.initialSection) return;
+  try {
+    const entry = await serverPluginFor(props.hostId, props.initialSection);
+    if (entry) emit('plugin', entry.pluginId, entry.id, props.hostId, props.initialSection);
+  } catch (cause) {
+    error.value = errorMessage(cause);
   }
-  event.preventDefault();
-  section.value = serverSections[target]!.key;
-  await nextTick();
-  tabs.value?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
 }
+onMounted(() => void load());
 </script>
-
 <template>
   <section class="server-view page-view" aria-label="服务器管理">
     <header class="server-heading">
       <div class="server-emblem"><Server :size="22" aria-hidden="true" /></div>
       <div>
         <h1>服务器管理</h1>
-        <p class="subtle">{{ hostDisplayName(host) || '当前主机' }} · 资源监控与日常运维</p>
+        <p class="subtle">{{ hostDisplayName(host) || '当前主机' }} · 选择服务器插件</p>
       </div>
     </header>
-    <div
-      ref="tabs"
-      class="server-tabs"
-      role="tablist"
-      aria-label="服务器管理分类"
-      @keydown="tabKey"
-    >
-      <button
-        v-for="item in serverSections"
-        :id="`server-tab-${item.key}`"
-        :key="item.key"
-        role="tab"
-        :aria-selected="section === item.key"
-        aria-controls="server-panel"
-        :tabindex="section === item.key ? 0 : -1"
-        @click="section = item.key"
+    <p v-if="plugins.loading" role="status">正在读取插件…</p>
+    <p v-if="error || plugins.error" role="status">
+      插件列表读取失败。<button class="text-button" @click="load">重试</button>
+    </p>
+    <p v-if="plugins.loaded && !entries.length" class="host-empty">尚未安装服务器插件。</p>
+    <div class="plugin-list">
+      <article
+        v-for="{ plugin, entry, ready } in entries"
+        :key="`${plugin.manifest.id}:${entry.id}`"
+        class="plugin-card"
       >
-        {{ item.label }}
-      </button>
+        <h2>
+          {{ plugin.manifest.name }}
+        </h2>
+        <p>{{ plugin.manifest.description }}</p>
+        <button
+          v-if="ready"
+          class="button primary"
+          @click="emit('plugin', plugin.manifest.id, entry.id, hostId)"
+        >
+          打开 {{ entry.label }}
+        </button>
+        <button v-else class="button" @click="emit('plugin', plugin.manifest.id, entry.id, hostId)">
+          {{ plugin.enabled ? '插件设置' : '启用并设置' }}
+        </button>
+      </article>
     </div>
-    <div
-      id="server-panel"
-      class="server-panel"
-      role="tabpanel"
-      :aria-labelledby="`server-tab-${section}`"
-    >
-      <MonitorView
-        v-if="isMonitorSection(section)"
-        :host-id="hostId"
-        :section="section"
-        @processes="section = 'processes'"
-      />
-      <OperationsView
-        v-else
-        :host-id="hostId"
-        :initial-tab="section"
-        @section="section = $event"
-        @shell="(target, shell) => emit('shell', target, shell)"
-      />
-    </div>
+    <button class="button" @click="emit('manage')">插件管理</button>
   </section>
 </template>

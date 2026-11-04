@@ -79,7 +79,7 @@ try {
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
     await assertHost('a', 'terminals');
     const existingTabs = await page.locator('.workspace-tab').count();
-    for (const module of ['tools', 'assets', 'system']) {
+    for (const module of ['tools', 'assets', 'plugins', 'system']) {
       await page.locator(`.module-navigation [data-module="${module}"]`).click();
       assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
       await assertHost('a', 'terminals');
@@ -264,7 +264,7 @@ try {
     );
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['批量运维', '自动运维', '网络诊断', '任务中心'],
+      ['批量运维', '自动运维', '网络诊断', 'AI 运维助手', '任务中心'],
     );
     await nav('任务中心');
     await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
@@ -281,7 +281,7 @@ try {
     );
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['安全凭据', '备份恢复'],
+      ['安全凭据', '模型管理', '备份恢复'],
     );
     await page.screenshot({ path: `${output}/${name}-assets-module.png` });
     await nav('关于');
@@ -306,7 +306,7 @@ try {
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();
-    assert.equal(await page.locator('.module-navigation button').count(), 4);
+    assert.equal(await page.locator('.module-navigation button').count(), 5);
     assert.equal(await page.locator('.workspace-header .host-tools').count(), 1);
     assert.deepEqual(errors, []);
     results.push({ name, width, height, theme, compactHeader, passed: true });

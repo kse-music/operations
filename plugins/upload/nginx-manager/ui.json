@@ -1,0 +1,653 @@
+{
+  "uiVersion": 1,
+  "title": {
+    "zh-CN": "Nginx 管理",
+    "en-US": "Nginx Manager"
+  },
+  "pages": [
+    {
+      "id": "nginx",
+      "title": {
+        "zh-CN": "配置、验证与显式重载",
+        "en-US": "Configure, validate and reload"
+      },
+      "initialAction": null,
+      "fields": [
+        {
+          "id": "binary",
+          "label": {
+            "zh-CN": "Nginx 可执行文件",
+            "en-US": "Nginx executable"
+          },
+          "kind": "text",
+          "default": "nginx",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "prefix",
+          "label": {
+            "zh-CN": "运行前缀（自定义安装）",
+            "en-US": "Runtime prefix (custom installation)"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "configPath",
+          "label": {
+            "zh-CN": "配置文件路径",
+            "en-US": "Configuration path"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "logPath",
+          "label": {
+            "zh-CN": "日志文件路径",
+            "en-US": "Log path"
+          },
+          "kind": "text",
+          "default": "/var/log/nginx/error.log",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "documentId",
+          "label": {
+            "zh-CN": "文档标识",
+            "en-US": "Document ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "content",
+          "label": {
+            "zh-CN": "配置内容",
+            "en-US": "Configuration text"
+          },
+          "kind": "textarea",
+          "default": "",
+          "readonly": false,
+          "documentField": "documentId"
+        },
+        {
+          "id": "validated",
+          "label": {
+            "zh-CN": "当前磁盘配置已验证",
+            "en-US": "Disk configuration validated"
+          },
+          "kind": "checkbox",
+          "default": false,
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "logId",
+          "label": {
+            "zh-CN": "日志标识",
+            "en-US": "Log ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        }
+      ],
+      "actions": [
+        {
+          "id": "detect",
+          "label": {
+            "zh-CN": "检测 Nginx / 版本 / 服务",
+            "en-US": "Detect Nginx / version / service"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "open",
+          "label": {
+            "zh-CN": "读取配置",
+            "en-US": "Read configuration"
+          },
+          "discardDirty": true,
+          "enabledWhen": null
+        },
+        {
+          "id": "save",
+          "label": {
+            "zh-CN": "保存配置（单次确认）",
+            "en-US": "Save configuration (confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "validate",
+          "label": {
+            "zh-CN": "验证磁盘配置 nginx -t",
+            "en-US": "Validate disk configuration"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "reload",
+          "label": {
+            "zh-CN": "重载（重新验证并单次确认）",
+            "en-US": "Reload (revalidate and confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": "validated"
+        },
+        {
+          "id": "logs",
+          "label": {
+            "zh-CN": "开始日志",
+            "en-US": "Start log"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": {
+        "resourceField": "logId",
+        "title": {
+          "zh-CN": "Nginx 日志",
+          "en-US": "Nginx log"
+        }
+      }
+    },
+    {
+      "id": "navigation",
+      "title": {
+        "zh-CN": "配置、验证与显式重载",
+        "en-US": "Configure, validate and reload"
+      },
+      "initialAction": null,
+      "fields": [
+        {
+          "id": "binary",
+          "label": {
+            "zh-CN": "Nginx 可执行文件",
+            "en-US": "Nginx executable"
+          },
+          "kind": "text",
+          "default": "nginx",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "prefix",
+          "label": {
+            "zh-CN": "运行前缀（自定义安装）",
+            "en-US": "Runtime prefix (custom installation)"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "configPath",
+          "label": {
+            "zh-CN": "配置文件路径",
+            "en-US": "Configuration path"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "logPath",
+          "label": {
+            "zh-CN": "日志文件路径",
+            "en-US": "Log path"
+          },
+          "kind": "text",
+          "default": "/var/log/nginx/error.log",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "documentId",
+          "label": {
+            "zh-CN": "文档标识",
+            "en-US": "Document ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "content",
+          "label": {
+            "zh-CN": "配置内容",
+            "en-US": "Configuration text"
+          },
+          "kind": "textarea",
+          "default": "",
+          "readonly": false,
+          "documentField": "documentId"
+        },
+        {
+          "id": "validated",
+          "label": {
+            "zh-CN": "当前磁盘配置已验证",
+            "en-US": "Disk configuration validated"
+          },
+          "kind": "checkbox",
+          "default": false,
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "logId",
+          "label": {
+            "zh-CN": "日志标识",
+            "en-US": "Log ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        }
+      ],
+      "actions": [
+        {
+          "id": "detect",
+          "label": {
+            "zh-CN": "检测 Nginx / 版本 / 服务",
+            "en-US": "Detect Nginx / version / service"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "open",
+          "label": {
+            "zh-CN": "读取配置",
+            "en-US": "Read configuration"
+          },
+          "discardDirty": true,
+          "enabledWhen": null
+        },
+        {
+          "id": "save",
+          "label": {
+            "zh-CN": "保存配置（单次确认）",
+            "en-US": "Save configuration (confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "validate",
+          "label": {
+            "zh-CN": "验证磁盘配置 nginx -t",
+            "en-US": "Validate disk configuration"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "reload",
+          "label": {
+            "zh-CN": "重载（重新验证并单次确认）",
+            "en-US": "Reload (revalidate and confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": "validated"
+        },
+        {
+          "id": "logs",
+          "label": {
+            "zh-CN": "开始日志",
+            "en-US": "Start log"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": {
+        "resourceField": "logId",
+        "title": {
+          "zh-CN": "Nginx 日志",
+          "en-US": "Nginx log"
+        }
+      }
+    },
+    {
+      "id": "menu",
+      "title": {
+        "zh-CN": "配置、验证与显式重载",
+        "en-US": "Configure, validate and reload"
+      },
+      "initialAction": null,
+      "fields": [
+        {
+          "id": "binary",
+          "label": {
+            "zh-CN": "Nginx 可执行文件",
+            "en-US": "Nginx executable"
+          },
+          "kind": "text",
+          "default": "nginx",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "prefix",
+          "label": {
+            "zh-CN": "运行前缀（自定义安装）",
+            "en-US": "Runtime prefix (custom installation)"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "configPath",
+          "label": {
+            "zh-CN": "配置文件路径",
+            "en-US": "Configuration path"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "logPath",
+          "label": {
+            "zh-CN": "日志文件路径",
+            "en-US": "Log path"
+          },
+          "kind": "text",
+          "default": "/var/log/nginx/error.log",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "documentId",
+          "label": {
+            "zh-CN": "文档标识",
+            "en-US": "Document ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "content",
+          "label": {
+            "zh-CN": "配置内容",
+            "en-US": "Configuration text"
+          },
+          "kind": "textarea",
+          "default": "",
+          "readonly": false,
+          "documentField": "documentId"
+        },
+        {
+          "id": "validated",
+          "label": {
+            "zh-CN": "当前磁盘配置已验证",
+            "en-US": "Disk configuration validated"
+          },
+          "kind": "checkbox",
+          "default": false,
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "logId",
+          "label": {
+            "zh-CN": "日志标识",
+            "en-US": "Log ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        }
+      ],
+      "actions": [
+        {
+          "id": "detect",
+          "label": {
+            "zh-CN": "检测 Nginx / 版本 / 服务",
+            "en-US": "Detect Nginx / version / service"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "open",
+          "label": {
+            "zh-CN": "读取配置",
+            "en-US": "Read configuration"
+          },
+          "discardDirty": true,
+          "enabledWhen": null
+        },
+        {
+          "id": "save",
+          "label": {
+            "zh-CN": "保存配置（单次确认）",
+            "en-US": "Save configuration (confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "validate",
+          "label": {
+            "zh-CN": "验证磁盘配置 nginx -t",
+            "en-US": "Validate disk configuration"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "reload",
+          "label": {
+            "zh-CN": "重载（重新验证并单次确认）",
+            "en-US": "Reload (revalidate and confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": "validated"
+        },
+        {
+          "id": "logs",
+          "label": {
+            "zh-CN": "开始日志",
+            "en-US": "Start log"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": {
+        "resourceField": "logId",
+        "title": {
+          "zh-CN": "Nginx 日志",
+          "en-US": "Nginx log"
+        }
+      }
+    },
+    {
+      "id": "command",
+      "title": {
+        "zh-CN": "配置、验证与显式重载",
+        "en-US": "Configure, validate and reload"
+      },
+      "initialAction": null,
+      "fields": [
+        {
+          "id": "binary",
+          "label": {
+            "zh-CN": "Nginx 可执行文件",
+            "en-US": "Nginx executable"
+          },
+          "kind": "text",
+          "default": "nginx",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "prefix",
+          "label": {
+            "zh-CN": "运行前缀（自定义安装）",
+            "en-US": "Runtime prefix (custom installation)"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "configPath",
+          "label": {
+            "zh-CN": "配置文件路径",
+            "en-US": "Configuration path"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "logPath",
+          "label": {
+            "zh-CN": "日志文件路径",
+            "en-US": "Log path"
+          },
+          "kind": "text",
+          "default": "/var/log/nginx/error.log",
+          "readonly": false,
+          "documentField": null
+        },
+        {
+          "id": "documentId",
+          "label": {
+            "zh-CN": "文档标识",
+            "en-US": "Document ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "content",
+          "label": {
+            "zh-CN": "配置内容",
+            "en-US": "Configuration text"
+          },
+          "kind": "textarea",
+          "default": "",
+          "readonly": false,
+          "documentField": "documentId"
+        },
+        {
+          "id": "validated",
+          "label": {
+            "zh-CN": "当前磁盘配置已验证",
+            "en-US": "Disk configuration validated"
+          },
+          "kind": "checkbox",
+          "default": false,
+          "readonly": true,
+          "documentField": null
+        },
+        {
+          "id": "logId",
+          "label": {
+            "zh-CN": "日志标识",
+            "en-US": "Log ID"
+          },
+          "kind": "text",
+          "default": "",
+          "readonly": true,
+          "documentField": null
+        }
+      ],
+      "actions": [
+        {
+          "id": "detect",
+          "label": {
+            "zh-CN": "检测 Nginx / 版本 / 服务",
+            "en-US": "Detect Nginx / version / service"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "open",
+          "label": {
+            "zh-CN": "读取配置",
+            "en-US": "Read configuration"
+          },
+          "discardDirty": true,
+          "enabledWhen": null
+        },
+        {
+          "id": "save",
+          "label": {
+            "zh-CN": "保存配置（单次确认）",
+            "en-US": "Save configuration (confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "validate",
+          "label": {
+            "zh-CN": "验证磁盘配置 nginx -t",
+            "en-US": "Validate disk configuration"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "reload",
+          "label": {
+            "zh-CN": "重载（重新验证并单次确认）",
+            "en-US": "Reload (revalidate and confirm)"
+          },
+          "discardDirty": false,
+          "enabledWhen": "validated"
+        },
+        {
+          "id": "logs",
+          "label": {
+            "zh-CN": "开始日志",
+            "en-US": "Start log"
+          },
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": {
+        "resourceField": "logId",
+        "title": {
+          "zh-CN": "Nginx 日志",
+          "en-US": "Nginx log"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "cn.hiboot.plugins.docker",
+  "name": "Docker 管理",
+  "version": "1.0.0",
+  "author": "ServerDeck",
+  "description": "管理 Docker 容器与镜像，查看详情、日志并打开容器终端。",
+  "apiVersion": "^1.1.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": [
+    "ui.contribute",
+    "system.read",
+    "system.manage"
+  ],
+  "contributions": [
+    {
+      "id": "server",
+      "label": "Docker 管理",
+      "kind": "server"
+    }
+  ],
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
+  "files": [],
+  "publisher": null
+}

@@ -1,0 +1,122 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { createApp, nextTick, type App } from 'vue';
+import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
+import PluginPage from './PluginPage.vue';
+import { usePluginsStore } from '../stores/plugins';
+import { useHostsStore } from '../stores/hosts';
+import { useWorkspaceStore } from '../stores/workspace';
+import { pluginsApi } from '../services/plugins';
+import { systemPluginFixtures } from '../services/system-plugins.fixture';
+let app: App, root: HTMLElement, pinia: Pinia;
+function mount(pluginId: string) {
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(PluginPage, {
+    pluginId,
+    contributionId: 'server',
+    hostId: '',
+    tabKey: 'own-page',
+  }).use(pinia);
+  app.mount(root);
+}
+const settle = async () => {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  await nextTick();
+};
+afterEach(() => {
+  app?.unmount();
+  root?.remove();
+  if (pinia) disposePinia(pinia);
+  vi.restoreAllMocks();
+});
+it.each(['system', 'user'] as const)(
+  'opens disabled %s plugins and keeps permission/source details inside their own page',
+  async (source) => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    const plugins = usePluginsStore();
+    const plugin = { ...systemPluginFixtures()[1]!, source };
+    plugins.installed = [plugin];
+    plugins.grants[plugin.manifest.id] = null;
+    if (source === 'system')
+      plugins.grants[plugin.manifest.id] = {
+        version: 1,
+        pluginId: plugin.manifest.id,
+        pluginVersion: plugin.manifest.version,
+        publisher: null,
+        packageDigest: plugin.packageDigest,
+        revision: plugin.revision,
+        permissions: plugin.manifest.permissions,
+        operations: ['ui.contribute', 'ui.notify', 'system.read', 'system.manage', 'system.shell'],
+        readRoots: [],
+        writeRoots: [],
+      };
+    const ui = vi.spyOn(pluginsApi, 'ui');
+    const grant = vi.spyOn(pluginsApi, 'grant').mockResolvedValue({} as never);
+    vi.spyOn(plugins, 'refresh').mockResolvedValue();
+    await useWorkspaceStore().openPlugin(plugin.manifest.id, 'server', '');
+    expect(useWorkspaceStore().current?.pluginId).toBe(plugin.manifest.id);
+    useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+    mount(plugin.manifest.id);
+    await settle();
+    expect(root.textContent).toContain(source === 'system' ? '系统内置' : '用户上传');
+    expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
+    expect(ui).not.toHaveBeenCalled();
+    expect(root.querySelector('.plugin-workspace')).toBeNull();
+    expect(root.textContent).not.toContain('允许访问的主机');
+    expect(root.textContent).toContain('适用于所有主机');
+    if (source === 'system') {
+      for (const field of root.querySelectorAll<HTMLInputElement>('form input')) {
+        expect(field.checked).toBe(true);
+        expect(field.disabled).toBe(true);
+      }
+      expect(root.textContent).not.toContain('保存并授权');
+      expect(root.textContent).not.toContain('撤销授权');
+      root
+        .querySelector<HTMLFormElement>('form')!
+        .dispatchEvent(new Event('submit', { cancelable: true }));
+      await settle();
+      expect(grant).not.toHaveBeenCalled();
+      return;
+    }
+    for (const permission of ['ui.contribute', 'system.read', 'system.manage']) {
+      const field = root.querySelector<HTMLInputElement>(`[aria-label="${permission}"]`)!;
+      field.checked = true;
+      field.dispatchEvent(new Event('change'));
+      await nextTick();
+    }
+    root
+      .querySelector<HTMLFormElement>('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(grant).toHaveBeenCalledWith(
+      plugin.manifest.id,
+      expect.objectContaining({
+        expectedRevision: plugin.revision,
+        permissions: ['ui.contribute', 'system.read', 'system.manage'],
+        operations: ['ui.contribute', 'ui.notify', 'system.read', 'system.manage'],
+        confirmed: true,
+      }),
+    );
+    expect(grant.mock.calls[0]![1].operations).not.toContain('system.shell');
+    expect(grant.mock.calls[0]![1]).not.toHaveProperty('hostIds');
+  },
+);
+it('does not overwrite permission edits when the installed list refreshes with unchanged grants', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const plugins = usePluginsStore();
+  const plugin = { ...systemPluginFixtures()[0]!, source: 'user' as const };
+  plugins.installed = [plugin];
+  plugins.grants[plugin.manifest.id] = null;
+  mount(plugin.manifest.id);
+  await settle();
+  const check = root.querySelector<HTMLInputElement>('[aria-label="metrics.read"]')!;
+  check.checked = true;
+  check.dispatchEvent(new Event('change'));
+  await nextTick();
+  plugins.installed = [{ ...plugin }];
+  plugins.grants = { ...plugins.grants };
+  await settle();
+  expect(root.querySelector<HTMLInputElement>('[aria-label="metrics.read"]')!.checked).toBe(true);
+});

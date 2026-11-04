@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
-import ServerView from './ServerView.vue';
+import PluginServerSurface from '../components/PluginServerSurface.vue';
+import { serverSections } from '../types/server';
+import type { PluginUiPage } from '../types/plugins';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
 import { hostInput } from '../types/hosts';
@@ -20,9 +22,42 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../services/monitor', () => ({ monitorApi: mocks.monitor }));
 vi.mock('../services/ops', () => ({ opsApi: mocks.ops }));
+vi.mock('../services/plugin-server', () => ({
+  pluginServerRequest: async (
+    _plugin: string,
+    operation: {
+      kind: string;
+      request?: unknown;
+      monitorId?: string;
+      visible?: boolean;
+      source?: unknown;
+      lines?: number;
+      follow?: boolean;
+      logId?: string;
+    },
+  ) => {
+    if (operation.kind === 'metrics_open') return mocks.monitor.open();
+    if (operation.kind === 'metrics_snapshot') return mocks.monitor.snapshot();
+    if (operation.kind === 'metrics_visible') return mocks.monitor.visible('a', operation.visible);
+    if (operation.kind === 'metrics_close') return mocks.monitor.stop();
+    if (operation.kind === 'system_query') return mocks.ops.query('ops-a', operation.request);
+    if (operation.kind === 'system_feedback') return mocks.ops.feedback();
+    if (operation.kind === 'system_log_start')
+      return mocks.ops.logOpen(
+        'ops-a',
+        { source: operation.source, lines: operation.lines, follow: operation.follow },
+        expect.any(Function),
+      );
+    if (operation.kind === 'system_log_poll') return { events: [] };
+    if (operation.kind === 'system_log_stop') return mocks.ops.logClose(operation.logId);
+    throw new Error('Unexpected capability ' + operation.kind);
+  },
+}));
+const navigate = vi.fn();
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const flush = async () => {
+  await vi.dynamicImportSettled();
   for (let i = 0; i < 20; i++) await Promise.resolve();
   await nextTick();
 };
@@ -128,7 +163,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 async function mount(section: ServerSection = 'overview') {
-  app = createApp(ServerView, { hostId: 'a', initialSection: section }).use(pinia);
+  const monitor = ['overview', 'disks', 'network'].includes(section);
+  const page: PluginUiPage = {
+    id: 'server',
+    title: 'Test',
+    initialAction: null,
+    fields: [],
+    actions: [{ id: 'bridge', label: 'bridge', discardDirty: false, enabledWhen: null }],
+    log: null,
+    surface: {
+      kind: monitor ? 'monitor' : 'operations',
+      sections: serverSections
+        .map((s) => s.key)
+        .filter((key) => ['overview', 'disks', 'network'].includes(key) === monitor),
+    },
+  };
+  app = createApp(PluginServerSurface, {
+    pluginId: 'dev.test',
+    hostId: 'a',
+    page,
+    initialSection: section,
+    onNavigate: navigate,
+  }).use(pinia);
   app.mount(root);
   await flush();
 }
@@ -145,25 +201,19 @@ async function click(text: string) {
   await flush();
 }
 
-it('separates resource panels, reuses sampling between resource tabs, and pauses when entering operations', async () => {
+it('renders the declared resource panels through plugin RPC and reuses its sampler', async () => {
   await mount();
-  expect(root.querySelectorAll('.server-tabs [role=tab]')).toHaveLength(9);
+  expect(root.querySelectorAll('.server-tabs [role=tab]')).toHaveLength(3);
   expect(root.querySelectorAll('.monitor-cards article')).toHaveLength(4);
   expect(root.querySelectorAll('.trend-chart')).toHaveLength(2);
-  expect(root.textContent).not.toContain('磁盘与挂载点');
   await tab('disks');
   expect(root.textContent).toContain('磁盘与挂载点');
   expect(root.querySelector('.monitor-cards, .trend-chart')).toBeNull();
   await tab('network');
   expect(root.textContent).toContain('网络接口');
-  expect(root.querySelectorAll('.trend-chart')).toHaveLength(2);
   expect(mocks.monitor.open).toHaveBeenCalledTimes(1);
-  await tab('processes');
+  app.unmount();
   expect(mocks.monitor.visible).toHaveBeenLastCalledWith('a', false);
-  expect(mocks.monitor.stop).not.toHaveBeenCalled();
-  expect(root.querySelector('[data-ops-target="123"]')).not.toBeNull();
-  await tab('overview');
-  expect(mocks.monitor.open).toHaveBeenCalledTimes(2);
 });
 it('puts system information in a dialog and supports keyboard tab selection', async () => {
   await mount();
@@ -206,19 +256,29 @@ it('shows detail failures without stale details and clears the dialog on section
   await tab('ports');
   expect(document.querySelector('dialog')).toBeNull();
 });
-it('opens container logs in the Logs tab and closes the stream when leaving that tab', async () => {
-  mocks.ops.logOpen.mockResolvedValue({ id: 'log-a' });
+it('routes container logs to a standard provider without opening a native log stream', async () => {
   await mount('containers');
   root
     .querySelector<HTMLButtonElement>('[data-ops-target="container-a"] button:nth-last-child(2)')!
     .click();
   await flush();
-  expect(root.querySelector('#server-tab-logs')?.getAttribute('aria-selected')).toBe('true');
-  expect(mocks.ops.logOpen).toHaveBeenCalledWith(
-    'ops-a',
-    { source: { kind: 'container', id: 'container-a' }, lines: 200, follow: true },
-    expect.any(Function),
+  expect(navigate).toHaveBeenCalledWith(
+    'logs',
+    expect.objectContaining({
+      input: { source: { kind: 'container', id: 'container-a' }, lines: 200, follow: true },
+    }),
   );
+  expect(mocks.ops.logOpen).not.toHaveBeenCalled();
+});
+it('opens and closes a standard log resource when its view leaves', async () => {
+  mocks.ops.logOpen.mockResolvedValue({ id: 'log-a' });
+  await mount('logs');
+  const path = root.querySelector<HTMLInputElement>('[aria-label="远程日志绝对路径"]')!;
+  path.value = '/var/log/test.log';
+  path.dispatchEvent(new Event('input'));
+  await nextTick();
+  await click('打开日志文件');
+  expect(mocks.ops.logOpen).toHaveBeenCalled();
   await tab('containers');
   expect(mocks.ops.logClose).toHaveBeenCalledWith('log-a');
 });

@@ -1,0 +1,10 @@
+[package]
+name = "serverdeck-nginx-manager"
+version = "1.0.0"
+edition = "2024"
+publish = false
+[lib]
+crate-type = ["cdylib", "rlib"]
+[dependencies]
+serverdeck-plugin-sdk = { path = "../../../../crates/plugin-sdk" }
+[workspace]

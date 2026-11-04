@@ -27,7 +27,10 @@ impl Application {
         self.monitors.snapshot(host, after)
     }
     pub fn monitor_visible(&self, host: &str, visible: bool) -> Result<(), Error> {
-        self.monitors.visible(host, visible)
+        match self.monitors.visible(host, visible) {
+            Err(Error::NotFound) if !visible => Ok(()),
+            result => result,
+        }
     }
     pub async fn monitor_stop(&self, host: &str) -> Result<(), Error> {
         self.monitors.stop(host).await

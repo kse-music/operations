@@ -55,6 +55,8 @@ export type LogEvent =
   | { type: 'state'; state: string; code: string | null; message: string | null }
   | { type: 'data'; sequence: number; stream: string; data: number[]; at: number };
 export interface ContainerShell {
+  /** Host-only launch attribution; omitted from native operation DTOs. */
+  pluginId?: string;
   id: string;
   bash: boolean;
   confirmed: boolean;

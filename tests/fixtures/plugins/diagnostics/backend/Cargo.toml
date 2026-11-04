@@ -1,0 +1,14 @@
+[workspace]
+
+[package]
+name = "serverdeck-diagnostics-example"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+serverdeck-plugin-sdk = { path = "../../../../../crates/plugin-sdk", version = "1.0.0" }

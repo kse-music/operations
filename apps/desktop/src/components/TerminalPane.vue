@@ -2,6 +2,7 @@
 import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { opsApi } from '../services/ops';
+import { pluginContainerShell } from '../services/plugin-server';
 import { ArrowDown, ArrowUp } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
@@ -147,7 +148,10 @@ async function connect(): Promise<void> {
           hostId: string,
           size: import('../types/terminal').TerminalSize,
           receive: (event: TerminalEvent) => void,
-        ) => opsApi.shell(hostId, size, props.tab.containerShell!, receive)
+        ) =>
+          props.tab.containerShell!.pluginId
+            ? pluginContainerShell(hostId, size, props.tab.containerShell!, receive)
+            : opsApi.shell(hostId, size, props.tab.containerShell!, receive)
       : props.tab.fileAction
         ? (
             hostId: string,
