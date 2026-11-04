@@ -16,7 +16,7 @@ const config = path.join(output, 'tauri-e2e.json');
 await writeFile(
   config,
   JSON.stringify({
-    identifier: 'io.serverdeck.desktop.ai-e2e',
+    identifier: 'cn.hiboot.desktop.ai-e2e',
     app: { appDirectoriesOverride: output },
   }),
 );

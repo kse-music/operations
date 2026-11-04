@@ -16,7 +16,6 @@ const viewModules: Record<WorkspaceView, NavigationModule> = {
   automation: 'plugins',
   network: 'plugins',
   assistant: 'plugins',
-  tasks: 'plugins',
   credentials: 'assets',
   models: 'assets',
   backup: 'assets',

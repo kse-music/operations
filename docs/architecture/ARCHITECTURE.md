@@ -1,12 +1,28 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-04：插件图标配置
+
+Host API 1.3.0 在 Manifest 增加可选 icon，Rust 校验名称格式并透传预览/安装/列表/详情，前端使用共享 PluginIcon 与固定图标映射。九个系统清单声明图标，上传使用同一字段；省略和未知名称回退 boxes。旧 system 安装记录缺字段时，显示层按当前分发清单补默认值，不改写已安装清单、摘要、安装代、启停、授权或卸载选择；user 来源不继承系统回退。图标只使用静态导入的 Lucide 组件，不新增资源协议、权限、数据库或依赖。包/清单格式、SDK 1.2.0 和 ABI/UI 协议版本保持，使用新字段的包声明最低 Host API ^1.3.0。
+
+## 2026-11-04：应用域名统一
+
+应用 identifier 为 `cn.hiboot.desktop`，系统凭据服务为 `cn.hiboot.desktop.credentials.v1`，内置插件继续使用 `cn.hiboot.plugins.*`；QA 应用标识、Docker 所有权标签、发布校验和文档路径同步使用 cn.hiboot。旧应用标识和插件前缀仅在 core/identity.rs 的兼容常量中保留，由目录、凭据及既有插件迁移读取，不用于新安装或新写入。
+
+单实例插件之后、WebView 与 Application 初始化之前，通过 Tauri 插件 setup 迁移默认数据、本地数据、配置、缓存和日志目录。仅将同一父目录下的旧标识普通目录原子重命名为新标识，保留数据库、插件版本/授权/配置及权限；新目录已有内容时优先使用新目录，不合并或覆盖。文件、符号链接和 Windows 重解析点拒绝，错误终止启动。自定义 appDirectoriesOverride 和 QA 标识不执行真实用户目录迁移。升级前须退出旧版，不能让新旧标识的程序并行运行。
+
+NativeStore 新写入使用新服务；读取先查新服务，缺失时读取旧服务并复制到新服务，写入失败按真实错误返回。旧条目保留以便回退，用户明确删除凭据时先删旧条目再删新条目，避免旧值通过兼容回读复活；引用及秘密不写日志或普通文件。无数据库 schema 变化，macOS/Linux 原生目录和凭据迁移仍须平台验收。
+
+## 2026-11-04：任务中心底部弹窗（当前入口）
+
+任务中心从运维工具菜单移回底部状态栏。App 的 taskPanel 控制单个共享 Modal，按需挂载原 TaskCenterView 内容；全局搜索发出独立 tasks 事件，原可配置 tasks 快捷键打开同一弹窗。任务中心从 WorkspaceView 字典及模块映射移除，不创建工作区标签，不改变当前模块、页面和终端。关闭按钮与 Esc 只卸载弹窗；重试或查看结果关闭弹窗并复用原目标导航。原传输、自动化及后台 store、全局轮询、危险操作确认继续复用；无 Rust、IPC、数据库或权限变化。本节替代下方历史记录中运维工具下 tasks 工作区的入口描述。
+
 ## 2026-11-04：四个工作区工具标准插件（当前）
 
 新增 assistant、batch、automation、network 四个独立 WASM 包，系统总计九个标准插件。SDK/API 1.2.0、UI v3 的 tool 贡献对上传包同样开放；按声明类型选择可信组件，不按内置 ID 路由。业务 API 注入经 plugin_tool_stage 单次不可变票据、实际 Guest/WASM、ToolInvoke 和原有 Host 服务。输入/结果/AI 引用都有归属、安装代、上下文代与配额，主窗口 IPC 不开放给其他窗口/远程来源。
 
 顶部旧工具组与 plugins 合并，显示名为“运维工具”。工作区/快捷入口只打开启用且授权的贡献，插件管理仍在设置。批量/自动化/网络页按标签保留内存草稿；设置切换不丢草稿，禁用/撤权卸载功能区。公共模型管理、SSH/凭据、任务引擎、调度器、历史和任务中心留在宿主，已提交工作不因插件卸载而删除；任务中心独立提供停止与暂停。详情见 [内置标准包](../plugins/BUILTIN_PLUGINS.md)。
 
-空 examples/plugins 删除，四个开发测试包移至 tests/fixtures/plugins，业务上传源码只保留真实 Nginx Manager。无数据库迁移，不重置已有配置/任务/计划/用户包；本节替代下方历史阶段的五个包及旧菜单描述。
+空 examples/plugins 删除，四个开发测试包移至 tests/fixtures/plugins，旧 Nginx 测试插件及其专用验收入口已删除。仓库 plugins/upload 不预置插件、不被启动扫描；客户端上传安装内容仍存于应用数据目录 plugins/upload，安装记录由 packages/<ID>/record.json 管理，只有明确安装后才出现在管理列表和运维工具中。无数据库迁移，不重置已有配置/任务/计划/用户包；本节替代下方历史阶段的五个包及旧菜单描述。
 
 ## 2026-11-04：工具菜单与系统预置权限（上一阶段）
 
@@ -514,7 +530,7 @@ AppConfig 保持 version=1，新增 serde(default) product 偏好，旧数据可
 
 ## QA 与测试版发布边界（2026-11-02）
 
-统一版本为 0.1.0-beta.1，应用标识 io.serverdeck.desktop 保持不变；Cargo/npm/Tauri 版本一致。Release 开启 thin LTO、单 codegen-unit 和 strip，前端嵌入二进制；NSIS 采用当前用户安装，不把数据放在安装目录。多尺寸 ICO/ICNS/PNG、许可证清单及依赖通知随包，未引入更新器。
+统一版本为 0.1.0-beta.1，当前应用标识为 cn.hiboot.desktop，标识迁移见本文“应用域名统一”；Cargo/npm/Tauri 版本一致。Release 开启 thin LTO、单 codegen-unit 和 strip，前端嵌入二进制；NSIS 采用当前用户安装，不把数据放在安装目录。多尺寸 ICO/ICNS/PNG、许可证清单及依赖通知随包，未引入更新器。
 
 本轮修复 Unix 目录权限：仅初始化应用专属数据/日志叶目录到 0700，并在迁移前把 SQLite 文件收紧至 0600，符号链接叶目录拒绝；不修改 HOME 等父目录。Windows 保留系统用户目录 ACL，不声称与 Unix mode 等价。权限失败向上传播，不静默继续。
 

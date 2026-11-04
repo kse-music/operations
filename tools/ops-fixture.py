@@ -53,17 +53,17 @@ WantedBy=default.target
     images.sort(key=lambda v:0 if v.get('Repository','').split('/')[-1] in ('busybox','alpine') else 1)
     seed='serverdeck-e2e-'+uid+'-seed'
     for image in images[:8]:
-        result=docker('create','--name',seed,'--label','io.serverdeck.e2e='+uid,'--network','none','--entrypoint','/bin/sh',image['ID'],'-c','exit 0',check=False)
+        result=docker('create','--name',seed,'--label','cn.hiboot.e2e='+uid,'--network','none','--entrypoint','/bin/sh',image['ID'],'-c','exit 0',check=False)
         if result.returncode:continue
         data['seed']=result.stdout.strip();(root/'scope.json').write_text(json.dumps(data))
         result=docker('start','--attach',seed,check=False)
         if result.returncode==0:break
         docker('rm',seed);data.pop('seed',None)
     if not data.get('seed'):raise RuntimeError('No existing Linux image with /bin/sh; test will not pull images automatically')
-    data['image']=docker('commit','--change','LABEL io.serverdeck.e2e='+uid,seed,'serverdeck-e2e-'+uid+':fixture').stdout.strip()
+    data['image']=docker('commit','--change','LABEL cn.hiboot.e2e='+uid,seed,'serverdeck-e2e-'+uid+':fixture').stdout.strip()
     docker('rm',seed);data.pop('seed',None);(root/'scope.json').write_text(json.dumps(data))
     script='i=0; while test $i -lt 3600; do printf "__SD_DOCKER_%s__ 中文 %%s\\n" "$i"; printf "__SD_STDERR_%s__\\n" >&2; i=$((i+1)); sleep 1; done'%(uid,uid)
-    data['container']=docker('create','--name','serverdeck-e2e-'+uid,'--label','io.serverdeck.e2e='+uid,'--cpus','0.25','--memory','64m','--pids-limit','32','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--publish','127.0.0.1::8080','--mount','type=bind,source='+str(root)+',target=/test-data,readonly','--env','SD_E2E_SECRET=protect-'+uid,'--entrypoint','/bin/sh',data['image'],'-c',script).stdout.strip()
+    data['container']=docker('create','--name','serverdeck-e2e-'+uid,'--label','cn.hiboot.e2e='+uid,'--cpus','0.25','--memory','64m','--pids-limit','32','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges','--publish','127.0.0.1::8080','--mount','type=bind,source='+str(root)+',target=/test-data,readonly','--env','SD_E2E_SECRET=protect-'+uid,'--entrypoint','/bin/sh',data['image'],'-c',script).stdout.strip()
     (root/'scope.json').write_text(json.dumps(data));return data
 
 def cleanup(data):
@@ -78,13 +78,13 @@ def cleanup(data):
     uid=data['uuid']
     for key in ('container','seed'):
         if data.get(key):
-            p=docker('container','inspect','--format','{{index .Config.Labels "io.serverdeck.e2e"}}',data[key],check=False)
+            p=docker('container','inspect','--format','{{index .Config.Labels "cn.hiboot.e2e"}}',data[key],check=False)
             if p.returncode==0:
                 assert p.stdout.strip()==uid
                 docker('stop','--time','2',data[key],check=False);docker('rm',data[key])
             elif 'no such' not in p.stderr.lower():raise RuntimeError('Unable to verify fixture container absence')
     if data.get('image'):
-        p=docker('image','inspect','--format','{{index .Config.Labels "io.serverdeck.e2e"}}',data['image'],check=False)
+        p=docker('image','inspect','--format','{{index .Config.Labels "cn.hiboot.e2e"}}',data['image'],check=False)
         if p.returncode==0:
             assert p.stdout.strip()==uid;docker('image','rm',data['image'])
         elif 'no such' not in p.stderr.lower():raise RuntimeError('Unable to verify fixture image absence')

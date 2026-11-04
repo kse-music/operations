@@ -61,6 +61,7 @@ it.each(['system', 'user'] as const)(
     await settle();
     expect(root.textContent).toContain(source === 'system' ? '系统内置' : '用户上传');
     expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
+    expect(root.querySelector('.plugin-page-icon svg.lucide-container')).not.toBeNull();
     expect(ui).not.toHaveBeenCalled();
     expect(root.querySelector('.plugin-workspace')).toBeNull();
     expect(root.textContent).not.toContain('允许访问的主机');

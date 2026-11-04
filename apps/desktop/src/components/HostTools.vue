@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { messages, type WorkspaceView } from '../types/product';
 import { usePluginsStore } from '../stores/plugins';
 import { primaryPluginPage } from '../services/plugin-pages';
+import PluginIcon from './PluginIcon.vue';
 const plugins = usePluginsStore();
 
 const props = defineProps<{ active: WorkspaceView; local: boolean }>();
@@ -121,7 +122,8 @@ onBeforeUnmount(() => {
             close(true);
           "
         >
-          {{ plugin.manifest.name }}
+          <PluginIcon :manifest="plugin.manifest" :source="plugin.source" />
+          <span>{{ plugin.manifest.name }}</span>
         </button>
         <p v-if="!enabled.length">暂无已启用的插件</p>
       </div>

@@ -2,10 +2,11 @@
   "schemaVersion": 1,
   "id": "cn.hiboot.plugins.services",
   "name": "系统服务",
+  "icon": "settings-2",
   "version": "1.0.0",
   "author": "ServerDeck",
   "description": "查看和管理 systemd 系统服务与用户服务。",
-  "apiVersion": "^1.1.0",
+  "apiVersion": "^1.3.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"

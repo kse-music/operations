@@ -1,7 +1,10 @@
 use serverdeck_core::Error;
+use serverdeck_core::identity::{CREDENTIAL_SERVICE, LEGACY_APPLICATION_ID};
 use zeroize::Zeroizing;
 
-const SERVICE: &str = "io.serverdeck.desktop.credentials.v1";
+fn legacy_service() -> String {
+    format!("{LEGACY_APPLICATION_ID}.credentials.v1")
+}
 
 // Different implementations are used only for OS storage and fault-injection tests.
 pub trait SecretStore: Send + Sync {
@@ -19,35 +22,78 @@ fn failure(error: keyring::Error) -> Error {
 }
 impl SecretStore for NativeStore {
     fn write(&self, reference: &str, secret: &[u8]) -> Result<(), Error> {
-        keyring::Entry::new(SERVICE, reference)
+        keyring::Entry::new(CREDENTIAL_SERVICE, reference)
             .map_err(failure)?
             .set_secret(secret)
             .map_err(failure)
     }
     fn read(&self, reference: &str) -> Result<Option<Zeroizing<Vec<u8>>>, Error> {
-        match keyring::Entry::new(SERVICE, reference)
-            .map_err(failure)?
-            .get_secret()
-        {
-            Ok(secret) => Ok(Some(Zeroizing::new(secret))),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(error) => Err(failure(error)),
+        if let Some(secret) = read_service(CREDENTIAL_SERVICE, reference)? {
+            return Ok(Some(secret));
         }
+        let secret = read_service(&legacy_service(), reference)?;
+        if let Some(secret) = &secret {
+            self.write(reference, secret)?;
+        }
+        Ok(secret)
     }
     fn delete(&self, reference: &str) -> Result<(), Error> {
-        match keyring::Entry::new(SERVICE, reference)
-            .map_err(failure)?
-            .delete_credential()
-        {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(failure(error)),
+        // Remove legacy first: a failed deletion must not resurrect an old secret
+        // through the read fallback after the current entry has been removed.
+        for service in [&legacy_service(), CREDENTIAL_SERVICE] {
+            match keyring::Entry::new(service, reference)
+                .map_err(failure)?
+                .delete_credential()
+            {
+                Ok(()) | Err(keyring::Error::NoEntry) => (),
+                Err(error) => return Err(failure(error)),
+            }
         }
+        Ok(())
+    }
+}
+
+fn read_service(service: &str, reference: &str) -> Result<Option<Zeroizing<Vec<u8>>>, Error> {
+    match keyring::Entry::new(service, reference)
+        .map_err(failure)?
+        .get_secret()
+    {
+        Ok(secret) => Ok(Some(Zeroizing::new(secret))),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(failure(error)),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Explicit OS credential-store migration test; uses only a random test entry"]
+    fn native_store_migrates_legacy_secret_and_delete_prevents_resurrection() {
+        let reference = format!("identity-migration-test-{}", uuid::Uuid::new_v4());
+        let legacy = keyring::Entry::new(&legacy_service(), &reference).unwrap();
+        let current = keyring::Entry::new(CREDENTIAL_SERVICE, &reference).unwrap();
+        let store = NativeStore;
+        legacy.set_secret(b"ephemeral-legacy-secret").unwrap();
+        let result = (|| {
+            let migrated = store.read(&reference)?;
+            let copied = read_service(CREDENTIAL_SERVICE, &reference)?;
+            store.write(&reference, b"replacement-secret")?;
+            let replacement = store.read(&reference)?;
+            store.delete(&reference)?;
+            let removed = store.read(&reference)?.is_none();
+            Ok::<_, Error>((migrated, copied, replacement, removed))
+        })();
+        // Always attempt cleanup of both owned entries, including on an API error.
+        store.delete(&reference).unwrap();
+        let (migrated, copied, replacement, removed) = result.unwrap();
+        assert_eq!(migrated.unwrap().as_slice(), b"ephemeral-legacy-secret");
+        assert_eq!(copied.unwrap().as_slice(), b"ephemeral-legacy-secret");
+        assert_eq!(replacement.unwrap().as_slice(), b"replacement-secret");
+        assert!(removed);
+        assert!(matches!(legacy.get_secret(), Err(keyring::Error::NoEntry)));
+        assert!(matches!(current.get_secret(), Err(keyring::Error::NoEntry)));
+    }
     #[test]
     #[ignore = "Explicit OS credential-store integration test; creates and removes only a random test entry"]
     fn native_store_roundtrip_update_and_delete() {

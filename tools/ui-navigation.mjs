@@ -5,7 +5,6 @@ const menuModules = {
   批量运维: 'plugins',
   自动运维: 'plugins',
   网络诊断: 'plugins',
-  任务中心: 'plugins',
   安全凭据: 'assets',
   备份恢复: 'assets',
   通用: 'system',
@@ -15,6 +14,12 @@ const menuModules = {
   关于: 'system',
   插件管理: 'system',
 };
+
+async function closeTaskCenter(page) {
+  const dialog = page.getByRole('dialog', { name: '任务中心', exact: true });
+  if (await dialog.count())
+    await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+}
 
 export async function terminalAction(page, pane, name) {
   await pane.locator('.xterm-helper-textarea').press('Shift+F10');
@@ -30,6 +35,7 @@ export async function terminalTabAction(page, name, tab = page.locator('.termina
 }
 
 export async function showHostTree(page) {
+  await closeTaskCenter(page);
   await page.locator('.module-navigation [data-module="hosts"]').click();
   if (!(await page.locator('.sidebar').isVisible())) {
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
@@ -125,6 +131,7 @@ export async function previewPluginPackage(page, packagePath) {
 }
 
 export async function openPluginSettings(page, name) {
+  await closeTaskCenter(page);
   await page.locator('[data-module="plugins"]').click();
   if (!(await page.locator('.sidebar').isVisible()))
     await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
@@ -160,6 +167,14 @@ export async function setPluginEnabled(page, name, enabled) {
 }
 
 export async function navigateWorkspace(page, name) {
+  const taskDialog = page.getByRole('dialog', { name: '任务中心', exact: true });
+  if (name === '任务中心') {
+    if (!(await taskDialog.count()))
+      await page.locator('.statusbar').getByRole('button', { name, exact: true }).click();
+    await taskDialog.waitFor();
+    return;
+  }
+  await closeTaskCenter(page);
   const module = hostTools.has(name) ? 'hosts' : menuModules[name];
   if (!module) throw new Error(`Unknown navigation target: ${name}`);
   await page.locator(`.module-navigation [data-module="${module}"]`).click();
@@ -194,6 +209,7 @@ export async function navigateWorkspace(page, name) {
 }
 
 export async function selectHostWorkspace(page, id) {
+  await closeTaskCenter(page);
   if (await page.evaluate(() => innerWidth <= 720)) {
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
     if (await collapse.isVisible()) await collapse.click();

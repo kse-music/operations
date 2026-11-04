@@ -54,7 +54,7 @@ const config = path.join(artifacts, 'tauri-e2e.json');
 await writeFile(
   config,
   JSON.stringify({
-    identifier: 'io.serverdeck.desktop.terminal-e2e',
+    identifier: 'cn.hiboot.desktop.terminal-e2e',
     app: { appDirectoriesOverride: artifacts },
   }),
 );

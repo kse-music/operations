@@ -25,7 +25,7 @@ const config = path.join(artifacts, 'tauri-e2e.json');
 await writeFile(
   config,
   JSON.stringify({
-    identifier: 'io.serverdeck.desktop.ui-e2e',
+    identifier: 'cn.hiboot.desktop.ui-e2e',
     app: { appDirectoriesOverride: artifacts },
   }),
 );
@@ -419,19 +419,26 @@ try {
   );
   await navigateWorkspace(page, '任务中心');
   await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
-  assert.equal(await page.locator('.statusbar button').count(), 0);
-  assert.equal(await page.getByRole('dialog', { name: '后台任务与传输', exact: true }).count(), 0);
+  assert.equal(await page.locator('.statusbar button').count(), 1);
+  assert.equal(await page.getByRole('dialog', { name: '任务中心', exact: true }).count(), 1);
   assert.equal(await page.getByRole('region', { name: '传输任务', exact: true }).count(), 1);
   assert.equal(await page.getByRole('region', { name: '网络与批量任务', exact: true }).count(), 1);
   assert.equal(await page.getByRole('region', { name: '自动化任务', exact: true }).count(), 1);
   await page.keyboard.press('Control+Shift+J');
-  assert.equal(await page.locator('.workspace-tab[data-view="tasks"]').count(), 1);
+  assert.equal(await page.locator('.workspace-tab[data-view="tasks"]').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'task-center.png') });
-  await page.locator('.workspace-tab[data-view="tasks"] .tab-close').click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog', { name: '任务中心', exact: true }).waitFor({ state: 'hidden' });
+  await page.keyboard.press('Control+Shift+J');
+  await page.getByRole('dialog', { name: '任务中心', exact: true }).waitFor();
+  await page
+    .getByRole('dialog', { name: '任务中心', exact: true })
+    .getByRole('button', { name: '关闭对话框', exact: true })
+    .click();
   await selectHostWorkspace(page, '');
   await command("[Console]::WriteLine(('SD_TASK_CENTER_' + $sdValue))", 'SD_TASK_CENTER_323');
   passed.push(
-    'tools menu and shortcut share one task center page; footer entries are removed and closing the task center preserves the real local shell',
+    'footer and shortcut share one task dialog; Escape and close preserve the real local shell without a task workspace',
   );
   await navigateWorkspace(page, '自动运维');
   const templateCatalog = await rpc('automation_catalog');

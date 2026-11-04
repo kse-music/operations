@@ -3,7 +3,6 @@ import {
   ArchiveRestore,
   Info,
   KeyRound,
-  ListChecks,
   Boxes,
   PanelLeftClose,
   Settings2,
@@ -16,6 +15,7 @@ import { computed } from 'vue';
 import { navigationModules, type NavigationModule } from '../types/navigation';
 import { usePluginsStore } from '../stores/plugins';
 import { primaryPluginPage } from '../services/plugin-pages';
+import PluginIcon from './PluginIcon.vue';
 const plugins = usePluginsStore();
 
 const props = defineProps<{
@@ -105,7 +105,7 @@ const pluginEntries = computed(() =>
         :aria-label="plugin.manifest.name"
         @click="$emit('plugin', plugin.manifest.id, contribution)"
       >
-        <Boxes :size="16" aria-hidden="true" /><span class="nav-label">{{
+        <PluginIcon :manifest="plugin.manifest" :source="plugin.source" /><span class="nav-label">{{
           plugin.manifest.name
         }}</span>
         <small
@@ -117,15 +117,6 @@ const pluginEntries = computed(() =>
       <p v-if="plugins.loaded && !pluginEntries.length" class="plugin-sidebar-empty">
         尚未安装运维工具
       </p>
-      <button
-        class="nav-item plugin-shared-tool"
-        aria-label="任务中心"
-        :aria-current="active === 'tasks' ? 'page' : undefined"
-        :class="{ active: active === 'tasks' }"
-        @click="$emit('navigate', 'tasks')"
-      >
-        <ListChecks :size="16" aria-hidden="true" /><span class="nav-label">任务中心</span>
-      </button>
     </div>
   </nav>
 </template>

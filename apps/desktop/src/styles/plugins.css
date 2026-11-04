@@ -334,11 +334,6 @@
 .plugin-page:has(.plugin-tool-surface) {
   gap: 14px;
 }
-.plugin-shared-tool {
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-}
 .plugin-settings-section {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -425,7 +420,9 @@
   box-shadow: 0 8px 24px #0003;
 }
 .host-plugin-menu button {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   width: 100%;
   border: 0;
   border-radius: 4px;
@@ -434,6 +431,9 @@
   background: transparent;
   text-align: left;
   overflow-wrap: anywhere;
+}
+.host-plugin-menu button > svg {
+  flex-shrink: 0;
 }
 .host-plugin-menu button:hover,
 .host-plugin-menu button:focus-visible {

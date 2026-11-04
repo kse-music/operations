@@ -21,7 +21,7 @@ afterEach(() => {
 
 it.each([
   ['terminals', ['收起主机栏'], []],
-  ['tasks', ['收起主机栏', '任务中心'], ['tasks']],
+  ['network', ['收起主机栏'], []],
   [
     'credentials',
     ['收起主机栏', '安全凭据', '模型管理', '备份恢复'],
@@ -67,7 +67,7 @@ it.each([
   expect(heading.closest('button, a, [role="button"]')).toBeNull();
   expect(heading.hasAttribute('tabindex')).toBe(false);
   if (active === 'terminals') expect(heading.textContent?.trim()).toBe('主机管理');
-  if (active !== 'terminals')
+  if (active !== 'terminals' && active !== 'network')
     expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
       labels[active === 'plugins' ? 5 : 1],
     );
@@ -85,6 +85,7 @@ it.each(['plugins', 'system'] as const)(
         manifest: {
           id: 'dev.example',
           name: 'Example',
+          icon: 'rocket',
           contributions: [
             { id: 'main', label: '插件主页面', kind: 'navigation' },
             { id: 'settings', label: '插件独立设置', kind: 'settings' },
@@ -106,7 +107,8 @@ it.each(['plugins', 'system'] as const)(
     }
     expect(
       [...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent),
-    ).toEqual(['Example', '任务中心']);
+    ).toEqual(['Example']);
+    expect(root.querySelector('[data-plugin-id="dev.example"] svg.lucide-rocket')).not.toBeNull();
     for (const button of root.querySelectorAll<HTMLButtonElement>(
       '[aria-label="运维工具导航"] [data-plugin-id]',
     ))

@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod connection;
 pub mod files;
 pub mod hosts;
+pub mod identity;
 pub mod openssh;
 pub mod terminal;
 pub mod workspace;

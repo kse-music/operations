@@ -83,6 +83,7 @@ async fn install(
     wasm: Option<&[u8]>,
 ) -> InstalledPlugin {
     let mut manifest = Manifest {
+        icon: None,
         schema_version: 1,
         id: id.into(),
         name: "SDK test".into(),

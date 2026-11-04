@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { Settings2, ArrowLeft, Puzzle } from '@lucide/vue';
+import { Settings2, ArrowLeft } from '@lucide/vue';
+import PluginIcon from '../components/PluginIcon.vue';
 import { usePluginsStore } from '../stores/plugins';
 import PluginSettings from '../components/PluginSettings.vue';
 import PluginView from './PluginView.vue';
@@ -58,7 +59,9 @@ const generation = computed(() =>
   <section v-if="plugin" class="plugin-page" :data-plugin-id="pluginId">
     <header class="plugin-heading plugin-page-heading">
       <div class="plugin-page-identity">
-        <span class="plugin-page-icon"><Puzzle :size="23" aria-hidden="true" /></span>
+        <span class="plugin-page-icon">
+          <PluginIcon :manifest="plugin.manifest" :source="plugin.source" :size="23" />
+        </span>
         <div>
           <h1>{{ plugin.manifest.name }}</h1>
           <p class="subtle">

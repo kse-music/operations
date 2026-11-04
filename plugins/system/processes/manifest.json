@@ -2,10 +2,11 @@
   "schemaVersion": 1,
   "id": "cn.hiboot.plugins.processes",
   "name": "进程与端口",
+  "icon": "list-tree",
   "version": "1.0.0",
   "author": "ServerDeck",
   "description": "查看进程与监听端口，定位资源占用并管理进程。",
-  "apiVersion": "^1.1.0",
+  "apiVersion": "^1.3.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"

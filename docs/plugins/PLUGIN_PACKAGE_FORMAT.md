@@ -1,5 +1,22 @@
 # 本地插件包 v1
 
+## 可选插件图标（Host API 1.3.0）
+
+在源码 `manifest.json` 中声明可选 `icon` 图标名，例如：
+
+```json
+{
+  "apiVersion": "^1.3.0",
+  "icon": "rocket"
+}
+```
+
+以上仅展示新增字段，其他必填字段继续保留。图标无需额外权限或资源文件。系统和上传插件共用此配置，运维工具侧栏、主机工具菜单、管理列表、插件页面及安装预览统一显示。省略或设为 null 时使用默认 `boxes` 图标；符合名称格式但宿主尚不支持的图标名也回退默认。旧版已安装系统插件缺少字段时，从当前分发清单读取图标，仅用于显示，不改写包、摘要、安装代、启停或授权；上传插件不继承同 ID 系统插件的图标。
+
+名称最多 64 字节，使用小写字母、数字和单个连字符分隔，首字符为字母。空串、路径、URL、标记文本及其他类型无效。当前支持：`activity`、`archive`、`bot`、`boxes`、`calendar-clock`、`chart-no-axes-combined`、`cloud`、`code`、`container`、`cpu`、`database`、`file-text`、`folder`、`globe`、`hard-drive`、`layers`、`list-tree`、`network`、`radio`、`rocket`、`scroll-text`、`search`、`server`、`settings-2`、`shield`、`terminal`、`wrench`。这些名称对应宿主静态内置的 Lucide 图标，大小与颜色随界面统一控制。
+
+使用 icon 的新包应声明 `apiVersion: "^1.3.0"`，避免将含新字段的包分发给严格拒绝未知字段的旧宿主。formatVersion/schemaVersion 仍为 1，SDK 1.2.0 与 WASM ABI、UI v1/v2/v3 不变；旧包无需补 icon。
+
 ## SDK 1.2 工具贡献
 
 formatVersion/schemaVersion 仍为 1。使用新工具的包声明 apiVersion ^1.2.0、uiVersion 3；贡献 kind=tool 且 tool 为 assistant/batch/automation/network 之一，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。

@@ -1,4 +1,5 @@
 use super::*;
+use serverdeck_core::identity::LEGACY_PLUGIN_PREFIX;
 const PACKAGES: [(&str, &[u8]); 9] = [
     (
         "cn.hiboot.plugins.resources",
@@ -42,7 +43,7 @@ impl Application {
     /// A tombstone preserves uninstall; existing enable choices remain unchanged.
     pub fn provision_bundled_plugins(&self) -> Result<(), Error> {
         for (id, bytes) in PACKAGES {
-            let old_id = id.replacen("cn.hiboot.plugins.", "io.serverdeck.plugins.", 1);
+            let old_id = id.replacen("cn.hiboot.plugins.", LEGACY_PLUGIN_PREFIX, 1);
             let previous = match self.plugins.detail(&old_id) {
                 Ok(plugin) => Some(plugin),
                 Err(Error::NotFound) => None,
@@ -321,7 +322,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app =
             Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-        let old = "io.serverdeck.plugins.resources";
+        let old_id = format!("{LEGACY_PLUGIN_PREFIX}resources");
+        let old = old_id.as_str();
         let mut package: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
         package["manifest"]["id"] = json!(old);
         let previous = app
@@ -347,7 +349,7 @@ mod tests {
             .unwrap();
         app.database.mark_bundled_plugin_provisioned(old).unwrap();
         app.database
-            .mark_bundled_plugin_provisioned("io.serverdeck.plugins.docker")
+            .mark_bundled_plugin_provisioned(&format!("{LEGACY_PLUGIN_PREFIX}docker"))
             .unwrap();
         app.provision_bundled_plugins().unwrap();
         assert!(matches!(app.plugins.detail(old), Err(Error::NotFound)));

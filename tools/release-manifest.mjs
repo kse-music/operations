@@ -13,7 +13,7 @@ assert.equal(pkg.version, config.version);
 assert.equal(desktop.version, pkg.version);
 assert(cargo.includes(`version = "${pkg.version}"`));
 assert(config.version.includes('beta'), 'unresolved release gates require beta version');
-assert.equal(config.identifier, 'io.serverdeck.desktop', 'preserve migration/credential identity');
+assert.equal(config.identifier, 'cn.hiboot.desktop', 'application must use the cn.hiboot identity');
 assert.equal(config.bundle.windows.nsis.installMode, 'currentUser');
 const capability = JSON.parse(
   await readFile(path.join(root, 'apps/desktop/src-tauri/capabilities/main.json'), 'utf8'),

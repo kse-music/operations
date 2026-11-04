@@ -51,6 +51,12 @@ it('shows only enabled plugins once and opens them from the tools menu without h
   await nextTick();
   const menu = document.querySelector<HTMLElement>('[aria-label="已启用的插件"]')!;
   expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(2);
+  expect(
+    menu.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-activity`),
+  ).not.toBeNull();
+  expect(
+    menu.querySelector(`[data-plugin-id="${items[1]!.manifest.id}"] svg.lucide-container`),
+  ).not.toBeNull();
   expect(menu.textContent).not.toContain('进程与端口');
   menu.querySelector<HTMLButtonElement>(`[data-plugin-id="${items[1]!.manifest.id}"]`)!.click();
   await nextTick();

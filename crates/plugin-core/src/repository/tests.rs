@@ -14,6 +14,7 @@ fn package(version: &str) -> Package {
             schema_version: 1,
             id: "dev.example".into(),
             name: "Metadata fixture".into(),
+            icon: None,
             version: version.into(),
             author: "Local developer".into(),
             description: "No executable entry".into(),
@@ -51,6 +52,68 @@ fn input(path: &Path, old: Option<&str>) -> InstallInput {
         expected_digest: None,
     }
 }
+#[test]
+fn plugin_icon_survives_preview_install_and_restart_and_is_optional_for_legacy_packages() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("plugins");
+    let repo = Repository::open(root.clone()).unwrap();
+    let mut p = package("1.0.0");
+    let legacy = serde_json::to_vec(&p).unwrap();
+    assert!(
+        serde_json::to_value(&p).unwrap()["manifest"]
+            .get("icon")
+            .is_none()
+    );
+    assert!(Package::validate_bytes(&legacy, std::env::consts::OS).is_ok());
+    p.manifest.icon = Some("rocket".into());
+    p.manifest.api_version = "^1.3.0".into();
+    let path = save(dir.path(), &p);
+    assert_eq!(
+        repo.preview_info(&path).unwrap().manifest.icon.as_deref(),
+        Some("rocket")
+    );
+    let installed = repo.install(input(&path, None)).unwrap();
+    assert_eq!(installed.manifest.icon.as_deref(), Some("rocket"));
+    let reopened = Repository::open(root).unwrap();
+    let loaded = reopened.detail("dev.example").unwrap();
+    assert_eq!(loaded.manifest.icon.as_deref(), Some("rocket"));
+    assert_eq!(loaded.package_digest, installed.package_digest);
+    assert_eq!(loaded.revision, installed.revision);
+    assert!(!loaded.enabled);
+    assert!(reopened.grant("dev.example").unwrap().is_none());
+}
+
+#[test]
+fn plugin_icon_rejects_paths_urls_markup_and_invalid_names_but_allows_future_icon_names() {
+    let mut p = package("1.0.0");
+    for icon in [
+        "",
+        "Bot",
+        "1bot",
+        "../icon",
+        "icons/bot.svg",
+        "https://example.com/a",
+        "<svg>",
+        "-bot",
+        "bot-",
+        "bot--name",
+        "图标",
+    ] {
+        p.manifest.icon = Some(icon.into());
+        assert!(p.manifest.validate(std::env::consts::OS).is_err(), "{icon}");
+    }
+    p.manifest.icon = Some("a".repeat(65));
+    assert!(p.manifest.validate(std::env::consts::OS).is_err());
+    p.manifest.icon = Some("future-icon-2".into());
+    assert!(p.manifest.validate(std::env::consts::OS).is_ok());
+    let mut value = serde_json::to_value(&p).unwrap();
+    value["manifest"]["icon"] = serde_json::json!({"url": "https://example.com/a"});
+    assert!(
+        Package::validate_bytes(&serde_json::to_vec(&value).unwrap(), std::env::consts::OS)
+            .is_err()
+    );
+}
+
 #[test]
 fn preview_digest_and_ui_grant_are_enforced_and_scripts_rejected() {
     use crate::permissions::GrantInput;

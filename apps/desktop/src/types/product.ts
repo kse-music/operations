@@ -28,7 +28,6 @@ export const messages = {
     batch: '批量运维',
     automation: '自动运维',
     backup: '备份恢复',
-    tasks: '任务中心',
     about: '关于',
     plugins: '插件管理',
     extension: '插件工作区',

@@ -264,15 +264,12 @@ try {
     );
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['批量运维', '自动运维', '网络诊断', 'AI 运维助手', '任务中心'],
+      ['批量运维', '自动运维', '网络诊断', 'AI 运维助手'],
     );
     await nav('任务中心');
     await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
-    assert.equal(await page.locator('.statusbar button').count(), 0);
-    assert.equal(
-      await page.getByRole('dialog', { name: '后台任务与传输', exact: true }).count(),
-      0,
-    );
+    assert.equal(await page.locator('.statusbar button').count(), 1);
+    assert.equal(await page.getByRole('dialog', { name: '任务中心', exact: true }).count(), 1);
     await page.screenshot({ path: `${output}/${name}-task-center.png` });
     await nav('备份恢复');
     assert.equal(

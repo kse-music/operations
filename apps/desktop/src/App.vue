@@ -17,7 +17,7 @@ import AppNavigation from './components/AppNavigation.vue';
 import AppModules from './components/AppModules.vue';
 import type { NavigationModule } from './types/navigation';
 import HostTools from './components/HostTools.vue';
-import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
+import { ListChecks, Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
@@ -62,6 +62,8 @@ const workspace = useWorkspaceStore(),
   background = useBackgroundStore(),
   operations = useOpsStore();
 const searching = ref(false),
+  taskPanel = ref(false),
+  taskTrigger = ref<HTMLButtonElement | null>(null),
   entryIntent = ref(''),
   automationHost = ref(''),
   networkHost = ref(''),
@@ -173,6 +175,14 @@ function fromSearch(value: View, hostId = currentHostId.value, entryId = '') {
   entryIntent.value = entryId;
   if (value === 'automation' && entryId) automationHost.value = hostId;
   navigate(value, hostId);
+}
+function fromTaskCenter(value: View, hostId = currentHostId.value) {
+  taskPanel.value = false;
+  navigate(value, hostId);
+}
+function closeTaskCenter() {
+  taskPanel.value = false;
+  void nextTick(() => taskTrigger.value?.focus({ preventScroll: true }));
 }
 function setContext(hostId: string, connectShell = false) {
   const existing = workspace.tabs.some((tab) => hostViews.has(tab.view) && tab.hostId === hostId);
@@ -316,7 +326,7 @@ function globalShortcut(event: KeyboardEvent) {
   event.stopPropagation();
   if (action === 'search') searching.value = true;
   else if (action === 'settings') navigate('settings');
-  else if (action === 'tasks') navigate('tasks');
+  else if (action === 'tasks') taskPanel.value = true;
 }
 const sidebarDraft = ref<number | null>(null);
 const sidebarOpen = ref(!window.matchMedia('(max-width: 720px)').matches);
@@ -806,7 +816,6 @@ watch(
           @contribution="(contribution) => openPlugin(workspace.current!.pluginId!, contribution)"
         />
         <ModelsView v-else-if="view === 'models'" />
-        <TaskCenterView v-else-if="view === 'tasks'" @navigate="navigate" />
         <AboutView v-else-if="view === 'about'" />
         <CredentialsView v-else-if="view === 'credentials'" />
         <SettingsPanel
@@ -832,6 +841,15 @@ watch(
       </div>
     </main>
     <footer class="statusbar">
+      <button
+        ref="taskTrigger"
+        class="text-button task-center-trigger"
+        aria-label="任务中心"
+        aria-haspopup="dialog"
+        @click="taskPanel = true"
+      >
+        <ListChecks :size="14" aria-hidden="true" />任务中心
+      </button>
       <span
         ><span :class="['status-dot', { offline: !application.ready }]"></span
         >{{
@@ -846,12 +864,16 @@ watch(
   </div>
   <NotificationToasts />
   <PluginDialogs />
+  <Modal v-if="taskPanel" title="任务中心" wide @close="closeTaskCenter">
+    <TaskCenterView @navigate="fromTaskCenter" />
+  </Modal>
   <GlobalSearch
     v-if="searching"
     @close="searching = false"
     @navigate="fromSearch"
     @select-host="setContext"
     @plugin="openPlugin"
+    @tasks="taskPanel = true"
   />
   <RemoteEditor v-if="files.document" />
   <Modal

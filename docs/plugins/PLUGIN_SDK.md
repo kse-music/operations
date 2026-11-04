@@ -36,7 +36,7 @@ FileDocument 最多 32 KiB UTF-8，返回插件专属 id，不返回内部 SFTP 
 
 总消息 64 KiB，API 负载安全预算 60 KiB；四个 Host 能力调用并发槽、每插件一个在途请求、每秒二十次准入，无无界请求队列。所有文档/任务/日志都绑定上下文代；切换主机、撤销授权、禁用、升级和卸载撤销句柄并取消/排空相应资源。
 
-可运行源码与命令见 `tests/fixtures/plugins/diagnostics/README.md`。13A-4 的公开 ui 模块定义声明式 JSON；Host Info 展示五类贡献，Nginx Manager 演示实际配置/验证/重载/日志。见 [PLUGIN_UI_EXTENSION.md](PLUGIN_UI_EXTENSION.md)、[PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md)；SDK 不授予原生 UI API。
+可运行源码与命令见 `tests/fixtures/plugins/diagnostics/README.md`。13A-4 的公开 ui 模块定义声明式 JSON；Host Info 展示五类贡献。旧 Nginx 测试插件已删除，历史配置/验证/重载/日志验收证据保留于[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md)。见 [PLUGIN_UI_EXTENSION.md](PLUGIN_UI_EXTENSION.md)、[PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md)；SDK 不授予原生 UI API。
 
 ## 1.1 标准服务器能力
 

@@ -399,6 +399,12 @@ kbd {
   overflow: auto;
   gap: 14px;
 }
+.task-center-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
 .settings-form > fieldset {
   min-width: 0;
 }

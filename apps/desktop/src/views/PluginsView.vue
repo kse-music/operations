@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { PackagePlus, Puzzle, RefreshCw, Trash2, Upload, FileArchive } from '@lucide/vue';
+import { PackagePlus, RefreshCw, Trash2, Upload } from '@lucide/vue';
+import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from '../services/plugins';
@@ -189,7 +190,9 @@ onBeforeUnmount(() => {
           class="plugin-installed-row"
           :data-plugin-id="plugin.manifest.id"
         >
-          <span class="plugin-row-icon"><Puzzle :size="21" aria-hidden="true" /></span>
+          <span class="plugin-row-icon">
+            <PluginIcon :manifest="plugin.manifest" :source="plugin.source" :size="21" />
+          </span>
           <div class="plugin-row-main">
             <div class="plugin-row-title">
               <button
@@ -224,7 +227,9 @@ onBeforeUnmount(() => {
     <Modal v-if="preview" title="安装插件" wide :busy="plugins.busy" @close="cancelPreview">
       <div class="plugin-preview" aria-label="插件安装预览">
         <header class="plugin-preview-heading">
-          <span class="plugin-row-icon"><FileArchive :size="25" aria-hidden="true" /></span>
+          <span class="plugin-row-icon"
+            ><PluginIcon :manifest="preview.manifest" :size="25"
+          /></span>
           <div>
             <h2>{{ preview.manifest.name }}</h2>
             <p>{{ preview.manifest.author }} · v{{ preview.manifest.version }}</p>

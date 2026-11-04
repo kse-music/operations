@@ -15,7 +15,6 @@ import {
   openPluginSettings,
   setPluginEnabled,
 } from './ui-navigation.mjs';
-import { nginxChecks } from './plugin-nginx-e2e.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url)),
   base = path.join(root, '.local', 'plugin-13a', 'native');
 const config = path.join(base, 'config.json'),
@@ -32,7 +31,7 @@ if (process.argv.includes('--build')) {
   await writeFile(
     config,
     JSON.stringify({
-      identifier: 'io.serverdeck.plugin13a.qa',
+      identifier: 'cn.hiboot.plugin13a.qa',
       app: { appDirectoriesOverride: path.join(base, `data-${randomUUID()}`) },
     }),
   );
@@ -157,130 +156,119 @@ try {
   ).id;
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
-  if (process.argv.includes('--nginx')) {
-    await nginxChecks({ page, invoke, root, hostId, credentialId, artifacts, passed });
-  } else {
-    await navigateWorkspace(page, '插件管理');
-    const manager = page.locator('.plugin-manager');
-    const preview = await previewPluginPackage(
-      page,
-      path.join(root, '.local', 'plugin-13a', 'host-info.sdplugin'),
-    );
-    await preview.locator('.plugin-install-ack').waitFor();
-    assert(await preview.getByRole('button', { name: '安装插件', exact: true }).isDisabled());
-    await preview.getByRole('checkbox').check();
-    await preview.getByRole('button', { name: '安装插件', exact: true }).click();
-    const card = manager.locator(
-      '.plugin-installed-row[data-plugin-id="dev.serverdeck.host-info"]',
-    );
-    await card.waitFor();
-    passed.push('UI package preview, unverified warning, digest-bound install');
-    const grant = await openPluginSettings(page, 'Host Info');
-    for (const label of [
-      'hosts.read',
-      'ssh.execute',
-      'ui.contribute',
-      'settings.read',
-      'settings.write',
-    ])
-      await grant.getByLabel(label, { exact: true }).check();
-    await grant.getByRole('button', { name: '保存并授权', exact: true }).click();
-    await grant.getByText('已授权', { exact: true }).waitFor();
-    await setPluginEnabled(page, 'Host Info', true);
-    await page.getByRole('navigation', { name: '运维工具导航' }).count();
-    await page
-      .locator('[aria-label="运维工具导航"]')
-      .getByRole('button', { name: 'Host Info', exact: true })
-      .click();
-    const back = page.getByRole('button', { name: '返回功能', exact: true });
-    if (await back.isVisible()) await back.click();
-    const view = page.locator('.plugin-workspace');
-    await view.waitFor();
-    await view.getByLabel('插件目标主机', { exact: true }).selectOption(hostId);
-    await view.getByRole('button', { name: '连接 SSH / SFTP', exact: true }).click();
-    const trust = page.getByRole('dialog', { name: '核验 SSH 主机指纹', exact: true });
-    await trust.waitFor();
-    const key = process.env.SERVERDECK_PLUGIN_TEST_HOST_KEY.split(/\s+/)[1],
-      fingerprint =
-        'SHA256:' +
-        createHash('sha256').update(Buffer.from(key, 'base64')).digest('base64').replace(/=+$/, '');
-    assert((await trust.textContent()).includes(fingerprint), 'real host key mismatch');
-    await trust.getByRole('button', { name: '已核对，信任并连接', exact: true }).click();
-    await trust.waitFor({ state: 'hidden' });
-    await view.getByText('connected', { exact: true }).waitFor();
-    await view.getByRole('button', { name: '读取主机信息', exact: true }).click();
-    await view.locator('.plugin-output').filter({ hasText: 'Plugin QA Linux' }).waitFor();
-    assert(
-      !/credentialId|secretRef|password/.test(await view.locator('.plugin-output').textContent()),
-    );
-    await view.getByRole('button', { name: '只读诊断 uname -a', exact: true }).click();
-    await view.locator('.plugin-output').filter({ hasText: 'exitCode' }).waitFor();
-    assert((await view.locator('.plugin-output').textContent()).includes('Linux'));
-    passed.push(
-      'installed public SDK WASM UI uses real host projection and authenticated SSH uname',
-    );
-    assert.equal(await view.getByLabel('插件界面语言', { exact: true }).count(), 0);
-    assert.equal(await page.locator('html').getAttribute('lang'), 'zh-CN');
-    await view.getByRole('button', { name: '读取主机信息', exact: true }).waitFor();
-    await page.screenshot({ path: path.join(artifacts, 'global-language-dark.png') });
-    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-    assert((await view.evaluate((el) => getComputedStyle(el).color)) !== 'rgb(255, 255, 255)');
-    await page.screenshot({ path: path.join(artifacts, 'global-language-light.png') });
-    passed.push('plugin labels follow the global language and theme tokens');
-    await page.keyboard.press('Control+k');
-    await page
-      .getByRole('option', { name: '插件命令 · Host Info · Host Info', exact: true })
-      .waitFor();
-    await page.keyboard.press('Escape');
-    await page
-      .getByRole('navigation', { name: '当前主机工具', exact: true })
-      .getByRole('button', { name: 'Host Info', exact: true })
-      .click();
-    await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
-    await showHostTree(page);
-    await hostContextAction(
-      page,
-      page.locator('.tree-host-row').filter({ hasText: 'Plugin QA Linux' }),
-      'Host Info',
-    );
-    await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
-    await page.locator('.module-navigation [data-module="plugins"]').click();
-    await page.getByLabel('插件页面', { exact: true }).selectOption('settings');
-    await view
-      .getByLabel('备注（仅保存于本插件）', { exact: true })
-      .fill('<img src=x onerror=alert(1)>');
-    await view.getByRole('button', { name: '保存设置', exact: true }).click();
-    await page.waitForFunction(() => !document.querySelector('.plugin-workspace button:disabled'));
-    await view.getByRole('button', { name: '读取设置', exact: true }).click();
-    await view
-      .locator('.plugin-output')
-      .filter({ hasText: '<img src=x onerror=alert(1)>' })
-      .waitFor();
-    assert.equal(await view.locator('img,iframe,script').count(), 0);
-    passed.push(
-      'all five extension surfaces and isolated settings render hostile strings as inert text',
-    );
-    const disabledSettings = await setPluginEnabled(page, 'Host Info', false);
-    await page.waitForFunction(() => !document.querySelector('.plugin-workspace'));
-    assert.equal(
-      (await invoke('plugin_detail', { id: 'dev.serverdeck.host-info' })).enabled,
-      false,
-    );
-    await disabledSettings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
-    assert.equal(await page.locator('[aria-label="运维工具导航"] [data-plugin-id]').count(), 1);
-    assert.equal(await page.locator('[aria-label="运维工具导航"] .plugin-source').count(), 0);
-    await navigateWorkspace(page, '插件管理');
-    await card.getByRole('button', { name: '卸载 Host Info', exact: true }).click();
-    await page
-      .getByRole('dialog', { name: '卸载插件？', exact: true })
-      .getByRole('button', { name: '确认卸载', exact: true })
-      .click();
-    await card.waitFor({ state: 'hidden' });
-    assert.equal((await invoke('plugin_list')).length, 0);
-    passed.push(
-      'disable withdraws workspace/runtime and preserves individual settings; the management list uninstalls it',
-    );
-  }
+  await navigateWorkspace(page, '插件管理');
+  const manager = page.locator('.plugin-manager');
+  const preview = await previewPluginPackage(
+    page,
+    path.join(root, '.local', 'plugin-13a', 'host-info.sdplugin'),
+  );
+  await preview.locator('.plugin-install-ack').waitFor();
+  assert(await preview.getByRole('button', { name: '安装插件', exact: true }).isDisabled());
+  await preview.getByRole('checkbox').check();
+  await preview.getByRole('button', { name: '安装插件', exact: true }).click();
+  const card = manager.locator('.plugin-installed-row[data-plugin-id="dev.serverdeck.host-info"]');
+  await card.waitFor();
+  passed.push('UI package preview, unverified warning, digest-bound install');
+  const grant = await openPluginSettings(page, 'Host Info');
+  for (const label of [
+    'hosts.read',
+    'ssh.execute',
+    'ui.contribute',
+    'settings.read',
+    'settings.write',
+  ])
+    await grant.getByLabel(label, { exact: true }).check();
+  await grant.getByRole('button', { name: '保存并授权', exact: true }).click();
+  await grant.getByText('已授权', { exact: true }).waitFor();
+  await setPluginEnabled(page, 'Host Info', true);
+  await page.getByRole('navigation', { name: '运维工具导航' }).count();
+  await page
+    .locator('[aria-label="运维工具导航"]')
+    .getByRole('button', { name: 'Host Info', exact: true })
+    .click();
+  const back = page.getByRole('button', { name: '返回功能', exact: true });
+  if (await back.isVisible()) await back.click();
+  const view = page.locator('.plugin-workspace');
+  await view.waitFor();
+  await view.getByLabel('插件目标主机', { exact: true }).selectOption(hostId);
+  await view.getByRole('button', { name: '连接 SSH / SFTP', exact: true }).click();
+  const trust = page.getByRole('dialog', { name: '核验 SSH 主机指纹', exact: true });
+  await trust.waitFor();
+  const key = process.env.SERVERDECK_PLUGIN_TEST_HOST_KEY.split(/\s+/)[1],
+    fingerprint =
+      'SHA256:' +
+      createHash('sha256').update(Buffer.from(key, 'base64')).digest('base64').replace(/=+$/, '');
+  assert((await trust.textContent()).includes(fingerprint), 'real host key mismatch');
+  await trust.getByRole('button', { name: '已核对，信任并连接', exact: true }).click();
+  await trust.waitFor({ state: 'hidden' });
+  await view.getByText('connected', { exact: true }).waitFor();
+  await view.getByRole('button', { name: '读取主机信息', exact: true }).click();
+  await view.locator('.plugin-output').filter({ hasText: 'Plugin QA Linux' }).waitFor();
+  assert(
+    !/credentialId|secretRef|password/.test(await view.locator('.plugin-output').textContent()),
+  );
+  await view.getByRole('button', { name: '只读诊断 uname -a', exact: true }).click();
+  await view.locator('.plugin-output').filter({ hasText: 'exitCode' }).waitFor();
+  assert((await view.locator('.plugin-output').textContent()).includes('Linux'));
+  passed.push('installed public SDK WASM UI uses real host projection and authenticated SSH uname');
+  assert.equal(await view.getByLabel('插件界面语言', { exact: true }).count(), 0);
+  assert.equal(await page.locator('html').getAttribute('lang'), 'zh-CN');
+  await view.getByRole('button', { name: '读取主机信息', exact: true }).waitFor();
+  await page.screenshot({ path: path.join(artifacts, 'global-language-dark.png') });
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+  assert((await view.evaluate((el) => getComputedStyle(el).color)) !== 'rgb(255, 255, 255)');
+  await page.screenshot({ path: path.join(artifacts, 'global-language-light.png') });
+  passed.push('plugin labels follow the global language and theme tokens');
+  await page.keyboard.press('Control+k');
+  await page
+    .getByRole('option', { name: '插件命令 · Host Info · Host Info', exact: true })
+    .waitFor();
+  await page.keyboard.press('Escape');
+  await page
+    .getByRole('navigation', { name: '当前主机工具', exact: true })
+    .getByRole('button', { name: 'Host Info', exact: true })
+    .click();
+  await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
+  await showHostTree(page);
+  await hostContextAction(
+    page,
+    page.locator('.tree-host-row').filter({ hasText: 'Plugin QA Linux' }),
+    'Host Info',
+  );
+  await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
+  await page.locator('.module-navigation [data-module="plugins"]').click();
+  await page.getByLabel('插件页面', { exact: true }).selectOption('settings');
+  await view
+    .getByLabel('备注（仅保存于本插件）', { exact: true })
+    .fill('<img src=x onerror=alert(1)>');
+  await view.getByRole('button', { name: '保存设置', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('.plugin-workspace button:disabled'));
+  await view.getByRole('button', { name: '读取设置', exact: true }).click();
+  await view
+    .locator('.plugin-output')
+    .filter({ hasText: '<img src=x onerror=alert(1)>' })
+    .waitFor();
+  assert.equal(await view.locator('img,iframe,script').count(), 0);
+  passed.push(
+    'all five extension surfaces and isolated settings render hostile strings as inert text',
+  );
+  const disabledSettings = await setPluginEnabled(page, 'Host Info', false);
+  await page.waitForFunction(() => !document.querySelector('.plugin-workspace'));
+  assert.equal((await invoke('plugin_detail', { id: 'dev.serverdeck.host-info' })).enabled, false);
+  await disabledSettings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
+  assert.equal(await page.locator('[aria-label="运维工具导航"] [data-plugin-id]').count(), 1);
+  assert.equal(await page.locator('[aria-label="运维工具导航"] .plugin-source').count(), 0);
+  await navigateWorkspace(page, '插件管理');
+  await card.getByRole('button', { name: '卸载 Host Info', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: '卸载插件？', exact: true })
+    .getByRole('button', { name: '确认卸载', exact: true })
+    .click();
+  await card.waitFor({ state: 'hidden' });
+  assert.equal((await invoke('plugin_list')).length, 0);
+  passed.push(
+    'disable withdraws workspace/runtime and preserves individual settings; the management list uninstalls it',
+  );
   await writeFile(
     path.join(artifacts, 'results.json'),
     JSON.stringify({ passed, artifacts }, null, 2),

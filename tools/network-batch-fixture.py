@@ -28,7 +28,7 @@ sock = '/run/user/%s/docker.sock' % uid
 if not os.path.exists(sock):
     sock = '/var/run/docker.sock'
 d = ['docker', '--host', 'unix://' + sock]
-label = 'io.serverdeck.network-e2e'
+label = 'cn.hiboot.network-e2e'
 uuid = data['uuid']
 if not re.fullmatch(r'[a-f0-9-]{36}', uuid):
     raise ValueError('invalid scope')

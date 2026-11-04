@@ -5,6 +5,7 @@ use serverdeck_plugin_sdk::{Request, read_only};
 fn plugin() -> InstalledPlugin {
     InstalledPlugin {
         manifest: Manifest {
+            icon: None,
             schema_version: 1,
             id: "dev.policy".into(),
             name: "Policy".into(),

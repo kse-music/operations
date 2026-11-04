@@ -6,6 +6,7 @@
 
 ## 基础与配置
 
+- [cn.hiboot 应用身份统一验证](foundation/VALIDATION_IDENTITY.md)
 - [阶段一交付与验证记录](foundation/VALIDATION.md)
 - [主机、凭据与配置导入导出阶段验收](foundation/VALIDATION_STAGE2.md)
 
@@ -68,7 +69,7 @@
 - [顶部模块与左侧菜单验证（2026-11-03）](workspace/VALIDATION_MODULE_NAVIGATION.md)
 - [顶部模块不自动打开默认菜单（2026-11-03）](workspace/VALIDATION_MODULE_SELECTION.md)
 - [禁用系统右键菜单验收](workspace/VALIDATION_NATIVE_MENU.md)
-- [产品整合与交互验收](workspace/VALIDATION_PRODUCT.md)
+- [产品整合与交互验收](workspace/VALIDATION_PRODUCT.md)：含 2026-11-04 任务中心恢复底部弹窗的回归与布局验证。
 - [移除标签栏本地工作区按钮验收](workspace/VALIDATION_REMOVE_LOCAL_WORKSPACE_BUTTON.md)
 - [设置导航与关于页面合并验证](workspace/VALIDATION_SETTINGS_NAVIGATION.md)
 - [全局设置分类 Tab 验收（2026-11-02）](workspace/VALIDATION_SETTINGS_TABS.md)
@@ -85,7 +86,7 @@
 
 ## 插件系统
 
-- [插件阶段验证记录](plugins/PLUGIN_TEST_REPORT.md)：含九个标准内置包、工作区工具迁移、目录清理和合并菜单的 Windows/浏览器/权限回归。
+- [插件阶段验证记录](plugins/PLUGIN_TEST_REPORT.md)：含插件图标配置与默认回退、上传安装目录与列表注册核对、旧 Nginx 测试插件清理，以及九个标准内置包、工作区工具迁移和合并菜单的 Windows/浏览器/权限回归。
 
 维护时优先更新同一主题的记录；新增独立记录后在对应模块补充链接。构建产物、截图和原始日志继续使用项目约定的 `.local/` 目录，不迁入文档目录。
 

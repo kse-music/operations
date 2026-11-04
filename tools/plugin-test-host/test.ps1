@@ -1,4 +1,4 @@
-param([string]$Distro = 'Ubuntu-24.04', [ValidateSet('sdk','ui','nginx')][string]$Mode='sdk')
+param([string]$Distro = 'Ubuntu-24.04', [ValidateSet('sdk','ui')][string]$Mode='sdk')
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
 $stateDirectory = Join-Path $workspace '.local/plugin-13a'
@@ -17,7 +17,7 @@ function Docker([Parameter(ValueFromRemainingArguments=$true)][string[]]$Argumen
 }
 try {
     $env:SERVERDECK_PLUGIN_TEST_DISTRO = $Distro
-    $containerId = (Docker @('run','--detach','--name',$containerName,'--label','io.serverdeck.qa=plugin-13a','--memory','256m','--cpus','1','--pids-limit','128','--security-opt','no-new-privileges','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','SETUID','--cap-add','SETGID','--cap-add','SYS_CHROOT','--cap-add','NET_BIND_SERVICE','--cap-add','DAC_OVERRIDE','--tmpfs','/run:rw,nosuid,nodev,mode=755','--tmpfs','/home/plugin:rw,nodev,mode=755','--publish','127.0.0.1::22','--publish','127.0.0.1::8080','serverdeck-plugin13a-test:13a')).Trim()
+    $containerId = (Docker @('run','--detach','--name',$containerName,'--label','cn.hiboot.qa=plugin-13a','--memory','256m','--cpus','1','--pids-limit','128','--security-opt','no-new-privileges','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','SETUID','--cap-add','SETGID','--cap-add','SYS_CHROOT','--cap-add','NET_BIND_SERVICE','--cap-add','DAC_OVERRIDE','--tmpfs','/run:rw,nosuid,nodev,mode=755','--tmpfs','/home/plugin:rw,nodev,mode=755','--publish','127.0.0.1::22','--publish','127.0.0.1::8080','serverdeck-plugin13a-test:13a')).Trim()
     $portLine = (Docker @('port',$containerId,'22/tcp')).Trim()
     if ($portLine -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'Unexpected container SSH binding' }
     $env:SERVERDECK_PLUGIN_TEST_PORT = $Matches[1]
@@ -68,7 +68,6 @@ try {
     Push-Location $workspace
     try {
         if ($Mode -eq 'ui') { node tools/plugin-native-e2e.mjs }
-        elseif ($Mode -eq 'nginx') { node tools/plugin-native-e2e.mjs --nginx }
         else { cargo test -p serverdeck-application --offline --locked -j 2 --target-dir .local/plugin-13a/cargo-target plugins::tests::linux_sdk_capability_roundtrip -- --ignored --nocapture }
         if ($LASTEXITCODE -ne 0) { throw 'Real Linux plugin integration test failed' }
     } finally { Pop-Location }
@@ -77,7 +76,7 @@ try {
     throw
 } finally {
     if ($containerId) {
-        $owned = (Docker @('inspect','--format','{{.Id}}|{{index .Config.Labels "io.serverdeck.qa"}}|{{.Name}}|{{.State.Running}}',$containerId)).Trim()
+        $owned = (Docker @('inspect','--format','{{.Id}}|{{index .Config.Labels "cn.hiboot.qa"}}|{{.Name}}|{{.State.Running}}',$containerId)).Trim()
         if ($owned -ne "$containerId|plugin-13a|/$containerName|true" -and $owned -ne "$containerId|plugin-13a|/$containerName|false") { throw 'Container identity changed; cleanup refused' }
         Docker @('rm','--force',$containerId) | Out-Null
     }

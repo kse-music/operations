@@ -19,6 +19,7 @@ export interface PluginManifest {
   schemaVersion: number;
   id: string;
   name: string;
+  icon?: string | null;
   version: string;
   author: string;
   description: string;

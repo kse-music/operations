@@ -3,6 +3,7 @@ mod automation;
 mod bundled_plugins;
 mod files;
 mod hosts;
+pub mod identity;
 mod local_terminal;
 pub mod logging;
 mod monitor;

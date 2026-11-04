@@ -1,5 +1,36 @@
 # 插件阶段验证记录
 
+## 2026-11-04：插件图标配置
+
+Manifest 新增可选 icon 名称字段，九个系统插件配置各不相同的图标；上传包同样支持，缺省/null/未识别图标显示默认 boxes。统一用于运维工具侧栏、主机工具菜单、管理列表、插件页面与安装预览。旧已安装 system 记录缺字段时只读取分发配置作为显示默认值，不修改清单/摘要/安装代、启停、授权、卸载选择；同 ID 上传包不继承系统图标。Host API 1.3.0 明确新字段的兼容下限，SDK 1.2.0、包格式、ABI 与 UI 版本不变。
+
+主要文件：crates/plugin-core/src/manifest.rs 及相关包回归；apps/desktop/src/{services/plugin-icons.ts,components/PluginIcon.vue,types/plugins.ts}，AppNavigation、HostTools、PluginsView、PluginPage 与对应测试；plugins/system 九份 manifest 及重新打包产物。新增 tools/ui-plugin-icons-e2e.mjs，同步 PRD、架构、设计决策、包格式、开发/API 文档与实施计划。没有新增依赖、权限、资源协议或数据库迁移。
+
+| 检查                                                                                   | 结果                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                                                                             | 50 文件、328 项通过；覆盖九图标均有效且互异、旧 system 回退、同 ID user 隔离、自选/未知/缺省图标、尺寸与更新，以及侧栏、主机工具、插件页集成                               |
+| `cargo test -p serverdeck-plugin-core -p serverdeck-plugin-runtime --offline --locked` | core 20、runtime 12 项通过；图标经过预览、真实安装、仓库重开仍保留；旧包无字段可读取，非法路径/URL/标记/超长/类型被拒绝，未来合法名称可读取                                |
+| `cargo test -p serverdeck-application bundled_plugins --offline --locked`              | 2 项通过；九包真实校验/实例化、系统预置权限、禁用/卸载选择与上传授权边界继续成立                                                                                           |
+| `npm run build`                                                                        | 九个 WASM 标准包打包、vue-tsc 与 Vite 生产构建通过，保留既有 Monaco 大 chunk 提示                                                                                          |
+| `npm run lint`、Rust 格式与 Clippy                                                     | ESLint 与本轮 Rust 文件 rustfmt 通过；core/runtime 全目标 Clippy 完成，依赖 core 既有 single_element_loop 和缓存硬链接回退提示保留                                         |
+| 无头 Edge                                                                              | 1440×900 深/浅、900×600 深、390×844 浅四组通过；真实侧栏/主机菜单展示九种图标、自选 rocket、缺省及未知名称 boxes，旧系统缺字段仍显示配置图标，无根页面横向溢出与 pageerror |
+
+本轮前端/文档 Prettier、脚本 `node --check` 及 `git diff --check` 通过；九份清单保留原有数组排版，JSON 解析、图标互异和源码/分发包 icon、apiVersion 一致性检查通过。
+
+浏览器脚本为 `node tools/ui-plugin-icons-e2e.mjs`，通过 SERVERDECK_BROWSER、SERVERDECK_PLUGIN_ICONS_URL 指向独立浏览器和本地开发服务。结果与截图位于 `.local/plugin-icons/browser`；已查看桌面深色侧栏及窄屏浅色主机菜单。浏览器仅使用内存夹具，不写正式配置、不调用远程命令。测试服务和浏览器已退出。
+
+首次 Rust 检查受沙箱限制，已有 junction 安全测试无法创建链接（19 项通过、1 项失败），获批沙箱外重跑 core/runtime 后 32 项全通过。首次 ESLint 提示共享组件 source 缺默认值，补上与原有行为一致的 user 默认值后通过；未删除或弱化有效断言。
+
+未重跑完整 Tauri 原生 UI/安装包、真实远端全链路或 macOS/Linux；不宣称这些范围通过。当前支持宿主内置名称，不加载自带图片/远程 URL。未生成或替换安装包，未发现新增风险，无新增下一阶段依赖，本阶段结束。
+
+## 2026-11-04：上传目录说明与旧 Nginx 测试插件清理
+
+按用户要求删除仓库 plugins/upload/nginx-manager 的源码、声明与独立 Cargo 文件，以及 tools/plugin-nginx-e2e.mjs；通用原生测试移除 --nginx 分支，隔离测试入口仅保留 sdk/ui。Host Info、diagnostics 等通用协议测试继续保留，历史 Nginx 验收记录不删除。本轮不卸载客户端插件、不清理旧隔离环境或用户数据。
+
+核对现有真实链路：管理页确认安装 .sdplugin 后，上传内容写入应用数据目录 plugins/upload/<ID>/versions/<revision>，packages/<ID>/record.json 登记当前安装；plugin_list 读取登记记录，管理页与运维工具侧栏显示全部已安装身份，包括禁用或未授权项。仓库中的 plugins/upload 不被启动扫描，不是运行时安装目录。普通 Windows 配置的应用数据根为 %APPDATA%/cn.hiboot.desktop。本轮没有改动安装、授权或导航行为。
+
+实际验证：前端 navigation、plugin-manager、plugin-page 三个文件共 14 项通过；plugin-core 的 repository 回归 15 项通过，涵盖上传目录、注册/重启、升级回滚、数据保留及链接拒绝。首次前端临时文件 rename 和 Rust 临时目录写入受沙箱限制，改用任务内 TEMP/TMP 后前端与 14 个 Rust 用例通过；Junction 安全用例仍被沙箱阻止，沙箱外完整复验 15 项通过。Node/PowerShell 脚本语法和修改文件格式检查通过。未重新构建桌面程序或执行真实客户端上传、SSH/SFTP、跨平台验收；这些结果不计为本轮验证。无新增运行时风险，无下一阶段依赖。
+
 ## 2026-11-04：工作区工具标准插件与顶部菜单合并
 
 按用户确认，本轮一并迁移 AI 助手、批量运维、自动运维、网络诊断，共九个独立标准内置包。每包具备 manifest/UI/Rust crate/Cargo.lock，只有公开 SDK 依赖，真实编译为 WASM/.sdplugin；SDK/API 1.2.0、UI v3 的 tool 贡献和领域能力同样对上传包开放，不按内置 ID 路由原生页面。顶部合并为“运维工具”，任务中心保留为宿主公共能力，管理仍在设置。

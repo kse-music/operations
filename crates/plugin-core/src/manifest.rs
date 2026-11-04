@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "1.2.0";
+pub const API_VERSION: &str = "1.3.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -12,6 +12,8 @@ pub struct Manifest {
     pub schema_version: u32,
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub version: String,
     pub author: String,
     pub description: String,
@@ -110,6 +112,19 @@ pub fn validate_path(path: &str) -> Result<(), Error> {
 impl Manifest {
     pub fn validate(&self, platform: &str) -> Result<(), Error> {
         validate_id(&self.id)?;
+        if let Some(icon) = &self.icon
+            && (icon.is_empty()
+                || icon.len() > 64
+                || !icon.as_bytes()[0].is_ascii_lowercase()
+                || icon.split('-').any(|part| {
+                    part.is_empty()
+                        || !part
+                            .bytes()
+                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+                }))
+        {
+            return Err(invalid("插件图标必须是最多 64 字节的小写图标名称"));
+        }
         if self.schema_version != 1
             || self.name.trim().is_empty()
             || self.name.len() > 120

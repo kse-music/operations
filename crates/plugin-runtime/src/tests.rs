@@ -46,6 +46,7 @@ impl Fixture {
         let package = Package {
             format_version: 1,
             manifest: Manifest {
+                icon: None,
                 schema_version: 1,
                 id: "dev.runtime".into(),
                 name: "Runtime fixture".into(),

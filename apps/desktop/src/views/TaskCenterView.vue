@@ -117,9 +117,8 @@ useErrorNotifications(error);
 </script>
 <template>
   <section class="page-view" aria-label="任务中心">
-    <header class="section-heading"><h1>任务中心</h1></header>
     <p class="subtle">
-      统一查看文件传输、网络诊断、批量运维和自动化任务。关闭此页面不会停止任务；停止在途远端命令后仍需核对实际状态。
+      统一查看文件传输、网络诊断、批量运维和自动化任务。关闭弹窗不会停止任务；停止在途远端命令后仍需核对实际状态。
     </p>
 
     <TransferPanel @retry="(t) => open('files', t.hostId)" />

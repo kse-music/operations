@@ -449,7 +449,7 @@ h1 {
   .module-grid article {
     padding: 15px;
   }
-  .statusbar > span:nth-child(2) {
+  .statusbar > span:nth-of-type(2) {
     display: none;
   }
 }

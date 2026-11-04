@@ -495,32 +495,50 @@ it('removes the host management page and keeps creation available in the workspa
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
 
-it('opens a single task center workspace from the tools menu and removes duplicate footer entries', async () => {
+it('opens the task center from the footer without changing the workspace or terminal', async () => {
   const terminals = useTerminalsStore();
   terminals.open(useHostsStore().catalog!.hosts[0]!);
   terminals.update(terminals.focused, { state: 'connected', sessionId: 'live-shell' });
   useWorkspaceStore().navigate('terminals', 'a');
   useBackgroundStore().connections = [];
   const original = JSON.stringify(terminals.tabs);
+  const workspace = useWorkspaceStore();
+  const originalTabs = JSON.stringify(workspace.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
-  expect(root.querySelectorAll('.statusbar button')).toHaveLength(0);
-  await sidebarMenu('plugins', '任务中心');
-  expect(useWorkspaceStore().current).toMatchObject({ key: 'tasks:', view: 'tasks', hostId: '' });
-  expect(root.querySelector('section[aria-label="任务中心"] h1')?.textContent).toBe('任务中心');
-  expect(document.querySelector('dialog[aria-label="后台任务与传输"]')).toBeNull();
-  expect(root.textContent).toContain('没有传输任务');
-  expect(root.textContent).toContain('没有网络或批量任务');
-  await sidebarMenu('plugins', '任务中心');
-  expect(useWorkspaceStore().tabs.filter((tab) => tab.view === 'tasks')).toHaveLength(1);
-  await useWorkspaceStore().close('tasks:');
+  root.querySelector<HTMLButtonElement>('.module-navigation [data-module="plugins"]')!.click();
   await flush();
+  expect(root.querySelector('.activity-rail [aria-label="任务中心"]')).toBeNull();
+  const open = root.querySelector<HTMLButtonElement>('.statusbar [aria-label="任务中心"]');
+  expect(open).not.toBeNull();
+  open!.click();
+  await flush();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="任务中心"]')!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.textContent).toContain('没有传输任务');
+  expect(dialog.textContent).toContain('没有网络或批量任务');
+  open!.click();
+  await flush();
+  expect(document.querySelectorAll('dialog[aria-label="任务中心"]')).toHaveLength(1);
+  expect(JSON.stringify(workspace.tabs)).toBe(originalTabs);
+  expect(workspace.current?.key).toBe('host:a');
+  expect(workspace.module).toBe('plugins');
+  dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
+  expect(document.activeElement).toBe(open);
+  open!.click();
+  await flush();
+  document.querySelector('dialog[aria-label="任务中心"]')!.dispatchEvent(new Event('cancel'));
+  await flush();
+  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
   expect(JSON.stringify(terminals.tabs)).toBe(original);
   expect(close).not.toHaveBeenCalled();
 });
 
-it('uses the configured task shortcut to open the task center without duplicating its workspace', async () => {
+it('uses the configured task shortcut and search to open one task dialog while preserving the current page', async () => {
   app!.unmount();
   loadSidebarConfig();
+  useApplicationStore().state!.config.product.shortcuts.tasks = 'Ctrl+Shift+U';
   vi.spyOn(useHostsStore(), 'load').mockResolvedValue();
   vi.spyOn(useAutomationStore(), 'start').mockImplementation(() => {});
   vi.spyOn(useBackgroundStore(), 'start').mockImplementation(() => {});
@@ -534,7 +552,7 @@ it('uses the configured task shortcut to open the task center without duplicatin
   for (let index = 0; index < 2; index++) {
     window.dispatchEvent(
       new KeyboardEvent('keydown', {
-        key: 'J',
+        key: 'U',
         ctrlKey: true,
         shiftKey: true,
         bubbles: true,
@@ -543,11 +561,53 @@ it('uses the configured task shortcut to open the task center without duplicatin
     );
     await flush();
   }
-  expect(useWorkspaceStore().current?.view).toBe('tasks');
-  expect(useWorkspaceStore().module).toBe('plugins');
-  expect(useWorkspaceStore().tabs.filter((tab) => tab.view === 'tasks')).toHaveLength(1);
-  expect(root.querySelector('section[aria-label="任务中心"]')).not.toBeNull();
+  expect(useWorkspaceStore().current?.view).toBe('terminals');
+  expect(useWorkspaceStore().module).toBe('hosts');
+  expect(useWorkspaceStore().tabs).toHaveLength(1);
+  expect(document.querySelectorAll('dialog[aria-label="任务中心"][open]')).toHaveLength(1);
   expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
+  document.querySelector('dialog[aria-label="任务中心"]')!.dispatchEvent(new Event('cancel'));
+  await flush();
+  window.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true }),
+  );
+  await flush();
+  const search = document.querySelector<HTMLInputElement>('[aria-label="全局搜索内容"]')!;
+  search.value = '任务中心';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await flush();
+  document.querySelector<HTMLButtonElement>('[role="option"]')!.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="全局搜索"]')).toBeNull();
+  expect(document.querySelectorAll('dialog[aria-label="任务中心"][open]')).toHaveLength(1);
+  expect(useWorkspaceStore().current?.view).toBe('terminals');
+  expect(useWorkspaceStore().module).toBe('hosts');
+  expect(useWorkspaceStore().tabs).toHaveLength(1);
+});
+
+it('closes the task dialog when opening a result in its original tool', async () => {
+  useBackgroundStore().tasks = [
+    {
+      id: 'diag',
+      kind: 'diagnostic',
+      hostIds: ['b'],
+      state: 'completed',
+      label: '诊断结果',
+      active: false,
+    },
+  ];
+  root.querySelector<HTMLButtonElement>('.statusbar [aria-label="任务中心"]')!.click();
+  await flush();
+  const result = [
+    ...document.querySelectorAll<HTMLButtonElement>('dialog[aria-label="任务中心"] button'),
+  ].find((button) => button.textContent?.trim() === '查看任务结果')!;
+  result.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
+  expect(useWorkspaceStore().current).toMatchObject({
+    view: 'extension',
+    pluginId: 'cn.hiboot.plugins.network',
+  });
 });
 
 it('merges navigation with the host tree and keeps the sidebar available on global pages', async () => {
@@ -758,7 +818,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   await sidebarMenu('plugins', '网络诊断');
   expect(workspace.module).toBe('plugins');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['AI 运维助手', '批量运维', '自动运维', '网络诊断', '任务中心'],
+    ['AI 运维助手', '批量运维', '自动运维', '网络诊断'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
   await sidebarMenu('assets', '备份恢复');
