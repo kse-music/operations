@@ -1,5 +1,25 @@
 # 系统内置标准插件
 
+## 当前目录与加载机制（UI v4）
+
+九个包均为 1.1.0，要求 Host API ^1.4.0，使用 Rust SDK 1.3.0 和前端 SDK 1.0.0。每个 `plugins/system/<name>` 自带 frontend、backend、测试、manifest 和 UI JSON；助手、自动化、批量、诊断和五个服务器页面已从 desktop 迁出。公共基础组件、类型、客户端和主题放在 SDK，宿主只保留公共服务及受控桥，不再静态挂载业务页面。
+
+| 插件目录   | 界面与交互业务                     |
+| ---------- | ---------------------------------- |
+| assistant  | 对话、关联主机、Markdown、命令审核 |
+| automation | 命令/脚本、模板、执行及计划表单    |
+| batch      | 多主机命令与单文件分发             |
+| network    | 网络诊断和结果                     |
+| resources  | 资源总览、磁盘、网络图表           |
+| docker     | 容器、镜像及详情                   |
+| processes  | 进程、端口及详情                   |
+| services   | systemd 服务                       |
+| logs       | 结构化日志浏览与流                 |
+
+`npm run plugins:build` 调用与上传相同的单包编译器，输出带摘要的 WASM/UI/JS/CSS 标准包。主程序根据安装记录加载包内前端到 iframe，并以同一 SDK/WASM/权限路径调用公共原生能力，不按内置 ID 选择组件。新通用 frontend 插件完全不依赖标准工具类型。
+
+旧 v2/v3 安装继续用兼容资源，组合服务器旧视图在 `plugins/compat/server/frontend`；兼容层允许复用资源/日志业务源，只在兼容构建中明确列出，不进入新插件依赖图。兼容产物随产品分发，不需要强制重装已有系统包。预置授权、禁用/卸载墓碑、上传显式授权及任务中心接管语义保持。下面“固定可信渲染器、UI v2/v3、SDK 1.2”等为先前阶段设计，当前实现以上述为准。
+
 ## 插件图标
 
 九个分发清单通过 icon 配置不同图标：AI 运维助手 `bot`、自动运维 `calendar-clock`、批量运维 `layers`、Docker `container`、日志 `scroll-text`、网络诊断 `network`、进程与端口 `list-tree`、资源监控 `activity`、系统服务 `settings-2`。新清单要求 Host API ^1.3.0，SDK 仍为 1.2.0。已安装旧系统包缺字段时读取分发配置用于显示，不重装、不改变启停/授权；上传也支持相同字段，未填默认 boxes。详见[图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。

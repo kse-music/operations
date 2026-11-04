@@ -1,5 +1,11 @@
 # 插件 API 版本策略
 
+## 1.4.0：包内前端与公共 Vue SDK
+
+Host API 1.4.0、Rust SDK 1.3.0 新增 UI v4 的 frontend 入口及通用 frontend surface；新包声明 `apiVersion: "^1.4.0"`，避免旧 Host 严格字段检查失败。TypeScript/Vue SDK `@serverdeck/plugin-sdk` 独立版本为 1.0.0。SDK 实现统一有界桥，既有 Capability/WASM ABI/wire、manifest schemaVersion 和包 formatVersion 仍为 1，旧 SDK 1.0–1.2 的能力和 UI v1–v3 继续兼容。
+
+九个分发包版本为 1.1.0。预置逻辑保留已有安装，不强制升级、重写摘要或继承新的授权；新安装使用 UI v4，旧 v2/v3 由兼容资源渲染。用户主动安装更高版本仍遵循标准升级确认、备份、重新授权规则。以下各版本条目描述其发布时状态，当前 Host/SDK 版本以上述为准。
+
 ## 1.3.0：插件清单图标
 
 Host API 升至 1.3.0，manifest 增加可选 icon 图标名。旧清单省略字段仍可读取，None 序列化时不增加字段；使用图标的新包声明 ^1.3.0，旧 Host 对未知字段的严格拒绝保持。SDK crate 仍为 1.2.0，包 formatVersion/schemaVersion、WASM ABI、消息版本和 UI 版本不变。不增加权限、资源加载或动态代码能力。支持名称及默认回退见[包格式](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。

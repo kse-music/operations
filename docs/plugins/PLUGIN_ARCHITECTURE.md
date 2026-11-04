@@ -1,5 +1,11 @@
 # 插件架构
 
+## 当前：源码归属与 UI v4
+
+Host API 1.4 / Rust SDK 1.3 / Vue SDK 1.0 起，九个标准插件的前端和测试位于各自 `plugins/system/<name>/frontend`，Guest 位于 `backend`。公开前端 SDK 为 `packages/plugin-sdk`；宿主提供桥接与公共原生服务，业务视图不再由宿主静态导入。新通用 frontend 贡献可以定义独立 WASM 动作，扩展新业务无需修改宿主工具枚举。
+
+构建输出为标准包内的 WASM、ui.json、单一 JS 和 CSS。内置与上传共用该构建/校验/加载/调用链；资源进入不透明来源的 sandbox iframe，桥绑定安装代并保留现有逐请求授权。UI v1 保持声明式表单；旧 v2/v3 的标准视图使用兼容资源进入相同沙箱，不强制重装。公共服务实现与 SDK 接口的职责、缓存生命周期见[总体架构](../architecture/ARCHITECTURE.md#2026-11-04插件源码归属与-ui-v4)，新边界见[安全](PLUGIN_SECURITY.md)。下文 UI v2/v3 的“固定可信组件”描述为历史协议行为，由当前加载方式替代。
+
 ## 工作区工具标准化
 
 AI 助手、批量、自动运维和网络诊断各自成为独立标准包，源码/锁文件/产物独立，系统与上传使用相同公开 ToolInvoke/UI v3 契约。PluginToolSurface 注入通过实际 WASM 的领域 API；App/workspace 仅解析已安装且启用/授权的贡献，不直接挂载原生业务页。顶部合并为一个运维工具入口；任务中心/调度器/引擎为宿主公共能力，禁用或卸载不删除已授权工作。票据及 AI 资源归属和边界见 [内置插件](BUILTIN_PLUGINS.md)。

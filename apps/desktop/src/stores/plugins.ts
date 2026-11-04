@@ -45,6 +45,7 @@ export const usePluginsStore = defineStore('plugins', () => {
   const prompt = shallowRef<{
     title: string;
     message: string;
+    confirmationText?: string | null;
     resolve: (accepted: boolean) => void;
   } | null>(null);
   const extensions = computed(() =>
@@ -150,10 +151,10 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
     return ok;
   }
-  function ask(title: string, message: string): Promise<boolean> {
+  function ask(title: string, message: string, confirmationText?: string | null): Promise<boolean> {
     if (prompt.value) return Promise.resolve(false);
     return new Promise((resolve) => {
-      prompt.value = { title, message, resolve };
+      prompt.value = { title, message, confirmationText, resolve };
     });
   }
   function decide(accepted: boolean) {

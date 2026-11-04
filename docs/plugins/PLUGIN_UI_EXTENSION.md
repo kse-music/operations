@@ -1,4 +1,23 @@
-# 声明式插件 UI v1 / v2 / v3
+# 插件 UI v1 / v2 / v3 / v4
+
+## UI v4：包内独立界面
+
+Host API 1.4.0 / Rust SDK 1.3.0 新增 `uiVersion:4` 和必填 `frontend:{script:"frontend.js",style:"frontend.css"}`。页面仍声明 id/title/fields/actions 等严格字段；`surface:{kind:"frontend"}` 允许全新业务页面，普通 workspace/navigation/host_menu/command/settings 贡献映射到同 ID 页面，无需增加宿主类型。通用页面的 actions/fields 声明可由 SDK invoke 使用；初始动作及 log 仍为空，插件自行管理 UI 状态。原 monitor/operations/tool surface 在 v4 也可使用，标准 surface 的单一 bridge 动作约束不变。
+
+前端入口使用公开 SDK：
+
+```ts
+import { mountPlugin } from '@serverdeck/plugin-sdk/runtime';
+import App from './App.vue';
+import '@serverdeck/plugin-sdk/ui/base.css';
+mountPlugin(App);
+```
+
+`@serverdeck/plugin-sdk` 的 `invoke(action, values)` 只能调用该页面已声明的自身 WASM 动作。公共服务客户端、Store 和组件分别位于 services/stores/ui 子路径。源码不得引用 desktop 的服务、类型、状态或 Tauri；构建器拒绝这些引用。完整独立示例为 `tests/fixtures/plugins/custom-ui`，常规业务示例为 `plugins/system/<name>/frontend`。
+
+宿主 PluginFrame 用不透明来源的 sandbox iframe 加载包入口，theme/当前主机/允许读取的状态经 MessageChannel 注入；插件 API 仅通过白名单桥到实际 WASM 和授权 Host。可信 Host 操作确认根据冻结输入生成，不接受 Guest 自行批准。iframe 的请求、并发、事件和速率有界；资源每次检查安装代、grant 和摘要。详见[安全边界](PLUGIN_SECURITY.md#ui-v4-的页面隔离与原生能力)。
+
+工具标签持续挂载，切换标签或查看自身设置保留草稿；隐藏页面经 SDK 收到可见性通知，监控暂停。禁用/撤权/升级/卸载释放对应资源；已提交后台工作仍由任务中心接管。UI v1 保持原表单；旧 v2/v3 标准视图使用兼容资源进入相同 iframe，已有包不强制升级。下文 v1–v3 的“不执行包内 JS、frame-src none”是这些协议最初的约束，不适用于新增 v4；主窗口当前仅允许本地 sdplugin frame。
 
 ## UI v3：可信工作区工具
 

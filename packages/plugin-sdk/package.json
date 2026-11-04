@@ -1,0 +1,23 @@
+{
+  "name": "@serverdeck/plugin-sdk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "exports": {
+    "./ui/*.vue": "./src/ui/*.vue",
+    "./ui/*.css": "./src/ui/*.css",
+    "./*": "./src/*.ts",
+    ".": "./src/index.ts"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0",
+    "pinia": "^3.0.0"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.66.0",
+    "marked": "14.0.0"
+  }
+}

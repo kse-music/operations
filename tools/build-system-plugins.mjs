@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile, rename, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildPluginUi } from './build-plugin-ui.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const names = [
   'resources',
@@ -18,6 +19,14 @@ const names = [
 const artifacts = path.join(root, 'plugins/system/packages');
 await mkdir(path.join(root, '.local/plugin-build'), { recursive: true });
 await mkdir(artifacts, { recursive: true });
+await buildPluginUi(
+  path.join(root, 'plugins/compat/server'),
+  path.join(root, 'plugins/compat/server/assets'),
+  [
+    path.join(root, 'plugins/system/logs/frontend'),
+    path.join(root, 'plugins/system/resources/frontend'),
+  ],
+);
 const staging = await mkdtemp(path.join(root, '.local/plugin-build', 'system-'));
 for (const name of names) {
   const output = path.join(staging, `${name}.sdplugin`);

@@ -1,5 +1,5 @@
 {
-  "uiVersion": 3,
+  "uiVersion": 4,
   "title": "网络诊断",
   "pages": [
     {
@@ -21,5 +21,9 @@
         "tool": "network"
       }
     }
-  ]
+  ],
+  "frontend": {
+    "script": "frontend.js",
+    "style": "frontend.css"
+  }
 }

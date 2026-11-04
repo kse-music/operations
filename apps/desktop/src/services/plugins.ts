@@ -26,7 +26,7 @@ export const pluginsApi = {
       operation: import('../types/plugins').PluginToolOperation;
       args: Record<string, unknown>;
     },
-  ): Promise<{ inputId: string; operation: import('../types/plugins').PluginToolOperation }> {
+  ): Promise<import('../types/plugins').PluginToolTicket> {
     ensureDesktop();
     return invoke('plugin_tool_stage', { id, input });
   },

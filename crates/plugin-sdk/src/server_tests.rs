@@ -1,6 +1,37 @@
 use crate::{Capability, serde_json::json, server::SurfaceState};
 
 #[test]
+fn independent_frontend_requires_v4_safe_assets_and_declared_actions() {
+    let text = include_str!("../../../tests/fixtures/plugins/custom-ui/ui.json");
+    let original: crate::ui::Ui = serde_json::from_str(text).unwrap();
+    original.validate().unwrap();
+    assert!(matches!(
+        original.pages[0].surface,
+        Some(crate::ui::Surface::Frontend)
+    ));
+    let mut legacy = original.clone();
+    legacy.ui_version = 3;
+    assert!(legacy.validate().is_err());
+    let mut missing = original.clone();
+    missing.frontend = None;
+    assert!(missing.validate().is_err());
+    for path in [
+        "../frontend.js",
+        "https://evil.example/a.js",
+        "<script>.js",
+        "/absolute.js",
+        "a\\b.js",
+    ] {
+        let mut invalid = original.clone();
+        invalid.frontend.as_mut().unwrap().script = path.into();
+        assert!(invalid.validate().is_err(), "{path}");
+    }
+    let mut unknown: serde_json::Value = serde_json::from_str(text).unwrap();
+    unknown["frontend"]["url"] = json!("https://evil.example");
+    assert!(serde_json::from_value::<crate::ui::Ui>(unknown).is_err());
+}
+
+#[test]
 fn surface_only_forwards_its_policy_and_matches_real_host_responses() {
     let mut state = SurfaceState::default();
     let allow = |cap: &Capability| matches!(cap, Capability::MetricsOpen { .. });
@@ -83,6 +114,7 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
     let mut server: Ui =
         serde_json::from_str(include_str!("../../../plugins/system/resources/ui.json")).unwrap();
     server.ui_version = 3;
+    server.frontend = None;
     server.validate().unwrap();
     assert!(matches!(
         original.pages[0].surface,

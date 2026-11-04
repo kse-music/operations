@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "apps/desktop"
+    "apps/desktop",
+    "packages/plugin-sdk"
   ],
   "engines": {
     "node": ">=22.13.0"
@@ -13,11 +14,11 @@
     "plugins:build": "node tools/build-system-plugins.mjs",
     "dev": "npm run dev -w @serverdeck/desktop",
     "build": "npm run build -w @serverdeck/desktop",
-    "typecheck": "npm run typecheck -w @serverdeck/desktop",
+    "typecheck": "npm run typecheck -w @serverdeck/desktop && npm run typecheck -w @serverdeck/plugin-sdk",
     "test": "npm run test -w @serverdeck/desktop",
     "test:native": "node tools/native-e2e.mjs",
     "test:terminal": "node tools/native-terminal-e2e.mjs",
-    "lint": "eslint apps/desktop/src apps/desktop/vite.config.ts --max-warnings 0",
+    "lint": "eslint apps/desktop/src apps/desktop/vite.config.ts packages/plugin-sdk/src plugins/system plugins/compat/server/frontend tests/fixtures/plugins/custom-ui/frontend --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "tauri": "node tools/tauri.mjs"

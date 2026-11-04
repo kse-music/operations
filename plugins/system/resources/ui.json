@@ -1,5 +1,5 @@
 {
-  "uiVersion": 2,
+  "uiVersion": 4,
   "title": "资源监控",
   "pages": [
     {
@@ -18,12 +18,12 @@
       "log": null,
       "surface": {
         "kind": "monitor",
-        "sections": [
-          "overview",
-          "disks",
-          "network"
-        ]
+        "sections": ["overview", "disks", "network"]
       }
     }
-  ]
+  ],
+  "frontend": {
+    "script": "frontend.js",
+    "style": "frontend.css"
+  }
 }

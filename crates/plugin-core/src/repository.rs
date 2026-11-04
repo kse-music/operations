@@ -147,6 +147,20 @@ impl Repository {
     pub fn install(&self, input: InstallInput) -> Result<InstalledPlugin, Error> {
         self.install_inner(input, false)
     }
+    /// Only the two declared UI assets are accessible; authorization and digests
+    /// are checked again on every resource request, including after revocation.
+    pub fn frontend_asset(&self, id: &str, revision: &str, path: &str) -> Result<Vec<u8>, Error> {
+        let ui = self.ui(id, revision)?;
+        let frontend = ui.frontend.ok_or_else(|| invalid("插件没有独立界面"))?;
+        if path != frontend.script && path != frontend.style {
+            return Err(crate::permissions::denied());
+        }
+        let plugin = self.detail(id)?;
+        if !plugin.enabled || plugin.revision != revision {
+            return Err(crate::permissions::denied());
+        }
+        self.read_file(&plugin, path)
+    }
     fn install_inner(
         &self,
         input: InstallInput,

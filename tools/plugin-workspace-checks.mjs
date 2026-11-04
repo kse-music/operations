@@ -7,6 +7,17 @@ import path from 'node:path';
 import { navigateWorkspace, setPluginEnabled } from './ui-navigation.mjs';
 
 export async function checkWorkspaceTools({ page, invoke, run, passed }) {
+  const content = () => page.frameLocator('.plugin-frame-container:visible iframe');
+  // Approve only the two known outbound AI reviews in this owned HTTP fixture.
+  const approveQuestion = async () => {
+    for (const expected of ['资产索引', 'body']) {
+      const review = page.getByRole('dialog', { name: '确认插件操作 · AI 运维助手', exact: true });
+      await review.waitFor();
+      assert((await review.innerText()).includes(expected), 'unexpected AI approval request');
+      await review.getByRole('button', { name: '明确确认', exact: true }).click();
+      await review.waitFor({ state: 'hidden' });
+    }
+  };
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   const poll = async (read, check) => {
     for (let i = 0; i < 100; i++) {
@@ -31,18 +42,18 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     ['批量运维', '[aria-label="批量统一命令"]'],
     ['自动运维', '[aria-label="自动化工作区"]'],
     ['网络诊断', '[aria-label="诊断工具"]'],
-    ['AI 运维助手', '.plugin-tool-surface[data-tool="assistant"]'],
+    ['AI 运维助手', '.ai-view'],
   ]) {
     await navigateWorkspace(page, name);
-    await page.locator(selector).waitFor();
+    await content().locator(selector).waitFor();
     assert.equal(await page.locator('.plugin-context:visible').count(), 0);
   }
   await navigateWorkspace(page, '批量运维');
-  await page.getByLabel('批量统一命令', { exact: true }).fill('printf preserved-draft');
+  await content().getByLabel('批量统一命令', { exact: true }).fill('printf preserved-draft');
   await navigateWorkspace(page, '网络诊断');
   await navigateWorkspace(page, '批量运维');
   assert.equal(
-    await page.getByLabel('批量统一命令', { exact: true }).inputValue(),
+    await content().getByLabel('批量统一命令', { exact: true }).inputValue(),
     'printf preserved-draft',
   );
   passed.push(
@@ -50,8 +61,8 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
   );
 
   await navigateWorkspace(page, '自动运维');
-  await page.getByRole('button', { name: '新建命令 / 脚本', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: '新建命令 / 脚本', exact: true });
+  await content().getByRole('button', { name: '新建命令 / 脚本', exact: true }).click();
+  const editor = content().getByRole('dialog', { name: '新建命令 / 脚本', exact: true });
   await editor.getByLabel('自动化条目名称', { exact: true }).fill('Native WASM 保存验证');
   await editor.getByLabel('自动化条目正文', { exact: true }).fill('printf not-executed');
   await editor.getByRole('button', { name: '保存条目', exact: true }).click();
@@ -131,23 +142,45 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
       await stores.get('hosts').load();
     });
     await navigateWorkspace(page, 'AI 运维助手');
-    await page.getByLabel('使用模型', { exact: true }).selectOption(model.id);
-    const question = page.getByLabel('问题', { exact: true });
+    await content().locator('.ai-view').waitFor();
+    await content().getByLabel('使用模型', { exact: true }).selectOption(model.id);
+    const question = content().getByLabel('问题', { exact: true });
     await question.fill('Explain a basic TCP handshake');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    await page.getByText('NATIVE_WASM_AI_OK', { exact: true }).waitFor();
+    await content().getByRole('button', { name: '发送', exact: true }).click();
+    await approveQuestion();
+    await content().getByText('NATIVE_WASM_AI_OK', { exact: true }).waitFor();
     await question.fill('qa-hold');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
+    await content().getByRole('button', { name: '发送', exact: true }).click();
+    await approveQuestion();
     await poll(async () => holding, Boolean);
-    await page.getByRole('button', { name: '停止', exact: true }).click();
-    await page.getByRole('button', { name: '发送', exact: true }).waitFor();
+    await content().getByRole('button', { name: '停止', exact: true }).click();
+    await content().getByRole('button', { name: '发送', exact: true }).waitFor();
     await question.fill('Explain TCP again');
-    await page.getByRole('button', { name: '发送', exact: true }).click();
-    await page.getByText('NATIVE_WASM_AI_OK', { exact: true }).nth(1).waitFor();
+    await content().getByRole('button', { name: '发送', exact: true }).click();
+    await approveQuestion();
+    await content().getByText('NATIVE_WASM_AI_OK', { exact: true }).nth(1).waitFor();
     passed.push(
       'AI model HTTP answer travels through the actual WASM bridge; cancelling an in-flight answer allows another question',
     );
     await page.screenshot({ path: path.join(run, 'assistant.png') });
+  } catch (error) {
+    await page.screenshot({ path: path.join(run, 'assistant-failure.png') });
+    await writeFile(
+      path.join(run, 'assistant-failure.json'),
+      JSON.stringify(
+        {
+          error: String(error),
+          ui: await content()
+            .locator('.ai-view')
+            .innerText()
+            .catch(() => 'frame unavailable'),
+          hostPrompts: await page.locator('.plugin-prompt').allTextContents(),
+        },
+        null,
+        2,
+      ),
+    );
+    throw error;
   } finally {
     await navigateWorkspace(page, '任务中心');
     if (model)
@@ -164,12 +197,12 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
   await new Promise((resolve) => tcp.listen(0, '127.0.0.1', resolve));
   try {
     await navigateWorkspace(page, '网络诊断');
-    await page.getByRole('tab', { name: 'TCP 端口', exact: true }).click();
-    await page.getByLabel('诊断目标', { exact: true }).fill('127.0.0.1');
-    await page.getByLabel('诊断端口', { exact: true }).fill(String(tcp.address().port));
-    await page.getByLabel('诊断次数', { exact: true }).fill('100');
-    await page.getByLabel('诊断超时', { exact: true }).fill('180');
-    await page.getByRole('button', { name: '开始诊断', exact: true }).click();
+    await content().getByRole('tab', { name: 'TCP 端口', exact: true }).click();
+    await content().getByLabel('诊断目标', { exact: true }).fill('127.0.0.1');
+    await content().getByLabel('诊断端口', { exact: true }).fill(String(tcp.address().port));
+    await content().getByLabel('诊断次数', { exact: true }).fill('100');
+    await content().getByLabel('诊断超时', { exact: true }).fill('180');
+    await content().getByRole('button', { name: '开始诊断', exact: true }).click();
     const tasks = await poll(
       () => invoke('diagnostic_list', { versions: {} }),
       (tasks) => tasks.some((t) => t.state === 'running'),
@@ -244,7 +277,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     .locator('[aria-label="运维工具导航"]')
     .getByRole('button', { name: 'Uploaded Network QA', exact: true })
     .click();
-  await page.locator('.plugin-tool-surface[data-tool="network"]:visible').waitFor();
+  await content().getByRole('tablist', { name: '诊断工具', exact: true }).waitFor();
   assert((await page.locator('.plugin-page:visible > header').textContent()).includes('用户上传'));
   passed.push(
     'unrelated uploaded package ID renders and executes the same tool contract only after explicit grants',

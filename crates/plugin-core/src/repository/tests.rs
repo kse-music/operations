@@ -1,4 +1,5 @@
 use super::*;
+use crate::permissions::GrantInput;
 use crate::{
     Contribution, ContributionKind, Entry, FileDigest, PackageFile, Permission,
     package::{MAX_FILE, MAX_PACKAGE},
@@ -51,6 +52,112 @@ fn input(path: &Path, old: Option<&str>) -> InstallInput {
         expected_version: old.map(str::to_owned),
         expected_digest: None,
     }
+}
+
+#[test]
+fn independent_ui_assets_require_current_grants_declared_entries_and_matching_digests() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Repository::open(dir.path().join("plugins")).unwrap();
+    let mut p = package("1.0.0");
+    p.manifest.api_version = "^1.4.0".into();
+    p.manifest.entry.backend = Some("backend.wasm".into());
+    p.manifest.entry.ui = Some("ui.json".into());
+    p.manifest.permissions = vec![Permission::UiContribute];
+    p.manifest.contributions = vec![Contribution {
+        id: "custom".into(),
+        label: "Custom".into(),
+        kind: ContributionKind::Workspace,
+        tool: None,
+    }];
+    let ui = include_bytes!("../../../../tests/fixtures/plugins/custom-ui/ui.json");
+    for (path, bytes) in [
+        ("ui.json", ui.as_slice()),
+        ("backend.wasm", b"\0asm\x01\0\0\0".as_slice()),
+        (
+            "frontend.js",
+            b"document.body.textContent='owned package'".as_slice(),
+        ),
+        ("frontend.css", b"body{color:inherit}".as_slice()),
+    ] {
+        p.manifest.files.push(FileDigest {
+            path: path.into(),
+            size: bytes.len() as u64,
+            sha256: digest(bytes),
+        });
+        p.files.push(PackageFile {
+            path: path.into(),
+            content: STANDARD.encode(bytes),
+        });
+    }
+    let path = save(dir.path(), &p);
+    let installed = repo.install(input(&path, None)).unwrap();
+    assert!(
+        repo.frontend_asset("dev.example", &installed.revision, "frontend.js")
+            .is_err()
+    );
+    repo.set_enabled("dev.example", true).unwrap();
+    assert!(
+        repo.frontend_asset("dev.example", &installed.revision, "frontend.js")
+            .is_err()
+    );
+    repo.set_grant(
+        "dev.example",
+        GrantInput {
+            expected_revision: installed.revision.clone(),
+            permissions: vec![Permission::UiContribute],
+            host_ids: vec![],
+            operations: vec!["ui.contribute".into()],
+            read_roots: vec![],
+            write_roots: vec![],
+            confirmed: true,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        repo.frontend_asset("dev.example", &installed.revision, "frontend.js")
+            .unwrap(),
+        b"document.body.textContent='owned package'"
+    );
+    assert!(
+        repo.frontend_asset("dev.example", &installed.revision, "frontend.css")
+            .is_ok()
+    );
+    for invalid in ["readme.txt", "backend.wasm", "ui.json", "../frontend.js"] {
+        assert!(
+            repo.frontend_asset("dev.example", &installed.revision, invalid)
+                .is_err()
+        );
+    }
+    assert!(
+        repo.frontend_asset("dev.example", "stale", "frontend.js")
+            .is_err()
+    );
+    let asset = repo
+        .payload_folder(installed.source, "dev.example")
+        .unwrap()
+        .join("versions")
+        .join(&installed.revision)
+        .join("frontend.js");
+    fs::write(&asset, b"tampered").unwrap();
+    assert!(
+        repo.frontend_asset("dev.example", &installed.revision, "frontend.js")
+            .is_err()
+    );
+    repo.revoke_grant("dev.example").unwrap();
+    assert!(
+        repo.frontend_asset("dev.example", &installed.revision, "frontend.css")
+            .is_err()
+    );
+    let mut missing = p.clone();
+    missing
+        .manifest
+        .files
+        .retain(|file| file.path != "frontend.js");
+    missing.files.retain(|file| file.path != "frontend.js");
+    assert!(
+        Package::validate_bytes(&serde_json::to_vec(&missing).unwrap(), std::env::consts::OS)
+            .is_err()
+    );
 }
 #[test]
 fn plugin_icon_survives_preview_install_and_restart_and_is_optional_for_legacy_packages() {

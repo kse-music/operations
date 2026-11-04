@@ -1,5 +1,11 @@
 # 本地插件包 v1
 
+## UI v4 前端入口（Host API 1.4.0）
+
+包格式仍为 1。`entry.ui` 仍指向严格 JSON，不接收包内 HTML。`uiVersion:4` 必须声明 `frontend:{"script":"frontend.js","style":"frontend.css"}`，二者必须是包内真实普通文件，进入 files 的长度/SHA256 校验和现有单文件/总量上限。入口仅允许最长 80 字节的平面 ASCII 文件名，分别以 `.js`/`.css` 结束，不允许点开头、`..`、路径、URL 或额外资源入口。
+
+宿主提供固定 HTML 壳并使用受限本地协议加载这两个入口；包内 JS/CSS 不进入宿主 DOM。构建工具把 Vue 和普通库打入单文件，图片可使用 data URI，运行时不能加载远程资源、动态分块或任意本地路径。新包需 `apiVersion:^1.4.0`；图标规则不变。UI v1–v3 不允许 frontend 字段并继续兼容。完整页面契约见[UI v4](PLUGIN_UI_EXTENSION.md#ui-v4包内独立界面)。
+
 ## 可选插件图标（Host API 1.3.0）
 
 在源码 `manifest.json` 中声明可选 `icon` 图标名，例如：

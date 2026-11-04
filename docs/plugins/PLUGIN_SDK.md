@@ -1,4 +1,20 @@
-# Plugin SDK 1.2.0
+# Plugin SDK：Rust 1.3.0 / TypeScript 1.0.0
+
+## 当前公开 SDK 与源码边界
+
+Host API 1.4.0 支持 UI v4。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
+
+| SDK 内容                                                    | 使用入口                                        |
+| ----------------------------------------------------------- | ----------------------------------------------- |
+| 独立界面启动/主题/状态注入                                  | `@serverdeck/plugin-sdk/runtime` 的 mountPlugin |
+| 自身已声明 WASM 动作                                        | 包根 invoke(action, values)                     |
+| 主机只读目录/模型元数据/连接/系统/监控/日志/文件/任务客户端 | services 和 stores 子路径                       |
+| 公开 DTO 与工具能力类型                                     | types 子路径；宿主类型从此处重导出              |
+| 通用表格/详情/模态框/图表/连接选择器/主题                   | ui 子路径                                       |
+
+客户端通过运行时注入的有界 MessageChannel 使用公共服务；不能在 Guest 传 native command、插件身份、凭据或原始租约。业务 API 经 Host stage → 不可变票据 → 该包实际 WASM → 类型化授权能力，服务端仍复验输入/范围/状态。连接凭据和模型 Key、原生文件选择/下载、指纹/变更批准由 Host 处理。SDK 是接口与可复用前端基础，原生服务实现不复制进每个 WASM。
+
+插件前端代码、编排和测试只引用自己的目录和公开 SDK；backend 独立编译和单测，禁止依赖 core/application/Tauri。编译器会拒绝越界源码或 Tauri 包引用。可用 `npm run typecheck -w @serverdeck/plugin-sdk` 独立检查 SDK；仓库 `npm run typecheck` 同时检查宿主、插件和 SDK，`npm test` 会收集各插件自己的测试文件。UI4、兼容旧安装和资源入口见[UI 协议](PLUGIN_UI_EXTENSION.md)。下文 1.2/1.1 为既有能力说明，当前 Host 为 1.4.0，ABI/wire 仍为 1。
 
 ## SDK 1.2 工作区工具
 

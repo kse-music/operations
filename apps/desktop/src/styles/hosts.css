@@ -186,111 +186,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.editor-form input:not([type='checkbox']),
-.editor-form select,
-.editor-form textarea,
-.toolbar select {
-  width: 100%;
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  padding: 9px 10px;
-  background: var(--panel);
-  color: var(--text);
-  font: inherit;
-}
 .toolbar select {
   width: auto;
 }
 .host-name {
   font-size: 13px;
-}
-.modal {
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  padding: 24px;
-  width: min(650px, calc(100vw - 60px));
-  max-height: calc(100vh - 60px);
-  overflow: auto;
-  box-shadow: 0 24px 100px #0006;
-}
-.modal.wide {
-  width: min(900px, calc(100vw - 60px));
-}
-.modal::backdrop {
-  background: #0008;
-}
-.modal-heading {
-  display: flex;
-  gap: 18px;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 18px;
-}
-.modal-heading h2 {
-  font-size: 18px;
-  margin: 0;
-}
-.modal-heading .icon-button {
-  flex-shrink: 0;
-}
-.editor-form {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
-  margin-top: 18px;
-}
-.editor-form fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 17px;
-}
-.editor-form .form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
-.full-width {
-  grid-column: 1 / -1;
-}
-.editor-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 12px;
-}
-.editor-form textarea {
-  resize: vertical;
-  min-height: 60px;
-}
-.checkbox-label,
-.editor-form .checkbox-label {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 8px;
-  line-height: 1.6;
-  font-size: 12px;
-}
-.checkbox-label input {
-  accent-color: var(--accent);
-  flex-shrink: 0;
-  margin-top: 3px;
-}
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 20px;
-  padding-top: 18px;
-  border-top: 1px solid var(--border);
-}
-.danger {
-  color: var(--error);
 }
 .management-list,
 .credential-list {

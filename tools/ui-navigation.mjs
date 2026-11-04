@@ -141,7 +141,7 @@ export async function openPluginSettings(page, name) {
     .click();
   const settingsButton = page.getByRole('button', { name: '插件设置', exact: true });
   if (await settingsButton.isVisible()) await settingsButton.click();
-  const settings = page.locator('[aria-label="插件设置"]');
+  const settings = page.locator('.plugin-page:visible [aria-label="插件设置"]');
   await settings.waitFor();
   return settings;
 }
@@ -175,8 +175,7 @@ export async function navigateWorkspace(page, name) {
     return;
   }
   await closeTaskCenter(page);
-  const module = hostTools.has(name) ? 'hosts' : menuModules[name];
-  if (!module) throw new Error(`Unknown navigation target: ${name}`);
+  const module = hostTools.has(name) ? 'hosts' : (menuModules[name] ?? 'plugins');
   await page.locator(`.module-navigation [data-module="${module}"]`).click();
   if (hostTools.has(name)) {
     const remote = page.getByRole('navigation', { name: '当前主机工具', exact: true });

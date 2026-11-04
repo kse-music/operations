@@ -1,0 +1,25 @@
+{
+  "uiVersion": 4,
+  "title": "Custom UI QA",
+  "frontend": { "script": "frontend.js", "style": "frontend.css" },
+  "pages": [
+    {
+      "id": "custom",
+      "title": "Custom UI QA",
+      "initialAction": null,
+      "surface": { "kind": "frontend" },
+      "fields": [
+        {
+          "id": "name",
+          "label": "姓名",
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        }
+      ],
+      "actions": [{ "id": "greet", "label": "问候", "discardDirty": false, "enabledWhen": null }],
+      "log": null
+    }
+  ]
+}

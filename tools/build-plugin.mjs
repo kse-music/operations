@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildPluginUi } from './build-plugin-ui.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const [name, output] = process.argv.slice(2);
 if (!name || !output)
@@ -47,6 +48,10 @@ if (manifest.entry.ui)
     path.join(staging, manifest.entry.ui),
     await readFile(path.join(source, manifest.entry.ui)),
   );
+if (manifest.entry.ui) {
+  const ui = JSON.parse(await readFile(path.join(source, manifest.entry.ui), 'utf8'));
+  if (ui.frontend) await buildPluginUi(source, staging);
+}
 run(process.execPath, [
   path.join(root, 'tools', 'package-plugin.mjs'),
   staging,

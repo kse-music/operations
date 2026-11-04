@@ -125,6 +125,13 @@ impl Package {
             let ui: serverdeck_plugin_sdk::ui::Ui = serde_json::from_slice(bytes)
                 .map_err(|_| invalid("插件 UI 声明无效或含脚本/未知字段"))?;
             ui.validate().map_err(invalid)?;
+            if let Some(frontend) = &ui.frontend {
+                for entry in [&frontend.script, &frontend.style] {
+                    if !files.iter().any(|(path, _)| path == entry) {
+                        return Err(invalid("插件界面资源入口缺失"));
+                    }
+                }
+            }
             if ui.pages.iter().any(|page| page.surface.is_some())
                 && package.manifest.entry.backend.is_none()
             {

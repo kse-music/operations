@@ -1,5 +1,7 @@
 # 隔离运行时 v1
 
+当前 Host API 1.4 同时支持独立前端 UI v4；页面使用浏览器 sandbox/MessageChannel，后端继续使用本文的 Wasmi ABI 和配额。WASM 的 fuel/线性内存限制不覆盖 JS 页面执行，不能将两层保障混为一谈。界面加载与兼容策略见[UI 协议](PLUGIN_UI_EXTENSION.md)，安全和原生验收边界见[安全文档](PLUGIN_SECURITY.md)。
+
 13A-2 使用 Wasmi 1.1.0（MIT/Apache-2.0，Rust MSRV 1.86），仅开启 std 与 extra-checks。解释执行二进制 WASM，不加载动态库，不运行 Node，不接入 WASI。不提供任何导入，因此文件系统、网络、环境变量、秘密、进程、Tauri IPC 和内部 SSH Session 均不可达。每次加载核验安装代及入口摘要。后续能力 API 必须单独提供授权桥，不能开放 WASI 作为捷径。
 
 依据：[Wasmi Module API](https://docs.rs/wasmi/1.1.0/wasmi/struct.Module.html)、[StoreLimitsBuilder](https://docs.rs/wasmi/1.1.0/wasmi/struct.StoreLimitsBuilder.html)；已按下载的固定版本源码核对 fuel/limits/instantiate_and_start 接口。

@@ -1,5 +1,17 @@
 # 插件安全边界
 
+## UI v4 的页面隔离与原生能力
+
+UI v4 执行摘要校验过的包内 JS/CSS，运行在 `sandbox="allow-scripts allow-forms"` iframe，不含 allow-same-origin。其来源为 null，不能读取父页面 DOM/Store、取得宿主连接或直接调用 Tauri。主页面仅允许 sdplugin 本地 frame，子页面 CSP 为 default-src none、connect-src none、frame-src none、object-src none、base-uri none、form-action none；脚本/样式只来自专用本地协议，样式允许 inline、图片仅 data。allow-forms 使 Vue preventDefault 表单事件可用，网络提交仍被 CSP 拒绝。Windows WebView 可能存在注入的 Tauri 全局对象，安全判断依据实际 IPC/来源校验和副作用拒绝，不能以对象是否存在作为保证。
+
+资源协议只接受主 WebView 的 GET 和四段路径，绑定 id/revision/page，重新检查启用、授权、摘要，仅返回可信 HTML 壳及声明的 JS/CSS。响应 no-store/nosniff，最多八个并发文件读。包格式和文件配额保持。父桥验证 ready 消息来自实际 iframe.contentWindow、null origin 和协议版本，再分配专属 MessageChannel；后续绑定插件身份和安装代，不相信消息中自报 ID。每帧最多 32 在途、40 请求/秒、1 MiB 输入，SDK 180 秒超时、最多 64 事件回调，Host 最多 32 个连接状态监听（不降低原 32 个连接总限额），失败/关闭回收；原 WASM 消息/fuel/能力并发配额仍在下一层生效。
+
+SDK 只能调用显式白名单能力，管理/授权/模型 Key 修改及任意 native command 不开放。主机目录不包含凭据表/私钥路径；凭据引用、连接租约、认证路由以 frame 专属不透明引用替代。可选择的业务资料和远端输出仍按已授权能力提供，不能宣称所有元数据都已脱敏。公共原生实现继续保管密钥、主机指纹和文件提交，插件业务不能绕过这些检查。
+
+包内 UI 的 confirmed 或自述风险信息不构成批准。Host bridge 先冻结输入；Rust 从真实 AI 预览/命令、条目/目标和严格类型输入生成宿主独立弹窗，必要时核对确认短语，再将单次票据送入 WASM。AI 资产匹配和发送分别显示实际外发阶段；敏感变更、批量及自动化执行/删除继续确认。文件分发源必须经过宿主原生选择器登记，不能指定任意本地文件；剪贴板及下载只接受白名单且有界的数据。
+
+UI v1 保持原表单，旧 v2/v3 通过兼容资源进入同一隔离框架。以下固定可信表单/无 JS 的描述只代表旧协议；当前 Host 桥仍是唯一批准边界。Web UI 没有独立 OS 进程、CPU/fuel 或内存硬上限，恶意页面仍可能消耗 WebView 资源；不能把浏览器隔离等同 WASM 执行配额。已验证 Windows WebView2 的父 DOM 和实际 host_create IPC 副作用拒绝，macOS/Linux 原生边界未验收。
+
 ## SDK 1.2 工具输入与任务边界
 
 可信主窗口才能准备严格类型的工具输入；Guest 的 tool_invoke 只携带不透明票据和封闭操作。Host 校验插件、安装代、上下文代、权限/操作、精确操作、TTL 和单次消费，不能伪造确认、修改已确认载荷或借用其他插件输入。stage/cancel_request/abort_input 均仅向本地主窗口授予。输入大小/并发有界，错误不回显敏感载荷，未开放模型 Key 管理能力或任意原生 IPC。

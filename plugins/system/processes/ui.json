@@ -1,5 +1,5 @@
 {
-  "uiVersion": 2,
+  "uiVersion": 4,
   "title": "进程与端口",
   "pages": [
     {
@@ -18,11 +18,12 @@
       "log": null,
       "surface": {
         "kind": "operations",
-        "sections": [
-          "processes",
-          "ports"
-        ]
+        "sections": ["processes", "ports"]
       }
     }
-  ]
+  ],
+  "frontend": {
+    "script": "frontend.js",
+    "style": "frontend.css"
+  }
 }

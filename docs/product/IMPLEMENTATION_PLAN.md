@@ -5,6 +5,8 @@
 
 ## 当前状态
 
+- 2026-11-04：完成插件源码归属与 UI v4 重构。九个插件的 frontend/backend/相关测试在各自目录，公共类型、客户端、状态和通用 UI 进入 packages/plugin-sdk；宿主通过统一 iframe/SDK/WASM/授权链加载内置和上传包。新增通用 frontend 贡献，独立新业务不需要新增宿主页面分支；旧 v1–v3 和既有安装继续兼容，不重置数据/授权/禁用/任务历史。Host API 1.4、Rust SDK 1.3、Vue SDK 1.0，分发包 1.1。前端 56 文件 339 项、Rust 工作区 228 项（4 ignored）、九个独立 Guest 14 项通过；最终 Windows 原生 12 组通过，含真实 HTTP AI 回答/取消/再问、WASM 保存 SQLite、上传自带 UI 与 WASM、权限拒绝、TCP 任务接管及四布局。类型/构建/变更文件静态检查通过；全库 Prettier 仍报 14 个既有文件的格式问题，未扩大修改，既有 Clippy/大 chunk/硬链接降级提示保留。额外 Linux SDK 验证在 SSH 建连阶段报 SSH_NETWORK，未宣称通过；跨平台原生及签名/安装器未验收。主要文件、失败修复、证据和限制见[本阶段验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04插件源码归属与-ui-v4)。当前阶段结束，下一阶段依赖可用的隔离 SSH 环境及对应平台验收环境，不自动推进。
+
 - 2026-11-04：应用及自有工具统一 cn.hiboot：应用 identifier/default 数据目录、OS 凭据服务、QA 标识、Docker 标签、发布校验和文档路径同步。旧名称仅保留在 core/identity.rs 两个兼容常量中；新增 application/identity.rs 与 WebView 前置迁移插件，保留数据库/插件版本/授权及禁用选择，已有新目录不覆盖；NativeStore 兼容旧凭据并复制到新服务，明确删除时清除两处。应用 37 项通过、1 项 Linux SDK ignored，真实 Windows 凭据 2 项、cargo check、四包 Clippy、fmt 和脚本/文档检查通过。桌面 IPC 重建因现有 EXE 访问拒绝未完成，未重新交付 EXE/安装器，未触碰用户实际目录或现有凭据；macOS/Linux 与 NSIS 身份升级未验收。主要修改、取舍和风险见[应用身份统一验证](../validation/foundation/VALIDATION_IDENTITY.md)。无新增依赖或数据库 schema 变更，本阶段结束，不自动推进安装器与跨平台验收。
 
 - 2026-11-04：插件 manifest 增加可选 icon，九个内置插件使用不同图标；侧栏、主机工具、管理、页面及安装预览统一渲染。上传可自行指定支持的图标名，未填/未知名称使用默认；旧系统包显示回退不重装、不改变授权。Host API 升至 1.3.0，SDK/ABI 保持。前端 328 项、插件 core/runtime 32 项、应用内置包集成 2 项和 Edge 四布局通过；构建及静态检查完成，既有 Clippy/大 chunk/缓存硬链接提示保留。详见[插件图标验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04插件图标配置)。本阶段完成，无新增下一阶段依赖。

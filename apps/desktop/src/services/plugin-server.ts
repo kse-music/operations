@@ -101,6 +101,41 @@ async function expanded(id: string, value: unknown): Promise<unknown> {
   return result;
 }
 
+/** The same bounded Wasm and approval path for a package-owned custom UI. */
+export async function pluginInvokeRequest<T>(
+  id: string,
+  page: PluginUiPage,
+  action: string,
+  values: import('../types/plugins').PluginValues,
+): Promise<T> {
+  const plugins = usePluginsStore();
+  const version = plugins.contextVersion(id);
+  const verify = () => {
+    if (plugins.contextVersion(id) !== version)
+      throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
+  };
+  return queued(id, async () => {
+    verify();
+    const payload = actionPayload(page, action, values);
+    let reply = await pluginsApi.call(id, payload);
+    if (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
+      const approval = reply.result as PluginApproval;
+      const accepted = await plugins.ask(
+        '插件操作需要单独确认',
+        `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
+      );
+      await pluginsApi.approve(approval.id, accepted);
+      if (!accepted) throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
+      verify();
+      reply = await pluginsApi.call(id, payload);
+    }
+    if (reply.error) throw reply.error;
+    const value = await expanded(id, reply.result);
+    verify();
+    return value as T;
+  });
+}
+
 async function surfaceRequest<T>(
   id: string,
   operation: PluginCapability | (() => Promise<PluginCapability>),
@@ -157,6 +192,7 @@ export function pluginToolRequest<T>(
   args: Record<string, unknown>,
   page: PluginUiPage,
   signal?: AbortSignal,
+  trustedApproval = false,
 ): Promise<T> {
   const frozen = JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
   let inputId = '',
@@ -182,6 +218,29 @@ export function pluginToolRequest<T>(
       inputId = ticket.inputId;
       if (signal?.aborted) abort();
       if (ticket.operation !== operation) throw new Error('运维工具请求票据类型不匹配');
+      if (trustedApproval && ticket.review) {
+        const review = ticket.review;
+        if (signal?.aborted) throw new DOMException('已停止', 'AbortError');
+        const store = usePluginsStore();
+        const answer = store.ask(review.title, review.message, review.confirmationText);
+        const ownPrompt = store.prompt;
+        const cancelPrompt = () => {
+          if (ownPrompt && store.prompt === ownPrompt) store.decide(false);
+        };
+        signal?.addEventListener('abort', cancelPrompt, { once: true });
+        let accepted: boolean;
+        try {
+          accepted = await answer;
+        } finally {
+          signal?.removeEventListener('abort', cancelPrompt);
+        }
+        if (!accepted) {
+          abort();
+          await cancelling;
+          inputId = '';
+          throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
+        }
+      }
       return { kind: 'tool_invoke', inputId: ticket.inputId, operation };
     },
     page,

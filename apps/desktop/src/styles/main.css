@@ -1,38 +1,6 @@
+@import '@serverdeck/plugin-sdk/ui/foundation.css';
 @import url('./theme.css');
 @import url('./plugins.css');
-
-* {
-  box-sizing: border-box;
-}
-body {
-  margin: 0;
-  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: 13px;
-  letter-spacing: 0;
-  background: var(--bg);
-  color: var(--text);
-}
-button,
-input,
-select {
-  font: inherit;
-}
-button {
-  cursor: pointer;
-}
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.45;
-}
-button:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-button {
-  color: inherit;
-}
 .app-shell {
   --module-header-height: 52px;
   --host-panel-width: var(--sidebar-width);
@@ -46,15 +14,6 @@ button {
 }
 .app-shell.hosts-hidden {
   --host-panel-width: 0px;
-}
-.icon-button {
-  margin-left: auto;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  width: 30px;
-  height: 30px;
-  font-size: 18px;
 }
 .sidebar {
   grid-column: 1;
@@ -99,58 +58,10 @@ button {
   padding-top: 23px;
   border-top: 1px solid var(--border);
 }
-.button {
-  display: inline-flex;
-  justify-content: center;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--control-height);
-  max-width: 100%;
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--control-radius);
-  padding: 5px 12px;
-  background: var(--raised);
-  font-size: 12px;
-  line-height: 20px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.button:not(:disabled):hover {
-  border-color: var(--border-strong);
-  background: var(--hover);
-}
-.button.primary {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
-}
-.button.primary:hover {
-  background: var(--accent);
-  filter: brightness(1.08);
-}
-.button.primary span {
-  margin-left: 22px;
-}
 .add-host {
   width: 100%;
   background: none;
   border-style: dashed;
-}
-.host-empty {
-  margin: 36px 10px;
-  text-align: center;
-  color: var(--muted);
-}
-.host-empty > span {
-  font-size: 28px;
-}
-.host-empty p {
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-.host-empty small {
-  font-size: 11px;
 }
 .local-note {
   margin-top: auto;
@@ -215,26 +126,6 @@ button {
   overflow: auto;
   padding: 22px 24px;
   container: workspace / inline-size;
-}
-.section-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.eyebrow {
-  font-size: 10px;
-  letter-spacing: 0;
-  color: var(--accent);
-  margin: 0 0 10px;
-  font-weight: 600;
-}
-h1 {
-  font-size: 21px;
-  margin: 0;
-  font-weight: 600;
-  letter-spacing: 0;
 }
 .stage-label {
   color: var(--muted);
@@ -327,19 +218,6 @@ h1 {
   font-weight: 500;
   margin: 0;
 }
-.text-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  border: 0;
-  background: none;
-  color: var(--accent);
-  font-size: 12px;
-  line-height: 20px;
-  min-height: var(--compact-height);
-  padding: 4px 6px;
-}
 .system-details {
   margin: 14px 0 0;
 }
@@ -363,10 +241,6 @@ h1 {
   overflow-wrap: anywhere;
   color: var(--muted);
 }
-.subtle {
-  color: var(--muted);
-  font-size: 11px;
-}
 .statusbar {
   grid-column: 1 / -1;
   background: var(--panel);
@@ -377,22 +251,6 @@ h1 {
   padding: 0 16px;
   font-size: 10px;
   color: var(--muted);
-}
-.banner {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px 16px;
-  margin-bottom: 22px;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.banner.error {
-  color: var(--error);
-  background: var(--error-bg);
-}
-.banner.success {
-  color: var(--accent);
-  background: var(--accent-bg);
 }
 .settings-form {
   margin-top: 28px;
@@ -427,24 +285,12 @@ h1 {
   accent-color: var(--accent);
   height: 35px;
 }
-.form-footer {
-  margin-top: 32px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-}
 @media (max-width: 1100px) {
   .content-scroll {
     padding: 27px 26px;
   }
   .stage-label {
     display: none;
-  }
-  h1 {
-    font-size: 23px;
   }
   .module-grid article {
     padding: 15px;

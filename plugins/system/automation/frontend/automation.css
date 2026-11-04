@@ -1,0 +1,109 @@
+.automation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.automation-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.automation-form label:has(input[type='checkbox']) {
+  flex-direction: row;
+  align-items: center;
+}
+.automation-form input:not([type='checkbox']),
+.automation-form select,
+.automation-form textarea {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+}
+.automation-form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font:
+    13px/1.5 Consolas,
+    monospace;
+}
+.automation-param {
+  margin-bottom: 12px;
+}
+
+.automation-library-empty {
+  padding: 16px 20px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-soft);
+}
+.automation-templates {
+  min-width: 0;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.automation-templates-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.automation-templates-heading strong {
+  font-size: 14px;
+}
+.automation-template-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.automation-template-drawer {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.automation-template-drawer > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  cursor: pointer;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+.automation-template-drawer > summary::-webkit-details-marker {
+  display: none;
+}
+.automation-template-drawer > summary:hover {
+  background: var(--panel-soft);
+}
+.automation-template-drawer > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.automation-template-drawer > summary svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.automation-template-drawer[open] > summary svg {
+  transform: rotate(90deg);
+}
+.automation-template-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+.automation-template-content > .ops-log-output {
+  max-height: 240px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+}
+.automation-template-content > footer {
+  display: flex;
+  justify-content: flex-end;
+}

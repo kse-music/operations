@@ -7,3 +7,4 @@ package-lock.json
 docs/product/PRD.md
 AGENTS.md
 .local
+plugins/compat/server/assets

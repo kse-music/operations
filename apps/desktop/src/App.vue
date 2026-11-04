@@ -749,7 +749,11 @@ watch(
         <button class="text-button" @click="view = 'automation'">查看自动化任务</button>
       </div>
 
-      <div v-show="view !== 'terminals'" class="content-scroll">
+      <div
+        v-show="view !== 'terminals'"
+        class="content-scroll"
+        :class="{ 'plugin-frame-workspace': view === 'extension' }"
+      >
         <section v-if="view === null" class="workspace-empty" aria-label="欢迎页面">
           <h1>欢迎使用 ServerDeck</h1>
           <p>打开本地终端，或从左侧主机列表连接服务器。</p>
@@ -758,19 +762,18 @@ watch(
             <button class="button" @click="openHost()">新建主机</button>
           </div>
         </section>
-        <KeepAlive v-for="tab in cachedToolTabs" :key="tab.key">
-          <PluginPage
-            v-if="workspace.active === tab.key"
-            :key="tab.key"
-            :plugin-id="tab.pluginId!"
-            :contribution-id="tab.contributionId!"
-            host-id=""
-            :tab-key="tab.key"
-            :tool-intent="{ automationHost, entryId: entryIntent, networkHost, networkRequest }"
-            @intent-consumed="entryIntent = ''"
-            @contribution="(contribution) => openPlugin(tab.pluginId!, contribution)"
-          />
-        </KeepAlive>
+        <PluginPage
+          v-for="tab in cachedToolTabs"
+          v-show="workspace.active === tab.key"
+          :key="tab.key"
+          :plugin-id="tab.pluginId!"
+          :contribution-id="tab.contributionId!"
+          host-id=""
+          :tab-key="tab.key"
+          :tool-intent="{ automationHost, entryId: entryIntent, networkHost, networkRequest }"
+          @intent-consumed="entryIntent = ''"
+          @contribution="(contribution) => openPlugin(tab.pluginId!, contribution)"
+        />
         <ServerView
           v-if="view === 'server'"
           :key="`server:${currentHostId}`"

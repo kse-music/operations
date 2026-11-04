@@ -1,5 +1,28 @@
 # 插件阶段验证记录
 
+## 2026-11-04：插件源码归属与 UI v4
+
+完成目标：九个插件各自拥有 frontend/backend/清单/UI/相关测试；公开 TypeScript/Vue SDK 包含类型、客户端、状态与公共 UI。宿主移除原业务页面和固定渲染器，仅保留公共服务、插件管理/安全壳与 SDK/WASM 桥。新增 UI4 包内 JS/CSS 和通用 frontend 贡献，真实新业务插件无需修改宿主类型或路由；系统和上传共用构建/校验/加载/调用。旧 v1 表单及 v2/v3 标准视图继续兼容，既有包不强制重装，未更改数据库 schema 或用户数据。
+
+主要文件：`plugins/system/*/frontend`、独立 backend 与重建 packages；`packages/plugin-sdk`；`plugins/compat/server`；宿主 `PluginFrame`、`PluginView`、App、`plugin-ui-bridge`、审批和类型重导出；Rust `plugin_ui_protocol`、application/plugins、bundled_plugins、plugin-sdk/ui 与 plugin-core 包/资源校验；构建器和原生 QA。产品/架构/决策/SDK/包/UI/安全/开发/AI 使用说明同步。
+
+| 实际验证          | 结果与证据                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 前端完整回归      | `npm test`：56 文件、339 项通过；`.local/plugin-refactor-frontend-tests.log`。既有测试随插件迁移并保留断言，补独立 Docker/systemd、SDK iframe DTO/事件回收、权限/不可变输入/不透明引用及模型刷新回归。                                                                                                                                                                                                                                                                   |
+| Rust 工作区       | `cargo test --workspace --offline --locked`：228 项通过、4 项环境依赖 ignored；`.local/plugin-refactor-workspace-tests.log`。含真实桌面 IPC 5 项、安装/授权/摘要/撤销、ABI/运行时和原引擎协议回归。                                                                                                                                                                                                                                                                      |
+| 独立插件          | 九个 backend 各自 `cargo fmt --check` / `cargo test --offline --locked`：共 14 项通过；`.local/plugin-refactor-independent-tests.log`。九包各自 release WASM/Vue 编译及标准打包通过；`.local/plugin-refactor-packages.log`。                                                                                                                                                                                                                                             |
+| 最终 Windows 原生 | 真实 WebView2、WASM、SQLite、HTTP/TCP，12 组通过；`.local/plugin-refactor-native-final-retry.log`。最终程序先构建，再由同一独立 QA 目录 `1e3a934d-173f-41a8-9488-790b7717648a` 复用运行；结果见 `.local/plugin-ui-isolation/1e3a934d-173f-41a8-9488-790b7717648a/results.json`。                                                                                                                                                                                         |
+| 原生场景与布局    | 四工具包内界面、批量草稿/自身设置往返、父 DOM/实际 native host_create 副作用拒绝、全新自带 UI+WASM 的通用插件、未声明能力拒绝、自动化保存且无执行历史、无关 ID/修改 JS 的上传包、真实本机 TCP 停用后继续并由任务中心停止、AI 真实 HTTP 回答→停止→再问。1440 暗/亮、900×600、390×844 截图及横向溢出断言通过；人工核对 dark-1440 / tools-light-390，iframe 填满工作区、无重复业务标题。                                                                                    |
+| 静态检查与构建    | 桌面/插件和 SDK 各自 vue-tsc、严格 ESLint、Windows debug/no-bundle、全工作区 Clippy、Rust fmt、本次变更文件 Prettier、Git diff 空白及工具语法检查通过。实际编译器分别拒绝 desktop 私有源码和 Tauri 导入，见 `.local/plugin-refactor-boundary.log`。全库 format:check 仍有 14 个本次未修改文件的既有格式问题，未夹带格式化，见 `.local/plugin-refactor-format.log`。Clippy 保留 core 既有 single_element_loop 提示，缓存硬链接失败降级复制和原 Monaco 大 chunk 提示保留。 |
+
+原生发现并修复的问题：Windows 资源 URL 的斜杠被 convertFileSrc 编码、Vue 独立库缺少生产环境常量、KeepAlive 移动 iframe 导致浏览上下文重建/草稿丢失、响应式 Proxy 无法经 MessagePort 克隆、模型列表相同版本快照触发深度 watcher 清空对话、重复开关事件流后未回收回调，以及 iframe 只有默认高度。新回归检查实际目标行为；相关失败保留在各 QA 子目录。最终测试脚本还修复了 CDP 端口先于 WebView 就绪的启动竞态和隐藏缓存设置页的定位范围，未放宽安全断言。
+
+隔离依据：iframe 是 null 来源，CSP 禁止网络/表单导航/子框架，native IPC 仍限定主来源。Windows 可能注入 Tauri 全局，因此原生测试以实际 host_create 无副作用为判据，预期 CSP 拒绝日志单独记录，其他错误断言为空。UI 的批准由 Rust 冻结输入和真实预览生成的 Host 弹窗完成；WASM 不得到审批 API 或密钥。新夹具位于 `tests/fixtures/plugins/custom-ui`，不是正式功能数据。
+
+额外执行 `tools/plugin-test-host/test.ps1 -Mode sdk`：首次误用 Windows PowerShell 5 导致 WSL 参数传递失败；使用当前 PowerShell 7 后脚本正常创建/清理专属容器，但 SDK 测试在运维/SFTP SSH 建连阶段返回 `SSH_NETWORK`（还未进入插件能力断言），本项失败，日志 `.local/plugin-refactor-linux-sdk.log`。没有改动 SSH 实现或据此宣称 Linux 长流程通过；历史记录中的 PLUGIN_SESSION_CLOSED 也未在本轮得到修复验收。
+
+未验证与已知风险：工作区四项 ignored 分别为 Linux SDK、真实 Linux PTY 和两个显式 OS 凭据集成测试；本次没有对真实远端重跑全部插件操作，未做 macOS/Linux 原生、签名/安装器验收。Web UI 没有独立 OS/CPU/内存硬隔离，不能将其浏览器边界等同 WASM fuel 限额；取消远端进程仍可能需要人工核对实际状态。测试仅使用新建 QA 数据目录、自己的进程和本机服务，模型/凭据/测试主机均按现有脚本清理，未启动或改写用户客户端/配置。下一阶段依赖：可用的隔离 SSH 和跨平台验收环境；本阶段完成后停止。
+
 ## 2026-11-04：插件图标配置
 
 Manifest 新增可选 icon 名称字段，九个系统插件配置各不相同的图标；上传包同样支持，缺省/null/未识别图标显示默认 boxes。统一用于运维工具侧栏、主机工具菜单、管理列表、插件页面与安装预览。旧已安装 system 记录缺字段时只读取分发配置作为显示默认值，不修改清单/摘要/安装代、启停、授权、卸载选择；同 ID 上传包不继承系统图标。Host API 1.3.0 明确新字段的兼容下限，SDK 1.2.0、包格式、ABI 与 UI 版本不变。

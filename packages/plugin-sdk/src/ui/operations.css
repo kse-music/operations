@@ -1,0 +1,171 @@
+.operations-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.operations-view h1 {
+  margin: 0;
+}
+.operations-view .section-heading {
+  align-items: flex-start;
+  padding-bottom: 4px;
+}
+.operations-view .section-heading .subtle {
+  margin: 8px 0 0;
+  line-height: 1.7;
+}
+.ops-connection-status {
+  margin: 0;
+  padding: 0 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.ops-toolbar,
+.ops-tabs,
+.ops-capabilities,
+.ops-row-actions,
+.ops-log-tabs {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.operations-view input:not([type='checkbox']),
+.operations-view select {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  max-width: 320px;
+}
+.operations-view input[type='number'] {
+  width: 100px;
+}
+.ops-table {
+  overflow: auto;
+  min-width: 0;
+}
+.ops-table th {
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.ops-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+.ops-table td,
+.ops-table th {
+  padding: 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  max-width: 300px;
+  overflow-wrap: anywhere;
+}
+.ops-row-actions {
+  min-width: 180px;
+}
+.ops-detail,
+.ops-logs {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  padding: 16px;
+}
+.ops-tabs {
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+}
+.ops-tabs .button {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.ops-tabs .button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.ops-detail pre,
+.ops-log-output {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 520px;
+  overflow: auto;
+  padding: 14px;
+  background: var(--bg);
+  font:
+    12px/1.6 Consolas,
+    monospace;
+}
+.ops-tabs [aria-selected='true'],
+.ops-log-tabs [aria-selected='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ops-capabilities {
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.ops-log-tabs {
+  margin: 12px 0;
+}
+.ops-log-tabs span {
+  padding-left: 12px;
+}
+.ops-logs h2 {
+  margin-top: 0;
+}
+@media (max-width: 960px) {
+  .operations-view .ops-toolbar {
+    gap: 8px;
+  }
+  .operations-view input:not([type='checkbox']),
+  .operations-view select {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .ops-tabs .button {
+    padding: 9px 10px;
+    font-size: 12px;
+  }
+}
+
+.batch-targets {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+}
+.task-host {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.task-command-label {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+.task-command-label textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 12px;
+  font:
+    13px/1.5 Consolas,
+    monospace;
+}
+.batch-row {
+  margin-top: 16px;
+}

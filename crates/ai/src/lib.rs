@@ -104,6 +104,21 @@ impl Default for Assistant {
     }
 }
 impl Assistant {
+    /// Trusted approval data comes from the stored request, never Guest labels.
+    pub fn review_send(&self, id: &str) -> Result<Value, Error> {
+        let mut state = lock(&self.state)?;
+        state.prune();
+        let pending = state.previews.get(id).ok_or(Error::NotFound)?;
+        Ok(
+            serde_json::json!({"destination":provider::endpoint(&pending.config)?.to_string(),"model":pending.config.model,"body":pending.body}),
+        )
+    }
+    pub fn review_command(&self, id: &str) -> Result<Value, Error> {
+        let mut state = lock(&self.state)?;
+        state.prune();
+        let pending = state.commands.get(id).ok_or(Error::NotFound)?;
+        serde_json::to_value(&pending.proposal).map_err(|e| Error::Worker(Box::new(e)))
+    }
     pub fn prepare(&self, input: PreparedContext) -> Result<Preview, Error> {
         let PreparedContext {
             related_bindings,

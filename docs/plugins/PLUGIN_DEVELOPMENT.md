@@ -1,5 +1,37 @@
 # 插件开发与本地安装
 
+## 当前推荐：完整插件目录与 UI v4
+
+九个系统插件和上传插件采用同一源码/包结构：
+
+```text
+plugins/system/<name>/       # 上传源码可放任意显式目录
+  manifest.json              # apiVersion ^1.4.0
+  ui.json                    # uiVersion 4 + frontend 入口
+  frontend/
+    main.ts                  # SDK mountPlugin
+    App.vue / 业务组件及样式
+    *.test.ts                # 该插件的界面/编排回归
+  backend/
+    Cargo.toml / Cargo.lock  # 独立 workspace，只依赖公开 Rust SDK
+    src/lib.rs               # 自身 WASM 业务/能力策略及 Rust 测试
+```
+
+公共前端类型、客户端、Store、基础 UI 和主题在 `packages/plugin-sdk`；前端导入 `@serverdeck/plugin-sdk/...`，禁止引用 `apps/desktop`、其他插件或 Tauri。共享基础优先提入 SDK，避免插件互相引用业务实现。完整新业务示例是 `tests/fixtures/plugins/custom-ui`，不需要在宿主新增页面/工具分支。旧 v2/v3 兼容源码单独放在 `plugins/compat`，不作为新插件开发模板。
+
+```powershell
+npm run typecheck
+npm test
+cargo test --manifest-path plugins/system/network/backend/Cargo.toml --offline --locked
+node tools/build-plugin.mjs plugins/system/network .local/network-v4.sdplugin
+npm run plugins:build
+node tools/plugin-ui-isolation-e2e.mjs
+```
+
+单包构建同时编译独立 WASM 与 Vue 前端，并检查源码边界，打成 backend.wasm/ui.json/frontend.js/frontend.css。运行时使用 sandbox iframe，不访问宿主 DOM；仅使用 SDK 已公开服务和自身声明动作。UI资源必须单文件，不可远程加载或任意读取本地文件。打包输出仍需不存在且在源目录之外。原生 QA 使用全新目录和自己的 HTTP/TCP 夹具，不能代替真实 SSH 或其他平台验收。
+
+版本为 Host API 1.4.0、Rust SDK 1.3.0、Vue SDK 1.0.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。已有安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
+
 ## 配置插件图标
 
 在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^1.3.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。

@@ -12,8 +12,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Only the trusted, fixed Host forms can prepare these inputs. Guest code receives
-/// an immutable single-use ticket, never a private lease, API key or native IPC name.
+/// The trusted Host bridge validates these inputs and obtains native approval when
+/// required. Wasm receives an immutable single-use ticket, never a private lease,
+/// API key or native IPC name.
 #[derive(Deserialize)]
 #[serde(
     tag = "operation",
@@ -297,6 +298,7 @@ mod tests {
         let forged = ToolTicket {
             input_id: ticket.input_id.clone(),
             operation: Operation::DiagnosticCancel,
+            review: None,
         };
         assert!(invoke(&app, system, &forged).await.error.is_some());
         assert!(invoke(&app, system, &ticket).await.error.is_none());
@@ -479,6 +481,8 @@ impl ToolInput {
 pub struct ToolTicket {
     pub input_id: String,
     pub operation: Operation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review: Option<super::review::ToolReview>,
 }
 struct ActiveInputGuard {
     host: super::state::Host,
@@ -516,6 +520,7 @@ impl Application {
         if bytes > 1024 * 1024 {
             return Err(Error::Validation("运维工具输入超过 1 MiB"));
         }
+        let raw = input.clone();
         let input: ToolInput = serde_json::from_value(input)
             .map_err(|_| Error::Validation("运维工具输入无效或含不支持的字段"))?;
         let operation = input.operation();
@@ -550,6 +555,9 @@ impl Application {
             }
             _ => (),
         }
+        let review = self
+            .plugin_tool_review(&input, raw, &plugin.manifest.name)
+            .await?;
         let ticket = uuid::Uuid::new_v4().to_string();
         let mut data = self.plugin_host.lock()?;
         if !super::state::Host::current(&data, &id, &generation) {
@@ -577,6 +585,7 @@ impl Application {
         Ok(ToolTicket {
             input_id: ticket,
             operation,
+            review,
         })
     }
     pub(super) async fn plugin_tool_invoke(

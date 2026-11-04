@@ -21,6 +21,29 @@ pub struct Ui {
     pub ui_version: u32,
     pub title: Label,
     pub pages: Vec<Page>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frontend: Option<Frontend>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Frontend {
+    pub script: String,
+    pub style: String,
+}
+impl Frontend {
+    pub fn valid(&self) -> bool {
+        // Flat, fixed-extension entry points keep the UI resource surface bounded.
+        fn name(value: &str, extension: &str) -> bool {
+            value.len() <= 80
+                && value.ends_with(extension)
+                && value
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_-.".contains(&b))
+                && !value.starts_with('.')
+                && !value.contains("..")
+        }
+        name(&self.script, ".js") && name(&self.style, ".css")
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -37,6 +60,7 @@ pub struct Page {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Surface {
+    Frontend,
     Monitor { sections: Vec<String> },
     Operations { sections: Vec<String> },
     Tool { tool: crate::tools::Tool },
@@ -101,10 +125,15 @@ impl Label {
 }
 impl Ui {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !matches!(self.ui_version, 1..=3)
+        if !matches!(self.ui_version, 1..=4)
             || !self.title.valid()
             || self.pages.is_empty()
             || self.pages.len() > 8
+            || self
+                .frontend
+                .as_ref()
+                .is_some_and(|f| self.ui_version != 4 || !f.valid())
+            || (self.ui_version == 4 && self.frontend.is_none())
         {
             return Err("UI 版本、标题或页面数量无效");
         }
@@ -112,13 +141,14 @@ impl Ui {
         for page in &self.pages {
             if let Some(surface) = &page.surface {
                 let valid = match surface {
-                    Surface::Tool { .. } => self.ui_version == 3,
+                    Surface::Frontend => self.ui_version == 4,
+                    Surface::Tool { .. } => matches!(self.ui_version, 3 | 4),
                     Surface::Monitor { sections } => {
-                        matches!(self.ui_version, 2 | 3)
+                        matches!(self.ui_version, 2..=4)
                             && valid_sections(sections, &["overview", "disks", "network"])
                     }
                     Surface::Operations { sections } => {
-                        matches!(self.ui_version, 2 | 3)
+                        matches!(self.ui_version, 2..=4)
                             && valid_sections(
                                 sections,
                                 &[
@@ -133,9 +163,10 @@ impl Ui {
                     }
                 };
                 if !valid
-                    || page.actions.len() != 1
-                    || page.actions[0].id != "bridge"
-                    || !page.fields.is_empty()
+                    || (!matches!(surface, Surface::Frontend)
+                        && (page.actions.len() != 1
+                            || page.actions[0].id != "bridge"
+                            || !page.fields.is_empty()))
                     || page.log.is_some()
                     || page.initial_action.is_some()
                 {

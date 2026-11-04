@@ -442,24 +442,28 @@ try {
   );
   await navigateWorkspace(page, '自动运维');
   const templateCatalog = await rpc('automation_catalog');
-  const templateDrawers = page.locator('.automation-template-drawer');
+  const automationContent = page.frameLocator('.plugin-frame-container:visible iframe');
+  const templateDrawers = automationContent.locator('.automation-template-drawer');
   await templateDrawers.first().waitFor();
   assert.equal(await templateDrawers.count(), templateCatalog.templates.length);
-  assert.equal(await page.locator('.automation-template-drawer[open]').count(), 0);
+  assert.equal(await automationContent.locator('.automation-template-drawer[open]').count(), 0);
   assert.equal(await templateDrawers.getByRole('button').first().isVisible(), false);
   await page.screenshot({ path: path.join(artifacts, 'template-drawers-collapsed.png') });
   const scriptTemplate = templateCatalog.templates.find((template) => template.parameters.length);
   assert(scriptTemplate, 'a parameterized template is required for editor verification');
   const templateDrawer = templateDrawers.filter({
-    has: page.getByText(scriptTemplate.name, { exact: true }),
+    has: automationContent.getByText(scriptTemplate.name, { exact: true }),
   });
   await templateDrawer.locator('summary').press('Enter');
   assert.equal(await templateDrawer.getAttribute('open'), '');
   assert.equal(await templateDrawer.locator('pre').innerText(), scriptTemplate.body);
-  assert.equal(await page.locator('.automation-template-drawer[open]').count(), 1);
+  assert.equal(await automationContent.locator('.automation-template-drawer[open]').count(), 1);
   await page.screenshot({ path: path.join(artifacts, 'template-drawer-expanded.png') });
   await templateDrawer.getByRole('button', { name: `使用“${scriptTemplate.name}”模板` }).click();
-  const templateEditor = page.getByRole('dialog', { name: '新建命令 / 脚本', exact: true });
+  const templateEditor = automationContent.getByRole('dialog', {
+    name: '新建命令 / 脚本',
+    exact: true,
+  });
   await templateEditor.waitFor();
   assert.equal(
     await templateEditor.getByLabel('自动化条目正文', { exact: true }).inputValue(),

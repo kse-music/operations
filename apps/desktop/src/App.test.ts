@@ -24,6 +24,42 @@ import { aiApi } from './services/ai';
 
 // Exercise the shell and both tab bars without xterm's browser canvas or a remote connection.
 vi.mock('./components/TerminalPane.vue', () => ({ default: { render: () => null } }));
+// This shell unit suite mounts the real plugin views through public SDK test
+// adapters. Native iframe isolation and package loading are checked separately.
+vi.mock('@serverdeck/plugin-sdk/stores/hosts', async () => import('./stores/hosts'));
+vi.mock('@serverdeck/plugin-sdk/stores/ops', async () => import('./stores/ops'));
+vi.mock('@serverdeck/plugin-sdk/stores/files', async () => import('./stores/files'));
+vi.mock('@serverdeck/plugin-sdk/stores/models', async () => import('./stores/models'));
+vi.mock('@serverdeck/plugin-sdk/services/tasks', async () => import('./services/tasks'));
+vi.mock('@serverdeck/plugin-sdk/services/automation', async () => import('./services/automation'));
+vi.mock('@serverdeck/plugin-sdk/services/ai', async () => import('./services/ai'));
+vi.mock('./components/PluginFrame.vue', async () => {
+  const { defineComponent, h } = await import('vue');
+  const batch = (await import('../../../plugins/system/batch/frontend/BatchView.vue')).default;
+  const network = (await import('../../../plugins/system/network/frontend/NetworkView.vue'))
+    .default;
+  return {
+    default: defineComponent({
+      props: {
+        page: { type: Object, required: true },
+        toolIntent: { type: Object, default: undefined },
+      },
+      setup(props) {
+        return () => {
+          const tool = props.page.surface?.tool;
+          return tool === 'batch'
+            ? h(batch)
+            : tool === 'network'
+              ? h(network, {
+                  hostId: props.toolIntent?.networkHost,
+                  requestId: props.toolIntent?.networkRequest,
+                })
+              : h('div');
+        };
+      },
+    }),
+  };
+});
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 let app: App | undefined, pinia: Pinia, root: HTMLDivElement;
 const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');

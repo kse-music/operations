@@ -312,28 +312,6 @@
   gap: 18px;
   min-width: 0;
 }
-.plugin-tool-surface {
-  min-width: 0;
-  width: 100%;
-}
-.plugin-tool-surface .ai-view {
-  padding: 0;
-}
-.plugin-tool-surface .ai-page-heading {
-  display: none;
-}
-.plugin-tool-surface .page-view > header h1,
-.plugin-tool-surface .page-view > .section-heading h1 {
-  display: none;
-}
-.plugin-tool-surface .page-view > header,
-.plugin-tool-surface .page-view > .section-heading {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-.plugin-page:has(.plugin-tool-surface) {
-  gap: 14px;
-}
 .plugin-settings-section {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -501,13 +479,6 @@
   margin: 0;
   max-width: none;
 }
-.plugin-page:has(.plugin-server-surface) {
-  padding: 0;
-  gap: 12px;
-}
-.plugin-page:has(.plugin-server-surface) .plugin-page-heading h1 {
-  font-size: 20px;
-}
 .plugin-heading p {
   margin: 0;
 }
@@ -617,34 +588,6 @@
   border-bottom: 1px solid var(--border);
   padding-bottom: 16px;
 }
-.plugin-workspace:has(.plugin-server-surface) {
-  gap: 10px;
-  padding: 14px;
-}
-.plugin-workspace:has(.plugin-server-surface) .plugin-heading h1 {
-  font-size: 20px;
-}
-.plugin-server-surface {
-  display: grid;
-  gap: 12px;
-  min-width: 0;
-}
-.plugin-workspace:has(.plugin-server-surface) .plugin-context {
-  padding-bottom: 8px;
-}
-.plugin-workspace:has(.plugin-server-surface) .plugin-context label {
-  display: flex;
-  align-items: center;
-}
-.plugin-workspace:has(.plugin-server-surface) .plugin-context select {
-  max-width: 280px;
-}
-.plugin-server-surface .server-panel .monitor-cards .panel {
-  padding: 14px;
-}
-.plugin-server-surface .server-panel .trend-chart svg {
-  height: 95px;
-}
 .plugin-context label {
   display: grid;
   gap: 6px;
@@ -734,4 +677,34 @@
   .plugin-page-heading {
     flex-wrap: wrap;
   }
+}
+.plugin-frame-container {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.plugin-frame-workspace,
+.plugin-page:has(.plugin-frame-container),
+.plugin-workspace:has(.plugin-frame-container) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.plugin-page:has(.plugin-frame-container),
+.plugin-workspace:has(.plugin-frame-container) {
+  flex: 1;
+}
+.plugin-page:has(.plugin-frame-container) > :not(.plugin-workspace),
+.plugin-workspace:has(.plugin-frame-container) > :not(.plugin-frame-container) {
+  flex-shrink: 0;
+}
+.plugin-frame {
+  border: 0;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+  background: var(--bg);
+  color-scheme: inherit;
 }

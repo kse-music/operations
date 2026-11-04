@@ -74,10 +74,10 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
     ] {
         assert!(get_ipc_response(&main, request(command, body, origin)).is_err());
     }
-    assert_eq!(
-        invoke("plugin_ui", json!({"id":id,"revision":revision}))["uiVersion"],
-        2
-    );
+    let ui = invoke("plugin_ui", json!({"id":id,"revision":revision}));
+    assert_eq!(ui["uiVersion"], 4);
+    assert_eq!(ui["frontend"]["script"], "frontend.js");
+    assert_eq!(ui["frontend"]["style"], "frontend.css");
     assert_eq!(
         invoke("plugin_set_enabled", json!({"id":id,"enabled":false}))["enabled"],
         false

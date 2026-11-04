@@ -5,6 +5,7 @@ pub mod file_commands;
 mod monitor_commands;
 mod ops_commands;
 mod plugin_commands;
+mod plugin_ui_protocol;
 mod product_commands;
 mod task_commands;
 mod terminal_upload_commands;
@@ -21,7 +22,7 @@ use tauri::{Emitter, Manager};
 pub fn run() {
     let exiting = Arc::new(AtomicBool::new(false));
     let drained = Arc::new(AtomicBool::new(false));
-    let application = tauri::Builder::default()
+    let application = plugin_ui_protocol::register(tauri::Builder::default())
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main")
                 && let Err(error) = window.unminimize().and_then(|()| window.show()).and_then(|()| window.set_focus()) {

@@ -10,7 +10,20 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": {
+      "@serverdeck/plugin-sdk/*": ["../../packages/plugin-sdk/src/*"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.vue",
+    "vite.config.ts",
+    "../../packages/plugin-sdk/src/**/*.ts",
+    "../../packages/plugin-sdk/src/**/*.vue",
+    "../../plugins/system/**/*.ts",
+    "../../plugins/system/**/*.vue",
+    "../../plugins/compat/**/*.ts",
+    "../../plugins/compat/**/*.vue"
+  ]
 }

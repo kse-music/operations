@@ -1,6 +1,7 @@
 use super::*;
 use serverdeck_plugin_core::{InstallInput, InstalledPlugin, Manifest, UninstallInput};
 mod capabilities;
+mod review;
 mod server;
 mod tools;
 pub use tools::{ToolInput, ToolTicket};
@@ -10,6 +11,41 @@ pub use state::{Approval, ContextInput, Event};
 mod tests;
 
 impl Application {
+    pub fn plugin_frontend_asset(
+        &self,
+        id: &str,
+        revision: &str,
+        page: &str,
+        path: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let ui = self.plugins.ui(id, revision)?;
+        if !ui.pages.iter().any(|p| p.id == page && p.surface.is_some()) {
+            return Err(Error::Validation("插件界面不存在"));
+        }
+        if ui.frontend.is_some() {
+            self.plugins.frontend_asset(id, revision, path)
+        } else {
+            super::bundled_plugins::legacy_frontend(&ui, page, path)
+        }
+    }
+
+    pub fn plugin_frontend_document(
+        &self,
+        id: &str,
+        revision: &str,
+        page: &str,
+    ) -> Result<Vec<u8>, Error> {
+        let ui = self.plugins.ui(id, revision)?;
+        if !ui.pages.iter().any(|p| p.id == page && p.surface.is_some()) {
+            return Err(Error::Validation("插件没有独立界面"));
+        }
+        let frontend = ui.frontend.unwrap_or(serverdeck_plugin_sdk::ui::Frontend {
+            script: "frontend.js".into(),
+            style: "frontend.css".into(),
+        });
+        // Entry names have already passed the strict SDK validation.
+        Ok(format!("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><link rel=\"stylesheet\" href=\"{}\"></head><body><div id=\"app\"></div><script type=\"module\" src=\"{}\"></script></body></html>", frontend.style, frontend.script).into_bytes())
+    }
     pub async fn plugin_preview(&self, path: PathBuf) -> Result<Manifest, Error> {
         let plugins = self.plugins.clone();
         self.blocking(move |_| plugins.preview(&path)).await

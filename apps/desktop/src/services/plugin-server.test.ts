@@ -17,6 +17,36 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
+it('requires the frozen native review even when a package sends its own confirmed flag and cancels unused tickets', async () => {
+  const toolPage = { ...page, surface: { kind: 'tool', tool: 'batch' } } as PluginUiPage;
+  vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
+    inputId: 'reviewed',
+    operation: 'batch_start',
+    review: {
+      title: 'Actual target',
+      message: 'Actual command',
+      confirmationText: 'approve target',
+    },
+  });
+  const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
+  const abort = vi.spyOn(pluginsApi, 'toolAbortInput').mockResolvedValue();
+  const call = vi.spyOn(pluginsApi, 'call');
+  const check = expect(
+    pluginToolRequest(
+      'review-test',
+      'batch_start',
+      { input: { confirmed: true } },
+      toolPage,
+      undefined,
+      true,
+    ),
+  ).rejects.toMatchObject({ code: 'PLUGIN_USER_CANCELLED' });
+  await vi.runAllTimersAsync();
+  await check;
+  expect(ask).toHaveBeenCalledWith('Actual target', 'Actual command', 'approve target');
+  expect(abort).toHaveBeenCalledWith('review-test', 'reviewed');
+  expect(call).not.toHaveBeenCalled();
+});
 it('passes typed requests through WASM and requires host approval before retrying a mutation', async () => {
   const call = vi
     .spyOn(pluginsApi, 'call')

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "1.3.0";
+pub const API_VERSION: &str = "1.4.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

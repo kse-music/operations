@@ -15,8 +15,6 @@ app.config.errorHandler = () => store.reportUnexpectedError();
 window.addEventListener('unhandledrejection', () => store.reportUnexpectedError());
 app.mount('#app');
 
-import './styles/monitor.css';
-
 import './styles/operations.css';
 
 import './styles/product.css';

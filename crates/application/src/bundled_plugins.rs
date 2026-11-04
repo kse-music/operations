@@ -38,6 +38,54 @@ const PACKAGES: [(&str, &[u8]); 9] = [
         include_bytes!("../../../plugins/system/packages/network.sdplugin"),
     ),
 ];
+// UI v2/v3 selected a host renderer. Keep that published contract usable for
+// installed and uploaded legacy packages without granting an ID-based privilege.
+pub(crate) fn legacy_frontend(
+    ui: &serverdeck_plugin_sdk::ui::Ui,
+    page: &str,
+    path: &str,
+) -> Result<Vec<u8>, Error> {
+    use serverdeck_plugin_sdk::{tools::Tool, ui::Surface};
+    if !matches!(path, "frontend.js" | "frontend.css") {
+        return Err(Error::Validation("插件界面资源无效"));
+    }
+    let surface = ui
+        .pages
+        .iter()
+        .find(|p| p.id == page)
+        .and_then(|p| p.surface.as_ref())
+        .ok_or(Error::Validation("插件界面不存在"))?;
+    let name = match surface {
+        Surface::Frontend => return Err(Error::Validation("独立界面没有兼容渲染器")),
+        Surface::Tool { tool } => match tool {
+            Tool::Assistant => "assistant",
+            Tool::Batch => "batch",
+            Tool::Automation => "automation",
+            Tool::Network => "network",
+        },
+        Surface::Monitor { .. } => "resources",
+        Surface::Operations { .. } => {
+            return Ok(if path.ends_with(".js") {
+                include_bytes!("../../../plugins/compat/server/assets/frontend.js").to_vec()
+            } else {
+                include_bytes!("../../../plugins/compat/server/assets/frontend.css").to_vec()
+            });
+        }
+    };
+    let bytes = PACKAGES
+        .iter()
+        .find(|(id, _)| id.rsplit('.').next() == Some(name))
+        .map(|(_, bytes)| *bytes)
+        .ok_or(Error::Validation("兼容界面不可用"))?;
+    let package =
+        serverdeck_plugin_core::package::Package::validate_bytes(bytes, std::env::consts::OS)?;
+    package
+        .files
+        .into_iter()
+        .find(|(entry, _)| entry == path)
+        .map(|(_, bytes)| bytes)
+        .ok_or(Error::Validation("兼容界面资源缺失"))
+}
 impl Application {
     /// Startup-only standard package distribution with fixed system grants.
     /// A tombstone preserves uninstall; existing enable choices remain unchanged.
@@ -209,18 +257,8 @@ mod tests {
                 .is_err()
             );
             let ui = app.plugin_ui(id.clone(), plugin.revision).await.unwrap();
-            assert_eq!(
-                ui.ui_version,
-                if id.ends_with("assistant")
-                    || id.ends_with("batch")
-                    || id.ends_with("automation")
-                    || id.ends_with("network")
-                {
-                    3
-                } else {
-                    2
-                }
-            );
+            assert_eq!(ui.ui_version, 4);
+            assert!(ui.frontend.is_some());
             assert!(ui.pages[0].surface.is_some());
             app.plugin_activate(&id).await.unwrap();
             let denied = app
@@ -245,7 +283,10 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 host_denied.error.unwrap().code,
-                if ui.ui_version == 3 {
+                if matches!(
+                    ui.pages[0].surface,
+                    Some(serverdeck_plugin_sdk::ui::Surface::Tool { .. })
+                ) {
                     "CAPABILITY"
                 } else {
                     "PLUGIN_PERMISSION_DENIED"

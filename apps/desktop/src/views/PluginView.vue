@@ -13,8 +13,7 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import type { PluginApproval, PluginUi, PluginValues } from '../types/plugins';
 import Modal from '../components/Modal.vue';
 import PluginLog from '../components/PluginLog.vue';
-import PluginServerSurface from '../components/PluginServerSurface.vue';
-import PluginToolSurface from '../components/PluginToolSurface.vue';
+import PluginFrame from '../components/PluginFrame.vue';
 import type { ServerSection } from '../types/server';
 import type { ContainerShell, LogInput } from '../types/ops';
 import type { Host } from '../types/hosts';
@@ -60,6 +59,7 @@ const operations = computed(() => ops.connections[props.hostId]),
 const trust = computed(() => operations.value?.trust ?? connection.value?.trust);
 const disposed = ref(false);
 const contextReady = ref(false);
+const frameReload = ref(0);
 let generation = 0;
 let dirtyTimer: ReturnType<typeof setTimeout> | undefined;
 const logResource = computed(() => {
@@ -247,6 +247,7 @@ async function restart() {
     await pluginsApi.activate(props.pluginId);
     await plugins.refresh();
     await load();
+    frameReload.value++;
   } catch (cause) {
     error.value = errorMessage(cause);
   }
@@ -323,24 +324,26 @@ useErrorNotifications(error);
     <template v-else-if="page"
       ><h2 v-if="!page.surface">{{ plugins.label(page.title) }}</h2>
       <template v-if="page.surface">
-        <PluginToolSurface
-          v-if="page.surface.kind === 'tool'"
+        <PluginFrame
+          v-if="
+            plugin &&
+            (page.surface.kind === 'tool' ||
+              page.surface.kind === 'frontend' ||
+              (contextReady && hostId))
+          "
+          :key="`${pluginId}:${plugin.revision}:${page.surface.kind === 'tool' ? 'global' : hostId}:${frameReload}`"
           :plugin-id="pluginId"
-          :page="page"
-          :intent="toolIntent"
-          @intent-consumed="emit('intentConsumed')"
-        />
-        <PluginServerSurface
-          v-else-if="contextReady && hostId"
-          :key="`${pluginId}:${hostId}`"
-          :plugin-id="pluginId"
+          :revision="plugin.revision"
           :host-id="hostId"
           :page="page"
           :initial-section="initialSection"
           :log-intent="logIntent"
+          :tool-intent="toolIntent"
           @navigate="(section, intent) => emit('surfaceNavigate', section, intent)"
           @shell="(host, shell) => emit('shell', host, shell)"
           @section="emit('section', $event)"
+          @intent-consumed="emit('intentConsumed')"
+          @retry="restart"
         />
         <p v-else class="host-empty">请选择已授权的主机并连接后使用此插件。</p>
       </template>
