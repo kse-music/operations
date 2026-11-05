@@ -1,4 +1,7 @@
 import type { InstalledPlugin } from '../types/plugins';
+export function isBuiltinAssistant(plugin: InstalledPlugin | undefined): boolean {
+  return plugin?.source === 'system' && plugin.manifest.id === 'cn.hiboot.plugins.assistant';
+}
 export function primaryPluginPage(plugin: InstalledPlugin): string {
   return (
     plugin.manifest.contributions.find((entry) =>

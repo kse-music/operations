@@ -5,7 +5,12 @@ import Services from './ServiceUnits.vue';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
 import { useNotificationsStore } from '@serverdeck/plugin-sdk/stores/notifications';
 import { hostInput } from '@serverdeck/plugin-sdk/types/hosts';
-const api = vi.hoisted(() => ({ query: vi.fn(), feedback: vi.fn(async () => []) }));
+const api = vi.hoisted(() => ({
+  query: vi.fn(),
+  feedback: vi.fn(async () => []),
+  logOpen: vi.fn(async () => ({ id: 'log', sessionId: 'lease', hostId: 'host' })),
+  logClose: vi.fn(async () => {}),
+}));
 vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({ opsApi: api }));
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
@@ -45,10 +50,9 @@ it('binds queries and logs to user scope and reports a failed service action wit
     detail: { systemd: true },
     records: request.kind === 'services' ? [{ unit: 'owned.service', active: 'active' }] : [],
   }));
-  const log = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(Services, { hostId: 'host', onLog: log }).use(pinia);
+  app = createApp(Services, { hostId: 'host' }).use(pinia);
   app.mount(root);
   await settle();
   const scope = root.querySelector<HTMLSelectElement>('[aria-label="systemd 范围"]')!;
@@ -65,10 +69,15 @@ it('binds queries and logs to user scope and reports a failed service action wit
     await settle();
   };
   await click('服务日志');
-  expect(log).toHaveBeenCalledWith(
+  expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe('owned.service · 日志');
+  expect(api.logOpen).toHaveBeenCalledWith(
+    'lease',
     { source: { kind: 'service', scope: 'user', unit: 'owned.service' }, lines: 200, follow: true },
-    'owned.service',
+    expect.any(Function),
   );
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await settle();
+  expect(api.logClose).toHaveBeenCalledWith('log');
   await click('重启');
   const target = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
   target.value = 'owned.service';

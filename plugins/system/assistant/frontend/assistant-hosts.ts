@@ -67,7 +67,9 @@ export function useAssistantHosts() {
         check();
       });
     } catch (e) {
-      if (created && (signal.aborted || !ops.connections[host.id]?.trust)) {
+      const connection = ops.connections[host.id];
+      const awaitingTrust = connection?.trust || connection?.state === 'awaiting_trust';
+      if (created && (signal.aborted || !awaitingTrust)) {
         try {
           await ops.close(host.id);
         } catch (closeError) {

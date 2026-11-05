@@ -365,11 +365,6 @@ function openServer(host: Host): void {
   if (!currentConfiguration(host)) return;
   navigate('server', host.id);
 }
-function containerTerminal(host: Host, shell: import('./types/ops').ContainerShell): void {
-  if (!currentConfiguration(host)) return;
-  terminals.open(host, undefined, shell);
-  navigate('terminals', host.id);
-}
 const FilesView = defineAsyncComponent(() => import('./views/FilesView.vue'));
 const RemoteEditor = defineAsyncComponent(() => import('./components/RemoteEditor.vue'));
 import { useTerminalsStore } from './stores/terminals';
@@ -495,7 +490,6 @@ function openPlugin(
   contribution: string,
   hostId = workspace.current?.hostId ?? '',
   section?: WorkspaceTab['section'],
-  logIntent?: WorkspaceTab['logIntent'],
 ): void {
   const installed = plugins.installed.find((p) => p.manifest.id === id);
   const entry = installed?.manifest.contributions.find((entry) => entry.id === contribution);
@@ -504,17 +498,14 @@ function openPlugin(
     return;
   }
   if (installed)
-    void workspace.openPlugin(id, contribution, hostId, section, logIntent).catch((cause) => {
+    void workspace.openPlugin(id, contribution, hostId, section).catch((cause) => {
       plugins.error = errorMessage(cause);
     });
 }
-async function surfaceNavigate(
-  section: NonNullable<WorkspaceTab['section']>,
-  intent?: WorkspaceTab['logIntent'],
-) {
+async function surfaceNavigate(section: NonNullable<WorkspaceTab['section']>) {
   try {
     const entry = await serverPluginFor(currentHostId.value, section);
-    if (entry) openPlugin(entry.pluginId, entry.id, currentHostId.value, section, intent);
+    if (entry) openPlugin(entry.pluginId, entry.id, currentHostId.value, section);
     else {
       notifications.push('请先在插件管理中启用并授权提供此功能的插件。', true);
       navigate('plugins');
@@ -735,7 +726,6 @@ watch(
           :host-id="page.hostId"
           :tab-key="page.key"
           :initial-section="page.section"
-          :log-intent="page.logIntent"
           @settings="workspace.openPluginSettings(page.pluginId!)"
           @contribution="(contribution) => openPlugin(page.pluginId!, contribution, page.hostId)"
           @section="
@@ -745,8 +735,7 @@ watch(
                 workspace.current.section = section;
             }
           "
-          @surface-navigate="(section, intent) => surfaceNavigate(section, intent)"
-          @shell="containerTerminal"
+          @surface-navigate="surfaceNavigate"
         />
         <ServerView
           v-if="view === 'server'"

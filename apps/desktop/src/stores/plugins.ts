@@ -1,6 +1,7 @@
 import { computed, onScopeDispose, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 import { pluginsApi } from '../services/plugins';
+import { isBuiltinAssistant } from '../services/plugin-pages';
 import { errorMessage } from '../services/ipc';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { useApplicationStore } from './application';
@@ -72,20 +73,32 @@ export const usePluginsStore = defineStore('plugins', () => {
   const contexts = new Map<string, string>();
   const contextVersions = new Map<string, number>();
   const owners = new Map<string, string>();
+  const assistantOwners = new Map<string, Set<string>>();
   const contextVersion = (id: string) => contextVersions.get(id) ?? 0;
   function bind(
     id: string,
     input: import('../types/plugins').PluginContextInput | null,
     owner = '',
   ): Promise<void> {
-    owners.set(id, owner);
-    contextVersions.set(id, contextVersion(id) + 1);
+    const shared =
+      !!owner && isBuiltinAssistant(installed.value.find((plugin) => plugin.manifest.id === id));
+    if (shared) {
+      const scopes = assistantOwners.get(id) ?? new Set<string>();
+      scopes.add(owner);
+      assistantOwners.set(id, scopes);
+      owners.delete(id);
+    } else {
+      owners.set(id, owner);
+      contextVersions.set(id, contextVersion(id) + 1);
+    }
     const prior = bindings.get(id) ?? Promise.resolve();
     const work = async () => {
-      const signature = JSON.stringify(input);
+      const signature = shared ? 'builtin-assistant' : JSON.stringify(input);
       try {
-        if (input === null || contexts.get(id) !== signature) {
-          await pluginsApi.context(id, input);
+        if (shared && !owns(id, owner)) return;
+        if ((!shared && input === null) || contexts.get(id) !== signature) {
+          if (shared) contextVersions.set(id, contextVersion(id) + 1);
+          await pluginsApi.context(id, shared ? null : input);
           contexts.set(id, signature);
         }
         if (
@@ -112,6 +125,16 @@ export const usePluginsStore = defineStore('plugins', () => {
     return job;
   }
   function release(id: string, owner: string): Promise<void> {
+    const scopes = assistantOwners.get(id);
+    if (scopes?.has(owner)) {
+      scopes.delete(owner);
+      if (scopes.size) return Promise.resolve();
+      assistantOwners.delete(id);
+      return bind(id, null).catch((cause) => {
+        assistantOwners.set(id, new Set([owner]));
+        throw cause;
+      });
+    }
     if (owners.get(id) !== owner) return Promise.resolve();
     return bind(id, null).catch((cause) => {
       if (owners.get(id) === '') owners.set(id, owner);
@@ -119,7 +142,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     });
   }
   function owns(id: string, owner: string): boolean {
-    return owners.get(id) === owner;
+    return assistantOwners.get(id)?.has(owner) || owners.get(id) === owner;
   }
   async function refresh(quiet = false): Promise<void> {
     if (loading.value) return;
@@ -200,6 +223,7 @@ export const usePluginsStore = defineStore('plugins', () => {
   }
   function clearPlugin(id: string) {
     owners.delete(id);
+    assistantOwners.delete(id);
     contextVersions.set(id, contextVersion(id) + 1);
     delete schemas.value[id];
     contexts.delete(id);

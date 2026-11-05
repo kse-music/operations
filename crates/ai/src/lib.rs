@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod commands;
 mod model_test;
 pub mod provider;
@@ -50,6 +51,31 @@ pub struct PreparedContext {
     pub redactor: Redactor,
     pub warnings: Vec<String>,
 }
+pub const REQUEST_LIMIT_BYTES: usize = 96 * 1024;
+
+// Shared by built-in context budgeting and the final send boundary. Count the
+// actual JSON wire representation, including escaped context and history.
+pub fn request_size(input: &PreparedContext) -> Result<usize, Error> {
+    serde_json::to_vec(&request_body(input)?)
+        .map(|bytes| bytes.len())
+        .map_err(|e| Error::Worker(Box::new(e)))
+}
+fn request_body(input: &PreparedContext) -> Result<Value, Error> {
+    let mut context = input.context.clone();
+    input.redactor.value(&mut context);
+    let mut body = provider::request(
+        &input.config,
+        &input.redactor.text(&input.question),
+        context,
+    );
+    let messages = body["messages"]
+        .as_array_mut()
+        .ok_or(Error::Validation("模型消息格式无效"))?;
+    for (index, message) in input.history.iter().enumerate() {
+        messages.insert(index + 1, serde_json::json!({"role":message.role,"content":input.redactor.text(&message.content)}));
+    }
+    Ok(body)
+}
 struct Pending {
     related_bindings: Vec<Binding>,
     model_id: String,
@@ -75,6 +101,7 @@ struct State {
     previews: HashMap<String, Pending>,
     commands: HashMap<String, ApprovedCommand>,
     active: HashMap<String, (String, CancellationToken)>,
+    plans: HashMap<String, agent::StoredPlan>,
 }
 impl State {
     fn prune(&mut self) {
@@ -84,6 +111,8 @@ impl State {
             .retain(|_, p| p.at.elapsed() < Duration::from_secs(300));
         self.commands
             .retain(|_, c| c.at.elapsed() < Duration::from_secs(600));
+        self.plans
+            .retain(|_, p| p.at.elapsed() < Duration::from_secs(600));
     }
 }
 #[derive(Clone)]
@@ -116,54 +145,49 @@ impl Assistant {
     pub fn review_command(&self, id: &str) -> Result<Value, Error> {
         let mut state = lock(&self.state)?;
         state.prune();
+        if let Some(plan) = state.plans.get(id) {
+            return Ok(
+                serde_json::json!({"proposal":plan.proposal,"steps":plan.public_steps(),"changeConfirmation":plan.proposal.change_confirmation}),
+            );
+        }
         let pending = state.commands.get(id).ok_or(Error::NotFound)?;
         serde_json::to_value(&pending.proposal).map_err(|e| Error::Worker(Box::new(e)))
     }
     pub fn prepare(&self, input: PreparedContext) -> Result<Preview, Error> {
+        if self.stop.is_cancelled() {
+            return Err(Error::ShuttingDown);
+        }
+        if input.question.trim().is_empty() || input.question.len() > 8192 {
+            return Err(Error::Validation("问题须为 1–8192 字节"));
+        }
+        validate_history(&input.history)?;
+        let body = request_body(&input)?;
         let PreparedContext {
             related_bindings,
-            history,
+            history: _,
             model_id,
             revision,
             config,
-            question,
-            mut context,
+            question: _,
+            context: _,
             binding,
             redactor,
             mut warnings,
         } = input;
-        if self.stop.is_cancelled() {
-            return Err(Error::ShuttingDown);
-        }
-        if question.trim().is_empty() || question.len() > 8192 {
-            return Err(Error::Validation("问题须为 1–8192 字节"));
-        }
         let destination = provider::endpoint(&config)?.to_string();
-        redactor.value(&mut context);
-        validate_history(&history)?;
-        let mut body = provider::request(&config, &redactor.text(&question), context);
-        let messages = body["messages"]
-            .as_array_mut()
-            .ok_or(Error::Validation("模型消息格式无效"))?;
-        for (index, message) in history.into_iter().enumerate() {
-            messages.insert(
-                index + 1,
-                serde_json::json!({"role":message.role,"content":redactor.text(&message.content)}),
-            );
-        }
+        let wire_bytes = serde_json::to_vec(&body)
+            .map_err(|e| Error::Worker(Box::new(e)))?
+            .len();
         let serialized =
             serde_json::to_string_pretty(&body).map_err(|e| Error::Worker(Box::new(e)))?;
-        if serialized.len() > 96 * 1024 {
+        if wire_bytes > REQUEST_LIMIT_BYTES {
             return Err(failure(
                 "AI_CONTEXT_LIMIT",
-                "发送上下文超过 96 KiB，请减少所选数据",
+                "问题、历史与上下文合计超过 96 KiB，请缩小问题或主机范围，或开启新对话",
             ));
         }
         // Conservative UTF-8 byte estimate, not a model tokenizer or a billing guarantee.
-        let estimated_input_tokens = serde_json::to_vec(&body)
-            .map_err(|e| Error::Worker(Box::new(e)))?
-            .len() as u64
-            + 64;
+        let estimated_input_tokens = wire_bytes as u64 + 64;
         let id = uuid::Uuid::new_v4().to_string();
         warnings.push(
             "问题、历史和上下文已进行自动脱敏，仍可能遗漏敏感内容。执行输出不会作为对话历史发送。"
@@ -242,6 +266,7 @@ impl Assistant {
         let mut state = lock(&self.state)?;
         state.previews.retain(|_, p| p.model_id != id);
         state.commands.retain(|_, c| c.model_id != id);
+        state.plans.retain(|_, p| p.model_id != id);
         for (model_id, cancel) in state.active.values() {
             if model_id == id {
                 cancel.cancel();
@@ -280,11 +305,26 @@ impl Assistant {
             r = OpenAiCompatible.complete(&pending.config, key, &pending.body) => r,
             _ = cancel.cancelled() => Err(failure("AI_CANCELLED", "AI 请求已取消；服务端仍可能计费")),
         };
-        let mut state = lock(&self.state)?;
-        state.active.remove(id);
+        lock(&self.state)?.active.remove(id);
         let completion = result?;
         if cancel.is_cancelled() {
             return Err(failure("AI_CANCELLED", "AI 请求已取消"));
+        }
+        self.finish_answer(id, &pending, completion)
+    }
+    fn finish_answer(
+        &self,
+        id: &str,
+        pending: &Pending,
+        completion: provider::Completion,
+    ) -> Result<Answer, Error> {
+        let mut state = lock(&self.state)?;
+        if state
+            .active
+            .get(id)
+            .is_some_and(|(_, cancel)| cancel.is_cancelled())
+        {
+            return Err(failure("AI_CANCELLED", "智能体任务已取消"));
         }
         let mut warnings =
             vec!["模型内容不可信，分析可能有误。执行输出仅在本地展示，不自动回传模型。".into()];
@@ -371,11 +411,15 @@ impl Assistant {
             usage: completion.usage,
             estimated_cost,
             warnings,
+            agent: None,
         })
     }
     pub fn execution_binding(&self, id: &str) -> Result<Binding, Error> {
         let mut state = lock(&self.state)?;
         state.prune();
+        if let Some(plan) = state.plans.get(id) {
+            return Ok(plan.binding.clone());
+        }
         Ok(state
             .commands
             .get(id)
@@ -417,6 +461,7 @@ impl Assistant {
         let mut state = lock(&self.state)?;
         state.previews.remove(id);
         state.commands.retain(|_, c| c.request_id != id);
+        state.plans.retain(|_, p| p.root != id);
         if let Some((_, cancel)) = state.active.get(id) {
             cancel.cancel();
         }
@@ -427,6 +472,7 @@ impl Assistant {
         if let Ok(mut state) = self.state.lock() {
             state.previews.clear();
             state.commands.clear();
+            state.plans.clear();
         }
         if tokio::time::timeout(Duration::from_secs(3), self.slots.acquire())
             .await

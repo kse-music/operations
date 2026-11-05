@@ -8,6 +8,7 @@ use serverdeck_core::{
 };
 use serverdeck_storage::ai::ModelRecord;
 use zeroize::Zeroizing;
+mod agent;
 mod context;
 mod routing;
 
@@ -150,9 +151,9 @@ impl Application {
         input.mask_addresses = true;
         input.selection = ContextSelection {
             server: true,
-            metrics: true,
-            processes: true,
-            docker: true,
+            metrics: false,
+            processes: false,
+            docker: false,
             log: None,
             log_lines: 100,
         };
@@ -251,6 +252,7 @@ impl Application {
         }
         let mut host_contexts = Vec::new();
         let mut warnings = Vec::new();
+        let plan = context::Plan::for_question(&input.question, &input.history);
         for binding in &bindings {
             let mut context = json!({});
             let id = &binding.session.id;
@@ -258,9 +260,12 @@ impl Application {
                 context["matchedHost"] = json!({"hostId":binding.session.host_id,"hostname":binding.hostname,"username":binding.username,"port":binding.port,"connected":true});
             }
             if let Some(cancel) = automatic {
-                self.ai_builtin_context(binding, &mut context, &mut warnings, cancel)
+                let (mut collected, notices) = self
+                    .ai_builtin_context(binding, &plan, &redactor, cancel)
                     .await?;
-                host_contexts.push(context);
+                collected["matchedHost"] = context["matchedHost"].take();
+                warnings.extend(notices);
+                host_contexts.push(collected);
                 continue;
             }
             if selection.server {
@@ -334,6 +339,20 @@ impl Application {
             json!({"hosts":host_contexts})
         };
         if let Some(inventory) = inventory {
+            // Routing has already used the catalog. Diagnostic requests only need
+            // metadata for the selected hosts, not every unrelated saved asset.
+            let inventory = if automatic.is_some() {
+                inventory
+                    .into_iter()
+                    .filter(|asset| {
+                        bindings
+                            .iter()
+                            .any(|binding| binding.session.host_id == asset.id)
+                    })
+                    .collect()
+            } else {
+                inventory
+            };
             context["associatedAssets"] =
                 serde_json::to_value(inventory).map_err(|e| Error::Worker(Box::new(e)))?;
         }
@@ -347,7 +366,7 @@ impl Application {
             .into_iter()
             .map(|value| redactor.text(&value))
             .collect();
-        self.assistant.prepare(serverdeck_ai::PreparedContext {
+        let mut prepared = serverdeck_ai::PreparedContext {
             related_bindings,
             history: input.history,
             model_id: record.id,
@@ -358,7 +377,11 @@ impl Application {
             binding,
             redactor,
             warnings,
-        })
+        };
+        if automatic.is_some() {
+            context::fit_budget(&mut prepared)?;
+        }
+        self.assistant.prepare(prepared)
     }
     pub async fn ai_send(&self, id: String, confirmed: bool) -> Result<Answer, Error> {
         if !confirmed {
@@ -386,7 +409,11 @@ impl Application {
         let mut data = serde_json::to_value(&response).map_err(|e| Error::Worker(Box::new(e)))?;
         redactor.value(&mut data);
         let output = serde_json::to_string_pretty(&data).map_err(|e| Error::Worker(Box::new(e)))?;
-        Ok(Execution { success, output })
+        Ok(Execution {
+            success,
+            output,
+            agent: None,
+        })
     }
     pub fn ai_cancel(&self, id: &str) -> Result<(), Error> {
         self.assistant.cancel(id)

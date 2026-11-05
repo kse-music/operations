@@ -193,6 +193,7 @@ export function pluginToolRequest<T>(
   page: PluginUiPage,
   signal?: AbortSignal,
   trustedApproval = false,
+  canApprove: () => boolean = () => true,
 ): Promise<T> {
   const frozen = JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
   let inputId = '',
@@ -219,6 +220,10 @@ export function pluginToolRequest<T>(
       if (signal?.aborted) abort();
       if (ticket.operation !== operation) throw new Error('运维工具请求票据类型不匹配');
       if (trustedApproval && ticket.review) {
+        if (!canApprove()) {
+          abort();
+          throw { code: 'PLUGIN_CANCELLED', message: '请返回 AI 页面审核后再执行变更' };
+        }
         const review = ticket.review;
         if (signal?.aborted) throw new DOMException('已停止', 'AbortError');
         const store = usePluginsStore();
@@ -234,7 +239,7 @@ export function pluginToolRequest<T>(
         } finally {
           signal?.removeEventListener('abort', cancelPrompt);
         }
-        if (!accepted) {
+        if (!accepted || !canApprove()) {
           abort();
           await cancelling;
           inputId = '';

@@ -49,6 +49,47 @@ it('withdraws extension registration on disable, revoke or revision change', () 
   p.grants['dev.example'] = null;
   expect(p.extensions).toHaveLength(0);
 });
+it('keeps the built-in assistant native context stable across host and settings owners until the last closes', async () => {
+  const p = fixture();
+  const plugin = p.installed[0]!;
+  plugin.source = 'system';
+  plugin.manifest.id = 'cn.hiboot.plugins.assistant';
+  const id = plugin.manifest.id;
+  const context = vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  await p.bind(id, { hostId: 'a', opsSession: 'session-a', fileSession: null }, 'host-a');
+  const version = p.contextVersion(id);
+  await p.bind(id, null, 'settings');
+  await p.bind(id, { hostId: 'b', opsSession: 'session-b', fileSession: null }, 'host-b');
+  expect(context).toHaveBeenCalledExactlyOnceWith(id, null);
+  expect(p.contextVersion(id)).toBe(version);
+  expect(p.owns(id, 'host-a')).toBe(true);
+  expect(p.owns(id, 'host-b')).toBe(true);
+  await p.release(id, 'settings');
+  await p.release(id, 'host-a');
+  expect(context).toHaveBeenCalledOnce();
+  expect(p.owns(id, 'host-b')).toBe(true);
+  await p.release(id, 'host-b');
+  expect(context).toHaveBeenCalledTimes(2);
+  expect(p.owns(id, 'host-b')).toBe(false);
+});
+it('keeps uploaded same-ID assistants on the exclusive context and invalidates retained owners on revoke', async () => {
+  const p = fixture();
+  const plugin = p.installed[0]!;
+  const context = vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  plugin.manifest.id = 'cn.hiboot.plugins.assistant';
+  plugin.source = 'user';
+  const id = plugin.manifest.id;
+  await p.bind(id, null, 'a');
+  const old = p.contextVersion(id);
+  await p.bind(id, null, 'b');
+  expect(p.contextVersion(id)).toBeGreaterThan(old);
+  expect(p.owns(id, 'a')).toBe(false);
+  expect(context).toHaveBeenCalledTimes(2);
+  plugin.source = 'system';
+  await p.bind(id, null, 'retained');
+  p.clearPlugin(id);
+  expect(p.owns(id, 'retained')).toBe(false);
+});
 it('keeps per-host drafts across switches and only asks before closing their workspace', async () => {
   const p = fixture(),
     w = useWorkspaceStore(),

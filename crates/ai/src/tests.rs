@@ -103,6 +103,72 @@ fn is_code(error: Error, code: &str) -> bool {
 }
 
 #[test]
+fn request_limit_counts_wire_bytes_and_preserves_the_hard_limit() {
+    let mut input = PreparedContext {
+        related_bindings: vec![],
+        history: vec![],
+        model_id: "fixture".into(),
+        revision: "fixture".into(),
+        config: Config {
+            model: "fixture".into(),
+            ..Default::default()
+        },
+        question: "count".into(),
+        context: serde_json::json!({"text":""}),
+        binding: None,
+        redactor: Redactor::new(true, vec![]).unwrap(),
+        warnings: vec![],
+    };
+    let overhead = request_size(&input).unwrap();
+    input.context["text"] = serde_json::json!("x".repeat(REQUEST_LIMIT_BYTES - overhead));
+    assert_eq!(request_size(&input).unwrap(), REQUEST_LIMIT_BYTES);
+    let preview = Assistant::default().prepare(input).unwrap();
+    assert!(
+        preview.body.len() > REQUEST_LIMIT_BYTES,
+        "pretty formatting is not sent over HTTP"
+    );
+    let mut input = PreparedContext {
+        related_bindings: vec![],
+        history: vec![],
+        model_id: "fixture".into(),
+        revision: "fixture".into(),
+        config: Config {
+            model: "fixture".into(),
+            ..Default::default()
+        },
+        question: "count".into(),
+        context: serde_json::json!({"text":"x".repeat(REQUEST_LIMIT_BYTES-overhead+1)}),
+        binding: None,
+        redactor: Redactor::new(true, vec![]).unwrap(),
+        warnings: vec![],
+    };
+    assert!(is_code(
+        Assistant::default().prepare(input).err().unwrap(),
+        "AI_CONTEXT_LIMIT"
+    ));
+    // JSON escaping can exceed the limit even when the source text is small.
+    input = PreparedContext {
+        related_bindings: vec![],
+        history: vec![],
+        model_id: "fixture".into(),
+        revision: "fixture".into(),
+        config: Config {
+            model: "fixture".into(),
+            ..Default::default()
+        },
+        question: "count".into(),
+        context: serde_json::json!({"text":"\"".repeat(30_000)}),
+        binding: None,
+        redactor: Redactor::new(true, vec![]).unwrap(),
+        warnings: vec![],
+    };
+    assert!(is_code(
+        Assistant::default().prepare(input).err().unwrap(),
+        "AI_CONTEXT_LIMIT"
+    ));
+}
+
+#[test]
 fn endpoint_and_cost_validation() {
     let mut config = Config {
         model: "fixture".into(),

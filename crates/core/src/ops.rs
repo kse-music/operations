@@ -196,7 +196,7 @@ impl Request {
             Self::Diagnostic { tool } => tool.command().into(),
             Self::Capabilities => include_str!("ops_capabilities.sh").replace("\r\n", "\n"),
             Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
-            Self::Images => "d image ls --no-trunc --digests --format '{{json .}}'".into(),
+            Self::Images => "d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
             Self::ContainerDetails {
                 id,
                 reveal_env,

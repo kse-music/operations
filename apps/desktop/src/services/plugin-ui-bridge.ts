@@ -12,6 +12,7 @@ import { pluginInvokeRequest, pluginServerRequest, pluginToolRequest } from './p
 import { clipboardApi } from './clipboard';
 import { terminalApi } from './terminal';
 import { downloadResult } from './download';
+import { isBuiltinAssistant } from './plugin-pages';
 import type {
   PluginUiPage,
   PluginToolOperation,
@@ -37,6 +38,7 @@ export function createPluginUiBridge(input: {
   page: PluginUiPage;
   hostId: string;
   isActive?: () => boolean;
+  canRetain?: () => boolean;
   stream: (id: string, event: unknown) => void;
 }) {
   const hosts = useHostsStore(),
@@ -50,6 +52,40 @@ export function createPluginUiBridge(input: {
   let disposed = false,
     monitor = '';
   const requests = new Set<AbortController>();
+  const aiRoots = new Set<string>();
+  let continuing = false;
+  const retained = () =>
+    input.canRetain?.() === true &&
+    isBuiltinAssistant(plugins.installed.find((plugin) => plugin.manifest.id === input.id)) &&
+    input.page.surface?.kind === 'tool' &&
+    input.page.surface.tool === 'assistant';
+  const backgroundMethods = new Set([
+    'hosts.list',
+    'ops_open',
+    'ops_close',
+    'ops_connections',
+    'ai_resolve_hosts',
+    'ai_prepare',
+    'ai_send',
+  ]);
+  const background = (method: string, completing = false) =>
+    retained() &&
+    (method === 'ai_cancel' ||
+      method === 'ai_end' ||
+      (continuing && (backgroundMethods.has(method) || (completing && method === 'ai_execute'))));
+  async function cancelRoot(id: string) {
+    try {
+      await pluginsApi.toolCancelRequest(input.id, id);
+    } catch (cause) {
+      if (!(
+        cause &&
+        typeof cause === 'object' &&
+        'code' in cause &&
+        ['NOT_FOUND', 'PLUGIN_PERMISSION_DENIED', 'PLUGIN_CANCELLED'].includes(String(cause.code))
+      ))
+        throw cause;
+    }
+  }
   const streams = new Map<string, { stopped: boolean; eventStream: string }>();
   const listeners = new Set<() => void>();
   const leases = new Map<string, string>(),
@@ -197,7 +233,17 @@ export function createPluginUiBridge(input: {
     return Object.values(ops.connections).find((c) => c.session?.id === id);
   }
   async function call(method: string, raw: Record<string, unknown>): Promise<unknown> {
-    check(true);
+    if (method === 'ai_begin') {
+      check(true);
+      if (retained()) continuing = true;
+      return;
+    }
+    if (method === 'ai_end') {
+      check(!background(method));
+      continuing = false;
+      return;
+    }
+    check(!background(method));
     const args = restore(raw) as Record<string, unknown>;
     const domain = Object.values(tools).find((tool) => tool.operations.includes(method));
     if (domain) {
@@ -208,22 +254,44 @@ export function createPluginUiBridge(input: {
       )
         throw denied();
       if (method === 'ai_cancel') {
-        await pluginsApi.toolCancelRequest(input.id, String(args.id));
+        try {
+          await pluginsApi.toolCancelRequest(input.id, String(args.id));
+        } finally {
+          aiRoots.delete(String(args.id));
+        }
         return;
       }
+      const resolving =
+        method === 'ai_resolve_hosts'
+          ? (args.input as { requestId?: string })?.requestId
+          : undefined;
+      if (resolving) aiRoots.add(resolving);
       const controller = new AbortController();
       requests.add(controller);
       try {
-        return await pluginToolRequest(
+        const result = await pluginToolRequest<unknown>(
           input.id,
           method as PluginToolOperation,
           args,
           input.page,
           controller.signal,
           true,
+          () => !input.isActive || input.isActive(),
         );
+        if (
+          method === 'ai_prepare' &&
+          result &&
+          typeof result === 'object' &&
+          'id' in result &&
+          typeof result.id === 'string'
+        ) {
+          if (disposed) await cancelRoot(result.id);
+          else aiRoots.add(result.id);
+        }
+        return result;
       } finally {
         requests.delete(controller);
+        if (resolving) aiRoots.delete(resolving);
       }
     }
     switch (method) {
@@ -266,7 +334,7 @@ export function createPluginUiBridge(input: {
           const stop = watch(
             () => [current.state, current.trust, current.error],
             () => {
-              if (!disposed && (!input.isActive || input.isActive()))
+              if (!disposed && (!input.isActive || input.isActive() || (continuing && retained())))
                 input.stream(
                   stream,
                   current.trust ?? {
@@ -489,9 +557,11 @@ export function createPluginUiBridge(input: {
   return {
     snapshot,
     suspend() {
-      for (const request of requests) request.abort();
-      for (const stop of listeners) stop();
-      listeners.clear();
+      if (!retained()) {
+        for (const request of requests) request.abort();
+        for (const stop of listeners) stop();
+        listeners.clear();
+      }
       for (const control of streams.values()) {
         control.stopped = true;
         input.stream(control.eventStream, {
@@ -509,14 +579,16 @@ export function createPluginUiBridge(input: {
       const value = await call(method, args);
       // Authorized navigation hides its own caller and returns no data or resource.
       if (method === 'workspace.navigate') return null;
-      check(true);
+      check(!background(method, true));
       if (plugins.contextVersion(input.id) !== version) throw denied();
       return value === undefined ? null : publicValue(value);
     },
     async dispose() {
       for (const request of requests) request.abort();
       for (const stop of listeners) stop();
-      const cleanup: Promise<unknown>[] = [];
+      const cleanup: Promise<unknown>[] = [...aiRoots].map(cancelRoot);
+      aiRoots.clear();
+      continuing = false;
       const close = (operation: PluginCapability) =>
         pluginServerRequest(input.id, operation, input.page).catch((error) => {
           if (

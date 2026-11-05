@@ -250,7 +250,7 @@ mod tests {
         for (index, old_revision) in old_revisions.iter().take(2).enumerate() {
             let id = PACKAGES[index].0;
             let plugin = app.plugins.detail(id).unwrap();
-            assert_eq!(plugin.manifest.version, "1.3.1");
+            assert_eq!(plugin.manifest.version, "1.4.0");
             assert_ne!(&plugin.revision, old_revision);
             assert_eq!(plugin.enabled, index == 0);
             assert_eq!(plugin.previous_version.as_deref(), Some("1.1.1"));
@@ -338,10 +338,25 @@ mod tests {
             let defaults = app.plugin_permissions(id.clone()).await.unwrap().unwrap();
             assert_eq!(defaults.permissions, plugin.manifest.permissions);
             if id.ends_with("services") {
-                assert_eq!(defaults.read_roots, ["/"]);
+                assert!(defaults.read_roots.is_empty());
+                assert!(
+                    !defaults
+                        .permissions
+                        .contains(&serverdeck_plugin_core::Permission::SftpRead)
+                );
+                assert!(
+                    defaults
+                        .permissions
+                        .contains(&serverdeck_plugin_core::Permission::LogsRead)
+                );
             }
             if id.ends_with("docker") {
                 assert!(defaults.operations.contains(&"system.shell".into()));
+                assert!(
+                    defaults
+                        .permissions
+                        .contains(&serverdeck_plugin_core::Permission::LogsRead)
+                );
             }
             assert!(
                 app.plugin_grant(
@@ -567,7 +582,7 @@ mod tests {
         let upgraded = Application::initialize(data.clone(), logs).unwrap();
         upgraded.provision_bundled_plugins().unwrap();
         let plugin = upgraded.plugins.detail(id).unwrap();
-        assert_eq!(plugin.manifest.version, "1.3.1");
+        assert_eq!(plugin.manifest.version, "1.4.0");
         assert_ne!(plugin.revision, old_revision);
         assert!(!plugin.enabled);
         assert_eq!(

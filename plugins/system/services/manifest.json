@@ -3,22 +3,15 @@
   "id": "cn.hiboot.plugins.services",
   "name": "系统服务",
   "icon": "settings-2",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "author": "ServerDeck",
-  "description": "在当前主机统一查看资源、进程与端口、systemd 服务和日志。",
+  "description": "查看当前主机资源、进程与端口，管理 systemd 服务并在弹窗中查看服务日志。",
   "apiVersion": "^3.0.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"
   },
-  "permissions": [
-    "ui.contribute",
-    "system.read",
-    "system.manage",
-    "metrics.read",
-    "logs.read",
-    "sftp.read"
-  ],
+  "permissions": ["ui.contribute", "system.read", "system.manage", "metrics.read", "logs.read"],
   "contributions": [
     {
       "id": "server",

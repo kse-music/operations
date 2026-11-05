@@ -14,10 +14,7 @@ await mkdir(artifacts, { recursive: true });
 await buildPluginUi(
   path.join(root, 'plugins/compat/server'),
   path.join(root, 'plugins/compat/server/assets'),
-  [
-    path.join(root, 'plugins/system/services/frontend/logs'),
-    path.join(root, 'plugins/system/services/frontend/monitor'),
-  ],
+  [path.join(root, 'plugins/system/services/frontend/monitor')],
 );
 const staging = await mkdtemp(path.join(root, '.local/plugin-build', 'system-'));
 for (const name of names) {

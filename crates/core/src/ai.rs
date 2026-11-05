@@ -1,6 +1,8 @@
 use crate::{Error, ops::LogSource};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
+mod agent;
+pub use agent::*;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -259,6 +261,8 @@ pub struct Answer {
     pub usage: Option<Usage>,
     pub estimated_cost: Option<f64>,
     pub warnings: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentReport>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -272,4 +276,6 @@ pub struct ExecuteInput {
 pub struct Execution {
     pub success: bool,
     pub output: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentExecution>,
 }

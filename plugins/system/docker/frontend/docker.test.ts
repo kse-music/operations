@@ -4,7 +4,12 @@ import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import Docker from './App.vue';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
 import { hostInput } from '@serverdeck/plugin-sdk/types/hosts';
-const api = vi.hoisted(() => ({ query: vi.fn(), feedback: vi.fn(async () => []) }));
+const api = vi.hoisted(() => ({
+  query: vi.fn(),
+  feedback: vi.fn(async () => []),
+  logOpen: vi.fn(async () => ({ id: 'container-log', sessionId: 'lease', hostId: 'host' })),
+  logClose: vi.fn(async () => {}),
+}));
 vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({ opsApi: api }));
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
@@ -56,7 +61,8 @@ it('loads its container details without environment secrets and requires the exa
   }));
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(Docker, { hostId: 'host' }).use(pinia);
+  const shell = vi.fn();
+  app = createApp(Docker, { hostId: 'host', onShell: shell }).use(pinia);
   app.mount(root);
   await settle();
   const click = async (label: string) => {
@@ -77,6 +83,25 @@ it('loads its container details without environment secrets and requires the exa
   expect(document.querySelector('dialog')?.textContent).toContain('TOKEN=[已隐藏]');
   document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await settle();
+  await click('日志');
+  expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe(
+    'owned-container · 日志',
+  );
+  expect(api.logOpen).toHaveBeenCalledWith(
+    'lease',
+    { source: { kind: 'container', id: 'container' }, lines: 200, follow: true },
+    expect.any(Function),
+  );
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await settle();
+  expect(api.logClose).toHaveBeenCalledWith('container-log');
+  await click('Shell');
+  expect(shell).toHaveBeenCalledWith(expect.objectContaining({ id: 'host' }), {
+    id: 'container',
+    bash: false,
+    confirmed: false,
+  });
+  expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
   await click('删除镜像');
   expect(api.query.mock.calls.some(([, request]) => request.kind === 'image_remove')).toBe(false);

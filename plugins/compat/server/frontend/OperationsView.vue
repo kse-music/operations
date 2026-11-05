@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '@serverdeck/plugin-sdk/composables/error-notifications';
-import { computed, inject, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
+import { computed, inject, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
 import { opsApi } from '@serverdeck/plugin-sdk/services/ops';
@@ -26,21 +27,21 @@ import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import OpsDetails from '@serverdeck/plugin-sdk/ui/OpsDetails.vue';
 import type { OperationsSection } from '@serverdeck/plugin-sdk/types/server';
 import OpsTable from '@serverdeck/plugin-sdk/ui/OpsTable.vue';
-import OpsLogPanel from '../../../../plugins/system/services/frontend/logs/OpsLogPanel.vue';
+import ResourceLogDialog from '@serverdeck/plugin-sdk/ui/ResourceLogDialog.vue';
 const props = defineProps<{
   hostId?: string;
   initialTab?: OperationsSection;
-  logIntent?: { input: LogInput; title: string; sequence: number };
 }>();
 const emit = defineEmits<{
   section: [value: NonNullable<typeof props.initialTab>];
   shell: [host: Host, shell: ContainerShell];
-  log: [input: LogInput, title: string];
 }>();
 const hosts = useHostsStore(),
   ops = useOpsStore();
 const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
-  tab = ref<OperationsSection>(props.initialTab ?? 'containers'),
+  tab = ref<Exclude<OperationsSection, 'logs'>>(
+    props.initialTab === 'logs' ? 'services' : (props.initialTab ?? 'containers'),
+  ),
   scope = ref<Scope>('system'),
   filter = ref(''),
   rows = ref<Record<string, unknown>[]>([]),
@@ -50,8 +51,11 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   busy = ref(false),
   detail = ref<Record<string, unknown> | null>(null),
   detailTitle = ref(''),
-  history = ref<Feedback[]>([]),
-  logs = ref<InstanceType<typeof OpsLogPanel>>();
+  history = ref<Feedback[]>([]);
+const log = ref<{ input: LogInput; title: string; sessionId: string }>();
+watch(usePluginVisibility(), (visible) => {
+  if (!visible) log.value = undefined;
+});
 const pending = ref<{
     title: string;
     target: string;
@@ -85,7 +89,7 @@ const processPorts = ref<Record<string, unknown>[] | null>(null);
 watch(
   () => props.initialTab,
   (value) => {
-    if (value) tab.value = value;
+    if (value && value !== 'logs') tab.value = value;
   },
 );
 watch(tab, (value) => emit('section', value));
@@ -132,7 +136,6 @@ const columns = computed(
         { key: 'enabled', label: '开机自启' },
         { key: 'description', label: '说明' },
       ],
-      logs: [],
     })[tab.value],
 );
 const rowKey = computed(
@@ -143,7 +146,6 @@ const rowKey = computed(
       processes: 'pid',
       ports: 'local',
       services: 'unit',
-      logs: 'id',
     })[tab.value],
 );
 function session(): string {
@@ -158,7 +160,7 @@ async function query(request: OpsRequest): Promise<OpsResponse> {
   return result;
 }
 async function load(): Promise<void> {
-  if (!connected.value || tab.value === 'logs') return;
+  if (!connected.value) return;
   const token = ++generation;
   busy.value = true;
   error.value = null;
@@ -300,17 +302,11 @@ async function apply(): Promise<void> {
   }
 }
 async function openLog(input: LogInput, title: string): Promise<void> {
-  emit('log', input, title);
+  log.value = { input, title, sessionId: session() };
 }
-watch(
-  [() => props.logIntent, connected],
-  async ([intent, ready]) => {
-    if (!intent || !ready || tab.value !== 'logs') return;
-    await nextTick();
-    await logs.value?.open(intent.input, intent.title);
-  },
-  { immediate: true, flush: 'post' },
-);
+watch([tab, () => connection.value?.session?.id], () => {
+  log.value = undefined;
+});
 async function disconnect(): Promise<void> {
   try {
     await ops.close(chosen.value);
@@ -405,7 +401,7 @@ useErrorNotifications(() => [error.value, detailError.value]);
           版本 / 能力详情</button
         ><button class="text-button" @click="probe = !probe">TCP 连通性检测</button>
       </div>
-      <div v-if="tab !== 'logs'" class="ops-toolbar">
+      <div class="ops-toolbar">
         <input
           v-model="filter"
           aria-label="运维项目搜索"
@@ -420,7 +416,6 @@ useErrorNotifications(() => [error.value, detailError.value]);
         ><span v-if="tab === 'ports'" class="subtle">未获权限的关联进程显示不可用。</span>
       </div>
       <OpsTable
-        v-if="tab !== 'logs'"
         :key="tab"
         :rows="rows"
         :loading="busy"
@@ -473,10 +468,11 @@ useErrorNotifications(() => [error.value, detailError.value]);
             ><button
               class="text-button"
               @click="
-                ask('进入容器 Shell', String(row.ID), undefined, {
+                connection &&
+                emit('shell', connection.host, {
                   id: String(row.ID),
                   bash: false,
-                  confirmed: true,
+                  confirmed: false,
                 })
               "
             >
@@ -548,12 +544,12 @@ useErrorNotifications(() => [error.value, detailError.value]);
           ></template
         ></OpsTable
       >
-      <OpsLogPanel
-        v-if="tab === 'logs' && connection?.session"
-        :key="connection.session.id"
-        ref="logs"
-        :session-id="connection.session.id"
-        :host-name="hostDisplayName(connection.host)"
+      <ResourceLogDialog
+        v-if="log"
+        :session-id="log.sessionId"
+        :input="log.input"
+        :title="log.title"
+        @close="log = undefined"
       />
       <Modal v-if="detailOpen" :title="detailTitle" wide :busy="busy" @close="closeDetail">
         <div class="ops-detail-content" :aria-busy="detailLoading">

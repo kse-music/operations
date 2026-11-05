@@ -14,6 +14,7 @@ import type { Host } from '../types/hosts';
 import Modal from './Modal.vue';
 import OpsTable from './OpsTable.vue';
 import OpsDetails from './OpsDetails.vue';
+import ResourceLogDialog from './ResourceLogDialog.vue';
 import { Search, RefreshCw, ShieldCheck } from '@lucide/vue';
 
 const props = defineProps<{
@@ -25,7 +26,6 @@ const props = defineProps<{
   hint?: string;
 }>();
 const emit = defineEmits<{
-  log: [input: LogInput, title: string];
   shell: [host: Host, value: ContainerShell];
 }>();
 const ops = useOpsStore(),
@@ -55,6 +55,7 @@ const pending = ref<{
   sessionId: string;
 } | null>(null);
 const confirmedTarget = ref('');
+const log = ref<{ input: LogInput; title: string; sessionId: string }>();
 const probe = ref(false),
   probeTarget = ref(''),
   probePort = ref(80),
@@ -158,6 +159,7 @@ watch(
   [() => connection.value?.session?.id, () => connection.value?.state],
   async () => {
     closeDetail();
+    log.value = undefined;
     ++generation;
     rows.value = [];
     capabilities.value = null;
@@ -179,12 +181,14 @@ watch(
   () => {
     filter.value = '';
     closeDetail();
+    log.value = undefined;
     void load();
   },
 );
 function visibility() {
   ++generation;
   closeDetail();
+  log.value = undefined;
   pending.value = null;
   busy.value = false;
   if (panelVisible.value) void load();
@@ -207,7 +211,13 @@ const slotContext = {
   inspect,
   ask,
   query,
-  openLog: (input: LogInput, title: string) => emit('log', input, title),
+  openLog: (input: LogInput, title: string) => {
+    log.value = { input, title, sessionId: session() };
+  },
+  openShell: (id: string) => {
+    if (connected.value && panelVisible.value && connection.value)
+      emit('shell', connection.value.host, { id, bash: false, confirmed: false });
+  },
 };
 </script>
 <template>
@@ -282,6 +292,13 @@ const slotContext = {
         ><ShieldCheck :size="13" aria-hidden="true" />当前 SSH 账号执行 · 不自动提权</span
       ><button class="text-button" @click="historyOpen = true">操作反馈</button>
     </footer>
+    <ResourceLogDialog
+      v-if="log"
+      :session-id="log.sessionId"
+      :input="log.input"
+      :title="log.title"
+      @close="log = undefined"
+    />
     <Modal v-if="probe" title="TCP 连通性检测" @close="probe = false">
       <div class="ops-toolbar">
         <select v-model="probeLocation" aria-label="检测位置">

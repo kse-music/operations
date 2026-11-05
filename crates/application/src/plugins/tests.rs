@@ -1056,26 +1056,30 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
         }
     }
     let logs = "cn.hiboot.plugins.services";
-    let log=standard_rpc(app,logs,json!({"kind":"system_log_start","source":{"kind":"file","path":"/home/plugin/nginx/nginx.conf"},"lines":20,"follow":false})).await["id"].as_str().unwrap().to_string();
-    let mut output = vec![];
+    let rejected = app.plugin_call(logs, json!({"action":"bridge","values":{"request":json!({"kind":"system_log_start","source":{"kind":"file","path":"/home/plugin/nginx/nginx.conf"},"lines":20,"follow":false}).to_string()}})).await.unwrap();
+    assert!(
+        rejected.error.is_some(),
+        "system services must reject removed file-log access"
+    );
+    let log = standard_rpc(app, logs, json!({"kind":"system_log_start","source":{"kind":"service","scope":"system","unit":"ssh.service"},"lines":20,"follow":false})).await["id"].as_str().unwrap().to_string();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let events = standard_rpc(app, logs, json!({"kind":"system_log_poll","logId":log})).await;
-        for event in events["events"].as_array().unwrap() {
-            if let Some(base64) = event["dataBase64"].as_str() {
-                output.extend(STANDARD.decode(base64).unwrap());
-            }
-        }
-        if !output.is_empty() {
+        let events = events["events"].as_array().unwrap();
+        if !events.is_empty() {
+            assert!(
+                events
+                    .iter()
+                    .all(|event| event["type"] == "data" || event["type"] == "state")
+            );
             break;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "standard log did not return actual file bytes"
+            "service journal must return data or explicit state/failure"
         );
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    assert!(String::from_utf8(output).unwrap().contains("http"));
     standard_rpc(app, logs, json!({"kind":"system_log_stop","logId":log})).await;
     for plugin in app
         .plugin_list()

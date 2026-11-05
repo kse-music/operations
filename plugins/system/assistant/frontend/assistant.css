@@ -929,3 +929,26 @@
     min-height: 42px;
   }
 }
+.ai-agent-plan {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--raised);
+}
+.ai-agent-plan h4 {
+  margin: 0 0 8px;
+}
+.ai-agent-plan ol {
+  max-height: 300px;
+  overflow: auto;
+  padding-left: 24px;
+}
+.ai-agent-plan li {
+  margin: 10px 0;
+}
+.ai-agent-plan code {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}

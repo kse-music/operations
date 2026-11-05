@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import ResourceView from '@serverdeck/plugin-sdk/ui/ResourceView.vue';
-import type { ServiceAction, LogInput } from '@serverdeck/plugin-sdk/types/ops';
+import type { ServiceAction } from '@serverdeck/plugin-sdk/types/ops';
 defineProps<{ hostId?: string }>();
-const emit = defineEmits<{ log: [input: LogInput, title: string] }>();
 const scope = ref<'system' | 'user'>('system');
 const columns = [
   { key: 'unit', label: '服务' },
@@ -18,7 +17,6 @@ const columns = [
     :list-request="{ kind: 'services', scope }"
     :columns="columns"
     row-key="unit"
-    @log="(input, title) => emit('log', input, title)"
   >
     <template #cell="{ row, column }">
       <template v-if="column.key === 'unit'"

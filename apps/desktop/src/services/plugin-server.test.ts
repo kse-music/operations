@@ -84,6 +84,33 @@ it('passes typed requests through WASM and requires host approval before retryin
     action: 'stop',
   });
 });
+it('does not show or execute a queued destructive approval after its page becomes hidden', async () => {
+  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
+  vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
+    inputId: 'hidden-review',
+    operation: 'ai_execute',
+    review: { title: 'Plan', message: 'Frozen targets', confirmationText: 'approve' },
+  });
+  const abort = vi.spyOn(pluginsApi, 'toolAbortInput').mockResolvedValue();
+  const ask = vi.spyOn(usePluginsStore(), 'ask');
+  const call = vi.spyOn(pluginsApi, 'call');
+  const pending = expect(
+    pluginToolRequest(
+      'hidden-plan',
+      'ai_execute',
+      { input: { confirmed: true } },
+      toolPage,
+      undefined,
+      true,
+      () => false,
+    ),
+  ).rejects.toMatchObject({ code: 'PLUGIN_CANCELLED' });
+  await vi.runAllTimersAsync();
+  await pending;
+  expect(ask).not.toHaveBeenCalled();
+  expect(call).not.toHaveBeenCalled();
+  expect(abort).toHaveBeenCalledWith('hidden-plan', 'hidden-review');
+});
 it('reassembles UTF-8 result chunks without truncation and releases the host resource', async () => {
   const bytes = new TextEncoder().encode(JSON.stringify({ text: '中文'.repeat(20_000) }));
   vi.spyOn(pluginsApi, 'call').mockResolvedValue({

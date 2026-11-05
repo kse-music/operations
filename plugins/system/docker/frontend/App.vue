@@ -4,13 +4,12 @@ import ResourceView from '@serverdeck/plugin-sdk/ui/ResourceView.vue';
 import ServerTabs from '@serverdeck/plugin-sdk/ui/ServerTabs.vue';
 import { Container, Layers, CircleCheck, Box } from '@lucide/vue';
 import './docker.css';
-import type { ContainerAction, LogInput, ContainerShell } from '@serverdeck/plugin-sdk/types/ops';
+import type { ContainerAction, ContainerShell } from '@serverdeck/plugin-sdk/types/ops';
 import type { Host } from '@serverdeck/plugin-sdk/types/hosts';
 import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
 const props = defineProps<{ hostId?: string; initialSection?: ServerSection }>();
 const emit = defineEmits<{
   section: [section: ServerSection];
-  log: [input: LogInput, title: string];
   shell: [host: Host, shell: ContainerShell];
 }>();
 const section = ref<ServerSection>(props.initialSection === 'images' ? 'images' : 'containers');
@@ -48,7 +47,6 @@ const columns = computed(() =>
         :list-request="{ kind: section === 'images' ? 'images' : 'containers' }"
         :columns="columns"
         row-key="ID"
-        @log="(input, title) => emit('log', input, title)"
         @shell="(host, shell) => emit('shell', host, shell)"
       >
         <template #summary="{ rows, loading, error }">
@@ -113,7 +111,7 @@ const columns = computed(() =>
             }}</span
           ></template
         >
-        <template #actions="{ row, busy, inspect, ask, openLog }">
+        <template #actions="{ row, busy, inspect, ask, openLog, openShell }">
           <template v-if="section === 'containers'">
             <button
               class="text-button"
@@ -172,16 +170,7 @@ const columns = computed(() =>
             >
               日志
             </button>
-            <button
-              class="text-button"
-              @click="
-                ask('进入容器 Shell', String(row.ID), undefined, {
-                  id: String(row.ID),
-                  bash: false,
-                  confirmed: true,
-                })
-              "
-            >
+            <button class="text-button" :disabled="busy" @click="openShell(String(row.ID))">
               Shell
             </button>
           </template>

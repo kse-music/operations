@@ -1,5 +1,105 @@
 # 助手直接对话验证
 
+## 2026-11-05：主机工作区后台回答
+
+完成标准：从主机打开的内置助手在切换工具、设置或另一主机后继续已开始的处理；返回显示完整结果和仍有效的计划。关闭所属主机仅取消本页请求和计划；全局助手随自己的标签关闭。手动停止、模型/授权变化、超时和变更确认保持有效。
+
+主要实现：
+
+- `PluginView.vue`、`PluginFrame.vue`：以所属工作区是否存在决定保留请求，隐藏状态仍为真实 visible:false/inert。`stores/plugins.ts` 为精确内置 system 助手维护多个 owner 和稳定空原生上下文，切换设置或其他主机不增加上下文代，最后 owner 释放实例；实际 SSH Binding 仍由请求冻结并复验。
+- `plugin-ui-bridge.ts`、`plugin-server.ts`：每个 iframe 跟踪自有根请求和控制器，关闭时仅撤销本页资源；可见页面 begin 后才允许隐藏期间续接目录、连接、匹配、准备和发送，end 后不能后台开始新工作。后台新执行请求拒绝，可信审批展示和批准后均核对可见性，已批准调用可完成并回传结果。
+- SDK AI 服务增加可选 begin/end，经现有 MessageChannel 传输；助手 `assistant.ts` 保留在途对话版本、结果和计划，卸载仍清理。助手标准包1.5.1。没有新增原生 IPC、权限、依赖或数据库迁移；上传同 ID 包保持原隐藏取消规则，任务开始已有修改未回退。
+- `tools/assistant-agent-native-e2e.mjs --background` 复用原智能体真实 SSH/Docker 夹具，增加多 owner 导航与关闭验证；`assistant-agent-test-host.sh` 为交互 PTY/登录审计补充 FOWNER 与 AUDIT_WRITE，并增加有所有权校验的失败诊断日志，仅作用于临时测试容器。
+
+实际验证：
+
+| 检查                      | 结果与关键断言                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 前端全量                  | 56文件397项通过。新增九项覆盖共享 owner/安装来源隔离、隐藏请求与结果、关闭时仅取消自有根、排队审批隐藏后拒绝、缓存 frame 不重建、迟到 prepare 续接及卸载撤销；并验证已确认执行在隐藏后仍保留结果。既有 JSDOM Canvas 提示保留                                                                                           |
+| 类型、静态与格式          | desktop/SDK typecheck、ESLint 0 warnings、修改文件 Prettier、Node 脚本语法与 diff whitespace 通过                                                                                                                                                                                                                      |
+| 标准包与 Windows 调试构建 | 三个标准包、兼容资源、生产前端、隔离 QA 与默认配置 EXE 构建通过；沿用根 target，默认配置已恢复，保留既有 chunk 大小提示                                                                                                                                                                                                |
+| Application Rust          | `cargo test -p serverdeck-application --offline`：53通过、1失败、1既有 ignored。失败为 `identity::tests::junction_profiles_are_rejected_without_touching_their_target` 的 Windows New-Item Junction Access is denied；D/C 临时目录及允许本任务执行后仍失败。没有删除或弱化断言，本次未修改 Rust 源码，不宣称 Rust 全绿 |
+| Windows 原生后台回归      | 五组通过：真实 SSH 终端连接后，原回答跨设置、另一主机助手及关闭另一主机继续完成，返回计划可审核执行；关闭所属主机取消请求并移除 frame，无迟到计划，设置 owner/上下文代保持。真实镜像删除与复查保持通过                                                                                                                 |
+
+过程与边界：首次构建遇到用户正常运行的根 EXE 占用，按开发约定请用户从界面退出，收到“已正常退出”后成功构建，没有强杀用户进程。原生新用例先修正终端指纹弹窗名称，再发现仅命令查询夹具缺少 PTY/登录审计所需权限，日志明确 linux_audit_write_entry Operation not permitted，补齐 FOWNER/AUDIT_WRITE 后终端连接及五组验收通过；复用临时配置重试时，端口复用触发密钥变化保护，改为重建全新隔离配置，未覆盖信任或关闭指纹验证。所有远端变更只针对独立 daemon 中本任务创建的镜像，不使用用户 Docker socket 或生产模型/主机。
+
+证据在 `.local/assistant-background-20261105/`：`frontend-tests.log`、`typecheck.log`、`lint.log`、`application-tests.log`、`native-build.log`、`native-e2e.log`、`native-results.json` 与计划/结果截图，已查看宿主确认和深色结果。模型使用确定性本机 HTTP 协议夹具，本轮五次智能体调用；测试删除两张本任务无标签镜像，保留有标签镜像。应用、模型服务、临时 SSH 容器和独立 daemon 已结束并清理。默认 EXE 与 `.local/assistant-background-20261105/ServerDeck-preview.exe` SHA-256 一致（`delivery.json`），QA EXE 仅供隔离测试。复现：先 `node tools/assistant-agent-native-e2e.mjs --background --build`，再执行 `node tools/assistant-agent-native-e2e.mjs --background`；每轮使用新构建配置，避免端口复用时继承上一轮 SSH 信任。依赖 Windows WebView2、WSL Ubuntu-24.04、dockerd/docker/unshare 和既有测试基础镜像；不创建另一套桌面 Cargo 缓存。
+
+未验证/风险：未新增生产模型质量、跨平台、Release/安装器及长期压力验收；模型/SSH 原有预算和计划过期时间继续生效，切页不延长时限。关闭已批准且在途的变更不承诺回滚，按原规则收尾并停止后续项。此前已停止的旧回答不会自动重启，需重新发送。本阶段实现完成，无剩余实现依赖；Rust Junction 环境失败仍保留，发布与其他平台验证依赖对应环境，当前阶段结束。
+
+## 2026-11-05：SSH 运维智能体
+
+完成标准：内置助手能够通过有界只读工具连续查询，生成由宿主冻结的单主机计划，在一次可信宿主确认后通过 SSH 执行并逐项复查；能够清理 tag 为 `<none>` 的 Docker 镜像。未确认不变更，未知/失败停止后续项，不能扩大目标或执行任意模型 Shell，原有绑定/指纹/权限/脱敏和兼容调用继续有效。
+
+已完成及主要文件：
+
+- `crates/ai/src/agent.rs` 和 `agent/tests.rs`：严格 query/plan/answer 协议、只读 allowlist、完整查询证据选目标、摘要/轮次/字节/时限预算、单次过期计划及模型/取消生命周期。容器和服务目标必须来自成功查询，再冻结详情；无标签镜像按完整 ID 去重，排除带标签别名，超过32项拒绝。
+- `crates/application/src/ai/agent.rs`：复用已验证 SSH/Operations，变更前重查身份/模型/前置状态，变更后重新查询验证删除、状态、重启时间与启用状态；逐项完成/失败/未知/跳过结果。取消不承诺撤销在途变更，仍允许安全收尾并停止后续项。`plugins/tools.rs` 将内置助手接入编排，执行票据 abort 关联根请求；`plugins/review.rs` 从保存清单生成易读宿主审批，只需一次计划确认。上传与旧原生 IPC 保留原合同。
+- `crates/core/src/ops.rs` 将镜像列表改为 `image ls --all`，覆盖默认列表可能隐藏的无标签中间镜像；`crates/ops/src/lib.rs` 增加内部完整 ID/RepoTags 再验和 `image rm --no-prune`，不 force、不清理卷或额外父镜像，复用原变更锁、反馈与错误链。
+- Core/SDK Answer 和 Execution 增加可选 agent 结果；`AssistantAgent.vue` 展示查询、完整计划和逐项目标结果，`assistant.ts` 复用既有服务并保留停止后的结果；`assistant-hosts.ts` 保留等待指纹事件的连接。助手标准包1.5.0；无新 IPC、权限、依赖或数据库迁移，旧安装启停/绑定设置继续正常升级。
+- README、PRD、架构/决策、使用指南、内置插件、SDK、安全与实施计划同步。任务开始已有的按需上下文、资源日志/容器终端弹窗等修改保留，未回退其他工作。
+
+实际验证：
+
+最后复核增加同一目标只允许一项操作的校验，拒绝 stop/start 链并要求使用 restart，避免先停机再因冻结状态变化而中断；AI 21项在该修改后再次通过。
+
+最终原生复验同样通过三组；脚本显式核对首次 SSH 指纹的可信宿主弹窗，并等待认证完成后重新发送任务，保留原有安全确认。
+
+| 检查                                               | 结果与关键断言                                                                                                                                                                                                                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm test`                                         | 56文件、388项通过。计划不会自动执行，点击审核走可信宿主 API，显示逐项目标与复查失败，停止后保留结果；新增“awaiting_trust 先于指纹事件”回归，原聊天/模型绑定/会话/SSH/SFTP/插件测试保持。JSDOM 保留既有 Canvas 未实现提示                                                                   |
+| `cargo test --workspace --offline`                 | 230项通过、0失败、4项既有 ignored。新增模型 HTTP 工具循环、完整证据中摘要外目标、带标签别名排除、缺失依据/未知目标/超量/非法变更工具/轮次上限、审批防重放/过期/模型撤销、容器与服务复查，以及有状态真实 SSH 协议的成功删除/新目标不扩容/重新打标签/部分失败/取消/断连/在途取消后未知及跳过 |
+| `npm run typecheck`、`npm run lint`                | desktop/SDK 类型检查通过，ESLint 0 warnings                                                                                                                                                                                                                                                |
+| `cargo clippy --workspace --all-targets --offline` | 通过；只有原有 `core/src/openssh.rs` single_element_loop 提示，无本次新增提示                                                                                                                                                                                                              |
+| `npm run build`、原生构建                          | 三个标准包、兼容资源及生产前端通过，保留既有大 chunk 提示。最终 QA 副本和默认配置 Windows 调试 EXE 均构建成功，根 target 默认配置已恢复；未构建安装器                                                                                                                                      |
+| `node tools/assistant-agent-native-e2e.mjs`        | WebView2 → 包内 iframe/实际 WASM → 本地模型 HTTP 协议夹具 → 已核验 SSH → 独立真实 Docker 守护进程，三组通过，详见下述实测                                                                                                                                                                  |
+| 格式/语法                                          | Cargo fmt、相关 Prettier、Node 脚本语法及 diff whitespace 检查通过；PRD 沿用既有格式忽略规则，Shell 夹具通过真实执行验证                                                                                                                                                                   |
+
+原生实测使用全新隔离应用目录、临时系统凭据及本任务 SSH 容器。独立 dockerd 使用独立配置、数据/执行目录和网络命名空间，只含新导入的两张无标签镜像与一张有标签镜像；SSH 容器只能访问该测试 socket，不挂载用户 Docker socket。先核对本次生成的 SSH 公钥指纹，再执行以下检查：
+
+1. 模型协议经过两轮调用查询真实镜像并生成两个固定目标；查询、计划和宿主确认前，独立 daemon 仍有三张镜像。宿主弹窗包含完整目标 ID，未填确认文字时按钮禁用；错误确认文字由后端单测验证拒绝。
+2. 一次正确宿主确认后，经 SSH 真实删除两张 `<none>` 镜像，逐项重新查询确认消失；有标签镜像保留。执行没有再调用模型，输出仅本地复查。确认页、深浅主题结果截图已查看。
+3. 新对话再次查询真实状态，显示“没有符合条件的目标”，不生成删除按钮。共四次智能体模型协议调用，不包含连接测试；没有调用生产模型或用户服务器。
+
+证据位于 `.local/assistant-agent-20261105/`：`workspace-tests.log`、`frontend-tests.log`、`typecheck.log`、`lint.log`、`clippy.log`、`native-build.log`、`native-run.log`、`native-results.json` 和 `agent-*.png`。可复现入口为 `node tools/assistant-agent-native-e2e.mjs --build` 后运行同脚本；前提为 Windows WebView2、WSL Ubuntu-24.04、dockerd/docker/unshare 及现有 `serverdeck-plugin13a-test:13a` 镜像。复用根 target 构建缓存，构建前剩余空间超过10GiB。
+
+默认配置调试版副本为 `.local/assistant-agent-20261105/ServerDeck-preview.exe`，与根 `target/debug/serverdeck-desktop.exe` 的 SHA-256 一致（`delivery.json`）。`AssistantAgentQa.exe` 是绑定隔离目录的测试程序，不用于正常使用。
+
+过程发现和修复：沙箱内回环 HTTP 被拒绝，允许本任务隔离测试后完成；Vitest 指定外部插件文件时需以 desktop 为工作目录。Docker 夹具先遇到默认配置继承/网络冲突，改用独立配置和网络命名空间，失败创建的容器经标签/名称核对后清理。真实 Docker 显示无标签中间镜像需要 `--all`，已修复正式查询；原生首次 SSH 状态/指纹事件分开到达导致待信任连接误清理，已修复并通过回归及原生复验。未关闭指纹验证或放宽生产权限。
+
+限制/风险/依赖：真实 Docker 删除和原生审批已验证，模型使用确定性 HTTP 协议夹具，未验收生产模型的计划质量、完整真实 systemd/容器变更图形流程、跨平台、Release/安装器或长期压力。工具协议不合规时明确降回原有建议；当前不是任意 Shell 或多主机自主执行。镜像标签检查到删除间仍存在外部并发变更窗口，部分执行没有事务回滚；失败/未知停止后续并保留结果。测试应用/模型服务/SSH 容器/独立 daemon 及其数据已结束并清理，用户既有 Docker 镜像未操作。本阶段无剩余实现依赖，发布及其他平台验收需相应环境，完成后停止。
+
+## 2026-11-05：按问题采集与上下文预算
+
+修复首次询问“当前运行了多少个docker服务”也被 96 KiB 限制拒绝的问题。旧内置入口固定采集全套运维数据并附带全资产目录；当前仅按问题选择只读来源，成功查询先统计全部结果再限制明细。以下固定全量上下文的早期说明仅保留为历史。
+
+### 真实功能和主要文件
+
+- `crates/application/src/ai.rs`、`ai/context.rs`、`ai/context/summary.rs`：按问题规划指标/进程/容器/systemd 系统服务/端口/journal；只关联命中资产。模糊追问参考最近明确的用户领域，明确新话题重新选择，模型回答及远端指令不决定范围。首问容器数量不读监控、进程或日志。
+- 完整结果先统计，容器包含 total/running/各状态和统计口径；未知状态独立统计，失败明确 available=false。列表白名单字段最多 12 条/4 KiB；聚合 CPU、前 8 项磁盘/网卡；journal 脱敏后末尾最多 4 KiB；字段截短和 omitted 数量明确标注。所有截短前先脱敏。
+- `crates/ai/src/lib.rs`、`provider.rs`：统一构造和计算脱敏请求的实际 JSON wire 字节。96 KiB 上限保持；内置请求超预算先省略明细、保留每台主机统计与失败，再省略最旧成对历史，仍超限则明确报错。系统提示要求区分总数与样本、未读取与零、容器与 Compose/Swarm 服务。
+- `plugins/system/assistant/frontend/assistant.ts`、`AssistantView.vue`：合并去重准备阶段与响应阶段提示，让用户能在“上下文与响应提示”查看省略和读取失败。前端不再声明全部来源开启，内置范围由宿主选择。助手 manifest/标准包为 1.3.4，原权限、绑定、SSH 身份和命令审核保持。
+- `ai/context/tests.rs`、`ai/protocol_tests.rs`、`crates/ai/src/tests.rs` 和助手前端测试：本地选择、精确计数、预算、错误语义、真实协议和提示呈现回归。使用指南、PRD、架构、决策、实施计划及内置包说明同步更新。
+
+### 实际执行与结果
+
+| 检查                                                                         | 结果                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 根 target 编译 AI/应用测试，复制 EXE 到 `.local/assistant-demand-qa/` 后运行 | AI 16 项通过；应用 49 项通过、1 项既有 Linux SDK 测试忽略；未运行 target 内测试 EXE                                                                                                  |
+| 真实 loopback SSH/HTTP 首问回归                                              | 1500 容器/750 running/750 exited，只有一次容器查询，明细 12 条、omittedRecords=1488，实际请求小于 12 KiB；HTTP 收到内容与预览严格相等，无无关资产、Labels、进程/指标/journal         |
+| 同一真实 SSH fixture 的其他问题                                              | CPU 只触发两次监控采样，systemd/端口各一次对应读取；问候不触发运维读取，无后台监控                                                                                                   |
+| 汇总与异常回归                                                               | 5000 容器精确统计；长 UTF-8 字段有界；CPU 排序保留最高项；8 主机超预算仍保留全部统计和失败；JSON 转义历史按完整轮次省略；失败不伪造 0；脱敏、取消、连接/模型绑定与命令权限原回归保持 |
+| 最终请求上限                                                                 | 实际 JSON 恰好 96 KiB 可准备，超过 1 字节拒绝；预览格式缩进不计入 wire 上限；多层 JSON 转义按实际体积检查                                                                            |
+| 前端 Vitest                                                                  | 56 文件、385 项通过，含准备提示保留及去重；JSDOM 既有 canvas 未实现提示保持                                                                                                          |
+| 类型、格式与静态检查                                                         | 两前端工程 typecheck、助手 ESLint、Prettier、cargo fmt、git diff --check 通过；普通 Clippy 完成，本次无新增警告                                                                      |
+| 插件与桌面重建                                                               | 三个标准包和桌面前端生产构建成功；`node tools/tauri.mjs build --debug --no-bundle` 成功，根 target/debug EXE 已更新，包含助手 1.3.4                                                  |
+
+初次沙箱内 HTTP 测试受本机回环网络限制，单项移到沙箱外后立即通过；最终整套测试均在隔离 QA 副本、隔离临时数据及 loopback 协议上运行。前端首次测试遇沙箱临时目录 rename EPERM，改为本任务 `.local/assistant-demand-qa/tmp` 后通过。Clippy `-D warnings` 被既有 `crates/core/src/openssh.rs:290` single_element_loop 警告阻止，普通 Clippy 通过，未夹带修改该文件。npm 未转发调试构建参数的尝试已停止，最终直接调用项目入口生成调试版。构建前输出盘约 175 GiB 空闲；用户已正常退出 target 中运行的 ServerDeck，未强杀用户应用。
+
+证据目录 `.local/assistant-demand-qa/` 含编译元数据、最终 AI/应用测试输出、Clippy、Windows 构建日志和 `build-artifact.json`。交付副本 `ServerDeck-preview.exe` 为 55,987,200 字节，SHA-256 `3D0C2DCD6FF0D4B3319F621B0AA83FD401A278007B4A843935038E328BDCCC61`，与根 target/debug 产物严格一致。
+
+本阶段未调用真实模型、用户生产服务器或重新执行原生 WebView2 图形验收，未验证安装器、macOS/Linux。本地领域规则不能覆盖所有复杂问法；证据不足时明确说明，不回退全量采集。systemd 为 system 作用域；容器日志不自动猜测目标，只附容器状态并提示缺少日志。无新增依赖、数据库或未完成实现，本阶段结束。
+
 ## 2026-11-05：删除模型栏，模型统一在插件设置绑定
 
 按用户追加要求删除聊天页整个模型栏（选择、Key 状态、刷新和模型管理），复用插件标准设置页持久保存绑定，以下先前界面描述保留为历史。

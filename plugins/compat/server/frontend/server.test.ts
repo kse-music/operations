@@ -46,7 +46,7 @@ vi.mock('@serverdeck/plugin-sdk/services/plugin-server', () => ({
       return mocks.ops.logOpen(
         'ops-a',
         { source: operation.source, lines: operation.lines, follow: operation.follow },
-        expect.any(Function),
+        () => {},
       );
     if (operation.kind === 'system_log_poll') return { events: [] };
     if (operation.kind === 'system_log_stop') return mocks.ops.logClose(operation.logId);
@@ -162,7 +162,7 @@ afterEach(() => {
   vi.resetAllMocks();
   vi.useRealTimers();
 });
-async function mount(section: ServerSection = 'overview') {
+async function mount(section: ServerSection = 'overview', sections?: ServerSection[]) {
   const monitor = ['overview', 'disks', 'network'].includes(section);
   const page: PluginUiPage = {
     id: 'server',
@@ -173,9 +173,11 @@ async function mount(section: ServerSection = 'overview') {
     log: null,
     surface: {
       kind: monitor ? 'monitor' : 'operations',
-      sections: serverSections
-        .map((s) => s.key)
-        .filter((key) => ['overview', 'disks', 'network'].includes(key) === monitor),
+      sections:
+        sections ??
+        serverSections
+          .map((s) => s.key)
+          .filter((key) => ['overview', 'disks', 'network'].includes(key) === monitor),
     },
   };
   app = createApp(PluginServerSurface, {
@@ -214,6 +216,11 @@ it('renders the declared resource panels through plugin RPC and reuses its sampl
   expect(mocks.monitor.open).toHaveBeenCalledTimes(1);
   app.unmount();
   expect(mocks.monitor.visible).toHaveBeenLastCalledWith('a', false);
+});
+it('explains an old log-only surface without issuing unrelated server queries', async () => {
+  await mount('logs', ['logs']);
+  expect(root.textContent).toContain('独立日志页面已移除');
+  expect(mocks.ops.query).not.toHaveBeenCalled();
 });
 it('puts system information in a dialog and supports keyboard tab selection', async () => {
   await mount();
@@ -256,28 +263,31 @@ it('shows detail failures without stale details and clears the dialog on section
   await tab('ports');
   expect(document.querySelector('dialog')).toBeNull();
 });
-it('routes container logs to a standard provider without opening a native log stream', async () => {
+it('opens container logs in a dialog without navigating to a standalone log page', async () => {
+  mocks.ops.logOpen.mockResolvedValue({ id: 'log-a' });
   await mount('containers');
   root
     .querySelector<HTMLButtonElement>('[data-ops-target="container-a"] button:nth-last-child(2)')!
     .click();
   await flush();
-  expect(navigate).toHaveBeenCalledWith(
-    'logs',
-    expect.objectContaining({
-      input: { source: { kind: 'container', id: 'container-a' }, lines: 200, follow: true },
-    }),
+  expect(navigate).not.toHaveBeenCalled();
+  expect(mocks.ops.logOpen).toHaveBeenCalledWith(
+    'ops-a',
+    { source: { kind: 'container', id: 'container-a' }, lines: 200, follow: true },
+    expect.any(Function),
   );
-  expect(mocks.ops.logOpen).not.toHaveBeenCalled();
+  expect(document.querySelector('dialog[aria-label="web · 日志"]')).not.toBeNull();
 });
-it('opens and closes a standard log resource when its view leaves', async () => {
+it('removes the standalone file-log page and closes service logs when changing categories', async () => {
   mocks.ops.logOpen.mockResolvedValue({ id: 'log-a' });
-  await mount('logs');
-  const path = root.querySelector<HTMLInputElement>('[aria-label="远程日志绝对路径"]')!;
-  path.value = '/var/log/test.log';
-  path.dispatchEvent(new Event('input'));
-  await nextTick();
-  await click('打开日志文件');
+  mocks.ops.query.mockImplementation(async (_id, request) => ({
+    ...response(),
+    records: request.kind === 'services' ? [{ unit: 'owned.service' }] : [],
+  }));
+  await mount('services');
+  expect(root.querySelector('[aria-label="远程日志绝对路径"]')).toBeNull();
+  expect(root.querySelector('#server-tab-logs')).toBeNull();
+  await click('服务日志');
   expect(mocks.ops.logOpen).toHaveBeenCalled();
   await tab('containers');
   expect(mocks.ops.logClose).toHaveBeenCalledWith('log-a');

@@ -1,3 +1,4 @@
+/* eslint-disable vue/one-component-per-file -- Each test mounts an isolated view. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, h, nextTick, reactive, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
@@ -8,6 +9,8 @@ import { useOpsStore } from '../stores/ops';
 import { pluginsApi } from '../services/plugins';
 import { hostInput } from '../types/hosts';
 import { systemPluginFixtures } from '../services/system-plugins.fixture';
+import { toolPluginState } from '../services/system-plugins.fixture';
+import { useWorkspaceStore } from '../stores/workspace';
 import resourceUi from '../../../../plugins/system/services/ui.json';
 import type { PluginUi } from '../types/plugins';
 
@@ -185,4 +188,44 @@ it('keeps the cached frame inactive until its released runtime has been reactiva
   expect(root.querySelector('[data-frame]')).toBe(frame);
   expect(frame?.getAttribute('data-active')).toBe('true');
   expect((frame as HTMLElement).style.display).toBe('');
+});
+it('keeps the built-in assistant frame and native generation while its host workspace stays open', async () => {
+  const plugins = usePluginsStore();
+  Object.assign(plugins, toolPluginState());
+  const assistant = 'cn.hiboot.plugins.assistant';
+  const workspace = useWorkspaceStore();
+  await workspace.openPlugin(assistant, 'assistant', 'a');
+  vi.spyOn(useOpsStore(), 'open').mockResolvedValue();
+  useOpsStore().connections.a = {
+    host,
+    state: 'connected',
+    error: null,
+    trust: null,
+    session: { id: 'ops-a', hostId: 'a', transportId: 'transport-a', routeHostIds: ['a'] },
+  };
+  app = createApp({
+    render: () =>
+      h(PluginView, {
+        pluginId: assistant,
+        contributionId: 'assistant',
+        hostId: 'a',
+        tabKey: workspace.pluginPages[0]!.key,
+        active: state.active,
+      }),
+  }).use(pinia);
+  app.mount(root);
+  await settle();
+  const version = plugins.contextVersion(assistant);
+  const calls = vi.mocked(pluginsApi.context).mock.calls.length;
+  const frame = root.querySelector('[data-frame]');
+  expect(frame).not.toBeNull();
+  state.active = false;
+  await settle();
+  expect(plugins.contextVersion(assistant)).toBe(version);
+  expect(pluginsApi.context).toHaveBeenCalledTimes(calls);
+  expect((frame as HTMLElement).style.display).toBe('');
+  state.active = true;
+  await settle();
+  expect(root.querySelector('[data-frame]')).toBe(frame);
+  expect(plugins.contextVersion(assistant)).toBe(version);
 });

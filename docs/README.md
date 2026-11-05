@@ -28,7 +28,7 @@
 ## 使用指南：guides
 
 - [使用说明](guides/USER_GUIDE.md)：安装、升级、主机连接、日常操作和备份。
-- [AI 助手](guides/AI_ASSISTANT.md)：模型配置、主机关联、授权和命令审核。
+- [AI 助手](guides/AI_ASSISTANT.md)：模型配置、主机关联、切页后台处理、SSH 智能体查询/计划/确认执行/复查及兼容命令审核。
 
 ## 插件开发：plugins
 

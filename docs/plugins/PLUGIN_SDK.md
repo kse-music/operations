@@ -2,6 +2,10 @@
 
 ## 当前公开 SDK 与源码边界
 
+内置助手的可选 keepRunning 属性由宿主按来源和打开的工作区注入；AI 客户端可选 begin/end 仅通过现有 UI MessageChannel 标记本页在途流程，旧宿主未注入时不调用。它们不是原生 IPC 或执行授权；隐藏页的新问题/执行审批不开放，上传包不取得后台例外。关闭页面仍撤销根请求，其他页面不重绑共享原生上下文。
+
+内置 SSH 智能体复用 ai_prepare/ai_send/ai_execute 和原宿主票据；AiAnswer.agent 为可选查询记录/计划清单，AiExecution.agent 为可选逐项复查结果。只有 Host 识别的内置 system 助手启用该编排，上传插件及旧原生 IPC 继续原合同，字段缺省仍兼容。计划实际载荷保存在宿主，Guest 只能提交不透明 ID，不能修改目标、操作或确认文案。无新增权限、IPC 或数据库结构，版本仍为3.0.0。
+
 Host API / Rust SDK / TypeScript SDK 当前均为 3.0.0，支持 UI v1–v4。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；依赖这些旧权限的安装记录会停用归档，保留用户数据。迁移规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
 
 | SDK 内容                                                    | 使用入口                                        |
@@ -56,17 +60,17 @@ FileDocument 最多 32 KiB UTF-8，返回插件专属 id，不返回内部 SFTP 
 
 新增权限 `metrics.read`、`system.read`、`system.manage`、`logs.read`。上传包默认拒绝，系统分发包预先授予声明范围，仍通过同一逐请求授权检查；全部插件不再有主机白名单，调用绑定当前主机上下文。公开强类型位于 `server.rs`，操作名为 snake_case、字段 camelCase。SystemQuery 包含 capabilities、containers/images/container_details/container_stats/container_action/image_remove、processes/process_details/signal、ports、services/service_details/service_action、probe；参数与既有封闭请求一致，不接受任意命令或 Guest confirmed。
 
-| Capability                      | 参数和结果                                                 | 范围                                                     |
-| ------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
-| system_query                    | request: Query；结构化 success/code/message/records/detail | 读取 system.read，修改/明文环境 system.manage 并逐次批准 |
-| system_feedback                 | 当前主机反馈                                               | system.read                                              |
-| metrics_open                    | intervalSecs=3/5/10/30；返回 id                            | metrics.read                                             |
-| metrics_snapshot                | monitorId、afterRevision；快照或 null                      | 仅自有采样器；sessionId 为公开句柄                       |
-| metrics_visible / metrics_close | monitorId、visible / 关闭                                  | 仅自有采样器                                             |
-| system_log_start                | source=file/container/service、lines、follow；返回 id      | logs.read，文件额外需 sftp.read/可读根                   |
-| system_log_poll/pause/stop      | logId、paused；有界 events                                 | 仅自有日志，dataBase64 保留原字节                        |
-| container_shell                 | id、bash；返回 shellTicket                                 | system.manage / system.shell，逐次批准                   |
-| result_read / result_close      | resultId、chunk；chunk/dataBase64 / 关闭                   | ui.contribute；绑定原插件/上下文                         |
+| Capability                      | 参数和结果                                                 | 范围                                                                    |
+| ------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| system_query                    | request: Query；结构化 success/code/message/records/detail | 读取 system.read，修改/明文环境 system.manage 并逐次批准                |
+| system_feedback                 | 当前主机反馈                                               | system.read                                                             |
+| metrics_open                    | intervalSecs=3/5/10/30；返回 id                            | metrics.read                                                            |
+| metrics_snapshot                | monitorId、afterRevision；快照或 null                      | 仅自有采样器；sessionId 为公开句柄                                      |
+| metrics_visible / metrics_close | monitorId、visible / 关闭                                  | 仅自有采样器                                                            |
+| system_log_start                | source=file/container/service、lines、follow；返回 id      | logs.read，文件额外需 sftp.read/可读根                                  |
+| system_log_poll/pause/stop      | logId、paused；有界 events                                 | 仅自有日志，dataBase64 保留原字节                                       |
+| container_shell                 | id、bash；返回 shellTicket                                 | system.manage / system.shell；内置 System Docker 直接进入，其余逐次批准 |
+| result_read / result_close      | resultId、chunk；chunk/dataBase64 / 关闭                   | ui.contribute；绑定原插件/上下文                                        |
 
 业务结果超过 1 KiB 返回 `{__pluginResult:{id,bytes,chunks}}`，由标准可信渲染器用公开 result_read 验证完整分块后释放；单结果 4 MiB、总量 8 MiB、八项/每插件两项、TTL 60 秒、每块 32 KiB。不能跨插件或上下文代读取；不放宽 WASM 的 64 KiB 消息和 200 万 fuel 限额。
 

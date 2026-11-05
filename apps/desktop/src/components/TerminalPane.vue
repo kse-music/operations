@@ -28,8 +28,9 @@ import { useApplicationStore } from '../stores/application';
 import Modal from './Modal.vue';
 import '@xterm/xterm/css/xterm.css';
 
-const props = defineProps<{ tab: TerminalPaneModel; active: boolean }>();
+const props = defineProps<{ tab: TerminalPaneModel; active: boolean; standalone?: boolean }>();
 const emit = defineEmits<{
+  update: [values: Partial<Omit<TerminalPaneModel, 'key' | 'host'>>];
   close: [];
   server: [host: Host];
   action: [key: string, name: string];
@@ -64,7 +65,7 @@ const menuActions = computed(() => [
   { key: 'copy', label: '复制', disabled: false },
   { key: 'paste', label: '粘贴', disabled: props.tab.state !== 'connected' },
   { key: 'find', label: '查找', disabled: false },
-  ...(props.tab.host
+  ...(props.tab.host && !props.standalone
     ? [
         { key: 'server', label: '服务器管理', disabled: false },
         { key: 'files', label: 'SFTP 文件', disabled: false },
@@ -95,11 +96,31 @@ function fitTerminal(): void {
 function focusTerminal(): void {
   if (
     props.active &&
-    store.focused === props.tab.key &&
+    (props.standalone || store.focused === props.tab.key) &&
     container.value?.clientWidth &&
-    !document.querySelector('dialog[open]')
+    !dialogBlocksTerminal()
   )
     terminal.focus();
+}
+function dialogBlocksTerminal(): boolean {
+  const dialogs = document.querySelectorAll('dialog[open]');
+  const top = dialogs.item(dialogs.length - 1);
+  return !!top && !(props.standalone && top.contains(container.value ?? null));
+}
+function update(values: Partial<Omit<TerminalPaneModel, 'key' | 'host'>>): void {
+  if (props.standalone) emit('update', values);
+  else store.update(props.tab.key, values);
+}
+function terminalAction(name: string): void {
+  if (props.standalone && ['zoomIn', 'zoomOut', 'zoomReset'].includes(name)) {
+    const base = application.state?.config.terminalFontSize ?? 14;
+    const current = terminal.options.fontSize ?? base;
+    terminal.options.fontSize =
+      name === 'zoomReset'
+        ? base
+        : Math.max(8, Math.min(32, current + (name === 'zoomIn' ? 1 : -1)));
+    fitTerminal();
+  } else emit('action', props.tab.key, name);
 }
 async function toggleFind(): Promise<void> {
   finding.value = !finding.value;
@@ -135,7 +156,7 @@ async function connect(): Promise<void> {
   try {
     if (session) await terminalApi.close(session.id);
     session = undefined;
-    store.update(props.tab.key, { sessionId: undefined, state: 'opening' });
+    update({ sessionId: undefined, state: 'opening' });
     fitTerminal();
     const open = props.tab.containerShell
       ? (
@@ -199,7 +220,7 @@ async function connect(): Promise<void> {
         });
       } else if (event.type === 'state') {
         if (['closed', 'failed', 'disconnected'].includes(event.state)) receiver?.dispose();
-        store.update(props.tab.key, { state: event.state });
+        update({ state: event.state });
         if (event.message) message.value = event.message;
         if (event.state !== 'awaiting_trust') trust.value = null;
       } else if (event.type === 'trust') trust.value = event;
@@ -222,14 +243,14 @@ async function connect(): Promise<void> {
     session = value;
     inputQueue.reset(value.id);
     focusTerminal();
-    store.update(props.tab.key, {
+    update({
       sessionId: value.id,
       ...('transportId' in value
         ? { transportId: value.transportId, routeHostIds: value.routeHostIds }
         : { shell: value.shell }),
     });
   } catch (cause) {
-    store.update(props.tab.key, { state: 'failed' });
+    update({ state: 'failed' });
     message.value = errorMessage(cause);
   } finally {
     working.value = false;
@@ -270,7 +291,7 @@ function zoomWithWheel(event: WheelEvent): void {
     return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  emit('action', props.tab.key, event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
+  terminalAction(event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
 }
 function terminalContextMenu(event: MouseEvent): void {
   event.preventDefault();
@@ -282,8 +303,8 @@ function terminalContextMenu(event: MouseEvent): void {
   } else void openMenu(event.clientX, event.clientY);
 }
 async function openMenu(x: number, y: number): Promise<void> {
-  if (!props.active || document.querySelector('dialog[open]')) return;
-  store.focused = props.tab.key;
+  if (!props.active || dialogBlocksTerminal()) return;
+  if (!props.standalone) store.focused = props.tab.key;
   if (trust.value) return;
   menu.value = { x, y };
   await nextTick();
@@ -461,7 +482,7 @@ onMounted(() => {
   terminal.open(container.value!);
   terminal.parser.registerOscHandler(7, (data) => {
     const cwd = osc7Path(data);
-    if (cwd) store.update(props.tab.key, { cwd });
+    if (cwd) update({ cwd });
     return true;
   });
   container.value!.addEventListener('paste', nativePaste, true);
@@ -505,7 +526,7 @@ onMounted(() => {
       return false;
     }
     if (action) {
-      emit('action', props.tab.key, action);
+      terminalAction(action);
       return false;
     }
     return true;
@@ -624,7 +645,7 @@ useErrorNotifications(message);
       }}
     </div>
     <Modal
-      v-if="trust && active && store.focused === tab.key"
+      v-if="trust && active && (standalone || store.focused === tab.key)"
       title="确认 SSH 主机指纹"
       @close="confirm(false)"
     >
@@ -673,7 +694,7 @@ useErrorNotifications(message);
       :host-name="hostDisplayName(tab.host)"
       @close="forwards = false"
     />
-    <Teleport to="body">
+    <Teleport :to="standalone ? (container?.closest('dialog') ?? 'body') : 'body'">
       <template v-if="menu">
         <button
           class="context-backdrop"

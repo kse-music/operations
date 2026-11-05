@@ -66,7 +66,8 @@ it('keeps panel drafts while stopping hidden monitoring, and resumes only the se
     'retained.service',
   );
   expect(root.querySelector('[aria-label="网络诊断"]')).toBeNull();
-  expect(root.querySelectorAll('[role="tab"]')).toHaveLength(4);
+  expect(root.querySelector('[aria-label="日志查看"]')).toBeNull();
+  expect(root.querySelectorAll('[role="tab"]')).toHaveLength(3);
   await select('资源监控');
   expect(api.open).toHaveBeenCalledTimes(2);
   const tabs = root.querySelector('[aria-label="系统服务功能"]')!;

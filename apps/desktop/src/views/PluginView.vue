@@ -8,6 +8,8 @@ import { useFilesStore } from '../stores/files';
 import { pluginsApi } from '../services/plugins';
 import { filesApi } from '../services/files';
 import { sameHostConnection } from '../services/product-links';
+import { isBuiltinAssistant } from '../services/plugin-pages';
+import { useWorkspaceStore, isHostTab } from '../stores/workspace';
 import { sendPluginAction, uiResult } from '../services/plugin-ui';
 import { errorMessage } from '../services/ipc';
 import { useErrorNotifications } from '../composables/error-notifications';
@@ -16,8 +18,6 @@ import Modal from '../components/Modal.vue';
 import PluginLog from '../components/PluginLog.vue';
 import PluginFrame from '../components/PluginFrame.vue';
 import type { ServerSection } from '../types/server';
-import type { ContainerShell, LogInput } from '../types/ops';
-import type { Host } from '../types/hosts';
 const props = withDefaults(
   defineProps<{
     pluginId: string;
@@ -25,7 +25,6 @@ const props = withDefaults(
     hostId: string;
     tabKey: string;
     initialSection?: ServerSection;
-    logIntent?: { input: LogInput; title: string; sequence: number };
     active?: boolean;
     settingsPage?: boolean;
   }>(),
@@ -33,17 +32,12 @@ const props = withDefaults(
     active: true,
     settingsPage: false,
     initialSection: undefined,
-    logIntent: undefined,
   },
 );
 const emit = defineEmits<{
   settings: [];
   contribution: [id: string];
-  surfaceNavigate: [
-    section: ServerSection,
-    intent?: { input: LogInput; title: string; sequence: number },
-  ];
-  shell: [host: Host, shell: ContainerShell];
+  surfaceNavigate: [section: ServerSection];
   section: [section: ServerSection];
 }>();
 const plugins = usePluginsStore(),
@@ -51,6 +45,15 @@ const plugins = usePluginsStore(),
   ops = useOpsStore(),
   files = useFilesStore();
 const plugin = computed(() => plugins.installed.find((p) => p.manifest.id === props.pluginId));
+const workspace = useWorkspaceStore();
+const retainRequests = computed(
+  () =>
+    isBuiltinAssistant(plugin.value) &&
+    props.contributionId === 'assistant' &&
+    workspace.tabs.some((tab) =>
+      props.hostId ? isHostTab(tab) && tab.hostId === props.hostId : tab.key === props.tabKey,
+    ),
+);
 const available = computed(() =>
   plugins.extensions.some(
     (entry) => entry.pluginId === props.pluginId && entry.id === props.contributionId,
@@ -260,7 +263,7 @@ async function connect() {
         ))
       )
         return;
-      await plugins.bind(props.pluginId, null);
+      if (!isBuiltinAssistant(plugin.value)) await plugins.bind(props.pluginId, null);
       await ops.close(host.value.id);
       if (connection.value?.id) await filesApi.close(connection.value.id, false);
       if (connection.value) connection.value.state = 'closed';
@@ -327,6 +330,10 @@ watch(
 watch(
   () => [props.active, available.value, generationKey.value],
   async (value, previous) => {
+    if (!props.active && available.value && retainRequests.value && previous?.[2] === value[2]) {
+      saveDraft();
+      return;
+    }
     generation++;
     contextReady.value = false;
     if (previous && value[2] !== previous[2]) {
@@ -430,15 +437,14 @@ useErrorNotifications(error);
           v-show="contextReady"
           :key="`${generationKey}:${frameReload}`"
           :active="active && contextReady"
+          :retain-requests="retainRequests"
           :context-key="tabKey"
           :plugin-id="pluginId"
           :revision="plugin.revision"
           :host-id="hostId"
           :page="page"
           :initial-section="initialSection"
-          :log-intent="logIntent"
-          @navigate="(section, intent) => emit('surfaceNavigate', section, intent)"
-          @shell="(host, shell) => emit('shell', host, shell)"
+          @navigate="(section) => emit('surfaceNavigate', section)"
           @section="emit('section', $event)"
           @retry="restart"
         />

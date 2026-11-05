@@ -239,9 +239,7 @@ export async function operationsChecks(context) {
       await detailDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await showOps();
     await page.getByRole('tab', { name, exact: true }).click();
-    if (name !== '日志')
-      await page.getByRole('button', { name: '刷新运维列表', exact: true }).waitFor();
-    else await page.getByRole('button', { name: '打开日志文件', exact: true }).waitFor();
+    await page.getByRole('button', { name: '刷新运维列表', exact: true }).waitFor();
   };
   async function row(key) {
     const r = page.locator(`[data-ops-target="${key}"]`);
@@ -396,13 +394,13 @@ export async function operationsChecks(context) {
     );
   }
   await page.screenshot({ path: path.join(artifacts, 'ops-logs.png') });
-  await page.getByRole('button', { name: '关闭日志标签', exact: true }).click();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await switchTab('Docker 容器');
   await page.getByLabel('运维项目搜索').fill(fixture.uuid);
   await (await row(fixture.container)).getByRole('button', { name: 'Shell', exact: true }).click();
-  await confirm(fixture.container);
+  assert.equal(await page.getByLabel('确认运维目标').count(), 0);
   await page
-    .locator('.terminal-pane:visible')
+    .locator('.container-terminal-dialog .terminal-pane')
     .locator('.xterm-container[data-state="connected"]')
     .waitFor();
   await command(
@@ -418,46 +416,15 @@ export async function operationsChecks(context) {
   passed(
     'native bounded Docker log stream, timestamps/search/pause/resume/close and independent real container PTY shell',
   );
-  await fixtureCall('schedule_append');
-  await switchTab('日志');
-  await page.getByLabel('远程日志绝对路径').fill(fixture.log);
-  await page.getByRole('button', { name: '打开日志文件', exact: true }).click();
-  await output.filter({ hasText: 'fixture initial 中文' }).waitFor();
-  assert(!(await output.innerText()).includes('__SD_FILE_LIVE_'));
-  await output.filter({ hasText: '__SD_FILE_LIVE_' + fixture.uuid + '__' }).waitFor();
-  await fixtureCall('append');
-  await showOps();
-  await page.getByRole('tab', { name: '日志', exact: true }).click();
-  // Leaving the workspace closes tabs; reopening reads the newly appended tail.
-  await page.getByLabel('远程日志绝对路径').fill(fixture.log);
-  await page.getByRole('button', { name: '打开日志文件', exact: true }).click();
-  await output.filter({ hasText: '__SD_FILE_APPEND_' }).waitFor();
-  await page.getByLabel('日志关键词').fill('__SD_FILE_APPEND_');
-  const downloadPromise = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出可见日志', exact: true }).click();
-  const download = await downloadPromise;
-  await download.saveAs(path.join(artifacts, 'visible-log.txt'));
-  assert(
-    (await readFile(path.join(artifacts, 'visible-log.txt'), 'utf8')).includes('__SD_FILE_APPEND_'),
-  );
-  await page.getByRole('button', { name: '关闭日志标签', exact: true }).click();
-  await fixtureCall('deny_log');
-  await showOps();
-  await page.getByRole('tab', { name: '日志', exact: true }).click();
-  await page.getByLabel('远程日志绝对路径').fill(fixture.log);
-  await page.getByRole('button', { name: '打开日志文件', exact: true }).click();
-  await page.locator('.ops-logs').getByRole('status').filter({ hasText: 'failed' }).waitFor();
-  await page.getByRole('button', { name: '关闭日志标签', exact: true }).click();
-  await fixtureCall('restore_log');
+  assert.equal(await page.getByLabel('远程日志绝对路径').count(), 0);
+  assert.equal(await page.getByRole('tab', { name: '日志', exact: true }).count(), 0);
   const status = await fixtureCall('status');
   assert.deepEqual(
     status.streamProcesses,
     [],
-    'closed log tabs must release actual remote log processes',
+    'closed log dialogs must release actual remote log processes',
   );
-  passed(
-    'native Unicode/special-character file logs, tail refresh/filter/export and actual remote stream process release',
-  );
+  passed('standalone file-log UI is absent; closing container log dialogs releases remote streams');
   await switchTab('进程');
   await page.getByLabel('运维项目搜索').fill(String(fixture.sleepPid));
   await (
@@ -558,7 +525,7 @@ export async function operationsChecks(context) {
   assert.equal(service.detail.UnitFileState, 'disabled');
   await (await row(fixture.unit)).getByRole('button', { name: '服务日志', exact: true }).click();
   await output.filter({ hasText: '__SD_SERVICE_' + fixture.uuid + '__' }).waitFor();
-  await page.getByRole('button', { name: '关闭日志标签', exact: true }).click();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await switchTab('systemd 服务');
   await page.getByLabel('运维项目搜索').fill(fixture.unit);
   await (await row(fixture.unit)).getByRole('button', { name: '停止', exact: true }).click();

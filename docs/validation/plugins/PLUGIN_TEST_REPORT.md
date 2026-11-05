@@ -1,5 +1,36 @@
 # 插件阶段验证记录
 
+## 2026-11-05：日志与容器终端弹窗
+
+完成标准：删除系统服务独立日志分类及其文件路径表单、标签、源码/样式和导航链；systemd 与 Docker 日志在当前目标的弹窗中显示；内置 Docker Shell 点击直接打开交互终端弹窗、聚焦输入，无目标输入或二次批准；关闭或上下文变化释放自有日志流/PTY，保留共享连接与其他危险操作确认。
+
+真实实现与主要文件：
+
+- 删除 `plugins/system/services/frontend/logs/` 三个源文件，独立日志表单/标签、系统分类、日志样式、`workspace.logIntent` 及跨插件日志跳转链、兼容构建依赖退出生产路径。`services/frontend/App.vue` 仅三分类，旧 logs-only 兼容页面明确提示升级而不发起其他服务查询。保留日志流公共能力，供两个资源弹窗及已授权上传插件使用；SFTP 文件终端不在移除范围。
+- `packages/plugin-sdk/src/ui/ResourceLogDialog.vue` 由 ResourceView、systemd、Docker 与旧兼容渲染器复用，冻结原 Session/来源；支持跟踪、暂停/恢复、过滤、复制/导出，1 MiB/5000 行缓冲，独立 UTF-8 解码与渲染后 ACK。关闭失败保留重试，隐藏时处理正常取消，晚到打开结果仍关闭，技术清理失败继续上报。
+- `apps/desktop/src/components/ContainerTerminalDialog.vue`、`PluginFrame.vue` 与 `TerminalPane.vue` 复用真实 xterm/输入队列和原生终端接口，弹窗独立管理状态，不创建或切换主机终端标签；焦点、弹窗内菜单、字体缩放与关闭生命周期可用。原插件上下文保留，关闭只释放自身 PTY，晚到会话同样关闭。
+- services Guest 只允许 Service 日志并移除 sftp.read；Docker Guest 只允许 Container 日志并新增 logs.read，双方拒绝文件或其他来源。`crates/application/src/plugins/capabilities.rs` 仅对 System 来源、精确 Docker ID、ContainerShell 类型免二次批准；权限、连接签名、完整容器 ID、单次票据和交接校验保留，上传同 ID 包不继承例外。两个包更新到 1.4.0，助手仍 1.3.3，无新增 IPC/数据库/依赖。
+- PRD、架构、决策、插件能力/安全/界面合同、使用指南、验证工具及实施计划同步；旧日志测试中的有效缓冲、UTF-8、纯文本和迟到清理断言迁移到共享弹窗测试，已删除功能的测试改为断言其不存在和来源被拒绝。
+
+实际验证：
+
+| 检查                          | 结果与关键断言                                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                    | 56 文件、384 项通过。覆盖移除分类、服务作用域/容器来源绑定、日志暂停/过滤/ACK/清理与错误重试、旧 log-only 页面无错误查询、Shell 直接打开/焦点/输入/无工作区标签及迟到 PTY 关闭；保留其他删除/重启目标确认断言                                                                                                                                                                          |
+| 类型与前端静态检查            | `npm run typecheck`（desktop/SDK）、`npm run lint` 通过，ESLint 0 warnings                                                                                                                                                                                                                                                                                                             |
+| 生产前端/插件包               | `npm run build` 通过：两个更新的独立 WASM Guest、三个标准包、兼容资源及桌面前端均完成；保留既有 Monaco 大 chunk 提示                                                                                                                                                                                                                                                                   |
+| 应用层 Rust                   | 根 target 编译测试，再复制到 QA 目录运行 `application-dialog-tests.exe plugins:: --test-threads=1`，19 项通过、1 项既有 ignored。验证固定授权及升级保留、系统服务不再拥有 SFTP 根、Docker 日志授权、内置/上传来源隔离、Shell 票据归属/代际/目标/有效期/单次消费及清理                                                                                                                  |
+| 两个独立 Guest                | services/docker 各 2 项，复制原生测试 EXE 到 QA 后运行，共 4 项通过。断言各自合法日志来源接受，文件及其他插件领域拒绝                                                                                                                                                                                                                                                                  |
+| 浏览器 UI/iframe bridge/xterm | `node tools/ui-plugin-layout-e2e.mjs` 使用最终真实组件与打包资源、隔离内存传输夹具，通过 2400×1400、1440×900、900×600、390×844 各深浅主题，共 104 个页面布局检查。服务/容器日志显示中文及纯文本脚本字样并在关闭时停止；Shell 弹窗无需确认即可连接、自动获得焦点，xterm 输入经输入队列发送，关闭后调用 PTY close；主机工具页保持 Docker、无独立日志分类，无外层横向溢出。代表截图已查看 |
+| Windows 桌面构建              | `node tools/tauri.mjs build --debug --no-bundle` 通过，复用根 target 与既有调试参数；交付 `.local/plugin-dialogs-qa/ServerDeck-preview.exe` 与构建 EXE 的 SHA-256 一致，未启动用户配置下的新 EXE                                                                                                                                                                                       |
+| Rust 静态/格式/工具           | 应用层及两个 Guest 的 Clippy、Cargo fmt、变更文件 Prettier、变更 MJS Node 语法及 git diff 检查通过。保留既有 core/openssh 的 single_element_loop 提示；jsdom 两条 canvas 提示不影响测试，实际 xterm 渲染和焦点由浏览器检查                                                                                                                                                             |
+
+证据：`.local/plugin-dialogs-qa/`，包含 `rust-build.jsonl`、`rust-tests.log`、两个 Guest 构建产物记录、`rust-clippy.log`、`windows-build.log`、`windows-build-result.json`、`browser/result.json` 与三种弹窗的深浅/宽窄截图。所有原生测试使用 QA 复制 EXE；构建前确认磁盘超过 10 GiB，未新增 Cargo 缓存或终止用户进程。
+
+修复与复验：旧测试仍期望跨插件跳转、文件日志表单和 services 的 `/` 读取根，已按新行为替换为弹窗及权限收窄断言；测试中的跨环境 Uint8Array 断言改为核对实际发送字节。xterm 输入 textarea 按设计隐藏，图形检查改为检查挂载、真实焦点和输入发送，没有删除这些有效断言。源代码清理还发现并修复晚到日志关闭失败的静默问题，增加清理失败上报回归测试。
+
+限制与风险：未连接用户生产主机或正式 Docker/systemd 环境做完整端到端验收；`linux_sdk_capability_roundtrip` 仍需专用 Linux 测试主机而忽略，远端 native-ops/plugin-components 套件只同步未运行。浏览器传输夹具不能代替真实远端 PTY/日志验收，未验收新 EXE 完整原生图形流程、跨平台及安装器；旧仅声明 logs 的兼容插件需升级其界面。当前未发现新增回归，保留既有构建提示。本阶段实现和构建完成，无剩余实现依赖，后续发布验收依赖相应远端与平台环境。
+
 ## 2026-11-05：插件布局与模型选择优化
 
 完成标准：三个内置插件及公共设置页减少冗长留白、重复说明和不合理控件宽度；实际配置优先显示，模型选择清晰可用，深浅主题和宽窄窗口均无页面横向溢出，保存操作不被嵌入页面挤出。保留权限、模型绑定持久化、主机上下文及危险操作确认。

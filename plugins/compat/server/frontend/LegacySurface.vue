@@ -15,7 +15,7 @@ import {
   type OperationsSection,
 } from '@serverdeck/plugin-sdk/types/server';
 import type { PluginCapability, PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
-import type { ContainerShell, LogEvent, LogInput } from '@serverdeck/plugin-sdk/types/ops';
+import type { ContainerShell, LogEvent } from '@serverdeck/plugin-sdk/types/ops';
 import type { Host } from '@serverdeck/plugin-sdk/types/hosts';
 import type { MonitorSnapshot } from '@serverdeck/plugin-sdk/types/monitor';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
@@ -24,10 +24,9 @@ const props = defineProps<{
   hostId: string;
   page: PluginUiPage;
   initialSection?: ServerSection;
-  logIntent?: { input: LogInput; title: string; sequence: number };
 }>();
 const emit = defineEmits<{
-  navigate: [section: ServerSection, intent?: { input: LogInput; title: string; sequence: number }];
+  navigate: [section: ServerSection];
   shell: [host: Host, shell: ContainerShell];
   section: [section: ServerSection];
 }>();
@@ -35,13 +34,14 @@ const available = computed(() =>
   serverSections.filter(
     (entry) =>
       (props.page.surface?.kind === 'monitor' || props.page.surface?.kind === 'operations') &&
+      entry.key !== 'logs' &&
       props.page.surface.sections.includes(entry.key),
   ),
 );
 const section = ref<ServerSection>(
   props.initialSection && available.value.some((s) => s.key === props.initialSection)
     ? props.initialSection
-    : available.value[0]!.key,
+    : (available.value[0]?.key ?? 'services'),
 );
 const monitorSection = computed(() => section.value as MonitorSection);
 const operationsSection = computed(() => section.value as OperationsSection);
@@ -78,8 +78,7 @@ watch(section, (value) => emit('section', value));
 const rpc = <T,>(operation: PluginCapability) =>
   pluginServerRequest<T>(props.pluginId, operation, props.page);
 let monitor = '',
-  disposed = false,
-  logSequence = 0;
+  disposed = false;
 const logs = new Map<string, { stopped: boolean }>();
 const api: PluginServerServices = {
   monitor: {
@@ -174,15 +173,15 @@ onBeforeUnmount(() => {
   disposed = true;
   for (const control of logs.values()) control.stopped = true;
 });
-function openLog(input: LogInput, title: string) {
-  emit('navigate', 'logs', { input, title, sequence: ++logSequence });
-}
 function shell(host: Host, value: ContainerShell) {
   emit('shell', host, { ...value, pluginId: props.pluginId });
 }
 </script>
 <template>
-  <div class="plugin-server-surface">
+  <p v-if="!available.length" class="host-empty" role="alert">
+    独立日志页面已移除。请在服务或容器列表中查看日志，或升级插件界面。
+  </p>
+  <div v-else class="plugin-server-surface">
     <div ref="tabs" class="server-tabs" role="tablist" aria-label="插件功能分类" @keydown="tabKey">
       <button
         v-for="entry in available"
@@ -213,9 +212,7 @@ function shell(host: Host, value: ContainerShell) {
         v-else
         :host-id="hostId"
         :initial-tab="operationsSection"
-        :log-intent="logIntent"
         @section="select"
-        @log="openLog"
         @shell="shell"
       />
     </div>

@@ -6,6 +6,7 @@ import { useOpsStore } from '../stores/ops';
 import { useWorkspaceStore } from '../stores/workspace';
 import { useNotificationsStore } from '../stores/notifications';
 import { hostInput } from '../types/hosts';
+import { pluginsApi } from './plugins';
 import type { PluginPermission, PluginUiPage } from '../types/plugins';
 const api = vi.hoisted(() => ({ invoke: vi.fn(), tool: vi.fn(), server: vi.fn() }));
 vi.mock('./plugin-server', () => ({
@@ -215,7 +216,137 @@ it('keeps connection leases opaque and freezes approved input before dispatching
     page,
     expect.any(AbortSignal),
     true,
+    expect.any(Function),
   );
+});
+function retainedAssistant(source: 'system' | 'user' = 'system') {
+  const plugins = usePluginsStore();
+  const plugin = plugins.installed[0]!;
+  plugin.manifest.id = 'cn.hiboot.plugins.assistant';
+  plugin.source = source;
+  grant('ui.contribute', 'assistant.use');
+  plugins.grants[plugin.manifest.id] = { ...plugins.grants[id]!, pluginId: plugin.manifest.id };
+  return {
+    id: plugin.manifest.id,
+    page: {
+      ...page,
+      id: 'assistant',
+      surface: { kind: 'tool', tool: 'assistant' },
+    } as PluginUiPage,
+  };
+}
+it('keeps only an already-started built-in assistant flow running in the hidden open workspace', async () => {
+  const fixture = retainedAssistant();
+  let active = true;
+  let alive = true;
+  const ui = createPluginUiBridge({
+    ...fixture,
+    revision: 'revision',
+    hostId: 'a',
+    isActive: () => active,
+    canRetain: () => alive,
+    stream: vi.fn(),
+  });
+  const cancel = vi.spyOn(pluginsApi, 'toolCancelRequest').mockResolvedValue();
+  await ui.call('ai_begin', {});
+  api.tool.mockResolvedValueOnce({ id: 'root-a' });
+  await ui.call('ai_prepare', { input: {} });
+  let finish!: (value: unknown) => void;
+  api.tool.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = ui.call('ai_send', { id: 'root-a', confirmed: true });
+  const signal = api.tool.mock.lastCall![4] as AbortSignal;
+  active = false;
+  ui.suspend();
+  expect(signal.aborted).toBe(false);
+  await expect(
+    ui.call('ai_execute', { input: { proposalId: 'plan', confirmed: true } }),
+  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  finish({ text: 'background answer' });
+  await expect(pending).resolves.toMatchObject({ text: 'background answer' });
+  await ui.call('ai_end', {});
+  await expect(ui.call('ai_begin', {})).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  await expect(ui.call('ai_send', { id: 'root-a', confirmed: true })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  alive = false;
+  await ui.dispose();
+  expect(cancel).toHaveBeenCalledWith(fixture.id, 'root-a');
+});
+it('cancels only the closing assistant frame roots and does not abort another host flow', async () => {
+  const fixture = retainedAssistant();
+  const cancel = vi.spyOn(pluginsApi, 'toolCancelRequest').mockResolvedValue();
+  const first = createPluginUiBridge({
+    ...fixture,
+    revision: 'revision',
+    hostId: 'a',
+    isActive: () => true,
+    canRetain: () => true,
+    stream: vi.fn(),
+  });
+  const second = createPluginUiBridge({
+    ...fixture,
+    revision: 'revision',
+    hostId: 'b',
+    isActive: () => true,
+    canRetain: () => true,
+    stream: vi.fn(),
+  });
+  await first.call('ai_begin', {});
+  api.tool.mockResolvedValueOnce({ id: 'root-a' });
+  await first.call('ai_prepare', { input: {} });
+  await second.call('ai_begin', {});
+  api.tool.mockResolvedValueOnce({ id: 'root-b' });
+  await second.call('ai_prepare', { input: {} });
+  let finish!: (value: unknown) => void;
+  api.tool.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = second.call('ai_send', { id: 'root-b', confirmed: true });
+  const signal = api.tool.mock.lastCall![4] as AbortSignal;
+  await first.dispose();
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(fixture.id, 'root-a');
+  expect(signal.aborted).toBe(false);
+  finish({ text: 'host b' });
+  await expect(pending).resolves.toMatchObject({ text: 'host b' });
+  await second.call('ai_end', {});
+  await second.dispose();
+  expect(cancel).toHaveBeenCalledWith(fixture.id, 'root-b');
+});
+it('never gives an uploaded same-ID assistant background access', async () => {
+  const fixture = retainedAssistant('user');
+  let active = true;
+  const ui = createPluginUiBridge({
+    ...fixture,
+    revision: 'revision',
+    hostId: 'a',
+    isActive: () => active,
+    canRetain: () => true,
+    stream: vi.fn(),
+  });
+  await ui.call('ai_begin', {});
+  let finish!: (value: unknown) => void;
+  api.tool.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = ui.call('ai_send', { id: 'root', confirmed: true });
+  const signal = api.tool.mock.lastCall![4] as AbortSignal;
+  active = false;
+  ui.suspend();
+  expect(signal.aborted).toBe(true);
+  finish({ text: 'stale' });
+  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  await ui.dispose();
 });
 it('rejects removed tool operations before dispatch', async () => {
   grant('ui.contribute', 'assistant.use');

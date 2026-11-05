@@ -19,7 +19,7 @@ const labels: Record<PluginPermission, [string, string]> = {
   'metrics.read': ['资源监控', '读取 CPU、内存、磁盘和网络采样'],
   'system.read': ['系统信息', '读取容器、进程、端口和服务状态'],
   'system.manage': ['系统操作', '修改状态、发送信号或查看敏感信息，逐次确认'],
-  'logs.read': ['日志查看', '读取主动选择的文件、容器或服务日志'],
+  'logs.read': ['日志读取', '读取主动选择的文件、容器或服务日志'],
   'hosts.read': ['主机信息', '读取当前主机的基本信息'],
   'ssh.execute': ['SSH 命令', '执行只读命令，其他命令另行授权和确认'],
   'sftp.read': ['读取远程文件', '仅限下方可读目录'],

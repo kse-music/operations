@@ -736,6 +736,7 @@ impl Application {
             let ai_request = match &input {
                 ToolInput::AiResolveHosts { input } => Some(input.request_id.clone()),
                 ToolInput::AiSend { id, .. } => Some(id.clone()),
+                ToolInput::AiExecute { input } => Some(input.proposal_id.clone()),
                 _ => None,
             };
             data.tool_active.insert(
@@ -963,9 +964,17 @@ impl Application {
             }
             ToolInput::AiSend { id, confirmed } => {
                 self.plugin_ai_owner(&call.id, &call.generation, &id)?;
-                let answer = self
-                    .plugin_ai_wait(call, &id, self.ai_send(id.clone(), confirmed))
-                    .await?;
+                let answer = if super::review::builtin_assistant(&plugin) {
+                    self.plugin_ai_wait(
+                        call,
+                        &id,
+                        self.ai_agent_send(id.clone(), confirmed, &call.cancel),
+                    )
+                    .await?
+                } else {
+                    self.plugin_ai_wait(call, &id, self.ai_send(id.clone(), confirmed))
+                        .await?
+                };
                 if call.cancel.is_cancelled() {
                     self.ai_cancel(&id)?;
                     return Err(failure("PLUGIN_CANCELLED", "插件请求已取消"));
@@ -982,7 +991,14 @@ impl Application {
             }
             ToolInput::AiExecute { input } => {
                 self.plugin_ai_owner(&call.id, &call.generation, &input.proposal_id)?;
-                value(self.ai_execute(input).await?)
+                if self.assistant.is_agent_plan(&input.proposal_id)? {
+                    if !super::review::builtin_assistant(&plugin) {
+                        return Err(denied());
+                    }
+                    value(self.ai_agent_execute(input, &call.cancel).await?)
+                } else {
+                    value(self.ai_execute(input).await?)
+                }
             }
         }
     }

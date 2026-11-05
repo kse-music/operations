@@ -12,6 +12,8 @@ function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return request(command, args);
 }
 export const aiApi = {
+  begin: () => call<void>('ai_begin'),
+  end: () => call<void>('ai_end'),
   models: () => call<AiModel[]>('ai_models'),
   prepare: (input: AiPrepare) => call<AiPreview>('ai_prepare', { input }),
   resolveHosts: (input: AiResolveHosts) => call<AiHostRoute>('ai_resolve_hosts', { input }),

@@ -1,21 +1,18 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { Activity, ListTree, Settings2, ScrollText, Server } from '@lucide/vue';
+import { Activity, ListTree, Settings2, Server } from '@lucide/vue';
 import Monitor from './monitor/App.vue';
 import Processes from './processes/App.vue';
-import Logs from './logs/App.vue';
 import Units from './ServiceUnits.vue';
 import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
 import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
 import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
 import type { PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
-import type { LogInput } from '@serverdeck/plugin-sdk/types/ops';
 import './system.css';
 const props = defineProps<{
   hostId?: string;
   initialSection?: ServerSection;
   page?: PluginUiPage;
-  logIntent?: { input: LogInput; title: string; sequence: number };
 }>();
 const emit = defineEmits<{ section: [value: ServerSection] }>();
 const hosts = useHostsStore();
@@ -41,13 +38,6 @@ const tabs = [
     description: '服务状态与运行管理',
     icon: Settings2,
     component: Units,
-  },
-  {
-    id: 'logs',
-    label: '日志查看',
-    description: '文件与服务实时日志',
-    icon: ScrollText,
-    component: Logs,
   },
 ] as const;
 type TabId = (typeof tabs)[number]['id'];
@@ -77,20 +67,6 @@ function select(id: TabId) {
 function section(value: ServerSection) {
   sections.value[selected.value] = value;
   emit('section', value);
-}
-const localLog = ref(props.logIntent);
-watch(
-  () => props.logIntent,
-  (value) => {
-    if (value) {
-      localLog.value = value;
-      select('logs');
-    }
-  },
-);
-function openLog(input: LogInput, title: string) {
-  localLog.value = { input, title, sequence: (localLog.value?.sequence ?? 0) + 1 };
-  select('logs');
 }
 function navigate(value: ServerSection) {
   sections.value[group(value)] = value;
@@ -158,17 +134,15 @@ async function keys(event: KeyboardEvent) {
       role="tabpanel"
       :aria-labelledby="`system-tab-${selected}`"
     >
-      <KeepAlive :max="4">
+      <KeepAlive :max="3">
         <component
           :is="legacyMonitor ? Monitor : current.component"
           :key="legacyMonitor ? 'legacy' : selected"
           :host-id="hostId"
           :initial-section="sections[selected]"
           :page="legacyMonitor ? page : undefined"
-          :log-intent="localLog"
           @section="section"
           @navigate="navigate"
-          @log="openLog"
         />
       </KeepAlive>
     </section>

@@ -75,6 +75,7 @@ try {
           const { hostInput } = await import('/src/types/hosts.ts');
           const { pluginsApi } = await import('/src/services/plugins.ts');
           const { opsApi } = await import('/src/services/ops.ts');
+          const { terminalApi } = await import('/src/services/terminal.ts');
           const { aiApi } = await import('/src/services/ai.ts');
           const plugins = usePluginsStore();
           useFilesStore().open = async () => {};
@@ -158,6 +159,41 @@ try {
           aiApi.models = async () => window.layoutModels;
           await useModelsStore().refresh();
           window.layoutSettings = { modelId: models[0].id, retained: true };
+          window.dialogLogEvents = [];
+          window.dialogTerminalInput = [];
+          let terminalReceive;
+          pluginsApi.terminalOpen = async (_plugin, _ticket, hostId, _shell, _size, receive) => {
+            terminalReceive = receive;
+            receive({ type: 'state', state: 'connected', code: null, message: null });
+            setTimeout(
+              () =>
+                receive({
+                  type: 'data',
+                  data: [...new TextEncoder().encode('container:/ # ')],
+                  sequence: 1,
+                }),
+              0,
+            );
+            return {
+              id: 'dialog-pty',
+              hostId,
+              transportId: 'layout-transport',
+              routeHostIds: [hostId],
+            };
+          };
+          terminalApi.input = async (id, data) => {
+            window.dialogTerminalInput.push({
+              id,
+              text: new TextDecoder().decode(new Uint8Array(data)),
+            });
+            terminalReceive({ type: 'data', data: [...data], sequence: 2 });
+          };
+          terminalApi.ack = async () => {};
+          terminalApi.resize = async () => {};
+          terminalApi.close = async (id) => {
+            window.dialogPtyClosed = id;
+          };
+          const polledLogs = new Set();
           const now = Date.now(),
             gb = 1024 ** 3;
           const snapshot = {
@@ -250,8 +286,44 @@ try {
                 break;
               case 'metrics_visible':
               case 'metrics_close':
-              case 'system_log_stop':
                 result = null;
+                break;
+              case 'system_log_start':
+                window.dialogLogEvents.push({ kind: 'start', source: operation.source });
+                result = { id: `dialog-log-${window.dialogLogEvents.length}` };
+                break;
+              case 'system_log_poll':
+                result = {
+                  events: polledLogs.has(operation.logId)
+                    ? []
+                    : [
+                        { type: 'state', state: 'running', code: null, message: null },
+                        {
+                          type: 'data',
+                          sequence: 1,
+                          stream: 'stdout',
+                          at: Date.now(),
+                          dataBase64: btoa(
+                            unescape(
+                              encodeURIComponent(
+                                '弹窗日志：服务已启动\n<script>literal</script>\n',
+                              ),
+                            ),
+                          ),
+                        },
+                      ],
+                };
+                polledLogs.add(operation.logId);
+                break;
+              case 'system_log_stop':
+                window.dialogLogEvents.push({ kind: 'stop', id: operation.logId });
+                result = null;
+                break;
+              case 'system_log_pause':
+                result = null;
+                break;
+              case 'container_shell':
+                result = { shellTicket: 'layout-shell-ticket' };
                 break;
               case 'system_feedback':
                 result = [];
@@ -416,17 +488,67 @@ try {
       await content().getByRole('tab', { name: '资源监控', exact: true }).waitFor();
       await content().getByText('23.4%', { exact: true }).waitFor();
       await capture('services-monitor', '.plugin-workspace');
-      for (const tab of ['进程与端口', 'systemd 服务', '日志查看']) {
+      assert.equal(await content().getByRole('tab', { name: '日志查看', exact: true }).count(), 0);
+      for (const tab of ['进程与端口', 'systemd 服务']) {
         await content().getByRole('tab', { name: tab, exact: true }).click();
-        if (tab !== '日志查看') await content().locator('.ops-table tbody tr').first().waitFor();
+        await content().locator('.ops-table tbody tr').first().waitFor();
         await capture(
-          `services-${tab === '进程与端口' ? 'processes' : tab === 'systemd 服务' ? 'units' : 'logs'}`,
+          `services-${tab === '进程与端口' ? 'processes' : 'units'}`,
           '.plugin-workspace',
         );
       }
+      await content().getByRole('button', { name: '服务日志', exact: true }).click();
+      await content()
+        .getByTestId('operations-log-output')
+        .filter({ hasText: '弹窗日志' })
+        .waitFor();
+      await capture('systemd-log-dialog', '.plugin-workspace');
+      await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
       await openPluginFunction(page, 'Docker 管理', 'layout-host');
       await content().getByText('app-service-1', { exact: true }).waitFor();
       await capture('docker-containers', '.plugin-workspace');
+      await content().getByRole('button', { name: '日志', exact: true }).first().click();
+      await content()
+        .getByTestId('operations-log-output')
+        .filter({ hasText: '弹窗日志' })
+        .waitFor();
+      await capture('docker-log-dialog', '.plugin-workspace');
+      await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
+      await content().getByRole('button', { name: 'Shell', exact: true }).nth(1).click();
+      const terminal = page.locator('.container-terminal-dialog .xterm-helper-textarea');
+      await terminal.waitFor({ state: 'attached' });
+      await page
+        .locator('.container-terminal-dialog .terminal-pane[data-state="connected"]')
+        .waitFor();
+      assert(
+        await terminal.evaluate((element) => element === document.activeElement),
+        'Container terminal should receive focus without another click',
+      );
+      assert.equal(
+        await page.getByRole('dialog', { name: '插件操作需要单独确认', exact: true }).count(),
+        0,
+      );
+      await terminal.pressSequentially('whoami');
+      await terminal.press('Enter');
+      await page.waitForFunction(() =>
+        window.dialogTerminalInput
+          .map((entry) => entry.text)
+          .join('')
+          .includes('whoami\r'),
+      );
+      await capture('docker-shell-dialog', '.plugin-workspace');
+      await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+      await page.waitForFunction(() => window.dialogPtyClosed === 'dialog-pty');
+      assert.deepEqual(
+        await page.evaluate(() =>
+          window.dialogLogEvents.filter((e) => e.kind === 'start').map((e) => e.source.kind),
+        ),
+        ['service', 'container'],
+      );
+      assert.equal(
+        await page.evaluate(() => window.dialogLogEvents.filter((e) => e.kind === 'stop').length),
+        2,
+      );
       await content().getByRole('tab', { name: '镜像', exact: true }).click();
       await content().getByText('registry.example/application', { exact: true }).waitFor();
       await capture('docker-images', '.plugin-workspace');

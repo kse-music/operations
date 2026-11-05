@@ -1,7 +1,7 @@
 use serverdeck_plugin_sdk::{
     Capability,
     serde_json::Value,
-    server::{Query, SurfaceState},
+    server::{LogSource, Query, SurfaceState},
 };
 use std::sync::Mutex;
 static STATE: Mutex<Option<SurfaceState>> = Mutex::new(None);
@@ -22,7 +22,10 @@ fn allows(cap: &Capability) -> bool {
             | Capability::MetricsSnapshot { .. }
             | Capability::MetricsVisible { .. }
             | Capability::MetricsClose { .. }
-            | Capability::SystemLogStart { .. }
+            | Capability::SystemLogStart {
+                source: LogSource::Service { .. },
+                ..
+            }
             | Capability::SystemLogPoll { .. }
             | Capability::SystemLogPause { .. }
             | Capability::SystemLogStop { .. }
@@ -51,6 +54,26 @@ mod tests {
     }
     #[test]
     fn accepts_its_domain_and_rejects_other_server_domains() {
+        assert!(allows(&Capability::SystemLogStart {
+            source: LogSource::Service {
+                scope: serverdeck_plugin_sdk::server::Scope::User,
+                unit: "owned.service".into()
+            },
+            lines: 200,
+            follow: true
+        }));
+        assert!(!allows(&Capability::SystemLogStart {
+            source: LogSource::File {
+                path: "/var/log/messages".into()
+            },
+            lines: 200,
+            follow: true
+        }));
+        assert!(!allows(&Capability::SystemLogStart {
+            source: LogSource::Container { id: "a".repeat(64) },
+            lines: 200,
+            follow: true
+        }));
         assert!(allows(&Capability::MetricsOpen { interval_secs: 3 }));
         assert!(!allows(&Capability::ToolInvoke {
             input_id: "owned".into(),

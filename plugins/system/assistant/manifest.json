@@ -3,9 +3,9 @@
   "id": "cn.hiboot.plugins.assistant",
   "name": "AI 运维助手",
   "icon": "bot",
-  "version": "1.3.3",
+  "version": "1.5.1",
   "author": "ServerDeck",
-  "description": "结合已配置模型分析问题、匹配主机并在确认后执行受控运维操作。",
+  "description": "通过 SSH 查询主机、生成操作计划，在确认后执行并复查结果。",
   "apiVersion": "^3.0.0",
   "entry": {
     "backend": "backend.wasm",

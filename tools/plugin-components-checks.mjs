@@ -308,22 +308,21 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     'systemd: real owned active user unit, details and cancelled mutation without changing other services',
   );
 
-  await open('日志查看');
-  await content().getByLabel('远程日志绝对路径', { exact: true }).fill(resources.log);
-  await content().getByRole('button', { name: '打开日志文件', exact: true }).click();
-  await content().locator('.ops-log-output').filter({ hasText: 'fixture initial 中文' }).waitFor();
+  await serviceRow.getByRole('button', { name: '服务日志', exact: true }).click();
+  await content()
+    .getByRole('dialog', { name: `${resources.unit} · 日志`, exact: true })
+    .waitFor();
+  await content().getByRole('status').filter({ hasText: '实时跟踪' }).waitFor();
   await content().getByRole('button', { name: '暂停日志', exact: true }).click();
   await content().getByRole('button', { name: '继续日志', exact: true }).waitFor();
   await content().getByRole('button', { name: '继续日志', exact: true }).click();
   await stable('cn.hiboot.plugins.services', 40);
-  await content().getByRole('button', { name: '关闭日志标签', exact: true }).click();
-  await content()
-    .getByLabel('远程日志绝对路径', { exact: true })
-    .fill(`${resources.root}/missing.log`);
-  await content().getByRole('button', { name: '打开日志文件', exact: true }).click();
-  await content().getByRole('status').filter({ hasText: 'failed' }).waitFor();
-  await content().getByRole('button', { name: '关闭日志标签', exact: true }).click();
-  passed.push('logs: real quoted Unicode path, output/pause/resume/close and missing-file failure');
+  await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(await content().getByRole('tab', { name: '日志查看', exact: true }).count(), 0);
+  assert.equal(await content().getByLabel('远程日志绝对路径', { exact: true }).count(), 0);
+  passed.push(
+    'service journal dialog: real user-scope source, pause/resume/close without a standalone file-log page',
+  );
 
   await open('资源监控', hosts[1]);
   await content().getByTestId('monitor-cpu').waitFor();
@@ -425,16 +424,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     .getByRole('row')
     .filter({ hasText: `serverdeck-e2e-${fixture.uuid}` })
     .waitFor();
-  await open('日志查看');
-  await content().getByRole('tab', { name: '日志查看', exact: true }).click();
-  await content().getByLabel('远程日志绝对路径', { exact: true }).fill(resources.log);
-  await content().getByRole('button', { name: '打开日志文件', exact: true }).click();
-  await content().locator('.ops-log-output').filter({ hasText: 'fixture initial 中文' }).waitFor();
-  await content().getByRole('tab', { name: '进程与端口', exact: true }).click();
-  await content().getByRole('tab', { name: '日志查看', exact: true }).click();
-  assert((await content().locator('.ops-log-output').innerText()).includes('fixture initial 中文'));
-  assert.equal(await content().getByRole('button', { name: '继续日志', exact: true }).count(), 0);
-  await content().getByRole('button', { name: '关闭日志标签', exact: true }).click();
   await open('systemd 服务');
   assert.equal(await content().getByLabel('systemd 范围', { exact: true }).inputValue(), 'user');
   assert.equal(
@@ -442,7 +431,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     resources.unit,
   );
   passed.push(
-    'system panel navigation retains service and log drafts; leaving logs closes the stream and retains read output',
+    'system panel navigation retains service scope and filter; the removed standalone log category stays absent',
   );
   for (const [width, height, theme] of [
     [1440, 960, 'dark'],

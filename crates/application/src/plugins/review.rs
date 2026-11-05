@@ -63,6 +63,30 @@ impl Application {
             ToolInput::AiExecute { input } => {
                 let value = self.assistant.review_command(&input.proposal_id)?;
                 confirmation_text = value["changeConfirmation"].as_str().map(str::to_owned);
+                if let Some(steps) = value["steps"].as_array() {
+                    let targets = steps
+                        .iter()
+                        .enumerate()
+                        .map(|(index, step)| {
+                            format!(
+                                "{}. {}：{}",
+                                index + 1,
+                                step["action"].as_str().unwrap_or("操作"),
+                                step["target"].as_str().unwrap_or("")
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return Ok(Some(ToolReview {
+                        title: "确认 AI 运维计划".into(),
+                        message: format!(
+                            "主机：{}\n\n{}\n\n执行前重新核对目标状态，执行后逐项复查。任何失败或结果未确认都会停止后续操作；不强制、不提权、不自动重试。",
+                            value["proposal"]["target"].as_str().unwrap_or(""),
+                            targets
+                        ),
+                        confirmation_text,
+                    }));
+                }
                 value
             }
             _ => return Ok(None),

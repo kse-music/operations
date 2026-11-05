@@ -1,5 +1,13 @@
 # 验证记录索引
 
+最新：[主机工作区后台回答、切页续接与关闭取消验证](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05主机工作区后台回答)。
+
+最新：[SSH 运维智能体查询、冻结计划、确认执行和逐项复查](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05ssh-运维智能体)。
+
+最新：[助手按问题采集、精确统计、上下文预算与 Windows 重建验证](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05按问题采集与上下文预算)。
+
+最新：[删除独立日志页、资源日志弹窗与容器终端弹窗验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05日志与容器终端弹窗)。
+
 最新：[三个插件布局、模型选择与宽窄窗口验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05插件布局与模型选择优化)。
 
 最新：[完整移除系统服务网络诊断及旧包迁移验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05完整移除网络诊断)。旧网络诊断验收仅为历史证据，当前版本已删除该能力。
@@ -90,7 +98,7 @@
 ## 模型与 AI 助手
 
 - [AI 运维助手验证记录](ai/VALIDATION_AI_ASSISTANT.md)
-- [助手直接对话验证](ai/VALIDATION_ASSISTANT_CHAT.md)：含 2026-11-05 删除模型栏并在插件设置持久绑定（377 项前端/20 项 Rust/12 组布局），以及发送免弹窗、全宽对话与默认完整上下文的历史验证。
+- [助手直接对话与智能体验证](ai/VALIDATION_ASSISTANT_CHAT.md)：含 SSH 查询、固定计划、宿主确认、执行复查及无标签镜像清理；保留按需上下文、模型绑定、发送免弹窗和直接对话的历史验证。
 - [助手自动关联主机验证](ai/VALIDATION_ASSISTANT_HOSTS.md)
 - [AI 运维助手布局验证](ai/VALIDATION_ASSISTANT_LAYOUT.md)
 - [模型管理验证记录](ai/VALIDATION_MODEL_MANAGEMENT.md)

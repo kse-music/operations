@@ -24,9 +24,10 @@ import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
 import { useModelBinding } from './model-binding';
 import AssistantTargets from './AssistantTargets.vue';
 import AssistantMarkdown from './AssistantMarkdown';
+import AssistantAgent from './AssistantAgent.vue';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import './assistant.css';
-const props = defineProps<{ hostId?: string }>();
+const props = defineProps<{ hostId?: string; keepRunning?: boolean }>();
 const suggestions = [
   {
     icon: Activity,
@@ -37,8 +38,8 @@ const suggestions = [
   {
     icon: Boxes,
     title: '容器排查',
-    description: '分析容器状态与启动问题',
-    question: '如何逐步排查 Docker 容器无法正常启动的问题？',
+    description: '查询状态、规划操作并复查',
+    question: '查询当前主机 Docker 镜像，为删除 tag 为 <none> 的镜像生成计划，等我确认后执行。',
   },
   {
     icon: ListTree,
@@ -49,7 +50,7 @@ const suggestions = [
 ];
 const ops = useOpsStore();
 const hosts = useHostsStore();
-const ai = useAssistant();
+const ai = useAssistant(computed(() => props.keepRunning ?? false));
 const binding = useModelBinding();
 const { models, modelId, selected, loaded, loading, error: bindingError } = binding;
 onMounted(() => {
@@ -107,9 +108,9 @@ function send() {
       question: text,
       selection: {
         server: true,
-        metrics: true,
-        processes: true,
-        docker: true,
+        metrics: false,
+        processes: false,
+        docker: false,
         log: null,
         logLines: 100,
       },
@@ -232,12 +233,23 @@ const readinessHint = computed(() => {
                 </div>
                 <template v-else-if="turn.answer"
                   ><AssistantMarkdown :content="turn.answer.text" />
+                  <AssistantAgent
+                    v-if="turn.answer.agent"
+                    :report="turn.answer.agent"
+                    :execution="outputs[turn.answer.proposals[0]?.id ?? '']?.agent"
+                  />
                   <div v-if="turn.answer.usage" class="ai-chat-usage">
                     {{ turn.answer.usage.inputTokens + turn.answer.usage.outputTokens }} Token
                   </div>
-                  <details v-if="turn.answer.proposals.length" class="ai-chat-commands">
+                  <details
+                    v-if="turn.answer.proposals.length"
+                    class="ai-chat-commands"
+                    :open="!!turn.answer.agent?.steps.length"
+                  >
                     <summary>
-                      <Terminal :size="14" aria-hidden="true" />命令建议
+                      <Terminal :size="14" aria-hidden="true" />{{
+                        turn.answer.agent?.steps.length ? '计划审批' : '命令建议'
+                      }}
                       <span>{{ turn.answer.proposals.length }} 条 · 执行需审核</span>
                     </summary>
                     <article
@@ -284,7 +296,9 @@ const readinessHint = computed(() => {
                               ? '上下文已切换，请重新提问'
                               : attempted.includes(proposal.id)
                                 ? '已提交，不自动重试'
-                                : '审核此命令'
+                                : turn.answer.agent?.steps.length
+                                  ? '审核执行计划'
+                                  : '审核此命令'
                           }}
                         </button>
                       </div>
@@ -301,7 +315,9 @@ const readinessHint = computed(() => {
                             aria-hidden="true"
                           /><AlertTriangle v-else :size="14" aria-hidden="true" />{{
                             outputs[proposal.id]!.success
-                              ? '执行成功'
+                              ? outputs[proposal.id]!.agent
+                                ? '计划已执行并完成复查'
+                                : '执行成功'
                               : '命令失败，请核对服务器状态'
                           }}
                         </p>
@@ -309,8 +325,8 @@ const readinessHint = computed(() => {
                       </div>
                     </article>
                   </details>
-                  <details v-if="turn.answer.warnings.length > 1" class="ai-chat-notes">
-                    <summary>响应提示</summary>
+                  <details v-if="turn.answer.warnings.length" class="ai-chat-notes">
+                    <summary>上下文与响应提示</summary>
                     <p v-for="warning in turn.answer.warnings" :key="warning">{{ warning }}</p>
                   </details>
                 </template>
@@ -339,12 +355,7 @@ const readinessHint = computed(() => {
           />
           <div class="ai-chat-composer-footer">
             <span>{{ readinessHint }}</span
-            ><button
-              v-if="busy === 'prepare' || busy === 'send'"
-              class="button"
-              type="button"
-              @click="ai.cancel"
-            >
+            ><button v-if="busy" class="button" type="button" @click="ai.cancel">
               <Square :size="12" aria-hidden="true" />停止</button
             ><button v-else class="button primary" type="submit" :disabled="!ready">
               <Send :size="14" aria-hidden="true" />发送
@@ -381,6 +392,9 @@ const readinessHint = computed(() => {
           审批 10 分钟内有效，仅可使用一次。连接变化后拒绝执行；失败也不自动重试或提权。
         </p>
         <div class="dialog-actions">
+          <button v-if="busy === 'execute'" class="button" type="button" @click="ai.cancel">
+            停止后续操作
+          </button>
           <button class="button" type="button" :disabled="!!busy" @click="review = null">
             取消</button
           ><button
@@ -394,7 +408,7 @@ const readinessHint = computed(() => {
             "
             @click="ai.execute(commandApproved, changeConfirmation)"
           >
-            {{ busy === 'execute' ? '执行中…' : '批准执行这一条' }}
+            {{ busy === 'execute' ? '执行并复查中…' : '批准执行这一条' }}
           </button>
         </div>
       </div></Modal

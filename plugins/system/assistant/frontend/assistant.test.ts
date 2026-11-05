@@ -1,6 +1,6 @@
 /* eslint-disable vue/one-component-per-file -- Each test mounts an isolated component. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createApp, nextTick, type App } from 'vue';
+import { createApp, nextTick, ref, type App } from 'vue';
 import { createPinia, setActivePinia, type Pinia, disposePinia } from 'pinia';
 const api = vi.hoisted(() => ({
   models: vi.fn(),
@@ -14,6 +14,8 @@ const api = vi.hoisted(() => ({
   opsOpen: vi.fn(),
   opsClose: vi.fn(),
   trust: vi.fn(),
+  begin: vi.fn(),
+  end: vi.fn(),
 }));
 vi.mock('@serverdeck/plugin-sdk/services/ai', () => ({ aiApi: api }));
 vi.mock('@serverdeck/plugin-sdk/services/plugin-server', () => ({
@@ -104,13 +106,13 @@ async function mount(hostId?: string) {
   app.mount(root);
   await settle();
 }
-function mountState() {
+function mountState(retained = false) {
   let state!: ReturnType<typeof useAssistant>;
   root = document.createElement('div');
   document.body.append(root);
   app = createApp({
     setup() {
-      state = useAssistant();
+      state = useAssistant(ref(retained));
       return () => null;
     },
   });
@@ -182,7 +184,7 @@ afterEach(() => {
   root?.remove();
   disposePinia(pinia);
 });
-it('sends with built-in full context without a configuration panel or send dialog', async () => {
+it('delegates context selection to the host without a configuration panel or send dialog', async () => {
   await mount();
   expect(root.querySelector('aside, [aria-controls="assistant-context"]')).toBeNull();
   expect(root.querySelector('input[type=checkbox]')).toBeNull();
@@ -195,9 +197,9 @@ it('sends with built-in full context without a configuration panel or send dialo
       redactValues: [],
       selection: {
         server: true,
-        metrics: true,
-        processes: true,
-        docker: true,
+        metrics: false,
+        processes: false,
+        docker: false,
         log: null,
         logLines: 100,
       },
@@ -207,6 +209,15 @@ it('sends with built-in full context without a configuration panel or send dialo
   expect(api.send).toHaveBeenCalledWith('preview-a', true);
   expect(document.querySelector('dialog')).toBeNull();
   expect(api.execute).not.toHaveBeenCalled();
+});
+it('shows preparation omissions alongside response warnings without duplicates', async () => {
+  api.prepare.mockResolvedValue({ ...preview, warnings: ['已汇总容器，省略明细', '不可信内容'] });
+  await mount();
+  await generate();
+  const notes = root.querySelector('.ai-chat-notes')!;
+  expect(notes.textContent).toContain('上下文与响应提示');
+  expect(notes.textContent).toContain('已汇总容器，省略明细');
+  expect(notes.textContent!.split('不可信内容')).toHaveLength(2);
 });
 it('retains a conversation when the SDK refreshes unchanged model metadata and clears it for a new revision', async () => {
   await mount();
@@ -421,6 +432,31 @@ it('keeps first-use SSH trust explicit and does not accept a fingerprint automat
   expect(api.trust).toHaveBeenCalledWith('session-a', true);
   expect(api.send).not.toHaveBeenCalled();
 });
+it('preserves a pending SSH lease when awaiting_trust arrives before the fingerprint event', async () => {
+  api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
+  api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
+  let receive!: (value: unknown) => void;
+  api.opsOpen.mockImplementation(async (_id: string, event: (value: unknown) => void) => {
+    receive = event;
+    event({ type: 'state', state: 'awaiting_trust', code: null, message: null });
+    return { id: 'session-a', hostId: 'a', transportId: 'transport-a', routeHostIds: [] };
+  });
+  await mount();
+  await send();
+  expect(api.opsClose).not.toHaveBeenCalled();
+  receive({
+    type: 'trust',
+    hostname: 'a.example',
+    port: 22,
+    algorithm: 'ssh-ed25519',
+    fingerprint: 'SHA256:late-fixture',
+  });
+  await settle();
+  expect(root.textContent).toContain('SHA256:late-fixture');
+  expect(button('已核对，信任此指纹').disabled).toBe(false);
+  expect(api.trust).not.toHaveBeenCalled();
+  expect(api.send).not.toHaveBeenCalled();
+});
 it('cancels a newly opened pending SSH connection and never sends a late model request', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
   api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
@@ -449,6 +485,82 @@ it('connects multiple matched targets before one combined diagnostic request', a
   expect(api.opsOpen).toHaveBeenCalledTimes(2);
   expect(api.prepare.mock.lastCall![0].sessionIds).toEqual(['session-a', 'session-b']);
   expect(api.send).toHaveBeenCalledOnce();
+});
+it('shows a frozen agent plan, submits it for trusted host approval and presents per-target verification', async () => {
+  const agentAnswer: AiAnswer = {
+    ...answer,
+    proposals: [
+      {
+        ...answer.proposals[1]!,
+        id: 'plan-a',
+        command: '执行计划：2 个操作',
+        changeConfirmation: '执行计划 12345678',
+      },
+    ],
+    agent: {
+      observations: [{ query: 'Docker 镜像', success: true, records: 3, message: null }],
+      steps: [
+        { action: '删除无标签镜像', target: 'sha256:image-a' },
+        { action: '删除无标签镜像', target: 'sha256:image-b' },
+      ],
+    },
+  };
+  api.send.mockResolvedValueOnce(agentAnswer);
+  api.execute.mockResolvedValueOnce({
+    success: false,
+    output: '计划未全部完成',
+    agent: {
+      steps: [
+        { ...agentAnswer.agent!.steps[0], status: 'verified', message: '已复查镜像不存在' },
+        { ...agentAnswer.agent!.steps[1], status: 'failed', message: '镜像被引用，未强制删除' },
+      ],
+    },
+  });
+  await mount();
+  await send();
+  expect(root.textContent).toContain('已查询 1 项主机信息');
+  expect(root.textContent).toContain('执行计划 · 2 项操作');
+  expect(root.textContent).toContain('sha256:image-a');
+  expect(api.execute).not.toHaveBeenCalled();
+  button('审核执行计划').click();
+  await settle();
+  expect(document.querySelector('.ai-command-review')).toBeNull();
+  expect(api.execute).toHaveBeenCalledExactlyOnceWith('plan-a', true, '执行计划 12345678');
+  expect(root.textContent).toContain('已复查镜像不存在');
+  expect(root.textContent).toContain('镜像被引用，未强制删除');
+  expect(root.textContent).not.toContain('计划已执行并完成复查');
+});
+it('can stop remaining plan steps while retaining the final execution report', async () => {
+  let finish!: (result: { success: boolean; output: string }) => void;
+  const state = mountState();
+  await state.send({
+    modelId: 'model-a',
+    sessionId: null,
+    question: 'cleanup',
+    selection: {
+      server: false,
+      metrics: false,
+      processes: false,
+      docker: false,
+      log: null,
+      logLines: 20,
+    },
+    maskAddresses: true,
+    redactValues: [],
+  });
+  state.inspect(answer.proposals[0]!);
+  api.execute.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const work = state.execute(true, '');
+  await settle();
+  await state.cancel();
+  expect(api.cancel).toHaveBeenCalledWith('preview-a');
+  finish({ success: false, output: '已停止；已提交的操作结果未确认' });
+  await work;
+  expect(state.outputs.value.read?.output).toContain('结果未确认');
 });
 it('shows progress and cancels analysis without another submit or a late answer', async () => {
   let resolve!: (value: AiAnswer) => void;
@@ -635,6 +747,102 @@ it('retains readable replies after hiding but expires old command handles withou
   await settle();
   expect(api.cancel).not.toHaveBeenCalledWith('old-context-preview');
   expect(state.error.value).toBe('');
+});
+it('finishes a retained host answer while hidden and keeps its plan usable after returning', async () => {
+  const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
+  updateVisibility(true);
+  let finish!: (value: AiAnswer) => void;
+  api.send.mockReturnValueOnce(
+    new Promise<AiAnswer>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const state = mountState(true);
+  const work = state.send({
+    modelId: 'model-a',
+    sessionId: null,
+    question: 'test',
+    selection: {
+      server: false,
+      metrics: false,
+      processes: false,
+      docker: false,
+      log: null,
+      logLines: 20,
+    },
+    maskAddresses: true,
+    redactValues: [],
+  });
+  await settle();
+  expect(api.begin).toHaveBeenCalledOnce();
+  updateVisibility(false);
+  await settle();
+  expect(state.turns.value[0]?.state).toBe('pending');
+  expect(api.cancel).not.toHaveBeenCalled();
+  finish(answer);
+  await work;
+  expect(state.turns.value[0]?.state).toBe('complete');
+  expect(state.expired.value).toEqual([]);
+  expect(api.end).toHaveBeenCalledOnce();
+  updateVisibility(true);
+  await settle();
+  state.inspect(answer.proposals[0]!);
+  expect(state.review.value?.id).toBe('read');
+  let executed!: (value: { success: boolean; output: string }) => void;
+  api.execute.mockReturnValueOnce(
+    new Promise((resolve) => {
+      executed = resolve;
+    }),
+  );
+  const execution = state.execute(true, '');
+  await settle();
+  updateVisibility(false);
+  await settle();
+  expect(state.busy.value).toBe('execute');
+  expect(api.cancel).not.toHaveBeenCalled();
+  executed({ success: true, output: 'verified while hidden' });
+  await execution;
+  expect(state.outputs.value.read).toEqual({ success: true, output: 'verified while hidden' });
+  expect(api.begin).toHaveBeenCalledTimes(2);
+  expect(api.end).toHaveBeenCalledTimes(2);
+  updateVisibility(true);
+});
+it('continues from a late prepare response while hidden but revokes it when the host view is disposed', async () => {
+  const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
+  updateVisibility(true);
+  let prepared!: (value: AiPreview) => void;
+  api.prepare.mockReturnValueOnce(
+    new Promise<AiPreview>((resolve) => {
+      prepared = resolve;
+    }),
+  );
+  const state = mountState(true);
+  const work = state.send({
+    modelId: 'model-a',
+    sessionId: null,
+    question: 'test',
+    selection: {
+      server: false,
+      metrics: false,
+      processes: false,
+      docker: false,
+      log: null,
+      logLines: 20,
+    },
+    maskAddresses: true,
+    redactValues: [],
+  });
+  await settle();
+  updateVisibility(false);
+  await settle();
+  prepared(preview);
+  await work;
+  expect(api.send).toHaveBeenCalledOnce();
+  expect(state.turns.value[0]?.state).toBe('complete');
+  app.unmount();
+  await settle();
+  expect(api.cancel).toHaveBeenCalledWith('preview-a');
+  updateVisibility(true);
 });
 
 it('blocks unbound, deleted and unreadable model bindings without silently choosing another model', async () => {

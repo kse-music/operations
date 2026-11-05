@@ -1,4 +1,4 @@
-import { onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 import { useAssistantApi } from '@serverdeck/plugin-sdk/services/plugin-tool-services';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
@@ -25,7 +25,7 @@ function history(turns: AiTurn[]): NonNullable<AiPrepare['history']> {
   }
   return result;
 }
-export function useAssistant() {
+export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   const aiApi = useAssistantApi();
   const visible = usePluginVisibility();
   const hostContext = useAssistantHosts();
@@ -41,12 +41,12 @@ export function useAssistant() {
     disposed = false,
     requestId = '';
   async function revoke(id: string) {
-    if (!id || !visible.value) return;
+    if (!id || (!visible.value && !keepRunning.value)) return;
     const current = version;
     try {
       await aiApi.cancel(id);
     } catch (e) {
-      if (!disposed && current === version && visible.value) error.value = errorMessage(e);
+      if (!disposed && current === version) error.value = errorMessage(e);
     }
   }
   function invalidate() {
@@ -64,8 +64,10 @@ export function useAssistant() {
     expired.value = [];
     error.value = '';
   }
-  watch(visible, (active) => {
+  watch([visible, keepRunning], ([active, retained]) => {
     if (active) return;
+    review.value = null;
+    if (retained) return;
     controller?.abort();
     ++version;
     requestId = '';
@@ -108,7 +110,13 @@ export function useAssistant() {
     }
     error.value = '';
     busy.value = 'prepare';
+    let retained = false;
     try {
+      if (keepRunning.value && aiApi.begin) {
+        await aiApi.begin();
+        retained = true;
+        if (disposed || current !== version) return;
+      }
       let targetInput = input;
       if (input.autoHosts) {
         requestId = crypto.randomUUID();
@@ -151,7 +159,10 @@ export function useAssistant() {
       // Sending consumes the frozen native request; command execution is reviewed separately.
       const answer = await aiApi.send(prepared.id, true);
       if (!disposed && current === version) {
-        entry.answer = answer;
+        entry.answer = {
+          ...answer,
+          warnings: [...new Set([...prepared.warnings, ...answer.warnings])],
+        };
         entry.state = 'complete';
       }
     } catch (e) {
@@ -160,15 +171,27 @@ export function useAssistant() {
         entry.state = 'failed';
       }
     } finally {
+      if (retained) await end();
       busy.value = '';
       requestId = '';
       hostContext.phase.value = '';
       controller = null;
     }
   }
+  async function end() {
+    try {
+      await aiApi.end?.();
+    } catch (cause) {
+      if (!disposed) error.value = errorMessage(cause);
+    }
+  }
   async function cancel() {
     controller?.abort();
     const id = requestId;
+    if (busy.value === 'execute') {
+      await revoke(id);
+      return;
+    }
     version++;
     requestId = '';
     const turn = turns.value.find((t) => t.state === 'pending');
@@ -184,10 +207,27 @@ export function useAssistant() {
       proposal.risk === 'manual_only'
     )
       return;
+    if (
+      turns.value.some(
+        (turn) =>
+          turn.answer?.agent?.steps.length &&
+          turn.answer.proposals.some((p) => p.id === proposal.id),
+      )
+    ) {
+      void executeProposal(proposal, true, proposal.changeConfirmation ?? '');
+      return;
+    }
     review.value = proposal;
   }
   async function execute(confirmed: boolean, changeConfirmation: string) {
     const proposal = review.value;
+    if (proposal) await executeProposal(proposal, confirmed, changeConfirmation);
+  }
+  async function executeProposal(
+    proposal: AiProposal,
+    confirmed: boolean,
+    changeConfirmation: string,
+  ) {
     if (
       !proposal ||
       expired.value.includes(proposal.id) ||
@@ -199,8 +239,17 @@ export function useAssistant() {
     const current = version;
     attempted.value.push(proposal.id);
     busy.value = 'execute';
+    requestId =
+      turns.value.find((turn) => turn.answer?.proposals.some((p) => p.id === proposal.id))
+        ?.requestId ?? '';
     error.value = '';
+    let retained = false;
     try {
+      if (keepRunning.value && aiApi.begin) {
+        await aiApi.begin();
+        retained = true;
+        if (disposed || current !== version) return;
+      }
       const result = await aiApi.execute(
         proposal.id,
         true,
@@ -210,8 +259,10 @@ export function useAssistant() {
     } catch (e) {
       if (current === version) error.value = errorMessage(e);
     } finally {
+      if (retained) await end();
       if (current === version) review.value = null;
       busy.value = '';
+      requestId = '';
     }
   }
   onBeforeUnmount(() => {

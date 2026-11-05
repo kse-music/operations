@@ -15,6 +15,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn requires_confirmation(
+    source: &serverdeck_plugin_core::repository::PluginSource,
+    plugin_id: &str,
+    operation: &Capability,
+) -> bool {
+    operation.needs_confirmation()
+        && !(matches!(operation, Capability::ContainerShell { .. })
+            && *source == serverdeck_plugin_core::repository::PluginSource::System
+            && plugin_id == "cn.hiboot.plugins.docker")
+}
+
 impl Application {
     pub async fn plugin_grant(&self, id: String, input: GrantInput) -> Result<Grant, Error> {
         if self.plugin_detail(id.clone()).await?.source
@@ -212,7 +223,7 @@ impl Application {
             }
             _ => (),
         }
-        if request.operation.needs_confirmation()
+        if requires_confirmation(&plugin.source, &plugin.manifest.id, &request.operation)
             && let Some(approval) = self.plugin_confirmation(call, &plugin, &request.operation)?
         {
             return Ok(json!({"confirmationRequired":approval}));
@@ -744,5 +755,43 @@ impl std::fmt::Display for CleanupErrors {
 impl std::error::Error for CleanupErrors {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.0.first().map(|e| e as &dyn std::error::Error)
+    }
+}
+
+#[cfg(test)]
+mod confirmation_policy_tests {
+    use super::*;
+    use serverdeck_plugin_core::repository::PluginSource;
+
+    #[test]
+    fn direct_shell_is_limited_to_the_builtin_docker_identity() {
+        let shell = Capability::ContainerShell {
+            id: "a".repeat(64),
+            bash: false,
+        };
+        assert!(!requires_confirmation(
+            &PluginSource::System,
+            "cn.hiboot.plugins.docker",
+            &shell
+        ));
+        assert!(requires_confirmation(
+            &PluginSource::User,
+            "cn.hiboot.plugins.docker",
+            &shell
+        ));
+        assert!(requires_confirmation(
+            &PluginSource::System,
+            "cn.hiboot.plugins.services",
+            &shell
+        ));
+        let write = Capability::SaveFile {
+            document_id: "owned".into(),
+            content: "changed".into(),
+        };
+        assert!(requires_confirmation(
+            &PluginSource::System,
+            "cn.hiboot.plugins.docker",
+            &write
+        ));
     }
 }

@@ -1,5 +1,39 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-05：内置助手的工作区生命周期
+
+插件来源为 system 且 ID 精确匹配内置助手时，Plugins Store 维护多个页面 owner，并使用稳定的原生空上下文。AI 输入本身携带并复验实际 SSH Binding，无需随可见主机或设置页面重绑原生上下文；切换 owner 不增加 contextVersion，最后一个 owner 关闭时再释放 VM/上下文。其他插件及上传同 ID 包继续独占上下文和隐藏释放。
+
+PluginView 在所属主机工作区（或全局助手标签）仍存在时保留 iframe 与 contextReady，真实 visible:false/inert 继续生效。宿主注入 keepRunning；useAssistant 保留 pending、请求 ID、对话版本和未过期计划，不因隐藏丢弃结果。前端 begin/end 通过现有 MessageChannel 标记本页已启动的流程，不增加原生 IPC；begin 必须在可见页面，只有本页流程和工作区仍有效时才放行匹配、连接、准备、发送等必要续接和既有结果返回。后台不能启动新的 ai_execute，可信审批在展示和批准后都复验页面是否可见；已批准执行可收尾。
+
+桥为每个 iframe 跟踪自己的 AI 根请求及 AbortController。隐藏内置助手不 abort 在途请求和连接事件，卸载该页面时仅取消自有根请求并撤销排队票据，其他 owner 不受影响。每插件现有有界队列和模型单并发保持，未引入后台并行调度。模型/连接身份、授权、安装代、资源 TTL 与取消规则继续校验。助手包1.5.1，SDK/Host仍3.0，ABI/wire/权限/数据库不变。
+
+## 2026-11-05：SSH 智能体与冻结执行计划
+
+新增 ai/agent 有界编排，使用同一 OpenAI-compatible HTTP 提供者和严格 JSON query/plan/answer 协议。查询经过只读 allowlist 和现有 Request 参数校验，由 Application AgentHost 适配器执行，每次核验实际 SSH 身份。最多六轮、十二次模型申请查询，每轮三项、150秒总预算；原96 KiB wire/256 KiB 响应/单并发上限保持。模型只接收脱敏、有总数和省略标记的摘要，完整证据留在宿主选取目标，Token/费用按全部已知轮次累计。
+
+Plan 存入 Assistant 有界内存表，不向 Guest 开放可修改的执行载荷。无标签清理从完整成功 Images 证据选取、按完整 ID 去重并排除带标签别名；容器与服务先被查询，再读取详情冻结状态。每计划最多32项、十分钟单次消费，绑定模型 ID/版本、根请求和 Binding。复用 ai_execute 票据、所有权、安装代和上下文代校验，宿主从保存清单生成易读确认。仅 system 来源且精确内置 ID 启用智能体，上传及旧原生 IPC 保留原合同。
+
+Application 顺序执行固定计划，每项核验模型/连接/取消和前置状态；100秒调度预算后停止新变更，在途操作按原 SSH 超时收尾。Operations 内部 remove_untagged_image 使用严格完整 ID、Shell 引号、固定本机 socket、远端 RepoTags 再验及 rm --no-prune，无 force；复用原变更锁/反馈及错误日志。操作后重新查询验证删除、运行状态、重启时间或启用状态；失败/未知停止后续项，返回逐项完成、失败、未知或跳过，执行结果只在本地展示。
+
+模型撤销/取消/关闭会清除待执行计划并取消活动任务；执行票据 abort 关联到根 AI 请求，页面关闭或 SDK 超时会停止后续项。Answer/Execution 增加可选 agent 字段，TS 同步；复用现有 IPC/权限与包格式，无数据库迁移或依赖。AssistantAgent 展示查询/清单/复查，点击审核由可信宿主完成一次审批。助手包1.5.0，Host/SDK仍为3.0，兼容旧调用。
+
+## 2026-11-05：内置助手按需上下文与请求预算
+
+application/ai/context 按用户当前问题生成本地采集计划；模糊追问从用户历史继承最近明确领域，不读取模型回答或远端数据中的指令决定采集。复用已有类型化只读查询及临时监控采样，只执行选定来源，不开启后台监控。systemd 为 system 作用域；容器日志不猜测目标，本轮仅提供容器状态并明确缺少日志证据。上传插件和旧原生 IPC 的显式 selection 合同保持。
+
+成功查询先对完整记录统计，再限制发送字段、最多 12 条/4 KiB 明细；指标只含聚合 CPU，磁盘按使用率取前 8 项，网卡前 8 项，journal 外发片段最多 4 KiB。脱敏先于截短，避免截断凭据后漏脱敏。诊断请求不重复附带全资产目录，只携带已命中资产。
+
+ai crate 统一构造脱敏请求，并以实际 JSON wire 字节计费估算和校验 96 KiB 上限。内置入口超预算时清除可选明细并保留全部主机统计/失败，再按完整轮次省略旧历史；请求带 omitted 字段，聊天合并准备和响应阶段的提示。命令权限、SSH 身份/模型版本冻结、取消和单次快照不变，无数据库或 IPC 变更。
+
+## 2026-11-05：资源日志弹窗与容器终端弹窗
+
+删除 services/frontend/logs、旧 OpsLogPanel、工作区 logIntent 导航链和对应样式/打包依赖；系统服务使用三个分类及有界缓存。SDK ResourceView 在原列表内打开共享 ResourceLogDialog，使用原 ops_log_* → 插件桥 → SystemLog* 能力，冻结原会话/来源并在关闭、上下文变化、KeepAlive 隐藏时释放流；旧兼容渲染器同步使用该弹窗，不再提供独立文件日志页。保留有限 UTF-8 缓冲、逐流解码和渲染后 ACK，晚到结果不能遗留远程流。
+
+PluginFrame 将 Shell 事件交给宿主 ContainerTerminalDialog，复用 TerminalPane 的 xterm、输入队列、尺寸同步和关闭生命周期；standalone 状态由弹窗自身维护，不创建主机终端标签或改变插件页。终端在所属 modal 内可聚焦、使用上下文菜单和缩放，关闭时仅释放自身 PTY。旧 log 事件也由同一插件桥授权后在弹窗处理，不再跨插件导航。
+
+services Guest 仅允许 Service 日志来源并移除 SFTP 权限；docker Guest 新增 Container 日志来源及 logs.read，均拒绝其他来源。宿主仅对 System 来源且 ID 精确为 cn.hiboot.plugins.docker 的 ContainerShell 跳过二次确认，授权、完整容器 ID、连接签名、60 秒单次票据与交接复核保留；上传安装不继承例外。无新增 IPC 或数据库迁移，Host/SDK 仍为 3.0.0，两个包更新为 1.4.0。
+
 ## 2026-11-05：插件配置与功能页布局
 
 PluginPage 将自有 settings 贡献放在主区域，PluginSettings 的生命周期、权限和包信息置于辅助区域；容器宽度不足时按配置优先堆叠。移除设置根页面因后代 iframe 而撑满剩余高度的规则，为配置 surface 提供独立可用高度；模型设置内部以 flex 分配候选列表和固定操作区，长列表滚动不挤出保存按钮。权限的展示折叠不影响授权数据、表单校验和上传包默认展开。共享 SDK 资源表格调整行距、滚动上限及粘性表头；系统服务四等分导航、日志表单、Docker 摘要和 AI 快捷问题沿用既有数据及事件。无新增依赖、IPC、数据库或权限变化。系统服务/Docker 包 1.3.1，助手包 1.3.3。

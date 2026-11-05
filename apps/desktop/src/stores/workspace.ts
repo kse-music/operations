@@ -15,7 +15,6 @@ export interface WorkspaceTab {
   section?: ServerSection;
   pluginId?: string;
   contributionId?: string;
-  logIntent?: { input: import('../types/ops').LogInput; title: string; sequence: number };
 }
 export function isHostTab(tab: WorkspaceTab): boolean {
   return hostViews.has(tab.view) || (tab.view === 'extension' && !!tab.hostId);
@@ -66,7 +65,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     contributionId: string,
     target = hostId.value,
     section?: ServerSection,
-    logIntent?: WorkspaceTab['logIntent'],
   ): Promise<void> {
     const plugins = usePluginsStore();
     const installed = plugins.installed.find((p) => p.manifest.id === pluginId);
@@ -89,8 +87,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       pluginPages.value.push(page);
     }
     if (section) page.section = section;
-    if (logIntent) page.logIntent = logIntent;
-    else if (section && section !== 'logs') page.logIntent = undefined;
     const tabKey = target ? `host:${target}` : key;
     let tab = tabs.value.find((tab) => tab.key === tabKey);
     if (!tab) {
@@ -133,7 +129,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab.view = view;
       delete tab.pluginId;
       delete tab.contributionId;
-      delete tab.logIntent;
       if (section) tab.section = section;
     }
     activate(key);

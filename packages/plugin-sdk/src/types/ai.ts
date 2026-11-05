@@ -105,8 +105,22 @@ export interface AiAnswer {
   usage: { inputTokens: number; outputTokens: number } | null;
   estimatedCost: number | null;
   warnings: string[];
+  agent?: AiAgentReport;
 }
 export interface AiExecution {
   success: boolean;
   output: string;
+  agent?: { steps: AiAgentStepResult[] };
+}
+export interface AiAgentStep {
+  action: string;
+  target: string;
+}
+export interface AiAgentStepResult extends AiAgentStep {
+  status: 'verified' | 'failed' | 'unverified' | 'skipped';
+  message: string;
+}
+export interface AiAgentReport {
+  observations: { query: string; success: boolean; records: number; message: string | null }[];
+  steps: AiAgentStep[];
 }

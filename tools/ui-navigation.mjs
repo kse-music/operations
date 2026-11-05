@@ -212,7 +212,6 @@ export async function openPluginFunction(page, name, hostId) {
   const systemPages = {
     资源监控: '资源监控',
     进程与端口: '进程与端口',
-    日志查看: '日志查看',
     'systemd 服务': 'systemd 服务',
   };
   const subpage = systemPages[name];

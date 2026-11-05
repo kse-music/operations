@@ -95,6 +95,31 @@ impl Operations {
     }
     pub async fn query(&self, id: &str, request: Request) -> Result<Response, Error> {
         let command = request.command()?;
+        self.query_command(id, request, command).await
+    }
+    /// An agent plan may only remove a still-untagged exact image; never prune parents.
+    pub async fn remove_untagged_image(&self, id: &str, image: &str) -> Result<Response, Error> {
+        image_id(image)?;
+        let image_arg = quote(image)?;
+        let command = format!(
+            "{PRELUDE}sd_tags=$(d image inspect --format '{{{{len .RepoTags}}}}' {image_arg}) || exit $?; if test \"$sd_tags\" != 0; then printf '镜像已新增标签，计划已失效，请重新查询\\n' >&2; exit 65; fi; d image rm --no-prune {image_arg}"
+        );
+        self.query_command(
+            id,
+            Request::ImageRemove {
+                id: image.into(),
+                confirmed: true,
+            },
+            command,
+        )
+        .await
+    }
+    async fn query_command(
+        &self,
+        id: &str,
+        request: Request,
+        command: String,
+    ) -> Result<Response, Error> {
         if self.stop.is_cancelled() {
             return Err(Error::ShuttingDown);
         }

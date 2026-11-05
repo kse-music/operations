@@ -1,9 +1,17 @@
 # ServerDeck v0.1 实施计划
 
+- 2026-11-05：完成内置助手按主机工作区保留在途工作，切换 SSH/SFTP、插件、设置或其他主机不再停止回答，返回显示结果与有效计划；关闭所属主机只取消本页请求和计划，全局助手随自身标签关闭。精确 system 来源、多 owner 稳定上下文、每 iframe 根请求清理和可见页面审批边界保持上传隔离与变更确认；助手包1.5.1，无原生 IPC/权限/数据库变化。前端56文件397项、Windows 原生 SSH/WebView2/WASM/隔离 Docker 五组、类型/ESLint/格式与默认调试 EXE 构建通过。Application Rust53通过、1失败、1 ignored，失败为 Windows 创建 Junction Access is denied，未弱化断言。主要文件、构件、失败修正及限制见[后台回答验证](../validation/ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05主机工作区后台回答)。未验收生产模型质量、跨平台、安装器和长期压力；当前无剩余实现依赖，本阶段结束。
+
+- 2026-11-05：内置 AI 运维升级为桌面端 SSH 智能体，支持连续只读查询、固定目标计划、一次宿主确认后执行、逐项结果复查；已能清理 tag 为 `<none>` 且无其他标签的 Docker 镜像，并支持已查询容器/systemd 操作。助手包1.5.0，单主机32项/十分钟单次计划，失败/未知停止后续，不开放任意模型 Shell。修复完整镜像列表遗漏及首次指纹事件时序；旧绑定/上传合同/权限与数据保持。前端56文件388项、Rust工作区230项（4既有 ignored）、真实 Windows WebView2/WASM/SSH/隔离 Docker 三组通过，类型/ESLint/Clippy/格式、标准包及默认 Windows 调试 EXE 构建完成，保留既有提示。主要文件、实际验证、失败修正与限制见[本阶段记录](../validation/ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05ssh-运维智能体)。未验收生产模型计划质量、其他真实变更图形流程、跨平台及安装器；当前无剩余实现依赖，本阶段结束。
+
+- 2026-11-05：完成内置助手按问题采集与汇总，修复首次 Docker 数量提问被全量上下文挤超 96 KiB 的问题。按当前领域选择已有只读来源，完整统计后限制明细；只发送命中资产，超预算保留各主机摘要/失败并明确省略明细和旧历史，聊天保留准备提示。助手包 1.3.4；Rust AI/应用 65 项通过、1 项既有 Linux SDK 忽略，前端 385 项、类型/格式/ESLint、普通 Clippy 和 Windows 调试构建通过。Clippy 严格模式受既有 OpenSSH 警告阻止；真实模型、用户主机、原生图形及跨平台/安装器未验收。主要文件、证据和规则识别限制见[本阶段验证](../validation/ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05按问题采集与上下文预算)。EXE 副本在 `.local/assistant-demand-qa/ServerDeck-preview.exe`，无当前阶段剩余依赖，本阶段结束。
+
 基线：PRD v1.0，按 §19 六阶段推进。2026-11-05 已按追加授权移除自动运维与批量运维，以下早期范围描述保留为历史；当前状态以最新条目为准。本轮按用户明确授权扩展 PRD 的 P1 主机运维能力：Docker、日志、进程、端口和 systemd 已交付；网络诊断、显式批量命令和单文件分发已交付。命令/脚本库、持久任务历史及本地计划已交付。本轮按追加授权进行产品整合、交互优化和非敏感备份恢复，不引入 DAG 或云端调度。
 表中“验收”为完成标准。既有记录保留于 [VALIDATION.md](../validation/foundation/VALIDATION.md)、[VALIDATION_STAGE2.md](../validation/foundation/VALIDATION_STAGE2.md)；SSH 基础见 [VALIDATION_STAGE3.md](../validation/terminal/VALIDATION_STAGE3.md)，SSH 增强阶段见 [VALIDATION_SSH_USABILITY.md](../validation/terminal/VALIDATION_SSH_USABILITY.md)，SFTP 阶段见 [VALIDATION_STAGE4.md](../validation/files/VALIDATION_STAGE4.md)，监控阶段见 [VALIDATION_STAGE5.md](../validation/monitoring/VALIDATION_STAGE5.md)，当前主机运维见 [VALIDATION_OPERATIONS.md](../validation/operations/VALIDATION_OPERATIONS.md)，网络与批量见 [VALIDATION_NETWORK_BATCH.md](../validation/operations/VALIDATION_NETWORK_BATCH.md)，本地自动化见 [VALIDATION_AUTOMATION.md](../validation/operations/VALIDATION_AUTOMATION.md)。
 
 ## 当前状态
+
+- 2026-11-05：按追加要求删除系统服务独立日志页及源码/样式/导航/SFTP 权限，只保留资源、进程端口、systemd 三分类。服务与容器日志就地弹窗，内置 Docker Shell 直接进入弹窗终端并聚焦输入，关闭及上下文变化释放自有日志/PTY；上传同 ID 插件仍需宿主批准，其他危险操作继续确认。services/docker 1.4.0、assistant 1.3.3；前端 384 项、Rust/Guest 23 项（另 1 既有 ignored）、104 个 UI 布局、类型/静态/格式、标准包与 Windows 调试 EXE 构建通过，交付副本 `.local/plugin-dialogs-qa/ServerDeck-preview.exe` 已校验。主要文件、过程失败与复验见[本阶段记录](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-05日志与容器终端弹窗)。真实远端全链路、新 EXE 完整原生图形流程、跨平台和安装器未验收；当前阶段完成，无剩余实现依赖，发布验收依赖相应环境。
 
 - 2026-11-05：三个内置插件与公共设置页完成布局优化：配置优先、管理辅助列、内置权限折叠；AI 模型改为分层单选列表并保留明确保存，100 个候选时保存区不被挤出；统一系统服务导航/监控/日志表单、Docker 摘要/资源表格及 AI 短窗口排版。services/docker 1.3.1、assistant 1.3.3；前端 55 文件 378 项、原生应用层升级 5 项、88 个页面布局、类型/ESLint/生产前端与插件包构建检查通过。用户正常退出旧程序后 Windows 调试版重建通过，交付副本 `.local/plugin-layout-qa/ServerDeck-preview.exe` 与构建输出 SHA-256 一致。验证和限制见[本阶段记录](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-05插件布局与模型选择优化)。新 EXE 完整原生图形流程、正式模型/生产主机、第三方私有 UI、跨平台及安装器未验收；原生构建阻塞已解除，本阶段完成，无后续功能阶段依赖。
 

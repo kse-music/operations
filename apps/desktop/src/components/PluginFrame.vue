@@ -15,6 +15,11 @@ import type { PluginUiPage } from '../types/plugins';
 import type { ServerSection } from '../types/server';
 import type { LogInput, ContainerShell } from '../types/ops';
 import type { Host } from '../types/hosts';
+import type { LogEvent, LogSession } from '../types/ops';
+import { opsApi } from '../services/ops';
+import { clipboardApi } from '../services/clipboard';
+import ResourceLogDialog from '@serverdeck/plugin-sdk/ui/ResourceLogDialog.vue';
+import ContainerTerminalDialog from './ContainerTerminalDialog.vue';
 const props = withDefaults(
   defineProps<{
     pluginId: string;
@@ -22,20 +27,19 @@ const props = withDefaults(
     hostId: string;
     page: PluginUiPage;
     initialSection?: ServerSection;
-    logIntent?: { input: LogInput; title: string; sequence: number };
     active?: boolean;
     contextKey?: string;
+    retainRequests?: boolean;
   }>(),
   {
     active: true,
     contextKey: '',
+    retainRequests: false,
     initialSection: undefined,
-    logIntent: undefined,
   },
 );
 const emit = defineEmits<{
-  navigate: [section: ServerSection, intent?: { input: LogInput; title: string; sequence: number }];
-  shell: [host: Host, shell: ContainerShell];
+  navigate: [section: ServerSection];
   section: [section: ServerSection];
   retry: [];
 }>();
@@ -52,6 +56,10 @@ const application = useApplicationStore(),
   notifications = useNotificationsStore();
 const plugins = usePluginsStore(),
   workspace = useWorkspaceStore();
+const shell = ref<{ host: Host; value: ContainerShell }>();
+const log = ref<{ input: LogInput; title: string; sessionId: string }>();
+const logListeners = new Map<string, (event: LogEvent) => void>();
+const logStreams = new Map<string, string>();
 const active = computed(
   () =>
     props.active &&
@@ -80,9 +88,51 @@ const bridge = createPluginUiBridge({
   page: props.page,
   hostId: props.hostId,
   isActive: () => active.value,
-  stream: (id, event) =>
-    port?.postMessage(JSON.parse(JSON.stringify({ kind: 'stream', id, event }))),
+  canRetain: () => props.retainRequests,
+  stream: (id, event) => {
+    const listener = logListeners.get(id);
+    if (listener) listener(event as LogEvent);
+    else port?.postMessage(JSON.parse(JSON.stringify({ kind: 'stream', id, event })));
+  },
 });
+const logApi: Pick<typeof opsApi, 'logOpen' | 'logAck' | 'logPause' | 'logClose'> = {
+  async logOpen(_session, input, receive) {
+    const stream = `dialog-${crypto.randomUUID()}`;
+    logListeners.set(stream, receive);
+    try {
+      const result = (await bridge.call('ops_log_open', { input, events: stream })) as LogSession;
+      logStreams.set(result.id, stream);
+      return result;
+    } catch (cause) {
+      logListeners.delete(stream);
+      throw cause;
+    }
+  },
+  async logAck(id, sequence) {
+    await bridge.call('ops_log_ack', { id, sequence });
+  },
+  async logPause(id, paused) {
+    await bridge.call('ops_log_pause', { id, paused });
+  },
+  async logClose(id) {
+    if (active.value) await bridge.call('ops_log_close', { id });
+    const stream = logStreams.get(id);
+    if (stream) logListeners.delete(stream);
+    logStreams.delete(id);
+  },
+};
+watch(
+  [
+    active,
+    () => props.hostId,
+    () => props.revision,
+    () => ops.connections[props.hostId]?.session?.id,
+  ],
+  () => {
+    shell.value = undefined;
+    log.value = undefined;
+  },
+);
 function context() {
   if (!port || disposed) return;
   try {
@@ -99,8 +149,8 @@ function context() {
             boundHostId: props.hostId,
             initialSection: props.initialSection,
             initialTab: props.initialSection,
-            logIntent: props.logIntent,
             page: props.page,
+            keepRunning: props.retainRequests,
           },
         }),
       ),
@@ -131,18 +181,22 @@ function uiEvent(name: string, args: unknown[]) {
     emit('navigate', args[0] as ServerSection);
   else if (name === 'log') {
     const input = args[0] as LogInput;
-    if (input && typeof args[1] === 'string')
-      emit('navigate', 'logs', { input, title: args[1].slice(0, 1024), sequence: Date.now() });
+    const sessionId = ops.connections[props.hostId]?.session?.id;
+    if (input && sessionId && typeof args[1] === 'string')
+      log.value = { input, title: args[1].slice(0, 1024), sessionId };
   } else if (name === 'shell') {
     const host = hosts.catalog?.hosts.find((h) => h.id === props.hostId);
-    const shell = args[1] as ContainerShell;
-    if (host && shell && typeof shell.id === 'string' && shell.id.length <= 128)
-      emit('shell', host, {
-        id: shell.id,
-        bash: shell.bash === true,
-        confirmed: false,
-        pluginId: props.pluginId,
-      });
+    const request = args[1] as ContainerShell;
+    if (host && request && typeof request.id === 'string' && request.id.length <= 128)
+      shell.value = {
+        host,
+        value: {
+          id: request.id,
+          bash: request.bash === true,
+          confirmed: false,
+          pluginId: props.pluginId,
+        },
+      };
   }
 }
 function connect(event: MessageEvent) {
@@ -248,7 +302,6 @@ watch(
     models.models,
     application.state?.config.monitorIntervalSecs,
     props.initialSection,
-    props.logIntent,
     props.page,
   ],
   context,
@@ -301,6 +354,22 @@ onBeforeUnmount(() => {
       sandbox="allow-scripts allow-forms"
       referrerpolicy="no-referrer"
       class="plugin-frame"
+    />
+    <ContainerTerminalDialog
+      v-if="shell && active"
+      :host="shell.host"
+      :shell="shell.value"
+      @close="shell = undefined"
+    />
+    <ResourceLogDialog
+      v-if="log && active"
+      :session-id="log.sessionId"
+      :input="log.input"
+      :title="log.title"
+      :api="logApi"
+      :copy="clipboardApi.writeText"
+      :report-error="(message) => notifications.push(message, true)"
+      @close="log = undefined"
     />
   </div>
 </template>

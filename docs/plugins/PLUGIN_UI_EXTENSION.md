@@ -2,6 +2,8 @@
 
 ## 使用入口与上下文（2026-11-05）
 
+内置 system 助手采用工作区生命周期：已启动的匹配/准备/回答/查询和已批准执行在隐藏时继续，返回显示结果，关闭所属主机（全局入口为自身标签）时停止。宿主保留真实 visible:false，注入 keepRunning 并校验每页流程；只有已开始流程的必要续接可在后台进行，新执行审批仍须回到可见页面。上传及其他插件继续以下隐藏释放规则。
+
 workspace/navigation/server/host_menu/command 等主机功能从当前设备打开，宿主提供固定 hostId，插件页面不提供第二个目标主机选择器；无上下文时由宿主统一选择一次。自动运维与批量运维已移除，不再接受其 tool 枚举。assistant 可从主机或全局进入。settings 贡献继续由插件自己的 UI/WASM 提供，在设置中的插件详情下展示。
 
 功能界面按插件/贡献/主机保留，详情与管理单独归属设置。隐藏 iframe 会收到 visible:false，不应继续轮询或提交操作；Host 会拒绝非当前页面请求，撤销在途交互并使旧资源失效。恢复 visible:true 后需重新获取监控/日志等不透明资源；不得复用已失效的句柄，错误须正常呈现。已读日志与输入草稿可保留，恢复不自动执行原操作。标准系统包提供对应可见性处理。
@@ -10,7 +12,7 @@ Host API / Rust SDK / Vue SDK 当前为 3.0.0；ABI/wire 仍为 1，UI v1–v4 �
 
 ## 2.1 组合分类与缓存页面
 
-UI v4 的 operations.sections 可组合 overview/disks/network 与原运维分类，v2/v3 仍只接受其既有类别。系统服务用一个 server 贡献实现四分类，宿主根据声明定位功能，逐请求权限不改变。SDK usePluginVisibility 返回包含 KeepAlive 激活状态的响应式可见性；组件不可只依赖整个 iframe 的 visible 状态，否则隐藏分类仍会轮询。AI 的历史回答可保留，旧上下文命令引用失效后不能继续执行。
+UI v4 的 operations.sections 可组合 overview/disks/network 与原运维分类，v2/v3 仍只接受其既有类别。系统服务用一个 server 贡献实现资源、进程/端口、systemd 三分类；独立日志 renderer 已移除，旧 logs-only 兼容页面显示升级提示，不执行其他分类。服务与容器日志使用 ResourceLogDialog 就地弹窗，不使用 logIntent 或跨插件导航；通用日志协议保留。SDK usePluginVisibility 返回包含 KeepAlive 激活状态的响应式可见性，资源弹窗关闭或隐藏时释放流。Shell 事件由宿主 ContainerTerminalDialog 展示，保持原主机及插件页；其免二次确认仅适用于内置 System Docker，权限与票据复核保留。AI 的历史回答可保留，旧上下文命令引用失效后不能继续执行。
 
 ## UI v4：包内独立界面
 
