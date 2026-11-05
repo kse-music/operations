@@ -21,6 +21,24 @@ export interface Bootstrap {
   dataDirectory: string;
   logDirectory: string;
   config: AppConfig;
+  storage?: StorageInfo;
+}
+
+export interface StorageInfo {
+  rootDirectory: string;
+  databasePath: string;
+  pluginDirectory: string;
+  logDirectory: string;
+  webviewDirectory: string;
+  notice: string | null;
+}
+
+export interface StoragePreview {
+  targetDirectory: string;
+  bytes: number;
+  availableBytes: number;
+  unfinishedTasks: number;
+  dirtyDocuments: number;
 }
 
 export interface IpcError {

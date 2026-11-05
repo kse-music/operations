@@ -30,7 +30,6 @@ import {
 import type { Component } from 'vue';
 import type { InstalledPlugin, PluginManifest } from '../types/plugins';
 import docker from '../../../../plugins/system/docker/manifest.json';
-import services from '../../../../plugins/system/services/manifest.json';
 import assistant from '../../../../plugins/system/assistant/manifest.json';
 
 export const pluginIcons = new Map<string, Component>([
@@ -63,9 +62,7 @@ export const pluginIcons = new Map<string, Component>([
   ['wrench', Wrench],
 ]);
 // Old installed system records keep their original package metadata and grants.
-const bundledIcons = new Map(
-  [services, docker, assistant].map((manifest) => [manifest.id, manifest.icon]),
-);
+const bundledIcons = new Map([docker, assistant].map((manifest) => [manifest.id, manifest.icon]));
 export function pluginIcon(
   manifest: Pick<PluginManifest, 'id' | 'icon'>,
   source?: InstalledPlugin['source'],

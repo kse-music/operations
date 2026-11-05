@@ -87,9 +87,17 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     });
   };
   const list = await invoke('plugin_list');
-  assert.equal(list.length, 3);
+  assert.equal(list.length, 2);
   const archive = await readdir(path.join(run, 'plugins/retired'));
-  for (const name of ['batch', 'automation', 'resources', 'processes', 'logs', 'network']) {
+  for (const name of [
+    'batch',
+    'automation',
+    'resources',
+    'processes',
+    'logs',
+    'network',
+    'services',
+  ]) {
     const id = `cn.hiboot.plugins.${name}`;
     assert(archive.some((entry) => entry.startsWith(`${id}-removed-`)));
     assert.deepEqual(
@@ -113,6 +121,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   passed.push(
     'upgrade retires both enabled tools without deleting settings; removed IPC/activation are denied and backup omits the command library',
   );
+  const configurationRequests = {};
   for (const plugin of list) {
     const expectedPackage = JSON.parse(
       await readFile(
@@ -128,29 +137,32 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
       0,
     );
     const hasSettings = plugin.manifest.contributions.some((entry) => entry.kind === 'settings');
+    if (hasSettings) await page.locator('.plugin-frame-container:visible').waitFor();
     assert.equal(
       await page.locator('.plugin-frame-container:visible').count(),
       hasSettings ? 1 : 0,
     );
     if (hasSettings) await content().getByRole('group', { name: '使用模型' }).waitFor();
+    if (hasSettings) await poll(() => content().getByRole('radio').last().isEnabled(), Boolean);
+    if (hasSettings) await poll(counts, (value) => (value[plugin.manifest.id] ?? 0) > 0);
+    Object.assign(configurationRequests, await counts());
+    const activeIds = (statuses) =>
+      statuses?.filter((status) => status.state === 'active').map((status) => status.id);
+    const expectedActive = hasSettings ? [plugin.manifest.id] : [];
+    await poll(
+      runtimeStatuses,
+      (statuses) => JSON.stringify(activeIds(statuses)) === JSON.stringify(expectedActive),
+    );
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').innerText(),
       '设置',
     );
   }
-  const configurationRequests = await counts();
   assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) > 0);
   assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) <= 4);
-  assert.equal(configurationRequests['cn.hiboot.plugins.services'] ?? 0, 0);
   assert.equal(configurationRequests['cn.hiboot.plugins.docker'] ?? 0, 0);
-  assert.deepEqual(
-    (await poll(runtimeStatuses, Boolean))
-      .filter((status) => status.state === 'active')
-      .map((status) => status.id),
-    ['cn.hiboot.plugins.assistant'],
-  );
   passed.push(
-    'all three plugins open configuration under Settings without host selection or connections; only the assistant settings surface activates its own guest to read model binding',
+    'both plugins open configuration under Settings without host selection or connections; only the assistant settings surface activates its own guest to read model binding',
   );
 
   const credential = (
@@ -220,10 +232,20 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   const open = async (name, host = hosts[0]) => {
     await openPluginFunction(page, name, host.id);
     await content().locator('#app > *').waitFor();
-    await poll(
-      runtimeStatuses,
-      (statuses) => statuses?.filter((status) => status.state === 'active').length === 1,
-    );
+    await poll(runtimeStatuses, (statuses) => {
+      if (!statuses) return false;
+      const active = statuses
+        .filter((status) => status.state === 'active')
+        .map((status) => status.id);
+      const expected = list.find((plugin) => plugin.manifest.name === name)?.manifest.id;
+      // The builtin assistant can remain active for its open workspace.
+      return (
+        active.includes(expected) &&
+        active.length <= 2 &&
+        new Set(active).size === active.length &&
+        active.every((id) => list.some((plugin) => plugin.manifest.id === id))
+      );
+    });
     assert.equal(await page.getByLabel('插件目标主机', { exact: true }).count(), 0);
     await noBusy();
     await dismissNotifications();
@@ -239,14 +261,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     await dialog.getByRole('button', { name: '取消', exact: true }).click();
   };
   const resources = fixture.resources;
-  await open('资源监控');
-  await content().getByTestId('monitor-cpu').waitFor();
-  assert(!/不可用/.test(await content().getByTestId('monitor-cpu').innerText()));
-  await content().getByRole('tab', { name: '磁盘', exact: true }).click();
-  await content().getByRole('tab', { name: '网络', exact: true }).click();
-  await stable('cn.hiboot.plugins.services');
-  passed.push('resources: real Linux SSH CPU sample, disk/network tabs and bounded polling');
-
   await open('Docker 管理');
   const dockerFilter = content().getByLabel('运维项目搜索', { exact: true });
   await dockerFilter.fill(`serverdeck-e2e-${fixture.uuid}`);
@@ -270,62 +284,32 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     'docker: real owned container list/details, cancelled stop, refresh and stable filter without request feedback',
   );
 
-  await open('进程与端口');
-  const processFilter = content().getByLabel('运维项目搜索', { exact: true });
-  await processFilter.fill(String(resources.sleepPid));
-  const processRow = content()
-    .getByRole('row')
-    .filter({
-      has: content().getByRole('cell', { name: String(resources.sleepPid), exact: true }),
-    });
-  await processRow.waitFor();
-  await processRow.getByRole('button', { name: '进程详情 / 信号', exact: true }).click();
-  const processDetails = content().getByRole('dialog', { name: '进程详情', exact: true });
-  await processDetails.getByText(`PID ${resources.sleepPid}`, { exact: true }).waitFor();
-  await processDetails.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await content().getByRole('tab', { name: '监听端口', exact: true }).click();
-  await content().getByLabel('运维项目搜索', { exact: true }).fill(String(resources.tcpPort));
+  await containerRow.getByRole('button', { name: '日志', exact: true }).click();
   await content()
-    .getByRole('row')
-    .filter({ hasText: String(resources.tcpPort) })
+    .getByTestId('operations-log-output')
+    .filter({ hasText: `__SD_DOCKER_${fixture.uuid}__` })
     .waitFor();
-  await stable('cn.hiboot.plugins.services', 2);
-  passed.push('processes: real owned PID details and listening TCP port, bounded list requests');
-
-  await open('systemd 服务');
-  await content().getByLabel('systemd 范围', { exact: true }).selectOption('user');
-  await content().getByLabel('运维项目搜索', { exact: true }).fill(resources.unit);
-  const serviceRow = content().getByRole('row').filter({ hasText: resources.unit });
-  await serviceRow.waitFor();
-  assert((await serviceRow.innerText()).includes('active'));
-  await serviceRow.getByRole('button', { name: '详情', exact: true }).click();
-  const serviceDetails = content().getByRole('dialog', { name: '服务详情', exact: true });
-  await serviceDetails.getByText(resources.unit, { exact: false }).first().waitFor();
-  await serviceDetails.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await cancelMutation(serviceRow, '停止', resources.unit);
-  await stable('cn.hiboot.plugins.services', 2);
-  passed.push(
-    'systemd: real owned active user unit, details and cancelled mutation without changing other services',
-  );
-
-  await serviceRow.getByRole('button', { name: '服务日志', exact: true }).click();
-  await content()
-    .getByRole('dialog', { name: `${resources.unit} · 日志`, exact: true })
-    .waitFor();
-  await content().getByRole('status').filter({ hasText: '实时跟踪' }).waitFor();
   await content().getByRole('button', { name: '暂停日志', exact: true }).click();
   await content().getByRole('button', { name: '继续日志', exact: true }).waitFor();
   await content().getByRole('button', { name: '继续日志', exact: true }).click();
-  await stable('cn.hiboot.plugins.services', 40);
   await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
-  assert.equal(await content().getByRole('tab', { name: '日志查看', exact: true }).count(), 0);
-  assert.equal(await content().getByLabel('远程日志绝对路径', { exact: true }).count(), 0);
+  await containerRow.getByRole('button', { name: 'Shell', exact: true }).click();
+  const shell = page.locator('.container-terminal-dialog .xterm-helper-textarea');
+  await page.locator('.container-terminal-dialog .terminal-pane[data-state="connected"]').waitFor();
+  assert(await shell.evaluate((element) => element === document.activeElement));
+  await shell.pressSequentially('printf "__SD_COMPONENT_%s__" SHELL');
+  await shell.press('Enter');
+  await page
+    .locator('.container-terminal-dialog .xterm-rows')
+    .filter({ hasText: '__SD_COMPONENT_SHELL__' })
+    .waitFor();
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(await page.locator('.container-terminal-dialog').count(), 0);
   passed.push(
-    'service journal dialog: real user-scope source, pause/resume/close without a standalone file-log page',
+    'docker: real journal-free container log pause/resume/close and independent container PTY with input focus',
   );
 
-  await open('资源监控', hosts[1]);
-  await content().getByTestId('monitor-cpu').waitFor();
+  await open('Docker 管理', hosts[1]);
   await open('Docker 管理', hosts[0]);
   assert.equal(
     await content().getByLabel('运维项目搜索', { exact: true }).inputValue(),
@@ -424,15 +408,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     .getByRole('row')
     .filter({ hasText: `serverdeck-e2e-${fixture.uuid}` })
     .waitFor();
-  await open('systemd 服务');
-  assert.equal(await content().getByLabel('systemd 范围', { exact: true }).inputValue(), 'user');
-  assert.equal(
-    await content().getByLabel('运维项目搜索', { exact: true }).inputValue(),
-    resources.unit,
-  );
-  passed.push(
-    'system panel navigation retains service scope and filter; the removed standalone log category stays absent',
-  );
   for (const [width, height, theme] of [
     [1440, 960, 'dark'],
     [1440, 960, 'light'],
@@ -444,31 +419,16 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
     if (width < 1000 && (await collapse.isVisible())) await collapse.click();
     for (const [name, label] of [
-      ['资源监控', 'system'],
       ['Docker 管理', 'docker'],
       ['AI 运维助手', 'assistant'],
     ]) {
       await open(name);
-      if (label === 'system') {
-        await content().getByRole('tab', { name: '资源概览', exact: true }).click();
-        await poll(
-          () =>
-            content()
-              .getByTestId('monitor-cpu')
-              .textContent()
-              .catch(() => ''),
-          (value) => /[0-9]+(?:\.[0-9]+)?%/.test(value || ''),
-        );
-      }
       if (label === 'assistant') {
         assert.equal(
           await content().locator('.ai-chat-error').count(),
           0,
           'stale AI cancellation error after context replacement',
         );
-        const toggle = content().getByRole('button', { name: /^上下文/ });
-        if (width < 1000 && (await toggle.getAttribute('aria-expanded')) === 'true')
-          await toggle.click();
         const composer = await content().locator('.ai-chat-composer').boundingBox();
         assert(
           composer && composer.height > 70 && composer.y + composer.height <= height + 2,
@@ -510,13 +470,17 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   await page.setViewportSize({ width: 1440, height: 960 });
   await page.evaluate(() => (document.documentElement.dataset.theme = 'dark'));
   passed.push(
-    'three redesigned plugin workspaces fit dark/light desktop, compact and narrow layouts without horizontal body overflow; chat composer stays visible',
+    'both plugin workspaces fit dark/light desktop, compact and narrow layouts without horizontal body overflow; chat composer stays visible',
   );
   const statuses = await poll(runtimeStatuses, Boolean);
-  assert.equal(statuses.length, 3);
-  assert.equal(statuses.filter((status) => status.state === 'active').length, 1);
+  assert.deepEqual(
+    statuses.map((status) => status.id).sort(),
+    list.map((plugin) => plugin.manifest.id).sort(),
+  );
+  const activeStatuses = statuses.filter((status) => status.state === 'active');
+  assert(activeStatuses.length >= 1 && activeStatuses.length <= 2);
   passed.push(
-    'all three runtimes visited with only one active guest; cached Docker draft and real refresh survive reactivation',
+    'both runtimes visited within the two installed guests; retained assistant workspace remains allowed; cached Docker draft and real refresh survive reactivation',
   );
   await selectHostWorkspace(page, hosts[0].id);
   await page

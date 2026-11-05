@@ -45,7 +45,6 @@ import {
   type WorkspaceView as View,
 } from './types/product';
 import { isHostTab, type WorkspaceCloseScope, type WorkspaceTab } from './stores/workspace';
-import { isMonitorSection } from './types/server';
 import { serverPluginFor } from './services/server-plugins';
 import GlobalSearch from './components/GlobalSearch.vue';
 import { usePluginsStore } from './stores/plugins';
@@ -83,9 +82,7 @@ const currentHost = computed(() => {
         : module === 'files'
           ? 'files'
           : module === 'server'
-            ? isMonitorSection(workspace.current?.section ?? 'overview')
-              ? 'monitor'
-              : 'operations'
+            ? 'operations'
             : module === 'extension'
               ? 'operations'
               : '';

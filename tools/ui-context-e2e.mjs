@@ -79,7 +79,7 @@ try {
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
     await assertHost('a', 'terminals');
     const existingTabs = await page.locator('.workspace-tab').count();
-    for (const module of ['assets', 'system']) {
+    for (const module of ['assets', 'plugins', 'system']) {
       await page.locator(`.module-navigation [data-module="${module}"]`).click();
       assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
       await assertHost('a', 'terminals');
@@ -115,7 +115,7 @@ try {
       (await page.locator('.workspace-header .host-tools button').allTextContents()).map((text) =>
         text.trim(),
       ),
-      ['SSH 终端', 'SFTP 文件', '服务器管理'],
+      ['SSH 终端', 'SFTP 文件'],
     );
     assert.equal(await page.locator('.terminal-tab').count(), 1);
     assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
@@ -248,7 +248,7 @@ try {
     await nav('关于');
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['通用', '终端', '快捷键', '工作区与连接', '插件管理', '关于'],
+      ['通用', '终端', '快捷键', '数据与存储', '关于'],
     );
     await page.locator('.module-navigation [data-module="assets"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'about');
@@ -258,7 +258,12 @@ try {
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();
-    assert.equal(await page.locator('.module-navigation button').count(), 5);
+    assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
+      '主机运维',
+      '资产管理',
+      '插件',
+      '设置',
+    ]);
     assert.equal(await page.locator('.workspace-header .host-tools').count(), 1);
     assert.deepEqual(errors, []);
     results.push({ name, width, height, theme, compactHeader, passed: true });

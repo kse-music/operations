@@ -108,7 +108,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         (entry) => entry.kind === 'tool' && entry.tool === view,
       );
       if (!entry) {
-        plugins.error = '此运维工具未安装、未启用或未授权，请在设置中的插件管理检查。';
+        plugins.error = '此运维工具未安装、未启用或未授权，请在“插件 → 插件管理”中检查。';
         return;
       }
       void openPlugin(entry.pluginId, entry.id, '').catch((cause) => {

@@ -7,9 +7,82 @@ fn app() -> (tempfile::TempDir, Application) {
     (dir, app)
 }
 #[tokio::test]
+async fn image_removal_review_uses_the_frozen_native_target_and_remains_single_use() {
+    let (_dir, app) = app();
+    let id = "cn.hiboot.plugins.docker";
+    app.plugin_host
+        .resume(
+            id,
+            Some((
+                ContextInput {
+                    host_id: "review-host".into(),
+                    ops_session: None,
+                    file_session: None,
+                },
+                "profile".into(),
+            )),
+        )
+        .unwrap();
+    let plugin = app.plugins.detail(id).unwrap();
+    let call = app.plugin_host.start(id).unwrap();
+    let target = format!("sha256:{}", "a".repeat(64));
+    let operation = Capability::SystemQuery {
+        request: serverdeck_plugin_sdk::server::Query::ImageRemove { id: target.clone() },
+    };
+    let review = app
+        .plugin_confirmation(&call, &plugin, &operation)
+        .unwrap()
+        .unwrap();
+    assert_eq!(review.image_id.as_deref(), Some(target.as_str()));
+    assert_eq!(review.host_id, "review-host");
+    assert_eq!(serde_json::to_value(&review).unwrap()["imageId"], target);
+    app.plugin_approve(&review.id, true).unwrap();
+    let other = Capability::SystemQuery {
+        request: serverdeck_plugin_sdk::server::Query::ImageRemove { id: "b".repeat(64) },
+    };
+    let different = app
+        .plugin_confirmation(&call, &plugin, &other)
+        .unwrap()
+        .unwrap();
+    assert_ne!(different.id, review.id);
+    assert!(
+        app.plugin_confirmation(&call, &plugin, &operation)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        app.plugin_confirmation(&call, &plugin, &operation)
+            .unwrap()
+            .is_some()
+    );
+    app.plugin_approve(&different.id, false).unwrap();
+    let after_cancel = app
+        .plugin_confirmation(&call, &plugin, &other)
+        .unwrap()
+        .unwrap();
+    assert_ne!(after_cancel.id, different.id);
+    let non_image = Capability::Execute {
+        command: "printf review_only".into(),
+        timeout_secs: 5,
+    };
+    let generic = app
+        .plugin_confirmation(&call, &plugin, &non_image)
+        .unwrap()
+        .unwrap();
+    assert!(generic.image_id.is_none());
+    assert!(
+        serde_json::to_value(&generic)
+            .unwrap()
+            .get("imageId")
+            .is_none()
+    );
+    drop(call);
+    app.shutdown().await;
+}
+#[tokio::test]
 async fn chunk_resources_are_bounded_owned_expiring_and_released_on_stop() {
     let (_dir, app) = app();
-    let id = "cn.hiboot.plugins.services";
+    let id = "cn.hiboot.plugins.docker";
     let plugin = app.plugins.detail(id).unwrap();
     let grant = Grant::new(
         &plugin,

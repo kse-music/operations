@@ -1,5 +1,5 @@
 # Test-only Linux fixture. Never imported by the product or installed remotely.
-import base64,json,os,pathlib,shutil,signal,socket,subprocess,sys,tempfile,time
+import base64,json,os,pathlib,signal,subprocess,tempfile
 
 def run(args,check=True):
     p=subprocess.run(args,capture_output=True,text=True,timeout=25)
@@ -21,33 +21,6 @@ def owned(data):
 def create(data):
     uid=data['uuid'];assert len(uid)==36 and all(c in '0123456789abcdef-' for c in uid)
     root=pathlib.Path(tempfile.mkdtemp(prefix='serverdeck-ops-e2e-'+uid+'-'));data['root']=str(root)
-    data['unit']='serverdeck-e2e-'+uid+'.service'
-    data['log']=str(root/"日志 ' ;$ 文件.log");pathlib.Path(data['log']).write_text('fixture initial 中文\nline two\n',encoding='utf8')
-    (root/'unit-lease').touch()
-    unitdir=pathlib.Path(os.environ.get('XDG_CONFIG_HOME',str(pathlib.Path.home()/'.config')))/'systemd/user'
-    unitdir.mkdir(parents=True,exist_ok=True)
-    data['unitPath']=str(unitdir/data['unit'])
-    (root/'scope.json').write_text(json.dumps(data))
-    unittext='''# serverdeck-owned %s
-[Unit]
-Description=ServerDeck isolated test
-ConditionPathExists=%s/unit-lease
-[Service]
-Type=simple
-RuntimeMaxSec=300
-ExecStart=/bin/sh -c 'echo __SD_SERVICE_%s__; exec /usr/bin/sleep 600'
-[Install]
-WantedBy=default.target
-'''%(uid,root,uid)
-    with open(data['unitPath'],'x') as f:f.write(unittext)
-    run(['systemctl','--user','--no-ask-password','daemon-reload'])
-    sleeper=subprocess.Popen(['sleep','600'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-    data['sleepPid']=sleeper.pid;data['sleepStart']=start(sleeper.pid)
-    program="import socket,time,json; t=socket.socket(); t.bind(('127.0.0.1',0)); t.listen(8); u=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); u.bind(('127.0.0.1',0)); print(json.dumps([t.getsockname()[1],u.getsockname()[1]]),flush=True); time.sleep(600)"
-    listener=subprocess.Popen([sys.executable,'-u','-c',program],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,start_new_session=True)
-    data['tcpPort'],data['udpPort']=json.loads(listener.stdout.readline());listener.stdout.close()
-    data['portPid']=listener.pid;data['portStart']=start(listener.pid)
-    # Persist only ownership metadata, so an interrupted test can be recovered safely.
     (root/'scope.json').write_text(json.dumps(data))
     images=[json.loads(l) for l in docker('image','ls','--no-trunc','--format','{{json .}}').stdout.splitlines() if l]
     images.sort(key=lambda v:0 if v.get('Repository','').split('/')[-1] in ('busybox','alpine') else 1)
@@ -93,56 +66,35 @@ def cleanup(data):
         if pid and start(pid)==expected:
             try:os.kill(pid,signal.SIGTERM)
             except ProcessLookupError:pass
-    unit=data['unit'];assert unit=='serverdeck-e2e-'+uid+'.service'
-    run(['systemctl','--user','--no-ask-password','stop',unit],False);run(['systemctl','--user','--no-ask-password','disable',unit],False)
-    path=pathlib.Path(data['unitPath'])
-    if path.exists():
-        assert path.name==unit and ('# serverdeck-owned '+uid) in path.read_text();path.unlink()
-    run(['systemctl','--user','--no-ask-password','daemon-reload'])
+    # Compatibility cleanup for explicitly recovered older fixture scopes.
+    if data.get('unit'):
+        unit=data['unit'];assert unit=='serverdeck-e2e-'+uid+'.service'
+        run(['systemctl','--user','--no-ask-password','stop',unit],False);run(['systemctl','--user','--no-ask-password','disable',unit],False)
+        path=pathlib.Path(data['unitPath'])
+        if path.exists():
+            assert path.name==unit and ('# serverdeck-owned '+uid) in path.read_text();path.unlink()
+        run(['systemctl','--user','--no-ask-password','daemon-reload'])
     if root.exists():
         for path in root.iterdir():
-            if path.name not in ('scope.json','unit-lease',pathlib.Path(data['log']).name):raise RuntimeError('Unexpected fixture file; retained for review')
+            if path.name not in ('scope.json','unit-lease',pathlib.Path(data.get('log','')).name):raise RuntimeError('Unexpected fixture file; retained for review')
             assert not path.is_symlink();path.unlink()
         root.rmdir()
     return {'cleaned':True,'directoryAlreadyAbsent':directory_absent}
 
 def status(data):
-    owned(data);pid=data['sleepPid'];state=None
-    try:
-        raw=pathlib.Path('/proc/%d/stat'%pid).read_text();state=raw[raw.rfind(')')+2:].split()[0]
-    except FileNotFoundError:pass
+    owned(data)
     streams=[]
     for path in pathlib.Path('/proc').iterdir():
         if not path.name.isdigit():continue
         try:
             cmd=(path/'cmdline').read_bytes().split(b'\0');name=(path/'comm').read_text().strip()
-            if (name=='tail' and data['log'].encode() in cmd) or (name=='docker' and b'logs' in cmd and data['container'].encode() in cmd):streams.append(int(path.name))
+            if (name=='docker' and b'logs' in cmd and data['container'].encode() in cmd):streams.append(int(path.name))
         except (PermissionError,FileNotFoundError,ProcessLookupError):pass
-    kill_state=None
-    if data.get('killPid'):
-        try:
-            raw=pathlib.Path('/proc/%d/stat'%data['killPid']).read_text();kill_state=raw[raw.rfind(')')+2:].split()[0]
-        except FileNotFoundError:pass
-    return {'sleepState':state,'killState':kill_state,'streamProcesses':streams}
+    return {'streamProcesses':streams}
 
 try:
     if mode=='create':result=create(data)
     elif mode=='cleanup':result=cleanup(data)
-    elif mode=='schedule_append':
-        root=owned(data);data=json.loads((root/'scope.json').read_text())
-        program="import sys,time; time.sleep(5); f=open(sys.argv[1],'a',encoding='utf8'); f.write('__SD_FILE_LIVE_'+sys.argv[2]+'__ 中文\\n'); f.close()"
-        child=subprocess.Popen([sys.executable,'-c',program,data['log'],data['uuid']],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-        data['appendPid']=child.pid;data['appendStart']=start(child.pid);(root/'scope.json').write_text(json.dumps(data));result={'scheduled':True}
-    elif mode=='spawn_kill':
-        root=owned(data);data=json.loads((root/'scope.json').read_text())
-        child=subprocess.Popen(['sleep','600'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-        data['killPid']=child.pid;data['killStart']=start(child.pid);(root/'scope.json').write_text(json.dumps(data));result=data
-    elif mode in ('deny_log','restore_log'):
-        owned(data);os.chmod(data['log'],0 if mode=='deny_log' else 0o600);result={'changed':True}
-    elif mode=='append':
-        owned(data)
-        with open(data['log'],'a',encoding='utf8') as f:f.write('__SD_FILE_APPEND_'+data['uuid']+'__ 中文\n')
-        result={'appended':True}
     elif mode=='status':result=status(data)
     else:raise ValueError('unknown fixture mode')
 except Exception as exc:

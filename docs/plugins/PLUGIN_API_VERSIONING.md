@@ -1,5 +1,15 @@
 # 插件 API 版本策略
 
+## 4.0.0 兼容补充：镜像删除确认
+
+Docker 标准包更新至 1.5.1，镜像删除只保留一次宿主批准。宿主 Approval 响应可选增加 imageId，来自冻结的原生镜像删除请求；旧响应无此字段时保留通用宿主审批。无新增权限、IPC 命令或必填字段，Host/Rust/Vue SDK 仍为 4.0.0，包声明 ^4.0.0，ABI/wire/包格式保持。助手包仍为 1.6.0。
+
+## 4.0.0：移除系统服务标准界面
+
+Host API、Rust SDK 和 Vue SDK 升至 4.0.0。删除 Monitor surface，以及 operations 中 overview/disks/network/processes/ports/services/logs 分类，operations 仅接受 containers/images；删除旧视图注入适配。公开 metrics、系统查询/受控操作与日志能力继续供独立前端和 AI 使用。Docker 1.5.0、助手 1.6.0 声明 ^4.0.0，ABI/wire/包格式仍为 1。
+
+不再分发 services，并拒绝当前及旧域名 services 身份重新安装。已安装旧身份或声明被删标准视图的包归档退役，原包、配置和授权保留；只有 backup 不兼容时保留 current，归档原记录和独立包并清除 backup/previousVersion。新安装被删视图时明确提示升级为独立界面。仅使用保留合同的 ^1.x/^2.x/^3.x 包继续兼容。以下为历史版本。
+
 ## 3.0.0：移除网络诊断
 
 Host API、Rust SDK 和 Vue SDK 升至 3.0.0，三个系统包升至 1.3.0。删除 network.run、tools::Tool::Network、DiagnosticStart/List/Cancel、网络诊断 UI 分类/兼容页面以及原生 diagnostic_* IPC；前端不再导出 services/tasks、types/tasks 或 PluginToolIntent。通用导出使用 services/download；AI、SSH/SFTP、监控网络流量与端口能力保留，ABI/wire/包格式仍为 1。未使用移除契约的 ^1.x/^2.x 包继续使用。

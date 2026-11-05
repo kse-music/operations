@@ -19,7 +19,7 @@ export const messages = {
     settings: '通用',
     settingsTerminal: '终端',
     settingsShortcuts: '快捷键',
-    settingsWorkspace: '工作区与连接',
+    settingsStorage: '数据与存储',
     terminals: 'SSH 终端',
     files: 'SFTP 文件',
     server: '服务器管理',
@@ -36,7 +36,7 @@ export const settingsCategories = [
   { id: 'general', view: 'settings', label: messages['zh-CN'].settings },
   { id: 'terminal', view: 'settingsTerminal', label: messages['zh-CN'].settingsTerminal },
   { id: 'shortcuts', view: 'settingsShortcuts', label: messages['zh-CN'].settingsShortcuts },
-  { id: 'workspace', view: 'settingsWorkspace', label: messages['zh-CN'].settingsWorkspace },
+  { id: 'storage', view: 'settingsStorage', label: messages['zh-CN'].settingsStorage },
 ] as const;
 export type SettingsCategory = (typeof settingsCategories)[number]['id'];
 export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'server']);

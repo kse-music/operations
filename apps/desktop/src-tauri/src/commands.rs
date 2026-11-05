@@ -129,9 +129,14 @@ use serverdeck_core::{hosts::*, openssh::ImportPreview};
 
 #[tauri::command]
 pub async fn app_bootstrap(
+    app: tauri::AppHandle<impl tauri::Runtime>,
     application: tauri::State<'_, Application>,
 ) -> Result<Bootstrap, IpcError> {
-    let result = application.bootstrap().await.map_err(IpcError::from)?;
+    use tauri::Manager;
+    let mut result = application.bootstrap().await.map_err(IpcError::from)?;
+    if let Some(storage) = app.try_state::<crate::storage_commands::StorageState>() {
+        result.storage = Some(storage.info()?);
+    }
     tracing::info!(operation = "ipc_bootstrap", "frontend bootstrap completed");
     Ok(result)
 }

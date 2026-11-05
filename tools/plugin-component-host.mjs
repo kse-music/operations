@@ -106,7 +106,6 @@ print(json.dumps(dict(root=str(root),pid=child.pid,start=start,port=port,address
   resources = fixture('create', resources);
   linux(`import subprocess
 subprocess.run(['docker','start',${JSON.stringify(resources.container)}],check=True,stdout=subprocess.DEVNULL)
-subprocess.run(['systemctl','--user','start',${JSON.stringify(resources.unit)}],check=True)
 `);
   let host;
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -63,7 +63,7 @@ if (!reuse) {
 if (!reuse && process.env.SERVERDECK_PLUGIN_COMPONENT_FIXTURE) {
   // Old enabled records must be retired before the new SDK decodes their removed permissions.
   const template = JSON.parse(
-    await readFile(path.join(root, 'plugins/system/packages/services.sdplugin'), 'utf8'),
+    await readFile(path.join(root, 'plugins/system/packages/docker.sdplugin'), 'utf8'),
   ).manifest;
   for (const [name, permission] of [
     ['batch', 'batch.run'],
@@ -71,6 +71,7 @@ if (!reuse && process.env.SERVERDECK_PLUGIN_COMPONENT_FIXTURE) {
     ['resources', 'metrics.read'],
     ['processes', 'system.read'],
     ['logs', 'logs.read'],
+    ['services', 'system.read'],
     ['network', 'network.run'],
   ]) {
     const id = `cn.hiboot.plugins.${name}`;
@@ -174,10 +175,10 @@ try {
       passed,
       fixture: JSON.parse(await readFile(componentFixturePath, 'utf8')),
     });
-    assert.deepEqual(errors, []);
     await writeFile(path.join(run, 'results.json'), JSON.stringify({ passed, errors }, null, 2));
+    assert.deepEqual(errors, []);
     console.log(
-      `PASS ${passed.length} component scenarios covering three real plugins. Artifacts: ${run}`,
+      `PASS ${passed.length} component scenarios covering two real plugins. Artifacts: ${run}`,
     );
   } else {
     for (const plugin of await invoke('plugin_list')) {
@@ -191,9 +192,7 @@ try {
         });
       if (
         plugin.source === 'system' &&
-        ['cn.hiboot.plugins.services', 'cn.hiboot.plugins.assistant'].includes(
-          plugin.manifest.id,
-        ) &&
+        ['cn.hiboot.plugins.docker', 'cn.hiboot.plugins.assistant'].includes(plugin.manifest.id) &&
         !plugin.enabled
       )
         await invoke('plugin_set_enabled', { id: plugin.manifest.id, enabled: true });

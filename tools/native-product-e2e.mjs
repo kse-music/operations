@@ -288,12 +288,13 @@ export async function productChecks(context) {
     'native versioned backup preview, duplicate skip and confirmed copy restore preserve originals and omit credentials/automatic plans',
   );
   // Settings and logical panel/window persistence. Only manipulate this test process window.
-  await nav('工作区与连接');
+  await nav('终端');
   await page.getByLabel('默认 Keepalive 间隔', { exact: true }).fill('33');
+  await nav('数据与存储');
   await page.getByLabel('默认下载目录', { exact: true }).fill(artifacts);
   await nav('通用');
   await page.getByTestId('theme-select').selectOption('light');
-  await nav('工作区与连接');
+  await nav('终端');
   await page.getByLabel('全局默认代理', { exact: true }).selectOption('socks5');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await until(
@@ -311,7 +312,7 @@ export async function productChecks(context) {
     (await rpc('host_list')).hosts.find((h) => h.id === hostId).ssh.keepaliveIntervalSecs,
     originalHost.ssh.keepaliveIntervalSecs,
   );
-  await nav('工作区与连接');
+  await nav('终端');
   await page.getByLabel('全局默认代理', { exact: true }).selectOption('direct');
   await page.getByRole('button', { name: '保存设置', exact: true }).click();
   await until(async () => (await rpc('app_bootstrap')).config.product.sshDefaults.proxy === null);

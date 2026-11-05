@@ -1,16 +1,6 @@
 <script setup lang="ts">
-import {
-  computed,
-  inject,
-  nextTick,
-  onBeforeUnmount,
-  onMounted,
-  ref,
-  shallowRef,
-  watch,
-} from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { opsApi } from '../services/ops';
-import { pluginServerServices } from '../services/plugin-server-surface';
 import { usePluginVisibility } from '../visibility';
 import { LogBuffer } from '../services/log-buffer';
 import { errorMessage } from '../services/ipc';
@@ -35,7 +25,7 @@ const labels: Record<string, string> = {
   closed: '已结束',
   failed: '读取失败',
 };
-const api = props.api ?? inject(pluginServerServices, null)?.operations ?? opsApi;
+const api = props.api ?? opsApi;
 const visible = usePluginVisibility();
 const buffer = new LogBuffer();
 const revision = ref(0),

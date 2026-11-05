@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { Puzzle, PackagePlus, RefreshCw, Trash2, Upload } from '@lucide/vue';
+import { Puzzle, PackagePlus, RefreshCw, Search, Trash2, Upload } from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -25,6 +25,28 @@ const existing = computed(() =>
 );
 const filename = computed(() => path.value.split(/[\\/]/).pop() ?? '');
 const enabled = computed(() => plugins.installed.filter((p) => p.enabled).length);
+const search = ref('');
+const source = ref<'all' | 'system' | 'user'>('all');
+const status = ref<'all' | 'enabled' | 'disabled'>('all');
+const filtered = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase();
+  return plugins.installed.filter((plugin) => {
+    const manifest = plugin.manifest;
+    return (
+      (source.value === 'all' || (plugin.source ?? 'user') === source.value) &&
+      (status.value === 'all' || plugin.enabled === (status.value === 'enabled')) &&
+      (!query ||
+        [manifest.name, manifest.id, manifest.description, manifest.author].some((value) =>
+          value.toLocaleLowerCase().includes(query),
+        ))
+    );
+  });
+});
+function resetFilters() {
+  search.value = '';
+  source.value = 'all';
+  status.value = 'all';
+}
 let selection = 0,
   disposed = false,
   unlisten: UnlistenFn | undefined;
@@ -134,13 +156,26 @@ onBeforeUnmount(() => {
   <section class="plugin-manager" aria-label="插件管理">
     <header class="plugin-heading">
       <div>
-        <p class="eyebrow">扩展与集成</p>
-        <h1>插件管理</h1>
-        <p class="subtle">安装和配置插件。插件功能从当前主机工作区顶部的工具按钮使用。</p>
+        <div class="plugin-manager-title">
+          <h1>插件管理</h1>
+          <span class="plugin-count" aria-label="已安装插件数量">{{
+            plugins.installed.length
+          }}</span>
+        </div>
+        <p class="subtle">管理已安装的插件，点击名称查看详情与配置。</p>
       </div>
-      <button class="button" :disabled="plugins.loading || plugins.busy" @click="plugins.refresh()">
-        <RefreshCw :size="15" aria-hidden="true" />刷新
-      </button>
+      <div class="plugin-heading-actions">
+        <button
+          class="button"
+          :disabled="plugins.loading || plugins.busy"
+          @click="plugins.refresh()"
+        >
+          <RefreshCw :size="15" aria-hidden="true" />刷新
+        </button>
+        <button class="button primary" :disabled="plugins.busy || inspecting" @click="pick">
+          <PackagePlus :size="16" aria-hidden="true" />安装插件
+        </button>
+      </div>
     </header>
     <section
       ref="dropzone"
@@ -150,73 +185,114 @@ onBeforeUnmount(() => {
       @dragleave="over = false"
       @drop.prevent="over = false"
     >
-      <span class="plugin-upload-icon"><Upload :size="25" aria-hidden="true" /></span>
-      <div>
-        <h2>
-          {{
-            inspecting ? '正在检查插件包…' : over ? '松开即可检查插件包' : '拖入插件包，添加新工具'
-          }}
-        </h2>
-        <p>支持 .sdplugin 文件，安装前会显示插件信息和所需权限。</p>
-      </div>
-      <button class="button primary" :disabled="plugins.busy || inspecting" @click="pick">
-        <PackagePlus :size="16" aria-hidden="true" />选择插件包
-      </button>
+      <Upload :size="17" aria-hidden="true" />
+      <p role="status">
+        {{
+          inspecting
+            ? '正在检查插件包…'
+            : over
+              ? '松开即可检查插件包'
+              : '也可将 .sdplugin 插件包拖到这里，安装前会显示包信息与所需权限。'
+        }}
+      </p>
     </section>
     <section class="plugin-installed" aria-label="已安装插件">
-      <header class="plugin-section-heading">
-        <div>
-          <h2>
-            已安装插件 <span class="plugin-count">{{ plugins.installed.length }}</span>
-          </h2>
-          <p class="subtle">
-            {{ enabled }} 个已启用 · {{ plugins.installed.length - enabled }} 个已禁用
-          </p>
+      <div class="plugin-filterbar" role="search" aria-label="筛选已安装插件">
+        <select v-model="source" aria-label="插件来源">
+          <option value="all">所有来源</option>
+          <option value="system">系统内置</option>
+          <option value="user">用户上传</option>
+        </select>
+        <select v-model="status" aria-label="插件状态">
+          <option value="all">所有状态</option>
+          <option value="enabled">已启用</option>
+          <option value="disabled">已禁用</option>
+        </select>
+        <div class="plugin-search">
+          <Search :size="16" aria-hidden="true" />
+          <input
+            v-model="search"
+            type="search"
+            aria-label="搜索插件"
+            placeholder="搜索名称、描述或插件 ID"
+          />
         </div>
-      </header>
+        <p class="subtle plugin-filter-summary" role="status">
+          显示 {{ filtered.length }} / {{ plugins.installed.length }} 个 · {{ enabled }} 个已启用
+        </p>
+      </div>
       <p v-if="plugins.loading && !plugins.loaded" class="host-empty" role="status">
         正在读取插件…
       </p>
+      <div v-else-if="plugins.error && !plugins.loaded" class="plugin-empty" role="alert">
+        <h3>插件列表加载失败</h3>
+        <p>{{ plugins.error }}</p>
+        <button
+          class="button"
+          :disabled="plugins.loading || plugins.busy"
+          @click="plugins.refresh()"
+        >
+          重试
+        </button>
+      </div>
       <div v-else-if="!plugins.installed.length" class="plugin-empty">
         <Puzzle :size="32" aria-hidden="true" />
         <h3>还没有安装插件</h3>
-        <p>将插件包拖到上方，或点击“选择插件包”开始安装。</p>
+        <p>点击右上角“安装插件”，或将插件包拖到上方开始安装。</p>
+      </div>
+      <div v-else-if="!filtered.length" class="plugin-empty" role="status">
+        <Search :size="28" aria-hidden="true" />
+        <h3>没有匹配的插件</h3>
+        <p>试试其他关键词，或清除来源与状态筛选。</p>
+        <button class="button" @click="resetFilters">清除筛选</button>
       </div>
       <div v-else class="plugin-installed-list">
         <article
-          v-for="plugin in plugins.installed"
+          v-for="plugin in filtered"
           :key="plugin.manifest.id"
           class="plugin-installed-row"
           :data-plugin-id="plugin.manifest.id"
         >
-          <span class="plugin-row-icon">
-            <PluginIcon :manifest="plugin.manifest" :source="plugin.source" :size="21" />
-          </span>
-          <div class="plugin-row-main">
-            <div class="plugin-row-title">
-              <button class="plugin-name-button" @click="emit('settings', plugin.manifest.id)">
-                {{ plugin.manifest.name }}</button
-              ><span class="plugin-version">v{{ plugin.manifest.version }}</span>
+          <div class="plugin-card-content">
+            <span class="plugin-row-icon">
+              <PluginIcon :manifest="plugin.manifest" :source="plugin.source" :size="21" />
+            </span>
+            <div class="plugin-row-main">
+              <div class="plugin-row-title">
+                <button class="plugin-name-button" @click="emit('settings', plugin.manifest.id)">
+                  {{ plugin.manifest.name }}</button
+                ><span class="plugin-version">v{{ plugin.manifest.version }}</span>
+              </div>
+              <p>{{ plugin.manifest.description || '点击插件名称查看详情和设置' }}</p>
             </div>
-            <p>{{ plugin.manifest.description || '点击插件名称查看详情和设置' }}</p>
+            <div class="plugin-row-actions">
+              <button
+                class="plugin-remove-button"
+                :disabled="plugins.busy"
+                :aria-label="`卸载 ${plugin.manifest.name}`"
+                title="卸载插件"
+                @click="
+                  deleting = plugin;
+                  clearData = false;
+                "
+              >
+                <Trash2 :size="16" aria-hidden="true" />
+              </button>
+            </div>
           </div>
-          <span :class="['plugin-status', { enabled: plugin.enabled }]">{{
-            plugin.enabled ? '已启用' : '已禁用'
-          }}</span>
-          <div class="plugin-row-actions">
-            <button
-              class="plugin-remove-button"
-              :disabled="plugins.busy"
-              :aria-label="`卸载 ${plugin.manifest.name}`"
-              title="卸载插件"
-              @click="
-                deleting = plugin;
-                clearData = false;
-              "
-            >
-              <Trash2 :size="16" aria-hidden="true" />
-            </button>
-          </div>
+          <footer class="plugin-card-footer">
+            <span class="plugin-identifier" :title="plugin.manifest.id">{{
+              plugin.manifest.id
+            }}</span>
+            <div class="plugin-card-badges">
+              <span class="plugin-source">{{
+                plugin.source === 'system' ? '系统内置' : '用户上传'
+              }}</span>
+              <span :class="['plugin-status', { enabled: plugin.enabled }]">{{
+                plugin.enabled ? '已启用' : '已禁用'
+              }}</span>
+            </div>
+          </footer>
         </article>
       </div>
     </section>

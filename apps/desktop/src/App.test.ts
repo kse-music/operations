@@ -47,7 +47,7 @@ async function sidebarMenu(module: NavigationModule, label: string): Promise<voi
   await flush();
 }
 async function openPluginSettings(name: string): Promise<void> {
-  await sidebarMenu('system', '插件管理');
+  await sidebarMenu('plugins', '插件管理');
   [...root.querySelectorAll<HTMLButtonElement>('.plugin-name-button')]
     .find((button) => button.textContent?.trim() === name)!
     .click();
@@ -338,24 +338,24 @@ it('opens plugin management under settings, keeps language in settings and prese
   await flush();
   const original = JSON.stringify(terminals.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
-  expect(root.querySelector('[data-module="plugins"]')).toBeNull();
+  expect(root.querySelector('[data-module="plugins"]')?.textContent?.trim()).toBe('插件');
   root.querySelector<HTMLButtonElement>('[data-module="assets"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
   expect(root.querySelector('.module-menu [aria-label="插件管理"]')).toBeNull();
   expect(root.querySelector('.module-menu [aria-label="通用"]')).toBeNull();
-  await sidebarMenu('system', '插件管理');
-  expect(workspace.module).toBe('system');
+  await sidebarMenu('plugins', '插件管理');
+  expect(workspace.module).toBe('plugins');
   expect(root.querySelector('.plugin-manager h1')?.textContent).toBe('插件管理');
   expect(root.querySelector('[aria-label="插件界面语言"]')).toBeNull();
-  await sidebarMenu('system', '工作区与连接');
-  expect(root.querySelector('.module-menu [aria-label="插件管理"]')).not.toBeNull();
+  await sidebarMenu('system', '数据与存储');
+  expect(root.querySelector('.module-menu [aria-label="插件管理"]')).toBeNull();
   expect(root.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')?.value).toBe('zh-CN');
   root
     .querySelector<HTMLButtonElement>('.workspace-tab[data-view="plugins"] [role="tab"]')!
     .click();
   await flush();
-  expect(workspace.module).toBe('system');
+  expect(workspace.module).toBe('plugins');
   expect(root.querySelector('.plugin-manager')).not.toBeNull();
   expect(workspace.tabs.filter((tab) => tab.view === 'plugins')).toHaveLength(1);
   expect(JSON.stringify(terminals.tabs)).toBe(original);
@@ -773,7 +773,7 @@ it('preserves welcome when switching unused module menus without opening a page 
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   const open = vi.spyOn(terminals, 'open');
-  for (const module of ['assets', 'system'] as const) {
+  for (const module of ['assets', 'plugins', 'system'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -809,7 +809,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   const terminalElement = root.querySelector('.terminal-tab')!;
   const open = vi.spyOn(terminals, 'open');
   const close = vi.spyOn(terminalApi, 'close');
-  for (const module of ['assets', 'system', 'hosts'] as const) {
+  for (const module of ['assets', 'plugins', 'system', 'hosts'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -825,11 +825,11 @@ it('keeps the current terminal visible across top module switches and navigates 
     expect(root.textContent).not.toContain('请选择功能');
   }
   await openPluginSettings('AI 运维助手');
-  expect(workspace.module).toBe('system');
+  expect(workspace.module).toBe('plugins');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['通用', '终端', '快捷键', '工作区与连接', '插件管理', '关于'],
+    ['插件管理'],
   );
-  expect(root.querySelector('.activity-rail [aria-label="通用"]')).not.toBeNull();
+  expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
   await sidebarMenu('assets', '备份恢复');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
     ['安全凭据', '模型管理', '备份恢复'],
@@ -845,7 +845,7 @@ it('keeps the current terminal visible across top module switches and navigates 
     .click();
   await flush();
   expect(root.querySelector('.module-navigation [aria-current="page"]')?.textContent?.trim()).toBe(
-    '设置',
+    '插件',
   );
   expect(
     root.querySelector('.activity-rail [aria-label="插件管理"][aria-current="page"]'),
@@ -1322,7 +1322,7 @@ it('merges session controls into the host toolbar and retains names within the c
     [...root.querySelectorAll('.workspace-header .host-tools button')].map((button) =>
       button.textContent?.trim(),
     ),
-  ).toEqual(['SSH 终端', 'SFTP 文件', 'AI 运维助手', '系统服务']);
+  ).toEqual(['SSH 终端', 'SFTP 文件', 'AI 运维助手', 'Docker 管理']);
   expect(root.querySelector('.terminal-session-header .terminal-tabs')).not.toBeNull();
   expect(root.querySelector('.split-toolbar, [aria-label="会话操作"]')).toBeNull();
   expect(root.querySelector('#terminal-session-tools .terminal-session-header')).not.toBeNull();
@@ -1862,7 +1862,7 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
     .click();
   await flush();
   expect(workspace.current?.view).toBe('pluginSettings');
-  expect(workspace.module).toBe('system');
+  expect(workspace.module).toBe('plugins');
   expect(root.querySelector('.plugin-page [aria-label="插件设置"]')).not.toBeNull();
   workspace.selectHost('a');
   await flush();
@@ -1877,11 +1877,16 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   expect(plugins.drafts['extension:dev.host-draft:draft:b']?.values.content).toBe('draft for b');
 });
 
-it('opens disabled, ungranted and UI-less plugin configurations only through settings without connecting a host', async () => {
+it('opens disabled, ungranted and UI-less plugin configurations through plugin management without connecting a host', async () => {
   const workspace = useWorkspaceStore(),
     plugins = usePluginsStore();
   plugins.installed = systemPluginFixtures();
-  plugins.installed[1]!.enabled = true;
+  plugins.installed[1] = {
+    ...plugins.installed[0]!,
+    source: 'user',
+    enabled: true,
+    manifest: { ...plugins.installed[0]!.manifest, id: 'dev.ungranted', name: '未授权插件' },
+  };
   plugins.installed.push({
     ...plugins.installed[0]!,
     source: 'user',
@@ -1907,7 +1912,7 @@ it('opens disabled, ungranted and UI-less plugin configurations only through set
       pluginId: plugin.manifest.id,
       hostId: '',
     });
-    expect(workspace.module).toBe('system');
+    expect(workspace.module).toBe('plugins');
     expect(root.querySelector('.activity-rail [aria-current="page"]')?.textContent).toContain(
       '插件管理',
     );
@@ -1917,6 +1922,6 @@ it('opens disabled, ungranted and UI-less plugin configurations only through set
   expect(schema).not.toHaveBeenCalled();
   expect(activate).not.toHaveBeenCalled();
   expect(workspace.pluginPages).toHaveLength(0);
-  expect(root.querySelector('[data-module="plugins"]')).toBeNull();
+  expect(root.querySelector('[data-module="plugins"]')?.textContent?.trim()).toBe('插件');
   expect(root.querySelector('[aria-label="运维工具导航"]')).toBeNull();
 });

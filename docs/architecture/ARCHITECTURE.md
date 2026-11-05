@@ -1,5 +1,37 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-05：镜像删除的宿主单次确认
+
+ResourceView 对 image_remove 直接提交能力请求，由既有 Rust approval 阻止未批准执行，移除包内重复目标输入。Approval 增加可选 imageId，仅从已冻结的 SystemQuery/ImageRemove 生成，其他操作不序列化此字段；PluginApproval 前端类型同步。宿主 plugin-server 使用原生 imageId、真实主机目录和插件身份生成结构化确认，PluginDialogs 展示目标、完整 ID 和删除约束；取消按原协议拒绝批准，批准后仅重试原冻结载荷。
+
+不更改 requires_confirmation、权限、安装代/上下文代、TTL 或单次消费。旧后端无 imageId 时继续使用原通用宿主审批，不回退到信任 iframe 目标。SDK/Host API 仍为 4.0.0，Docker 包 1.5.1 更新独立 UI，兼容资源同步重建；无数据库迁移或新增 IPC 命令。
+
+## 2026-11-05：插件管理独立导航
+
+NavigationModule 增加 plugins；plugins 与 pluginSettings 两种工作区视图统一映射至插件模块，AppNavigation 将唯一的插件管理入口从 system 移至 plugins。继续复用 Workspace 的标签激活与配置标签去重，功能页面仍属于 hosts，切换顶部模块只切换菜单、不改变当前工作区及主机上下文。
+
+PluginsView 基于真实 installed 清单在本地组合来源、启用状态与关键字筛选；卡片通过内容区容器查询在双列和单列间切换，不依赖整个窗口宽度。安装、原生拖放、预览代校验及卸载复用既有服务，无 IPC、Rust、权限或数据结构变化。下文设置模块下的插件管理归属为历史描述，以本节为准。
+
+## 2026-11-05：本机目录定位与重启迁移
+
+application/storage_location 维护版本化本机定位文件 storage-location.json，保存在默认 app_config_dir；目录选择不进入 AppConfig/业务备份，无 SQLite schema 变化。Locations 明确 data/logs/webview，统一布局为根目录数据库和 plugins、logs、webview。已有安装沿用原分散位置，新安装使用统一布局。系统凭据服务和独立下载位置保持原契约。
+
+主窗口关闭自动创建，单实例及旧标识目录处理后，setup 在打开业务数据库/日志/WebView 前解析定位状态和执行待处理复制，再用已解析 webview 路径创建 main 窗口。启动故障使用原生对话框提示，不降级到空库。Bootstrap 增加可选 storage；app_storage_preview、app_storage_migrate、app_storage_ready 仅授权本地主窗口，后台文件操作放 spawn_blocking，Rust/TS 数据类型同步。
+
+迁移使用同一目标磁盘上的专用暂存目录，记录来源、目标、普通文件及空目录清单、字节数与 SHA-256；空间预检预留 16 MiB。Pending 可根据清单校验续传，Copied 尚未确认启动时重启回退源目录，Committed 在清理前持久化且永不回退到部分清理的源。数据库副本以只读 quick_check、版本及偏好校验。前端启动确认提交候选后逐文件复核并删除源，只尝试移除空目录；定位文件、未知新增文件和变化文件保留，清理故障提示并在下次就绪重试。
+
+迁移先申请普通退出，复用窗口状态保存、任务取消和排空；排空完成并冲刷日志后才 request_restart，避免 Tauri 的重启退出码绕过退出延迟。源/目标祖先、文件和清理目录拒绝链接及 Windows 重解析点；目标不得非空、覆盖或与源嵌套。同路径别名视为无需迁移。摘要/数据库/复制失败保留源，暂存及候选失败副本保留供诊断。
+
+## 2026-11-05：系统服务退役与 Docker 兼容复用
+
+系统服务插件、发行包、资源监控/进程端口/systemd/服务日志专属界面及旧标准视图兼容实现已移除，内置只分发 Docker 管理和 AI 运维助手。保留 AI、Docker 和独立插件仍使用的通用指标采集、类型化系统查询、受控操作及日志能力，不提供替代系统页面。
+
+当前及旧域名 services 身份启动退役，依赖已删除标准界面的旧安装退出注册；有效安装仅旧备份依赖已删合同时，归档原始记录和可独立恢复的包后清除活动回滚指针。原包、设置、授权和用户数据保留，迁移可重复执行、错误传播，禁止重新安装被删身份或标准视图。第三方需升级使用自带界面；未使用移除合同的旧包继续兼容。
+
+Host/Rust/Vue SDK 为 4.0.0，Docker 包 1.5.0、助手包 1.6.0，要求 ^4.0.0；ABI、wire、包格式仍为 1。下文系统服务页面及三插件范围仅为历史记录，以本节为准。
+
+旧 Docker 标准界面直接复用 Docker 插件现有前端，按声明限制分类；移除旧监控及 OperationsView、专属注入适配。仓库在当前 SDK 解码前以有界读取及摘要核验识别旧 UI，同时支持旧/新 payload 布局；归档记录附 reason.json，原授权不作为重新激活依据。共享能力验收改用不分发的 server-capabilities WASM 夹具。
+
 ## 2026-11-05：内置助手的工作区生命周期
 
 插件来源为 system 且 ID 精确匹配内置助手时，Plugins Store 维护多个页面 owner，并使用稳定的原生空上下文。AI 输入本身携带并复验实际 SSH Binding，无需随可见主机或设置页面重绑原生上下文；切换 owner 不增加 contextVersion，最后一个 owner 关闭时再释放 VM/上下文。其他插件及上传同 ID 包继续独占上下文和隐藏释放。

@@ -404,7 +404,7 @@ try {
   );
   assert.deepEqual(
     (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-    ['通用', '终端', '快捷键', '工作区与连接', '关于'],
+    ['通用', '终端', '快捷键', '数据与存储', '插件管理', '关于'],
   );
   assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'module-settings.png') });

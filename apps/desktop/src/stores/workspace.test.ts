@@ -72,7 +72,7 @@ it('blocks reopening tools while closing a host and removes completed closes bef
   await vi.waitFor(() => expect(files.prepareHostClose).toHaveBeenCalledTimes(2));
   expect(workspace.tabs.map((tab) => tab.hostId)).toEqual(['b']);
   workspace.navigate('files', 'b');
-  await workspace.openPlugin('cn.hiboot.plugins.services', 'server', 'b');
+  await workspace.openPlugin('cn.hiboot.plugins.docker', 'server', 'b');
   expect(workspace.current?.view).toBe('terminals');
   expect(workspace.pluginPages).toEqual([]);
   workspace.navigate('terminals', 'a');
@@ -114,14 +114,14 @@ it.each(['', 'target'])(
 it('keeps host plugins in their device tab across host switches', async () => {
   const w = useWorkspaceStore();
   w.navigate('files', 'b');
-  await w.openPlugin('cn.hiboot.plugins.services', 'network', 'a');
+  await w.openPlugin('cn.hiboot.plugins.docker', 'images', 'a');
   expect(w.active).toBe('host:a');
   expect(w.module).toBe('hosts');
   expect(w.tabs.filter((tab) => tab.hostId === 'a')).toHaveLength(1);
   w.selectHost('b');
   expect(w.current).toMatchObject({ view: 'files', hostId: 'b' });
   w.selectHost('a');
-  expect(w.current).toMatchObject({ view: 'extension', pluginId: 'cn.hiboot.plugins.services' });
+  expect(w.current).toMatchObject({ view: 'extension', pluginId: 'cn.hiboot.plugins.docker' });
 });
 
 it('waits for close completion and prevents duplicate close requests for the same workspace', async () => {
@@ -264,7 +264,7 @@ it('does not choose another page or create a default when selecting a module aft
   expect(workspace.module).toBe('assets');
 });
 
-it.each(['hosts', 'assets', 'system'] as const)(
+it.each(['hosts', 'assets', 'plugins', 'system'] as const)(
   'selects the %s module without opening or selecting any page',
   (id) => {
     const workspace = useWorkspaceStore();
@@ -277,19 +277,19 @@ it.each(['hosts', 'assets', 'system'] as const)(
   },
 );
 
-it('reuses plugin settings under the system module when reactivating from other modules', () => {
+it('reuses plugin settings under the plugins module when reactivating from other modules', () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
   workspace.openPluginSettings('cn.hiboot.plugins.assistant');
   const settings = workspace.current;
-  expect(workspace.module).toBe('system');
+  expect(workspace.module).toBe('plugins');
   expect(settings).toMatchObject({ view: 'pluginSettings', hostId: '' });
   workspace.selectModule('assets');
   workspace.openPluginSettings('cn.hiboot.plugins.assistant');
   expect(workspace.current).toBe(settings);
   workspace.activate('host:a');
   workspace.activate(settings!.key);
-  expect(workspace.module).toBe('system');
+  expect(workspace.module).toBe('plugins');
   expect(workspace.hostId).toBe('a');
   expect(workspace.tabs.filter((tab) => tab.view === 'pluginSettings')).toHaveLength(1);
 });

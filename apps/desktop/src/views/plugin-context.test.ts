@@ -11,7 +11,7 @@ import { hostInput } from '../types/hosts';
 import { systemPluginFixtures } from '../services/system-plugins.fixture';
 import { toolPluginState } from '../services/system-plugins.fixture';
 import { useWorkspaceStore } from '../stores/workspace';
-import resourceUi from '../../../../plugins/system/services/ui.json';
+import resourceUi from '../../../../plugins/system/docker/ui.json';
 import type { PluginUi } from '../types/plugins';
 
 vi.mock('../components/PluginFrame.vue', () => ({
@@ -27,7 +27,7 @@ const host = {
   createdAt: '',
   updatedAt: '',
 };
-const id = 'cn.hiboot.plugins.services';
+const id = 'cn.hiboot.plugins.docker';
 const settle = async () => {
   for (let i = 0; i < 24; i++) await Promise.resolve();
   await nextTick();

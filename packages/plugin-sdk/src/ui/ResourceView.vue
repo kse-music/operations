@@ -120,12 +120,21 @@ function ask(
   shell?: ContainerShell,
   asDetail = false,
 ) {
-  pending.value = { title, target, request, shell, inspect: asDetail, sessionId: session() };
+  if (busy.value || !panelVisible.value) return;
+  const action = { title, target, request, shell, inspect: asDetail, sessionId: session() };
+  if (request?.kind === 'image_remove') {
+    void execute(action);
+    return;
+  }
+  pending.value = action;
   confirmedTarget.value = '';
 }
 async function apply() {
   const action = pending.value;
   if (!action || confirmedTarget.value !== action.target) return;
+  await execute(action);
+}
+async function execute(action: NonNullable<typeof pending.value>) {
   if (action.sessionId !== connection.value?.session?.id) {
     error.value = '主机上下文已变化，请重新选择目标';
     pending.value = null;
@@ -144,7 +153,8 @@ async function apply() {
     }
     pending.value = null;
   } catch (cause) {
-    error.value = errorMessage(cause);
+    if ((cause as { code?: string } | null)?.code !== 'PLUGIN_USER_CANCELLED')
+      error.value = errorMessage(cause);
     notice.value = null;
   } finally {
     try {

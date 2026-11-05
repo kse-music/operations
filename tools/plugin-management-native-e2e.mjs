@@ -107,7 +107,7 @@ try {
   assert.equal((await invoke('host_list')).hosts.length, 0);
   safe = true;
   const installed = await invoke('plugin_list');
-  assert.equal(installed.length, 3);
+  assert.equal(installed.length, 2);
   for (const plugin of installed) {
     assert(plugin.manifest.id.startsWith('cn.hiboot.plugins.'));
     assert.equal(plugin.source, 'system');
@@ -127,9 +127,9 @@ try {
       ),
     );
   }
-  passed.push('three cn.hiboot standard packages installed under the owned system directory');
+  passed.push('two cn.hiboot standard packages installed under the owned system directory');
   assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
-  const settings = await openPluginSettings(page, '系统服务');
+  const settings = await openPluginSettings(page, 'Docker 管理');
   assert((await page.locator('.plugin-page > header').textContent()).includes('系统内置'));
   assert(await settings.getByLabel('ui.contribute', { exact: true }).isChecked());
   assert(await settings.getByLabel('ui.contribute', { exact: true }).isDisabled());
@@ -144,14 +144,14 @@ try {
   await settings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
   await settings.getByRole('button', { name: '启用插件', exact: true }).click();
   await settings.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
-  assert.equal((await invoke('plugin_health', { id: 'cn.hiboot.plugins.services' })).error, null);
+  assert.equal((await invoke('plugin_health', { id: 'cn.hiboot.plugins.docker' })).error, null);
   passed.push(
     'system permissions are preset and read-only; enable controls stay in individual settings; real WASM health succeeds',
   );
   await navigateWorkspace(page, '插件管理');
   const manager = page.locator('.plugin-manager');
   await manager.waitFor();
-  assert.equal(await manager.locator('[data-plugin-id]').count(), 3);
+  assert.equal(await manager.locator('[data-plugin-id]').count(), 2);
   assert.equal(await manager.locator('.plugin-source').count(), 0);
   assert.equal(await manager.getByLabel('本地插件包路径', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(run, 'manager.png') });
@@ -194,7 +194,7 @@ try {
     .getByRole('button', { name: '确认卸载', exact: true })
     .click();
   await row.waitFor({ state: 'detached' });
-  assert.equal((await invoke('plugin_list')).length, 3);
+  assert.equal((await invoke('plugin_list')).length, 2);
   assert.equal((await invoke('host_list')).hosts.length, 0);
   passed.push(
     'source appears only inside individual pages; real native uninstall removes the uploaded package',

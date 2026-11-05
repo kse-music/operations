@@ -2,11 +2,11 @@
 
 ## 当前推荐：完整插件目录与 UI v4
 
-三个系统插件和上传插件采用同一源码/包结构：
+两个系统插件和上传插件采用同一源码/包结构：
 
 ```text
 plugins/system/<name>/       # 上传源码可放任意显式目录
-  manifest.json              # apiVersion ^3.0.0
+  manifest.json              # apiVersion ^4.0.0
   ui.json                    # uiVersion 4 + frontend 入口
   frontend/
     main.ts                  # SDK mountPlugin
@@ -22,27 +22,27 @@ plugins/system/<name>/       # 上传源码可放任意显式目录
 ```powershell
 npm run typecheck
 npm test
-cargo test --manifest-path plugins/system/services/backend/Cargo.toml --offline --locked
-node tools/build-plugin.mjs plugins/system/services .local/services-v4.sdplugin
+cargo test --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked
+node tools/build-plugin.mjs plugins/system/docker .local/docker-v4.sdplugin
 npm run plugins:build
 node tools/plugin-ui-isolation-e2e.mjs
 ```
 
 单包构建同时编译独立 WASM 与 Vue 前端，并检查源码边界，打成 backend.wasm/ui.json/frontend.js/frontend.css。运行时使用 sandbox iframe，不访问宿主 DOM；仅使用 SDK 已公开服务和自身声明动作。UI资源必须单文件，不可远程加载或任意读取本地文件。打包输出仍需不存在且在源目录之外。原生 QA 使用全新目录和自己的 HTTP/TCP 夹具，不能代替真实 SSH 或其他平台验收。
 
-版本为 Host API / Rust SDK / Vue SDK 3.0.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。自动运维、批量运维及依赖已删除权限的旧安装记录会停用归档，保留用户数据；其余已有上传安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
+版本为 Host API / Rust SDK / Vue SDK 4.0.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。自动运维、批量运维及依赖已删除权限的旧安装记录会停用归档，保留用户数据；其余已有上传安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
 
 ## 配置插件图标
 
-在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^3.0.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
+在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^4.0.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
 
 ## 工作区工具插件
 
 AI 助手独立，系统服务保留监控、进程端口、systemd 与日志；两者只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v3 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
 
-三个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v2 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
+两个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v2 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
 
-平台 SDK 3.0.0，API wire version=1（兼容不使用已移除能力的 ^1.x/^2.x 包）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
+平台 SDK 4.0.0，API wire version=1（兼容不使用已移除能力的 ^1.x/^2.x/^3.x 包）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
 
 ## 构建公开 SDK 示例
 

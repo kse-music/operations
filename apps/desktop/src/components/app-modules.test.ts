@@ -18,8 +18,13 @@ it('switches major modules from the header and indicates the module of the activ
     [...root.querySelectorAll('.module-navigation button')].map((button) =>
       button.textContent?.trim(),
     ),
-  ).toEqual(['主机运维', '资产管理', '设置']);
+  ).toEqual(['主机运维', '资产管理', '插件', '设置']);
   expect(root.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('资产管理');
   for (const button of root.querySelectorAll<HTMLButtonElement>('button')) button.click();
-  expect(select.mock.calls.map((call) => call[0])).toEqual(['hosts', 'assets', 'system']);
+  expect(select.mock.calls.map((call) => call[0])).toEqual([
+    'hosts',
+    'assets',
+    'plugins',
+    'system',
+  ]);
 });

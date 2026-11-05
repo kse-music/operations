@@ -84,6 +84,56 @@ it('passes typed requests through WASM and requires host approval before retryin
     action: 'stop',
   });
 });
+
+it.each([true, false])(
+  'reviews the native image target once and executes only after approval=%s',
+  async (accepted) => {
+    const call = vi
+      .spyOn(pluginsApi, 'call')
+      .mockResolvedValueOnce({
+        protocolVersion: 1,
+        result: {
+          id: 'image-approval',
+          hostId: 'native-host',
+          pluginName: 'Docker',
+          pluginVersion: '1.5.1',
+          imageId: 'native-frozen-image',
+          description: 'native image removal',
+        },
+        error: { code: 'PLUGIN_CONFIRMATION_REQUIRED', message: 'confirm' },
+      })
+      .mockResolvedValueOnce({ protocolVersion: 1, result: { success: true }, error: null });
+    const approve = vi.spyOn(pluginsApi, 'approve').mockResolvedValue();
+    const plugins = usePluginsStore();
+    const job = pluginServerRequest(
+      'image-review',
+      {
+        kind: 'system_query',
+        request: { kind: 'image_remove', id: 'untrusted-submitted-image' },
+      },
+      page,
+    );
+    const result = accepted
+      ? expect(job).resolves.toEqual({ success: true })
+      : expect(job).rejects.toMatchObject({ code: 'PLUGIN_USER_CANCELLED' });
+    await vi.runAllTimersAsync();
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(approve).not.toHaveBeenCalled();
+    expect(plugins.prompt).toMatchObject({
+      title: '删除镜像？',
+      confirmationText: undefined,
+      imageRemoval: { imageId: 'native-frozen-image', hostName: 'native-host' },
+    });
+    const firstPayload = call.mock.calls[0]![1];
+    plugins.decide(accepted);
+    await vi.runAllTimersAsync();
+    await result;
+    expect(approve).toHaveBeenCalledExactlyOnceWith('image-approval', accepted);
+    expect(call).toHaveBeenCalledTimes(accepted ? 2 : 1);
+    if (accepted) expect(call.mock.calls[1]![1]).toEqual(firstPayload);
+    expect(plugins.prompt).toBeNull();
+  },
+);
 it('does not show or execute a queued destructive approval after its page becomes hidden', async () => {
   const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
   vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({

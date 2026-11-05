@@ -1,9 +1,8 @@
-import { terminalAction } from './ui-navigation.mjs';
+import { openPluginFunction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import net from 'node:net';
 import { resources } from './native-release-qa.mjs';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +24,10 @@ export async function remotePython({ page, hostId }, script) {
   await mkdir(folder, { recursive: true });
   const fixture = JSON.parse(
     await readFile(
-      new URL('../plugins/system/packages/services.sdplugin', import.meta.url),
+      new URL(
+        '../tests/fixtures/plugins/server-capabilities/server-capabilities.sdplugin',
+        import.meta.url,
+      ),
       'utf8',
     ),
   );
@@ -155,12 +157,15 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export async function operationsChecks(context) {
   const { page, artifacts, passed, hostId, command, contains, registerCleanup } = context;
   page.setDefaultTimeout(30000);
+  const content = () => page.frameLocator('.plugin-frame-container:visible iframe');
   const source = await readFile(new URL('./ops-fixture.py', import.meta.url), 'utf8');
   const nav = () => page.getByRole('navigation', { name: '当前主机工具', exact: true });
   async function hostShell() {
-    const dialog = page.getByRole('dialog', { name: '确认主机运维操作', exact: true });
-    if (await dialog.isVisible())
-      await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    if (await page.locator('.plugin-frame-container:visible iframe').count()) {
+      const dialog = content().getByRole('dialog', { name: '确认主机运维操作', exact: true });
+      if (await dialog.isVisible())
+        await dialog.getByRole('button', { name: '取消', exact: true }).click();
+    }
     await nav()
       .getByRole('button', { name: /SSH 终端/ })
       .click();
@@ -212,8 +217,8 @@ export async function operationsChecks(context) {
   });
   assert(!created.error, created.error);
   assert.equal(fixture.container.length, 64);
-  await terminalAction(page, page.locator('.terminal-pane:visible'), '服务器管理');
-  await page.getByRole('tab', { name: 'Docker 容器', exact: true }).click();
+  await openPluginFunction(page, 'Docker 管理', hostId);
+  await content().getByRole('tab', { name: 'Docker 容器', exact: true }).click();
   async function connections() {
     return page.evaluate(() => window.__TAURI_INTERNALS__.invoke('ops_connections'));
   }
@@ -229,27 +234,35 @@ export async function operationsChecks(context) {
       ({ id, request }) => window.__TAURI_INTERNALS__.invoke('ops_query', { id, request }),
       { id: session.id, request },
     );
-  const showOps = async () =>
-    nav().getByRole('button', { name: '服务器管理', exact: true }).click();
+  const showOps = async () => openPluginFunction(page, 'Docker 管理', hostId);
   const switchTab = async (name) => {
-    const detailDialog = page
+    const detailDialog = content()
       .getByRole('dialog')
-      .filter({ has: page.getByTestId('operations-detail') });
+      .filter({ has: content().getByTestId('operations-detail') });
     if (await detailDialog.count())
       await detailDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await showOps();
-    await page.getByRole('tab', { name, exact: true }).click();
-    await page.getByRole('button', { name: '刷新运维列表', exact: true }).waitFor();
+    await content().getByRole('tab', { name, exact: true }).click();
+    await content().getByRole('button', { name: '刷新运维列表', exact: true }).waitFor();
   };
   async function row(key) {
-    const r = page.locator(`[data-ops-target="${key}"]`);
+    const r = content().locator(`[data-ops-target="${key}"]`);
     await r.waitFor();
     return r;
   }
+  async function action(target, label) {
+    const targetRow = await row(target);
+    const button = targetRow.getByRole('button', { name: label, exact: true });
+    if (!(await button.isVisible())) await targetRow.locator('summary').click();
+    await button.click();
+  }
   async function confirm(target) {
-    const dialog = page.getByRole('dialog', { name: '确认主机运维操作', exact: true });
+    const dialog = content().getByRole('dialog', { name: '确认主机运维操作', exact: true });
     await dialog.getByLabel('确认运维目标').fill(String(target));
     await dialog.getByRole('button', { name: '确认执行', exact: true }).click();
+    const approval = page.getByRole('dialog', { name: '插件操作需要单独确认', exact: true });
+    await approval.waitFor();
+    await approval.getByRole('button', { name: '明确确认', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
   }
   const capability = await query({ kind: 'capabilities' });
@@ -258,9 +271,9 @@ export async function operationsChecks(context) {
     path.join(artifacts, 'ops-capabilities.json'),
     JSON.stringify(capability.detail, null, 2),
   );
-  await page.getByRole('tab', { name: 'Docker 容器', exact: true }).click();
-  await page.getByLabel('运维项目搜索').fill(fixture.uuid);
-  await (await row(fixture.container)).getByRole('button', { name: '启动', exact: true }).click();
+  await content().getByRole('tab', { name: 'Docker 容器', exact: true }).click();
+  await content().getByLabel('运维项目搜索').fill(fixture.uuid);
+  await action(fixture.container, '启动');
   await confirm(fixture.container);
   const refused = await query({
     kind: 'container_action',
@@ -272,7 +285,7 @@ export async function operationsChecks(context) {
   let list = await query({ kind: 'containers' });
   assert.equal(list.records.find((r) => r.ID === fixture.container).State, 'running');
   await (await row(fixture.container)).getByRole('button', { name: '详情', exact: true }).click();
-  const detail = page.getByTestId('operations-detail');
+  const detail = content().getByTestId('operations-detail');
   await detail.filter({ hasText: 'SD_E2E_SECRET' }).waitFor();
   assert(!(await detail.innerText()).includes('protect-' + fixture.uuid));
   await page.screenshot({ path: path.join(artifacts, 'ops-container.png') });
@@ -285,139 +298,75 @@ export async function operationsChecks(context) {
   assert(!JSON.stringify(inspected).includes('protect-' + fixture.uuid));
   assert(inspected.detail.mounts.length);
   assert(inspected.detail.ports['8080/tcp'][0].HostIp === '127.0.0.1');
-  await page.getByRole('button', { name: '显示环境变量值…', exact: true }).click();
+  await content().getByRole('button', { name: '显示环境变量值…', exact: true }).click();
   await confirm(fixture.container);
   await detail.filter({ hasText: 'protect-' + fixture.uuid }).waitFor();
-  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
   await (await row(fixture.container)).getByRole('button', { name: '资源', exact: true }).click();
   await detail.filter({ hasText: 'CPUPerc' }).waitFor();
-  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
   passed(
     'native Docker detection/version, container list/start, masked environment, explicit reveal, ports/mounts and stats',
   );
   await (await row(fixture.container)).getByRole('button', { name: '日志', exact: true }).click();
-  const output = page.getByTestId('operations-log-output');
+  const output = content().getByTestId('operations-log-output');
   await output.filter({ hasText: '__SD_DOCKER_' + fixture.uuid + '__' }).waitFor();
   assert(/\d{4}-\d\d-\d\dT/.test(await output.innerText()));
-  await page.getByLabel('日志关键词').fill('__SD_STDERR_');
+  await content().getByLabel('日志关键词').fill('__SD_STDERR_');
   assert(!(await output.innerText()).includes('__SD_DOCKER_'));
-  await page.getByLabel('日志关键词').fill('');
-  await page.getByRole('button', { name: '暂停日志', exact: true }).click();
-  await page.locator('.ops-logs').getByRole('status').filter({ hasText: 'paused' }).waitFor();
+  await content().getByLabel('日志关键词').fill('');
+  await content().getByRole('button', { name: '暂停日志', exact: true }).click();
+  await content().getByRole('status').filter({ hasText: '已暂停' }).waitFor();
   const frozen = await output.innerText();
   await delay(1200);
   assert.equal(await output.innerText(), frozen);
-  await page.getByRole('button', { name: '继续日志', exact: true }).click();
-  await page.locator('.ops-logs').getByRole('status').filter({ hasText: 'running' }).waitFor();
-  await page.waitForFunction(
-    (length) =>
-      (document.querySelector('[data-testid="operations-log-output"]')?.textContent?.length ?? 0) >
-      length,
-    frozen.length,
-  );
+  await content().getByRole('button', { name: '继续日志', exact: true }).click();
+  await content().getByRole('status').filter({ hasText: '实时跟踪' }).waitFor();
+  for (let i = 0; i < 100 && (await output.innerText()).length <= frozen.length; i++)
+    await delay(100);
+  assert((await output.innerText()).length > frozen.length);
   if (process.argv.includes('--soak')) {
-    const seconds = 300;
-    const start = Date.now();
     const samples = [];
-    await page
-      .getByRole('navigation')
-      .getByRole('button', { name: '服务器管理', exact: true })
-      .click();
-    await page.getByRole('tab', { name: '资源概览', exact: true }).click();
-    for (let n = 0; n < 100; n++) {
-      const ready = await page.evaluate(async (hostId) => {
-        try {
-          return !!(
-            await window.__TAURI_INTERNALS__.invoke('monitor_snapshot', { hostId, after: null })
-          )?.sample;
-        } catch {
-          return false;
-        }
-      }, hostId);
-      if (ready) break;
-      await delay(100);
-    }
-    await nav().getByRole('button', { name: '服务器管理', exact: true }).click();
-    await switchTab('Docker 容器');
-    await page.getByLabel('运维项目搜索').fill(fixture.uuid);
-    await (await row(fixture.container)).getByRole('button', { name: '日志', exact: true }).click();
-    await output.filter({ hasText: '__SD_DOCKER_' + fixture.uuid + '__' }).waitFor();
-    await page.evaluate(
-      (hostId) => window.__TAURI_INTERNALS__.invoke('monitor_visible', { hostId, visible: true }),
-      hostId,
-    );
-    let monitorId;
-    for (let i = 0; i <= seconds / 10; i++) {
-      const snapshot = await page.evaluate(
-        (hostId) => window.__TAURI_INTERNALS__.invoke('monitor_snapshot', { hostId, after: null }),
-        hostId,
-      );
-      assert(snapshot?.sample, 'soak must collect real Linux metrics');
-      monitorId ??= snapshot.sessionId;
-      assert.equal(snapshot.sessionId, monitorId, 'one host sampler');
-      assert(snapshot.history.length <= 600);
-      const chars = (await output.textContent()).length;
-      assert(chars <= 1024 * 1024 + 8192, 'bounded Docker log buffer');
+    for (let i = 0; i <= 30; i++) {
+      const characters = (await output.textContent()).length;
+      assert(characters <= 1024 * 1024 + 8192, 'bounded Docker log buffer');
       samples.push({
-        elapsedMs: Date.now() - start,
-        revision: snapshot.revision,
-        history: snapshot.history.length,
-        logCharacters: chars,
+        seconds: i * 10,
+        logCharacters: characters,
+        resources: resources(context.processId()),
       });
-      if (i % 3 === 0) {
-        console.log(`SOAK ${i * 10}/${seconds}s: real Monitor + Docker logs`);
-        samples.at(-1).resources = resources(context.processId());
-      }
-      if (i < seconds / 10) await delay(10000);
+      if (i < 30) await delay(10000);
     }
-    assert(samples.at(-1).revision > samples[0].revision);
     assert(samples.at(-1).logCharacters > samples[0].logCharacters);
     await writeFile(
-      path.join(artifacts, 'monitor-docker-soak.json'),
-      JSON.stringify(
-        {
-          durationSeconds: (Date.now() - start) / 1000,
-          samples,
-          limitation: 'five-minute observation; not proof against 24-hour leaks',
-        },
-        null,
-        2,
-      ),
+      path.join(artifacts, 'docker-logs-soak.json'),
+      JSON.stringify(samples, null, 2),
     );
-    await page.evaluate(
-      (hostId) => window.__TAURI_INTERNALS__.invoke('monitor_stop', { hostId }),
-      hostId,
-    );
-    await nav().getByRole('button', { name: '服务器管理', exact: true }).click();
-    passed(
-      'five-minute simultaneous real Monitor/Docker logs, bounded histories and resource samples',
-    );
+    passed('five-minute real Docker log stream remains bounded');
   }
   await page.screenshot({ path: path.join(artifacts, 'ops-logs.png') });
-  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
   await switchTab('Docker 容器');
-  await page.getByLabel('运维项目搜索').fill(fixture.uuid);
+  await content().getByLabel('运维项目搜索').fill(fixture.uuid);
   await (await row(fixture.container)).getByRole('button', { name: 'Shell', exact: true }).click();
-  assert.equal(await page.getByLabel('确认运维目标').count(), 0);
+  assert.equal(await content().getByLabel('确认运维目标').count(), 0);
   await page
     .locator('.container-terminal-dialog .terminal-pane')
     .locator('.xterm-container[data-state="connected"]')
     .waitFor();
-  await command(
-    `test -f /.dockerenv && printf '\\n__SD_%s__%s__\\n' CONTAINER_REAL_SHELL "$(hostname)"`,
-  );
-  await contains('__SD_CONTAINER_REAL_SHELL__' + fixture.container.slice(0, 12) + '__');
-  await command('exit');
+  const shellInput = page.locator('.container-terminal-dialog .xterm-helper-textarea');
+  await shellInput.pressSequentially('test -f /.dockerenv && hostname');
+  await shellInput.press('Enter');
   await page
-    .locator('.terminal-pane:visible')
-    .locator('.xterm-container[data-state="closed"]')
+    .locator('.container-terminal-dialog .xterm-rows')
+    .filter({ hasText: fixture.container.slice(0, 12) })
     .waitFor();
-  await terminalAction(page, page.locator('.terminal-pane:visible'), '关闭终端');
+  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
   passed(
     'native bounded Docker log stream, timestamps/search/pause/resume/close and independent real container PTY shell',
   );
-  assert.equal(await page.getByLabel('远程日志绝对路径').count(), 0);
-  assert.equal(await page.getByRole('tab', { name: '日志', exact: true }).count(), 0);
+  assert.equal(await content().getByLabel('远程日志绝对路径').count(), 0);
+  assert.equal(await content().getByRole('tab', { name: '日志', exact: true }).count(), 0);
   const status = await fixtureCall('status');
   assert.deepEqual(
     status.streamProcesses,
@@ -425,116 +374,8 @@ export async function operationsChecks(context) {
     'closed log dialogs must release actual remote log processes',
   );
   passed('standalone file-log UI is absent; closing container log dialogs releases remote streams');
-  await switchTab('进程');
-  await page.getByLabel('运维项目搜索').fill(String(fixture.sleepPid));
-  await (
-    await row(fixture.sleepPid)
-  )
-    .getByRole('button', { name: '进程详情 / 信号', exact: true })
-    .click();
-  await detail.filter({ hasText: 'startTicks' }).waitFor();
-  const proc = await query({ kind: 'process_details', pid: fixture.sleepPid });
-  assert.equal(proc.detail.startTicks, fixture.sleepStart);
-  const stale = await query({
-    kind: 'signal',
-    pid: fixture.sleepPid,
-    startTicks: String(BigInt(fixture.sleepStart) + 1n),
-    bootId: proc.detail.bootId,
-    signal: 'TERM',
-    confirmed: true,
-  });
-  assert.equal(stale.success, false);
-  await page.getByRole('button', { name: '发送信号…', exact: true }).click();
-  await confirm(fixture.sleepPid);
-  const after = await fixtureCall('status');
-  assert(!after.sleepState || after.sleepState === 'Z');
-  fixture = await fixtureCall('spawn_kill');
-  const victim = await query({ kind: 'process_details', pid: fixture.killPid });
-  const killed = await query({
-    kind: 'signal',
-    pid: fixture.killPid,
-    startTicks: victim.detail.startTicks,
-    bootId: victim.detail.bootId,
-    signal: 'KILL',
-    confirmed: true,
-  });
-  assert.equal(killed.success, true);
-  const killStatus = await fixtureCall('status');
-  assert(!killStatus.killState || killStatus.killState === 'Z');
-  passed(
-    'native process list/details, PID start-time mismatch refusal and confirmed pidfd TERM/KILL of only the fixture process',
-  );
-  await switchTab('监听端口');
-  await page.getByLabel('运维项目搜索').fill(String(fixture.tcpPort));
-  await page
-    .locator('.ops-table')
-    .getByText('127.0.0.1:' + fixture.tcpPort, { exact: true })
-    .waitFor();
-  const ports = await query({ kind: 'ports' });
-  assert(
-    ports.records.some((p) => p.protocol === 'udp' && p.local.endsWith(':' + fixture.udpPort)),
-  );
-  assert(
-    ports.records.some(
-      (p) => p.protocol === 'tcp' && String(p.process).includes('pid=' + fixture.portPid),
-    ),
-  );
-  const remote = await query({
-    kind: 'probe',
-    location: 'remote',
-    target: '127.0.0.1',
-    port: fixture.tcpPort,
-  });
-  assert.equal(remote.detail.reachable, true);
-  const server = net.createServer((socket) => socket.end());
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  try {
-    const local = await query({
-      kind: 'probe',
-      location: 'local',
-      target: '127.0.0.1',
-      port: server.address().port,
-    });
-    assert.equal(local.detail.reachable, true);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
-  passed('native TCP/UDP listeners and owning PID, remote and local TCP reachability');
-  await switchTab('systemd 服务');
-  await page.getByLabel('systemd 范围').selectOption('user');
-  await page.getByLabel('运维项目搜索').fill(fixture.unit);
-  let servicePid;
-  for (const label of ['启动', '重启', '启用自启', '禁用自启']) {
-    await (await row(fixture.unit)).getByRole('button', { name: label, exact: true }).click();
-    await confirm(fixture.unit);
-    const observed = await query({ kind: 'service_details', scope: 'user', unit: fixture.unit });
-    if (label === '启动') {
-      assert.equal(observed.detail.ActiveState, 'active');
-      servicePid = observed.detail.MainPID;
-    }
-    if (label === '重启') {
-      assert.equal(observed.detail.ActiveState, 'active');
-      assert.notEqual(observed.detail.MainPID, servicePid);
-    }
-    if (label === '启用自启') assert.equal(observed.detail.UnitFileState, 'enabled');
-    if (label === '禁用自启') assert.equal(observed.detail.UnitFileState, 'disabled');
-  }
-  await page.screenshot({ path: path.join(artifacts, 'ops-service.png') });
-  const service = await query({ kind: 'service_details', scope: 'user', unit: fixture.unit });
-  assert.equal(service.detail.ActiveState, 'active');
-  assert.equal(service.detail.UnitFileState, 'disabled');
-  await (await row(fixture.unit)).getByRole('button', { name: '服务日志', exact: true }).click();
-  await output.filter({ hasText: '__SD_SERVICE_' + fixture.uuid + '__' }).waitFor();
-  await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await switchTab('systemd 服务');
-  await page.getByLabel('运维项目搜索').fill(fixture.unit);
-  await (await row(fixture.unit)).getByRole('button', { name: '停止', exact: true }).click();
-  await confirm(fixture.unit);
-  passed(
-    'native scoped systemd user-service start/restart/enable/disable/stop and journal shortcut',
-  );
   await switchTab('Docker 容器');
-  await page.getByLabel('运维项目搜索').fill(fixture.uuid);
+  await content().getByLabel('运维项目搜索').fill(fixture.uuid);
   const beforeRestart = await query({
     kind: 'container_details',
     id: fixture.container,
@@ -542,7 +383,7 @@ export async function operationsChecks(context) {
     confirmed: false,
   });
   for (const label of ['重启', '停止', '删除']) {
-    await (await row(fixture.container)).getByRole('button', { name: label, exact: true }).click();
+    await action(fixture.container, label);
     await confirm(fixture.container);
     if (label === '重启') {
       const changed = await query({
@@ -561,12 +402,17 @@ export async function operationsChecks(context) {
   }
   assert(!(await query({ kind: 'containers' })).records.some((r) => r.ID === fixture.container));
   await switchTab('镜像');
-  await page.getByLabel('运维项目搜索').fill(fixture.uuid);
+  await content().getByLabel('运维项目搜索').fill(fixture.uuid);
   await (await row(fixture.image)).getByRole('button', { name: '删除镜像', exact: true }).click();
-  await confirm(fixture.image);
+  const imageReview = page.getByRole('dialog', { name: '删除镜像？', exact: true });
+  await imageReview.waitFor();
+  assert.equal(await imageReview.locator('input').count(), 0);
+  assert((await imageReview.innerText()).includes(fixture.image));
+  await imageReview.getByRole('button', { name: '确认删除', exact: true }).click();
+  await imageReview.waitFor({ state: 'hidden' });
   assert(!(await query({ kind: 'images' })).records.some((r) => r.ID === fixture.image));
   await page.screenshot({ path: path.join(artifacts, 'operations.png') });
-  await page.getByRole('button', { name: '断开运维连接', exact: true }).click();
+  await page.evaluate((id) => window.__TAURI_INTERNALS__.invoke('ops_close', { id }), session.id);
   await hostShell();
   await command("printf '\\n__SD_%s__\\n' OPS_SURVIVED");
   await contains('__SD_OPS_SURVIVED__');

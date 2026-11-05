@@ -9,6 +9,7 @@ mod monitor;
 mod ops;
 mod plugins;
 mod product;
+pub mod storage_location;
 mod terminal;
 mod terminal_upload;
 pub use hosts::SecureStatus;
@@ -141,6 +142,7 @@ impl Application {
             data_directory: self.data_directory.to_string_lossy().into_owned(),
             log_directory: self.log_directory.to_string_lossy().into_owned(),
             config,
+            storage: None,
         })
     }
 

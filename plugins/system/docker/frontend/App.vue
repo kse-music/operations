@@ -7,16 +7,30 @@ import './docker.css';
 import type { ContainerAction, ContainerShell } from '@serverdeck/plugin-sdk/types/ops';
 import type { Host } from '@serverdeck/plugin-sdk/types/hosts';
 import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
-const props = defineProps<{ hostId?: string; initialSection?: ServerSection }>();
+import type { PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
+const props = defineProps<{
+  hostId?: string;
+  initialSection?: ServerSection;
+  page?: PluginUiPage;
+}>();
+const sections = computed<ServerSection[]>(() =>
+  props.page?.surface?.kind === 'operations'
+    ? props.page.surface.sections
+    : ['containers', 'images'],
+);
 const emit = defineEmits<{
   section: [section: ServerSection];
   shell: [host: Host, shell: ContainerShell];
 }>();
-const section = ref<ServerSection>(props.initialSection === 'images' ? 'images' : 'containers');
+const section = ref<ServerSection>(
+  props.initialSection && sections.value.includes(props.initialSection)
+    ? props.initialSection
+    : sections.value[0]!,
+);
 watch(
   () => props.initialSection,
   (value) => {
-    if (value === 'images' || value === 'containers') section.value = value;
+    if (value && sections.value.includes(value)) section.value = value;
   },
 );
 watch(section, (value) => emit('section', value));
@@ -39,7 +53,7 @@ const columns = computed(() =>
 </script>
 <template>
   <div class="plugin-server-surface docker-workbench">
-    <ServerTabs v-model="section" :sections="['containers', 'images']" />
+    <ServerTabs v-model="section" :sections="sections" />
     <KeepAlive
       ><ResourceView
         :key="section"

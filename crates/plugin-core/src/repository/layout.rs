@@ -44,40 +44,9 @@ impl Repository {
                             entries.iter().any(|entry| entry["tool"] == "network")
                         })
             };
-            let system_services = record["current"]["source"] == "system"
-                && (id == "cn.hiboot.plugins.services"
-                    || id
-                        == format!(
-                            "{}services",
-                            serverdeck_core::identity::LEGACY_PLUGIN_PREFIX
-                        ));
-            if (system_services && has_network(&record["current"]))
-                || has_network(&record["backup"])
-            {
-                // Keep the exact old record before narrowing an obsolete system permission.
-                // Startup provisioning must replace its package before any runtime is exposed.
-                let archive = self
-                    .root
-                    .join("retired")
-                    .join(format!("{id}-contract-{}", uuid::Uuid::new_v4()));
-                ensure_directory(&archive)?;
-                write_json(&archive.join("record.json"), &record)?;
-                if system_services
-                    && let Some(permissions) =
-                        record["current"]["manifest"]["permissions"].as_array_mut()
-                {
-                    permissions.retain(|permission| permission != "network.run");
-                }
-                if has_network(&record["backup"]) {
-                    record["backup"] = serde_json::Value::Null;
-                }
-                write_json(&path, &record)?;
-            }
-            let removed = merged_system
-                || crate::manifest::is_removed_tool_id(&id)
-                || (!system_services && has_network(&record["current"]))
-                || ["current", "backup"].iter().any(|key| {
-                    record[key]["manifest"]["permissions"]
+            let has_removed_permission = |plugin: &serde_json::Value| {
+                has_network(plugin)
+                    || plugin["manifest"]["permissions"]
                         .as_array()
                         .is_some_and(|permissions| {
                             permissions.iter().any(|permission| {
@@ -87,17 +56,147 @@ impl Repository {
                                 )
                             })
                         })
-                });
+            };
+            let removed = merged_system
+                || crate::manifest::is_removed_tool_id(&id)
+                || has_removed_permission(&record["current"])
+                || self.has_removed_server_view(&id, &record["current"])?;
             if !removed {
+                if !record["backup"].is_null()
+                    && (has_removed_permission(&record["backup"])
+                        || self.has_removed_server_view(&id, &record["backup"])?)
+                {
+                    let archive = self
+                        .root
+                        .join("retired")
+                        .join(format!("{id}-contract-{}", uuid::Uuid::new_v4()));
+                    ensure_directory(&archive)?;
+                    self.archive_backup_payload(&id, &record["backup"], &archive)?;
+                    write_json(&archive.join("record.json"), &record)?;
+                    write_json(
+                        &archive.join("reason.json"),
+                        &serde_json::json!({"message":"旧备份使用已移除的插件合同，已归档；请升级插件使用独立界面。"}),
+                    )?;
+                    record["backup"] = serde_json::Value::Null;
+                    record["current"]["previousVersion"] = serde_json::Value::Null;
+                    write_json(&path, &record)?;
+                }
                 continue;
             }
             let archive = self.root.join("retired");
             ensure_directory(&archive)?;
             let target = archive.join(format!("{id}-removed-{}", uuid::Uuid::new_v4()));
             check_ancestors(&target)?;
-            fs::rename(entry.path(), target).map_err(io)?;
+            fs::rename(entry.path(), &target).map_err(io)?;
+            write_json(
+                &target.join("reason.json"),
+                &serde_json::json!({"message":"插件身份或标准界面已移除，原包和用户数据保留；第三方插件需升级为独立界面。"}),
+            )?;
         }
         Ok(())
+    }
+
+    fn archive_backup_payload(
+        &self,
+        id: &str,
+        raw: &serde_json::Value,
+        archive: &Path,
+    ) -> Result<(), Error> {
+        use base64::Engine as _;
+        let base = self.retirement_payload_folder(id, raw)?;
+        let files = raw["manifest"]["files"]
+            .as_array()
+            .ok_or_else(|| invalid("插件文件清单无效"))?;
+        let mut archived = Vec::new();
+        let mut total = 0;
+        if files.len() > crate::package::MAX_FILES {
+            return Err(invalid("插件文件清单超限"));
+        }
+        for file in files {
+            let name = file["path"]
+                .as_str()
+                .ok_or_else(|| invalid("插件文件路径无效"))?;
+            validate_path(name)?;
+            let path = base.join(name);
+            check_ancestors(&path)?;
+            let bytes = read_bounded(&path, crate::package::MAX_FILE as u64)?;
+            total += bytes.len();
+            if total > crate::package::MAX_TOTAL
+                || file["size"].as_u64() != Some(bytes.len() as u64)
+                || file["sha256"].as_str() != Some(digest(&bytes).as_str())
+            {
+                return Err(invalid("插件备份文件大小或摘要不符"));
+            }
+            archived.push(serde_json::json!({"path":name,"content":base64::engine::general_purpose::STANDARD.encode(bytes)}));
+        }
+        write_json(
+            &archive.join("package.sdplugin"),
+            &serde_json::json!({"formatVersion":1,"manifest":raw["manifest"],"files":archived}),
+        )
+    }
+
+    fn retirement_payload_folder(
+        &self,
+        id: &str,
+        raw: &serde_json::Value,
+    ) -> Result<PathBuf, Error> {
+        let revision = raw["revision"]
+            .as_str()
+            .ok_or_else(|| invalid("插件存储代号缺失"))?;
+        validate_path(revision)?;
+        if revision.contains('/') || !revision.starts_with("version-") {
+            return Err(invalid("插件存储代号无效"));
+        }
+        let source = match raw["source"].as_str() {
+            None | Some("user") => PluginSource::User,
+            Some("system") => PluginSource::System,
+            _ => return Err(invalid("插件来源无效")),
+        };
+        // Retirement precedes payload migration; accept either owned layout.
+        let legacy = self.folder(id)?.join("versions").join(revision);
+        let base = if legacy.try_exists().map_err(io)? {
+            legacy
+        } else {
+            self.payload_folder(source, id)?
+                .join("versions")
+                .join(revision)
+        };
+        check_directory(&base)?;
+        Ok(base)
+    }
+
+    fn has_removed_server_view(&self, id: &str, raw: &serde_json::Value) -> Result<bool, Error> {
+        if raw["manifest"]["entry"]["ui"].is_null() {
+            return Ok(false);
+        }
+        let plugin: InstalledPlugin =
+            serde_json::from_value(raw.clone()).map_err(|error| Error::Storage(Box::new(error)))?;
+        if plugin.manifest.id != id {
+            return Err(invalid("插件仓库身份不一致"));
+        }
+        let path = plugin
+            .manifest
+            .entry
+            .ui
+            .as_deref()
+            .ok_or_else(|| invalid("插件 UI 入口缺失"))?;
+        validate_path(path)?;
+        let file = plugin
+            .manifest
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .ok_or_else(|| invalid("插件 UI 文件未声明"))?;
+        let base = self.retirement_payload_folder(id, raw)?;
+        let target = base.join(path);
+        check_ancestors(&target)?;
+        let bytes = read_bounded(&target, 64 * 1024)?;
+        if bytes.len() as u64 != file.size || digest(&bytes) != file.sha256 {
+            return Err(invalid("已安装插件 UI 文件被修改"));
+        }
+        let ui: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|error| Error::Storage(Box::new(error)))?;
+        Ok(crate::package::uses_removed_server_view(&ui))
     }
 
     pub(super) fn payload_folder(&self, source: PluginSource, id: &str) -> Result<PathBuf, Error> {

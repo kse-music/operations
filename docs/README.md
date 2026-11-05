@@ -32,12 +32,12 @@
 
 ## 插件开发：plugins
 
-- [系统内置插件](plugins/BUILTIN_PLUGINS.md)：三个 cn.hiboot 标准 WASM 插件、平铺工具栏、预置只读权限、全主机适用及目录迁移。
+- [系统内置插件](plugins/BUILTIN_PLUGINS.md)：两个 cn.hiboot 标准 WASM 插件、平铺工具栏、预置只读权限、全主机适用及目录迁移。
 - [架构](plugins/PLUGIN_ARCHITECTURE.md)
 - [开发与本地安装](plugins/PLUGIN_DEVELOPMENT.md)
 - [包格式](plugins/PLUGIN_PACKAGE_FORMAT.md)
 - [运行时与 ABI](plugins/PLUGIN_RUNTIME.md)
-- [公开 SDK](plugins/PLUGIN_SDK.md)：Rust 3.0 / Vue 3.0，插件源码边界与公共能力。
+- [公开 SDK](plugins/PLUGIN_SDK.md)：Rust 4.0 / Vue 4.0，插件源码边界与公共能力。
 - [API 版本策略](plugins/PLUGIN_API_VERSIONING.md)
 - [安全边界](plugins/PLUGIN_SECURITY.md)
 - [插件 UI 扩展](plugins/PLUGIN_UI_EXTENSION.md)：UI v4 独立前端及 v1–v3 兼容。

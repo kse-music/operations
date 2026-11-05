@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { AppConfig, Bootstrap } from '../types/ipc';
+import type { AppConfig, Bootstrap, StorageInfo, StoragePreview } from '../types/ipc';
 
 export function errorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
@@ -25,4 +25,28 @@ export function bootstrap(): Promise<Bootstrap> {
 export function saveConfig(config: AppConfig): Promise<AppConfig> {
   ensureDesktop();
   return invoke<AppConfig>('config_save', { config });
+}
+
+export function storagePreview(targetDirectory: string): Promise<StoragePreview> {
+  ensureDesktop();
+  return invoke('app_storage_preview', { targetDirectory });
+}
+
+export function storageMigrate(
+  config: AppConfig,
+  targetDirectory: string,
+  discardDocuments: boolean,
+): Promise<boolean> {
+  ensureDesktop();
+  return invoke('app_storage_migrate', {
+    config,
+    targetDirectory,
+    confirmed: true,
+    discardDocuments,
+  });
+}
+
+export function storageReady(): Promise<StorageInfo> {
+  ensureDesktop();
+  return invoke('app_storage_ready');
 }

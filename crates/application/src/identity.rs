@@ -70,7 +70,7 @@ mod tests {
         let mut config = app.bootstrap().await.unwrap().config;
         config.theme = Theme::Light;
         app.save_config(config.clone()).await.unwrap();
-        let id = "cn.hiboot.plugins.services";
+        let id = "cn.hiboot.plugins.docker";
         let plugin = app.plugins.detail(id).unwrap();
         app.plugins.set_enabled(id, false).unwrap();
         fs::write(old.join("logs/retained.log"), b"retained").unwrap();

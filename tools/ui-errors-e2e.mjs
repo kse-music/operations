@@ -99,7 +99,7 @@ try {
     'settings',
     'settingsTerminal',
     'settingsShortcuts',
-    'settingsWorkspace',
+    'settingsStorage',
     'about',
   ]) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });

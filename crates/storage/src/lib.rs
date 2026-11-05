@@ -43,6 +43,36 @@ pub(crate) fn storage_error<E: std::error::Error + Send + Sync + 'static>(error:
 }
 
 impl Database {
+    /// Check a closed migration copy without creating, migrating or rewriting it.
+    pub fn verify_file(path: &Path) -> Result<(), Error> {
+        let connection =
+            Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+                .map_err(storage_error)?;
+        let result: String = connection
+            .pragma_query_value(None, "quick_check", |row| row.get(0))
+            .map_err(storage_error)?;
+        if result != "ok" {
+            return Err(Error::Validation("迁移数据库完整性检查失败"));
+        }
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .map_err(storage_error)?;
+        if version > DATABASE_VERSION {
+            return Err(Error::UnsupportedDatabase(version));
+        }
+        let json: String = connection
+            .query_row(
+                "SELECT value FROM application_settings WHERE key = 'app_config'",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(storage_error)?;
+        serde_json::from_str::<AppConfig>(&json)
+            .map_err(storage_error)?
+            .validate()?;
+        Ok(())
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let database = Self {
             path: path.as_ref().to_owned(),

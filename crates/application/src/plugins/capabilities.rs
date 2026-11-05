@@ -544,6 +544,12 @@ impl Application {
             host_id: context(call)?.input.host_id.clone(),
             operation: operation.operation().into(),
             description,
+            image_id: match operation {
+                Capability::SystemQuery {
+                    request: serverdeck_plugin_sdk::server::Query::ImageRemove { id },
+                } => Some(id.clone()),
+                _ => None,
+            },
         };
         data.approvals.insert(
             public.id.clone(),
@@ -781,7 +787,7 @@ mod confirmation_policy_tests {
         ));
         assert!(requires_confirmation(
             &PluginSource::System,
-            "cn.hiboot.plugins.services",
+            "dev.other-system-plugin",
             &shell
         ));
         let write = Capability::SaveFile {

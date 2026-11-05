@@ -1,14 +1,14 @@
 // UI navigation shared by browser fixtures and isolated native WebView2 checks.
-const hostTools = new Set(['SSH 终端', 'SFTP 文件', '服务器管理']);
+const hostTools = new Set(['SSH 终端', 'SFTP 文件']);
 const menuModules = {
   安全凭据: 'assets',
   备份恢复: 'assets',
   通用: 'system',
   终端: 'system',
   快捷键: 'system',
-  工作区与连接: 'system',
+  数据与存储: 'system',
   关于: 'system',
-  插件管理: 'system',
+  插件管理: 'plugins',
 };
 
 export async function terminalAction(page, pane, name) {
@@ -82,6 +82,7 @@ export async function deliverPluginDrop(page, payload) {
   );
   const delivered = await page.evaluate((payload) => {
     let count = 0;
+    const handlers = new Set();
     for (const key of Object.getOwnPropertyNames(window)) {
       const value = Object.getOwnPropertyDescriptor(window, key)?.value;
       if (!value || typeof value !== 'object' || !Object.hasOwn(value, 'tauri://drag-drop'))
@@ -89,7 +90,12 @@ export async function deliverPluginDrop(page, payload) {
       const receivers = value['tauri://drag-drop'];
       for (const id of Object.getOwnPropertyNames(receivers)) {
         const listener = receivers[id];
-        if (listener.target?.kind === 'Webview' && listener.target?.label === 'main') {
+        if (
+          listener.target?.kind === 'Webview' &&
+          listener.target?.label === 'main' &&
+          !handlers.has(listener.handlerId)
+        ) {
+          handlers.add(listener.handlerId);
           window.__TAURI_INTERNALS__.runCallback(listener.handlerId, {
             event: 'tauri://drag-drop',
             id: Number(id),
@@ -101,8 +107,12 @@ export async function deliverPluginDrop(page, payload) {
     }
     return count;
   }, payload);
-  if (delivered !== 1)
-    throw new Error(`Expected one mounted native drop receiver, got ${delivered}`);
+  if (delivered < 1) throw new Error('No mounted native drop receiver');
+  // Cached views can retain listeners; the visible upload zone must produce one preview.
+  const preview = page.getByRole('dialog', { name: '安装插件', exact: true });
+  await preview.waitFor();
+  if ((await preview.count()) !== 1)
+    throw new Error('Native drop produced duplicate package previews');
 }
 export async function previewPluginPackage(page, packagePath) {
   await navigateWorkspace(page, '插件管理');
@@ -209,13 +219,6 @@ export async function bindAssistantModel(page, modelId) {
 }
 
 export async function openPluginFunction(page, name, hostId) {
-  const systemPages = {
-    资源监控: '资源监控',
-    进程与端口: '进程与端口',
-    'systemd 服务': 'systemd 服务',
-  };
-  const subpage = systemPages[name];
-  if (subpage) name = '系统服务';
   const id =
     hostId ??
     (await page.evaluate(() => {
@@ -230,11 +233,6 @@ export async function openPluginFunction(page, name, hostId) {
     .getByRole('navigation', { name: '当前主机工具', exact: true })
     .getByRole('button', { name, exact: true })
     .click();
-  if (subpage)
-    await page
-      .frameLocator('.plugin-frame-container:visible iframe')
-      .getByRole('tab', { name: subpage, exact: true })
-      .click();
 }
 
 export async function selectHostWorkspace(page, id) {

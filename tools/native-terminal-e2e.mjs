@@ -15,7 +15,6 @@ import { chromium } from 'playwright-core';
 import { advancedTerminalChecks } from './native-terminal-advanced.mjs';
 import { sftpChecks } from './native-sftp-e2e.mjs';
 import { transferExitChecks } from './native-transfer-exit.mjs';
-import { monitorChecks } from './native-monitor-e2e.mjs';
 import { releaseChecks } from './native-release-qa.mjs';
 import { createProductHost, productChecks } from './native-product-e2e.mjs';
 
@@ -478,8 +477,6 @@ try {
     });
   if (process.argv.includes('--ops-probe'))
     await probeOps({ page, artifacts, passed, command, contains, hostId });
-  if (process.argv.includes('--monitor'))
-    await monitorChecks({ page, artifacts, passed, hostId, command, contains });
   if (process.argv.includes('--sftp'))
     await sftpChecks({
       page,
@@ -504,18 +501,6 @@ try {
       },
     };
     if (!process.argv.includes('--product-core')) {
-      await monitorChecks(shared);
-      await terminalAction(page, page.locator('.terminal-pane:visible'), '监控');
-      await page.getByRole('button', { name: '查看资源占用进程', exact: true }).click();
-      assert.equal(
-        await page.locator('.workspace-tab.active').getAttribute('data-host-id'),
-        hostId,
-      );
-      passed('native monitor-to-process navigation preserves the selected server');
-      await page
-        .getByRole('navigation', { name: '当前主机工具', exact: true })
-        .getByRole('button', { name: /^SSH 终端/ })
-        .click();
       await sftpChecks(shared);
       await operationsChecks(shared);
     }

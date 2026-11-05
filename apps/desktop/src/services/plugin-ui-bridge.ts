@@ -122,14 +122,7 @@ export function createPluginUiBridge(input: {
       throw denied();
     const surface = input.page.surface;
     if (surface?.kind === 'frontend') return surface;
-    const permission =
-      surface?.kind === 'tool'
-        ? tools[surface.tool]?.permission
-        : surface?.kind === 'monitor'
-          ? 'metrics.read'
-          : surface?.kind === 'operations' && surface.sections.every((s) => s === 'logs')
-            ? 'logs.read'
-            : 'system.read';
+    const permission = surface?.kind === 'tool' ? tools[surface.tool]?.permission : 'system.read';
     if (
       !permission ||
       !grant.permissions.includes(permission as PluginPermission) ||

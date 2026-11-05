@@ -40,10 +40,10 @@ beforeEach(() => {
   });
 });
 let app: App, root: HTMLDivElement, pinia: Pinia;
-function mountManager() {
+function mountManager(onSettings = vi.fn()) {
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(PluginsView).use(pinia);
+  app = createApp(PluginsView, { onSettings }).use(pinia);
   app.mount(root);
 }
 afterEach(() => {
@@ -109,7 +109,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
   expect(root.querySelector('[aria-label="本地插件包路径"]')).toBeNull();
   const button = (text: string) =>
     [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)!;
-  button('选择插件包').click();
+  button('安装插件').click();
   await settle();
   const ack = document.querySelector<HTMLInputElement>('.plugin-install-ack input')!;
   ack.checked = true;
@@ -143,13 +143,14 @@ it('keeps only uninstall actions in the list and opens individual settings from 
     source: 'user',
     manifest: { ...items[1]!.manifest, id: 'dev.upload', name: 'Uploaded Docker' },
   });
-  items[1]!.enabled = true;
+  items[0]!.enabled = true;
   vi.spyOn(pluginsApi, 'list').mockImplementation(async () => items.map((item) => ({ ...item })));
   vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   const change = vi.spyOn(pluginsApi, 'setEnabled');
   pinia = createPinia();
-  mountManager();
+  const settings = vi.fn();
+  mountManager(settings);
   await settle();
   const cards = root.querySelectorAll('[data-plugin-id]');
   expect(cards).toHaveLength(3);
@@ -159,8 +160,12 @@ it('keeps only uninstall actions in the list and opens individual settings from 
       /^卸载 /,
     );
     expect(card.textContent).not.toContain('权限');
-    expect(card.textContent).not.toContain('系统内置');
-    expect(card.textContent).not.toContain('用户上传');
+    expect(card.querySelector('.plugin-source')?.textContent).toBe(
+      card.getAttribute('data-plugin-id') === 'dev.upload' ? '用户上传' : '系统内置',
+    );
+    expect(card.querySelector('.plugin-identifier')?.textContent).toBe(
+      card.getAttribute('data-plugin-id'),
+    );
   }
   const docker = root.querySelector('[data-plugin-id="cn.hiboot.plugins.docker"]')!;
   expect([...docker.querySelectorAll('button')].map((b) => b.textContent?.trim())).not.toContain(
@@ -168,6 +173,8 @@ it('keeps only uninstall actions in the list and opens individual settings from 
   );
   expect(change).not.toHaveBeenCalled();
   expect(docker.textContent).toContain('已启用');
+  docker.querySelector<HTMLButtonElement>('.plugin-name-button')!.click();
+  expect(settings).toHaveBeenCalledWith('cn.hiboot.plugins.docker');
 });
 
 it('accepts one native dropped package, previews it and requires acknowledgement before installing', async () => {
@@ -198,7 +205,7 @@ it('accepts one native dropped package, previews it and requires acknowledgement
   drop(['C:/plugins/resources.sdplugin']);
   await settle();
   expect(preview).toHaveBeenCalledWith('C:/plugins/resources.sdplugin');
-  const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+  const button = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
     (b) => b.textContent?.trim() === '安装插件',
   )!;
   expect(button.disabled).toBe(true);
@@ -249,4 +256,112 @@ it('ignores late preview responses after a newer drop or closing the dialog', as
   await settle();
   expect(document.querySelector('.plugin-preview-heading')?.textContent).toContain('new.sdplugin');
   expect(document.querySelector('.plugin-preview-heading')?.textContent).not.toContain('stale');
+});
+
+it('combines search, source and status filters and restores the list after clearing them', async () => {
+  const items = systemPluginFixtures();
+  items[0]!.enabled = true;
+  items.push({
+    ...items[0]!,
+    source: undefined,
+    enabled: false,
+    manifest: {
+      ...items[0]!.manifest,
+      id: 'dev.upload',
+      name: 'Uploaded Docker',
+      author: 'Test Publisher',
+    },
+  });
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(items);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  const ids = () =>
+    [...root.querySelectorAll('[data-plugin-id]')].map((card) =>
+      card.getAttribute('data-plugin-id'),
+    );
+  const choose = async (label: string, value: string) => {
+    const select = root.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;
+    select.value = value;
+    select.dispatchEvent(new Event('change'));
+    await nextTick();
+  };
+  const search = root.querySelector<HTMLInputElement>('[aria-label="搜索插件"]')!;
+  const query = async (value: string) => {
+    search.value = value;
+    search.dispatchEvent(new Event('input'));
+    await nextTick();
+  };
+  await query('  DOCKER  ');
+  expect(ids()).toEqual(['cn.hiboot.plugins.docker', 'dev.upload']);
+  await choose('插件来源', 'user');
+  expect(ids()).toEqual(['dev.upload']);
+  await query('test publisher');
+  expect(ids()).toEqual(['dev.upload']);
+  await query('DEV.UPLOAD');
+  expect(ids()).toEqual(['dev.upload']);
+  await choose('插件状态', 'enabled');
+  expect(ids()).toEqual([]);
+  expect(root.querySelector('.plugin-empty')?.textContent).toContain('没有匹配的插件');
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '清除筛选')!
+    .click();
+  await nextTick();
+  expect(ids()).toHaveLength(3);
+  expect(search.value).toBe('');
+  await choose('插件状态', 'disabled');
+  expect(ids()).toEqual(['cn.hiboot.plugins.assistant', 'dev.upload']);
+  expect(root.querySelector('.plugin-filter-summary')?.textContent).toContain('显示 2 / 3 个');
+});
+
+it('shows initial loading and a retryable error instead of an empty success state', async () => {
+  let reject!: (cause: unknown) => void;
+  vi.spyOn(pluginsApi, 'list')
+    .mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    )
+    .mockResolvedValue([]);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  mountManager();
+  await nextTick();
+  expect(root.textContent).toContain('正在读取插件…');
+  reject({ message: 'Repository unavailable' });
+  await settle();
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('Repository unavailable');
+  expect(root.textContent).not.toContain('还没有安装插件');
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '重试')!
+    .click();
+  await settle();
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  expect(root.querySelector('.plugin-empty')?.textContent).toContain('还没有安装插件');
+});
+
+it('requires uninstall confirmation and preserves plugin data by default', async () => {
+  const item = systemPluginFixtures()[0]!;
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue([item]);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const uninstall = vi.spyOn(pluginsApi, 'uninstall').mockResolvedValue();
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  root.querySelector<HTMLButtonElement>('.plugin-remove-button')!.click();
+  await nextTick();
+  expect(uninstall).not.toHaveBeenCalled();
+  expect(document.querySelector<HTMLInputElement>('dialog input[type="checkbox"]')!.checked).toBe(
+    false,
+  );
+  [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find((button) => button.textContent?.trim() === '确认卸载')!
+    .click();
+  await settle();
+  expect(uninstall).toHaveBeenCalledWith(item.manifest.id, false, true);
+  expect(document.querySelector('dialog')).toBeNull();
 });

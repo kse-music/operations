@@ -15,9 +15,14 @@ import {
 
 const root = process.cwd();
 const backgroundTest = process.argv.includes('--background');
-const base = path.join(
+const base = path.resolve(
   root,
-  backgroundTest ? '.local/assistant-background-20261105' : '.local/assistant-agent-20261105',
+  process.env.SERVERDECK_AGENT_OUTPUT ??
+    (backgroundTest ? '.local/assistant-background-20261105' : '.local/assistant-agent-20261105'),
+);
+assert(
+  base.startsWith(path.join(root, '.local') + path.sep),
+  'Agent QA output must stay in .local',
 );
 const configPath = path.join(base, 'native-config.json');
 const executable = path.join(base, 'AssistantAgentQa.exe');

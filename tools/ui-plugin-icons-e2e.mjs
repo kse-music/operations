@@ -91,6 +91,7 @@ try {
     assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
       '主机运维',
       '资产管理',
+      '插件',
       '设置',
     ]);
     assert.equal(await page.locator('.activity-rail [data-plugin-id]').count(), 0);
@@ -116,7 +117,7 @@ try {
     await page.locator('.plugin-page').waitFor();
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '设置',
+      '插件',
     );
     assert.equal(
       await page.locator('.activity-rail [aria-current="page"]').getAttribute('aria-label'),
@@ -143,7 +144,10 @@ try {
       const box = await button.boundingBox();
       assert(box && box.x >= 0 && box.x + box.width <= width + 1);
     }
-    assert.equal(await toolbar.getByRole('button').count(), 5);
+    assert.equal(
+      await toolbar.getByRole('button').count(),
+      2 + expected.filter(([, , functional]) => functional).length,
+    );
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({ path: `${output}/${name}-host-tools.png` });
     assert.deepEqual(errors, []);

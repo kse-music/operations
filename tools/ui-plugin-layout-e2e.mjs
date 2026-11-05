@@ -17,7 +17,7 @@ const server = process.env.SERVERDECK_PLUGIN_LAYOUT_URL
 await server?.listen();
 await mkdir(output, { recursive: true });
 const packages = await Promise.all(
-  ['services', 'docker', 'assistant'].map(async (name) => {
+  ['docker', 'assistant'].map(async (name) => {
     const pkg = JSON.parse(await readFile(`plugins/system/packages/${name}.sdplugin`, 'utf8'));
     const ui = JSON.parse(
       Buffer.from(pkg.files.find((f) => f.path === 'ui.json').content, 'base64'),
@@ -194,98 +194,50 @@ try {
             window.dialogPtyClosed = id;
           };
           const polledLogs = new Set();
-          const now = Date.now(),
-            gb = 1024 ** 3;
-          const snapshot = {
-            hostId: host.id,
-            sessionId: 'layout-monitor',
-            state: 'running',
-            revision: 1,
-            intervalSecs: 3,
-            error: null,
-            sample: {
-              sampledAt: now,
-              uptime: 1276000,
-              load: [0.42, 0.68, 0.53],
-              rateStatus: 'ok',
-              warnings: [],
-              cpus: [{ name: 'cpu', usage: 23.4, iowait: 0.8 }],
-              memory: {
-                total: 16 * gb,
-                used: 6.2 * gb,
-                available: 9.8 * gb,
-                usage: 38.75,
-                approximate: false,
-                swapTotal: 2 * gb,
-                swapUsed: 0,
-                swapUsage: 0,
-              },
-              disks: [
-                {
-                  mount: '/',
-                  source: '/dev/vda1',
-                  filesystem: 'ext4',
-                  device: '1',
-                  total: 100 * gb,
-                  used: 42 * gb,
-                  available: 58 * gb,
-                  usage: 42,
-                  pseudo: false,
-                  image: false,
-                  duplicateOf: null,
-                  error: null,
-                },
-              ],
-              network: [
-                {
-                  name: 'eth0',
-                  index: 1,
-                  addresses: ['192.0.2.10/24'],
-                  received: 4 * gb,
-                  sent: gb,
-                  receiveRate: 16384,
-                  sendRate: 8192,
-                },
-              ],
-              system: {
-                hostname: 'app-prod-01',
-                distribution: 'Ubuntu 24.04 LTS',
-                kernel: '6.8.0',
-                architecture: 'x86_64',
-                cpuModel: 'Intel Xeon',
-                cores: 8,
-                systemTime: new Date(now).toISOString(),
-                timezone: 'Asia/Shanghai',
-              },
-            },
-            history: Array.from({ length: 30 }, (_, n) => ({
-              sampledAt: now - (30 - n) * 3000,
-              uptime: n * 3,
-              cpu: 22 + Math.sin(n / 4) * 8,
-              memory: 38 + Math.sin(n / 6),
-              receiveRate: 16384,
-              sendRate: 8192,
-            })),
+          let imageApproved = false,
+            imageDeleted = false;
+          window.imageDeleteDecisions = [];
+          window.imageDeleteExecutions = 0;
+          pluginsApi.approve = async (id, accepted) => {
+            assertImageApproval(id);
+            window.imageDeleteDecisions.push(accepted);
+            imageApproved = accepted;
           };
+          function assertImageApproval(id) {
+            if (id !== 'layout-image-approval') throw new Error('Unknown image approval');
+          }
           pluginsApi.call = async (_id, payload) => {
             const operation = JSON.parse(payload.values.request);
             let result;
+            if (operation.kind === 'system_query' && operation.request.kind === 'image_remove') {
+              if (!imageApproved)
+                return {
+                  protocolVersion: 1,
+                  result: {
+                    id: 'layout-image-approval',
+                    hostId: 'layout-host',
+                    pluginName: 'Docker 管理',
+                    pluginVersion: '1.5.1',
+                    imageId: operation.request.id,
+                    description: 'Remove frozen test image',
+                  },
+                  error: { code: 'PLUGIN_CONFIRMATION_REQUIRED', message: 'confirm' },
+                };
+              imageApproved = false;
+              imageDeleted = true;
+              window.imageDeleteExecutions++;
+              return {
+                protocolVersion: 1,
+                result: { success: true, records: [], detail: null, code: null, message: null },
+                error: null,
+              };
+            }
             switch (operation.kind) {
               case 'settings_read':
                 result = window.layoutSettings;
                 break;
               case 'settings_write':
                 window.layoutSettings = operation.value;
-                result = null;
-                break;
-              case 'metrics_open':
-                result = { id: 'layout-monitor' };
-                break;
-              case 'metrics_snapshot':
-                result = snapshot;
-                break;
-              case 'metrics_visible':
-              case 'metrics_close':
                 result = null;
                 break;
               case 'system_log_start':
@@ -330,7 +282,7 @@ try {
                 break;
               case 'system_query': {
                 const data = {
-                  capabilities: [{ dockerInstalled: true, dockerState: 'running', systemd: true }],
+                  capabilities: [{ dockerInstalled: true, dockerState: 'running' }],
                   containers: Array.from({ length: 6 }, (_, n) => ({
                     ID: `${n}`.repeat(64),
                     Names: `app-service-${n + 1}`,
@@ -339,44 +291,17 @@ try {
                     Status: n ? 'Up 3 days' : 'Exited (1)',
                     Ports: '0.0.0.0:8080->80/tcp',
                   })),
-                  images: [
-                    {
-                      ID: 'a'.repeat(64),
-                      Repository: 'registry.example/application',
-                      Tag: 'stable',
-                      Size: '128 MB',
-                      CreatedSince: '3 days ago',
-                    },
-                  ],
-                  processes: [
-                    {
-                      pid: 1024,
-                      user: 'www-data',
-                      cpu: 12.4,
-                      memory: 2.3,
-                      elapsed: 7200,
-                      command: 'nginx',
-                    },
-                  ],
-                  ports: [
-                    {
-                      protocol: 'tcp',
-                      state: 'LISTEN',
-                      local: '0.0.0.0:80',
-                      peer: '*:*',
-                      process: 'nginx (1024)',
-                    },
-                  ],
-                  services: [
-                    {
-                      unit: 'nginx.service',
-                      description: 'Web application service',
-                      load: 'loaded',
-                      active: 'active',
-                      sub: 'running',
-                      enabled: 'enabled',
-                    },
-                  ],
+                  images: imageDeleted
+                    ? []
+                    : [
+                        {
+                          ID: `sha256:${'a'.repeat(64)}`,
+                          Repository: 'registry.example/application',
+                          Tag: 'stable',
+                          Size: '128 MB',
+                          CreatedSince: '3 days ago',
+                        },
+                      ],
                 };
                 result = {
                   success: true,
@@ -474,36 +399,6 @@ try {
       });
       await openPluginSettings(page, 'Docker 管理');
       await capture('docker-settings', '.plugin-page');
-      await openPluginSettings(page, '系统服务');
-      await capture('services-settings', '.plugin-page');
-      await page.evaluate(async () => {
-        const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
-        await useWorkspaceStore().openPlugin(
-          'cn.hiboot.plugins.services',
-          'server',
-          'layout-host',
-          'overview',
-        );
-      });
-      await content().getByRole('tab', { name: '资源监控', exact: true }).waitFor();
-      await content().getByText('23.4%', { exact: true }).waitFor();
-      await capture('services-monitor', '.plugin-workspace');
-      assert.equal(await content().getByRole('tab', { name: '日志查看', exact: true }).count(), 0);
-      for (const tab of ['进程与端口', 'systemd 服务']) {
-        await content().getByRole('tab', { name: tab, exact: true }).click();
-        await content().locator('.ops-table tbody tr').first().waitFor();
-        await capture(
-          `services-${tab === '进程与端口' ? 'processes' : 'units'}`,
-          '.plugin-workspace',
-        );
-      }
-      await content().getByRole('button', { name: '服务日志', exact: true }).click();
-      await content()
-        .getByTestId('operations-log-output')
-        .filter({ hasText: '弹窗日志' })
-        .waitFor();
-      await capture('systemd-log-dialog', '.plugin-workspace');
-      await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
       await openPluginFunction(page, 'Docker 管理', 'layout-host');
       await content().getByText('app-service-1', { exact: true }).waitFor();
       await capture('docker-containers', '.plugin-workspace');
@@ -543,21 +438,116 @@ try {
         await page.evaluate(() =>
           window.dialogLogEvents.filter((e) => e.kind === 'start').map((e) => e.source.kind),
         ),
-        ['service', 'container'],
+        ['container'],
       );
       assert.equal(
         await page.evaluate(() => window.dialogLogEvents.filter((e) => e.kind === 'stop').length),
-        2,
+        1,
       );
       await content().getByRole('tab', { name: '镜像', exact: true }).click();
       await content().getByText('registry.example/application', { exact: true }).waitFor();
       await capture('docker-images', '.plugin-workspace');
+      await content().getByRole('button', { name: '删除镜像', exact: true }).click();
+      const imageReview = page.getByRole('dialog', { name: '删除镜像？', exact: true });
+      await imageReview.waitFor();
+      assert.equal(await imageReview.locator('input').count(), 0);
+      assert.equal(
+        await content().getByRole('dialog', { name: '确认主机运维操作', exact: true }).count(),
+        0,
+      );
+      assert((await imageReview.innerText()).includes(`sha256:${'a'.repeat(64)}`));
+      const reviewGeometry = await imageReview.evaluate((element) => ({
+        overflow: element.scrollWidth > element.clientWidth + 1,
+        footerVisible:
+          element.querySelector('footer').getBoundingClientRect().bottom <=
+          element.getBoundingClientRect().bottom,
+      }));
+      assert.equal(reviewGeometry.overflow, false);
+      assert.equal(reviewGeometry.footerVisible, true);
+      assert.equal(await page.evaluate(() => window.imageDeleteExecutions), 0);
+      await page.screenshot({ path: `${output}/image-removal-confirm-${width}-${theme}.png` });
+      await imageReview.screenshot({
+        path: `${output}/image-removal-dialog-${width}-${theme}.png`,
+      });
+      await imageReview.getByRole('button', { name: '取消', exact: true }).click();
+      assert.equal(await page.evaluate(() => window.imageDeleteExecutions), 0);
+      await content().getByRole('button', { name: '删除镜像', exact: true }).click();
+      await imageReview.getByRole('button', { name: '确认删除', exact: true }).click();
+      await content().getByText('没有匹配项目。', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => window.imageDeleteExecutions), 1);
+      assert.deepEqual(await page.evaluate(() => window.imageDeleteDecisions), [false, true]);
       await openPluginFunction(page, 'AI 运维助手', 'layout-host');
       await content().getByRole('button', { name: '容器排查', exact: true }).click();
       assert((await content().getByLabel('问题', { exact: true }).inputValue()).includes('Docker'));
       await capture('assistant-chat', '.plugin-workspace');
       await navigateWorkspace(page, '插件管理');
+      const manager = page.locator('.plugin-manager');
+      await manager.waitFor();
+      await page.locator('.plugin-installed-row').first().waitFor();
+      await page.evaluate(async () => {
+        const { usePluginsStore } = await import('/src/stores/plugins.ts');
+        const plugins = usePluginsStore();
+        const base = plugins.installed[0];
+        plugins.installed.push({
+          ...base,
+          source: 'user',
+          enabled: false,
+          manifest: {
+            ...base.manifest,
+            id: `dev.upload.${'long-identifier-'.repeat(8)}plugin`,
+            name: '自定义工具 / LongPluginNameWithoutBreaksForResponsiveLayoutVerification',
+            description: '布局测试插件：用于验证长名称、长标识和描述换行，不连接主机。'.repeat(4),
+          },
+        });
+      });
+      assert.equal(await page.locator('.plugin-installed-row').count(), 3);
+      assert.equal(
+        await page.locator('.module-navigation [aria-current="page"]').textContent(),
+        '插件',
+      );
+      assert.deepEqual(
+        (await page.locator('.module-menu .nav-label').allTextContents()).map((text) =>
+          text.trim(),
+        ),
+        ['插件管理'],
+      );
+      const columns = await manager.evaluate((element) => {
+        const cards = element.querySelectorAll('.plugin-installed-row');
+        return {
+          width: element.clientWidth,
+          sameRow:
+            Math.abs(cards[0].getBoundingClientRect().top - cards[1].getBoundingClientRect().top) <
+            1,
+        };
+      });
+      assert.equal(
+        columns.sameRow,
+        columns.width > 840,
+        'Cards must use two columns only when space allows',
+      );
+      const searchGeometry = await manager.locator('.plugin-search').evaluate((element) => {
+        const icon = element.querySelector('svg').getBoundingClientRect();
+        const input = element.querySelector('input').getBoundingClientRect();
+        return {
+          height: element.getBoundingClientRect().height,
+          centered: Math.abs(icon.top + icon.height / 2 - input.top - input.height / 2) < 1,
+        };
+      });
+      assert(
+        searchGeometry.centered && searchGeometry.height <= 40,
+        'Search icon and input must share a compact row',
+      );
       await capture('plugin-manager', '.plugin-manager');
+      await page.getByLabel('插件来源', { exact: true }).selectOption('user');
+      assert.equal(await page.locator('.plugin-installed-row').count(), 1);
+      await page.getByLabel('搜索插件', { exact: true }).fill('no-matching-plugin');
+      await page.getByRole('heading', { name: '没有匹配的插件', exact: true }).waitFor();
+      await capture('plugin-manager-filter-empty', '.plugin-manager');
+      await page.getByRole('button', { name: '清除筛选', exact: true }).click();
+      assert.equal(await page.locator('.plugin-installed-row').count(), 3);
+      await page.getByLabel('插件状态', { exact: true }).selectOption('enabled');
+      assert.equal(await page.locator('.plugin-installed-row').count(), 2);
+      await page.getByLabel('插件状态', { exact: true }).selectOption('all');
       assert.deepEqual(errors, []);
       await page.close();
       console.log(`Passed packaged plugin layouts: ${width} × ${height}, ${theme}`);

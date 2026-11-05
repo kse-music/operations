@@ -3,7 +3,7 @@ import { createPinia, setActivePinia } from 'pinia';
 import { useWorkspaceStore } from './workspace';
 import { useOpsStore } from './ops';
 import { hostInput } from '../types/hosts';
-import { pidPorts, sameHostConnection } from '../services/product-links';
+import { sameHostConnection } from '../services/product-links';
 import { globalKey } from '../types/product';
 import { filesApi } from '../services/files';
 vi.mock('../services/ops', () => ({ opsApi: { close: vi.fn(), connections: vi.fn() } }));
@@ -43,14 +43,14 @@ describe('product integration boundaries', () => {
     w.navigate('files', 'b');
     expect(w.tabs.filter((t) => t.view === 'files')).toHaveLength(2);
     expect(w.current?.hostId).toBe('b');
-    w.navigate('server', 'a', 'processes');
-    expect(w.current?.section).toBe('processes');
+    w.navigate('server', 'a', 'containers');
+    expect(w.current?.section).toBe('containers');
     w.navigate('files', 'a');
     expect(w.current?.key).toBe(a);
     w.selectHost('b');
     expect(w.current).toMatchObject({ view: 'files', hostId: 'b' });
     w.selectHost('a');
-    expect(w.current).toMatchObject({ view: 'files', hostId: 'a', section: 'processes' });
+    expect(w.current).toMatchObject({ view: 'files', hostId: 'a', section: 'containers' });
     w.navigate('settings', 'b');
     expect(w.current?.hostId).toBe('');
     expect(w.hostId).toBe('a');
@@ -106,16 +106,6 @@ describe('product integration boundaries', () => {
     expect(terminalApi.trust).toHaveBeenCalledWith('session-a', true);
     expect(opsApi.close).toHaveBeenCalledWith('session-a');
     expect(ops.connections.b!.state).toBe('connected');
-  });
-  it('associates ports only from exact reported PID and preserves unknown ownership', () => {
-    const rows = [
-      { process: 'users:(("node",pid=12,fd=4))', local: ':80' },
-      { process: 'users:(("node",pid=123,fd=5))', local: ':81' },
-      { process: null, local: ':12' },
-    ];
-    expect(pidPorts(rows, 12)).toEqual([rows[0]]);
-    expect(pidPorts(rows, 1)).toEqual([]);
-    expect(pidPorts(rows, NaN)).toEqual([]);
   });
   it('keeps connection identity separate from edited host metadata and detects endpoint/route changes', () => {
     const a = hostInput();

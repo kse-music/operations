@@ -259,7 +259,10 @@ try {
   assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
   await navigateWorkspace(page, '插件管理');
   assert.equal(await page.locator('.plugin-installed-row[data-plugin-id]').count(), 1);
-  assert.equal(await page.locator('.plugin-installed-row .plugin-source').count(), 0);
+  assert.equal(
+    await page.locator('.plugin-installed-row .plugin-source').textContent(),
+    '用户上传',
+  );
   await card.getByRole('button', { name: '卸载 Host Info', exact: true }).click();
   await page
     .getByRole('dialog', { name: '卸载插件？', exact: true })

@@ -1,30 +1,30 @@
-# Plugin SDK：Rust / TypeScript 3.0.0
+# Plugin SDK：Rust / TypeScript 4.0.0
 
 ## 当前公开 SDK 与源码边界
 
 内置助手的可选 keepRunning 属性由宿主按来源和打开的工作区注入；AI 客户端可选 begin/end 仅通过现有 UI MessageChannel 标记本页在途流程，旧宿主未注入时不调用。它们不是原生 IPC 或执行授权；隐藏页的新问题/执行审批不开放，上传包不取得后台例外。关闭页面仍撤销根请求，其他页面不重绑共享原生上下文。
 
-内置 SSH 智能体复用 ai_prepare/ai_send/ai_execute 和原宿主票据；AiAnswer.agent 为可选查询记录/计划清单，AiExecution.agent 为可选逐项复查结果。只有 Host 识别的内置 system 助手启用该编排，上传插件及旧原生 IPC 继续原合同，字段缺省仍兼容。计划实际载荷保存在宿主，Guest 只能提交不透明 ID，不能修改目标、操作或确认文案。无新增权限、IPC 或数据库结构，版本仍为3.0.0。
+内置 SSH 智能体复用 ai_prepare/ai_send/ai_execute 和原宿主票据；AiAnswer.agent 为可选查询记录/计划清单，AiExecution.agent 为可选逐项复查结果。只有 Host 识别的内置 system 助手启用该编排，上传插件及旧原生 IPC 继续原合同，字段缺省仍兼容。计划实际载荷保存在宿主，Guest 只能提交不透明 ID，不能修改目标、操作或确认文案。无新增权限、IPC 或数据库结构，版本仍为4.0.0。
 
-Host API / Rust SDK / TypeScript SDK 当前均为 3.0.0，支持 UI v1–v4。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；依赖这些旧权限的安装记录会停用归档，保留用户数据。迁移规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
+Host API / Rust SDK / TypeScript SDK 当前均为 4.0.0，支持 UI v1–v4。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；依赖这些旧权限的安装记录会停用归档，保留用户数据。迁移规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
 
-| SDK 内容                                                    | 使用入口                                        |
-| ----------------------------------------------------------- | ----------------------------------------------- |
-| 独立界面启动/主题/状态注入                                  | `@serverdeck/plugin-sdk/runtime` 的 mountPlugin |
-| 自身已声明 WASM 动作                                        | 包根 invoke(action, values)                     |
-| 主机只读目录/模型元数据/连接/系统/监控/日志/文件/任务客户端 | services 和 stores 子路径                       |
-| 公开 DTO 与工具能力类型                                     | types 子路径；宿主类型从此处重导出              |
-| 通用表格/详情/模态框/图表/连接选择器/主题                   | ui 子路径                                       |
+| SDK 内容                                               | 使用入口                                        |
+| ------------------------------------------------------ | ----------------------------------------------- |
+| 独立界面启动/主题/状态注入                             | `@serverdeck/plugin-sdk/runtime` 的 mountPlugin |
+| 自身已声明 WASM 动作                                   | 包根 invoke(action, values)                     |
+| 主机只读目录/模型元数据/连接/系统/监控/日志/文件客户端 | services 和 stores 子路径                       |
+| 公开 DTO 与工具能力类型                                | types 子路径；宿主类型从此处重导出              |
+| 通用表格/详情/模态框/图表/连接选择器/主题              | ui 子路径                                       |
 
 客户端通过运行时注入的有界 MessageChannel 使用公共服务；不能在 Guest 传 native command、插件身份、凭据或原始租约。业务 API 经 Host stage → 不可变票据 → 该包实际 WASM → 类型化授权能力，服务端仍复验输入/范围/状态。连接凭据和模型 Key、原生文件选择/下载、指纹/变更批准由 Host 处理。SDK 是接口与可复用前端基础，原生服务实现不复制进每个 WASM。
 
-插件前端代码、编排和测试只引用自己的目录和公开 SDK；backend 独立编译和单测，禁止依赖 core/application/Tauri。编译器会拒绝越界源码或 Tauri 包引用。可用 `npm run typecheck -w @serverdeck/plugin-sdk` 独立检查 SDK；仓库 `npm run typecheck` 同时检查宿主、插件和 SDK，`npm test` 会收集各插件自己的测试文件。UI4、兼容旧安装和资源入口见[UI 协议](PLUGIN_UI_EXTENSION.md)。下文 1.2/1.1 为既有能力说明，当前 Host 为 3.0.0，ABI/wire 仍为 1。
+插件前端代码、编排和测试只引用自己的目录和公开 SDK；backend 独立编译和单测，禁止依赖 core/application/Tauri。编译器会拒绝越界源码或 Tauri 包引用。可用 `npm run typecheck -w @serverdeck/plugin-sdk` 独立检查 SDK；仓库 `npm run typecheck` 同时检查宿主、插件和 SDK，`npm test` 会收集各插件自己的测试文件。UI4、兼容旧安装和资源入口见[UI 协议](PLUGIN_UI_EXTENSION.md)。下文 1.2/1.1 为既有能力说明，当前 Host 为 4.0.0，ABI/wire 仍为 1。
 
 ## 工作区工具（当前契约）
 
-公开 tools::Tool / tools::Operation、AI 领域权限和 Capability::ToolInvoke；UI v3 允许 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,services}；上传包可使用相同契约。模型设置与凭据、可信连接保留在宿主；网络诊断、network.run 及 diagnostic_* 已移除。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
+公开 tools::Tool / tools::Operation、AI 领域权限和 Capability::ToolInvoke；UI v3 允许 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,docker}；上传包可使用相同契约。模型设置与凭据、可信连接保留在宿主；网络诊断、network.run 及 diagnostic_* 已移除。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
 
-公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。ABI/wire version 仍为 1，宿主语义 API 为 3.0.0；新包声明 ^3.0.0。未使用已移除权限/枚举的旧 ^1.x/^2.x 包继续兼容，不能调用已删除能力。
+公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。ABI/wire version 仍为 1，宿主语义 API 为 4.0.0；新包声明 ^4.0.0。未使用已移除权限/枚举的旧 ^1.x/^2.x/^3.x 包继续兼容，不能调用已删除能力。
 
 `export_plugin!(handle)` 导出经过缓冲区长度/指针检查的 ABI，不解引用任意原始指针。仅导出符号使用 Rust 要求的 unsafe(no_mangle) 属性，没有 unsafe 内存访问块。不能在 Guest 中使用宿主文件、网络、环境或其他原生导入。
 

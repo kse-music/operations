@@ -61,7 +61,6 @@ pub struct Page {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Surface {
     Frontend,
-    Monitor { sections: Vec<String> },
     Operations { sections: Vec<String> },
     Tool { tool: crate::tools::Tool },
 }
@@ -143,37 +142,9 @@ impl Ui {
                 let valid = match surface {
                     Surface::Frontend => self.ui_version == 4,
                     Surface::Tool { .. } => matches!(self.ui_version, 3 | 4),
-                    Surface::Monitor { sections } => {
-                        matches!(self.ui_version, 2..=4)
-                            && valid_sections(sections, &["overview", "disks", "network"])
-                    }
                     Surface::Operations { sections } => {
                         matches!(self.ui_version, 2..=4)
-                            && valid_sections(
-                                sections,
-                                if self.ui_version == 4 {
-                                    &[
-                                        "overview",
-                                        "disks",
-                                        "network",
-                                        "containers",
-                                        "images",
-                                        "processes",
-                                        "ports",
-                                        "services",
-                                        "logs",
-                                    ]
-                                } else {
-                                    &[
-                                        "containers",
-                                        "images",
-                                        "processes",
-                                        "ports",
-                                        "services",
-                                        "logs",
-                                    ]
-                                },
-                            )
+                            && valid_sections(sections, &["containers", "images"])
                     }
                 };
                 if !valid

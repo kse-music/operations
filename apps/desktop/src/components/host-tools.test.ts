@@ -67,7 +67,7 @@ it('shows enabled plugin functions beside SSH and SFTP without requiring host gr
   expect(toolbar.querySelector('[aria-haspopup]')).toBeNull();
   expect(document.querySelector('.host-plugin-menu')).toBeNull();
   expect(
-    toolbar.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-settings-2`),
+    toolbar.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-container`),
   ).not.toBeNull();
   expect(
     [...toolbar.querySelectorAll('button')].map((button) => button.textContent?.trim()),

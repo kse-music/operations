@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "ServerDeck",
         "width": 1280,
         "height": 820,

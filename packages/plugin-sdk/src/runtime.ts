@@ -100,7 +100,6 @@ export function mountPlugin(component: Component): void {
         onShell: event('shell'),
         onSection: event('section'),
         onLog: event('log'),
-        onProcesses: () => event('navigate')('processes'),
         onIntentConsumed: event('intentConsumed'),
       }),
   }).use(pinia);

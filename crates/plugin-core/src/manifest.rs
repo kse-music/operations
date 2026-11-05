@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "3.0.0";
+pub const API_VERSION: &str = "4.0.0";
 
 pub(crate) fn is_removed_tool_id(id: &str) -> bool {
     [
@@ -12,7 +12,12 @@ pub(crate) fn is_removed_tool_id(id: &str) -> bool {
         serverdeck_core::identity::LEGACY_PLUGIN_PREFIX,
     ]
     .iter()
-    .any(|prefix| matches!(id.strip_prefix(prefix), Some("batch" | "automation")))
+    .any(|prefix| {
+        matches!(
+            id.strip_prefix(prefix),
+            Some("batch" | "automation" | "services")
+        )
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,7 +161,11 @@ impl Manifest {
         let current = Version::parse(API_VERSION).map_err(|_| invalid("宿主 API 版本无效"))?;
         // Retained v1 capabilities and ABI remain usable by existing packages.
         let legacy = Version::new(1, 4, 0);
-        if !api.matches(&current) && !api.matches(&legacy) && !api.matches(&Version::new(2, 1, 0)) {
+        if !api.matches(&current)
+            && !api.matches(&legacy)
+            && !api.matches(&Version::new(2, 1, 0))
+            && !api.matches(&Version::new(3, 0, 0))
+        {
             return Err(invalid("插件 API 版本与宿主不兼容"));
         }
         if self.platforms.is_empty()

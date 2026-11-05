@@ -1,12 +1,11 @@
 // Test fixtures use the distributed manifests; production reads the host repository.
 import docker from '../../../../plugins/system/docker/manifest.json';
-import services from '../../../../plugins/system/services/manifest.json';
 import assistant from '../../../../plugins/system/assistant/manifest.json';
-import servicesUi from '../../../../plugins/system/services/ui.json';
+import dockerUi from '../../../../plugins/system/docker/ui.json';
 import assistantUi from '../../../../plugins/system/assistant/ui.json';
 import type { InstalledPlugin, PluginManifest, PluginGrant, PluginUi } from '../types/plugins';
 export const systemPluginFixtures = (): InstalledPlugin[] =>
-  [services, docker].map((manifest) => ({
+  [docker, assistant].map((manifest) => ({
     source: 'system',
     manifest: manifest as PluginManifest,
     enabled: false,
@@ -16,8 +15,8 @@ export const systemPluginFixtures = (): InstalledPlugin[] =>
     previousVersion: null,
   }));
 export function toolPluginState() {
-  const definitions = [assistant, services];
-  const ui = [assistantUi, servicesUi];
+  const definitions = [assistant, docker];
+  const ui = [assistantUi, dockerUi];
   const installed = definitions.map((manifest) => ({
     source: 'system',
     manifest: manifest as PluginManifest,

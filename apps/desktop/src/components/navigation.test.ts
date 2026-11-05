@@ -26,15 +26,11 @@ it.each([
     ['收起主机栏', '安全凭据', '模型管理', '备份恢复'],
     ['credentials', 'models', 'backup'],
   ],
-  [
-    'plugins',
-    ['收起主机栏', '通用', '终端', '快捷键', '工作区与连接', '插件管理', '关于'],
-    ['settings', 'settingsTerminal', 'settingsShortcuts', 'settingsWorkspace', 'plugins', 'about'],
-  ],
+  ['plugins', ['收起主机栏', '插件管理'], ['plugins']],
   [
     'settings',
-    ['收起主机栏', '通用', '终端', '快捷键', '工作区与连接', '插件管理', '关于'],
-    ['settings', 'settingsTerminal', 'settingsShortcuts', 'settingsWorkspace', 'plugins', 'about'],
+    ['收起主机栏', '通用', '终端', '快捷键', '数据与存储', '关于'],
+    ['settings', 'settingsTerminal', 'settingsShortcuts', 'settingsStorage', 'about'],
   ],
 ] as const)('shows only menus belonging to the module containing %s', (active, labels, views) => {
   const navigate = vi.fn(),
@@ -66,12 +62,10 @@ it.each([
   expect(heading.hasAttribute('tabindex')).toBe(false);
   if (active === 'terminals') expect(heading.textContent?.trim()).toBe('主机管理');
   if (active !== 'terminals')
-    expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
-      labels[active === 'plugins' ? 5 : 1],
-    );
+    expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(labels[1]);
 });
 
-it.each(['hosts', 'assets', 'system'] as const)(
+it.each(['hosts', 'assets', 'plugins', 'system'] as const)(
   'keeps installed plugins out of the %s sidebar',
   (module) => {
     pinia = createPinia();
@@ -80,7 +74,7 @@ it.each(['hosts', 'assets', 'system'] as const)(
     mountNavigation({ active: null, module });
     expect(root.querySelector('[aria-label="运维工具导航"]')).toBeNull();
     expect(root.querySelector('[data-plugin-id]')).toBeNull();
-    expect(root.querySelector('[aria-label="插件管理"]') !== null).toBe(module === 'system');
+    expect(root.querySelector('[aria-label="插件管理"]') !== null).toBe(module === 'plugins');
   },
 );
 

@@ -956,6 +956,34 @@ async fn standard_rpc(
 }
 async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, files: &str) {
     app.provision_bundled_plugins().unwrap();
+    let fixture: &[u8] = include_bytes!(
+        "../../../../tests/fixtures/plugins/server-capabilities/server-capabilities.sdplugin"
+    );
+    let fixture_id = "dev.serverdeck.server-capabilities";
+    let installed = app.plugins.install_bundled(fixture, fixture_id).unwrap();
+    app.plugins
+        .set_grant(
+            fixture_id,
+            GrantInput {
+                expected_revision: installed.revision,
+                permissions: installed.manifest.permissions,
+                host_ids: vec![],
+                operations: vec![
+                    "ui.contribute",
+                    "metrics.read",
+                    "system.read",
+                    "system.manage",
+                    "logs.read",
+                ]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+                read_roots: vec![],
+                write_roots: vec![],
+                confirmed: true,
+            },
+        )
+        .unwrap();
     for plugin in app
         .plugin_list()
         .await
@@ -984,7 +1012,7 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
         .await
         .unwrap();
     }
-    let resource = "cn.hiboot.plugins.services";
+    let resource = fixture_id;
     let monitor = standard_rpc(
         app,
         resource,
@@ -1038,7 +1066,11 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
     ] {
         let response = standard_rpc(
             app,
-            &format!("cn.hiboot.plugins.{id}"),
+            if id == "docker" {
+                "cn.hiboot.plugins.docker"
+            } else {
+                fixture_id
+            },
             json!({"kind":"system_query","request":query}),
         )
         .await;
@@ -1055,11 +1087,11 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
             assert!(response["message"].is_string());
         }
     }
-    let logs = "cn.hiboot.plugins.services";
+    let logs = fixture_id;
     let rejected = app.plugin_call(logs, json!({"action":"bridge","values":{"request":json!({"kind":"system_log_start","source":{"kind":"file","path":"/home/plugin/nginx/nginx.conf"},"lines":20,"follow":false}).to_string()}})).await.unwrap();
     assert!(
         rejected.error.is_some(),
-        "system services must reject removed file-log access"
+        "the journal-only fixture must reject undeclared file-log access"
     );
     let log = standard_rpc(app, logs, json!({"kind":"system_log_start","source":{"kind":"service","scope":"system","unit":"ssh.service"},"lines":20,"follow":false})).await["id"].as_str().unwrap().to_string();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);

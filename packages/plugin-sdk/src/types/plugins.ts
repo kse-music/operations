@@ -124,6 +124,7 @@ export interface PluginApproval {
   hostId: string;
   operation: string;
   description: string;
+  imageId?: string;
 }
 export interface PluginEvent {
   pluginId: string;
@@ -142,7 +143,7 @@ export interface PluginUi {
 export interface PluginUiPage {
   surface?:
     | { kind: 'frontend' }
-    | { kind: 'monitor' | 'operations'; sections: import('./server').ServerSection[] }
+    | { kind: 'operations'; sections: import('./server').ServerSection[] }
     | { kind: 'tool'; tool: PluginTool }
     | null;
   id: string;

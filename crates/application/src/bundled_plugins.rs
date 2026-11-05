@@ -1,10 +1,6 @@
 use super::*;
 use serverdeck_core::identity::LEGACY_PLUGIN_PREFIX;
-const PACKAGES: [(&str, &[u8]); 3] = [
-    (
-        "cn.hiboot.plugins.services",
-        include_bytes!("../../../plugins/system/packages/services.sdplugin"),
-    ),
+const PACKAGES: [(&str, &[u8]); 2] = [
     (
         "cn.hiboot.plugins.docker",
         include_bytes!("../../../plugins/system/packages/docker.sdplugin"),
@@ -36,7 +32,6 @@ pub(crate) fn legacy_frontend(
         Surface::Tool { tool } => match tool {
             Tool::Assistant => "assistant",
         },
-        Surface::Monitor { .. } => "services",
         Surface::Operations { .. } => {
             return Ok(if path.ends_with(".js") {
                 include_bytes!("../../../plugins/compat/server/assets/frontend.js").to_vec()
@@ -190,7 +185,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn releasing_pages_allows_all_three_guests_to_run_and_reactivate_without_disabling() {
+    async fn releasing_pages_allows_both_guests_to_run_and_reactivate_without_disabling() {
         use serverdeck_plugin_runtime::protocol::State;
         let dir = tempfile::tempdir().unwrap();
         let app =
@@ -216,50 +211,53 @@ mod tests {
                     .all(|s| s.state == State::Stopped)
             );
         }
-        assert_eq!(app.plugin_statuses().unwrap().len(), 3);
+        assert_eq!(app.plugin_statuses().unwrap().len(), 2);
         app.shutdown().await;
     }
 
     #[tokio::test]
-    async fn bundled_update_preserves_enable_choices_settings_uploads_and_uninstall_tombstones() {
+    async fn bundled_update_preserves_settings_enable_choices_uploads_and_uninstall() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         let logs = dir.path().join("logs");
         let app = Application::initialize(data.clone(), logs.clone()).unwrap();
-        let mut old_revisions = Vec::new();
+        let mut previous = Vec::new();
         for (index, (id, bytes)) in PACKAGES.iter().enumerate() {
             let mut package: serde_json::Value = serde_json::from_slice(bytes).unwrap();
             package["manifest"]["version"] = json!("1.1.1");
-            let previous = app
+            let old = app
                 .plugins
                 .install_bundled(&serde_json::to_vec(&package).unwrap(), id)
                 .unwrap();
-            old_revisions.push(previous.revision);
+            previous.push(old.revision);
             app.plugins.set_enabled(id, index == 0).unwrap();
             app.plugins.settings_write(id, &json!({"keep":id})).unwrap();
             app.database.mark_bundled_plugin_provisioned(id).unwrap();
         }
-        app.plugin_uninstall(UninstallInput {
-            id: PACKAGES[2].0.into(),
-            clear_data: false,
-            confirmed: true,
-        })
-        .await
-        .unwrap();
         app.provision_bundled_plugins().unwrap();
-        for (index, old_revision) in old_revisions.iter().take(2).enumerate() {
-            let id = PACKAGES[index].0;
+        for (index, (id, bytes)) in PACKAGES.iter().enumerate() {
             let plugin = app.plugins.detail(id).unwrap();
-            assert_eq!(plugin.manifest.version, "1.4.0");
-            assert_ne!(&plugin.revision, old_revision);
+            let mut package: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            assert_eq!(
+                plugin.manifest.version,
+                package["manifest"]["version"].as_str().unwrap()
+            );
+            assert_ne!(plugin.revision, previous[index]);
             assert_eq!(plugin.enabled, index == 0);
-            assert_eq!(plugin.previous_version.as_deref(), Some("1.1.1"));
-            assert_eq!(app.plugins.settings_read(id).unwrap()["keep"], id);
+            assert_eq!(app.plugins.settings_read(id).unwrap()["keep"], *id);
             assert!(
                 app.plugins
                     .grant(id)
                     .unwrap()
-                    .is_some_and(|grant| grant.matches(&plugin))
+                    .is_some_and(|g| g.matches(&plugin))
+            );
+            package["manifest"]["version"] = json!("1.1.1");
+            assert_eq!(
+                app.plugins
+                    .install_bundled(&serde_json::to_vec(&package).unwrap(), id)
+                    .unwrap()
+                    .revision,
+                plugin.revision
             );
         }
         app.plugin_uninstall(UninstallInput {
@@ -269,56 +267,49 @@ mod tests {
         })
         .await
         .unwrap();
-        let upload = dir.path().join("upload.sdplugin");
-        std::fs::write(&upload, PACKAGES[1].1).unwrap();
-        let user = app
+        app.plugin_uninstall(UninstallInput {
+            id: PACKAGES[0].0.into(),
+            clear_data: false,
+            confirmed: true,
+        })
+        .await
+        .unwrap();
+        let path = dir.path().join("upload.sdplugin");
+        std::fs::write(&path, PACKAGES[0].1).unwrap();
+        let upload = app
             .plugin_install(InstallInput {
-                path: upload,
+                path,
                 development_confirmed: true,
                 expected_version: None,
                 expected_digest: None,
             })
             .await
             .unwrap();
+        app.provision_bundled_plugins().unwrap();
+        assert_eq!(
+            app.plugins.detail(PACKAGES[0].0).unwrap().source,
+            PluginSource::User
+        );
+        assert_eq!(
+            app.plugins.detail(PACKAGES[0].0).unwrap().revision,
+            upload.revision
+        );
+        assert!(app.plugins.grant(PACKAGES[0].0).unwrap().is_none());
         assert!(matches!(
-            app.plugins.detail(PACKAGES[2].0),
+            app.plugins.detail(PACKAGES[1].0),
             Err(Error::NotFound)
         ));
-        let preserved = app.plugins.detail(PACKAGES[1].0).unwrap();
-        assert_eq!(preserved.source, PluginSource::User);
-        assert_eq!(preserved.revision, user.revision);
-        assert!(app.plugins.grant(PACKAGES[1].0).unwrap().is_none());
-        assert!(
-            app.plugins
-                .install_bundled(PACKAGES[1].1, PACKAGES[1].0)
-                .is_err()
-        );
-        let revision = app.plugins.detail(PACKAGES[0].0).unwrap().revision;
-        let mut older: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
-        older["manifest"]["version"] = json!("1.0.0");
-        assert_eq!(
-            app.plugins
-                .install_bundled(&serde_json::to_vec(&older).unwrap(), PACKAGES[0].0)
-                .unwrap()
-                .revision,
-            revision
-        );
         app.shutdown().await;
         let restarted = Application::initialize(data, logs).unwrap();
         restarted.provision_bundled_plugins().unwrap();
         assert_eq!(
             restarted.plugins.detail(PACKAGES[0].0).unwrap().revision,
-            revision
+            upload.revision
         );
-        assert!(!restarted.plugins.detail(PACKAGES[1].0).unwrap().enabled);
         assert!(matches!(
-            restarted.plugins.detail(PACKAGES[2].0),
+            restarted.plugins.detail(PACKAGES[1].0),
             Err(Error::NotFound)
         ));
-        assert_eq!(
-            restarted.plugins.detail(PACKAGES[1].0).unwrap().revision,
-            user.revision
-        );
         restarted.shutdown().await;
     }
 
@@ -337,19 +328,6 @@ mod tests {
             assert!(plugin.enabled);
             let defaults = app.plugin_permissions(id.clone()).await.unwrap().unwrap();
             assert_eq!(defaults.permissions, plugin.manifest.permissions);
-            if id.ends_with("services") {
-                assert!(defaults.read_roots.is_empty());
-                assert!(
-                    !defaults
-                        .permissions
-                        .contains(&serverdeck_plugin_core::Permission::SftpRead)
-                );
-                assert!(
-                    defaults
-                        .permissions
-                        .contains(&serverdeck_plugin_core::Permission::LogsRead)
-                );
-            }
             if id.ends_with("docker") {
                 assert!(defaults.operations.contains(&"system.shell".into()));
                 assert!(
@@ -395,11 +373,7 @@ mod tests {
             } else {
                 assert_eq!(denied.error.unwrap().code, "CAPABILITY");
             }
-            let capability = if id.ends_with("resources") {
-                json!({"kind":"metrics_open","intervalSecs":3})
-            } else {
-                json!({"kind":"system_query","request":{"kind":"capabilities"}})
-            };
+            let capability = json!({"kind":"system_query","request":{"kind":"capabilities"}});
             let host_denied = app
                 .plugin_call(
                     &id,
@@ -431,17 +405,17 @@ mod tests {
             );
         }
         // Upgrading the application repairs legacy partial grants, without re-enabling plugins.
-        app.plugins.revoke_grant(PACKAGES[1].0).unwrap();
+        app.plugins.revoke_grant(PACKAGES[0].0).unwrap();
         app.provision_bundled_plugins().unwrap();
         assert!(
-            app.plugin_permissions(PACKAGES[1].0.into())
+            app.plugin_permissions(PACKAGES[0].0.into())
                 .await
                 .unwrap()
                 .unwrap()
                 .operations
                 .contains(&"system.shell".into())
         );
-        assert!(!app.plugins.detail(PACKAGES[1].0).unwrap().enabled);
+        assert!(!app.plugins.detail(PACKAGES[0].0).unwrap().enabled);
         let id = PACKAGES[0].0;
         app.plugin_uninstall(UninstallInput {
             id: id.into(),
@@ -481,7 +455,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(!restarted.plugins.detail(PACKAGES[1].0).unwrap().enabled);
+        assert!(!restarted.plugins.detail(PACKAGES[0].0).unwrap().enabled);
         restarted.shutdown().await;
     }
     #[tokio::test]
@@ -489,7 +463,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app =
             Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-        let old_id = format!("{LEGACY_PLUGIN_PREFIX}services");
+        let old_id = format!("{LEGACY_PLUGIN_PREFIX}docker");
         let old = old_id.as_str();
         let mut package: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
         package["manifest"]["id"] = json!(old);
@@ -516,26 +490,26 @@ mod tests {
             .unwrap();
         app.database.mark_bundled_plugin_provisioned(old).unwrap();
         app.database
-            .mark_bundled_plugin_provisioned(&format!("{LEGACY_PLUGIN_PREFIX}docker"))
+            .mark_bundled_plugin_provisioned(&format!("{LEGACY_PLUGIN_PREFIX}assistant"))
             .unwrap();
         app.provision_bundled_plugins().unwrap();
         assert!(matches!(app.plugins.detail(old), Err(Error::NotFound)));
-        let migrated = app.plugins.detail("cn.hiboot.plugins.services").unwrap();
+        let migrated = app.plugins.detail("cn.hiboot.plugins.docker").unwrap();
         assert!(!migrated.enabled);
         assert_eq!(
             app.plugins
-                .settings_read("cn.hiboot.plugins.services")
+                .settings_read("cn.hiboot.plugins.docker")
                 .unwrap()["keep"],
             "my configuration"
         );
         assert!(
             app.plugins
-                .grant("cn.hiboot.plugins.services")
+                .grant("cn.hiboot.plugins.docker")
                 .unwrap()
                 .is_some_and(|g| g.permissions == migrated.manifest.permissions)
         );
         assert!(matches!(
-            app.plugins.detail("cn.hiboot.plugins.docker"),
+            app.plugins.detail("cn.hiboot.plugins.assistant"),
             Err(Error::NotFound)
         ));
         app.provision_bundled_plugins().unwrap();
@@ -543,80 +517,38 @@ mod tests {
         app.shutdown().await;
     }
     #[tokio::test]
-    async fn removed_diagnostic_permission_upgrades_system_service_without_resetting_user_state() {
-        use serde_json::{Value, json};
+    async fn removed_service_identities_are_not_reprovisioned() {
         let dir = tempfile::tempdir().unwrap();
-        let data = dir.path().join("data");
-        let logs = dir.path().join("logs");
-        let id = "cn.hiboot.plugins.services";
-        let app = Application::initialize(data.clone(), logs.clone()).unwrap();
-        app.provision_bundled_plugins().unwrap();
-        app.plugins.set_enabled(id, false).unwrap();
-        app.plugins
-            .settings_write(id, &json!({"retained":"user draft"}))
-            .unwrap();
-        let path = data.join("plugins/packages").join(id).join("record.json");
-        let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        record["current"]["manifest"]["version"] = json!("1.2.0");
-        record["current"]["manifest"]["apiVersion"] = json!("^2.1.0");
-        record["current"]["manifest"]["permissions"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!("network.run"));
-        let old_revision = record["current"]["revision"].as_str().unwrap().to_owned();
-        let original = serde_json::to_vec(&record).unwrap();
-        std::fs::write(&path, &original).unwrap();
-        let grant_path = data
-            .join("plugins/authorizations")
-            .join(format!("{id}.json"));
-        let mut grant: Value =
-            serde_json::from_slice(&std::fs::read(&grant_path).unwrap()).unwrap();
-        grant["pluginVersion"] = json!("1.2.0");
-        grant["permissions"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!("network.run"));
-        std::fs::write(grant_path, serde_json::to_vec(&grant).unwrap()).unwrap();
+        let app =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        for _ in 0..2 {
+            app.provision_bundled_plugins().unwrap();
+            let ids: Vec<_> = app
+                .plugin_list()
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|p| p.manifest.id)
+                .collect();
+            assert_eq!(ids.len(), 2);
+            assert!(
+                ids.iter()
+                    .all(|id| id.ends_with("docker") || id.ends_with("assistant"))
+            );
+        }
+        for id in [
+            "cn.hiboot.plugins.services".to_owned(),
+            format!("{LEGACY_PLUGIN_PREFIX}services"),
+        ] {
+            assert!(matches!(app.plugins.detail(&id), Err(Error::NotFound)));
+            let mut package: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
+            package["manifest"]["id"] = json!(id);
+            assert!(
+                app.plugins
+                    .install_bundled(&serde_json::to_vec(&package).unwrap(), &id)
+                    .is_err()
+            );
+        }
         app.shutdown().await;
-        drop(app);
-        let upgraded = Application::initialize(data.clone(), logs).unwrap();
-        upgraded.provision_bundled_plugins().unwrap();
-        let plugin = upgraded.plugins.detail(id).unwrap();
-        assert_eq!(plugin.manifest.version, "1.4.0");
-        assert_ne!(plugin.revision, old_revision);
-        assert!(!plugin.enabled);
-        assert_eq!(
-            upgraded.plugins.settings_read(id).unwrap()["retained"],
-            "user draft"
-        );
-        assert!(
-            !serde_json::to_string(&plugin)
-                .unwrap()
-                .contains("network.run")
-        );
-        let grant = upgraded.plugins.grant(id).unwrap().unwrap();
-        assert_eq!(grant.revision, plugin.revision);
-        assert!(
-            !grant
-                .operations
-                .iter()
-                .any(|operation| operation == "network.run")
-        );
-        assert!(
-            data.join("plugins/system")
-                .join(id)
-                .join("versions")
-                .join(old_revision)
-                .join("backend.wasm")
-                .is_file()
-        );
-        assert!(
-            std::fs::read_dir(data.join("plugins/retired"))
-                .unwrap()
-                .any(|entry| {
-                    std::fs::read(entry.unwrap().path().join("record.json")).unwrap() == original
-                })
-        );
-        upgraded.shutdown().await;
     }
 }

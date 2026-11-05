@@ -8,6 +8,9 @@ fn main() {
     }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "app_storage_preview",
+            "app_storage_migrate",
+            "app_storage_ready",
             "plugin_tool_stage",
             "plugin_tool_abort_input",
             "plugin_tool_cancel_request",

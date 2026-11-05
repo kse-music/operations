@@ -37,7 +37,7 @@ it('lists system and uploaded server contributions and sends unavailable plugins
   app = createApp(ServerView, { hostId: 'a', onManage: manage, onPlugin: open }).use(pinia);
   app.mount(root);
   await flush();
-  expect(root.querySelectorAll('.plugin-card')).toHaveLength(3);
+  expect(root.querySelectorAll('.plugin-card')).toHaveLength(2);
   expect(root.querySelector('.plugin-source')).toBeNull();
   expect(root.querySelector('.monitor-view, .operations-view')).toBeNull();
   root.querySelector<HTMLButtonElement>('.plugin-card button')!.click();

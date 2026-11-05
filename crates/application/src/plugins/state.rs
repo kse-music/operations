@@ -91,6 +91,8 @@ pub struct Approval {
     pub host_id: String,
     pub operation: String,
     pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_id: Option<String>,
 }
 pub(super) struct Pending {
     pub public: Approval,

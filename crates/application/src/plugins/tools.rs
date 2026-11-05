@@ -341,7 +341,7 @@ mod tests {
         ] {
             assert!(
                 app.plugin_tool_stage(
-                    "cn.hiboot.plugins.services".into(),
+                    "cn.hiboot.plugins.docker".into(),
                     json!({"operation":operation,"args":{}})
                 )
                 .await
@@ -496,7 +496,7 @@ mod tests {
         let stage = stage_input;
         let ticket = app.plugin_tool_stage(id.into(), stage()).await.unwrap();
         assert!(
-            app.plugin_tool_abort_input("cn.hiboot.plugins.services", &ticket.input_id)
+            app.plugin_tool_abort_input("cn.hiboot.plugins.docker", &ticket.input_id)
                 .is_err()
         );
         app.plugin_tool_abort_input(id, &ticket.input_id).unwrap();

@@ -13,7 +13,14 @@ import { defaultTerminalPreferences } from '../types/preferences';
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const category = ref<SettingsCategory>('general');
+const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
   category.value = 'general';
   pinia = createPinia();
   setActivePinia(pinia);
@@ -52,6 +59,9 @@ afterEach(() => {
   app.unmount();
   disposePinia(pinia);
   root.remove();
+  if (originalShowModal)
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
 const visiblePanels = () =>
@@ -151,12 +161,12 @@ it('requests the menu containing an invalid field before reporting validity', as
 
 it('validates conditional proxy fields even after switching to another tab', async () => {
   const save = vi.spyOn(ipc, 'saveConfig');
-  await select(3);
+  await select(1);
   await input('[aria-label="全局默认代理"]', 'socks5', 'change');
   const invalid = await input('[aria-label="默认代理地址"]', '');
   await select(2);
   await submit();
-  expect(visiblePanels()[0]!.id).toBe('settings-panel-workspace');
+  expect(visiblePanels()[0]!.id).toBe('settings-panel-terminal');
   expect(document.activeElement).toBe(invalid);
   expect(save).not.toHaveBeenCalled();
 });
@@ -181,4 +191,122 @@ it('disables every category during saving and retains edits after a failed save'
   expect(useApplicationStore().error).toBe('保存失败，请重试');
   expect(useApplicationStore().notice).toBeNull();
   expect(root.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(false);
+});
+
+async function storageDraft() {
+  useApplicationStore().state!.storage = {
+    rootDirectory: 'C:\\ServerDeck',
+    databasePath: 'C:\\ServerDeck\\serverdeck.sqlite3',
+    pluginDirectory: 'C:\\ServerDeck\\plugins',
+    logDirectory: 'C:\\ServerDeck\\logs',
+    webviewDirectory: 'C:\\ServerDeck\\webview',
+    notice: null,
+  };
+  await select(3);
+  await input('[aria-label="数据根目录"]', 'D:\\ServerDeck');
+}
+
+it('groups language, SSH defaults, shortcuts and storage under their corresponding categories', async () => {
+  const panel = (selector: string) =>
+    root.querySelector(selector)?.closest('.settings-category')?.id;
+  expect(panel('[aria-label="界面语言"]')).toBe('settings-panel-general');
+  expect(panel('[aria-label="全局默认代理"]')).toBe('settings-panel-terminal');
+  expect(panel('[aria-label="打开设置全局快捷键"]')).toBe('settings-panel-shortcuts');
+  expect(panel('[aria-label="默认下载目录"]')).toBe('settings-panel-storage');
+});
+
+it('previews migration without saving and cancellation preserves all drafts', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig');
+  const migrate = vi.spyOn(ipc, 'storageMigrate');
+  const preview = vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
+    targetDirectory: 'D:\\ServerDeck',
+    bytes: 1024,
+    availableBytes: 1e9,
+    unfinishedTasks: 2,
+    dirtyDocuments: 0,
+  });
+  await storageDraft();
+  await select(0);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await submit();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  expect(preview).toHaveBeenCalledWith('D:\\ServerDeck');
+  expect(save).not.toHaveBeenCalled();
+  expect(migrate).not.toHaveBeenCalled();
+  [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find((b) => b.textContent?.trim() === '取消')!
+    .click();
+  await nextTick();
+  expect(document.querySelector('dialog')).toBeNull();
+  await select(3);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
+    'D:\\ServerDeck',
+  );
+  expect(useApplicationStore().state!.config.theme).toBe('dark');
+});
+
+it('requires explicit document discard and sends all preferences with confirmed migration', async () => {
+  vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
+    targetDirectory: 'D:\\ServerDeck',
+    bytes: 1024,
+    availableBytes: 1e9,
+    unfinishedTasks: 1,
+    dirtyDocuments: 1,
+  });
+  const migrate = vi.spyOn(ipc, 'storageMigrate').mockResolvedValue(true);
+  await storageDraft();
+  await submit();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  const button = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
+    (b) => b.textContent?.trim() === '确认迁移并重启',
+  )!;
+  expect(button.disabled).toBe(true);
+  document.querySelector<HTMLInputElement>('dialog input[type="checkbox"]')!.click();
+  await nextTick();
+  button.click();
+  await vi.waitFor(() =>
+    expect(migrate).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        version: 1,
+        product: expect.any(Object),
+        terminal: expect.any(Object),
+      }),
+      'D:\\ServerDeck',
+      true,
+    ),
+  );
+});
+
+it('retains target and preferences when migration preflight fails', async () => {
+  vi.spyOn(ipc, 'storagePreview').mockRejectedValue({ message: '目标目录必须为空' });
+  const migrate = vi.spyOn(ipc, 'storageMigrate');
+  await storageDraft();
+  await submit();
+  await vi.waitFor(() => expect(useApplicationStore().error).toBe('目标目录必须为空'));
+  expect(migrate).not.toHaveBeenCalled();
+  expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
+    'D:\\ServerDeck',
+  );
+  expect(document.querySelector('dialog')).toBeNull();
+});
+
+it('applies saved preferences immediately when a path alias requires no restart', async () => {
+  vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
+    targetDirectory: 'C:\\ServerDeck',
+    bytes: 0,
+    availableBytes: 1e9,
+    unfinishedTasks: 0,
+    dirtyDocuments: 0,
+  });
+  vi.spyOn(ipc, 'storageMigrate').mockResolvedValue(false);
+  await storageDraft();
+  await select(0);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await submit();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find((b) => b.textContent?.trim() === '确认迁移并重启')!
+    .click();
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.theme).toBe('light'));
+  expect(useApplicationStore().notice).toContain('无需重启');
 });

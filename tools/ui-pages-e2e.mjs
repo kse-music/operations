@@ -20,7 +20,7 @@ const pages = [
   ['通用', 'settings'],
   ['终端', 'settingsTerminal'],
   ['快捷键', 'settingsShortcuts'],
-  ['工作区与连接', 'settingsWorkspace'],
+  ['数据与存储', 'settingsStorage'],
 ];
 
 // Browser-only rendering fixtures; no production fallback, disk changes, or remote commands.
@@ -382,7 +382,7 @@ try {
         await inspect(page, `${variant}/restore-preview`);
         await page.screenshot({ path: `${output}/${variant}-restore-preview.png` });
       }
-      if (view === 'settingsWorkspace') {
+      if (view === 'settingsTerminal') {
         await page.getByLabel('全局默认代理').selectOption('socks5');
         await page.getByText('代理需要认证', { exact: true }).click();
         await inspect(page, `${variant}/proxy-settings`);

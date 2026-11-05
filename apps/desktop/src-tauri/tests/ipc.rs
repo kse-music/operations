@@ -19,6 +19,76 @@ fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
 }
 
 #[test]
+fn storage_preview_confirmation_and_main_window_acl() {
+    use serverdeck_application::storage_location::{LOCATOR, Locations, Profile};
+    use serverdeck_desktop_lib::storage_commands::StorageState;
+    let directory = tempfile::tempdir().unwrap();
+    let data = directory.path().join("data");
+    let application = Application::initialize(data.clone(), data.join("logs")).unwrap();
+    let profile = Profile::open(data.join(LOCATOR), Locations::unified(data.clone())).unwrap();
+    let app = mock_builder()
+        .manage(application)
+        .manage(StorageState::new(profile))
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "storage-untrusted", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let input = json!({"targetDirectory": directory.path().join("target")});
+    let preview: Value =
+        get_ipc_response(&main, request("app_storage_preview", input.clone(), origin))
+            .unwrap()
+            .deserialize()
+            .unwrap();
+    assert!(preview["bytes"].as_u64().unwrap() > 0);
+    assert_eq!(preview["dirtyDocuments"], 0);
+    assert!(
+        get_ipc_response(
+            &other,
+            request("app_storage_preview", input.clone(), origin)
+        )
+        .is_err()
+    );
+    assert!(
+        get_ipc_response(
+            &main,
+            request(
+                "app_storage_preview",
+                input.clone(),
+                "https://untrusted.invalid"
+            )
+        )
+        .is_err()
+    );
+    let config = serverdeck_core::AppConfig::default();
+    let rejected = get_ipc_response(
+        &main,
+        request(
+            "app_storage_migrate",
+            json!({"targetDirectory": directory.path().join("target"), "config": config, "confirmed": false, "discardDocuments": false}),
+            origin,
+        ),
+    );
+    assert!(rejected.is_err());
+    assert!(!data.join(LOCATOR).exists());
+    assert!(get_ipc_response(&other, request("app_storage_ready", json!({}), origin)).is_err());
+    let ready: Value = get_ipc_response(&main, request("app_storage_ready", json!({}), origin))
+        .unwrap()
+        .deserialize()
+        .unwrap();
+    assert_eq!(ready["rootDirectory"], data.to_string_lossy().as_ref());
+}
+
+#[test]
 fn system_packages_use_standard_ipc_and_main_window_acl() {
     let directory = tempfile::tempdir().expect("tempdir");
     let data = directory.path().join("data");
@@ -50,7 +120,7 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
             .unwrap()
     };
     let initial = invoke("plugin_list", json!({}));
-    assert_eq!(initial.as_array().unwrap().len(), 3);
+    assert_eq!(initial.as_array().unwrap().len(), 2);
     for plugin in initial.as_array().unwrap() {
         assert_eq!(plugin["source"], "system");
         assert_eq!(plugin["enabled"], true);
@@ -123,7 +193,7 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
         .provision_bundled_plugins()
         .expect("provision after uninstall");
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    assert_eq!(runtime.block_on(reopened.plugin_list()).unwrap().len(), 2);
+    assert_eq!(runtime.block_on(reopened.plugin_list()).unwrap().len(), 1);
 }
 
 #[test]

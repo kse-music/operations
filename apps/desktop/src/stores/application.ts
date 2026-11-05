@@ -17,7 +17,13 @@ export const useApplicationStore = defineStore('application', () => {
     loading.value = true;
     error.value = null;
     try {
-      state.value = await ipc.bootstrap();
+      const nextState = await ipc.bootstrap();
+      if (nextState.storage) {
+        // A failed commit must not expose an uncommitted candidate for new writes.
+        nextState.storage = await ipc.storageReady();
+        notice.value = nextState.storage.notice;
+      }
+      state.value = nextState;
     } catch (cause) {
       state.value = null;
       error.value = ipc.errorMessage(cause);

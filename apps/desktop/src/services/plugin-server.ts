@@ -3,6 +3,7 @@ import { pluginsApi } from './plugins';
 import { actionPayload } from './plugin-ui';
 import type { PluginApproval, PluginCapability, PluginUiPage } from '../types/plugins';
 import { useHostsStore } from '../stores/hosts';
+import { hostDisplayName } from '../types/hosts';
 
 interface Queue {
   tail: Promise<unknown>;
@@ -164,10 +165,23 @@ async function surfaceRequest<T>(
     if (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
       const approval = reply.result as PluginApproval;
       const target = useHostsStore().catalog?.hosts.find((host) => host.id === approval.hostId);
-      const accepted = await plugins.ask(
-        '插件操作需要单独确认',
-        `${approval.pluginName} ${approval.pluginVersion}\n${target ? `${target.username}@${target.hostname}:${target.port}` : approval.hostId}\n${approval.description}\n\n本次确认 60 秒内有效。`,
-      );
+      const accepted = approval.imageId
+        ? await plugins.ask(
+            '删除镜像？',
+            '不强制删除，不删除卷。正在使用的镜像可能无法删除；超时后请刷新核对结果。',
+            undefined,
+            {
+              imageId: approval.imageId,
+              hostName: target ? hostDisplayName(target) : approval.hostId,
+              hostAddress: target ? `${target.username}@${target.hostname}:${target.port}` : '',
+              pluginName: approval.pluginName,
+              pluginVersion: approval.pluginVersion,
+            },
+          )
+        : await plugins.ask(
+            '插件操作需要单独确认',
+            `${approval.pluginName} ${approval.pluginVersion}\n${target ? `${target.username}@${target.hostname}:${target.port}` : approval.hostId}\n${approval.description}\n\n本次确认 60 秒内有效。`,
+          );
       await pluginsApi.approve(approval.id, accepted);
       if (!accepted) throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
       verifyContext();

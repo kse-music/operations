@@ -745,3 +745,11 @@ clipboard-win 5.4.3 发布包未包含 LICENSE，文本取自其固定源码提�
 | string-interner 0.19.0  | MIT/Apache-2.0                                      | Cargo (13A-2) |
 | unicode-width 0.2.3     | MIT OR Apache-2.0                                   | Cargo (13A-2) |
 | leb128fmt 0.1.0         | MIT OR Apache-2.0                                   | Cargo (13A-2) |
+
+## 2026-11-05：数据迁移空间检查
+
+新增 fs2 0.4.3，用于查询目标磁盘可用空间。SHA-256 与临时文件复用清单中已有的 sha2 0.10.9 和 tempfile 3.27.0。fs2 的完整双许可文本已追加到随包第三方声明。
+
+| 依赖      | 许可              | 来源  |
+| --------- | ----------------- | ----- |
+| fs2 0.4.3 | MIT OR Apache-2.0 | Cargo |

@@ -1,5 +1,100 @@
 # 插件阶段验证记录
 
+## 2026-11-05：镜像删除单次确认与弹窗布局
+
+### 已完成范围与主要文件
+
+- 删除镜像只由可信宿主显示一次“删除镜像？”弹窗，分区展示主机、账号地址、完整可换行镜像 ID、发起插件、删除约束及 60 秒时限；按钮为取消和确认删除，无需输入完整目标或确认短语。取消/关闭不执行，用户取消不显示失败通知；确认后按原流程刷新列表，真实错误继续展示。
+- `packages/plugin-sdk/src/ui/ResourceView.vue` 对 image_remove 直接请求原生审批，移除包内重复确认；容器等其他操作继续保留完整目标输入。`apps/desktop/src/components/PluginDialogs.vue`、`services/plugin-server.ts` 和 `stores/plugins.ts` 负责宿主审核排版与状态。
+- `crates/application/src/plugins/state.rs` / `capabilities.rs` 在 Approval 增加可选 imageId，直接来自原生冻结的 ImageRemove 请求，前端类型同步。展示不采用 iframe 自述 ID；权限、SSH 身份、安装代/上下文代、60 秒 TTL 与单次批准不变，其他操作不输出该字段。旧后端无字段时继续通用宿主审批。
+- Docker 标准包更新 1.5.1，兼容前端资源及标准包真实重建，保留原启停/配置升级策略。Host/Rust/Vue SDK 仍为 4.0.0，无新增 IPC 命令、权限或数据库迁移。原生操作脚本同步使用宿主删除确认。
+
+### 执行结果
+
+- `npm test`：54 文件、399 项全部通过。覆盖原生冻结目标与 iframe 自述 ID 不同、批准前无执行、取消不重试、批准仅重试原载荷、弹窗取消/关闭/确认、其他操作仍需确认文字、Docker 与旧兼容页面转交宿主审批。jsdom 保留两次既有 Canvas 未实现提示。
+- `npm run typecheck`、`npm run lint`、`cargo fmt --all -- --check`、12 个变更代码/脚本文件的 Prettier 和两个 E2E 脚本语法检查通过。
+- `node tools/build-system-plugins.mjs` 成功，构建使用既有 WASM 缓存和同一公开 SDK；Cargo 前检查 D 盘约 169 GiB 可用。`cargo test -p serverdeck-application --lib --no-run --offline --locked` 编译通过，复制 EXE 至本任务 QA 后运行 `plugins::`：20 项通过、1 项既有隔离 Linux SSH 夹具测试 ignored。新增 Rust 回归验证 imageId 来源、主机绑定、目标改变不能复用批准、取消后须重新审批及单次消费；非镜像操作不输出 imageId。
+- `cargo clippy -p serverdeck-application --lib --offline --locked` 通过，保留 core 中既有单元素 for 循环告警，本次没有新增告警。
+- `tools/ui-plugin-layout-e2e.mjs`：2400×1400、1440×900、900×600、390×844 的深/浅主题共 8 组通过。使用真实新标准包 UI 和本地内存审批夹具；确认只有宿主弹窗、无目标输入、取消执行数为零、批准后恰执行一次，长 ID 无横向溢出且按钮保持可见；Docker/助手及插件管理原布局检查继续通过。
+- 证据位于 `.local/image-removal-qa/layout/result.json`、`image-removal-confirm-*.png`、`native-tests.log` 和 `clippy.log`。未使用真实主机或删除用户镜像。
+- 用户正常退出后执行 `node tools/tauri.mjs build --debug --no-bundle` 成功，标准插件、类型与生产前端构建及 Windows 原生调试 EXE 均完成。产物为 `target/debug/serverdeck-desktop.exe`，Docker 标准包为 1.5.1；构建日志及产物大小、更新时间、SHA256 记录于 `.local/image-removal-qa/desktop-build.log` 和 `desktop-artifact.json`。保留既有大于 500 kB 前端分块提示，未生成安装器。
+
+### 检查修正与限制
+
+- 初轮新弹窗测试直接 spy jsdom 不存在的 showModal，改用项目现有的显式定义/恢复方式；旧兼容页面的目标输入断言同步至宿主确认。新增 Rust 测试曾在内部审批构造函数上误断言只读请求无需审批，现改为检验非镜像审批不输出 imageId，调用前的权限/敏感策略保持不动。
+- 初轮完整桌面构建在更新目标 EXE 时因文件占用失败；普通沙箱未能枚举进程，受限环境之外核实为正在运行的目标 EXE。依 AGENTS.md 保留进程；用户确认正常退出后重新构建成功，EXE 已更新。未启动用户配置下的应用，也未重验安装器、真实 SSH 删除、原生 WebView2 与跨平台；本阶段无剩余构建依赖。
+
+## 2026-11-05：独立插件菜单与管理卡片
+
+### 已完成范围与主要文件
+
+- 顶部增加“插件”，侧栏只提供“插件管理”；从设置移除此入口。管理列表及各插件配置标签统一归属 plugins 模块，点击旧标签、功能页设置入口或重复打开配置均正确高亮并复用标签。顶部模块切换继续保留当前主机、页面、终端和草稿。
+- 管理页改为紧凑标题/数量、右上角安装与刷新、轻量拖放提示和自适应卡片。内容区大于 840px 时双列，其余单列；卡片显示真实图标、版本、描述、ID、来源和启停状态，长名称换行、长 ID 省略且可悬停查看。
+- 基于现有清单组合来源、状态和关键词筛选，支持名称、描述、作者及 ID；提供无安装、筛选无匹配、首次加载、失败重试等状态。保留原安装预览/签名风险确认、升级批准、卸载确认及默认保留本地数据。
+- 主要文件：`apps/desktop/src/types/navigation.ts`、`components/AppNavigation.vue`、`views/PluginsView.vue`、`styles/plugins.css`、`stores/workspace.ts` 及对应测试；共用浏览器导航和布局/图标/设置/工作区检查脚本同步。README、PRD、架构及使用指南更新入口说明，无 Rust、IPC、权限、包版本或数据库变化。
+
+### 执行结果
+
+- `npm test`：53 文件、393 项全部通过，包含筛选组合、未知来源兼容、加载/失败重试、配置入口、升级取消/失败、拖放预览代校验及卸载确认。jsdom 仍输出两次既有 Canvas 未实现提示，不影响结果。
+- `npm run typecheck`：桌面与公开插件 SDK 均通过；`npm run lint` 通过；18 个变更代码/脚本文件的 Prettier 检查通过。
+- 桌面目录执行 `node ../../node_modules/vite/bin/vite.js build`：前端生产构建通过；磁盘检查可用约 169 GiB。复用现有插件包，无需重编 WASM；保留 Monaco 等大于 500 kB 分块的构建提示。
+- `tools/ui-plugin-layout-e2e.mjs`：2400×1400、1440×900、900×600、390×844，各深/浅主题共 8 组通过。检查独立菜单高亮、卡片单双列、搜索图标与输入框同排、长名称/ID、筛选及清除、插件设置、Docker 日志/Shell 弹窗和助手页面，外层/内容区均无横向溢出。
+- `tools/ui-settings-e2e.mjs`、`tools/ui-plugin-icons-e2e.mjs`、`tools/ui-context-e2e.mjs`：各 4 组通过，共 12 组。检查设置移除插件菜单、设置右对齐、系统/上传图标、功能按钮及模块往返时主机/终端/SFTP 状态保持。
+- 浏览器证据：`.local/plugin-menu-qa/plugin_layout/result.json`、`settings/results.json`、`plugin_icons/result.json`、`context/results.json` 及同目录截图；生产构建日志为 `.local/plugin-menu-qa/frontend-build.log`。均使用本地内存夹具和真实分发包 UI，不代表原生后端或真实 SSH 验收。
+
+### 检查中修正与限制
+
+- 初轮 Vitest 在沙箱临时目录重命名遇到 EPERM，将当前测试进程 TEMP/TMP 指向本任务 QA 目录后正常。Edge 在受限环境启动失败，经批准使用隔离无头浏览器完成检查，不访问用户浏览器配置或远程主机。
+- 截图复核发现旧通用 label/input 样式将搜索图标挤到输入框上方，已收窄样式并补充几何断言；格式化导致重试按钮带空白，测试改为按去空白文字匹配。旧菜单归属、已退役服务器按钮与固定插件数量的断言已同步为当前界面/夹具，保留关键行为断言。
+- 未运行原生 WebView2、真实 SSH、跨平台或 Rust 测试，未重建桌面 EXE/安装器。无新增已知功能风险；本阶段无剩余实现依赖，桌面打包与原生发布验收另行安排。
+
+## 2026-11-05：完整移除系统服务插件
+
+### 已完成范围与主要文件
+
+- 删除 `plugins/system/services/`、`plugins/system/packages/services.sdplugin`、旧系统页面及其样式/测试、旧监控和系统 OperationsView 兼容代码、专属页面注入适配、PID 关联界面辅助函数和原生监控/服务器页面脚本。内置仅 Docker 和 AI；主机工具与插件管理不再注册系统服务。
+- `crates/application/src/bundled_plugins.rs` 仅分发两包；`crates/plugin-core/src/repository/layout.rs` 在新 SDK 解码前退役当前/旧域名 services 身份及依赖被删 UI 的旧安装，保留原始记录、payload、设置和授权。仅 backup 不兼容时保留 current，将原记录与完整旧包归档，再清除活动 backup/previousVersion；后续普通升级清理不影响独立归档包。归档附升级说明，迁移可重入，摘要、路径和重解析点错误继续传播。
+- Rust/Vue UI 声明移除 monitor，operations 分类只保留 containers/images；宿主事件白名单和 SDK 类型同步。Host/Rust/Vue SDK 4.0.0，Docker 1.5.0、助手 1.6.0。保留独立前端公开指标、系统查询/受控操作与日志能力；兼容未使用移除合同的旧 v1–v3 包，ABI/wire/包格式仍为 1。
+- `plugins/compat/server/frontend/LegacySurface.vue` 复用当前 Docker 页面并限制声明分类；共享能力回归使用不分发、无 UI 的 `tests/fixtures/plugins/server-capabilities` WASM 夹具。混合验收脚本保留 Docker/AI/SSH/SFTP 检查，不再创建新的进程、监听端口或 systemd 单元夹具；旧作用域的所有权核验清理保留。
+- 产品需求、架构/决策、实施计划、当前使用指南及插件文档同步；历史验证记录保留，不再代表当前图形功能。
+
+### 实际验证
+
+| 检查                                                                        | 结果                                                                                                                                          |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 前端 Vitest（52 文件）                                                      | 381 项通过；包含 Docker 旧界面复用、声明分类限制、配置/启停、主机上下文、日志清理、AI 生命周期                                                |
+| Rust 工作区 `cargo test --workspace --offline --locked -- --test-threads=1` | 236 项通过、4 项既有 ignored；含真实 SSH/SFTP、AI 上下文/计划、原生 IPC 和插件安全边界                                                        |
+| 新退役回归                                                                  | 5 项通过，覆盖当前/旧域名与 system/user 来源、旧标准 UI 拒绝/归档、备份独立包持久保留、旧 payload 布局、损坏失败和 Windows junction 保护      |
+| 独立 Docker/助手/共享能力夹具 Guest 单测                                    | 2 + 1 + 2，共 5 项通过，原生测试复用根 target                                                                                                 |
+| `npm run test:build`                                                        | 7 项磁盘门禁测试通过；各次构建前空间均大于 10 GiB                                                                                             |
+| ESLint、宿主/SDK 类型检查、Rust 格式检查                                    | 通过；修改文件 Prettier 检查单独执行                                                                                                          |
+| Clippy                                                                      | 普通工作区全 target 检查完成，仅既有 `crates/core/src/openssh.rs:290` 的 single_element_loop 警告；`-D warnings` 严格门禁因此未通过           |
+| 全仓 Prettier                                                               | 报告 11 个未修改文件的既有格式问题，未夹带格式化修复；修改范围单独检查                                                                        |
+| 标准包、生产前端、Windows 调试 EXE                                          | 均构建成功，未构建安装器；共享 root target，未开新桌面 Cargo 缓存                                                                             |
+| 原生插件管理                                                                | 5 个场景通过：仅两包、预置只读权限、启停/WASM health、真实拖放安装、上传来源与卸载、工作区设置和 UI                                           |
+| AI 智能体原生全链路                                                         | 本机模型协议夹具 + 真实 WebView2/SSH/独立 Docker daemon，3 场景通过：查询冻结两目标、可信确认后执行并逐项复查、保留有标签镜像及后续无目标处理 |
+| 插件布局                                                                    | 两个实际标准包，2400×1400、1440×900、900×600、390×844 的深/浅主题共 8 组、64 张截图通过                                                       |
+
+证据：`.local/removed-services-qa/` 中的 `frontend-tests.log`、`rust-tests.log`、`clippy.log`、`clippy-default.log`、`format.log`、`layout/result.json`、`assistant/native-results.json` 和 `native-management.log`。原生管理完整记录在 `.local/ops-plugin-migration/native/run-b447d0f7-ec31-4375-9f5d-fd2d99ee0f41/results.json`。
+
+Docker 真实日志/容器 PTY、输入焦点、暂停/继续/关闭、两个主机的草稿、AI HTTP 500 恢复、深浅/窄窗口及原 SSH 终端保留的功能断言已完成。证据为 `.local/plugin-ui-isolation/9e48bdf0-e9c6-4c9e-9120-034c96ab4b1f/component-results.json` 及本任务 `native-components.log`。完整脚本仍以非零退出：最后的零控制台错误断言捕获助手设置页关闭时的未处理“插件界面已关闭”取消错误；保留该断言，未将完整组件门禁记为通过。本轮没有改动该关闭处理逻辑，也未据此扩大到助手生命周期修复。
+
+### 过程问题与纠正
+
+- 首轮前端临时目录 rename 被沙箱拒绝，改用本任务临时目录后正常运行；本机 HTTP 服务及原生浏览器检查在获准的沙箱外环境执行。
+- 清理了仍假设三个包的测试数量、图标、权限夹具；修正新测试装载旧版本的顺序及 Shell 归属断言，保留真实权限/生命周期目标。
+- 从 root target 运行的用户程序占用 EXE；用户正常退出后重建成功，没有强杀。一次原生构建与 Rust 编译并行导致兼容资源被编译器映射而拒绝覆盖，改为串行后成功。
+- 本地终端既有清理测试在并行工作区运行中出现一次时序失败；完整工作区串行复验通过，未改写该测试或生产终端代码。
+- 原生拖放投递器旧的“只能有一个监听器”假设不适用于缓存页面，改为对回调去重并验证一次投递恰好产生一个安装预览；真实安装/卸载断言保留且通过。组件脚本的异步设置 iframe 断言及计数快照改为可见时检查，活动实例按现有内置 AI 工作区保留合同核验；所有最终运行时身份严格匹配两个实际安装包。
+
+### 交付、限制及阶段依赖
+
+默认 Windows 调试程序和 `.local/removed-services-qa/ServerDeck-preview.exe` 副本已生成，SHA-256：`92223100A18C096CE5728DBA22969A82E2450BD44DB8812F67E50BEEA11747AD`；交付前再次校验。第三方旧系统标准界面必须升级为独立界面；原始数据归档保留，不承诺自动恢复已删除合同。
+
+未验收生产主机/正式模型提供者、macOS/Linux 客户端、签名安装器和长期压力。严格全仓格式/Clippy 门禁的既有问题仍在。首次布局运行误用了 `.local/plugin-layout-qa/` 默认输出，覆盖其中部分同名截图与结果索引；已说明该失误，最终证据改为本任务 `layout/`，未操作应用用户数据，也未清理旧 QA 目录。
+
+当前删除实现和本轮验证结束，无剩余实现依赖。组件控制台取消错误、严格静态门禁的既有问题及跨平台/安装器验收作为明确限制保留，不主动进入后续开发阶段。
+
 ## 2026-11-05：日志与容器终端弹窗
 
 完成标准：删除系统服务独立日志分类及其文件路径表单、标签、源码/样式和导航链；systemd 与 Docker 日志在当前目标的弹窗中显示；内置 Docker Shell 点击直接打开交互终端弹窗、聚焦输入，无目标输入或二次批准；关闭或上下文变化释放自有日志流/PTY，保留共享连接与其他危险操作确认。

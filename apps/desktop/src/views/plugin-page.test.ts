@@ -32,7 +32,7 @@ it.each(['system', 'user'] as const)(
     pinia = createPinia();
     setActivePinia(pinia);
     const plugins = usePluginsStore();
-    const plugin = { ...systemPluginFixtures()[1]!, source };
+    const plugin = { ...systemPluginFixtures()[0]!, source };
     plugins.installed = [plugin];
     plugins.grants[plugin.manifest.id] = null;
     if (source === 'system')
@@ -52,7 +52,7 @@ it.each(['system', 'user'] as const)(
     const grant = vi.spyOn(pluginsApi, 'grant').mockResolvedValue({} as never);
     vi.spyOn(plugins, 'refresh').mockResolvedValue();
     useWorkspaceStore().openPluginSettings(plugin.manifest.id);
-    expect(useWorkspaceStore().module).toBe('system');
+    expect(useWorkspaceStore().module).toBe('plugins');
     expect(useWorkspaceStore().current?.pluginId).toBe(plugin.manifest.id);
     useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
     mount(plugin.manifest.id);
@@ -110,17 +110,17 @@ it('does not overwrite permission edits when the installed list refreshes with u
   plugins.grants[plugin.manifest.id] = null;
   mount(plugin.manifest.id);
   await settle();
-  const check = root.querySelector<HTMLInputElement>('[aria-label="metrics.read"]')!;
+  const check = root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!;
   check.checked = true;
   check.dispatchEvent(new Event('change'));
   await nextTick();
   plugins.installed = [{ ...plugin }];
   plugins.grants = { ...plugins.grants };
   await settle();
-  expect(root.querySelector<HTMLInputElement>('[aria-label="metrics.read"]')!.checked).toBe(true);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!.checked).toBe(true);
 });
 
-it('keeps plugin-provided settings pages available under settings without a host selector', async () => {
+it('keeps plugin-provided settings pages available under plugins without a host selector', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const plugins = usePluginsStore(),
@@ -174,7 +174,7 @@ it('keeps plugin-provided settings pages available under settings without a host
   useWorkspaceStore().openPluginSettings(plugin.manifest.id);
   mount(plugin.manifest.id);
   await settle();
-  expect(useWorkspaceStore().module).toBe('system');
+  expect(useWorkspaceStore().module).toBe('plugins');
   expect(root.querySelector<HTMLInputElement>('.plugin-form input')?.value).toBe('配置草稿');
   // Configuration must remain the first usable section, ahead of lifecycle/permission controls.
   const configuration = root.querySelector('.plugin-configuration')!;

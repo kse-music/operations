@@ -6,6 +6,7 @@ mod ops_commands;
 mod plugin_commands;
 mod plugin_ui_protocol;
 mod product_commands;
+pub mod storage_commands;
 mod terminal_upload_commands;
 mod window_state;
 
@@ -48,18 +49,37 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            app.manage(file_commands::ExitApproval(AtomicBool::new(false)));
-            let data = app.path().app_data_dir()?;
-            let logs = app.path().app_log_dir()?;
-            let application = Application::initialize(data, logs.clone())?;
-            application.provision_bundled_plugins()?;
-            let config = tauri::async_runtime::block_on(application.bootstrap())?.config;
-            let guard = logging::initialize(&logs, config.log_level)?;
-            app.manage(guard);
-            window_state::initialize(app.handle(), &application)?;
-            app.manage(application);
-            tracing::info!(operation = "startup", "ServerDeck initialized");
-            Ok(())
+            let initialized = (|| -> Result<(), Box<dyn std::error::Error>> {
+                app.manage(file_commands::ExitApproval(AtomicBool::new(false)));
+                let data = app.path().app_data_dir()?;
+                let logs = app.path().app_log_dir()?;
+                let profile = serverdeck_application::storage_location::Profile::open(
+                    app.path().app_config_dir()?.join(serverdeck_application::storage_location::LOCATOR),
+                    serverdeck_application::storage_location::Locations { data, logs, webview: app.path().app_local_data_dir()? },
+                )?;
+                let locations = profile.locations().clone();
+                let application = Application::initialize(locations.data, locations.logs.clone())?;
+                application.provision_bundled_plugins()?;
+                profile.record_initialized()?;
+                let config = tauri::async_runtime::block_on(application.bootstrap())?.config;
+                let guard = logging::initialize(&locations.logs, config.log_level)?;
+                app.manage(guard);
+                app.manage(storage_commands::StorageState::new(profile));
+                app.manage(application);
+                let window_config = app.config().app.windows.iter().find(|w| w.label == "main")
+                    .ok_or("main window configuration missing")?;
+                tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                    .data_directory(locations.webview).build()?;
+                window_state::initialize(app.handle(), &app.state::<Application>())?;
+                tracing::info!(operation = "startup", "ServerDeck initialized");
+                Ok(())
+            })();
+            if let Err(error) = &initialized {
+                use tauri_plugin_dialog::DialogExt;
+                app.dialog().message(format!("无法打开应用数据：{error}\n请检查已配置的目录、磁盘和权限。不会切换到替代空数据库。"))
+                    .title("ServerDeck 启动失败").kind(tauri_plugin_dialog::MessageDialogKind::Error).blocking_show();
+            }
+            initialized
         })
         .invoke_handler(command_handler())
         .on_window_event(|window, event| {
@@ -121,7 +141,16 @@ pub fn run() {
                     window_state::flush(&handle, &state).await;
                     state.shutdown().await;
                     drained.store(true, Ordering::Release);
-                    handle.exit(0);
+                    if handle
+                        .state::<storage_commands::StorageState>()
+                        .restart
+                        .load(Ordering::Acquire)
+                    {
+                        handle.state::<logging::Logger>().flush();
+                        handle.request_restart();
+                    } else {
+                        handle.exit(0);
+                    }
                 });
             }
         }
@@ -131,6 +160,9 @@ pub fn run() {
 pub fn command_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        storage_commands::app_storage_preview,
+        storage_commands::app_storage_migrate,
+        storage_commands::app_storage_ready,
         plugin_commands::plugin_tool_stage,
         plugin_commands::plugin_tool_abort_input,
         plugin_commands::plugin_tool_cancel_request,

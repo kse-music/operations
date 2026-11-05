@@ -26,7 +26,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.restoreAllMocks();
 });
-it('loads its container details without environment secrets and requires the exact image target before removal', async () => {
+it('loads container details without secrets and delegates image removal to the host confirmation', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -95,6 +95,16 @@ it('loads its container details without environment secrets and requires the exa
   document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await settle();
   expect(api.logClose).toHaveBeenCalledWith('container-log');
+  await click('停止');
+  const confirm = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
+    (button) => button.textContent?.trim() === '确认执行',
+  )!;
+  expect(document.querySelector('[aria-label="确认运维目标"]')).not.toBeNull();
+  expect(confirm.disabled).toBe(true);
+  await click('取消');
+  expect(api.query.mock.calls.some(([, request]) => request.kind === 'container_action')).toBe(
+    false,
+  );
   await click('Shell');
   expect(shell).toHaveBeenCalledWith(expect.objectContaining({ id: 'host' }), {
     id: 'container',
@@ -104,17 +114,16 @@ it('loads its container details without environment secrets and requires the exa
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
   await click('删除镜像');
-  expect(api.query.mock.calls.some(([, request]) => request.kind === 'image_remove')).toBe(false);
-  const target = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
-  target.value = 'image';
-  target.dispatchEvent(new Event('input', { bubbles: true }));
-  await nextTick();
-  await click('确认执行');
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   expect(api.query).toHaveBeenCalledWith('lease', {
     kind: 'image_remove',
     id: 'image',
     confirmed: true,
   });
+  api.query.mockRejectedValueOnce({ code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' });
+  await click('删除镜像');
+  expect(root.querySelector('[role="alert"]')).toBeNull();
   api.query.mockResolvedValue({
     success: false,
     message: 'Docker daemon unavailable',

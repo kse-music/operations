@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[设置页面排版、响应式间距与终端命名验证](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-05设置页面排版与终端命名)。
+
+最新：[镜像删除单次确认、冻结目标与弹窗布局验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05镜像删除单次确认与弹窗布局)。
+
+最新：[独立插件菜单、管理卡片与搜索筛选验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05独立插件菜单与管理卡片)。
+
+最新：[设置分类与本机数据目录迁移](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-05设置分类与数据目录迁移)。
+
+最新：[完整移除系统服务插件、旧标准界面与安全退役验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05完整移除系统服务插件)。
+
 最新：[主机工作区后台回答、切页续接与关闭取消验证](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05主机工作区后台回答)。
 
 最新：[SSH 运维智能体查询、冻结计划、确认执行和逐项复查](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-05ssh-运维智能体)。

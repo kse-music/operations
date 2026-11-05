@@ -1,5 +1,9 @@
 # 插件 UI v1 / v2 / v3 / v4
 
+## 当前标准界面范围（Host/SDK 4.0.0）
+
+系统服务及宿主提供的监控、进程、端口、systemd 和日志分类已经删除；Monitor surface 不再接受，operations.sections 仅允许 containers/images。旧 Docker 兼容界面复用当前 Docker 页面并只显示声明的分类。独立前端 frontend surface 仍可使用授权的通用系统/指标/日志能力。旧系统界面声明需升级，安装时提示；已有安装或失效备份按[版本策略](PLUGIN_API_VERSIONING.md)保留数据并归档。下文涉及旧分类的段落为历史约定。
+
 ## 使用入口与上下文（2026-11-05）
 
 内置 system 助手采用工作区生命周期：已启动的匹配/准备/回答/查询和已批准执行在隐藏时继续，返回显示结果，关闭所属主机（全局入口为自身标签）时停止。宿主保留真实 visible:false，注入 keepRunning 并校验每页流程；只有已开始流程的必要续接可在后台进行，新执行审批仍须回到可见页面。上传及其他插件继续以下隐藏释放规则。
@@ -8,7 +12,7 @@ workspace/navigation/server/host_menu/command 等主机功能从当前设备打�
 
 功能界面按插件/贡献/主机保留，详情与管理单独归属设置。隐藏 iframe 会收到 visible:false，不应继续轮询或提交操作；Host 会拒绝非当前页面请求，撤销在途交互并使旧资源失效。恢复 visible:true 后需重新获取监控/日志等不透明资源；不得复用已失效的句柄，错误须正常呈现。已读日志与输入草稿可保留，恢复不自动执行原操作。标准系统包提供对应可见性处理。
 
-Host API / Rust SDK / Vue SDK 当前为 3.0.0；ABI/wire 仍为 1，UI v1–v4 格式保留。仅剩 assistant 工具领域；旧 ^1.x 包未使用已删除权限与枚举时继续兼容。
+Host API / Rust SDK / Vue SDK 当前为 4.0.0；ABI/wire 仍为 1，UI v1–v4 格式保留。仅剩 assistant 工具领域；旧 ^1.x 包未使用已删除权限与枚举时继续兼容。
 
 ## 2.1 组合分类与缓存页面
 
@@ -16,7 +20,7 @@ UI v4 的 operations.sections 可组合 overview/disks/network 与原运维分�
 
 ## UI v4：包内独立界面
 
-Host API 1.4.0 / Rust SDK 1.3.0 新增 `uiVersion:4` 和必填 `frontend:{script:"frontend.js",style:"frontend.css"}`。页面仍声明 id/title/fields/actions 等严格字段；`surface:{kind:"frontend"}` 允许全新业务页面，普通 workspace/navigation/host_menu/command/settings 贡献映射到同 ID 页面，无需增加宿主类型。通用页面的 actions/fields 声明可由 SDK invoke 使用；初始动作及 log 仍为空，插件自行管理 UI 状态。原 monitor/operations/tool surface 在 v4 也可使用，标准 surface 的单一 bridge 动作约束不变。
+Host API 1.4.0 / Rust SDK 1.3.0 新增 `uiVersion:4` 和必填 `frontend:{script:"frontend.js",style:"frontend.css"}`。页面仍声明 id/title/fields/actions 等严格字段；`surface:{kind:"frontend"}` 允许全新业务页面，普通 workspace/navigation/host_menu/command/settings 贡献映射到同 ID 页面，无需增加宿主类型。通用页面的 actions/fields 声明可由 SDK invoke 使用；初始动作及 log 仍为空，插件自行管理 UI 状态。保留的 operations（仅 containers/images）及 tool surface 在 v4 也可使用，标准 surface 的单一 bridge 动作约束不变。
 
 前端入口使用公开 SDK：
 

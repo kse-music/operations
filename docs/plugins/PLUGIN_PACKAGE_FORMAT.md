@@ -1,6 +1,6 @@
 # 本地插件包 v1
 
-当前 Host/Rust/Vue SDK 为 3.0.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；旧包处理见[版本策略](PLUGIN_API_VERSIONING.md#300移除网络诊断)。下述版本号同时记录字段首次引入的最低宿主版本。
+当前 Host/Rust/Vue SDK 为 4.0.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；旧包处理见[版本策略](PLUGIN_API_VERSIONING.md#300移除网络诊断)。下述版本号同时记录字段首次引入的最低宿主版本。
 
 ## UI v4 前端入口（Host API 1.4.0）
 
@@ -25,7 +25,7 @@
 
 使用 icon 的新包应声明 `apiVersion: "^1.3.0"`，避免将含新字段的包分发给严格拒绝未知字段的旧宿主。formatVersion/schemaVersion 仍为 1，SDK 1.2.0 与 WASM ABI、UI v1/v2/v3 不变；旧包无需补 icon。
 
-## SDK 3.0 工具贡献
+## SDK 4.0 工具贡献
 
 formatVersion/schemaVersion 仍为 1。使用工具的新包声明 apiVersion ^3.0.0、uiVersion 3 或 4；贡献 kind=tool 且 tool 仅为 assistant，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
 

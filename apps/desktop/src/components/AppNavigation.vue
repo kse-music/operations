@@ -9,6 +9,7 @@ import {
   Keyboard,
   Terminal,
   PanelsTopLeft,
+  Puzzle,
 } from '@lucide/vue';
 import { messages, type WorkspaceView } from '../types/product';
 import { computed } from 'vue';
@@ -29,12 +30,12 @@ const groups = {
     { view: 'models', icon: Boxes },
     { view: 'backup', icon: ArchiveRestore },
   ],
+  plugins: [{ view: 'plugins', icon: Puzzle }],
   system: [
     { view: 'settings', icon: Settings2 },
     { view: 'settingsTerminal', icon: Terminal },
     { view: 'settingsShortcuts', icon: Keyboard },
-    { view: 'settingsWorkspace', icon: PanelsTopLeft },
-    { view: 'plugins', icon: Boxes },
+    { view: 'settingsStorage', icon: PanelsTopLeft },
     { view: 'about', icon: Info },
   ],
 } as const;

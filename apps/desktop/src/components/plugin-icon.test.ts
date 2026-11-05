@@ -17,7 +17,7 @@ function mount(manifest: Pick<PluginManifest, 'id' | 'icon'>, source?: 'system' 
   app = createApp(PluginIcon, { manifest, source, size: 21 });
   app.mount(root);
 }
-it('uses three distinct configured icons and restores icons for legacy system records only', () => {
+it('uses two distinct configured icons and restores icons for legacy system records only', () => {
   const plugins = [
     ...new Map(
       [...systemPluginFixtures(), ...toolPluginState().installed].map((plugin) => [
@@ -27,8 +27,8 @@ it('uses three distinct configured icons and restores icons for legacy system re
     ).values(),
   ];
   const configured = plugins.map((plugin) => plugin.manifest.icon);
-  expect(configured).toHaveLength(3);
-  expect(new Set(configured).size).toBe(3);
+  expect(configured).toHaveLength(2);
+  expect(new Set(configured).size).toBe(2);
   for (const plugin of plugins) {
     expect(pluginIcons.has(plugin.manifest.icon!)).toBe(true);
     const old = { ...plugin.manifest, icon: undefined };

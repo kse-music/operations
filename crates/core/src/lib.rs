@@ -147,6 +147,29 @@ pub struct Bootstrap {
     pub data_directory: String,
     pub log_directory: String,
     pub config: AppConfig,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub storage: Option<StorageInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageInfo {
+    pub root_directory: String,
+    pub database_path: String,
+    pub plugin_directory: String,
+    pub log_directory: String,
+    pub webview_directory: String,
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePreview {
+    pub target_directory: String,
+    pub bytes: u64,
+    pub available_bytes: u64,
+    pub unfinished_tasks: usize,
+    pub dirty_documents: usize,
 }
 
 #[derive(Debug, Serialize)]

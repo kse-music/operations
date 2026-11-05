@@ -74,7 +74,7 @@ try {
     await page.locator('.module-navigation [data-module="system"]').click();
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['通用', '终端', '快捷键', '工作区与连接', '关于'],
+      ['通用', '终端', '快捷键', '数据与存储', '关于'],
     );
     const about = page.getByRole('button', { name: '关于', exact: true });
     await about.click();

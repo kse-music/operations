@@ -4,6 +4,9 @@
   "description": "Only the local main window may manage validated hosts and write secrets to the OS store; no secret read IPC or unrestricted filesystem/shell API.",
   "windows": ["main"],
   "permissions": [
+    "allow-app-storage-preview",
+    "allow-app-storage-migrate",
+    "allow-app-storage-ready",
     "allow-plugin-tool-stage",
     "allow-plugin-tool-abort-input",
     "allow-plugin-tool-cancel-request",

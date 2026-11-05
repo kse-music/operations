@@ -7,14 +7,14 @@ import { buildPluginUi } from './build-plugin-ui.mjs';
 import { requireBuildSpace } from './build-space.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 requireBuildSpace(root);
-const names = ['services', 'docker', 'assistant'];
+const names = ['docker', 'assistant'];
 const artifacts = path.join(root, 'plugins/system/packages');
 await mkdir(path.join(root, '.local/plugin-build'), { recursive: true });
 await mkdir(artifacts, { recursive: true });
 await buildPluginUi(
   path.join(root, 'plugins/compat/server'),
   path.join(root, 'plugins/compat/server/assets'),
-  [path.join(root, 'plugins/system/services/frontend/monitor')],
+  [path.join(root, 'plugins/system/docker/frontend')],
 );
 const staging = await mkdtemp(path.join(root, '.local/plugin-build', 'system-'));
 for (const name of names) {

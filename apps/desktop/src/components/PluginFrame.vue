@@ -164,17 +164,7 @@ function uiEvent(name: string, args: unknown[]) {
   if (!active.value) return;
   if (Date.now() - lastEvent < 40) return;
   lastEvent = Date.now();
-  const sections = [
-    'overview',
-    'disks',
-    'network',
-    'containers',
-    'images',
-    'processes',
-    'ports',
-    'services',
-    'logs',
-  ];
+  const sections = ['containers', 'images'];
   if (name === 'section' && sections.includes(String(args[0])))
     emit('section', args[0] as ServerSection);
   else if (name === 'navigate' && sections.includes(String(args[0])))

@@ -69,26 +69,19 @@ fn guest_cannot_supply_native_confirmation() {
 #[test]
 fn server_surface_rejects_unsupported_versions_categories_and_mixed_form_actions() {
     let original: crate::ui::Ui =
-        serde_json::from_str(include_str!("../../../plugins/system/services/ui.json")).unwrap();
+        serde_json::from_str(include_str!("../../../plugins/system/docker/ui.json")).unwrap();
     original.validate().unwrap();
     let mut legacy = original.clone();
     legacy.ui_version = 1;
     assert!(legacy.validate().is_err());
-    let mut legacy_categories = original.clone();
-    legacy_categories.ui_version = 3;
-    legacy_categories.frontend = None;
-    assert!(
-        legacy_categories.validate().is_err(),
-        "combined sections require UI v4"
-    );
     let mut duplicate = original.clone();
-    duplicate.pages[0].surface = Some(crate::ui::Surface::Monitor {
-        sections: vec!["overview".into(), "overview".into()],
+    duplicate.pages[0].surface = Some(crate::ui::Surface::Operations {
+        sections: vec!["containers".into(), "containers".into()],
     });
     assert!(duplicate.validate().is_err());
     let mut unknown = original.clone();
-    unknown.pages[0].surface = Some(crate::ui::Surface::Monitor {
-        sections: vec!["containers".into()],
+    unknown.pages[0].surface = Some(crate::ui::Surface::Operations {
+        sections: vec!["processes".into()],
     });
     assert!(unknown.validate().is_err());
     let mut mixed = original.clone();
@@ -119,9 +112,9 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
     unknown["pages"][0]["surface"]["tool"] = json!("arbitrary_native_command");
     assert!(serde_json::from_value::<Ui>(unknown).is_err());
     let mut server: Ui =
-        serde_json::from_str(include_str!("../../../plugins/system/services/ui.json")).unwrap();
-    server.pages[0].surface = Some(Surface::Monitor {
-        sections: vec!["overview".into()],
+        serde_json::from_str(include_str!("../../../plugins/system/docker/ui.json")).unwrap();
+    server.pages[0].surface = Some(Surface::Operations {
+        sections: vec!["containers".into()],
     });
     server.ui_version = 3;
     server.frontend = None;
@@ -150,4 +143,32 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn removed_standard_server_views_cannot_be_declared() {
+    let original: serde_json::Value =
+        serde_json::from_str(include_str!("../../../plugins/system/docker/ui.json")).unwrap();
+    let mut monitor = original.clone();
+    monitor["pages"][0]["surface"] = json!({"kind":"monitor","sections":["overview"]});
+    assert!(serde_json::from_value::<crate::ui::Ui>(monitor).is_err());
+    for section in [
+        "overview",
+        "disks",
+        "network",
+        "processes",
+        "ports",
+        "services",
+        "logs",
+    ] {
+        let mut removed = original.clone();
+        removed["pages"][0]["surface"]["sections"] = json!([section]);
+        assert!(
+            serde_json::from_value::<crate::ui::Ui>(removed)
+                .unwrap()
+                .validate()
+                .is_err(),
+            "{section}"
+        );
+    }
 }

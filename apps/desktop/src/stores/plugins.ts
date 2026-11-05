@@ -21,6 +21,13 @@ export interface PluginDraft {
   dirty: boolean;
   revision: string;
 }
+export interface ImageRemovalReview {
+  imageId: string;
+  hostName: string;
+  hostAddress: string;
+  pluginName: string;
+  pluginVersion: string;
+}
 export const usePluginsStore = defineStore('plugins', () => {
   const application = useApplicationStore();
   const installed = ref<InstalledPlugin[]>([]),
@@ -47,6 +54,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     title: string;
     message: string;
     confirmationText?: string | null;
+    imageRemoval?: ImageRemovalReview;
     resolve: (accepted: boolean) => void;
   } | null>(null);
   const extensions = computed(() =>
@@ -200,10 +208,15 @@ export const usePluginsStore = defineStore('plugins', () => {
     }
     return ok;
   }
-  function ask(title: string, message: string, confirmationText?: string | null): Promise<boolean> {
+  function ask(
+    title: string,
+    message: string,
+    confirmationText?: string | null,
+    imageRemoval?: ImageRemovalReview,
+  ): Promise<boolean> {
     if (prompt.value) return Promise.resolve(false);
     return new Promise((resolve) => {
-      prompt.value = { title, message, confirmationText, resolve };
+      prompt.value = { title, message, confirmationText, imageRemoval, resolve };
     });
   }
   function decide(accepted: boolean) {

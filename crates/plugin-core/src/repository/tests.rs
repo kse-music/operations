@@ -1026,3 +1026,6 @@ fn removed_network_uploads_are_inactive_and_new_packages_cannot_reintroduce_the_
     );
     assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 1);
 }
+
+#[path = "removed_views_tests.rs"]
+mod removed_views_tests;
