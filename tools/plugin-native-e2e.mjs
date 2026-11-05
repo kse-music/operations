@@ -258,12 +258,12 @@ try {
   await page.waitForFunction(
     () => !document.querySelector('.plugin-workspace:visible .plugin-form'),
   );
-  await page.locator('[data-module="plugins"]').click();
   assert.equal((await invoke('plugin_detail', { id: 'dev.serverdeck.host-info' })).enabled, false);
   await disabledSettings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
-  assert.equal(await page.locator('[aria-label="运维工具导航"] [data-plugin-id]').count(), 1);
-  assert.equal(await page.locator('[aria-label="运维工具导航"] .plugin-source').count(), 0);
+  assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
   await navigateWorkspace(page, '插件管理');
+  assert.equal(await page.locator('.plugin-installed-row[data-plugin-id]').count(), 1);
+  assert.equal(await page.locator('.plugin-installed-row .plugin-source').count(), 0);
   await card.getByRole('button', { name: '卸载 Host Info', exact: true }).click();
   await page
     .getByRole('dialog', { name: '卸载插件？', exact: true })

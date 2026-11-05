@@ -620,10 +620,8 @@ watch(
     <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
       <AppNavigation
         :active="view"
-        :active-plugin="workspace.current?.pluginId"
         :module="workspace.module"
         @navigate="navigate($event)"
-        @plugin-settings="workspace.openPluginSettings($event, 'plugins')"
         @collapse="toggleSidebar"
       >
         <HostSidebar

@@ -1,5 +1,11 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-05：插件导航集中到设置与主机工作区
+
+NavigationModule 只保留 hosts/assets/system；删除 AppNavigation 的插件侧栏、插件设置事件及安装列表依赖。插件管理 plugins 与单插件 pluginSettings 均映射 system，配置页激活时“插件管理”菜单同时标记 active 与 aria-current。WorkspaceTab 移除 settingsModule 来源字段，openPluginSettings 复用同一配置标签且始终通过 moduleForView 归属设置，不再随入口改变模块。
+
+HostTools 保留已启用且有功能贡献的插件，每个安装身份一项，通过现有 openPlugin 和当前主机打开功能。设备标签、按插件/页面/主机缓存的 pluginPages、草稿和连接生命周期不变；从功能页进入设置后返回设备仍恢复原功能。assistant/network/extension 的模块映射统一为 hosts，以兼容既有全局搜索、插件命令和任务结果跳转，不增加顶部入口或变更贡献协议。无 Rust、IPC、SDK、权限、数据库或持久配置变化。下方较早章节中的顶部运维工具及配置侧栏仅描述当时实现，以本节为准。
+
 ## 2026-11-05：系统服务五合一与界面布局
 
 分发清单仅保留 services/docker/assistant。原资源、进程、日志、诊断的 frontend/测试迁入 services/frontend 的各自子目录；现有 systemd 列表成为 ServiceUnits。统一 App 以一个 server 贡献和五分类呈现，通过 KeepAlive 最多缓存五页。SDK usePluginVisibility 将 document/宿主可见性与 Vue 激活状态合并；采样器、资源列表、日志和诊断轮询只在自己的激活页运行。离开日志停止流而保留缓冲/输入，返回监控重新获取资源；隐藏页迟到列表结果被代号拒绝。Docker 两类列表同样缓存输入并在离开时清除详情与待确认操作。

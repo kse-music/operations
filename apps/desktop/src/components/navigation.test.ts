@@ -1,10 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createApp, nextTick, type App } from 'vue';
+import { createApp, type App } from 'vue';
 import AppNavigation from './AppNavigation.vue';
 import { moduleForView } from '../types/navigation';
 import { createPinia, disposePinia, type Pinia } from 'pinia';
 import { usePluginsStore } from '../stores/plugins';
-import type { InstalledPlugin, PluginGrant } from '../types/plugins';
+import { systemPluginFixtures } from '../services/system-plugins.fixture';
 
 let app: App, root: HTMLDivElement, pinia: Pinia;
 function mountNavigation(props: InstanceType<typeof AppNavigation>['$props']): void {
@@ -72,52 +72,27 @@ it.each([
     );
 });
 
-it.each(['plugins', 'system'] as const)(
-  'scopes plugin navigation and settings in %s',
-  async (module) => {
+it.each(['hosts', 'assets', 'system'] as const)(
+  'keeps installed plugins out of the %s sidebar',
+  (module) => {
     pinia = createPinia();
     const plugins = usePluginsStore(pinia);
-    plugins.installed = [
-      {
-        enabled: true,
-        revision: 'r1',
-        manifest: {
-          id: 'dev.example',
-          name: 'Example',
-          icon: 'rocket',
-          contributions: [
-            { id: 'main', label: '插件主页面', kind: 'navigation' },
-            { id: 'settings', label: '插件独立设置', kind: 'settings' },
-            { id: 'host', label: '主机工具', kind: 'workspace' },
-          ],
-        },
-      } as InstalledPlugin,
-    ];
-    plugins.grants['dev.example'] = {
-      revision: 'r1',
-      permissions: ['ui.contribute'],
-      operations: ['ui.contribute'],
-    } as PluginGrant;
-    const open = vi.fn();
-    mountNavigation({ active: null, module, onPluginSettings: open });
-    if (module === 'system') {
-      expect(root.querySelector('[aria-label="运维工具导航"]')).toBeNull();
-      return;
-    }
-    expect(
-      [...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent),
-    ).toEqual(['Example']);
-    expect(root.querySelector('[data-plugin-id="dev.example"] svg.lucide-rocket')).not.toBeNull();
-    for (const button of root.querySelectorAll<HTMLButtonElement>(
-      '[aria-label="运维工具导航"] [data-plugin-id]',
-    ))
-      button.click();
-    expect(open.mock.calls).toEqual([['dev.example']]);
-    plugins.grants['dev.example'] = null;
-    await nextTick();
-    expect(root.querySelectorAll('[aria-label="运维工具导航"] [data-plugin-id]')).toHaveLength(1);
-    expect(root.querySelector('.plugin-source')).toBeNull();
-    root.querySelector<HTMLButtonElement>('[aria-label="运维工具导航"] [data-plugin-id]')!.click();
-    expect(open).toHaveBeenLastCalledWith('dev.example');
+    plugins.installed = systemPluginFixtures();
+    mountNavigation({ active: null, module });
+    expect(root.querySelector('[aria-label="运维工具导航"]')).toBeNull();
+    expect(root.querySelector('[data-plugin-id]')).toBeNull();
+    expect(root.querySelector('[aria-label="插件管理"]') !== null).toBe(module === 'system');
   },
+);
+
+it('highlights plugin management while an individual plugin settings tab is active', () => {
+  pinia = createPinia();
+  mountNavigation({ active: 'pluginSettings', module: moduleForView('pluginSettings') });
+  expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('插件管理');
+  expect(root.querySelector('.nav-item.active')?.getAttribute('aria-label')).toBe('插件管理');
+});
+
+it.each(['assistant', 'network', 'extension'] as const)(
+  'keeps the %s plugin function in the host module',
+  (view) => expect(moduleForView(view)).toBe('hosts'),
 );

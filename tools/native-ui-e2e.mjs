@@ -388,7 +388,7 @@ try {
     'duplicate creates an independent PowerShell; middle-click close preserves the original',
   );
   const tabsBeforeModuleSwitch = await page.locator('.workspace-tab').count();
-  for (const module of ['tools', 'assets', 'system']) {
+  for (const module of ['assets', 'system']) {
     await page.locator(`.module-navigation [data-module="${module}"]`).click();
     assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
     assert.equal(await active().locator('.xterm-container[data-state="connected"]').count(), 1);

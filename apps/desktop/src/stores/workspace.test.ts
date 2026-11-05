@@ -153,7 +153,7 @@ it('handles empty ranges and closing the last tab without creating replacements'
 it('switches module menus without changing the active page or host context', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
-  workspace.selectModule('plugins');
+  workspace.selectModule('system');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
   workspace.navigate('assistant');
   workspace.navigate('credentials');
@@ -165,9 +165,9 @@ it('switches module menus without changing the active page or host context', asy
   expect(workspace.current?.view).toBe('settings');
   workspace.selectModule('hosts');
   expect(workspace.current?.view).toBe('settings');
-  workspace.selectModule('plugins');
+  workspace.selectModule('system');
   expect(workspace.current?.view).toBe('settings');
-  expect(workspace.module).toBe('plugins');
+  expect(workspace.module).toBe('system');
   expect(workspace.hostId).toBe('a');
   workspace.selectModule('assets');
   expect(workspace.current?.view).toBe('settings');
@@ -182,14 +182,14 @@ it('does not choose another page or create a default when selecting a module aft
   workspace.navigate('credentials');
   workspace.navigate('settings');
   await workspace.close('settings:');
-  workspace.selectModule('plugins');
-  expect(workspace.module).toBe('plugins');
+  workspace.selectModule('system');
+  expect(workspace.module).toBe('system');
   expect(workspace.current?.view).toBe('credentials');
   expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant')).toBe(true);
   await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
-  workspace.selectModule('plugins');
+  workspace.selectModule('system');
   expect(workspace.current?.view).toBe('credentials');
-  workspace.selectModule('plugins');
+  workspace.selectModule('system');
   expect(
     workspace.tabs.filter((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant'),
   ).toHaveLength(0);
@@ -197,7 +197,7 @@ it('does not choose another page or create a default when selecting a module aft
   expect(workspace.module).toBe('assets');
 });
 
-it.each(['hosts', 'plugins', 'assets', 'system'] as const)(
+it.each(['hosts', 'assets', 'system'] as const)(
   'selects the %s module without opening or selecting any page',
   (id) => {
     const workspace = useWorkspaceStore();
@@ -209,6 +209,23 @@ it.each(['hosts', 'plugins', 'assets', 'system'] as const)(
     expect(workspace.tabs).toEqual([]);
   },
 );
+
+it('reuses plugin settings under the system module when reactivating from other modules', () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('files', 'a');
+  workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+  const settings = workspace.current;
+  expect(workspace.module).toBe('system');
+  expect(settings).toMatchObject({ view: 'pluginSettings', hostId: '' });
+  workspace.selectModule('assets');
+  workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+  expect(workspace.current).toBe(settings);
+  workspace.activate('host:a');
+  workspace.activate(settings!.key);
+  expect(workspace.module).toBe('system');
+  expect(workspace.hostId).toBe('a');
+  expect(workspace.tabs.filter((tab) => tab.view === 'pluginSettings')).toHaveLength(1);
+});
 
 it('keeps the current page and selected module when an unrelated inactive tab is closed', async () => {
   const workspace = useWorkspaceStore();

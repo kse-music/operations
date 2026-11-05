@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
+import { navigateWorkspace } from './ui-navigation.mjs';
 
 const output = process.env.SERVERDECK_PLUGIN_ICONS_OUTPUT ?? '.local/plugin-icons/browser';
 await mkdir(output, { recursive: true });
@@ -31,8 +32,15 @@ try {
       const { useTerminalsStore } = await import('/src/stores/terminals.ts');
       const { useNotificationsStore } = await import('/src/stores/notifications.ts');
       const { hostInput } = await import('/src/types/hosts.ts');
-      const items = [...toolPluginState().installed, ...systemPluginFixtures()];
-      const expected = items.map((item) => [item.manifest.id, item.manifest.icon]);
+      const items = [
+        ...new Map(
+          [...toolPluginState().installed, ...systemPluginFixtures()].map((item) => [
+            item.manifest.id,
+            item,
+          ]),
+        ).values(),
+      ].map((item) => ({ ...item, manifest: { ...item.manifest } }));
+      const expected = items.map((item) => [item.manifest.id, item.manifest.icon, true]);
       // Existing installed system records must receive configured icons without reinstalling.
       for (const item of items) delete item.manifest.icon;
       const uploaded = ['rocket', undefined, 'future-icon'].map((icon, i) => ({
@@ -67,7 +75,6 @@ try {
       terminals.open(host);
       terminals.update(terminals.focused, { state: 'idle', connectRequested: false });
       useWorkspaceStore().navigate('terminals', host.id);
-      useWorkspaceStore().selectModule('plugins');
       useNotificationsStore().items = [];
       document.documentElement.dataset.theme = theme;
       return [
@@ -75,27 +82,60 @@ try {
         ...uploaded.map((item) => [
           item.manifest.id,
           item.manifest.icon === 'rocket' ? 'rocket' : 'boxes',
+          false,
         ]),
       ];
     }, theme);
     if (!(await page.locator('.sidebar').isVisible()))
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+    assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
+      '主机运维',
+      '资产管理',
+      '设置',
+    ]);
+    assert.equal(await page.locator('.activity-rail [data-plugin-id]').count(), 0);
+    await navigateWorkspace(page, '插件管理');
+    await page.locator('.plugin-installed-row').first().waitFor();
     for (const [id, icon] of expected) {
       assert.equal(
-        await page.locator(`.activity-rail [data-plugin-id="${id}"] svg.lucide-${icon}`).count(),
+        await page
+          .locator(`.plugin-installed-row[data-plugin-id="${id}"] svg.lucide-${icon}`)
+          .count(),
         1,
+        `management icon for ${id} should be ${icon}`,
       );
     }
     assert.equal(
-      await page.locator('.activity-rail [data-plugin-id] svg[aria-hidden=true]').count(),
-      12,
+      await page.locator('.plugin-installed-row svg[aria-hidden=true]').count(),
+      expected.length * 2,
     );
-    await page.screenshot({ path: `${output}/${name}-navigation.png` });
-    if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+    await page.screenshot({ path: `${output}/${name}-manager.png` });
+    await page
+      .locator('.plugin-installed-row[data-plugin-id="dev.uploaded-0"] .plugin-name-button')
+      .click();
+    await page.locator('.plugin-page').waitFor();
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').textContent(),
+      '设置',
+    );
+    assert.equal(
+      await page.locator('.activity-rail [aria-current="page"]').getAttribute('aria-label'),
+      '插件管理',
+    );
+    assert.equal(await page.locator('[aria-label="选择使用工具的主机"]').count(), 0);
+    await page.screenshot({ path: `${output}/${name}-settings.png` });
+    await page.locator('.workspace-tab[data-host-id="icon-host"] [role="tab"]').click();
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').textContent(),
+      '主机运维',
+    );
     await page.locator('.host-tools [aria-haspopup=menu]').click();
     const menu = page.getByRole('menu', { name: '已启用的插件', exact: true });
-    for (const [id, icon] of expected) {
-      assert.equal(await menu.locator(`[data-plugin-id="${id}"] svg.lucide-${icon}`).count(), 1);
+    for (const [id, icon, functional] of expected) {
+      assert.equal(
+        await menu.locator(`[data-plugin-id="${id}"] svg.lucide-${icon}`).count(),
+        functional ? 1 : 0,
+      );
     }
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({ path: `${output}/${name}-host-tools.png` });

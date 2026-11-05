@@ -13,19 +13,14 @@ import {
 import { messages, type WorkspaceView } from '../types/product';
 import { computed } from 'vue';
 import { navigationModules, type NavigationModule } from '../types/navigation';
-import { usePluginsStore } from '../stores/plugins';
-import PluginIcon from './PluginIcon.vue';
-const plugins = usePluginsStore();
 
 const props = defineProps<{
   active: WorkspaceView | null;
   module: NavigationModule;
-  activePlugin?: string;
 }>();
 defineEmits<{
   navigate: [view: WorkspaceView];
   collapse: [];
-  pluginSettings: [id: string];
 }>();
 const groups = {
   hosts: [],
@@ -34,7 +29,6 @@ const groups = {
     { view: 'models', icon: Boxes },
     { view: 'backup', icon: ArchiveRestore },
   ],
-  plugins: [],
   system: [
     { view: 'settings', icon: Settings2 },
     { view: 'settingsTerminal', icon: Terminal },
@@ -48,7 +42,6 @@ const module = computed(() => props.module);
 const moduleLabel = computed(
   () => navigationModules.find((item) => item.id === module.value)!.label,
 );
-const pluginEntries = computed(() => plugins.installed);
 </script>
 
 <template>
@@ -81,36 +74,17 @@ const pluginEntries = computed(() => plugins.installed);
           },
         ]"
         :aria-label="messages['zh-CN'][item.view]"
-        :aria-current="active === item.view ? 'page' : undefined"
+        :aria-current="
+          active === item.view || (item.view === 'plugins' && active === 'pluginSettings')
+            ? 'page'
+            : undefined
+        "
         :data-tooltip="messages['zh-CN'][item.view]"
         @click="$emit('navigate', item.view)"
       >
         <component :is="item.icon" :size="16" :stroke-width="1.6" aria-hidden="true" />
         <span class="nav-label">{{ messages['zh-CN'][item.view] }}</span>
       </button>
-    </div>
-    <div v-if="module === 'plugins'" class="activity-group module-menu" aria-label="运维工具导航">
-      <button
-        v-for="plugin in pluginEntries"
-        :key="plugin.manifest.id"
-        :class="[
-          'nav-item',
-          { active: active === 'pluginSettings' && activePlugin === plugin.manifest.id },
-        ]"
-        :aria-current="
-          active === 'pluginSettings' && activePlugin === plugin.manifest.id ? 'page' : undefined
-        "
-        :data-plugin-id="plugin.manifest.id"
-        :aria-label="plugin.manifest.name"
-        @click="$emit('pluginSettings', plugin.manifest.id)"
-      >
-        <PluginIcon :manifest="plugin.manifest" :source="plugin.source" /><span class="nav-label">{{
-          plugin.manifest.name
-        }}</span>
-      </button>
-      <p v-if="plugins.loaded && !pluginEntries.length" class="plugin-sidebar-empty">
-        尚未安装运维工具
-      </p>
     </div>
   </nav>
 </template>

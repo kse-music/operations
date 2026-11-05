@@ -8,7 +8,7 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { checkWorkspaceTools } from './plugin-workspace-checks.mjs';
-import { navigateWorkspace, deliverPluginDrop } from './ui-navigation.mjs';
+import { navigateWorkspace, openPluginSettings, deliverPluginDrop } from './ui-navigation.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, '.local/ops-plugin-migration');
 const run = path.join(output, 'native', `run-${randomUUID()}`);
@@ -101,7 +101,7 @@ try {
   assert.equal((await invoke('host_list')).hosts.length, 0);
   safe = true;
   const installed = await invoke('plugin_list');
-  assert.equal(installed.length, 9);
+  assert.equal(installed.length, 3);
   for (const plugin of installed) {
     assert(plugin.manifest.id.startsWith('cn.hiboot.plugins.'));
     assert.equal(plugin.source, 'system');
@@ -121,16 +121,9 @@ try {
       ),
     );
   }
-  passed.push('nine cn.hiboot standard packages installed under the owned system directory');
-  await page.locator('[data-module="plugins"]').click();
-  const navigation = page.locator('[aria-label="运维工具导航"]');
-  assert.equal(await navigation.locator('[data-plugin-id]').count(), 9);
-  assert.equal(await navigation.locator('.plugin-source').count(), 0);
-  assert.equal(await navigation.getByRole('button', { name: '插件管理', exact: true }).count(), 0);
-  await navigation.getByRole('button', { name: '资源监控', exact: true }).click();
-  await page.getByRole('button', { name: '插件设置', exact: true }).click();
-  const settings = page.locator('[aria-label="插件设置"]');
-  await settings.waitFor();
+  passed.push('three cn.hiboot standard packages installed under the owned system directory');
+  assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
+  const settings = await openPluginSettings(page, '系统服务');
   assert((await page.locator('.plugin-page > header').textContent()).includes('系统内置'));
   assert(await settings.getByLabel('ui.contribute', { exact: true }).isChecked());
   assert(await settings.getByLabel('ui.contribute', { exact: true }).isDisabled());
@@ -152,7 +145,7 @@ try {
   await navigateWorkspace(page, '插件管理');
   const manager = page.locator('.plugin-manager');
   await manager.waitFor();
-  assert.equal(await manager.locator('[data-plugin-id]').count(), 9);
+  assert.equal(await manager.locator('[data-plugin-id]').count(), 3);
   assert.equal(await manager.locator('.plugin-source').count(), 0);
   assert.equal(await manager.getByLabel('本地插件包路径', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(run, 'manager.png') });
@@ -195,7 +188,7 @@ try {
     .getByRole('button', { name: '确认卸载', exact: true })
     .click();
   await row.waitFor({ state: 'detached' });
-  assert.equal((await invoke('plugin_list')).length, 9);
+  assert.equal((await invoke('plugin_list')).length, 3);
   assert.equal((await invoke('host_list')).hosts.length, 0);
   passed.push(
     'source appears only inside individual pages; real native uninstall removes the uploaded package',

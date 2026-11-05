@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace, openPluginSettings } from './ui-navigation.mjs';
+import { navigateWorkspace, openPluginFunction, openPluginSettings } from './ui-navigation.mjs';
 
 // UI-only fixtures. Does not connect to a server or replace production data.
 const packages = await Promise.all(
@@ -345,16 +345,7 @@ try {
     assert(await confirm.getByRole('button', { name: '确认执行', exact: true }).isDisabled());
     await confirm.getByRole('button', { name: '取消', exact: true }).click();
     await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
-    await page.locator('[data-module="plugins"]').click();
-    if (!(await page.locator('.sidebar').isVisible()))
-      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
-    const navigation = page.locator('[aria-label="运维工具导航"]');
-    assert.equal(await navigation.locator('[data-plugin-id]').count(), 6);
-    assert.equal(await navigation.locator('.plugin-source').count(), 0);
-    assert.equal(
-      await navigation.getByRole('button', { name: '插件管理', exact: true }).count(),
-      0,
-    );
+    assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
     await navigateWorkspace(page, '插件管理');
     if (width <= 720) {
       const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
@@ -432,14 +423,7 @@ try {
     await toolMenu.getByRole('menuitem', { name: 'Docker 管理', exact: true }).click();
     await navigateWorkspace(page, '插件管理');
 
-    await page.locator('[data-module="plugins"]').click();
-    if (!(await page.locator('.sidebar').isVisible()))
-      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
-    await page.locator('[aria-label="运维工具导航"] [data-plugin-id="dev.upload"]').click();
-    await page
-      .getByRole('dialog', { name: '选择使用工具的主机', exact: true })
-      .getByRole('button', { name: '生产应用服务器', exact: true })
-      .click();
+    await openPluginFunction(page, '上传资源插件', 'server-ui');
     await page.getByTestId('monitor-cpu').waitFor();
     await openPluginSettings(page, '上传资源插件');
     assert((await page.locator('.plugin-page > header').textContent()).includes('用户上传'));

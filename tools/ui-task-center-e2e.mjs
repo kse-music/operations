@@ -33,7 +33,7 @@ try {
       terminals.open(null);
       terminals.update(terminals.focused, { state: 'idle', connectRequested: false });
       useWorkspaceStore().navigate('terminals', '');
-      useWorkspaceStore().selectModule('plugins');
+      useWorkspaceStore().selectModule('assets');
       useBackgroundStore().connections = [];
       usePluginsStore().loaded = true;
       useNotificationsStore().items = [];

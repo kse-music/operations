@@ -5,7 +5,7 @@ import { createServer } from 'node:http';
 import { readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { navigateWorkspace, setPluginEnabled } from './ui-navigation.mjs';
+import { navigateWorkspace, openPluginSettings, setPluginEnabled } from './ui-navigation.mjs';
 
 export async function checkWorkspaceTools({ page, invoke, run, passed }) {
   const content = () => page.frameLocator('.plugin-frame-container:visible iframe');
@@ -37,7 +37,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     await page
       .locator('.module-navigation [data-module]')
       .evaluateAll((nodes) => nodes.map((n) => n.textContent.trim())),
-    ['主机运维', '运维工具', '资产管理', '设置'],
+    ['主机运维', '资产管理', '设置'],
   );
   for (const [name, selector] of [
     ['网络诊断', '[aria-label="诊断工具"]'],
@@ -254,11 +254,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
   });
   assert.equal(reply.error, null);
   await refresh();
-  await page.locator('[data-module="plugins"]').click();
-  await page
-    .locator('[aria-label="运维工具导航"]')
-    .getByRole('button', { name: 'Uploaded Network QA', exact: true })
-    .click();
+  await openPluginSettings(page, 'Uploaded Network QA');
   await page.locator('.plugin-page:visible [aria-label="插件设置"]').waitFor();
   assert.equal(await page.locator('.plugin-frame-container:visible').count(), 0);
   const openUploaded = () =>

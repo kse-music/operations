@@ -209,11 +209,6 @@
 .plugin-empty p {
   margin: 0;
 }
-.plugin-sidebar-empty {
-  padding: 16px;
-  color: var(--muted);
-  font-size: 12px;
-}
 .plugin-preview {
   display: grid;
   gap: 20px;

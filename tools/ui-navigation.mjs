@@ -1,8 +1,6 @@
 // UI navigation shared by browser fixtures and isolated native WebView2 checks.
 const hostTools = new Set(['SSH 终端', 'SFTP 文件', '服务器管理']);
 const menuModules = {
-  'AI 运维助手': 'plugins',
-  网络诊断: 'plugins',
   安全凭据: 'assets',
   备份恢复: 'assets',
   通用: 'system',
@@ -166,11 +164,11 @@ export async function navigateWorkspace(page, name) {
     return;
   }
   await closeTaskCenter(page);
-  const module = hostTools.has(name) ? 'hosts' : (menuModules[name] ?? 'plugins');
-  if (module === 'plugins') {
-    if (Object.hasOwn(menuModules, name)) {
+  const module = hostTools.has(name) ? 'hosts' : menuModules[name];
+  if (!module) {
+    if (['AI 运维助手', '网络诊断'].includes(name)) {
       // Focus the host shell before its shortcut; input focus may currently be inside an iframe.
-      await page.locator('.module-navigation [data-module="plugins"]').click();
+      await page.locator('.module-navigation [data-module="hosts"]').click();
       await page.keyboard.press('Control+k');
       const search = page.getByRole('dialog', { name: '全局搜索', exact: true });
       await search.getByLabel('全局搜索内容', { exact: true }).fill(name);

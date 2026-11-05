@@ -3,7 +3,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { writeFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { openPluginFunction, showHostTree, selectHostWorkspace } from './ui-navigation.mjs';
+import {
+  openPluginFunction,
+  openPluginSettings,
+  showHostTree,
+  selectHostWorkspace,
+} from './ui-navigation.mjs';
 
 export async function checkPluginComponents({ page, invoke, run, passed, fixture }) {
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -109,11 +114,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   );
   for (const plugin of list) {
     assert.equal(plugin.manifest.version, '1.2.0');
-    await page.locator('[data-module="plugins"]').click();
-    await page
-      .locator('[aria-label="运维工具导航"]')
-      .getByRole('button', { name: plugin.manifest.name, exact: true })
-      .click();
+    await openPluginSettings(page, plugin.manifest.name);
     await page.locator('.plugin-page:visible [aria-label="插件设置"]').waitFor();
     assert.equal(
       await page.getByRole('dialog', { name: '选择使用工具的主机', exact: true }).count(),
@@ -122,7 +123,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     assert.equal(await page.locator('.plugin-frame-container:visible').count(), 0);
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').innerText(),
-      '运维工具',
+      '设置',
     );
   }
   assert.equal(
@@ -131,7 +132,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   );
   assert.equal((await poll(runtimeStatuses, Boolean)).length, 0);
   passed.push(
-    'all three Operations Tools entries open configuration without host selection, connection or business Wasm calls',
+    'all three plugins open configuration under Settings without host selection, connection or business Wasm calls',
   );
 
   const credential = (

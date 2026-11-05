@@ -16,7 +16,6 @@ export interface WorkspaceTab {
   pluginId?: string;
   contributionId?: string;
   logIntent?: { input: import('../types/ops').LogInput; title: string; sequence: number };
-  settingsModule?: 'plugins' | 'system';
 }
 export function isHostTab(tab: WorkspaceTab): boolean {
   return hostViews.has(tab.view) || (tab.view === 'extension' && !!tab.hostId);
@@ -49,10 +48,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
     active.value = key;
-    module.value = isHostTab(tab) ? 'hosts' : (tab.settingsModule ?? moduleForView(tab.view));
+    module.value = isHostTab(tab) ? 'hosts' : moduleForView(tab.view);
     if (isHostTab(tab)) hostId.value = tab.hostId;
   }
-  function openPluginSettings(pluginId: string, origin: 'plugins' | 'system' = 'system'): void {
+  function openPluginSettings(pluginId: string): void {
     if (!usePluginsStore().installed.some((plugin) => plugin.manifest.id === pluginId)) return;
     const key = `plugin-settings:${pluginId}`;
     let tab = tabs.value.find((tab) => tab.key === key);
@@ -60,7 +59,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tab = { key, view: 'pluginSettings', hostId: '', pluginId };
       tabs.value.push(tab);
     }
-    tab.settingsModule = origin;
     activate(key);
   }
   async function openPlugin(

@@ -73,6 +73,13 @@ async function sidebarMenu(module: NavigationModule, label: string): Promise<voi
   root.querySelector<HTMLButtonElement>(`.activity-rail [aria-label="${label}"]`)!.click();
   await flush();
 }
+async function openPluginSettings(name: string): Promise<void> {
+  await sidebarMenu('system', '插件管理');
+  [...root.querySelectorAll<HTMLButtonElement>('.plugin-name-button')]
+    .find((button) => button.textContent?.trim() === name)!
+    .click();
+  await flush();
+}
 async function openGlobalTool(name: string): Promise<void> {
   const plugin = usePluginsStore().installed.find(
     (plugin) => plugin.manifest.name === (name === '网络诊断' ? '系统服务' : name),
@@ -367,7 +374,8 @@ it('opens plugin management under settings, keeps language in settings and prese
   await flush();
   const original = JSON.stringify(terminals.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
-  root.querySelector<HTMLButtonElement>('[data-module="plugins"]')!.click();
+  expect(root.querySelector('[data-module="plugins"]')).toBeNull();
+  root.querySelector<HTMLButtonElement>('[data-module="assets"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
   expect(root.querySelector('.module-menu [aria-label="插件管理"]')).toBeNull();
@@ -539,7 +547,7 @@ it('opens the task center from the footer without changing the workspace or term
   const workspace = useWorkspaceStore();
   const originalTabs = JSON.stringify(workspace.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
-  root.querySelector<HTMLButtonElement>('.module-navigation [data-module="plugins"]')!.click();
+  root.querySelector<HTMLButtonElement>('.module-navigation [data-module="assets"]')!.click();
   await flush();
   expect(root.querySelector('.activity-rail [aria-label="任务中心"]')).toBeNull();
   const open = root.querySelector<HTMLButtonElement>('.statusbar [aria-label="任务中心"]');
@@ -555,7 +563,7 @@ it('opens the task center from the footer without changing the workspace or term
   expect(document.querySelectorAll('dialog[aria-label="任务中心"]')).toHaveLength(1);
   expect(JSON.stringify(workspace.tabs)).toBe(originalTabs);
   expect(workspace.current?.key).toBe('host:a');
-  expect(workspace.module).toBe('plugins');
+  expect(workspace.module).toBe('assets');
   dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await flush();
   expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
@@ -797,7 +805,7 @@ it('preserves welcome when switching unused module menus without opening a page 
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   const open = vi.spyOn(terminals, 'open');
-  for (const module of ['plugins', 'assets', 'system'] as const) {
+  for (const module of ['assets', 'system'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -833,7 +841,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   const terminalElement = root.querySelector('.terminal-tab')!;
   const open = vi.spyOn(terminals, 'open');
   const close = vi.spyOn(terminalApi, 'close');
-  for (const module of ['plugins', 'assets', 'system', 'hosts'] as const) {
+  for (const module of ['assets', 'system', 'hosts'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -848,12 +856,12 @@ it('keeps the current terminal visible across top module switches and navigates 
     expect(root.querySelector('[aria-label="欢迎页面"]')).toBeNull();
     expect(root.textContent).not.toContain('请选择功能');
   }
-  await sidebarMenu('plugins', 'AI 运维助手');
-  expect(workspace.module).toBe('plugins');
+  await openPluginSettings('AI 运维助手');
+  expect(workspace.module).toBe('system');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['AI 运维助手', '系统服务'],
+    ['通用', '终端', '快捷键', '工作区与连接', '插件管理', '关于'],
   );
-  expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
+  expect(root.querySelector('.activity-rail [aria-label="通用"]')).not.toBeNull();
   await sidebarMenu('assets', '备份恢复');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
     ['安全凭据', '模型管理', '备份恢复'],
@@ -869,10 +877,10 @@ it('keeps the current terminal visible across top module switches and navigates 
     .click();
   await flush();
   expect(root.querySelector('.module-navigation [aria-current="page"]')?.textContent?.trim()).toBe(
-    '运维工具',
+    '设置',
   );
   expect(
-    root.querySelector('.activity-rail [aria-label="AI 运维助手"][aria-current="page"]'),
+    root.querySelector('.activity-rail [aria-label="插件管理"][aria-current="page"]'),
   ).not.toBeNull();
   root.querySelector<HTMLButtonElement>('.module-navigation [data-module="hosts"]')!.click();
   await flush();
@@ -1915,10 +1923,22 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   expect(plugins.drafts['extension:dev.host-draft:draft:b']?.values.content).toBe('draft for b');
 });
 
-it('opens every installed plugin configuration from Operations Tools without choosing or connecting a host', async () => {
+it('opens disabled, ungranted and UI-less plugin configurations only through settings without connecting a host', async () => {
   const workspace = useWorkspaceStore(),
     plugins = usePluginsStore();
-  plugins.installed.push(...systemPluginFixtures());
+  plugins.installed = systemPluginFixtures();
+  plugins.installed[1]!.enabled = true;
+  plugins.installed.push({
+    ...plugins.installed[0]!,
+    source: 'user',
+    manifest: {
+      ...plugins.installed[0]!.manifest,
+      id: 'dev.configuration-only',
+      name: '仅配置插件',
+      contributions: [],
+    },
+  });
+  plugins.grants = {};
   vi.spyOn(pluginsApi, 'list').mockResolvedValue(plugins.installed);
   workspace.navigate('settings');
   await flush();
@@ -1927,17 +1947,22 @@ it('opens every installed plugin configuration from Operations Tools without cho
   const activate = vi.mocked(pluginsApi.activate);
   activate.mockClear();
   for (const plugin of plugins.installed) {
-    await sidebarMenu('plugins', plugin.manifest.name);
+    await openPluginSettings(plugin.manifest.name);
     expect(workspace.current).toMatchObject({
       view: 'pluginSettings',
       pluginId: plugin.manifest.id,
       hostId: '',
     });
-    expect(workspace.module).toBe('plugins');
+    expect(workspace.module).toBe('system');
+    expect(root.querySelector('.activity-rail [aria-current="page"]')?.textContent).toContain(
+      '插件管理',
+    );
     expect(document.querySelector('[aria-label="选择使用工具的主机"]')).toBeNull();
     expect(root.querySelector('.plugin-page [aria-label="插件设置"]')).not.toBeNull();
   }
   expect(schema).not.toHaveBeenCalled();
   expect(activate).not.toHaveBeenCalled();
   expect(workspace.pluginPages).toHaveLength(0);
+  expect(root.querySelector('[data-module="plugins"]')).toBeNull();
+  expect(root.querySelector('[aria-label="运维工具导航"]')).toBeNull();
 });

@@ -79,7 +79,7 @@ try {
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
     await assertHost('a', 'terminals');
     const existingTabs = await page.locator('.workspace-tab').count();
-    for (const module of ['tools', 'assets', 'plugins', 'system']) {
+    for (const module of ['assets', 'system']) {
       await page.locator(`.module-navigation [data-module="${module}"]`).click();
       assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
       await assertHost('a', 'terminals');
@@ -250,11 +250,11 @@ try {
     await nav('网络诊断');
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '运维工具',
+      '主机运维',
     );
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['网络诊断', 'AI 运维助手'],
+      [],
     );
     await nav('任务中心');
     await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
@@ -274,12 +274,12 @@ try {
     await nav('关于');
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['通用', '终端', '快捷键', '工作区与连接', '关于'],
+      ['通用', '终端', '快捷键', '工作区与连接', '插件管理', '关于'],
     );
     await page.locator('.module-navigation [data-module="assets"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'about');
     await nav('备份恢复');
-    await page.locator('.module-navigation [data-module="tools"]').click();
+    await page.locator('.module-navigation [data-module="system"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'backup');
     await nav('网络诊断');
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'network');
