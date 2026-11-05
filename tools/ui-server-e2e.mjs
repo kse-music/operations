@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace } from './ui-navigation.mjs';
+import { navigateWorkspace, openPluginSettings } from './ui-navigation.mjs';
 
 // UI-only fixtures. Does not connect to a server or replace production data.
 const packages = await Promise.all(
@@ -56,7 +56,7 @@ try {
           version: 1,
           pluginId: id,
           pluginVersion: '1.0.0',
-          revision: `fixture-${id === 'dev.upload' ? 'cn.hiboot.plugins.resources' : id}`,
+          revision: `fixture-${id === 'dev.upload' ? 'cn.hiboot.plugins.services' : id}`,
           packageDigest: 'fixture',
           publisher: null,
           permissions: catalog.find((p) => p.manifest.id === id).manifest.permissions,
@@ -75,7 +75,7 @@ try {
         pluginsApi.statuses = async () => [];
         pluginsApi.ui = async (id) =>
           packages.find(
-            (p) => p.manifest.id === (id === 'dev.upload' ? 'cn.hiboot.plugins.resources' : id),
+            (p) => p.manifest.id === (id === 'dev.upload' ? 'cn.hiboot.plugins.services' : id),
           ).ui;
         pluginsApi.context = async () => {};
         pluginsApi.activate = async (id) => ({ id, state: 'active', errorCode: null });
@@ -277,7 +277,7 @@ try {
         };
         document.documentElement.dataset.theme = theme;
         await useWorkspaceStore(pinia).openPlugin(
-          'cn.hiboot.plugins.resources',
+          'cn.hiboot.plugins.services',
           'server',
           host.id,
           'overview',
@@ -377,7 +377,6 @@ try {
       .getByRole('button', { name: 'Docker 管理', exact: true })
       .click();
     await page.locator('.plugin-page').waitFor();
-    await page.getByRole('button', { name: '插件设置', exact: true }).click();
     await page.locator('[aria-label="插件设置"] form').waitFor();
     assert((await page.locator('.plugin-page > header').textContent()).includes('系统内置'));
     const settings = page.locator('[aria-label="插件设置"]');
@@ -407,6 +406,7 @@ try {
     await settings.getByRole('button', { name: '禁用插件', exact: true }).click();
     await disable.getByRole('button', { name: '明确确认', exact: true }).click();
     await settings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
+    await page.locator('.workspace-tab[data-host-id="server-ui"] [role=tab]').click();
     const tools = page
       .locator('.workspace-header')
       .getByRole('button', { name: '工具', exact: true });
@@ -423,19 +423,25 @@ try {
     );
     await page.screenshot({ path: `${output}/${name}-tools-menu.png` });
     await toolMenu.press('Escape');
+    await openPluginSettings(page, 'Docker 管理');
     await settings.getByRole('button', { name: '启用插件', exact: true }).click();
     await settings.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
     await page.screenshot({ path: `${output}/${name}-plugin-settings.png` });
+    await page.locator('.workspace-tab[data-host-id="server-ui"] [role=tab]').click();
     await tools.click();
     await toolMenu.getByRole('menuitem', { name: 'Docker 管理', exact: true }).click();
-    await page.getByRole('button', { name: '返回功能', exact: true }).click();
     await navigateWorkspace(page, '插件管理');
 
     await page.locator('[data-module="plugins"]').click();
     if (!(await page.locator('.sidebar').isVisible()))
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
     await page.locator('[aria-label="运维工具导航"] [data-plugin-id="dev.upload"]').click();
+    await page
+      .getByRole('dialog', { name: '选择使用工具的主机', exact: true })
+      .getByRole('button', { name: '生产应用服务器', exact: true })
+      .click();
     await page.getByTestId('monitor-cpu').waitFor();
+    await openPluginSettings(page, '上传资源插件');
     assert((await page.locator('.plugin-page > header').textContent()).includes('用户上传'));
     await navigateWorkspace(page, '插件管理');
     if (width <= 720) {
@@ -457,13 +463,13 @@ try {
     assert(
       calls.some(
         (call) =>
-          call.id === 'cn.hiboot.plugins.resources' && call.operation.kind === 'metrics_snapshot',
+          call.id === 'cn.hiboot.plugins.services' && call.operation.kind === 'metrics_snapshot',
       ),
     );
     assert(
       calls.some(
         (call) =>
-          call.id === 'cn.hiboot.plugins.processes' && call.operation.request?.kind === 'processes',
+          call.id === 'cn.hiboot.plugins.services' && call.operation.request?.kind === 'processes',
       ),
     );
     assert.equal(

@@ -1,41 +1,17 @@
 use super::*;
 use serverdeck_core::identity::LEGACY_PLUGIN_PREFIX;
-const PACKAGES: [(&str, &[u8]); 9] = [
+const PACKAGES: [(&str, &[u8]); 3] = [
     (
-        "cn.hiboot.plugins.resources",
-        include_bytes!("../../../plugins/system/packages/resources.sdplugin"),
+        "cn.hiboot.plugins.services",
+        include_bytes!("../../../plugins/system/packages/services.sdplugin"),
     ),
     (
         "cn.hiboot.plugins.docker",
         include_bytes!("../../../plugins/system/packages/docker.sdplugin"),
     ),
     (
-        "cn.hiboot.plugins.processes",
-        include_bytes!("../../../plugins/system/packages/processes.sdplugin"),
-    ),
-    (
-        "cn.hiboot.plugins.services",
-        include_bytes!("../../../plugins/system/packages/services.sdplugin"),
-    ),
-    (
-        "cn.hiboot.plugins.logs",
-        include_bytes!("../../../plugins/system/packages/logs.sdplugin"),
-    ),
-    (
         "cn.hiboot.plugins.assistant",
         include_bytes!("../../../plugins/system/packages/assistant.sdplugin"),
-    ),
-    (
-        "cn.hiboot.plugins.batch",
-        include_bytes!("../../../plugins/system/packages/batch.sdplugin"),
-    ),
-    (
-        "cn.hiboot.plugins.automation",
-        include_bytes!("../../../plugins/system/packages/automation.sdplugin"),
-    ),
-    (
-        "cn.hiboot.plugins.network",
-        include_bytes!("../../../plugins/system/packages/network.sdplugin"),
     ),
 ];
 // UI v2/v3 selected a host renderer. Keep that published contract usable for
@@ -59,11 +35,15 @@ pub(crate) fn legacy_frontend(
         Surface::Frontend => return Err(Error::Validation("独立界面没有兼容渲染器")),
         Surface::Tool { tool } => match tool {
             Tool::Assistant => "assistant",
-            Tool::Batch => "batch",
-            Tool::Automation => "automation",
-            Tool::Network => "network",
+            Tool::Network => {
+                return Ok(if path.ends_with(".js") {
+                    include_bytes!("../../../plugins/compat/network/assets/frontend.js").to_vec()
+                } else {
+                    include_bytes!("../../../plugins/compat/network/assets/frontend.css").to_vec()
+                });
+            }
         },
-        Surface::Monitor { .. } => "resources",
+        Surface::Monitor { .. } => "services",
         Surface::Operations { .. } => {
             return Ok(if path.ends_with(".js") {
                 include_bytes!("../../../plugins/compat/server/assets/frontend.js").to_vec()
@@ -130,6 +110,7 @@ impl Application {
                     if plugin.source
                         == serverdeck_plugin_core::repository::PluginSource::System =>
                 {
+                    let plugin = self.plugins.install_bundled(bytes, id)?;
                     let grant = bundled_grant(&plugin)?;
                     if self
                         .plugins
@@ -171,8 +152,6 @@ fn bundled_grant(
         .iter()
         .flat_map(|p| match p {
             Permission::AssistantUse => &["assistant.use"][..],
-            Permission::BatchRun => &["batch.run"],
-            Permission::AutomationManage => &["automation.manage"],
             Permission::NetworkRun => &["network.run"],
             Permission::MetricsRead => &["metrics.read"][..],
             Permission::SystemRead => &["system.read"],
@@ -185,7 +164,6 @@ fn bundled_grant(
             Permission::UiContribute => &["ui.contribute", "ui.notify"],
             Permission::SettingsRead => &["settings.read"],
             Permission::SettingsWrite => &["settings.write"],
-            Permission::TasksCreate => &["tasks.read_only", "tasks.execute", "tasks.manage"],
         })
         .map(|o| (*o).to_owned())
         .collect();
@@ -220,6 +198,139 @@ mod tests {
     };
 
     #[tokio::test]
+    async fn releasing_pages_allows_all_three_guests_to_run_and_reactivate_without_disabling() {
+        use serverdeck_plugin_runtime::protocol::State;
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        app.provision_bundled_plugins().unwrap();
+        for (id, _) in PACKAGES.iter().chain(PACKAGES.iter().rev()) {
+            app.plugin_set_enabled((*id).into(), true).await.unwrap();
+            assert!(app.plugin_runtime.health(id).await.unwrap().error.is_none());
+            assert_eq!(
+                app.plugin_statuses()
+                    .unwrap()
+                    .iter()
+                    .filter(|s| s.state == State::Active)
+                    .count(),
+                1,
+            );
+            app.plugin_clear_context((*id).into()).await.unwrap();
+            assert!(app.plugin_detail((*id).into()).await.unwrap().enabled);
+            assert!(
+                app.plugin_statuses()
+                    .unwrap()
+                    .iter()
+                    .all(|s| s.state == State::Stopped)
+            );
+        }
+        assert_eq!(app.plugin_statuses().unwrap().len(), 3);
+        app.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn bundled_update_preserves_enable_choices_settings_uploads_and_uninstall_tombstones() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let logs = dir.path().join("logs");
+        let app = Application::initialize(data.clone(), logs.clone()).unwrap();
+        let mut old_revisions = Vec::new();
+        for (index, (id, bytes)) in PACKAGES.iter().enumerate() {
+            let mut package: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            package["manifest"]["version"] = json!("1.1.1");
+            let previous = app
+                .plugins
+                .install_bundled(&serde_json::to_vec(&package).unwrap(), id)
+                .unwrap();
+            old_revisions.push(previous.revision);
+            app.plugins.set_enabled(id, index == 0).unwrap();
+            app.plugins.settings_write(id, &json!({"keep":id})).unwrap();
+            app.database.mark_bundled_plugin_provisioned(id).unwrap();
+        }
+        app.plugin_uninstall(UninstallInput {
+            id: PACKAGES[2].0.into(),
+            clear_data: false,
+            confirmed: true,
+        })
+        .await
+        .unwrap();
+        app.provision_bundled_plugins().unwrap();
+        for (index, old_revision) in old_revisions.iter().take(2).enumerate() {
+            let id = PACKAGES[index].0;
+            let plugin = app.plugins.detail(id).unwrap();
+            assert_eq!(plugin.manifest.version, "1.2.0");
+            assert_ne!(&plugin.revision, old_revision);
+            assert_eq!(plugin.enabled, index == 0);
+            assert_eq!(plugin.previous_version.as_deref(), Some("1.1.1"));
+            assert_eq!(app.plugins.settings_read(id).unwrap()["keep"], id);
+            assert!(
+                app.plugins
+                    .grant(id)
+                    .unwrap()
+                    .is_some_and(|grant| grant.matches(&plugin))
+            );
+        }
+        app.plugin_uninstall(UninstallInput {
+            id: PACKAGES[1].0.into(),
+            clear_data: false,
+            confirmed: true,
+        })
+        .await
+        .unwrap();
+        let upload = dir.path().join("upload.sdplugin");
+        std::fs::write(&upload, PACKAGES[1].1).unwrap();
+        let user = app
+            .plugin_install(InstallInput {
+                path: upload,
+                development_confirmed: true,
+                expected_version: None,
+                expected_digest: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            app.plugins.detail(PACKAGES[2].0),
+            Err(Error::NotFound)
+        ));
+        let preserved = app.plugins.detail(PACKAGES[1].0).unwrap();
+        assert_eq!(preserved.source, PluginSource::User);
+        assert_eq!(preserved.revision, user.revision);
+        assert!(app.plugins.grant(PACKAGES[1].0).unwrap().is_none());
+        assert!(
+            app.plugins
+                .install_bundled(PACKAGES[1].1, PACKAGES[1].0)
+                .is_err()
+        );
+        let revision = app.plugins.detail(PACKAGES[0].0).unwrap().revision;
+        let mut older: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
+        older["manifest"]["version"] = json!("1.0.0");
+        assert_eq!(
+            app.plugins
+                .install_bundled(&serde_json::to_vec(&older).unwrap(), PACKAGES[0].0)
+                .unwrap()
+                .revision,
+            revision
+        );
+        app.shutdown().await;
+        let restarted = Application::initialize(data, logs).unwrap();
+        restarted.provision_bundled_plugins().unwrap();
+        assert_eq!(
+            restarted.plugins.detail(PACKAGES[0].0).unwrap().revision,
+            revision
+        );
+        assert!(!restarted.plugins.detail(PACKAGES[1].0).unwrap().enabled);
+        assert!(matches!(
+            restarted.plugins.detail(PACKAGES[2].0),
+            Err(Error::NotFound)
+        ));
+        assert_eq!(
+            restarted.plugins.detail(PACKAGES[1].0).unwrap().revision,
+            user.revision
+        );
+        restarted.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn system_packages_have_fixed_defaults_while_uploaded_packages_still_require_grants() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
@@ -234,7 +345,7 @@ mod tests {
             assert!(plugin.enabled);
             let defaults = app.plugin_permissions(id.clone()).await.unwrap().unwrap();
             assert_eq!(defaults.permissions, plugin.manifest.permissions);
-            if id.ends_with("logs") {
+            if id.ends_with("services") {
                 assert_eq!(defaults.read_roots, ["/"]);
             }
             if id.ends_with("docker") {
@@ -363,7 +474,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app =
             Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-        let old_id = format!("{LEGACY_PLUGIN_PREFIX}resources");
+        let old_id = format!("{LEGACY_PLUGIN_PREFIX}services");
         let old = old_id.as_str();
         let mut package: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
         package["manifest"]["id"] = json!(old);
@@ -394,17 +505,17 @@ mod tests {
             .unwrap();
         app.provision_bundled_plugins().unwrap();
         assert!(matches!(app.plugins.detail(old), Err(Error::NotFound)));
-        let migrated = app.plugins.detail("cn.hiboot.plugins.resources").unwrap();
+        let migrated = app.plugins.detail("cn.hiboot.plugins.services").unwrap();
         assert!(!migrated.enabled);
         assert_eq!(
             app.plugins
-                .settings_read("cn.hiboot.plugins.resources")
+                .settings_read("cn.hiboot.plugins.services")
                 .unwrap()["keep"],
             "my configuration"
         );
         assert!(
             app.plugins
-                .grant("cn.hiboot.plugins.resources")
+                .grant("cn.hiboot.plugins.services")
                 .unwrap()
                 .is_some_and(|g| g.permissions == migrated.manifest.permissions)
         );

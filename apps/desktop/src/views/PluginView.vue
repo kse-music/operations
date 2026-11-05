@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { Settings2 } from '@lucide/vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
@@ -17,31 +18,46 @@ import PluginFrame from '../components/PluginFrame.vue';
 import type { ServerSection } from '../types/server';
 import type { ContainerShell, LogInput } from '../types/ops';
 import type { Host } from '../types/hosts';
-const props = defineProps<{
-  pluginId: string;
-  contributionId: string;
-  hostId: string;
-  tabKey: string;
-  initialSection?: ServerSection;
-  logIntent?: { input: LogInput; title: string; sequence: number };
-  embedded?: boolean;
-  toolIntent?: import('../types/plugins').PluginToolIntent;
-}>();
+const props = withDefaults(
+  defineProps<{
+    pluginId: string;
+    contributionId: string;
+    hostId: string;
+    tabKey: string;
+    initialSection?: ServerSection;
+    logIntent?: { input: LogInput; title: string; sequence: number };
+    active?: boolean;
+    settingsPage?: boolean;
+    toolIntent?: import('../types/plugins').PluginToolIntent;
+  }>(),
+  {
+    active: true,
+    settingsPage: false,
+    initialSection: undefined,
+    logIntent: undefined,
+    toolIntent: undefined,
+  },
+);
 const emit = defineEmits<{
-  host: [id: string];
+  settings: [];
+  contribution: [id: string];
   surfaceNavigate: [
     section: ServerSection,
     intent?: { input: LogInput; title: string; sequence: number },
   ];
   shell: [host: Host, shell: ContainerShell];
   section: [section: ServerSection];
-  intentConsumed: [];
 }>();
 const plugins = usePluginsStore(),
   hosts = useHostsStore(),
   ops = useOpsStore(),
   files = useFilesStore();
 const plugin = computed(() => plugins.installed.find((p) => p.manifest.id === props.pluginId));
+const available = computed(() =>
+  plugins.extensions.some(
+    (entry) => entry.pluginId === props.pluginId && entry.id === props.contributionId,
+  ),
+);
 const grant = computed(() => plugins.grants[props.pluginId]);
 const runtime = computed(() => plugins.statuses.find((s) => s.id === props.pluginId));
 const schema = shallowRef<PluginUi | null>(null),
@@ -59,7 +75,33 @@ const operations = computed(() => ops.connections[props.hostId]),
 const trust = computed(() => operations.value?.trust ?? connection.value?.trust);
 const disposed = ref(false);
 const contextReady = ref(false);
+const needsConnection = computed(
+  () =>
+    grant.value?.permissions.some((permission) =>
+      [
+        'ssh.execute',
+        'sftp.read',
+        'sftp.write',
+        'metrics.read',
+        'system.read',
+        'system.manage',
+        'logs.read',
+        'assistant.use',
+        'network.run',
+      ].includes(permission),
+    ) ?? false,
+);
 const frameReload = ref(0);
+const frameOpened = ref(false);
+const generationKey = computed(() => JSON.stringify([plugin.value?.revision, grant.value]));
+const connectionChanged = computed(
+  () =>
+    !!host.value &&
+    ((operations.value?.state === 'connected' &&
+      !sameHostConnection(operations.value.host, host.value)) ||
+      (connection.value?.state === 'connected' &&
+        !sameHostConnection(connection.value.host, host.value))),
+);
 let generation = 0;
 let dirtyTimer: ReturnType<typeof setTimeout> | undefined;
 const logResource = computed(() => {
@@ -76,6 +118,7 @@ function saveDraft() {
     };
 }
 async function bind() {
+  if (!props.active || !available.value || disposed.value) return;
   contextReady.value = false;
   const ticket = ++generation;
   await plugins.bind(
@@ -89,18 +132,31 @@ async function bind() {
             connection.value?.state === 'connected' ? (connection.value.id ?? null) : null,
         }
       : null,
+    props.tabKey,
   );
-  if (!disposed.value && ticket === generation)
-    contextReady.value = operations.value?.state === 'connected' && !!grant.value;
+  if (
+    !disposed.value &&
+    props.active &&
+    ticket === generation &&
+    plugins.owns(props.pluginId, props.tabKey)
+  ) {
+    contextReady.value =
+      !props.hostId ||
+      !needsConnection.value ||
+      page.value?.surface?.kind === 'tool' ||
+      operations.value?.state === 'connected';
+    if (contextReady.value && page.value?.surface) frameOpened.value = true;
+  }
   return ticket;
 }
 async function load() {
-  if (!plugin.value) return;
+  if (!plugin.value || !available.value || !props.active) return;
   loading.value = true;
   failed.value = false;
   error.value = null;
   try {
     schema.value = await plugins.schema(props.pluginId);
+    if (!props.active || !available.value || disposed.value) return;
     const selected = page.value;
     if (!selected) throw { message: '插件贡献页面不存在' };
     const draft = plugins.drafts[props.tabKey];
@@ -110,9 +166,8 @@ async function load() {
       output.value = draft.output;
       dirty.value = draft.dirty;
     }
+    if (props.hostId && !connectionChanged.value) await connect();
     await bind();
-    if (plugin.value.manifest.entry.backend && runtime.value?.state !== 'crashed')
-      await pluginsApi.activate(props.pluginId);
     if (selected.initialAction && !draft && (props.hostId || props.contributionId === 'settings'))
       await invoke(selected.initialAction);
   } catch (cause) {
@@ -124,7 +179,7 @@ async function load() {
 }
 async function invoke(action: string) {
   const selected = page.value;
-  if (!selected || busy.value || !plugin.value) return;
+  if (!selected || busy.value || !plugin.value || !props.active || !contextReady.value) return;
   const definition = selected.actions.find((a) => a.id === action);
   if (definition?.discardDirty && dirty.value && !(await plugins.discard(props.tabKey))) return;
   clearTimeout(dirtyTimer);
@@ -169,6 +224,7 @@ function edit(id: string, value: string | boolean) {
     clearTimeout(dirtyTimer);
     if (typeof document === 'string')
       dirtyTimer = setTimeout(() => {
+        if (!props.active || !contextReady.value) return;
         void pluginsApi
           .capability(props.pluginId, {
             apiVersion: 1,
@@ -188,7 +244,7 @@ function edit(id: string, value: string | boolean) {
   saveDraft();
 }
 async function connect() {
-  if (!host.value || !grant.value) return;
+  if (!host.value || !grant.value || !props.active) return;
   busy.value = true;
   try {
     const changed =
@@ -218,11 +274,12 @@ async function connect() {
           'ssh.execute',
           'sftp.read',
           'sftp.write',
-          'tasks.create',
           'metrics.read',
           'system.read',
           'system.manage',
           'logs.read',
+          'assistant.use',
+          'network.run',
         ].includes(p),
       )
     )
@@ -265,73 +322,118 @@ watch(
     connection.value?.state === 'connected' ? connection.value.id : '',
   ],
   () => {
-    if (schema.value)
+    if (schema.value && props.active && available.value)
       void bind().catch((cause) => {
         if (!disposed.value) error.value = errorMessage(cause);
       });
   },
 );
-onMounted(() => void load());
+watch(
+  () => [props.active, available.value, generationKey.value],
+  async (value, previous) => {
+    generation++;
+    contextReady.value = false;
+    if (previous && value[2] !== previous[2]) {
+      schema.value = null;
+      frameOpened.value = false;
+    }
+    try {
+      if (!props.active || !available.value) {
+        clearTimeout(dirtyTimer);
+        await plugins.release(props.pluginId, props.tabKey);
+        return;
+      }
+      if (!schema.value) await load();
+      else {
+        if (props.hostId && !connectionChanged.value) await connect();
+        await bind();
+      }
+    } catch (cause) {
+      if (!disposed.value) error.value = errorMessage(cause);
+    }
+  },
+  { immediate: true },
+);
 onBeforeUnmount(() => {
   disposed.value = true;
   generation++;
   clearTimeout(dirtyTimer);
+  void plugins.release(props.pluginId, props.tabKey).catch((cause) => {
+    plugins.error = errorMessage(cause);
+  });
 });
 useErrorNotifications(error);
 </script>
 <template>
   <section
-    :class="['plugin-workspace', { 'plugin-embedded': embedded }]"
+    class="plugin-workspace plugin-embedded"
     :data-plugin-id="pluginId"
+    :data-host-id="hostId"
   >
-    <header v-if="!embedded" class="plugin-heading">
-      <div>
-        <h1>{{ schema ? plugins.label(schema.title) : plugin?.manifest.name }}</h1>
-        <p class="subtle">
-          {{ plugin?.manifest.version }} ·
-          {{ plugin?.source === 'system' ? '系统内置' : '用户上传 / 来源未验证' }}
-        </p>
-      </div>
+    <header v-if="!settingsPage" class="plugin-heading">
+      <h1>{{ schema ? plugins.label(schema.title) : plugin?.manifest.name }}</h1>
+      <button class="button" aria-label="插件设置" @click="emit('settings')">
+        <Settings2 :size="15" aria-hidden="true" />插件设置
+      </button>
     </header>
-    <div v-if="page && page.surface?.kind !== 'tool'" class="plugin-context action-row">
-      <label
-        >{{ plugins.t('当前主机', 'Current host')
-        }}<select
-          :value="hostId"
-          :disabled="busy"
-          aria-label="插件目标主机"
-          @change="emit('host', ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">
-            {{ plugins.t('无主机 / 全局设置', 'No host / global settings') }}
-          </option>
-          <option v-for="h in hosts.catalog?.hosts ?? []" :key="h.id" :value="h.id">
-            {{ h.name || h.hostname }} · {{ h.username }}@{{ h.hostname }}
-          </option>
-        </select></label
-      ><button v-if="hostId" class="button" :disabled="busy || !grant" @click="connect">
-        {{ plugins.t('连接 SSH / SFTP', 'Connect SSH / SFTP') }}</button
-      ><span class="subtle"
-        >{{ operations?.state ?? plugins.t('未连接', 'Disconnected') }}
-        {{ connection?.state ?? '' }}</span
+    <label
+      v-if="
+        !settingsPage &&
+        (plugin?.manifest.contributions.filter((entry) => entry.kind !== 'settings').length ?? 0) >
+          1
+      "
+      class="plugin-contribution-select"
+    >
+      插件页面<select
+        :value="contributionId"
+        aria-label="插件页面"
+        @change="emit('contribution', ($event.target as HTMLSelectElement).value)"
       >
+        <option
+          v-for="entry in plugin?.manifest.contributions.filter(
+            (entry) => entry.kind !== 'settings',
+          )"
+          :key="entry.id"
+          :value="entry.id"
+        >
+          {{ entry.label }}
+        </option>
+      </select>
+    </label>
+    <p v-if="!available" class="host-empty">此插件尚未启用或授权，请在插件设置中配置。</p>
+    <div
+      v-else-if="
+        hostId && needsConnection && (connectionChanged || operations?.state !== 'connected')
+      "
+      class="plugin-context action-row"
+    >
+      <span>{{
+        connectionChanged
+          ? '主机配置已更新，请重新连接以使用新配置。'
+          : operations?.state === 'failed'
+            ? '主机连接失败'
+            : '正在连接当前主机…'
+      }}</span>
+      <button class="button" :disabled="busy" @click="connect">
+        {{ connectionChanged ? '重新连接' : '重试连接' }}
+      </button>
     </div>
-    <p v-if="loading" role="status">{{ plugins.t('正在加载插件…', 'Loading plugin…') }}</p>
-    <div v-else-if="failed || runtime?.state === 'crashed'" class="host-empty">
+    <p v-if="available && loading" role="status">
+      {{ plugins.t('正在加载插件…', 'Loading plugin…') }}
+    </p>
+    <div v-else-if="available && (failed || runtime?.state === 'crashed')" class="host-empty">
       <p>{{ plugins.t('插件暂不可用', 'Plugin unavailable') }} {{ runtime?.errorCode ?? '' }}</p>
       <button class="button" @click="restart">{{ plugins.t('重新激活', 'Restart') }}</button>
     </div>
-    <template v-else-if="page"
+    <template v-else-if="available && page"
       ><h2 v-if="!page.surface">{{ plugins.label(page.title) }}</h2>
       <template v-if="page.surface">
         <PluginFrame
-          v-if="
-            plugin &&
-            (page.surface.kind === 'tool' ||
-              page.surface.kind === 'frontend' ||
-              (contextReady && hostId))
-          "
-          :key="`${pluginId}:${plugin.revision}:${page.surface.kind === 'tool' ? 'global' : hostId}:${frameReload}`"
+          v-if="plugin && frameOpened"
+          v-show="contextReady"
+          :key="`${generationKey}:${frameReload}`"
+          :active="active && contextReady"
+          :context-key="tabKey"
           :plugin-id="pluginId"
           :revision="plugin.revision"
           :host-id="hostId"
@@ -342,10 +444,11 @@ useErrorNotifications(error);
           @navigate="(section, intent) => emit('surfaceNavigate', section, intent)"
           @shell="(host, shell) => emit('shell', host, shell)"
           @section="emit('section', $event)"
-          @intent-consumed="emit('intentConsumed')"
           @retry="restart"
         />
-        <p v-else class="host-empty">请选择已授权的主机并连接后使用此插件。</p>
+        <p v-if="!frameOpened || !contextReady" class="host-empty" role="status">
+          正在准备插件，请稍候…
+        </p>
       </template>
       <form v-else class="plugin-form" @submit.prevent>
         <label
@@ -397,13 +500,13 @@ useErrorNotifications(error);
         typeof output === 'string' ? output : JSON.stringify(output, null, 2)
       }}</pre>
       <PluginLog
-        v-if="page.log && logResource"
+        v-if="active && contextReady && page.log && logResource"
         :key="logResource"
         :plugin-id="pluginId"
         :resource="logResource"
     /></template>
     <Modal
-      v-if="trust"
+      v-if="active && trust"
       :title="plugins.t('核验 SSH 主机指纹', 'Verify SSH host key')"
       @close="acceptTrust(false)"
       ><p>{{ trust.hostname }}:{{ trust.port }} · {{ trust.algorithm }}</p>

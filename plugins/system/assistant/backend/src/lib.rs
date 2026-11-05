@@ -21,8 +21,8 @@ mod tests {
         assert!(!allows(&Capability::SettingsRead));
         for operation in [
             serverdeck_plugin_sdk::tools::Operation::AiPrepare,
-            serverdeck_plugin_sdk::tools::Operation::BatchList,
-            serverdeck_plugin_sdk::tools::Operation::AutomationCatalog,
+            serverdeck_plugin_sdk::tools::Operation::AiSend,
+            serverdeck_plugin_sdk::tools::Operation::DiagnosticCancel,
             serverdeck_plugin_sdk::tools::Operation::DiagnosticList,
         ] {
             assert_eq!(

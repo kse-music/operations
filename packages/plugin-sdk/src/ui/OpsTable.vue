@@ -63,7 +63,7 @@ function changeSort(key: string): void {
           :data-ops-target="String(row[rowKey])"
         >
           <td v-for="column in columns" :key="column.key" :title="String(row[column.key] ?? '')">
-            {{ row[column.key] ?? '不可用' }}
+            <slot name="cell" :row="row" :column="column">{{ row[column.key] ?? '不可用' }}</slot>
           </td>
           <td>
             <div class="ops-row-actions"><slot name="actions" :row="row" /></div>

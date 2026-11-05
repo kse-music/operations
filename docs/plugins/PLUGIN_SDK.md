@@ -1,8 +1,8 @@
-# Plugin SDK：Rust 1.3.0 / TypeScript 1.0.0
+# Plugin SDK：Rust / TypeScript 2.1.0
 
 ## 当前公开 SDK 与源码边界
 
-Host API 1.4.0 支持 UI v4。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
+Host API / Rust SDK / TypeScript SDK 当前均为 2.1.0，支持 UI v1–v4。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；依赖这些旧权限的安装记录会停用归档，保留用户数据。迁移规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
 
 | SDK 内容                                                    | 使用入口                                        |
 | ----------------------------------------------------------- | ----------------------------------------------- |
@@ -14,13 +14,13 @@ Host API 1.4.0 支持 UI v4。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖
 
 客户端通过运行时注入的有界 MessageChannel 使用公共服务；不能在 Guest 传 native command、插件身份、凭据或原始租约。业务 API 经 Host stage → 不可变票据 → 该包实际 WASM → 类型化授权能力，服务端仍复验输入/范围/状态。连接凭据和模型 Key、原生文件选择/下载、指纹/变更批准由 Host 处理。SDK 是接口与可复用前端基础，原生服务实现不复制进每个 WASM。
 
-插件前端代码、编排和测试只引用自己的目录和公开 SDK；backend 独立编译和单测，禁止依赖 core/application/Tauri。编译器会拒绝越界源码或 Tauri 包引用。可用 `npm run typecheck -w @serverdeck/plugin-sdk` 独立检查 SDK；仓库 `npm run typecheck` 同时检查宿主、插件和 SDK，`npm test` 会收集各插件自己的测试文件。UI4、兼容旧安装和资源入口见[UI 协议](PLUGIN_UI_EXTENSION.md)。下文 1.2/1.1 为既有能力说明，当前 Host 为 1.4.0，ABI/wire 仍为 1。
+插件前端代码、编排和测试只引用自己的目录和公开 SDK；backend 独立编译和单测，禁止依赖 core/application/Tauri。编译器会拒绝越界源码或 Tauri 包引用。可用 `npm run typecheck -w @serverdeck/plugin-sdk` 独立检查 SDK；仓库 `npm run typecheck` 同时检查宿主、插件和 SDK，`npm test` 会收集各插件自己的测试文件。UI4、兼容旧安装和资源入口见[UI 协议](PLUGIN_UI_EXTENSION.md)。下文 1.2/1.1 为既有能力说明，当前 Host 为 2.1.0，ABI/wire 仍为 1。
 
-## SDK 1.2 工作区工具
+## 工作区工具（当前契约）
 
-新增 tools::Tool / tools::Operation、四个领域权限和 Capability::ToolInvoke；UI v3 允许 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,batch,automation,network}；上传包可使用相同契约。模型设置与凭据、可信连接、任务引擎/调度器和任务中心保留在宿主。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
+公开 tools::Tool / tools::Operation、AI/网络领域权限和 Capability::ToolInvoke；UI v3 允许 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,services}；上传包可使用相同契约。模型设置与凭据、可信连接、诊断引擎和任务中心保留在宿主。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
 
-公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。主机 API 版本 1，宿主语义 API 为 1.2.0，wire version 仍为 1；manifest 使用 ^1.2.0 可使用工具能力，^1.1.0 可使用服务器能力，^1.0.0 插件继续兼容。
+公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。ABI/wire version 仍为 1，宿主语义 API 为 2.1.0；新包声明 ^2.1.0。未使用已移除权限/枚举的旧 ^1.x 包继续兼容，不能调用已删除能力。
 
 `export_plugin!(handle)` 导出经过缓冲区长度/指针检查的 ABI，不解引用任意原始指针。仅导出符号使用 Rust 要求的 unsafe(no_mangle) 属性，没有 unsafe 内存访问块。不能在 Guest 中使用宿主文件、网络、环境或其他原生导入。
 
@@ -28,19 +28,17 @@ Host API 1.4.0 支持 UI v4。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖
 
 所有 Request 都包含 apiVersion、requestId、operation，没有 pluginId、hostId、Session 或凭据字段。身份由 Host 安装实例绑定，目标由主界面设置的上下文决定。Response 包含 requestId、result、error；先检查 error。高风险操作返回 PLUGIN_CONFIRMATION_REQUIRED，result.confirmationRequired 是由 Host 生成的审批信息；仅主界面可确认，然后以相同请求重试。不能把等待确认当作执行成功。主界面批准 IPC 的确认过期或失效错误为 `PLUGIN_CONFIRMATION_EXPIRED`，须由用户重新发起原操作取得新确认，不能自动批准或复用旧确认。
 
-| Capability kind                 | 内容/返回                                           | 权限与操作范围                                                          |
-| ------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------- |
-| hosts_read                      | 当前主机 id/name/hostname/port/username（HostInfo） | hosts.read / hosts.read，必须有当前主机上下文                           |
-| execute                         | command、timeoutSecs(1–30)；CommandResult           | ssh.execute / ssh.read_only 或 ssh.execute；后者独立确认                |
-| read_file                       | path；FileDocument                                  | sftp.read / sftp.read；授权规范路径                                     |
-| save_file                       | documentId、content；SaveResult                     | sftp.write / sftp.write；独立确认并按原摘要检查冲突                     |
-| close_file / file_dirty         | documentId、discard 或 dirty                        | 仅本插件/上下文文档；dirty 需要 sftp.write                              |
-| settings_read / settings_write  | 本插件 JSON 设置（16 KiB）                          | settings.read / settings.write，不读取主应用配置                        |
-| notify                          | 1–1024 字节文本通知                                 | ui.contribute / ui.notify                                               |
-| task_create                     | command、timeoutSecs；任务句柄                      | tasks.create 且 ssh.execute；tasks.read_only 或 tasks.execute，后者确认 |
-| task_read / task_cancel         | taskId；状态/有限输出/取消                          | tasks.create / tasks.manage；仅自有任务                                 |
-| log_start                       | path、lines(1–200)；日志句柄                        | sftp.read / logs.read；规范路径范围，现有 SSH/SFTP 连接                 |
-| log_poll / log_pause / log_stop | logId；events / paused / 停止                       | 仅本插件/上下文日志句柄                                                 |
+| Capability kind                 | 内容/返回                                           | 权限与操作范围                                           |
+| ------------------------------- | --------------------------------------------------- | -------------------------------------------------------- |
+| hosts_read                      | 当前主机 id/name/hostname/port/username（HostInfo） | hosts.read / hosts.read，必须有当前主机上下文            |
+| execute                         | command、timeoutSecs(1–30)；CommandResult           | ssh.execute / ssh.read_only 或 ssh.execute；后者独立确认 |
+| read_file                       | path；FileDocument                                  | sftp.read / sftp.read；授权规范路径                      |
+| save_file                       | documentId、content；SaveResult                     | sftp.write / sftp.write；独立确认并按原摘要检查冲突      |
+| close_file / file_dirty         | documentId、discard 或 dirty                        | 仅本插件/上下文文档；dirty 需要 sftp.write               |
+| settings_read / settings_write  | 本插件 JSON 设置（16 KiB）                          | settings.read / settings.write，不读取主应用配置         |
+| notify                          | 1–1024 字节文本通知                                 | ui.contribute / ui.notify                                |
+| log_start                       | path、lines(1–200)；日志句柄                        | sftp.read / logs.read；规范路径范围，现有 SSH/SFTP 连接  |
+| log_poll / log_pause / log_stop | logId；events / paused / 停止                       | 仅本插件/上下文日志句柄                                  |
 
 命令 Host 只将精确的 `uname -a`、`uname -s`、`nginx -v`、`nginx -V`、`systemctl is-active nginx`、`systemctl status nginx --no-pager`、`command -v nginx` 归为只读，任何额外参数、管道、换行或变量赋值都不在此名单；Guest 不能自己声明只读。其他命令需要允许 ssh.execute 操作范围与本次确认。不会自动提权或拼接本地 Shell。
 
@@ -48,9 +46,9 @@ CommandResult 的 state 可能 completed/failed/uncertain；exitCode 非零是�
 
 FileDocument 最多 32 KiB UTF-8，返回插件专属 id，不返回内部 SFTP Session 或编辑器 token。读写均校验规范路径，保存复用现有原子替换/属性保留/冲突与恢复策略。SaveResult.saved=false 时必须保留草稿并展示 message/recoveryPath。file_dirty 关联主应用退出保护；close_file(discard=false) 不丢弃未保存编辑。已确认写入开始后等待安全收尾；停止遇到收尾超过 40 秒会明确报 COMMIT_PENDING，不能宣称未写入。
 
-日志使用既有有界 ACK 流：log_poll 返回状态事件或 dataBase64（原始字节）、sequence、stream、at，Host 消费后 ACK，未轮询不持续堆积。可以暂停、搜索本地有限缓存并显式停止。每插件最多两个日志，主应用现有总量八个仍生效。任务复用任务中心，最多四个活动任务/插件，最多保留十六个 SDK 句柄；已回收句柄可到任务中心查看历史。
+日志使用既有有界 ACK 流：log_poll 返回状态事件或 dataBase64（原始字节）、sequence、stream、at，Host 消费后 ACK，未轮询不持续堆积。可以暂停、搜索本地有限缓存并显式停止。每插件最多两个日志，主应用现有总量八个仍生效。网络诊断可在任务中心查看和停止；公开 execute 仍是显式授权的有界单次 SSH 命令，不能创建后台批量任务。
 
-总消息 64 KiB，API 负载安全预算 60 KiB；四个 Host 能力调用并发槽、每插件一个在途请求、每秒二十次准入，无无界请求队列。所有文档/任务/日志都绑定上下文代；切换主机、撤销授权、禁用、升级和卸载撤销句柄并取消/排空相应资源。
+总消息 64 KiB，API 负载安全预算 60 KiB；四个 Host 能力调用并发槽、每插件一个在途请求、每秒二十次准入，无无界请求队列。所有文档/日志和插件资源都绑定上下文代；切换主机、撤销授权、禁用、升级和卸载撤销句柄并取消/排空相应资源。
 
 可运行源码与命令见 `tests/fixtures/plugins/diagnostics/README.md`。13A-4 的公开 ui 模块定义声明式 JSON；Host Info 展示五类贡献。旧 Nginx 测试插件已删除，历史配置/验证/重载/日志验收证据保留于[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md)。见 [PLUGIN_UI_EXTENSION.md](PLUGIN_UI_EXTENSION.md)、[PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md)；SDK 不授予原生 UI API。
 

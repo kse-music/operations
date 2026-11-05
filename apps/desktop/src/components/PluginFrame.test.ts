@@ -1,10 +1,13 @@
+/* eslint-disable vue/one-component-per-file -- Each test mounts an isolated component. */
 import { afterEach, expect, it, vi } from 'vitest';
-import { createApp, nextTick, reactive, type App } from 'vue';
+import { createApp, h, nextTick, reactive, ref, type App } from 'vue';
 import { createPinia, disposePinia, type Pinia } from 'pinia';
 import PluginFrame from './PluginFrame.vue';
 import type { PluginUiPage } from '../types/plugins';
+import { useModelsStore } from '../stores/models';
 
 const bridge = vi.hoisted(() => ({
+  suspend: vi.fn(),
   snapshot: vi.fn(() => ({ theme: 'dark' })),
   dispose: vi.fn(async () => {}),
   call: vi.fn(),
@@ -17,6 +20,40 @@ afterEach(() => {
   if (pinia) disposePinia(pinia);
   root?.remove();
   vi.unstubAllGlobals();
+});
+
+it('refreshes shared models when a cached assistant becomes active again', async () => {
+  pinia = createPinia();
+  const refresh = vi.spyOn(useModelsStore(pinia), 'refresh').mockResolvedValue();
+  const active = ref(true);
+  const page: PluginUiPage = {
+    id: 'assistant',
+    title: 'Assistant',
+    surface: { kind: 'tool', tool: 'assistant' },
+    fields: [],
+    actions: [],
+    initialAction: null,
+    log: null,
+  };
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp({
+    render: () =>
+      h(PluginFrame, {
+        pluginId: 'dev.qa.assistant',
+        revision: 'r1',
+        hostId: '',
+        page,
+        active: active.value,
+      }),
+  }).use(pinia);
+  app.mount(root);
+  expect(refresh).toHaveBeenCalledOnce();
+  active.value = false;
+  await nextTick();
+  active.value = true;
+  await nextTick();
+  expect(refresh).toHaveBeenCalledTimes(2);
 });
 
 it('keeps nested reactive context cloneable across the frame boundary and rejects an unrelated sender', async () => {
@@ -45,7 +82,7 @@ it('keeps nested reactive context cloneable across the frame boundary and reject
     log: null,
     initialAction: null,
   });
-  const intent = reactive({ entryId: 'first' });
+  const intent = reactive({ networkRequest: 1 });
   pinia = createPinia();
   root = document.createElement('div');
   document.body.append(root);
@@ -73,11 +110,11 @@ it('keeps nested reactive context cloneable across the frame boundary and reject
   port.onmessage!({ data: { kind: 'connected' } });
   expect(messages.at(-1)).toMatchObject({
     kind: 'context',
-    props: { page: { id: 'custom' }, entryId: 'first' },
+    props: { page: { id: 'custom' }, requestId: 1 },
   });
-  intent.entryId = 'second';
+  intent.networkRequest = 2;
   await nextTick();
-  expect(messages.at(-1)).toMatchObject({ props: { entryId: 'second' } });
+  expect(messages.at(-1)).toMatchObject({ props: { requestId: 2 } });
   expect(root.textContent).not.toContain('could not be cloned');
   expect(port.close).not.toHaveBeenCalled();
 });

@@ -53,11 +53,11 @@ describe('product integration boundaries', () => {
     w.selectHost('b');
     w.navigate('server');
     expect(w.current).toMatchObject({ hostId: 'b', view: 'server', section: undefined });
-    w.navigate('network', 'a');
+    w.navigate('assistant', 'a');
     expect(w.current).toMatchObject({
       hostId: '',
       view: 'extension',
-      pluginId: 'cn.hiboot.plugins.network',
+      pluginId: 'cn.hiboot.plugins.assistant',
     });
     expect(w.hostId).toBe('b');
     w.selectHost('');

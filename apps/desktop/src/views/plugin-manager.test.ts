@@ -152,7 +152,7 @@ it('keeps only uninstall actions in the list and opens individual settings from 
   mountManager();
   await settle();
   const cards = root.querySelectorAll('[data-plugin-id]');
-  expect(cards).toHaveLength(6);
+  expect(cards).toHaveLength(3);
   for (const card of cards) {
     expect(card.querySelectorAll('.plugin-row-actions button')).toHaveLength(1);
     expect(card.querySelector('.plugin-row-actions button')?.getAttribute('aria-label')).toMatch(

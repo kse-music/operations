@@ -1,5 +1,4 @@
 pub mod ai;
-pub mod automation;
 pub mod backup;
 pub mod monitor;
 pub mod ops;

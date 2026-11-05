@@ -94,8 +94,6 @@ try {
     'terminals',
     'files',
     'server',
-    'automation',
-    'batch',
     'network',
     'credentials',
     'backup',
@@ -127,7 +125,6 @@ try {
         const { defaultProductPreferences } = await import('/src/types/product.ts');
         const { hostInput } = await import('/src/types/hosts.ts');
         const { tasksApi } = await import('/src/services/tasks.ts');
-        const { automationApi } = await import('/src/services/automation.ts');
         const { filesApi } = await import('/src/services/files.ts');
         const { monitorApi } = await import('/src/services/monitor.ts');
         const { opsApi } = await import('/src/services/ops.ts');
@@ -141,17 +138,6 @@ try {
         pluginsApi.list = view === 'server' ? fail : async () => [];
         pluginsApi.statuses = async () => [];
         tasksApi.diagnostics = view === 'network' ? fail : async () => [];
-        tasksApi.batches = view === 'batch' ? fail : async () => [];
-        automationApi.catalog =
-          view === 'automation'
-            ? fail
-            : async () => ({
-                entries: [],
-                groups: [],
-                schedules: [],
-                templates: [],
-              });
-        automationApi.history = async () => [];
         filesApi.open = fail;
         filesApi.local = async () => ({
           path: 'C:/test',

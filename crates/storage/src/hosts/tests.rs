@@ -51,7 +51,6 @@ fn migrates_v5_hosts_without_changing_configuration_or_links() {
         include_str!("../../migrations/002_hosts.sql"),
         include_str!("../../migrations/003_known_hosts.sql"),
         include_str!("../../migrations/004_terminal_workspace.sql"),
-        include_str!("../../migrations/005_automation.sql"),
     ] {
         connection.execute_batch(sql).expect("v5 schema");
     }

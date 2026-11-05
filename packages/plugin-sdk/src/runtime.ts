@@ -130,25 +130,37 @@ export function mountPlugin(component: Component): void {
         )
           releaseStream(data.id);
       } else if (data?.kind === 'context') {
-        updateVisibility(data.visible !== false);
         for (const key of Object.keys(props)) if (!(key in data.props)) delete props[key];
-        Object.assign(props, data.props);
+        for (const [key, value] of Object.entries(data.props))
+          if (JSON.stringify(props[key]) !== JSON.stringify(value)) props[key] = value;
         document.documentElement.dataset.pluginSurface = data.props.page?.surface?.kind ?? '';
         const state = data.state;
         if (!state) return;
         document.documentElement.dataset.theme = state.theme;
         const hosts = useHostsStore(pinia);
-        hosts.catalog = state.catalog;
+        if (JSON.stringify(hosts.catalog) !== JSON.stringify(state.catalog))
+          hosts.catalog = state.catalog;
         hosts.selectedId = state.hostId;
-        useOpsStore(pinia).connections = state.operations;
-        useFilesStore(pinia).connections = state.files;
-        useApplicationStore(pinia).state = {
-          config: { monitorIntervalSecs: state.monitorIntervalSecs },
-        };
+        const ops = useOpsStore(pinia),
+          files = useFilesStore(pinia),
+          application = useApplicationStore(pinia);
+        if (JSON.stringify(ops.connections) !== JSON.stringify(state.operations))
+          ops.connections = state.operations;
+        if (JSON.stringify(files.connections) !== JSON.stringify(state.files))
+          files.connections = state.files;
+        if (application.state?.config.monitorIntervalSecs !== state.monitorIntervalSecs)
+          application.state = { config: { monitorIntervalSecs: state.monitorIntervalSecs } };
         const models = useModelsStore(pinia);
-        models.models = state.models;
+        if (JSON.stringify(models.models) !== JSON.stringify(state.models))
+          models.models = state.models;
+        if (
+          models.selectedId &&
+          !state.models.some((model: { id: string }) => model.id === models.selectedId)
+        )
+          models.selectedId = '';
         if (!models.loaded && state.models.length === 1) models.selectedId = state.models[0].id;
         models.loaded = true;
+        updateVisibility(data.visible !== false);
         if (!mounted) {
           mounted = true;
           app.mount('#app');

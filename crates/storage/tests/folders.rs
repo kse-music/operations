@@ -41,7 +41,6 @@ fn v6_migration_keeps_host_membership_and_creates_no_synthetic_database_root() {
         include_str!("../migrations/002_hosts.sql"),
         include_str!("../migrations/003_known_hosts.sql"),
         include_str!("../migrations/004_terminal_workspace.sql"),
-        include_str!("../migrations/005_automation.sql"),
         include_str!("../migrations/006_optional_host_name.sql"),
     ] {
         c.execute_batch(sql).unwrap();
@@ -188,7 +187,7 @@ fn backup_restores_folder_ancestry_in_any_order_and_rejects_cycles_atomically() 
     let h = host(&source, Some(&b.id));
     let mut json: serde_json::Value =
         serde_json::from_str(&source.backup_export().unwrap()).unwrap();
-    assert_eq!(json["version"], 2);
+    assert_eq!(json["version"], 3);
     json["groups"].as_array_mut().unwrap().reverse();
     let target = Database::open(dir.path().join("target")).unwrap();
     target

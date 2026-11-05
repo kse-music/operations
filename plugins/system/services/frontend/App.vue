@@ -1,80 +1,189 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import ResourceView from '@serverdeck/plugin-sdk/ui/ResourceView.vue';
-import type { ServiceAction, LogInput } from '@serverdeck/plugin-sdk/types/ops';
-defineProps<{ hostId?: string }>();
-const emit = defineEmits<{ log: [input: LogInput, title: string] }>();
-const scope = ref<'system' | 'user'>('system');
-const columns = [
-  { key: 'unit', label: '服务' },
-  { key: 'load', label: '加载' },
-  { key: 'active', label: '状态' },
-  { key: 'sub', label: '子状态' },
-  { key: 'enabled', label: '开机自启' },
-  { key: 'description', label: '说明' },
-];
+import { computed, nextTick, ref, watch } from 'vue';
+import { Activity, ListTree, Settings2, ScrollText, Network, Server } from '@lucide/vue';
+import Monitor from './monitor/App.vue';
+import Processes from './processes/App.vue';
+import Logs from './logs/App.vue';
+import Diagnostics from './network/NetworkView.vue';
+import Units from './ServiceUnits.vue';
+import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
+import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
+import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
+import type { PluginUiPage, PluginToolIntent } from '@serverdeck/plugin-sdk/types/plugins';
+import type { LogInput } from '@serverdeck/plugin-sdk/types/ops';
+import './system.css';
+const props = defineProps<{
+  hostId?: string;
+  initialSection?: ServerSection;
+  page?: PluginUiPage;
+  toolIntent?: PluginToolIntent;
+  logIntent?: { input: LogInput; title: string; sequence: number };
+}>();
+const emit = defineEmits<{ section: [value: ServerSection] }>();
+const hosts = useHostsStore();
+const legacyMonitor = props.page?.surface?.kind === 'monitor';
+const tabs = [
+  {
+    id: 'overview',
+    label: '资源监控',
+    description: 'CPU、内存、磁盘与网络',
+    icon: Activity,
+    component: Monitor,
+  },
+  {
+    id: 'processes',
+    label: '进程与端口',
+    description: '进程详情与监听端口',
+    icon: ListTree,
+    component: Processes,
+  },
+  {
+    id: 'services',
+    label: 'systemd 服务',
+    description: '服务状态与运行管理',
+    icon: Settings2,
+    component: Units,
+  },
+  {
+    id: 'logs',
+    label: '日志查看',
+    description: '文件与服务实时日志',
+    icon: ScrollText,
+    component: Logs,
+  },
+  {
+    id: 'diagnostics',
+    label: '网络诊断',
+    description: '连接测试与故障定位',
+    icon: Network,
+    component: Diagnostics,
+  },
+] as const;
+type TabId = (typeof tabs)[number]['id'];
+function group(section?: ServerSection): TabId {
+  if (section === 'disks' || section === 'network') return 'overview';
+  if (section === 'ports') return 'processes';
+  return tabs.find((tab) => tab.id === section)?.id ?? 'overview';
+}
+const selected = ref<TabId>(group(props.initialSection));
+const sections = ref<Partial<Record<TabId, ServerSection>>>({
+  [selected.value]: props.initialSection,
+});
+const current = computed(() => tabs.find((tab) => tab.id === selected.value)!);
+const host = computed(() => hosts.catalog?.hosts.find((host) => host.id === props.hostId));
+watch(
+  () => props.initialSection,
+  (section) => {
+    if (!section) return;
+    selected.value = group(section);
+    sections.value[selected.value] = section;
+  },
+);
+function select(id: TabId) {
+  selected.value = id;
+  emit('section', sections.value[id] ?? id);
+}
+function section(value: ServerSection) {
+  sections.value[selected.value] = value;
+  emit('section', value);
+}
+const localLog = ref(props.logIntent);
+watch(
+  () => props.logIntent,
+  (value) => {
+    if (value) {
+      localLog.value = value;
+      select('logs');
+    }
+  },
+);
+function openLog(input: LogInput, title: string) {
+  localLog.value = { input, title, sequence: (localLog.value?.sequence ?? 0) + 1 };
+  select('logs');
+}
+function navigate(value: ServerSection) {
+  sections.value[group(value)] = value;
+  select(group(value));
+}
+const navigation = ref<HTMLElement>();
+async function keys(event: KeyboardEvent) {
+  const index = tabs.findIndex((tab) => tab.id === selected.value);
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? tabs.length - 1
+        : event.key === 'ArrowRight'
+          ? (index + 1) % tabs.length
+          : event.key === 'ArrowLeft'
+            ? (index + tabs.length - 1) % tabs.length
+            : -1;
+  if (next < 0) return;
+  event.preventDefault();
+  select(tabs[next]!.id);
+  await nextTick();
+  navigation.value?.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus();
+}
 </script>
 <template>
-  <ResourceView
-    :host-id="hostId"
-    :list-request="{ kind: 'services', scope }"
-    :columns="columns"
-    row-key="unit"
-    @log="(input, title) => emit('log', input, title)"
-  >
-    <template #capabilities="{ value }"
-      ><span>systemd：{{ value.systemd ? '可用' : '不支持' }}</span></template
+  <main class="system-workbench" :class="{ 'legacy-monitor': legacyMonitor }">
+    <header v-if="!legacyMonitor" class="system-host-strip">
+      <span class="system-host-icon"><Server :size="17" /></span>
+      <div>
+        <strong>{{ hostDisplayName(host) || '本地诊断工作区' }}</strong
+        ><span>{{
+          host ? `${host.username}@${host.hostname}:${host.port}` : '选择网络工具，开始本地诊断'
+        }}</span>
+      </div>
+      <span class="system-host-note">{{ host ? '当前主机' : '本地设备' }}</span>
+    </header>
+    <div
+      v-if="!legacyMonitor"
+      ref="navigation"
+      class="system-navigation"
+      role="tablist"
+      aria-label="系统服务功能"
+      @keydown="keys"
     >
-    <template #toolbar
-      ><select v-model="scope" aria-label="systemd 范围">
-        <option value="system">系统服务</option>
-        <option value="user">当前用户服务</option>
-      </select></template
+      <button
+        v-for="tab in tabs"
+        :id="`system-tab-${tab.id}`"
+        :key="tab.id"
+        role="tab"
+        :tabindex="selected === tab.id ? 0 : -1"
+        :aria-label="tab.label"
+        :disabled="!hostId && tab.id !== 'diagnostics'"
+        :aria-selected="selected === tab.id"
+        aria-controls="system-panel"
+        @click="select(tab.id)"
+      >
+        <component :is="tab.icon" :size="18" aria-hidden="true" /><span
+          ><strong>{{ tab.label }}</strong
+          ><small>{{ tab.description }}</small></span
+        >
+      </button>
+    </div>
+    <section
+      id="system-panel"
+      class="system-panel"
+      role="tabpanel"
+      :aria-labelledby="`system-tab-${selected}`"
     >
-    <template #actions="{ row, busy, inspect, ask, openLog }">
-      <button
-        class="text-button"
-        :disabled="busy"
-        @click="inspect({ kind: 'service_details', scope, unit: String(row.unit) }, '服务详情')"
-      >
-        详情
-      </button>
-      <button
-        v-for="action in ['start', 'stop', 'restart', 'enable', 'disable'] as ServiceAction[]"
-        :key="action"
-        class="text-button"
-        :disabled="busy"
-        @click="
-          ask(`服务 ${action} · ${scope === 'user' ? '当前用户' : '系统'}`, String(row.unit), {
-            kind: 'service_action',
-            scope,
-            unit: String(row.unit),
-            action,
-            confirmed: true,
-          })
-        "
-      >
-        {{
-          { start: '启动', stop: '停止', restart: '重启', enable: '启用自启', disable: '禁用自启' }[
-            action
-          ]
-        }}
-      </button>
-      <button
-        class="text-button"
-        @click="
-          openLog(
-            {
-              source: { kind: 'service', scope, unit: String(row.unit) },
-              lines: 200,
-              follow: true,
-            },
-            String(row.unit),
-          )
-        "
-      >
-        服务日志
-      </button>
-    </template>
-  </ResourceView>
+      <KeepAlive :max="5">
+        <component
+          :is="legacyMonitor ? Monitor : current.component"
+          :key="legacyMonitor ? 'legacy' : selected"
+          :host-id="selected === 'diagnostics' ? hostId || toolIntent?.networkHost : hostId"
+          :bound-host-id="hostId"
+          :request-id="toolIntent?.networkRequest"
+          :initial-section="sections[selected]"
+          :page="legacyMonitor ? page : undefined"
+          :log-intent="localLog"
+          @section="section"
+          @navigate="navigate"
+          @log="openLog"
+        />
+      </KeepAlive>
+    </section>
+  </main>
 </template>

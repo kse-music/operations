@@ -4,7 +4,7 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serverdeck_core::{ai, automation, tasks};
+use serverdeck_core::{ai, tasks};
 use serverdeck_plugin_core::{InstalledPlugin, permissions::denied};
 use serverdeck_plugin_sdk::{Capability, tools::Operation};
 use std::{
@@ -46,81 +46,6 @@ pub enum ToolInput {
     },
     DiagnosticCancel {
         id: String,
-    },
-    BatchStart {
-        input: tasks::BatchInput,
-    },
-    BatchList {
-        #[serde(default)]
-        versions: HashMap<String, u64>,
-    },
-    BatchCancel {
-        id: String,
-        running: bool,
-    },
-    BatchRetryFile {
-        id: String,
-        host_id: String,
-        session_id: String,
-        confirmed: bool,
-    },
-    AutomationCatalog {},
-    AutomationPrepare {
-        entry_id: String,
-        revision: u32,
-        host_ids: Vec<String>,
-    },
-    AutomationEntrySave {
-        id: Option<String>,
-        revision: Option<u32>,
-        input: automation::EntryInput,
-    },
-    AutomationEntryDelete {
-        id: String,
-        confirmed: bool,
-    },
-    AutomationGroupSave {
-        id: Option<String>,
-        name: String,
-    },
-    AutomationGroupDelete {
-        id: String,
-        confirmed: bool,
-    },
-    AutomationStart {
-        input: automation::RunInput,
-    },
-    AutomationRun {
-        id: String,
-    },
-    AutomationHistory {
-        query: automation::HistoryQuery,
-    },
-    AutomationCancel {
-        id: String,
-        running: bool,
-    },
-    AutomationApprove {
-        id: String,
-        confirmed: bool,
-        danger_confirmed: bool,
-    },
-    AutomationScheduleSave {
-        id: Option<String>,
-        revision: Option<u32>,
-        input: automation::ScheduleInput,
-    },
-    AutomationScheduleDisable {
-        id: String,
-    },
-    AutomationScheduleDelete {
-        id: String,
-        confirmed: bool,
-    },
-    AutomationStatus {},
-    AutomationRunDelete {
-        id: String,
-        confirmed: bool,
     },
 }
 
@@ -192,11 +117,7 @@ mod tests {
     #[tokio::test]
     async fn real_wasm_tools_execute_host_services_and_validate_inputs() {
         let (_dir, app) = app();
-        for (id, operation) in [
-            ("network", "diagnostic_list"),
-            ("batch", "batch_list"),
-            ("automation", "automation_catalog"),
-        ] {
+        for (id, operation) in [("services", "diagnostic_list")] {
             let id = format!("cn.hiboot.plugins.{id}");
             ready(&app, &id).await;
             let ticket = tokio::time::timeout(
@@ -232,26 +153,25 @@ mod tests {
             .await
             .is_err()
         );
-        let ticket = app.plugin_tool_stage("cn.hiboot.plugins.batch".into(), json!({"operation":"batch_start","args":{"input":{"targets":[],"operation":{"kind":"command","command":"must not execute"},"concurrency":1,"timeoutSecs":5,"confirmed":false}}})).await.unwrap();
-        assert!(
-            invoke(&app, "cn.hiboot.plugins.batch", &ticket)
+        for operation in ["batch_start", "automation_catalog"] {
+            assert!(
+                app.plugin_tool_stage(
+                    "cn.hiboot.plugins.services".into(),
+                    json!({"operation":operation,"args":{}})
+                )
                 .await
-                .error
-                .is_some()
-        );
-        assert!(
-            app.batch_list().unwrap().is_empty(),
-            "unconfirmed input cannot submit a task"
-        );
+                .is_err()
+            );
+        }
         app.shutdown().await;
     }
     #[tokio::test]
     async fn tickets_bind_owner_revision_generation_operation_expiry_and_quotas() {
         let (dir, app) = app();
-        let system = "cn.hiboot.plugins.network";
+        let system = "cn.hiboot.plugins.services";
         ready(&app, system).await;
         let mut package: Value = serde_json::from_slice(include_bytes!(
-            "../../../../plugins/system/packages/network.sdplugin"
+            "../../../../plugins/system/packages/services.sdplugin"
         ))
         .unwrap();
         package["manifest"]["id"] = json!("dev.upload-network");
@@ -313,6 +233,16 @@ mod tests {
         assert!(invoke(&app, system, &expired).await.error.is_some());
         let old = app.plugin_tool_stage(system.into(), input()).await.unwrap();
         app.plugin_clear_context(system.into()).await.unwrap();
+        assert_eq!(
+            app.plugin_statuses()
+                .unwrap()
+                .iter()
+                .find(|status| status.id == system)
+                .unwrap()
+                .state,
+            serverdeck_plugin_runtime::protocol::State::Stopped,
+        );
+        app.plugin_activate(system).await.unwrap();
         assert!(invoke(&app, system, &old).await.error.is_some());
         let first = app.plugin_tool_stage(system.into(), input()).await.unwrap();
         app.plugin_tool_stage(system.into(), input()).await.unwrap();
@@ -376,12 +306,12 @@ mod tests {
     #[tokio::test]
     async fn abort_targets_owned_inputs_and_never_cancels_a_new_call_or_the_vm() {
         let (_dir, app) = app();
-        let id = "cn.hiboot.plugins.network";
+        let id = "cn.hiboot.plugins.services";
         ready(&app, id).await;
         let stage = || json!({"operation":"diagnostic_list","args":{}});
         let ticket = app.plugin_tool_stage(id.into(), stage()).await.unwrap();
         assert!(
-            app.plugin_tool_abort_input("cn.hiboot.plugins.batch", &ticket.input_id)
+            app.plugin_tool_abort_input("cn.hiboot.plugins.assistant", &ticket.input_id)
                 .is_err()
         );
         app.plugin_tool_abort_input(id, &ticket.input_id).unwrap();
@@ -453,26 +383,6 @@ impl ToolInput {
             Self::DiagnosticStart { .. } => Operation::DiagnosticStart,
             Self::DiagnosticList { .. } => Operation::DiagnosticList,
             Self::DiagnosticCancel { .. } => Operation::DiagnosticCancel,
-            Self::BatchStart { .. } => Operation::BatchStart,
-            Self::BatchList { .. } => Operation::BatchList,
-            Self::BatchCancel { .. } => Operation::BatchCancel,
-            Self::BatchRetryFile { .. } => Operation::BatchRetryFile,
-            Self::AutomationCatalog { .. } => Operation::AutomationCatalog,
-            Self::AutomationPrepare { .. } => Operation::AutomationPrepare,
-            Self::AutomationEntrySave { .. } => Operation::AutomationEntrySave,
-            Self::AutomationEntryDelete { .. } => Operation::AutomationEntryDelete,
-            Self::AutomationGroupSave { .. } => Operation::AutomationGroupSave,
-            Self::AutomationGroupDelete { .. } => Operation::AutomationGroupDelete,
-            Self::AutomationStart { .. } => Operation::AutomationStart,
-            Self::AutomationRun { .. } => Operation::AutomationRun,
-            Self::AutomationHistory { .. } => Operation::AutomationHistory,
-            Self::AutomationCancel { .. } => Operation::AutomationCancel,
-            Self::AutomationApprove { .. } => Operation::AutomationApprove,
-            Self::AutomationScheduleSave { .. } => Operation::AutomationScheduleSave,
-            Self::AutomationScheduleDisable { .. } => Operation::AutomationScheduleDisable,
-            Self::AutomationScheduleDelete { .. } => Operation::AutomationScheduleDelete,
-            Self::AutomationStatus { .. } => Operation::AutomationStatus,
-            Self::AutomationRunDelete { .. } => Operation::AutomationRunDelete,
         }
     }
 }
@@ -860,84 +770,6 @@ impl Application {
             ),
             ToolInput::DiagnosticCancel { id } => {
                 self.diagnostic_cancel(&id)?;
-                Ok(Value::Null)
-            }
-            ToolInput::BatchStart { input } => value(self.batch_start(input).await?),
-            ToolInput::BatchList { versions } => value(
-                self.batch_list()?
-                    .into_iter()
-                    .filter(|i| versions.get(&i.id) != Some(&i.revision))
-                    .collect::<Vec<_>>(),
-            ),
-            ToolInput::BatchCancel { id, running } => {
-                self.batch_cancel(&id, running)?;
-                Ok(Value::Null)
-            }
-            ToolInput::BatchRetryFile {
-                id,
-                host_id,
-                session_id,
-                confirmed,
-            } => value(
-                self.batch_retry_file(&id, &host_id, session_id, confirmed)
-                    .await?,
-            ),
-            ToolInput::AutomationCatalog {} => value(self.automation_catalog().await?),
-            ToolInput::AutomationPrepare {
-                entry_id,
-                revision,
-                host_ids,
-            } => value(
-                self.automation_prepare(entry_id, revision, host_ids)
-                    .await?,
-            ),
-            ToolInput::AutomationEntrySave {
-                id,
-                revision,
-                input,
-            } => value(self.automation_entry_save(id, revision, input).await?),
-            ToolInput::AutomationEntryDelete { id, confirmed } => {
-                self.automation_entry_delete(id, confirmed).await?;
-                Ok(Value::Null)
-            }
-            ToolInput::AutomationGroupSave { id, name } => {
-                value(self.automation_group_save(id, name).await?)
-            }
-            ToolInput::AutomationGroupDelete { id, confirmed } => {
-                self.automation_group_delete(id, confirmed).await?;
-                Ok(Value::Null)
-            }
-            ToolInput::AutomationStart { input } => value(self.automation_start(input).await?),
-            ToolInput::AutomationRun { id } => value(self.automation_run(id).await?),
-            ToolInput::AutomationHistory { query } => value(self.automation_history(query).await?),
-            ToolInput::AutomationCancel { id, running } => {
-                self.automation_cancel(id, running).await?;
-                Ok(Value::Null)
-            }
-            ToolInput::AutomationApprove {
-                id,
-                confirmed,
-                danger_confirmed,
-            } => value(
-                self.automation_approve(id, confirmed, danger_confirmed)
-                    .await?,
-            ),
-            ToolInput::AutomationScheduleSave {
-                id,
-                revision,
-                input,
-            } => value(self.automation_schedule_save(id, revision, input).await?),
-            ToolInput::AutomationScheduleDisable { id } => {
-                self.automation_schedule_disable(id).await?;
-                Ok(Value::Null)
-            }
-            ToolInput::AutomationScheduleDelete { id, confirmed } => {
-                self.automation_schedule_delete(id, confirmed).await?;
-                Ok(Value::Null)
-            }
-            ToolInput::AutomationStatus {} => value(self.automation_status().await?),
-            ToolInput::AutomationRunDelete { id, confirmed } => {
-                self.automation_run_delete(id, confirmed).await?;
                 Ok(Value::Null)
             }
         }

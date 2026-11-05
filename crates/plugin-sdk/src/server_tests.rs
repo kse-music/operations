@@ -69,11 +69,18 @@ fn guest_cannot_supply_native_confirmation() {
 #[test]
 fn server_surface_rejects_unsupported_versions_categories_and_mixed_form_actions() {
     let original: crate::ui::Ui =
-        serde_json::from_str(include_str!("../../../plugins/system/resources/ui.json")).unwrap();
+        serde_json::from_str(include_str!("../../../plugins/system/services/ui.json")).unwrap();
     original.validate().unwrap();
     let mut legacy = original.clone();
     legacy.ui_version = 1;
     assert!(legacy.validate().is_err());
+    let mut legacy_categories = original.clone();
+    legacy_categories.ui_version = 3;
+    legacy_categories.frontend = None;
+    assert!(
+        legacy_categories.validate().is_err(),
+        "combined sections require UI v4"
+    );
     let mut duplicate = original.clone();
     duplicate.pages[0].surface = Some(crate::ui::Surface::Monitor {
         sections: vec!["overview".into(), "overview".into()],
@@ -112,7 +119,10 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
     unknown["pages"][0]["surface"]["tool"] = json!("arbitrary_native_command");
     assert!(serde_json::from_value::<Ui>(unknown).is_err());
     let mut server: Ui =
-        serde_json::from_str(include_str!("../../../plugins/system/resources/ui.json")).unwrap();
+        serde_json::from_str(include_str!("../../../plugins/system/services/ui.json")).unwrap();
+    server.pages[0].surface = Some(Surface::Monitor {
+        sections: vec!["overview".into()],
+    });
     server.ui_version = 3;
     server.frontend = None;
     server.validate().unwrap();
@@ -126,7 +136,7 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
     let allow = |cap: &Capability| matches!(cap,Capability::ToolInvoke{operation,..} if operation.tool()==Tool::Assistant);
     let bridge = |operation| json!({"action":"bridge","values":{"request":serde_json::to_string(&Capability::ToolInvoke{input_id:"opaque".into(),operation}).unwrap()}});
     assert_eq!(
-        state.handle(6, bridge(Operation::AutomationEntryDelete), allow)["error"]["code"],
+        state.handle(6, bridge(Operation::DiagnosticCancel), allow)["error"]["code"],
         "CAPABILITY"
     );
     let accepted = state.handle(6, bridge(Operation::AiPrepare), allow);

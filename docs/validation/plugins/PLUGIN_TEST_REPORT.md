@@ -1,5 +1,174 @@
 # 插件阶段验证记录
 
+## 2026-11-05：系统服务合并与界面优化
+
+完成标准：五项主机工具合成一个系统服务插件，而非只把菜单分组；Docker 和 AI 独立优化使用界面。原查询、监控、日志、诊断、Shell、模型及危险操作确认保留；主机/分类切换保留草稿，隐藏分类不继续轮询。三个工作区支持深浅主题和窄窗口，升级保留数据和上传插件。
+
+### 已完成及主要文件
+
+- `plugins/system/services/frontend/App.vue`、`system.css`：一个主机信息条、五个页内分类，支持键盘方向键，按需缓存最多五个子页。原资源/进程/日志/网络 frontend 和测试迁入同目录子模块；systemd 列表成为 ServiceUnits。删除四个重复 manifest/backend/分发包。当前标准分发只有 services/docker/assistant 三项。
+- services Guest 使用监控、进程/端口/systemd、日志和网络能力联合白名单；继续拒绝 Docker、AI、任意 execute/设置。Host 权限、队列、实例限额、SSH 信任和操作确认保持。
+- `packages/plugin-sdk/src/visibility.ts` 组合宿主、文档与 KeepAlive 激活状态；ResourceView/监控/日志/诊断遵循分类可见性。离开监控暂停采样、返回重新获取资源；隐藏列表结果按代号失效，离开日志停止流且保留已读缓冲；诊断任务继续由任务中心管理。Docker 容器/镜像分类同样保留输入，并清除离开的详情/待确认操作。
+- Docker App/docker.css 与公共 ResourceView/OpsTable：真实列表生成总量/运行/其他状态摘要，名称与短 ID 合并、状态标记、搜索刷新工具栏、分组操作与详情。原读取、日志、资源、Shell、精确目标确认和错误反馈保持。
+- AI AssistantView/assistant.css：常驻输入区、以对话为主的双栏布局、可收起上下文和仅填草稿的快捷问题。修复旧上下文引用误报：历史回答可读，旧命令引用失效后禁用并提示重新提问，不能在新上下文取消或执行旧资源；真实权限复验不放宽。SDK runtime 在模型移除时清除无效选择，保留其他有效模型选择。
+- `workspace.ts`、server-plugins、bundled_plugins、plugin-core repository/layout：按声明定位诊断分类，全局本机诊断不连接主机；其他主机功能继续使用当前主机。旧四项 source=system 记录（含旧域名）原子归档，不删除 payload/设置；同 ID 的上传源保留。services 的启停、配置和卸载选择沿用现有规则，不猜测合并未知设置。
+- Host/Rust/Vue SDK 为 2.1.0、标准包为 1.2.0。UI v4 operations.sections 增加资源和 diagnostics 分类；旧 v2/v3 继续限制为原类别，ABI/wire/包格式仍为 1，无新 IPC/权限/依赖/数据库。旧 monitor/operations/network UI 由合并包或 compat 资源继续提供，上传网络测试使用独立兼容 UI 和真实 Guest。
+- PRD、架构/决策、SDK/版本/使用说明、实施计划和验证索引同步。重要入口逻辑和旧用户修改保留，未替换用户正在运行的正式程序。
+
+### 执行结果
+
+| 检查                                   | 结果                                                                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                             | 56 文件、355 项通过，包含原各分类测试及新增缓存可见性、快捷问题不发送、上下文折叠、旧 AI 引用失效和模型选择修复            |
+| `cargo test --workspace --offline`     | 212 项通过，4 项原有 ignored；涵盖真实 SSH/SFTP 协议、授权、生命周期、目录/备份及三包升级                                  |
+| 最终 plugin-sdk/plugin-core 专项       | 通过，包含 UI4 分类和旧版本拒绝、四项 system 归档、上传源/数据保留，以及 Windows junction 安全断言                         |
+| 三个独立 Guest 测试                    | 5 项通过，确认 services 联合白名单与 AI/Docker 越域拒绝                                                                    |
+| 类型/ESLint/Rust fmt/Clippy            | 通过；Clippy 仅保留既有 openssh 单元素循环与缓存硬链接回退提示                                                             |
+| `node tools/plugin-component-host.mjs` | 最终 14 组通过，实际 WebView2/IPC/WASM/OpenSSH/HTTP；控制台无错误                                                          |
+| 上传/隔离/任务回归                     | 最终独立 QA 原生 11 组通过；预期 CSP 越权拒绝保留，无其他控制台错误                                                        |
+| Windows 默认配置调试构建               | `node tools/tauri.mjs build --debug --no-bundle` 通过，生成 `.local/system-services-redesign/ServerDeck.exe`，未构建安装器 |
+
+### 逐项真实验证和截图
+
+Ubuntu-24.04/OpenSSH 使用任务独占端点、容器、进程/监听端口、user unit、含引号/中文路径的日志。两种 HostId 指向同一隔离 Linux 端点，验证主机工作区隔离，不代表两台物理服务器互操作；AI 使用受控本机 HTTP，未调用外部付费服务。
+
+1. 仅三个系统配置入口，无重复选主机/连接/功能 iframe 或业务 WASM。六种旧启用记录（含此前删除的两个工具）在启动时归档，设置字节保留、旧激活拒绝；备份 v3 保持正确。
+2. 资源：实际 CPU 连续差值采样、磁盘/网络子页与恢复采样；进程：自有 PID、详情、真实 TCP 监听；systemd：自有 active user unit、详情和取消停止；日志：真实输出/暂停/继续/关闭及不存在文件错误；网络：当前主机来源固定、远端 TCP 探测完成。
+3. Docker：自有容器、真实状态摘要/详情、分组停止确认后取消、刷新和过滤草稿；AI：当前主机、模型管理往返、真实审核 HTTP 回答、HTTP 500 故障恢复，切换后无旧资源取消误报。
+4. 诊断目标、systemd 范围/搜索和日志已读内容在分类往返后保留；离开日志关闭流。A/B 工作区独立，三插件往返仅一个活动 Guest，原 SSH Shell 仍能执行并回显标记，无“插件请求正忙”。
+5. 1440×960 深/浅、900×650 深、390×844 浅共四组，三个工作区共 12 张布局截图；真实连续 CPU 值正常、页面无横向溢出（页签/表格各自允许内部滚动），聊天输入区保持可见。已人工审阅桌面监控、Docker、AI 与窄窗口监控截图。AI 上下文内普通复选标签另作同行对齐的细节整理。
+6. 独立上传 UI/WASM、父 DOM/原生 IPC 真实拒绝、按主机保留输入/结果、显式授权、撤销后的资源拒绝、AI 取消后再问、诊断禁用后的任务中心接管和四布局回归保留。
+
+变更文件 Prettier 检查 125 份、Node 语法检查 19 个脚本及本地文档目标检查通过，差异检查通过。最终程序逐字节包含当前三个分发包，防止交付旧包；摘要列表与私钥清理检查记录在 `source-audit.json`。Docker 读取失败时摘要显示不可用而非零，错误同时显示在当前面板；正常和失败断言均保留。
+
+最终原生证据：`.local/plugin-ui-isolation/02bead05-dbd7-4881-8af2-2483062fb1d5`，`component-scenarios.json` 为 14 组，`component-results.json` 为实际请求/主机与终端保持，`results.json` 为 11 组隔离回归，`redesign-*.png` 为三个界面/四布局。夹具临时私钥、SSH 端点和自有远端资源由 finally 清理；本任务源文件/包清单审计、构建/测试日志和程序 SHA256 位于 `.local/system-services-redesign`。
+
+### 发现并修正的问题、限制
+
+迁移后旧测试仍引用被合并目录和七包清单，已更新为新实际结构，保留目录/权限/升级/取消等有效断言。新增分类缓存测试捕获并约束隐藏页生命周期。真实截图发现 AI 旧上下文资源误报，补充资源失效/模型选择回归后重测。进一步用连续真实 CPU 数据验证 390 宽度时，发现迁移漏带 monitor.css 导致图表溢出；样式改由 MonitorView 自身导入，最终四布局全部通过，未以隐藏整个页面溢出掩盖问题。Clippy 指出原七包测试的 take(4) 已失效，移除多余限制。
+
+最终 SDK/core 专项首次在沙箱内无法创建 Windows 测试 junction，转为与工作区回归一致的沙箱外自有测试目录后通过；没有删改安全断言。4 项 ignored 为两项 OS 凭据库显式集成、Linux SDK 专属端到端及真实 Linux PTY 专属测试，本次不宣称通过。旧混合原生脚本仅同步契约和语法检查，未逐个完整重跑；真实功能以上述主套件为准。
+
+旧四插件设置继续留在原数据目录，不自动合并未知内容；上传同 ID 保留，服务插件仍尊重原启停/卸载。WSL df 特殊挂载警告继续可见；不伪装为完整指标。macOS/Linux 原生、Release/签名/安装器、长期压力和破坏性操作穷举未验收。无当前阶段剩余实现依赖，本阶段结束；发布及其他平台验收另行安排。
+
+## 2026-11-05：移除自动运维与批量运维
+
+完成标准：删除两个工具的页面、菜单、搜索、插件包、调度/批量执行链、SDK、IPC 和权限，不保留隐藏入口或空实现；剩余七个插件可用，主机切换、草稿、原终端、上传权限与任务中心保持正常；升级不清空用户数据。
+
+### 已完成的行为和主要文件
+
+- 删除 `plugins/system/{automation,batch}` 及分发包，删除 `crates/automation`、Core/Storage/Application 自动化模块、专属 Tauri 命令、批量队列与脚本启动器，以及桌面/SDK 对应服务、状态、类型、样式和专属验收脚本。
+- 更新 App/导航/终端工具/搜索/工作区/TaskCenter、`plugin-ui-bridge`、Tauri 注册/ACL、Rust/TS SDK 和 Cargo 依赖；保留资源监控、Docker、进程端口、systemd、日志、网络诊断和 AI 七个完整插件。原网络连接选择组件与共享 SSH/文件能力继续供其余功能使用。
+- Host API/Rust SDK/Vue SDK 均为 2.0.0，七包版本 1.1.3。包/Manifest/ABI/wire 格式不变；仅使用保留能力的旧 ^1.x 包继续兼容，新安装请求已移除权限/枚举或使用已移除系统身份时拒绝。
+- `plugin-core/repository/layout.rs` 在旧 SDK 反序列化之前，将两个旧工具及依赖已移除权限的记录原子归档至 `plugins/retired`，不再列出/激活；payload、设置、授权文件与数据库原数据保留。SQL schema 维持 7，迁移序号 5 为空档，新库不建立自动化表，已有表内容不清理，无调度器启动。
+- `core/backup.rs`、`storage/backup.rs`、BackupView 改为 v3 主机/文件夹/偏好备份；旧 v1/v2 读取明确警告跳过命令库，不恢复或执行旧计划。目录层级、循环拒绝、凭据排除与事务回滚断言保留。
+- 验证发现 AI“管理模型”导航已经成功，但自身隐藏会让返回确认误报权限失败；恢复被误删的共享导航/通知桥，并仅对已授权且严格限定为 models 的导航返回无数据确认。后续隐藏页请求与数据响应仍按原上下文代拒绝，单元及原生回归覆盖。
+- PRD、实施计划、架构/决策、使用指南和插件 SDK/包格式/安全文档同步；历史记录按当时状态保留。
+
+### 执行的验证
+
+| 验证                                                               | 结果和关键断言                                                                                                                  |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                                                         | 55 文件、351 项通过；删除专属测试，保留其他功能有效断言，补充旧 API 拒绝与共享导航/通知回归                                     |
+| `cargo test --workspace --offline`                                 | 211 项通过、4 项原有 ignored；覆盖真实 SSH/SFTP 协议、取消/超时、直接命令配额、存储/目录/备份、WASM/权限、七插件激活、Tauri IPC |
+| 七个独立 Guest `cargo test --manifest-path ... --offline --locked` | 7 个 crate、12 项通过，含 AI/网络跨领域拒绝                                                                                     |
+| `npm run typecheck` / `npm run lint`                               | 宿主/公开 SDK/插件类型检查与 ESLint 通过                                                                                        |
+| Rust fmt / `cargo clippy --workspace --all-targets --offline`      | 通过；保留既有 openssh 单元素循环和缓存硬链接回退提示，已修复本次新增 lint                                                      |
+| `node tools/plugin-component-host.mjs`                             | 最终 12 组真实组件场景通过，控制台无错误；七插件全部产生实际 SDK/WASM 请求                                                      |
+| `node tools/plugin-ui-isolation-e2e.mjs --reuse <QA目录>`          | 11 组通过：独立上传 UI/WASM、父 DOM/原生 IPC 越权拒绝、独立草稿、AI 取消后再问、TCP 诊断禁用后任务接管及布局                    |
+| `node tools/tauri.mjs build --debug --no-bundle`                   | 默认 `cn.hiboot.desktop` Windows 调试程序构建成功，七包重新生成；不替换正在使用的正式应用                                       |
+
+最终变更文件 Prettier 检查 96 份、Node 语法检查 17 个脚本、Markdown 本地目标检查与 `git diff --check` 通过。备份解析的最终 lint 整理后，另行复验存储 product/folders 12 项通过。源码/包/ACL 审计确认两个专属目录链已删除、仅剩七包 1.1.3/^2.0.0、无旧原生命令权限；证据为 `.local/remove-tools/source-audit.json`。
+
+两个原生套件使用隔离 SQLite/插件仓库、真实 WebView2 和实际 WASM，不使用 Mock 冒充正式功能。真实 SSH 测试使用任务独占 Ubuntu-24.04/OpenSSH、容器、进程、TCP 端口、日志和 user systemd unit；两个 HostId 指向同一隔离端点，验证工作区隔离，不表示两台物理服务器互操作。AI 使用受控本机 HTTP 验证正常回答、HTTP 500 与恢复、模型管理返回及取消后再问，不调用外部付费模型。
+
+| 构件       | 核验内容                                             | 最终 SDK 请求累计数 |
+| ---------- | ---------------------------------------------------- | ------------------- |
+| 资源监控   | 实际 CPU、磁盘/网络页、恢复采样、有界轮询            | 12                  |
+| Docker     | 自有容器列表/详情、停止确认后取消、刷新和过滤草稿    | 8                   |
+| 进程与端口 | 自有 PID、详情、监听 TCP 端口                        | 7                   |
+| 系统服务   | 自有 active user unit、详情、取消停止                | 5                   |
+| 日志       | 含引号/中文路径、输出/暂停/继续/关闭、缺失文件错误   | 10                  |
+| 网络诊断   | 终端入口固定来源，真实远程 TCP 探测完成              | 5                   |
+| AI 助手    | 当前主机、模型选择、管理模型往返、HTTP 回答/故障恢复 | 8                   |
+
+全部配置入口均不选主机、不连接、不加载功能 iframe 或激活业务 WASM；七插件连续切换仅保留一个活动 Guest，缓存 Docker 过滤草稿/刷新正常，A/B 主机页面独立，最后原 SSH shell 仍能执行并回显标记，全程未触发请求忙保护。旧启用记录在首次启动被归档，设置标记逐字保留，旧激活/IPC 拒绝，备份 v3 无 entries/commandGroups。上传沙箱检查记录的 CSP 错误为预期拒绝，未出现其他控制台异常。
+
+最终原生证据位于 `.local/plugin-ui-isolation/3fd3b464-ef52-4dd2-88e1-af862daf5578`：`component-scenarios.json`（12组）、`component-results.json`（七项请求/SSH会话保持）、`results.json`（11组）、逐项截图及布局截图。已人工审阅资源监控、AI 故障恢复与浅色窄布局截图。SSH 夹具目录 `.local/plugin-components/c77700c8-0622-43a3-a416-ab44112e663c` 仅保留诊断资料和公钥，临时私钥及远端自有运行资源已由 finally 清理。构建/完整测试与静态检查日志位于 `.local/remove-tools`；Windows 程序为 `.local/remove-tools/ServerDeck.exe`，大小及 SHA256 记录在 `build-artifact.json`。
+
+### 失败修正、限制与风险
+
+首次验证捕获残留 Tauri allow-batch/automation ACL，已删除并成功重建；Rust 首轮捕获备份层级测试仍断言 v2，更新为 v3 后保留原层级/循环拒绝断言并全量通过；独立 Guest 测试清理遗留枚举后通过。AI 自身导航错误已通过实际原生往返验证修复，未放宽隐藏页数据访问。自动审批拒绝进一步删减共享 SSH 输入通道，理由为可能影响其他功能；该删除未执行，采用保留共享能力的安全方案完成专属代码移除。
+
+4 项 ignored 分别为 Linux SDK 专属端到端、真实 Linux PTY 专属验收与两项 OS 凭据库显式集成测试，本次不宣称它们通过。七插件已另行进行上述真实 Linux SSH 验证。旧版混合原生脚本移除专属步骤并更新共用 helper 后仅做语法检查，未逐个重跑；非本次范围的破坏性远端操作未穷举。WSL 的 `/run/credentials/systemd-sysusers.service` df 不可用警告保留并可见；不伪装为完整指标。未验收 macOS/Linux 原生、Release/签名/安装器或长期压力，保留既有 Monaco 大 chunk 提示。
+
+用户数据不在本次删除范围，旧记录不再运行；依赖已删除 SDK 能力的自定义插件需要重构后重新安装。无当前阶段剩余实现依赖；发布与其他平台验收另行安排，本阶段结束。
+
+## 2026-11-04：配置入口、请求循环与九插件逐项验证
+
+完成标准：运维工具侧栏只打开全部已安装插件的配置，不选择/连接主机；主机工具菜单直接使用当前主机。连续打开九个插件、A/B 切换与设置往返保留草稿；无重复请求反馈和实例配额耗尽；原权限、任务、审批和终端继续可用。
+
+本轮确认上次统一遗漏的产品问题：侧栏误走功能入口；相同上下文反复替换响应式对象触发 ResourceView 查询反馈；隐藏 VM 累积，打开第九个时触发八实例配额。修复侧栏独立配置事件与模块归属；SDK 跳过未变化快照，列表监听原始值；隐藏时停止交互资源并释放 VM，返回时将绑定/激活串行完成后才开放页面请求。原生 A/B 快速切换又复现缓存 iframe 虽处于 inert、却已显示而使首次点击无效：准备期间用 v-show 隐藏 frame 并显示准备状态，保留 DOM/草稿，激活完再显示，前端断言与真实首次点击回归覆盖。保留崩溃状态及显式重启；队列 24、运行时八实例、速率与审批保护不变。九个系统包升至 1.1.2，1.1.1 system 安装保留启停、配置、上传源和卸载墓碑后升级。
+
+主要文件：AppNavigation/App、workspace/plugins stores、PluginView；公开 SDK runtime/ResourceView；application/plugins、bundled_plugins、plugin-runtime/manager；上述回归测试、九个清单/标准包与兼容资产；新增 tools/plugin-component-host.mjs、plugin-components-checks.mjs，复用既有 ops-fixture.py 和原生隔离驱动。PRD、架构/决策、使用/开发说明同步。
+
+### 逐项真实验收
+
+Windows WebView2 + 真实 IPC/WASM + Ubuntu-24.04/OpenSSH。临时凭据、SSH 指纹、容器、进程、TCP/UDP 监听、日志与 user systemd 服务均为本任务独占；两个不同 HostId 使用同一隔离 SSH 端点，覆盖工作区隔离，不代表两台物理服务器互操作。AI 使用受控本机 HTTP 服务检验真实请求链和错误恢复，不使用外部付费模型。
+
+| 构件       | 已核验行为                                                                        | 最终 SDK 请求累计数 |
+| ---------- | --------------------------------------------------------------------------------- | ------------------- |
+| 资源监控   | 真实 CPU 样本，磁盘/网络页，有界轮询，A/B 返回重新获取监控                        | 12                  |
+| Docker     | 真实自有运行容器列表/详情，停止确认后取消，刷新，草稿过滤保留，再激活后读回容器   | 8                   |
+| 进程与端口 | 真实自有 PID 及详情，真实监听 TCP 端口，静态列表不反复重载                        | 7                   |
+| 系统服务   | 真实自有 user unit 的 active 状态、详情、停止确认取消                             | 5                   |
+| 日志       | 含引号/中文路径的真实输出，暂停/继续/关闭，不存在路径明确失败                     | 9                   |
+| 网络诊断   | 当前主机固定来源，无额外主机选择，真实远程 TCP 探测完成                           | 5                   |
+| 批量运维   | 默认预选入口主机、手动加入 B，预览/宿主审批，两 HostId 实际 printf 输出与完成状态 | 5                   |
+| 自动运维   | WASM 保存条目、预选当前主机、预览/宿主审批、实际执行与 Success 历史               | 12                  |
+| AI 助手    | 固定入口主机、跨主机默认关闭，真实 HTTP 回答、500 错误、重新发送成功              | 7                   |
+
+每项等待 2.2 秒检查消息增长：静态资源列表最多 2 次，普通页最多 8 次，日志最多 40 次；上述累计包括整轮主动操作，不能当作每秒速率。计数通过未来 iframe 的 MessagePort 观测，不修改响应/业务结果，并要求九项计数均非零。全部配置入口核验零功能 iframe、零运行 VM、无主机弹窗；每次功能切换等待仅一个 active VM。最后九个 VM 状态均存在但只有一个 active，Docker 旧 frame 输入保持，原 SSH SessionId 执行分段 marker 的 printf 后出现完整输出。全程未触发“插件请求正忙”。
+
+原生最终 13 组通过，results.json.errors 为空，证据在 `.local/plugin-ui-isolation/41df4c63-44f9-4d72-888d-e10ee22ff7ab/{results.json,component-results.json,component-*.png,components-terminal.png}`，日志 `.local/plugin-entry-fix/components-native-final.log`。本轮最终产品源码已全新构建 QA 程序，包括快速切换的准备状态修复。已查看监控、Docker、AI 故障恢复截图。测试 finally 清理本任务创建的远程资源和 Windows 私钥；不清理旧任务或用户数据。
+
+### 单元、构建与回归
+
+原有 Windows 隔离原生回归 14 组全部通过：上传 UI/WASM、未授权拒绝、父 DOM/native IPC 越权阻断、A/B 首次点击与草稿、设置往返、WASM 保存、AI 取消再问、真实本机诊断停用后继续与任务中心停止、自动化搜索预选且未执行、1440 暗/亮、900×600 与 390×844 无横向溢出。结果/截图位于 `.local/plugin-ui-isolation/ede4e28f-39fa-4f41-90d1-fa47ec6d7eb6`，日志 isolation-native-final.log；errors 仅为主动越权探针的预期 CSP 拒绝，脚本排除该明确组合后断言无其他错误。旧脚本仍点击配置侧栏找功能，已同步配置断言及显式全局功能；UI-only 夹具不再打开 SSH；复用 QA 使用唯一主机/条目名避免同名歧义。早期终端输出的中文显示异常不代表源码标签乱码，实际定位问题如上。
+
+默认 cn.hiboot.desktop 配置的 Windows debug/no-bundle 构建已通过，包含九个标准包、桌面类型/Vite 与原生编译。可运行文件 `.local/plugin-entry-fix/ServerDeck.exe`，SHA256 `384182E480340A18CA3DCEDEDACD977191A9447D9ECB19E883AAB938485B1771`，证据 build-default.log/build-artifact.json。未启动或替换用户正在使用的正式应用，未构建签名安装器。最终自有 SSH 目录、标签容器和私钥的额外只读清理核验见 cleanup.log。
+
+- 前端 `npm test`：57 文件、361 项通过，`.local/plugin-entry-fix/tests.log`。回归先复现相同快照导致 capabilities 查询 21 次而非 1 次，修复后只查询一次，见 repro-runtime.log 与最终单测。覆盖配置九项、最新 owner、绑定/激活/释放串行、缓存页激活前不可请求、同主机快速切贡献的去重与激活。
+- Rust `cargo test -p serverdeck-plugin-core -p serverdeck-plugin-runtime -p serverdeck-application --lib --offline`：72 项通过（39 application、21 core、12 runtime），1 项原有 Linux SDK 通用集成 ignored，rust-tests.log。新增九个实际 WASM 正向/反向共 18 次激活/health/释放；票据失效测试在重新激活后继续验证旧票据不可用；崩溃状态不因隐藏而清除；系统升级测试实际从 1.1.1 升至 1.1.2。
+- 桌面/SDK 类型检查、全量严格 ESLint、三包含 tests 的 Clippy、全工作区 fmt、Node 脚本语法和差异空白检查已通过，日志在 `.local/plugin-entry-fix`。保留既有单元素循环、缓存硬链接回退和 Monaco 大包提示。
+
+本轮失败与修正：测试新增 shutdown 返回类型写错，改正后重跑 Rust；旧票据用例补上新的页面重新激活步骤，保留原有效安全断言。原生状态查询合法 BUSY 需等待，Playwright 不保留拒绝普通对象的字段，改为浏览器内返回错误值后只重试 BUSY。首次原生计数拦截不可写的 Tauri invoke 未生效，废弃该轮频率结论，改为真实 iframe SDK 消息计数并以九个非零断言重新通过。临时 SSH pid 文件删除存在竞态，增加进程等待和已消失 pid 文件处理；一处已停止的残留目录经绝对路径/UUID/文件白名单核验后清除，最终清理无错误。早期失败截图/日志保留，不作为通过证据。
+
+限制与风险：本轮不是每个破坏性操作和所有参数的穷举；容器/服务停止仅验证确认取消，未操作用户资源。监控保留 WSL `/run/credentials/systemd-sysusers.service` 的 df 挂载警告，真实 CPU/网络仍有数据，不将部分不可用标为完整采集。未运行 macOS/Linux 桌面、长期压力、签名安装器或全部历史远端 SDK 测试；上述真实 SSH 专项独立通过。草稿只保留在本次运行内，第三方插件须重新获取失效句柄。当前阶段不依赖外部服务，不推进后续发布阶段。
+
+## 2026-11-04：插件使用统一
+
+完成标准：单主机功能进入当前设备标签，不再重复选择主机；详情/权限/启停及包声明的 settings 页面归属设置；A/B 主机与功能/SSH/SFTP/设置切换保留独立草稿和结果，旧页面/晚到请求不能改绑新目标。批量、自动化保留多目标选择并只在首次进入时预选入口主机。已有 system 安装更新至 1.1.1，启停、配置、上传安装及卸载记录保持。
+
+真实实现：设备标签和插件页面缓存分离；宿主按权限自动建立/复用连接，保留指纹核验和失败重试。页面 owner 防止旧释放清除新上下文，桥检查活动页面与上下文代；隐藏时取消交互、停止日志流，保留已读内容，监控恢复时重开。AI 默认入口主机，跨主机显式开启；网络诊断默认入口来源，仍可选择本机。插件详情和自身 settings 贡献与功能入口分离，无 UI 包仅在管理中显示。系统包启动升级复用原子仓库和上一代备份，仅更新较低版本的 system 记录，在记录提交中保留 enabled，之后绑定当前系统预置授权，不改变 schema/SDK/IPC/依赖。
+
+主要文件：`apps/desktop/src/stores/workspace.ts`、`stores/plugins.ts`、`App.vue`、`PluginView.vue`、`PluginPage.vue`、导航/管理组件、`plugin-pages.ts`、`plugin-ui-bridge.ts` 和 `PluginFrame.vue`；五个相关系统插件前端、SDK ResourceView、九个 manifest/标准包及兼容资源；`crates/plugin-core/src/repository.rs`、`crates/application/src/bundled_plugins.rs`；对应单测、原生测试与导航脚本，PRD/架构/决策/插件与使用指南。
+
+| 验证         | 实际结果与证据                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 全量前端回归 | 57 文件、357 项通过，`.local/plugin-workspaces/tests.log`。包含 A/B 表单隔离、同设备单标签、SSH/设置往返复用、无上下文统一选择、连接失败重试、指纹等待、旧 owner 释放、新旧结果隔离、AI 当前主机/显式跨主机、模型返回刷新、上下文释放失败可重试、全局搜索不借用旧主机、批量预选与多选、诊断来源、本机切换、监控恢复及插件自有 settings。                                                                                                                                                                                                                                               |
+| Rust 相关包  | `cargo test -p serverdeck-plugin-core -p serverdeck-application --lib --offline`：59 项通过，1 项 Linux SDK 环境依赖 ignored，`.local/plugin-workspaces/rust-tests-isolated.log`。新集成测试实际将 1.1.0 system 仓库升级至 1.1.1，核验启用/禁用、配置、上一版本、当前授权、重复启动幂等、禁止降级、上传源不可替换及卸载墓碑。原有安装失败回滚/资源/权限测试保留。                                                                                                                                                                                                                      |
+| 构建         | 九个 WASM/UI 标准包、桌面 TypeScript/Vite 生产构建通过，`.local/plugin-workspaces/build.log`。Windows Tauri debug/no-bundle 构建通过，记录于 `native-final.log`，使用独立 QA identifier 和绝对数据目录。                                                                                                                                                                                                                                                                                                                                                                               |
+| 最终原生     | `node tools/plugin-ui-isolation-e2e.mjs`：14 组通过，`.local/plugin-workspaces/native-final.log`；程序及 JSON/截图位于 `.local/plugin-ui-isolation/0e524b15-4ffc-4c35-8ad2-f9f62b6d943a`。真实 WebView2、标准包、WASM 和 SQLite；通用上传插件在两台已登记但不连接 SSH 的 QA 主机间切换，分别保留 iframe、输入与输出，设置返回后仍能调用实际 WASM。另有独立上传包授权拒绝/加载、自动化保存且未执行、真实本机 TCP 任务停用后保留/任务中心停止、受控 HTTP AI 回答→取消→再问、父 DOM/native IPC 越权探针拒绝；从主机搜索自动化新条目时刷新缓存目录并预选当前主机，关闭后确认没有执行历史。 |
+| 布局         | 原生 1440 暗/亮、900×600、390×844 截图与横向溢出断言通过；已查看 `dark-1440.png`、`tools-light-390.png` 和 `host-workspace-draft.png`，工作区填充和窄屏布局正常。                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 静态检查     | 全量 ESLint、桌面/SDK 类型检查、两个相关 Rust 包 Clippy（含 tests）、工作区 Rust fmt、变更源码/文档 Prettier、五份修改脚本 Node 语法、Git 差异空白检查通过。日志在 `.local/plugin-workspaces`。Clippy 保留既有 `core/openssh.rs` 单元素循环提示，构建保留 Monaco 大包与缓存硬链接回退提示。                                                                                                                                                                                                                                                                                            |
+
+发现与修复：保留 AI iframe 后返回页面无法看到后来新增的模型，已在恢复活动状态时刷新共享列表，补回归并由最终真实 HTTP 验收通过。自动化缓存页恢复后目录可能缺少后来保存的条目，搜索意图会等待目录刷新后再处理，补单测并由原生验证当前主机预选且未提交任务；上下文释放失败保持可重试。较早原生脚本仍假定功能页显示来源，已改为从设置检查来源，并验证回到原功能。新增菜单用例最初修改了共享清单夹具，已改为复制清单，最终全量通过。
+
+环境失败：默认沙箱临时目录导致 Vite 缓存 rename/部分 Rust 临时文件失败，改用本任务 `.local/plugin-workspaces/tmp`。沙箱内回环 HTTP/WebView2 端口及 Windows Junction 不可用；经批准在沙箱外运行独立 QA 后，Rust 与原生完整通过。最后类型检查还发现旧终端自动化状态引用未清理，已改为明确更新目标页面；补测脚本的关闭按钮已对齐现有“关闭对话框”。历史失败日志保留，不据此宣称那些轮次通过。原生 `results.json.errors` 为主动越权探针产生的预期 CSP 拒绝，脚本核验没有主机创建副作用且无其他错误。
+
+未验证/风险：Linux SDK 真实 SSH 集成保持 ignored，本轮没有真实 Linux 服务器功能端到端或 macOS/Linux 原生验收；未执行旧版 `plugin-native-e2e`/`ui-server-e2e` 全流程，仅同步入口及语法。第三方 UI 须遵守隐藏/恢复及资源重取约定，不能把旧文件或日志句柄当作持久草稿；本次只验证官方能力与通用 UI/WASM 夹具。草稿仅当前运行内保留，隐藏日志流停止后需显式重新读取，已提交任务/计划继续由宿主管理。未重建签名/安装器或替换运行中的正式应用，未修改用户正式主机、凭据或配置。后续远程/跨平台验收依赖隔离 SSH 与对应平台环境，本阶段结束。
+
 ## 2026-11-04：插件源码归属与 UI v4
 
 完成目标：九个插件各自拥有 frontend/backend/清单/UI/相关测试；公开 TypeScript/Vue SDK 包含类型、客户端、状态与公共 UI。宿主移除原业务页面和固定渲染器，仅保留公共服务、插件管理/安全壳与 SDK/WASM 桥。新增 UI4 包内 JS/CSS 和通用 frontend 贡献，真实新业务插件无需修改宿主类型或路由；系统和上传共用构建/校验/加载/调用。旧 v1 表单及 v2/v3 标准视图继续兼容，既有包不强制重装，未更改数据库 schema 或用户数据。

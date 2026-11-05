@@ -461,7 +461,7 @@ fn rejects_paths_aliases_duplicate_files_and_file_directory_conflicts() {
 
 #[test]
 fn rejects_incompatible_versions_permissions_unknown_fields_links_and_corruption() {
-    for api in ["^2.0", "not a range"] {
+    for api in ["^3.0", "not a range"] {
         let mut p = package("1.0.0");
         p.manifest.api_version = api.into();
         assert!(validate(&p).is_err());
@@ -509,14 +509,14 @@ fn rejects_incompatible_versions_permissions_unknown_fields_links_and_corruption
 #[test]
 fn tool_packages_require_matching_contributions_and_standard_views() {
     let original: Value = serde_json::from_slice(include_bytes!(
-        "../../../../plugins/system/packages/network.sdplugin"
+        "../../../../plugins/system/packages/assistant.sdplugin"
     ))
     .unwrap();
     let validate_json =
         |p: &Value| Package::validate_bytes(&serde_json::to_vec(p).unwrap(), std::env::consts::OS);
     assert!(validate_json(&original).is_ok());
     let mut p = original.clone();
-    p["manifest"]["contributions"][0]["tool"] = serde_json::json!("batch");
+    p["manifest"]["contributions"][0]["tool"] = serde_json::json!("network");
     assert!(
         validate_json(&p).is_err(),
         "manifest and UI tool types must match"
@@ -841,4 +841,139 @@ fn migration_refuses_a_conflicting_payload_without_overwriting_it() {
     assert!(Repository::open(root).is_err());
     assert_eq!(fs::read(legacy.join("keep.txt")).unwrap(), b"old bytes");
     assert!(repo.read_file(&plugin, "readme.txt").is_ok());
+}
+
+#[test]
+fn removed_contracts_are_archived_without_loading_assets_or_deleting_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("plugins");
+    let repo = Repository::open(root.clone()).unwrap();
+    let retained = repo
+        .install(input(&save(dir.path(), &package("1.0.0")), None))
+        .unwrap();
+    let base: Value =
+        serde_json::from_slice(&fs::read(root.join("packages/dev.example/record.json")).unwrap())
+            .unwrap();
+    let legacy = format!(
+        "{}automation",
+        serverdeck_core::identity::LEGACY_PLUGIN_PREFIX
+    );
+    let mut originals = Vec::new();
+    for (id, permission) in [
+        ("cn.hiboot.plugins.batch", "batch.run"),
+        ("cn.hiboot.plugins.automation", "automation.manage"),
+        (legacy.as_str(), "automation.manage"),
+        ("dev.old-task-provider", "tasks.create"),
+    ] {
+        let mut record = base.clone();
+        record["current"]["manifest"]["id"] = serde_json::json!(id);
+        record["current"]["manifest"]["permissions"] = serde_json::json!([permission]);
+        record["current"]["enabled"] = serde_json::json!(true);
+        let folder = root.join("packages").join(id);
+        fs::create_dir_all(&folder).unwrap();
+        let bytes = serde_json::to_vec(&record).unwrap();
+        fs::write(folder.join("record.json"), &bytes).unwrap();
+        let data = root.join("data").join(id);
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("settings.json"), b"retained user settings").unwrap();
+        originals.push((id.to_owned(), bytes));
+    }
+    drop(repo);
+    let reopened = Repository::open(root.clone()).unwrap();
+    assert_eq!(
+        reopened
+            .list()
+            .unwrap()
+            .iter()
+            .map(|p| p.manifest.id.as_str())
+            .collect::<Vec<_>>(),
+        [retained.manifest.id.as_str()]
+    );
+    let archives = fs::read_dir(root.join("retired"))
+        .unwrap()
+        .map(|p| p.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(archives.len(), originals.len());
+    for (id, bytes) in originals {
+        assert!(matches!(reopened.detail(&id), Err(Error::NotFound)));
+        assert!(
+            archives
+                .iter()
+                .any(|p| fs::read(p.join("record.json")).unwrap() == bytes)
+        );
+        assert_eq!(
+            fs::read(root.join("data").join(&id).join("settings.json")).unwrap(),
+            b"retained user settings"
+        );
+    }
+    assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 1);
+    for id in ["cn.hiboot.plugins.batch", "cn.hiboot.plugins.automation"] {
+        let mut old = package("1.0.0");
+        old.manifest.id = id.into();
+        assert!(old.manifest.validate(std::env::consts::OS).is_err());
+    }
+}
+
+#[test]
+fn merged_system_records_are_archived_but_uploaded_identities_and_settings_stay_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("repo");
+    let repo = Repository::open(root.clone()).unwrap();
+    repo.install(input(&save(dir.path(), &package("1.0.0")), None))
+        .unwrap();
+    let template: Value =
+        serde_json::from_slice(&fs::read(root.join("packages/dev.example/record.json")).unwrap())
+            .unwrap();
+    let ids = [
+        "cn.hiboot.plugins.resources",
+        "cn.hiboot.plugins.processes",
+        "cn.hiboot.plugins.logs",
+        "io.serverdeck.plugins.network",
+    ];
+    let mut originals = Vec::new();
+    for id in ids.iter().chain(["cn.hiboot.plugins.network"].iter()) {
+        let mut record = template.clone();
+        record["current"]["manifest"]["id"] = serde_json::json!(id);
+        record["current"]["source"] = serde_json::json!(if *id == "cn.hiboot.plugins.network" {
+            "user"
+        } else {
+            "system"
+        });
+        let folder = root.join("packages").join(id);
+        fs::create_dir(&folder).unwrap();
+        let bytes = serde_json::to_vec(&record).unwrap();
+        fs::write(folder.join("record.json"), &bytes).unwrap();
+        let data = root.join("data").join(id);
+        fs::create_dir(&data).unwrap();
+        fs::write(data.join("settings.json"), b"preserved").unwrap();
+        originals.push((id.to_string(), bytes));
+    }
+    drop(repo);
+    let repo = Repository::open(root.clone()).unwrap();
+    assert_eq!(repo.list().unwrap().len(), 2);
+    assert_eq!(
+        repo.detail("cn.hiboot.plugins.network").unwrap().source,
+        PluginSource::User
+    );
+    let archives = fs::read_dir(root.join("retired"))
+        .unwrap()
+        .map(|p| p.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(archives.len(), 4);
+    for (id, bytes) in originals {
+        assert_eq!(
+            fs::read(root.join("data").join(&id).join("settings.json")).unwrap(),
+            b"preserved"
+        );
+        if id == "cn.hiboot.plugins.network" {
+            continue;
+        }
+        assert!(matches!(repo.detail(&id), Err(Error::NotFound)));
+        assert!(
+            archives
+                .iter()
+                .any(|path| fs::read(path.join("record.json")).unwrap() == bytes)
+        );
+    }
+    assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 2);
 }

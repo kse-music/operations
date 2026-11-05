@@ -1,11 +1,12 @@
 import { terminalAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import { resources } from './native-release-qa.mjs';
 import { deflateSync } from 'node:zlib';
+import { fileURLToPath } from 'node:url';
 export async function remotePython({ page, hostId }, script) {
   assert(hostId, 'fixture execution needs an explicit host context');
   const nonce = randomUUID().replaceAll('-', '');
@@ -18,51 +19,103 @@ export async function remotePython({ page, hostId }, script) {
       .replaceAll("'__SD_OP'+'S_END__'", "'__SD_OP'+'S_END_'+sd_nonce+'__'");
   const encoded = deflateSync(Buffer.from(script)).toString('base64');
   const command = `python3 -c 'import base64,zlib;exec(zlib.decompress(base64.b64decode("${encoded}")))'`;
-  // Fixture setup/cleanup uses the real bounded SSH execution API rather than terminal scrollback.
-  // No secret read, external ssh process, local exec IPC or fake result is introduced.
-  const job = await page.evaluate(
-    async ({ hostId, command }) => {
-      const invoke = window.__TAURI_INTERNALS__.invoke;
-      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
-      const host = (await invoke('host_list')).hosts.find((h) => h.id === hostId);
-      if (!host) throw new Error('fixture host missing');
-      const ops = pinia._s.get('operations');
-      await ops.open(host);
-      for (let n = 0; n < 100; n++) {
-        const c = ops.connections[hostId];
-        if (c?.state === 'connected' && c.session)
-          return await invoke('batch_start', {
-            input: {
-              targets: [{ hostId, sessionId: c.session.id }],
-              operation: { kind: 'command', command },
-              concurrency: 1,
-              timeoutSecs: 90,
-              confirmed: true,
-            },
-          });
-        if (['failed', 'awaiting_trust'].includes(c?.state))
-          throw new Error('fixture needs an explicitly trusted authenticated connection');
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      throw new Error('fixture connection deadline');
-    },
-    { hostId, command },
+  // Use an owned, explicitly granted fixture with the retained bounded Execute capability.
+  const id = `dev.qa.fixture-${nonce}`;
+  const folder = fileURLToPath(new URL('../.local/fixture-exec/', import.meta.url));
+  await mkdir(folder, { recursive: true });
+  const fixture = JSON.parse(
+    await readFile(
+      new URL('../plugins/system/packages/services.sdplugin', import.meta.url),
+      'utf8',
+    ),
   );
-  let row;
-  for (let n = 0; n < 1000; n++) {
-    const value = await page.evaluate(
-      (id) =>
-        window.__TAURI_INTERNALS__
-          .invoke('batch_list')
-          .then((rows) => rows.find((r) => r.id === id)),
-      job.id,
-    );
-    if (value?.finished) {
-      row = value.rows[0];
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
+  fixture.manifest = {
+    ...fixture.manifest,
+    id,
+    name: 'Owned SSH fixture',
+    permissions: ['ssh.execute', 'ui.contribute', 'network.run'],
+  };
+  const source = path.join(folder, `${id}.sdplugin`);
+  await writeFile(source, JSON.stringify(fixture), { flag: 'wx' });
+  const row = await page.evaluate(
+    async ({ id, source, hostId, command }) => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const bootstrap = await invoke('app_bootstrap');
+      if (!bootstrap.dataDirectory.replaceAll('\\', '/').includes('/.local/'))
+        throw new Error('Fixture requires an isolated QA profile');
+      const plugin = await invoke('plugin_install', {
+        input: { path: source, developmentConfirmed: true },
+      });
+      let value, failure;
+      try {
+        await invoke('plugin_grant', {
+          id,
+          input: {
+            expectedRevision: plugin.revision,
+            permissions: plugin.manifest.permissions,
+            operations: ['ssh.execute', 'ui.contribute', 'network.run'],
+            readRoots: [],
+            writeRoots: [],
+            confirmed: true,
+          },
+        });
+        await invoke('plugin_set_enabled', { id, enabled: true });
+        const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+        const ops = pinia._s.get('operations');
+        const host = (await invoke('host_list')).hosts.find((h) => h.id === hostId);
+        if (!host) throw new Error('Fixture host missing');
+        await ops.open(host);
+        let session;
+        for (let n = 0; n < 100; n++) {
+          const c = ops.connections[hostId];
+          if (c?.state === 'connected' && c.session) {
+            session = c.session.id;
+            break;
+          }
+          if (['failed', 'awaiting_trust'].includes(c?.state))
+            throw new Error('Fixture requires an explicitly trusted authenticated connection');
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        if (!session) throw new Error('Fixture connection deadline');
+        await invoke('plugin_context', {
+          id,
+          input: { hostId, opsSession: session, fileSession: null },
+        });
+        const operation = { kind: 'execute', command, timeoutSecs: 30 };
+        const request = () =>
+          invoke('plugin_capability', {
+            id,
+            request: { apiVersion: 1, requestId: crypto.randomUUID(), operation },
+          });
+        const pending = await request();
+        const review = pending.result?.confirmationRequired;
+        if (
+          pending.error?.code !== 'PLUGIN_CONFIRMATION_REQUIRED' ||
+          review?.pluginId !== id ||
+          review.hostId !== hostId ||
+          review.description !== command
+        )
+          throw new Error('Unexpected fixture approval');
+        await invoke('plugin_approve', { id: review.id, confirmed: true });
+        const reply = await request();
+        if (reply.error) throw new Error(reply.error.message);
+        if (reply.result.truncated)
+          throw new Error('Fixture output exceeded the bounded capability');
+        value = reply.result;
+      } catch (error) {
+        failure = error;
+      }
+      try {
+        await invoke('plugin_uninstall', { input: { id, clearData: true, confirmed: true } });
+      } catch (cleanup) {
+        if (failure) throw new AggregateError([failure, cleanup], 'Fixture and cleanup failed');
+        throw cleanup;
+      }
+      if (failure) throw failure;
+      return value;
+    },
+    { id, source, hostId, command },
+  );
   assert.equal(row?.state, 'completed', 'real SSH fixture execution must complete');
   assert.equal(row.exitCode, 0, 'real SSH fixture exit status');
   const text = row.stdout.replace(/\s/g, '');

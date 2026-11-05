@@ -32,7 +32,6 @@ const props = defineProps<{ tab: TerminalPaneModel; active: boolean }>();
 const emit = defineEmits<{
   close: [];
   server: [host: Host];
-  automation: [host: Host];
   network: [host: Host];
   action: [key: string, name: string];
   files: [host: Host, path: string | undefined, pane: string];
@@ -68,7 +67,6 @@ const menuActions = computed(() => [
   { key: 'find', label: '查找', disabled: false },
   ...(props.tab.host
     ? [
-        { key: 'automation', label: '自动化', disabled: false },
         { key: 'server', label: '服务器管理', disabled: false },
         { key: 'files', label: 'SFTP 文件', disabled: false },
         ...(['failed', 'disconnected'].includes(props.tab.state)
@@ -341,9 +339,6 @@ function runMenuAction(key: string): void {
       break;
     case 'find':
       void toggleFind();
-      break;
-    case 'automation':
-      if (props.tab.host) emit('automation', props.tab.host);
       break;
     case 'server':
       if (props.tab.host) emit('server', props.tab.host);

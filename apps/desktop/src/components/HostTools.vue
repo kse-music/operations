@@ -3,7 +3,7 @@ import { FolderSync, SquareTerminal, Wrench, ChevronDown } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { messages, type WorkspaceView } from '../types/product';
 import { usePluginsStore } from '../stores/plugins';
-import { primaryPluginPage } from '../services/plugin-pages';
+import { hasPluginFunction, primaryPluginPage } from '../services/plugin-pages';
 import PluginIcon from './PluginIcon.vue';
 const plugins = usePluginsStore();
 
@@ -16,7 +16,9 @@ const tools = [
   { view: 'terminals', label: 'SSH 终端', icon: SquareTerminal },
   { view: 'files', label: 'SFTP 文件', icon: FolderSync },
 ] as const;
-const enabled = computed(() => plugins.installed.filter((plugin) => plugin.enabled));
+const enabled = computed(() =>
+  plugins.installed.filter((plugin) => plugin.enabled && hasPluginFunction(plugin)),
+);
 const open = ref(false),
   trigger = ref<HTMLButtonElement>(),
   menu = ref<HTMLElement>();

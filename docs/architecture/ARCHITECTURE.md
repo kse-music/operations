@@ -1,5 +1,43 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-05：系统服务五合一与界面布局
+
+分发清单仅保留 services/docker/assistant。原资源、进程、日志、诊断的 frontend/测试迁入 services/frontend 的各自子目录；现有 systemd 列表成为 ServiceUnits。统一 App 以一个 server 贡献和五分类呈现，通过 KeepAlive 最多缓存五页。SDK usePluginVisibility 将 document/宿主可见性与 Vue 激活状态合并；采样器、资源列表、日志和诊断轮询只在自己的激活页运行。离开日志停止流而保留缓冲/输入，返回监控重新获取资源；隐藏页迟到列表结果被代号拒绝。Docker 两类列表同样缓存输入并在离开时清除详情与待确认操作。
+
+Host/Rust/Vue SDK 升至 2.1：只对 UI v4 扩展 operations.sections 为概览/磁盘/网络/诊断及原运维分类；v2/v3 保持原分类限制，ABI/wire 不变。serverPluginFor 继续按声明匹配，不按内置 ID 路由。网络全局入口通过显式 diagnostics 分类，只有真实声明此分类和 network.run 的包允许无主机打开，不让其他服务器分类隐式选主机。ToolInvoke 的 network 合同仍对上传开放；旧 monitor、operations、network UI 分别复用合并包或兼容资产，不依赖删除的分发包。
+
+服务 Guest 只允许监控、进程/端口/systemd、日志和网络能力；继续拒绝 Docker/AI/任意 execute/设置。逐请求 Host 授权、精确目标确认、队列和资源配额保持。Repository 启动前置归档旧四项 current.source=system（含旧域名）记录；上传源和用户数据保留，services 标准升级仍保存启停/配置/卸载墓碑。无新依赖、数据库或 IPC。
+
+界面采用统一紧凑标题、主机条、五分类导航、搜索工具栏和有界表格；Docker 摘要来自真实列表，不单独伪造统计。AI 将对话与上下文分列且输入区常驻，收起上下文不清除授权草稿，快捷问题不发起请求。
+
+## 2026-11-05：移除两个工具及专属执行链
+
+分发清单、前端路由/搜索/终端菜单、任务中心、桥白名单、Rust/TS SDK、Tauri 命令/ACL 与 Cargo Workspace 同步移除自动运维和批量运维。删除两个完整插件、serverdeck-automation、Core/Storage/Application 业务模块、批量队列和自动化脚本启动器。serverdeck-tasks 保留网络诊断与 AI/插件共用的有界 SSH 命令执行；共享输入通道、编码、取消、配额和 SSH/SFTP 实现继续保留。
+
+Repository 在反序列化 SDK 类型前，通过有界原始记录识别已移除身份/权限，原子移动 packages 记录至 retired，保留 payload、授权文件与 data。新包校验拒绝已移除身份和权限；旧记录不进入列表、资源加载或激活。故障继续传播，拒绝链接和越界路径。
+
+数据库版本维持 7，迁移序号 5 保留为空档：新数据库不再创建旧业务表，已有表及数据不改写，初始化不再构造或启动调度器。备份 v3 移除命令组/条目 DTO 与 SQL；v1/v2 只提取主机/偏好并明确警告跳过旧内容，不恢复或执行旧计划。Host API/Rust SDK/Vue SDK 2.0 声明接口移除；保留 v1.4 能力范围协商和 ABI/wire 1，旧保留能力的包仍可用。
+
+七个系统包 1.1.3 保留用户启停与设置后升级。模型管理导航为已授权、无数据返回的本地界面动作，成功离开自身页面后只返回空回执；其他请求继续复核活动 owner 和上下文代。验证包括旧启用记录归档、数据保留、删除接口拒绝及七插件真实 SSH，见本轮插件验证记录。
+
+## 2026-11-04：配置入口与运行时回归修复
+
+AppNavigation 仅发出 pluginSettings 事件，使用全部 installed 身份，无需功能贡献或主机上下文。HostTools/主机快捷入口仍打开功能；全局功能可通过搜索进入。配置页不读取功能 UI 或激活业务 WASM。
+
+SDK 收到相同 JSON 上下文时不重新替换 props/主机目录/连接/模型；ResourceView 监听 session ID、连接状态及列表请求值，避免响应同步触发查询反馈。请求队列上限仍为 24，不通过提高限额掩盖循环。
+
+plugin_clear_context 停止交互资源后调用既有 Runtime.deactivate 释放 VM；不关闭共用 SSH 连接，不禁用插件，不停止已提交任务/计划，不清除 iframe 草稿。store 将上下文绑定及激活放在同一插件串行队列内；PluginView 仅在当前 owner 的绑定与激活完成后恢复桥。返回缓存页同样重新激活；准备期间 v-show 隐藏缓存 frame、显示准备状态，激活完成后再开放可见操作，避免 inert 时第一次点击丢失。崩溃 VM 的状态/错误继续保留，须显式重新激活。运行时仍最多八个活动实例，不修改 IPC/SDK/数据库。实际九插件与主机切换证据见[逐项验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04配置入口请求循环与九插件逐项验证)。
+
+## 2026-11-04：插件使用与主机工作区统一
+
+Workspace 将设备导航标签与插件页面缓存分离：设备保持 host:<HostId> 一个标签，pluginPages 按插件/贡献/主机缓存，activePluginKey 指向当前功能页。SSH/SFTP 切换只改变设备当前视图；单主机插件归属 hosts 模块，批量/自动化归属全局工具。运维工具侧栏的所有已安装项打开 pluginSettings 配置标签，保留 plugins 模块；设置管理入口打开同一配置标签并保留 system 模块，PluginPage 只负责详情、宿主权限及包声明的 settings 页面；PluginView 负责功能。
+
+PluginView 在显示时按权限自动建立/复用入口主机连接，继续使用真实指纹核验、配置一致性检查和显式重连。插件 store 为每次绑定记录页面 owner，旧页面 release 不能清除另一主机刚建立的上下文。后端仍保持单插件单活跃上下文，未引入多上下文 IPC。缓存 iframe 的桥在请求前后检查页面激活状态和上下文代，既有有界 WASM 队列继续复验；隐藏页面停止交互请求及日志轮询，旧响应不能进入新上下文。SDK 可见性通知用于重开监控和刷新列表，日志输出/表单仍留在原 frame。AI 页面恢复时刷新公共模型列表。
+
+系统标准包为 1.1.2。启动分发复用仓库校验、较高 semver 限制和原子记录切换，仅升级 source=system 的旧安装；新记录在同一提交中继承启停选择，上一安装代保留为备份，随后生成当前系统固定授权。配置、任务、计划和卸载墓碑保留；上传源及较新/同版本安装不覆盖。该部分替代先前“已有系统安装不自动重装”的约定；用户上传流程仍显式升级/授权。Host API、SDK/ABI、包格式、IPC、数据库和依赖不变。
+
+完成标准及实际证据见[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04插件使用统一)。
+
 ## 2026-11-04：插件源码归属与 UI v4
 
 九个插件各自拥有 `plugins/system/<name>/frontend`、`backend`、清单和 UI 契约；页面、交互业务、样式及相关测试随插件维护。前端只引用本目录、公开 `packages/plugin-sdk` 和普通库，Rust Guest 只依赖 `crates/plugin-sdk`。构建器检查源码边界，拒绝导入桌面内部代码或 Tauri。宿主不再静态导入助手、批量、自动化、诊断及五个服务器业务页面。
@@ -173,8 +211,7 @@ crates/
   sftp/                           SFTP v3 filesystem, background transfers, guarded editor saves
   monitor/                        fixed SSH sampling, delta metrics and bounded history
   ops/                            typed host operations, bounded exec and ACK log streams
-  tasks/                          local/remote diagnostics, bounded batch execution and SFTP fan-out
-  automation/                     reusable Shell tasks, durable results and local schedules
+  tasks/                          local/remote diagnostics and bounded shared SSH command execution
 tools/ssh-probe/                   independent real SSH/SFTP protocol spike
 docs/                             requirements, architecture, plan, validation
 ```

@@ -3,15 +3,14 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { PackagePlus, RefreshCw, Trash2, Upload } from '@lucide/vue';
+import { Puzzle, PackagePlus, RefreshCw, Trash2, Upload } from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from '../services/plugins';
-import { primaryPluginPage } from '../services/plugin-pages';
 import { errorMessage } from '../services/ipc';
 import type { InstalledPlugin, PluginPackagePreview } from '../types/plugins';
-const emit = defineEmits<{ plugin: [id: string, contribution: string] }>();
+const emit = defineEmits<{ settings: [id: string] }>();
 const plugins = usePluginsStore();
 const path = ref(''),
   preview = ref<PluginPackagePreview | null>(null),
@@ -137,7 +136,7 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">扩展与集成</p>
         <h1>插件管理</h1>
-        <p class="subtle">安装所需的工具，在插件自己的页面配置权限和功能。</p>
+        <p class="subtle">安装和配置插件。插件功能从当前主机工作区的工具菜单使用。</p>
       </div>
       <button class="button" :disabled="plugins.loading || plugins.busy" @click="plugins.refresh()">
         <RefreshCw :size="15" aria-hidden="true" />刷新
@@ -195,14 +194,11 @@ onBeforeUnmount(() => {
           </span>
           <div class="plugin-row-main">
             <div class="plugin-row-title">
-              <button
-                class="plugin-name-button"
-                @click="emit('plugin', plugin.manifest.id, primaryPluginPage(plugin))"
-              >
+              <button class="plugin-name-button" @click="emit('settings', plugin.manifest.id)">
                 {{ plugin.manifest.name }}</button
               ><span class="plugin-version">v{{ plugin.manifest.version }}</span>
             </div>
-            <p>{{ plugin.manifest.description || '点击插件名称查看功能和设置' }}</p>
+            <p>{{ plugin.manifest.description || '点击插件名称查看详情和设置' }}</p>
           </div>
           <span :class="['plugin-status', { enabled: plugin.enabled }]">{{
             plugin.enabled ? '已启用' : '已禁用'
@@ -279,7 +275,7 @@ onBeforeUnmount(() => {
       ><p>
         卸载
         {{ deleting.manifest.name }}
-        将停止插件调用并放弃未保存的编辑。已提交的任务和计划继续由任务中心管理，服务器文件和已有终端不受影响。
+        将停止插件调用并放弃未保存的编辑。已提交的网络诊断任务继续由任务中心管理，服务器文件和已有终端不受影响。
       </p>
       <label class="checkbox-label"
         ><input v-model="clearData" type="checkbox" />同时清除这个插件的本地配置和数据</label

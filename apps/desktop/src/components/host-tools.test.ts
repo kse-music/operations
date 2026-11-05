@@ -4,6 +4,7 @@ import HostTools from './HostTools.vue';
 import { createPinia } from 'pinia';
 import { usePluginsStore } from '../stores/plugins';
 import { systemPluginFixtures } from '../services/system-plugins.fixture';
+import { hasPluginFunction, primaryPluginPage } from '../services/plugin-pages';
 
 let app: App, root: HTMLDivElement;
 function mount(props: InstanceType<typeof HostTools>['$props'], pinia = createPinia()) {
@@ -15,6 +16,21 @@ function mount(props: InstanceType<typeof HostTools>['$props'], pinia = createPi
 afterEach(() => {
   app?.unmount();
   root?.remove();
+});
+
+it('chooses a function contribution before settings even if the package lists settings first', () => {
+  const plugin = systemPluginFixtures()[0]!;
+  plugin.manifest = {
+    ...plugin.manifest,
+    contributions: [
+      { id: 'settings', label: '设置', kind: 'settings' },
+      { id: 'run', label: '执行', kind: 'command' },
+    ],
+  };
+  expect(hasPluginFunction(plugin)).toBe(true);
+  expect(primaryPluginPage(plugin)).toBe('run');
+  plugin.manifest.contributions = [plugin.manifest.contributions[0]!];
+  expect(hasPluginFunction(plugin)).toBe(false);
 });
 
 it.each([false, true])('scopes secondary tools to the selected host (local=%s)', (local) => {
@@ -50,17 +66,18 @@ it('shows only enabled plugins once and opens them from the tools menu without h
   trigger.click();
   await nextTick();
   const menu = document.querySelector<HTMLElement>('[aria-label="已启用的插件"]')!;
-  expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(2);
+  expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(1);
   expect(
-    menu.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-activity`),
+    menu.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-settings-2`),
   ).not.toBeNull();
   expect(
-    menu.querySelector(`[data-plugin-id="${items[1]!.manifest.id}"] svg.lucide-container`),
+    menu.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-settings-2`),
   ).not.toBeNull();
   expect(menu.textContent).not.toContain('进程与端口');
-  menu.querySelector<HTMLButtonElement>(`[data-plugin-id="${items[1]!.manifest.id}"]`)!.click();
+  menu.querySelector<HTMLButtonElement>(`[data-plugin-id="${items[0]!.manifest.id}"]`)!.click();
   await nextTick();
-  expect(select).toHaveBeenCalledWith(items[1]!.manifest.id, '__details');
+  expect(select).toHaveBeenCalledWith(items[0]!.manifest.id, 'server');
+  expect(menu.querySelector(`[data-plugin-id="${items[1]!.manifest.id}"]`)).toBeNull();
   expect(document.querySelector('[role="menu"]')).toBeNull();
   trigger.click();
   await nextTick();

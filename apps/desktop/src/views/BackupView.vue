@@ -48,7 +48,7 @@ async function exportBackup() {
   try {
     exported.value = await productApi.export();
     downloadResult('serverdeck-backup-v2.json', exported.value);
-    notifications.push('非敏感备份已生成，请妥善保管脚本正文和备注。');
+    notifications.push('非敏感备份已生成，请妥善保管主机配置和备注。');
   } catch (e) {
     error.value = errorMessage(e);
   } finally {
@@ -101,7 +101,7 @@ useErrorNotifications(error);
       <h1>备份与恢复</h1>
       <p class="subtle">
         版本化 JSON，最多 8
-        MiB。包含主机、分组、标签、命令/脚本定义和非敏感偏好。不会包含凭据、私钥路径、秘密参数值、信任记录、运行历史或自动执行计划。请自行检查正文/备注/普通默认值中是否写入了秘密。
+        MiB。包含主机、分组、标签和非敏感偏好。不会包含凭据、私钥路径、秘密参数值、信任记录、运行历史或自动执行计划。请自行检查主机描述和备注中是否写入了秘密。
       </p>
     </header>
     <section class="work-section" aria-label="备份导出">
@@ -168,8 +168,8 @@ useErrorNotifications(error);
               :value="i.id"
               :disabled="i.blocked || busy"
               :aria-label="`恢复 ${i.name}`"
-            />{{ i.kind === 'host' ? '主机' : '命令/脚本' }} · {{ i.name }} · {{ i.detail }}
-            {{ i.duplicate ? '（重复）' : '' }} {{ i.blocked ? '（阻止恢复）' : '' }}</label
+            />主机 · {{ i.name }} · {{ i.detail }} {{ i.duplicate ? '（重复）' : '' }}
+            {{ i.blocked ? '（阻止恢复）' : '' }}</label
           >
           <p v-for="w in i.warnings" :key="w" class="subtle">{{ w }}</p>
         </div>
@@ -177,7 +177,7 @@ useErrorNotifications(error);
       <button v-if="preview.items.length > limit" class="button" @click="limit += 200">
         显示更多恢复条目
       </button>
-      <p>将恢复选中的 {{ selected.length }} 个条目；主机/命令分组始终按名称合并。已有数据保留。</p>
+      <p>将恢复选中的 {{ selected.length }} 个条目；主机分组始终按名称合并。已有数据保留。</p>
       <div class="confirmation-list">
         <label
           ><input
@@ -205,10 +205,7 @@ useErrorNotifications(error);
     </section>
     <section v-if="result" class="work-section result-section" role="status">
       <h2>恢复完成</h2>
-      <p>
-        新增 {{ result.hosts }} 台主机、{{ result.entries }} 条命令/脚本，跳过
-        {{ result.skipped }} 项。
-      </p>
+      <p>新增 {{ result.hosts }} 台主机，跳过 {{ result.skipped }} 项。</p>
       <p v-for="w in result.warnings" :key="w">{{ w }}</p>
     </section>
   </section>

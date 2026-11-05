@@ -708,3 +708,24 @@
   background: var(--bg);
   color-scheme: inherit;
 }
+
+.plugin-workspace.plugin-embedded > .plugin-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 2px;
+}
+.plugin-workspace.plugin-embedded > .plugin-heading h1 {
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 550;
+  letter-spacing: -0.2px;
+}
+.plugin-workspace.plugin-embedded > .plugin-heading > .button {
+  font-size: 11px;
+  min-height: 29px;
+  background: transparent;
+  color: var(--muted);
+}

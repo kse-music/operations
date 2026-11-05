@@ -4,7 +4,16 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "1.4.0";
+pub const API_VERSION: &str = "2.1.0";
+
+pub(crate) fn is_removed_tool_id(id: &str) -> bool {
+    [
+        "cn.hiboot.plugins.",
+        serverdeck_core::identity::LEGACY_PLUGIN_PREFIX,
+    ]
+    .iter()
+    .any(|prefix| matches!(id.strip_prefix(prefix), Some("batch" | "automation")))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -112,6 +121,9 @@ pub fn validate_path(path: &str) -> Result<(), Error> {
 impl Manifest {
     pub fn validate(&self, platform: &str) -> Result<(), Error> {
         validate_id(&self.id)?;
+        if is_removed_tool_id(&self.id) {
+            return Err(invalid("此内置插件已从产品中移除"));
+        }
         if let Some(icon) = &self.icon
             && (icon.is_empty()
                 || icon.len() > 64
@@ -142,7 +154,9 @@ impl Manifest {
         let api =
             VersionReq::parse(&self.api_version).map_err(|_| invalid("插件 API 版本范围无效"))?;
         let current = Version::parse(API_VERSION).map_err(|_| invalid("宿主 API 版本无效"))?;
-        if !api.matches(&current) {
+        // Retained v1 capabilities and ABI remain usable by existing packages.
+        let legacy = Version::new(1, 4, 0);
+        if !api.matches(&current) && !api.matches(&legacy) {
             return Err(invalid("插件 API 版本与宿主不兼容"));
         }
         if self.platforms.is_empty()

@@ -5,7 +5,6 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub mod ai;
-pub mod automation;
 pub mod backup;
 pub mod hosts;
 pub mod plugins;
@@ -86,11 +85,6 @@ impl Database {
         if version < 4 {
             transaction
                 .execute_batch(include_str!("../migrations/004_terminal_workspace.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 5 {
-            transaction
-                .execute_batch(include_str!("../migrations/005_automation.sql"))
                 .map_err(storage_error)?;
         }
         if version < 6 {

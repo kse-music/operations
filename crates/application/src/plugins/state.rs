@@ -34,10 +34,6 @@ pub(super) struct Document {
     pub internal_token: String,
     pub path: String,
 }
-pub(super) struct Task {
-    pub plugin: String,
-    pub generation: String,
-}
 pub(super) struct Log {
     pub plugin: String,
     pub generation: String,
@@ -124,7 +120,6 @@ pub(super) struct Data {
     busy: BTreeSet<String>,
     requests: BTreeMap<String, CancellationToken>,
     pub documents: BTreeMap<String, Document>,
-    pub tasks: BTreeMap<String, Task>,
     pub logs: BTreeMap<String, Log>,
     pub approvals: BTreeMap<String, Pending>,
     pub events: VecDeque<Event>,

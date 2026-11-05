@@ -10,7 +10,6 @@ import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from './plugins';
 import { pluginInvokeRequest, pluginServerRequest, pluginToolRequest } from './plugin-server';
 import { clipboardApi } from './clipboard';
-import { filesApi } from './files';
 import { terminalApi } from './terminal';
 import { downloadResult } from './tasks';
 import type {
@@ -25,31 +24,6 @@ const tools: Record<string, { permission: PluginPermission; operations: readonly
   assistant: {
     permission: 'assistant.use',
     operations: ['ai_resolve_hosts', 'ai_prepare', 'ai_send', 'ai_execute', 'ai_cancel'],
-  },
-  batch: {
-    permission: 'batch.run',
-    operations: ['batch_start', 'batch_list', 'batch_cancel', 'batch_retry_file'],
-  },
-  automation: {
-    permission: 'automation.manage',
-    operations: [
-      'automation_catalog',
-      'automation_prepare',
-      'automation_entry_save',
-      'automation_entry_delete',
-      'automation_group_save',
-      'automation_group_delete',
-      'automation_start',
-      'automation_run',
-      'automation_history',
-      'automation_cancel',
-      'automation_approve',
-      'automation_schedule_save',
-      'automation_schedule_disable',
-      'automation_schedule_delete',
-      'automation_status',
-      'automation_run_delete',
-    ],
   },
   network: {
     permission: 'network.run',
@@ -66,6 +40,7 @@ export function createPluginUiBridge(input: {
   revision: string;
   page: PluginUiPage;
   hostId: string;
+  isActive?: () => boolean;
   stream: (id: string, event: unknown) => void;
 }) {
   const hosts = useHostsStore(),
@@ -79,28 +54,17 @@ export function createPluginUiBridge(input: {
   let disposed = false,
     monitor = '';
   const requests = new Set<AbortController>();
-  const streams = new Map<string, { stopped: boolean }>();
+  const streams = new Map<string, { stopped: boolean; eventStream: string }>();
   const listeners = new Set<() => void>();
   const leases = new Map<string, string>(),
     originals = new Map<string, string>();
   const ownedConnections = new Set<string>();
-  const pickedFiles = new Set<string>();
   const references = new Map<string, string>();
-  function opaque(value: string, profile = false): string {
-    if (!profile) {
-      let token = references.get(value);
-      if (!token) {
-        token = `sdk-reference-${crypto.randomUUID()}`;
-        references.set(value, token);
-      }
-      return token;
-    }
-    const key = `profile:${value}`;
-    let token = originals.get(key);
+  function opaque(value: string): string {
+    let token = references.get(value);
     if (!token) {
-      token = `sdk-profile-${crypto.randomUUID()}`;
-      originals.set(key, token);
-      leases.set(token, value);
+      token = `sdk-reference-${crypto.randomUUID()}`;
+      references.set(value, token);
     }
     return token;
   }
@@ -111,11 +75,12 @@ export function createPluginUiBridge(input: {
     if (proxy?.credentialId) proxy.credentialId = opaque(proxy.credentialId);
     return value;
   }
-  function check() {
+  function check(requireActive = false) {
     const plugin = plugins.installed.find((p) => p.manifest.id === input.id);
     const grant = plugins.grants[input.id];
     if (
       disposed ||
+      (requireActive && input.isActive && !input.isActive()) ||
       !plugin?.enabled ||
       plugin.revision !== input.revision ||
       grant?.revision !== input.revision ||
@@ -157,7 +122,7 @@ export function createPluginUiBridge(input: {
       if (connection.id) values.add(connection.id);
     return values;
   }
-  function publicValue(value: unknown, profiles = false): unknown {
+  function publicValue(value: unknown): unknown {
     const known = knownLeases();
     const visit = (value: unknown): unknown => {
       if (typeof value === 'string' && known.has(value)) {
@@ -171,19 +136,7 @@ export function createPluginUiBridge(input: {
       }
       if (Array.isArray(value)) return value.map(visit);
       if (value && typeof value === 'object') {
-        const target = value as Record<string, unknown>;
-        const profile =
-          profiles &&
-          typeof target.hostId === 'string' &&
-          typeof target.hostname === 'string' &&
-          typeof target.port === 'number' &&
-          typeof target.routeSignature === 'string';
-        return Object.fromEntries(
-          Object.entries(value).map(([key, v]) => [
-            key,
-            profile && key === 'routeSignature' ? opaque(v as string, true) : visit(v),
-          ]),
-        );
+        return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, visit(v)]));
       }
       return value;
     };
@@ -201,8 +154,6 @@ export function createPluginUiBridge(input: {
     const canRead = hasAny(
       'hosts.read',
       'assistant.use',
-      'batch.run',
-      'automation.manage',
       'network.run',
       'system.read',
       'metrics.read',
@@ -242,14 +193,19 @@ export function createPluginUiBridge(input: {
     });
   }
   const server = <T>(operation: PluginCapability) => {
-    check();
-    return pluginServerRequest<T>(input.id, operation, input.page);
+    check(true);
+    const version = plugins.contextVersion(input.id);
+    return pluginServerRequest<T>(input.id, operation, input.page).then((value) => {
+      check(true);
+      if (plugins.contextVersion(input.id) !== version) throw denied();
+      return value;
+    });
   };
   function connectionForSession(id: string) {
     return Object.values(ops.connections).find((c) => c.session?.id === id);
   }
   async function call(method: string, raw: Record<string, unknown>): Promise<unknown> {
-    const surface = check();
+    const surface = check(true);
     const args = restore(raw) as Record<string, unknown>;
     const domain = Object.values(tools).find((tool) => tool.operations.includes(method));
     if (domain) {
@@ -262,12 +218,6 @@ export function createPluginUiBridge(input: {
       if (method === 'ai_cancel') {
         await pluginsApi.toolCancelRequest(input.id, String(args.id));
         return;
-      }
-      if (method === 'batch_start') {
-        const operation = (args.input as { operation?: { kind?: string; source?: string } })
-          ?.operation;
-        if (operation?.kind === 'file' && (!operation.source || !pickedFiles.has(operation.source)))
-          throw denied();
       }
       const controller = new AbortController();
       requests.add(controller);
@@ -299,8 +249,6 @@ export function createPluginUiBridge(input: {
           !hasAny(
             'hosts.read',
             'assistant.use',
-            'batch.run',
-            'automation.manage',
             'network.run',
             'system.read',
             'metrics.read',
@@ -323,8 +271,6 @@ export function createPluginUiBridge(input: {
           !hasAny(
             'ssh.execute',
             'assistant.use',
-            'batch.run',
-            'automation.manage',
             'network.run',
             'system.read',
             'metrics.read',
@@ -346,7 +292,7 @@ export function createPluginUiBridge(input: {
           const stop = watch(
             () => [current.state, current.trust, current.error],
             () => {
-              if (!disposed)
+              if (!disposed && (!input.isActive || input.isActive()))
                 input.stream(
                   stream,
                   current.trust ?? {
@@ -373,8 +319,6 @@ export function createPluginUiBridge(input: {
           !hasAny(
             'ssh.execute',
             'assistant.use',
-            'batch.run',
-            'automation.manage',
             'network.run',
             'system.read',
             'metrics.read',
@@ -391,8 +335,6 @@ export function createPluginUiBridge(input: {
           !hasAny(
             'ssh.execute',
             'assistant.use',
-            'batch.run',
-            'automation.manage',
             'network.run',
             'system.read',
             'metrics.read',
@@ -415,7 +357,7 @@ export function createPluginUiBridge(input: {
         return;
       }
       case 'connections.fileOpen': {
-        if (!hasAny('sftp.read', 'sftp.write', 'batch.run')) throw denied();
+        if (!hasAny('sftp.read', 'sftp.write')) throw denied();
         const host = hosts.catalog?.hosts.find((h) => h.id === args.hostId);
         if (!host) throw denied();
         await files.open(host);
@@ -448,13 +390,6 @@ export function createPluginUiBridge(input: {
       case 'clipboard.write':
         if (typeof args.text !== 'string' || args.text.length > 1024 * 1024) throw denied();
         return clipboardApi.writeText(args.text);
-      case 'files.pick': {
-        if (!hasAny('batch.run') || args.kind !== 'files') throw denied();
-        const paths = await filesApi.pick('files');
-        for (const path of paths) pickedFiles.add(path);
-        while (pickedFiles.size > 64) pickedFiles.delete(pickedFiles.values().next().value!);
-        return paths;
-      }
       case 'workspace.navigate':
         if (args.view !== 'models') throw denied();
         workspace.navigate('models');
@@ -518,7 +453,7 @@ export function createPluginUiBridge(input: {
           eventStream = args.events;
         if (!value || typeof eventStream !== 'string') throw denied();
         const result = await server<{ id: string }>({ kind: 'system_log_start', ...value });
-        const control = { stopped: false };
+        const control = { stopped: false, eventStream };
         streams.set(result.id, control);
         void (async () => {
           try {
@@ -597,10 +532,30 @@ export function createPluginUiBridge(input: {
   }
   return {
     snapshot,
+    suspend() {
+      for (const request of requests) request.abort();
+      for (const stop of listeners) stop();
+      listeners.clear();
+      for (const control of streams.values()) {
+        control.stopped = true;
+        input.stream(control.eventStream, {
+          type: 'state',
+          state: 'closed',
+          code: 'PLUGIN_CANCELLED',
+          message: '页面已切换，日志流已停止。',
+        });
+      }
+      streams.clear();
+      monitor = '';
+    },
     async call(method: string, args: Record<string, unknown>) {
+      const version = plugins.contextVersion(input.id);
       const value = await call(method, args);
-      check();
-      return value === undefined ? null : publicValue(value, method.startsWith('automation_'));
+      // Authorized navigation hides its own caller and returns no data or resource.
+      if (method === 'workspace.navigate') return null;
+      check(true);
+      if (plugins.contextVersion(input.id) !== version) throw denied();
+      return value === undefined ? null : publicValue(value);
     },
     async dispose() {
       for (const request of requests) request.abort();
@@ -619,17 +574,17 @@ export function createPluginUiBridge(input: {
             return;
           throw error;
         });
+      const active = !input.isActive || input.isActive();
       for (const [id, control] of streams) {
         control.stopped = true;
-        cleanup.push(close({ kind: 'system_log_stop', logId: id }));
+        if (active) cleanup.push(close({ kind: 'system_log_stop', logId: id }));
       }
-      if (monitor) cleanup.push(close({ kind: 'metrics_close', monitorId: monitor }));
+      if (active && monitor) cleanup.push(close({ kind: 'metrics_close', monitorId: monitor }));
       disposed = true;
       listeners.clear();
       streams.clear();
       leases.clear();
       originals.clear();
-      pickedFiles.clear();
       references.clear();
       const results = await Promise.allSettled(cleanup);
       const failures = results

@@ -266,6 +266,10 @@ impl Runtime {
             let _control = control;
             let _permit = permit;
             let mut state = slot.lock().map_err(|_| Error::Busy)?;
+            // Releasing a hidden page must not erase a crash that requires an explicit restart.
+            if state.status.state == State::Crashed {
+                return Ok(());
+            }
             state.status.state = State::Stopping;
             state.cancelled.store(false, Ordering::Release);
             let result = if let Some(vm) = state.vm.as_mut() {

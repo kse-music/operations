@@ -2,8 +2,6 @@
 const hostTools = new Set(['SSH 终端', 'SFTP 文件', '服务器管理']);
 const menuModules = {
   'AI 运维助手': 'plugins',
-  批量运维: 'plugins',
-  自动运维: 'plugins',
   网络诊断: 'plugins',
   安全凭据: 'assets',
   备份恢复: 'assets',
@@ -132,15 +130,8 @@ export async function previewPluginPackage(page, packagePath) {
 
 export async function openPluginSettings(page, name) {
   await closeTaskCenter(page);
-  await page.locator('[data-module="plugins"]').click();
-  if (!(await page.locator('.sidebar').isVisible()))
-    await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
-  await page
-    .locator('[aria-label="运维工具导航"]')
-    .getByRole('button', { name, exact: true })
-    .click();
-  const settingsButton = page.getByRole('button', { name: '插件设置', exact: true });
-  if (await settingsButton.isVisible()) await settingsButton.click();
+  await navigateWorkspace(page, '插件管理');
+  await page.locator('.plugin-installed-row').getByRole('button', { name, exact: true }).click();
   const settings = page.locator('.plugin-page:visible [aria-label="插件设置"]');
   await settings.waitFor();
   return settings;
@@ -176,6 +167,20 @@ export async function navigateWorkspace(page, name) {
   }
   await closeTaskCenter(page);
   const module = hostTools.has(name) ? 'hosts' : (menuModules[name] ?? 'plugins');
+  if (module === 'plugins') {
+    if (Object.hasOwn(menuModules, name)) {
+      // Focus the host shell before its shortcut; input focus may currently be inside an iframe.
+      await page.locator('.module-navigation [data-module="plugins"]').click();
+      await page.keyboard.press('Control+k');
+      const search = page.getByRole('dialog', { name: '全局搜索', exact: true });
+      await search.getByLabel('全局搜索内容', { exact: true }).fill(name);
+      await search
+        .getByRole('option')
+        .filter({ hasText: `工作区 · ${name}` })
+        .click();
+    } else await openPluginFunction(page, name);
+    return;
+  }
   await page.locator(`.module-navigation [data-module="${module}"]`).click();
   if (hostTools.has(name)) {
     const remote = page.getByRole('navigation', { name: '当前主机工具', exact: true });
@@ -205,6 +210,42 @@ export async function navigateWorkspace(page, name) {
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
     if (await collapse.isVisible()) await collapse.click();
   }
+}
+
+export async function openPluginFunction(page, name, hostId) {
+  const systemPages = {
+    资源监控: '资源监控',
+    进程与端口: '进程与端口',
+    日志查看: '日志查看',
+    网络诊断: '网络诊断',
+    'systemd 服务': 'systemd 服务',
+  };
+  const subpage = systemPages[name];
+  if (subpage) name = '系统服务';
+  await closeTaskCenter(page);
+  const id =
+    hostId ??
+    (await page.evaluate(() => {
+      const workspace = document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace');
+      return workspace.current?.hostId || workspace.hostId;
+    }));
+  if (!id) throw new Error(`Opening ${name} requires an explicit host workspace`);
+  await selectHostWorkspace(page, id);
+  await page
+    .locator('.workspace-header')
+    .getByRole('button', { name: '工具', exact: true })
+    .click();
+  await page
+    .getByRole('menu', { name: '已启用的插件', exact: true })
+    .getByRole('menuitem', { name, exact: true })
+    .click();
+  if (subpage)
+    await page
+      .frameLocator('.plugin-frame-container:visible iframe')
+      .getByRole('tab', { name: subpage, exact: true })
+      .click();
 }
 
 export async function selectHostWorkspace(page, id) {

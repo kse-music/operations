@@ -1,3 +1,4 @@
+/* eslint-disable vue/one-component-per-file -- Each test mounts an isolated component. */
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, type Pinia, disposePinia } from 'pinia';
@@ -90,10 +91,10 @@ async function toggle(input: HTMLInputElement) {
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
 }
-async function mount() {
+async function mount(hostId?: string) {
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(AssistantView);
+  app = createApp(AssistantView, { hostId });
   app.use(pinia);
   app.mount(root);
   await settle();
@@ -588,4 +589,83 @@ it('preserves an asynchronous SSH failure reason after the state and message upd
   expect(root.textContent).toContain('连接不上：异步认证被服务器拒绝');
   expect(root.textContent).not.toContain('连接不上：SSH 运维连接已结束');
   expect(api.prepare).not.toHaveBeenCalled();
+});
+
+it('uses the entry host session by default and only performs cross-host matching after an explicit selection', async () => {
+  const host = {
+    ...hostInput(),
+    id: 'a',
+    name: 'Host a',
+    hostname: 'a.example',
+    createdAt: '',
+    updatedAt: '',
+  };
+  api.hostList.mockResolvedValue({
+    hosts: [host],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  });
+  useOpsStore().connections.a = {
+    host,
+    state: 'connected',
+    trust: null,
+    error: null,
+    session: { id: 'session-a', hostId: 'a', transportId: 'transport-a', routeHostIds: ['a'] },
+  };
+  await mount('a');
+  await generate();
+  expect(api.resolveHosts).not.toHaveBeenCalled();
+  expect(api.prepare).toHaveBeenCalledWith(
+    expect.objectContaining({ sessionId: 'session-a', autoHosts: false }),
+  );
+  expect(root.textContent).toContain('当前主机：Host a');
+  await toggle(check('跨主机分析'));
+  await generate();
+  expect(api.resolveHosts).toHaveBeenCalledOnce();
+});
+
+it('quick questions only fill the draft and collapsing context preserves the selected read scope', async () => {
+  await mount();
+  button('容器排查', root).click();
+  await settle();
+  expect(
+    root.querySelector<HTMLTextAreaElement>('[aria-label="问题"], #assistant-question')!.value,
+  ).toContain('Docker');
+  expect(api.prepare).not.toHaveBeenCalled();
+  expect(api.resolveHosts).not.toHaveBeenCalled();
+  await toggle(check('服务器信息', root));
+  const collapse = root.querySelector<HTMLButtonElement>('[aria-controls="assistant-context"]')!;
+  collapse.click();
+  await settle();
+  expect(collapse.getAttribute('aria-expanded')).toBe('false');
+  collapse.click();
+  await settle();
+  expect(check('服务器信息', root).checked).toBe(true);
+});
+it('retains readable replies after hiding but expires old command handles without cancelling them in a new host context', async () => {
+  const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
+  const state = mountState();
+  state.turns.value = [
+    {
+      id: 'turn',
+      question: 'question',
+      state: 'complete',
+      answer,
+      requestId: 'old-context-preview',
+      error: '',
+      hostIds: [],
+    },
+  ];
+  updateVisibility(false);
+  await settle();
+  updateVisibility(true);
+  await settle();
+  expect(state.turns.value[0]!.answer?.text).toBe(answer.text);
+  state.inspect(answer.proposals[0]!);
+  expect(state.review.value).toBeNull();
+  state.invalidate();
+  await settle();
+  expect(api.cancel).not.toHaveBeenCalledWith('old-context-preview');
+  expect(state.error.value).toBe('');
 });

@@ -44,6 +44,19 @@ it.each(['', 'target'])(
   },
 );
 
+it('keeps host plugins in their device tab across host switches', async () => {
+  const w = useWorkspaceStore();
+  w.navigate('files', 'b');
+  await w.openPlugin('cn.hiboot.plugins.services', 'network', 'a');
+  expect(w.active).toBe('host:a');
+  expect(w.module).toBe('hosts');
+  expect(w.tabs.filter((tab) => tab.hostId === 'a')).toHaveLength(1);
+  w.selectHost('b');
+  expect(w.current).toMatchObject({ view: 'files', hostId: 'b' });
+  w.selectHost('a');
+  expect(w.current).toMatchObject({ view: 'extension', pluginId: 'cn.hiboot.plugins.services' });
+});
+
 it('waits for close completion and prevents duplicate close requests for the same workspace', async () => {
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
@@ -72,20 +85,16 @@ function openTabs() {
   const workspace = useWorkspaceStore();
   workspace.navigate('terminals', '');
   workspace.navigate('files', 'a');
-  workspace.navigate('batch');
-  workspace.navigate('network');
+  workspace.navigate('assistant');
+  workspace.navigate('credentials');
   return workspace;
 }
 
 it.each([
   [
     'current',
-    [
-      'host:',
-      'extension:cn.hiboot.plugins.batch:batch:',
-      'extension:cn.hiboot.plugins.network:network:',
-    ],
-    'extension:cn.hiboot.plugins.network:network:',
+    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    'credentials:',
   ],
   ['right', ['host:', 'host:a'], 'host:a'],
   ['others', ['host:a'], 'host:a'],
@@ -112,9 +121,9 @@ it('keeps adjacent-tab selection for closing the current tab', async () => {
   const workspace = openTabs();
   workspace.activate('host:a');
   await workspace.close('host:a');
-  expect(workspace.active).toBe('extension:cn.hiboot.plugins.batch:batch:');
-  await workspace.close('extension:cn.hiboot.plugins.network:network:');
-  await workspace.close('extension:cn.hiboot.plugins.batch:batch:');
+  expect(workspace.active).toBe('extension:cn.hiboot.plugins.assistant:assistant:');
+  await workspace.close('credentials:');
+  await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
 });
@@ -146,8 +155,8 @@ it('switches module menus without changing the active page or host context', asy
   workspace.navigate('files', 'a');
   workspace.selectModule('plugins');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
-  workspace.navigate('batch');
-  workspace.navigate('network');
+  workspace.navigate('assistant');
+  workspace.navigate('credentials');
   workspace.selectModule('assets');
   workspace.navigate('backup');
   workspace.selectModule('system');
@@ -169,21 +178,21 @@ it('switches module menus without changing the active page or host context', asy
 
 it('does not choose another page or create a default when selecting a module after a tab closes', async () => {
   const workspace = useWorkspaceStore();
-  workspace.navigate('batch');
-  workspace.navigate('network');
+  workspace.navigate('assistant');
   workspace.navigate('credentials');
-  await workspace.close('extension:cn.hiboot.plugins.network:network:');
+  workspace.navigate('settings');
+  await workspace.close('settings:');
   workspace.selectModule('plugins');
   expect(workspace.module).toBe('plugins');
   expect(workspace.current?.view).toBe('credentials');
-  expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.batch')).toBe(true);
-  await workspace.close('extension:cn.hiboot.plugins.batch:batch:');
+  expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant')).toBe(true);
+  await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
   workspace.selectModule('plugins');
   expect(workspace.current?.view).toBe('credentials');
   workspace.selectModule('plugins');
-  expect(workspace.tabs.filter((tab) => tab.pluginId === 'cn.hiboot.plugins.batch')).toHaveLength(
-    0,
-  );
+  expect(
+    workspace.tabs.filter((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant'),
+  ).toHaveLength(0);
   workspace.activate('credentials:');
   expect(workspace.module).toBe('assets');
 });

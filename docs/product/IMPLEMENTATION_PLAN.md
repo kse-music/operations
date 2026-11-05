@@ -1,9 +1,17 @@
 # ServerDeck v0.1 实施计划
 
-基线：PRD v1.0，按 §19 六阶段推进。本轮按用户明确授权扩展 PRD 的 P1 主机运维能力：Docker、日志、进程、端口和 systemd 已交付；网络诊断、显式批量命令和单文件分发已交付。命令/脚本库、持久任务历史及本地计划已交付。本轮按追加授权进行产品整合、交互优化和非敏感备份恢复，不引入 DAG 或云端调度。
+基线：PRD v1.0，按 §19 六阶段推进。2026-11-05 已按追加授权移除自动运维与批量运维，以下早期范围描述保留为历史；当前状态以最新条目为准。本轮按用户明确授权扩展 PRD 的 P1 主机运维能力：Docker、日志、进程、端口和 systemd 已交付；网络诊断、显式批量命令和单文件分发已交付。命令/脚本库、持久任务历史及本地计划已交付。本轮按追加授权进行产品整合、交互优化和非敏感备份恢复，不引入 DAG 或云端调度。
 表中“验收”为完成标准。既有记录保留于 [VALIDATION.md](../validation/foundation/VALIDATION.md)、[VALIDATION_STAGE2.md](../validation/foundation/VALIDATION_STAGE2.md)；SSH 基础见 [VALIDATION_STAGE3.md](../validation/terminal/VALIDATION_STAGE3.md)，SSH 增强阶段见 [VALIDATION_SSH_USABILITY.md](../validation/terminal/VALIDATION_SSH_USABILITY.md)，SFTP 阶段见 [VALIDATION_STAGE4.md](../validation/files/VALIDATION_STAGE4.md)，监控阶段见 [VALIDATION_STAGE5.md](../validation/monitoring/VALIDATION_STAGE5.md)，当前主机运维见 [VALIDATION_OPERATIONS.md](../validation/operations/VALIDATION_OPERATIONS.md)，网络与批量见 [VALIDATION_NETWORK_BATCH.md](../validation/operations/VALIDATION_NETWORK_BATCH.md)，本地自动化见 [VALIDATION_AUTOMATION.md](../validation/operations/VALIDATION_AUTOMATION.md)。
 
 ## 当前状态
+
+- 2026-11-05：完成系统服务五合一与 Docker/AI 界面优化。仅分发 services/docker/assistant 三包 1.2.0，Host/Rust/Vue SDK 2.1；分类缓存并按可见性暂停请求，保留主机/草稿/终端和原确认边界。旧四项 system 身份归档而不删除设置或上传源。前端 355 项、Rust 212 项（4 ignored）、Guest 5 项、真实 SSH/三插件/四布局 14 组及上传/隔离/任务 11 组通过；类型/构建/静态检查完成，默认 Windows 调试 EXE 已生成。主要文件、截图、失败修正与限制见[本阶段验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-05系统服务合并与界面优化)。跨平台、安装器和长期压力未验收，无当前阶段剩余依赖，本阶段结束。
+
+- 2026-11-05：完整移除自动运维与批量运维的插件、页面、调度/执行链、SDK/IPC/ACL 和依赖；保留七插件与共享 SSH/SFTP/诊断/AI 能力。旧安装归档停用，历史表/设置不清空，新备份 v3；Host/Rust/Vue SDK 2.0.0、系统包 1.1.3。前端 351 项、Rust 211 项（4 原有 ignored）、独立 Guest 12 项、七插件真实 SSH 12 组及隔离/上传/任务/布局 11 组通过，类型/构建/静态检查完成，默认 Windows 调试 EXE 已生成。主要文件、逐项行为、失败修复、限制和证据见[本阶段验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-05移除自动运维与批量运维)。旧自定义插件若依赖已删除能力需改造；未验跨平台、Release/安装器和长期压力。无当前阶段剩余依赖，发布验收另行安排，本阶段结束。
+
+- 2026-11-04：插件入口与请求回归已修复并逐项验证。运维工具侧栏查看全部插件配置，不选主机；主机工具直接使用当前主机。SDK 消除相同快照的请求反馈，隐藏页释放 VM，返回时绑定/激活串行完成后才显示操作，保留草稿、崩溃诊断和原限额。标准包 1.1.2 保留配置升级。Windows WebView2 + 本任务隔离 Linux SSH 的九插件 13 组、原隔离/权限/任务/布局 14 组、前端 361 项、Rust 72 项（1 原有 Linux SDK ignored）、类型/构建/静态检查通过；生成默认配置 Windows 调试 EXE，未替换正式应用或构建安装器。主要文件、逐项矩阵和原始证据见[本阶段验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04配置入口请求循环与九插件逐项验证)。跨平台、长期压力和破坏性操作穷举未验证；保留 WSL df 挂载诊断警告。无当前阶段剩余依赖，发布验收另行授权，本阶段结束。
+
+- 2026-11-04：完成插件使用统一。单主机插件进入当前设备标签，宿主传入目标并按需连接，去除重复主机选择；详情/权限/启停及自有 settings 统一归属设置。按插件/贡献/主机保留页面、草稿和结果，隐藏页禁止操作且旧响应失效；批量/自动化保留多目标与首次主机预选，AI/诊断支持入口主机语义。标准系统包 1.1.1 启动升级保留启停/配置/上传安装/卸载墓碑，不增加依赖或数据库迁移。前端 57 文件 357 项、Rust 59 项（1 Linux SDK ignored）、Windows 隔离原生 14 组、类型/构建/格式/静态检查通过；修复缓存 AI 返回后的模型刷新，保留既有 Clippy/Monaco/缓存提示。未验收真实远端、跨平台或安装器，详情及主要文件见[本阶段验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04插件使用统一)。后续依赖隔离 SSH 和相应平台环境，本阶段结束，不主动推进。
 
 - 2026-11-04：完成插件源码归属与 UI v4 重构。九个插件的 frontend/backend/相关测试在各自目录，公共类型、客户端、状态和通用 UI 进入 packages/plugin-sdk；宿主通过统一 iframe/SDK/WASM/授权链加载内置和上传包。新增通用 frontend 贡献，独立新业务不需要新增宿主页面分支；旧 v1–v3 和既有安装继续兼容，不重置数据/授权/禁用/任务历史。Host API 1.4、Rust SDK 1.3、Vue SDK 1.0，分发包 1.1。前端 56 文件 339 项、Rust 工作区 228 项（4 ignored）、九个独立 Guest 14 项通过；最终 Windows 原生 12 组通过，含真实 HTTP AI 回答/取消/再问、WASM 保存 SQLite、上传自带 UI 与 WASM、权限拒绝、TCP 任务接管及四布局。类型/构建/变更文件静态检查通过；全库 Prettier 仍报 14 个既有文件的格式问题，未扩大修改，既有 Clippy/大 chunk/硬链接降级提示保留。额外 Linux SDK 验证在 SSH 建连阶段报 SSH_NETWORK，未宣称通过；跨平台原生及签名/安装器未验收。主要文件、失败修复、证据和限制见[本阶段验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-04插件源码归属与-ui-v4)。当前阶段结束，下一阶段依赖可用的隔离 SSH 环境及对应平台验收环境，不自动推进。
 

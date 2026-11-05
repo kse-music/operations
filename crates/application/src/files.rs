@@ -91,8 +91,7 @@ impl Application {
         (
             self.files.transfers.unfinished().unwrap_or(1)
                 + self.terminal_uploads.pending().unwrap_or(1)
-                + self.tasks.pending().unwrap_or(1)
-                + self.automation.pending().unwrap_or(1),
+                + self.tasks.pending().unwrap_or(1),
             self.files.dirty_count(),
         )
     }

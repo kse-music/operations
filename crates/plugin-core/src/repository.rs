@@ -103,6 +103,7 @@ impl Repository {
             root,
             platform: std::env::consts::OS.into(),
         };
+        repository.retire_removed_tools()?;
         repository.migrate_payload_layout()?;
         Ok(repository)
     }
@@ -246,7 +247,8 @@ impl Repository {
         let plugin = InstalledPlugin {
             source,
             manifest: package.manifest,
-            enabled: false,
+            enabled: source == PluginSource::System
+                && old.as_ref().is_some_and(|record| record.current.enabled),
             trust: Trust::LocalDevelopmentUnverified,
             package_digest: package.digest,
             revision,
@@ -287,7 +289,7 @@ impl Repository {
         Ok(plugins)
     }
     /// Only the application distribution calls this with its embedded package bytes.
-    /// Installation, validation and initial disabled/ungranted state are unchanged.
+    /// Existing system packages may advance; uploads and newer versions are preserved.
     pub fn install_bundled(
         &self,
         bytes: &[u8],
@@ -300,11 +302,24 @@ impl Repository {
         if preview.manifest.id != expected_id {
             return Err(invalid("随应用分发的插件身份不匹配"));
         }
+        let existing = match self.detail(expected_id) {
+            Ok(plugin) if plugin.source == PluginSource::System => Some(plugin),
+            Ok(_) => return Err(Error::Conflict),
+            Err(Error::NotFound) => None,
+            Err(error) => return Err(error),
+        };
+        if let Some(plugin) = &existing {
+            let version =
+                |value: &str| semver::Version::parse(value).map_err(|_| invalid("插件版本无效"));
+            if version(&preview.manifest.version)? <= version(&plugin.manifest.version)? {
+                return Ok(plugin.clone());
+            }
+        }
         self.install_with_source(
             InstallInput {
                 path: temporary.path().to_owned(),
                 development_confirmed: true,
-                expected_version: None,
+                expected_version: existing.map(|plugin| plugin.manifest.version),
                 expected_digest: Some(preview.package_digest),
             },
             false,

@@ -25,7 +25,7 @@
 
 ## SDK 1.2 工具贡献
 
-formatVersion/schemaVersion 仍为 1。使用新工具的包声明 apiVersion ^1.2.0、uiVersion 3；贡献 kind=tool 且 tool 为 assistant/batch/automation/network 之一，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
+formatVersion/schemaVersion 仍为 1。使用工具的新包声明 apiVersion ^2.0.0、uiVersion 3；贡献 kind=tool 且 tool 为 assistant/network 之一，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
 
 13A-1 使用 `.sdplugin`，UTF-8 JSON：`{formatVersion: 1, manifest, files: [{path, content}]}`。content 为严格标准 base64，不压缩，不支持链接、设备文件或权限位。源码目录使用 `manifest.json`；打包器将其嵌入 manifest 字段并生成 files 校验清单。不得当作 ZIP 解包。
 

@@ -76,7 +76,7 @@ export async function productChecks(context) {
   } = context;
   const uuid = randomUUID(),
     name = `Product ${uuid}`,
-    scope = { uuid, hosts: [], entries: [], runs: [], remotePaths: [] };
+    scope = { uuid, hosts: [], remotePaths: [] };
   const rpc = (name, args = {}) =>
     page.evaluate(({ name, args }) => window.__TAURI_INTERNALS__.invoke(name, args), {
       name,
@@ -119,20 +119,6 @@ export async function productChecks(context) {
       scope.remotePaths = [];
       await remember();
     }
-    const histories = await rpc('automation_history', { query: {} });
-    for (const run of histories.filter((r) => r.entryName.startsWith(name))) {
-      await rpc('automation_cancel', { id: run.id, running: true });
-      await until(async () => {
-        const r = await rpc('automation_run', { id: run.id });
-        return !['Pending', 'Running'].includes(r.state);
-      });
-      await delay(100);
-      await rpc('automation_run_delete', { id: run.id, confirmed: true });
-    }
-    for (const e of (await rpc('automation_catalog')).entries.filter((e) =>
-      e.name.startsWith(name),
-    ))
-      await rpc('automation_entry_delete', { id: e.id, confirmed: true });
     const catalog = await rpc('host_list');
     for (const h of catalog.hosts.filter((h) => h.id !== hostId && h.description === description)) {
       await rpc('terminal_close_host', { hostId: h.id });
@@ -272,85 +258,11 @@ export async function productChecks(context) {
     if (!(await close.count())) break;
     await close.first().click();
   }
-  // Run a reusable real command using the already chosen host, then export its actual result.
-  await nav('自动运维');
-  await page.getByRole('button', { name: '新建命令 / 脚本', exact: true }).click();
-  const editor = page.getByRole('dialog', { name: '新建命令 / 脚本', exact: true });
-  await editor.getByLabel('自动化条目名称').fill(name);
-  await editor.getByLabel('自动化条目正文').fill(`printf '__SD_PRODUCT_RESULT__\\n'; uname -s`);
-  await editor.getByLabel('持久化任务输出').check();
-  await editor.getByRole('button', { name: '保存条目', exact: true }).click();
-  await editor.waitFor({ state: 'hidden' });
-  const entry = (await rpc('automation_catalog')).entries.find((e) => e.name === name);
-  assert(entry);
-  scope.entries.push(entry.id);
-  await remember();
-  const article = page.locator(`[data-entry-id="${entry.id}"]`);
-  await article.getByRole('button', { name: '快捷执行', exact: true }).click();
-  let dialog = page.getByRole('dialog').filter({ has: page.getByLabel('自动化执行确认文字') });
-  const runDialog = page
-    .getByRole('dialog')
-    .filter({ has: page.getByRole('button', { name: '预览自动化执行', exact: true }) });
-  assert.equal(
-    await runDialog.getByLabel(`自动化目标 ${originalHost.name}`, { exact: true }).isChecked(),
-    true,
-  );
-  await runDialog.getByRole('button', { name: '连接所选目标', exact: true }).click();
-  await until(async () => (await rpc('ops_connections')).some((s) => s.hostId === hostId));
-  await runDialog.getByRole('button', { name: '预览自动化执行', exact: true }).click();
-  await dialog.getByLabel('自动化执行确认文字').fill('执行 1 台');
-  await dialog.getByRole('button', { name: '确认执行自动化', exact: true }).click();
-  await dialog.waitFor({ state: 'hidden' });
-  const run = await until(async () => {
-    const list = await rpc('automation_history', { query: {} });
-    const row = list.find((r) => r.entryName === name);
-    if (!row || row.state !== 'Success') return;
-    return rpc('automation_run', { id: row.id });
-  });
-  scope.runs.push(run.id);
-  await remember();
-  assert(run.rows[0].stdout.includes('__SD_PRODUCT_RESULT__'));
-  assert.equal(run.rows[0].hostId, hostId);
-  await page
-    .getByLabel('自动化执行详情', { exact: true })
-    .locator('pre:visible')
-    .filter({ hasText: '__SD_PRODUCT_RESULT__' })
-    .first()
-    .waitFor();
-  const downloaded = page.waitForEvent('download');
-  await page.getByRole('button', { name: '导出任务结果', exact: true }).click();
-  const resultFile = path.join(artifacts, 'product-export-result.json');
-  await (await downloaded).saveAs(resultFile);
-  const actual = JSON.parse(await readFile(resultFile, 'utf8'));
-  assert.equal(actual.id, run.id);
-  assert(actual.rows[0].stdout.includes('Linux'));
-  passed(
-    'native current-host command creation, target confirmation, real execution and exported result attribution',
-  );
-  // Global search invokes navigation/preview, never silently executes a script.
-  await page.keyboard.press('Control+k');
-  const search = page.getByRole('dialog', { name: '全局搜索', exact: true });
-  await search.getByLabel('全局搜索内容').fill(name);
-  await search.getByRole('option').filter({ hasText: name }).waitFor();
-  await search.getByLabel('全局搜索内容').press('Enter');
-  await page
-    .getByRole('dialog')
-    .filter({ has: page.getByRole('button', { name: '预览自动化执行', exact: true }) })
-    .getByRole('button', { name: '关闭对话框', exact: true })
-    .click();
-  assert.equal(
-    (await rpc('automation_history', { query: {} })).filter((r) => r.entryName === name).length,
-    1,
-  );
-  passed(
-    'native configurable global search opens a current-host task preview without executing it',
-  );
-  // Export, validate, skip duplicates, then explicitly restore copies without secrets or plans.
   await nav('备份恢复');
   await page.getByRole('button', { name: '导出非敏感备份', exact: true }).click();
   const backup = await rpc('backup_export');
   const parsed = JSON.parse(backup);
-  assert.equal(parsed.version, 2);
+  assert.equal(parsed.version, 3);
   assert(!backup.includes(originalHost.credentialId));
   assert(!parsed.credentials && !parsed.schedules && !parsed.runs);
   assert(parsed.hosts.every((h) => h.config.credentialId === null));
@@ -374,14 +286,12 @@ export async function productChecks(context) {
   assert.equal(restored[0].credentialId, null);
   scope.hosts.push(restored[0].id);
   await remember();
-  assert.equal((await rpc('automation_catalog')).schedules.length, 0);
   await writeFile(
     path.join(artifacts, 'product-backup-metadata.json'),
     JSON.stringify(
       {
         version: parsed.version,
         hosts: parsed.hosts.length,
-        entries: parsed.entries.length,
         restoredHostIds: restored.map((h) => h.id),
         credentialsExported: false,
       },

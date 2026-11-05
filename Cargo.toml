@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/storage", "crates/security", "crates/ssh", "crates/sftp", "crates/monitor", "crates/ops", "crates/tasks", "crates/automation", "crates/ai", "crates/plugin-sdk", "crates/plugin-core", "crates/plugin-runtime", "crates/application", "apps/desktop/src-tauri", "tools/ssh-probe"]
+members = ["crates/core", "crates/storage", "crates/security", "crates/ssh", "crates/sftp", "crates/monitor", "crates/ops", "crates/tasks", "crates/ai", "crates/plugin-sdk", "crates/plugin-core", "crates/plugin-runtime", "crates/application", "apps/desktop/src-tauri", "tools/ssh-probe"]
 default-members = ["crates/core", "crates/storage", "crates/security", "crates/application", "apps/desktop/src-tauri"]
 resolver = "3"
 
@@ -12,7 +12,6 @@ license = "MIT"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util", "fs", "process"] }
 tracing = "0.1"
@@ -28,7 +27,6 @@ serverdeck-sftp = { path = "crates/sftp" }
 serverdeck-monitor = { path = "crates/monitor" }
 serverdeck-ops = { path = "crates/ops" }
 serverdeck-tasks = { path = "crates/tasks" }
-serverdeck-automation = { path = "crates/automation" }
 serverdeck-ai = { path = "crates/ai" }
 serverdeck-plugin-core = { path = "crates/plugin-core" }
 serverdeck-plugin-runtime = { path = "crates/plugin-runtime" }

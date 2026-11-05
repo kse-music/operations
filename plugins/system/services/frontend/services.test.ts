@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
-import Services from './App.vue';
+import Services from './ServiceUnits.vue';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
 import { useNotificationsStore } from '@serverdeck/plugin-sdk/stores/notifications';
 import { hostInput } from '@serverdeck/plugin-sdk/types/hosts';

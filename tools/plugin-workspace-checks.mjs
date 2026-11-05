@@ -1,3 +1,4 @@
+import { networkFixture } from './plugin-fixtures.mjs';
 // Runs only inside the caller's verified, isolated native QA application.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -39,8 +40,6 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     ['主机运维', '运维工具', '资产管理', '设置'],
   );
   for (const [name, selector] of [
-    ['批量运维', '[aria-label="批量统一命令"]'],
-    ['自动运维', '[aria-label="自动化工作区"]'],
     ['网络诊断', '[aria-label="诊断工具"]'],
     ['AI 运维助手', '.ai-view'],
   ]) {
@@ -48,31 +47,16 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     await content().locator(selector).waitFor();
     assert.equal(await page.locator('.plugin-context:visible').count(), 0);
   }
-  await navigateWorkspace(page, '批量运维');
-  await content().getByLabel('批量统一命令', { exact: true }).fill('printf preserved-draft');
   await navigateWorkspace(page, '网络诊断');
-  await navigateWorkspace(page, '批量运维');
+  await content().getByLabel('诊断目标', { exact: true }).fill('preserved.example');
+  await navigateWorkspace(page, 'AI 运维助手');
+  await navigateWorkspace(page, '网络诊断');
   assert.equal(
-    await content().getByLabel('批量统一命令', { exact: true }).inputValue(),
-    'printf preserved-draft',
+    await content().getByLabel('诊断目标', { exact: true }).inputValue(),
+    'preserved.example',
   );
   passed.push(
-    'four workspace tools render through installed standard contributions; one Operations Tools menu and preserved batch draft',
-  );
-
-  await navigateWorkspace(page, '自动运维');
-  await content().getByRole('button', { name: '新建命令 / 脚本', exact: true }).click();
-  const editor = content().getByRole('dialog', { name: '新建命令 / 脚本', exact: true });
-  await editor.getByLabel('自动化条目名称', { exact: true }).fill('Native WASM 保存验证');
-  await editor.getByLabel('自动化条目正文', { exact: true }).fill('printf not-executed');
-  await editor.getByRole('button', { name: '保存条目', exact: true }).click();
-  await editor.waitFor({ state: 'hidden' });
-  assert(
-    (await invoke('automation_catalog')).entries.some((e) => e.name === 'Native WASM 保存验证'),
-  );
-  assert.equal((await invoke('automation_history', { query: {} })).length, 0);
-  passed.push(
-    'automation entry saved through the real WASM form and persisted in SQLite without executing a command',
+    'remaining workspace tools render through standard contributions and preserve diagnostic drafts',
   );
 
   const server = createServer();
@@ -208,11 +192,11 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
       (tasks) => tasks.some((t) => t.state === 'running'),
     );
     const task = tasks.find((t) => t.state === 'running');
-    await setPluginEnabled(page, '网络诊断', false);
+    await setPluginEnabled(page, '系统服务', false);
     assert((await invoke('diagnostic_list', { versions: {} })).some((t) => t.id === task.id));
     await navigateWorkspace(page, '任务中心');
     const card = page
-      .locator('[aria-label="网络与批量任务"] article')
+      .locator('[aria-label="网络诊断任务"] article')
       .filter({ hasText: '127.0.0.1' })
       .first();
     await card.getByRole('button', { name: '请求停止此任务', exact: true }).click();
@@ -224,7 +208,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
       () => invoke('diagnostic_list', { versions: {} }),
       (tasks) => tasks.some((t) => t.id === task.id && t.state === 'cancelled'),
     );
-    await setPluginEnabled(page, '网络诊断', true);
+    await setPluginEnabled(page, '系统服务', true);
     passed.push(
       'real local TCP diagnostic survives plugin disable and can be stopped by the shared Task Center',
     );
@@ -234,9 +218,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
   }
 
   // An uploaded equivalent with an unrelated ID uses the same public tool contract.
-  const packed = JSON.parse(
-    await readFile(new URL('../plugins/system/packages/network.sdplugin', import.meta.url)),
-  );
+  const packed = await networkFixture();
   packed.manifest.id = 'dev.qa.upload-network';
   packed.manifest.name = 'Uploaded Network QA';
   const source = path.join(run, 'uploaded-network.sdplugin');
@@ -277,8 +259,24 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     .locator('[aria-label="运维工具导航"]')
     .getByRole('button', { name: 'Uploaded Network QA', exact: true })
     .click();
+  await page.locator('.plugin-page:visible [aria-label="插件设置"]').waitFor();
+  assert.equal(await page.locator('.plugin-frame-container:visible').count(), 0);
+  const openUploaded = () =>
+    page.evaluate(
+      (id) =>
+        document
+          .querySelector('#app')
+          .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+          .openPlugin(id, 'network', ''),
+      id,
+    );
+  await openUploaded();
   await content().getByRole('tablist', { name: '诊断工具', exact: true }).waitFor();
+  assert.equal(await page.locator('.plugin-workspace:visible .plugin-source').count(), 0);
+  await page.getByRole('button', { name: '插件设置', exact: true }).click();
   assert((await page.locator('.plugin-page:visible > header').textContent()).includes('用户上传'));
+  await openUploaded();
+  await content().getByRole('tablist', { name: '诊断工具', exact: true }).waitFor();
   passed.push(
     'unrelated uploaded package ID renders and executes the same tool contract only after explicit grants',
   );

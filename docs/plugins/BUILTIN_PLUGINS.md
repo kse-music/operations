@@ -1,84 +1,47 @@
 # 系统内置标准插件
 
-## 当前目录与加载机制（UI v4）
+## 当前范围（2026-11-05）
 
-九个包均为 1.1.0，要求 Host API ^1.4.0，使用 Rust SDK 1.3.0 和前端 SDK 1.0.0。每个 `plugins/system/<name>` 自带 frontend、backend、测试、manifest 和 UI JSON；助手、自动化、批量、诊断和五个服务器页面已从 desktop 迁出。公共基础组件、类型、客户端和主题放在 SDK，宿主只保留公共服务及受控桥，不再静态挂载业务页面。
+系统分发三个独立标准 WASM 插件。资源监控、进程与端口、systemd 服务、日志查看、网络诊断合并为“系统服务”；Docker 管理和 AI 运维助手独立保留。自动运维与批量运维继续移除。
 
-| 插件目录   | 界面与交互业务                     |
-| ---------- | ---------------------------------- |
-| assistant  | 对话、关联主机、Markdown、命令审核 |
-| automation | 命令/脚本、模板、执行及计划表单    |
-| batch      | 多主机命令与单文件分发             |
-| network    | 网络诊断和结果                     |
-| resources  | 资源总览、磁盘、网络图表           |
-| docker     | 容器、镜像及详情                   |
-| processes  | 进程、端口及详情                   |
-| services   | systemd 服务                       |
-| logs       | 结构化日志浏览与流                 |
+| 插件 ID                       | 独立源码                   | 功能        | 预置权限                                                                                                 |
+| ----------------------------- | -------------------------- | ----------- | -------------------------------------------------------------------------------------------------------- |
+| `cn.hiboot.plugins.services`  | `plugins/system/services`  | 系统服务    | `ui.contribute`, `system.read`, `system.manage`, `metrics.read`, `logs.read`, `sftp.read`, `network.run` |
+| `cn.hiboot.plugins.docker`    | `plugins/system/docker`    | Docker 管理 | `ui.contribute`, `system.read`, `system.manage`                                                          |
+| `cn.hiboot.plugins.assistant` | `plugins/system/assistant` | AI 运维助手 | `ui.contribute`, `assistant.use`                                                                         |
 
-`npm run plugins:build` 调用与上传相同的单包编译器，输出带摘要的 WASM/UI/JS/CSS 标准包。主程序根据安装记录加载包内前端到 iframe，并以同一 SDK/WASM/权限路径调用公共原生能力，不按内置 ID 选择组件。新通用 frontend 插件完全不依赖标准工具类型。
+三个包版本为 1.2.0，要求 Host API ^2.1.0，Rust SDK 与前端 SDK 均为 2.1.0。WASM ABI/wire/包格式/manifest schemaVersion 仍为 1，UI 为 v4；保留旧能力和兼容 UI。见[API 版本策略](PLUGIN_API_VERSIONING.md)。
 
-旧 v2/v3 安装继续用兼容资源，组合服务器旧视图在 `plugins/compat/server/frontend`；兼容层允许复用资源/日志业务源，只在兼容构建中明确列出，不进入新插件依赖图。兼容产物随产品分发，不需要强制重装已有系统包。预置授权、禁用/卸载墓碑、上传显式授权及任务中心接管语义保持。下面“固定可信渲染器、UI v2/v3、SDK 1.2”等为先前阶段设计，当前实现以上述为准。
+“系统服务”只有一个插件身份和功能贡献，页内五分类支持键盘方向键。资源监控内含概览/磁盘/网络，进程内含监听端口。页签采用按需挂载的有界缓存；切换保留输入，隐藏时暂停监控/列表/诊断轮询并停止日志流，已读日志继续保留。进入系统服务仍使用当前主机，不重复选择主机。全局搜索和任务中心的网络诊断定位到同一插件的诊断分类，本机模式无需连接主机，其余主机分类在该全局页面中不可用。
 
-## 插件图标
+Docker 采用容器/镜像分类、从真实列表计算的状态摘要、精简列和分组操作；CPU/详情/日志/Shell、危险操作目标确认保留。AI 采用主对话区、可收起上下文、固定输入区和问题建议；建议只填写草稿，发送/授权/命令审批保持原机制。
 
-九个分发清单通过 icon 配置不同图标：AI 运维助手 `bot`、自动运维 `calendar-clock`、批量运维 `layers`、Docker `container`、日志 `scroll-text`、网络诊断 `network`、进程与端口 `list-tree`、资源监控 `activity`、系统服务 `settings-2`。新清单要求 Host API ^1.3.0，SDK 仍为 1.2.0。已安装旧系统包缺字段时读取分发配置用于显示，不重装、不改变启停/授权；上传也支持相同字段，未填默认 boxes。详见[图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。
+## 使用入口
 
-## 工作区工具：SDK 1.2 / UI v3
+顶部“运维工具”侧栏查看全部已安装插件的配置，包含禁用或未授权的身份；点击只打开配置。设置中的插件管理提供安装、详情、权限和卸载。插件功能从当前主机工作区 SSH/SFTP 右侧“工具”菜单进入，固定当前主机，不重复选择主机。全局搜索可打开 AI 与网络诊断；网络来源、诊断目标与 AI 跨主机分析仍按各自用途明确选择。
 
-四个新包分别声明公开 `tool` 贡献和 `{kind:"tool",tool:"assistant|batch|automation|network"}`（实际取其中一个枚举值），需要 SDK/API ^1.2.0 和 UI v3。固定可信渲染器注入同一桥接 API，根据贡献类型选择视图；不按内置 ID 路由，不执行包内脚本。第三方上传相同声明也能使用完整页面，但必须获得 ui.contribute 和对应 assistant.use / batch.run / automation.manage / network.run 权限及操作授权。
+每台主机保留一个设备标签，按插件/贡献/主机缓存页面、草稿与结果。隐藏时停止交互及日志、释放 WASM VM，返回时重新绑定并激活，准备完成后才开放界面。草稿仅保留在当前运行内；旧资源句柄须重新获取，已提交网络诊断任务由宿主管理。任务中心仅保留文件传输和网络诊断，停用插件不静默取消已提交的诊断。
 
-业务链路为可信表单 → plugin_tool_stage → 单次不可变输入票据 → 包内 WASM → tool_invoke → 类型化 Host 能力 → 原任务/AI/自动化服务 → WASM Resume。Guest 仅收到票据、封闭操作和限额结果，不得到模型 Key、私有 SSH 租约、完整确认载荷或原生 IPC 名称。输入票据绑定插件/安装代/上下文代/精确操作，TTL 60 秒、每份最多 1 MiB、全局八份/每插件两份、合计 4 MiB。结果沿用公开分块资源。
+## 源码、构建和加载
 
-模型管理、主机库存、可信连接/文件选择、任务引擎、调度器、持久化历史和任务中心是宿主基础能力。禁用/卸载撤销交互请求、AI 预览/建议、输入和结果资源；已明确提交的网络/批量/自动化任务及计划继续由宿主管理，不删除或悄悄取消。任务中心无需安装业务插件即可请求停止任务或暂停计划；创建、编辑和批准业务任务仍在插件页。内置配置预置且只读，上传权限仍可配置。
+每个 `plugins/system/<name>` 拥有 frontend、backend、manifest、UI JSON、测试和独立 Cargo.lock。公开 TypeScript/Vue SDK 提供共享状态、能力客户端和公共 UI；宿主只保留原生基础服务、管理和权限桥。
 
-批量、自动运维、网络诊断标签保留内存草稿，关闭标签后释放；打开自身设置保留当前功能草稿，禁用/撤权会卸载功能区。AI 的单次取消通过绑定输入票据和自有预览根撤销，不取消整个 VM，后续可以继续提问。AI 命令仍复用现有逐条审核、目标绑定和危险操作确认，不自动执行模型建议。
+执行 `npm run plugins:build`，或 `node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin`，使用与上传包相同的编译和打包器生成 WASM/UI/JS/CSS 与摘要。标准发行资产位于 `plugins/system/packages/*.sdplugin`。宿主验证安装代、授权和摘要后将包内 JS/CSS 加载到不透明来源 iframe，禁止直接访问父 DOM、原生 IPC 和外部网络。
 
-服务器管理五个插件和工作区工具四个插件，共九个独立 WASM 插件，每个都有自己的 manifest、UI 声明、Rust crate、Cargo.lock 和标准 `.sdplugin` 产物。仅依赖公开 SDK，使用与用户上传包相同的校验、仓库、运行时、授权、升级和卸载流程。
+AI 与系统服务中的网络 ToolInvoke 经不可变单次票据、真实 WASM、Host 类型化能力与原有审批执行；Guest 不取得模型 Key、私有 SSH 租约或任意 IPC 名称。服务器插件使用 SDK 公共监控、系统查询、日志和容器终端能力；危险操作继续核对目标和确认。主机密钥、连接配置一致性、取消、速率、资源配额和失败诊断保持。
 
-| 插件 ID                      | 独立源码                    | 分类                       |
-| ---------------------------- | --------------------------- | -------------------------- |
-| cn.hiboot.plugins.resources  | `plugins/system/resources`  | 资源概览、磁盘、网络       |
-| cn.hiboot.plugins.docker     | `plugins/system/docker`     | Docker 容器、镜像          |
-| cn.hiboot.plugins.processes  | `plugins/system/processes`  | 进程、监听端口             |
-| cn.hiboot.plugins.services   | `plugins/system/services`   | systemd 服务               |
-| cn.hiboot.plugins.logs       | `plugins/system/logs`       | 文件、容器、服务日志       |
-| cn.hiboot.plugins.assistant  | `plugins/system/assistant`  | AI 运维助手                |
-| cn.hiboot.plugins.batch      | `plugins/system/batch`      | 批量命令和文件分发         |
-| cn.hiboot.plugins.automation | `plugins/system/automation` | 命令脚本库、计划和执行历史 |
-| cn.hiboot.plugins.network    | `plugins/system/network`    | 本机和远端网络诊断         |
+旧 UI v1 表单和 v2/v3 的保留工具继续兼容，组合服务器兼容源在 `plugins/compat/server/frontend`。插件图标仍从 manifest.icon 读取，三个标准包各自声明；上传同样支持，未指定或未知名称使用 boxes。
 
-## 构建与分发
+## 升级、旧数据与存储
 
-单独构建：`node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin`。统一构建：`npm run plugins:build`，输出 `plugins/system/packages/*.sdplugin`；应用的开发/构建命令先刷新这些标准发行资产。首次获取锁定依赖及 wasm32-unknown-unknown 工具链后可离线构建。源码并不编译进宿主业务模块，宿主嵌入的是完整插件包字节。
+旧 resources/processes/logs/network 的 system 记录（含旧域名）在启动时归档，原 payload/设置不删除；同 ID 的上传源不归档。services 沿用自己的启停、设置与卸载选择，不猜测或覆盖原四个插件的配置。
 
-启动时将未配置过的分发包通过标准包校验器安装到普通插件仓库。系统分发的新安装默认启用，声明的全部能力、操作范围（含 Docker 容器终端）和所需目录预先授权；日志插件可读根为 `/`，仍受远端账号权限限制。已有系统安装补齐固定授权，但保留用户的禁用选择；不会自动连接服务器。existing application_settings 的 `bundled_plugin:<id>` 记录分发标记，卸载后重启不会重新安装。已有上传安装不被覆盖或自动授权；显式上传升级仍按上传包处理，默认禁用且需重新授权。
+版本升级只更新较低版本的 system 安装，复用标准仓库和备份，保留启停、设置、卸载墓碑及上传源；同版本不重装，也不降级。预置权限只读，上传权限仍需显式授权。所有插件适用于所有主机，实际使用时绑定入口主机；不会自动提权。
 
-“设置 → 插件管理”提供拖拽或文件选择安装，列表只保留卸载操作，点击名称进入插件自己的页面。顶部“运维工具”显示所有已安装名称，包括禁用/未授权项；来源、运行状态、启停、权限和包详情在各自页内展示。宿主公共“任务中心”独立位于应用底部状态栏，点击打开弹窗，不列入运维工具菜单。终端右上角 SFTP 右侧的“工具”下拉菜单按插件列出已启用项（每个插件一项），点击在当前主机打开；没有 UI 的包进入自身设置，未启用项不显示。两类插件都无需配置主机白名单，能力适用于所有主机，实际调用仍绑定当前选中主机和连接代。
+启动时在读取新 SDK 元数据前，将两个已删除内置身份（含旧域名）和声明已移除权限的旧安装记录原子移至 `plugins/retired/<id>-removed-<uuid>`，不再注册或允许激活。记录、payload、配置和既有数据库历史不清空，不重启旧计划；依赖这些已删除接口的上传包需修改后重新安装。新安装不能重新注册两个已删除内置身份。该归档兼容代码不包含调度或执行实现。
 
-系统插件权限和目录范围为只读，宿主拒绝修改或撤权请求；可在自身设置启停或在管理列表卸载。上传插件仍由用户配置能力与目录，上传相同 ID/相同包也不会取得系统预置权限。来源只由宿主分发/导入路径记录，不是独立的密码学签名验证。语言沿用全局偏好。
+Windows 默认仓库在 `%APPDATA%/cn.hiboot.desktop/plugins`：system 为系统包，upload 为上传内容，packages 保存当前安装记录，data 保存插件设置。仓库源码 `plugins/upload` 与应用安装仓库不同，不被启动扫描。应用身份迁移仍沿用既有安全目录检查，不覆盖已有新目录或用户上传包。
 
-## 标准服务器视图
+## 验证边界
 
-公开 SDK 1.1.0、UI v2 新增 `server` 贡献和 `surface` 声明。资源、运维表格、详情、图表及日志由可信共享 Vue 渲染器展示；上传插件也能使用相同声明。包内不执行 HTML/JS，不动态导入包内组件，不根据内置 ID 选择原生页面。
-
-每次业务调用都经过 `plugin_call → 该包 WASM → 公开 Capability → Host 授权/执行 → WASM Resume`。五个包分别限制自己提供的能力，宿主仍逐请求检查安装代、权限、当前主机、操作、连接配置及资源归属。共享 MonitorView/OperationsView/OpsLogPanel 在插件上下文注入受控 API，不直接调用原生业务 IPC。ServerView 保留标准 server 贡献入口，常用功能直接从工具菜单打开；进程/日志联动寻找已启用且具备能力、声明对应分类的提供者，上传插件同样参与。
-
-## 宿主资源与限制
-
-- `metrics.read` 使用本插件/上下文拥有的采样器，共用既有 SSH 连接池；最多八个插件采样器。切页暂停，停止/换连接/禁用/撤权/升级/卸载/退出释放，更新全局间隔与重置连接作用于全部采样器。AI 仍按当前真实 SSH transport 和采样时间复用数据。
-- `system.read` / `system.manage` 只接受封闭类型的运维请求。环境变量明文展示、状态修改和信号仍需宿主逐次批准；不接受 Guest 自带 confirmed。容器终端另需允许 `system.shell`，批准后领取绑定插件、安装代、上下文、主机、容器和 Shell 的单次票据，60 秒有效；可信终端 IPC 复验后创建 SSH 终端。已交给终端工作区的会话独立存在，重连须重新经过 WASM 审批。
-- `logs.read` 支持指定文件、容器和 systemd 日志；文件额外检查 sftp.read 和规范可读根目录。流、ACK、有限通道及轮询均检查归属，离开日志页关闭；不会自动提权。
-- 超过 1 KiB 的结构化业务结果通过不透明分块资源传递，避免消耗 Guest JSON 执行预算。单结果最多 4 MiB、共 8 MiB、全局八项/每插件两项、60 秒有效，每块 32 KiB；不可跨插件/上下文读取，前端验证完整字节数和 UTF-8，读取后关闭。WASM 原有 64 KiB 消息、内存/fuel 限额未放宽。
-
-旧 `serverdeck.builtin.*` 原生注册表、独立启停 IPC 和状态门控已移除；旧 settings 行保留不读取，不重置用户配置、主机、凭据或远端数据。新包不会继承旧原生功能的默认授权。
-
-验证与平台边界见 [插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md)。
-
-## 目录与域名迁移
-
-内置源码位于项目 plugins/system。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件及专用验收入口已删除；metadata、hello-world、diagnostics、host-info 是必要的协议/隔离测试夹具，位于 tests/fixtures/plugins，不作为产品插件分发。原 examples/plugins 是空目录，已删除。这里只整理仓库源码，不删除客户端已安装的上传包或用户数据。实际客户端安装目录位于应用数据根的 plugins 下：system/<ID>/versions 保存分发包内容，upload/<ID>/versions 保存上传内容，packages/<ID>/record.json 保存当前代和备份指针；data 与 authorizations 继续保存个人配置和授权。通过管理页预览并确认安装后即写入内容和记录，管理列表与运维工具侧栏显示已安装身份，包括禁用、未授权的上传包；放入仓库 plugins/upload 不会自动注册。旧 packages/<ID>/versions 中的内容按原来源原子移动，不改变安装代、摘要、授权或设置；冲突/链接明确拒绝，不覆盖目标，部分移动后可在下次启动继续。
-
-旧域名的内置 ID 已统一为 cn.hiboot.plugins.*；应用 identifier 现为 cn.hiboot.desktop，默认数据目录及凭据服务具备兼容迁移，见[总体架构](../architecture/ARCHITECTURE.md#2026-11-04应用域名统一)。内置插件身份迁移保留配置和旧卸载标记，旧系统记录归入 plugins/retired，新系统身份使用本版固定预置授权，不复制旧授权。已存在的新 ID 安装不覆盖，上传包 ID 不改写。旧授权文件中的 hostIds 兼容读取但不再限制主机，新授权和 IPC 不输出该字段；版本、摘要、安装代、能力、操作和路径限制继续有效。历史内容留存，不删除用户配置或远端数据。
-
-存储布局迁移后应使用新版客户端，旧版按原 packages 路径读取内容，不支持直接回退旧程序；本轮保留原记录/数据，不提供自动回退工具。
+本轮三插件/五分类真实 SSH、旧记录归档、接口拒绝、草稿和权限回归见[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md)。不将历史九插件测试记录当作当前功能范围；跨平台、签名安装器和长期运行仍需各自验收。

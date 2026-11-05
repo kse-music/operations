@@ -1,7 +1,5 @@
 import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
 import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
-import { automationChecks } from './native-automation-e2e.mjs';
-import { networkBatchChecks } from './native-network-batch-e2e.mjs';
 import { probeOps, operationsChecks } from './native-ops-e2e.mjs';
 // Real packaged WebView2 -> Tauri -> OS credential store -> SSH -> Linux PTY.
 // Password must arrive through process environment (or the invoking secure prompt), never argv/files.
@@ -465,32 +463,6 @@ try {
     await openTerminal();
     await active().locator('.xterm-container[data-state="connected"]').waitFor();
   }
-  if (process.argv.includes('--automation') || process.argv.includes('--recover-automation'))
-    await automationChecks({
-      dataDirectory,
-      page,
-      artifacts,
-      passed,
-      hostId,
-      command,
-      contains,
-      restart: restartIsolated,
-      registerCleanup: (fn) => {
-        cleanupFiles = fn;
-      },
-    });
-  if (process.argv.includes('--network-batch'))
-    await networkBatchChecks({
-      page,
-      artifacts,
-      passed,
-      hostId,
-      command,
-      contains,
-      registerCleanup: (fn) => {
-        cleanupFiles = fn;
-      },
-    });
   if (process.argv.includes('--ops'))
     await operationsChecks({
       processId: () => child.pid,

@@ -1,4 +1,4 @@
-use serverdeck_core::{automation::*, backup::*, hosts::*, product::WindowGeometry};
+use serverdeck_core::{backup::*, hosts::*, product::WindowGeometry};
 use serverdeck_storage::Database;
 fn host(db: &Database, name: &str) -> Host {
     db.host_create(HostInput {
@@ -105,12 +105,6 @@ fn backup_roundtrip_preserves_definitions_groups_tags_and_omits_credentials_and_
         None,
     )
     .unwrap();
-    let g = db.automation_group_save(None, "tools").unwrap();
-    let mut template = templates().pop().unwrap();
-    template.parameters[0].secret = true;
-    template.parameters[0].default = None;
-    template.group_id = Some(g.id);
-    let e = db.automation_entry_save(None, None, template, 1).unwrap();
     let text = db.backup_export().unwrap();
     assert!(!text.contains(&credential_id));
     assert!(!text.contains("C:/private/key"));
@@ -121,19 +115,14 @@ fn backup_roundtrip_preserves_definitions_groups_tags_and_omits_credentials_and_
     let before = out.backup_preview(&text).unwrap();
     assert!(before.items.iter().all(|i| !i.duplicate));
     let r = out
-        .backup_restore(restore(text, vec![h.id, e.id], ConflictPolicy::Skip))
+        .backup_restore(restore(text, vec![h.id], ConflictPolicy::Skip))
         .unwrap();
-    assert_eq!((r.hosts, r.entries), (1, 1));
+    assert_eq!(r.hosts, 1);
     let catalog = out.catalog().unwrap();
     assert_eq!(catalog.hosts[0].config.tags, vec!["中文"]);
     assert!(catalog.hosts[0].config.credential_id.is_none());
     assert!(catalog.credentials.is_empty());
     assert_eq!(catalog.groups[0].name, "Production");
-    assert_eq!(
-        out.automation_entries().unwrap()[0].input.group_id,
-        Some(out.automation_groups().unwrap()[0].id.clone())
-    );
-    assert!(out.automation_schedules().unwrap().is_empty());
 }
 #[test]
 fn duplicate_skip_copy_and_reopen_do_not_overwrite_original() {
@@ -261,10 +250,6 @@ fn authenticated_proxy_is_blocked_and_secret_defaults_rejected() {
         db.backup_restore(restore(text, vec![h.id], ConflictPolicy::Copy))
             .is_err()
     );
-    let mut t = templates().pop().unwrap();
-    t.parameters[0].secret = true;
-    t.parameters[0].default = Some("never save secret".into());
-    assert!(db.automation_entry_save(None, None, t, 0).is_err());
 }
 #[test]
 fn additive_preferences_and_logical_window_size_survive_reopen() {
@@ -329,4 +314,51 @@ fn proxy_default_requires_a_live_credential_and_blocks_deletion_until_unlinked()
     db.save_config(&config).unwrap();
     db.credential_delete(&id, false).unwrap();
     assert!(db.credential_record(&id).is_err());
+}
+
+#[test]
+fn retired_data_stays_intact_and_legacy_backup_only_restores_hosts_and_preferences() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    assert_eq!(connection.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name LIKE 'automation_%'", [], |row| row.get::<_, u32>(0)).unwrap(), 0);
+    connection.execute_batch("CREATE TABLE automation_entries(id TEXT PRIMARY KEY,document TEXT); INSERT INTO automation_entries VALUES('legacy','retained');").unwrap();
+    drop(connection);
+    let saved = host(&db, "retained host");
+    drop(db);
+    let db = Database::open(&path).unwrap();
+    assert_eq!(
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .query_row(
+                "SELECT document FROM automation_entries WHERE id='legacy'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+        "retained"
+    );
+    let mut backup: serde_json::Value = serde_json::from_str(&db.backup_export().unwrap()).unwrap();
+    assert_eq!(backup["version"], 3);
+    assert!(backup.get("entries").is_none());
+    assert!(backup.get("commandGroups").is_none());
+    backup["version"] = serde_json::json!(2);
+    backup["entries"] = serde_json::json!([{"old":"ignored, never executed"}]);
+    backup["commandGroups"] = serde_json::json!([]);
+    let old = serde_json::to_string(&backup).unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let target = Database::open(other.path().join("db")).unwrap();
+    let preview = target.backup_preview(&old).unwrap();
+    assert_eq!(preview.items.len(), 1);
+    assert!(preview.warnings.iter().any(|w| w.contains("旧版命令库")));
+    let result = target
+        .backup_restore(restore(old, vec![saved.id], ConflictPolicy::Skip))
+        .unwrap();
+    assert_eq!(result.hosts, 1);
+    assert!(result.warnings.iter().any(|w| w.contains("旧版命令库")));
+    assert_eq!(
+        target.catalog().unwrap().hosts[0].config.name,
+        "retained host"
+    );
 }

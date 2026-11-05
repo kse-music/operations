@@ -25,12 +25,11 @@ export const messages = {
     server: '服务器管理',
     network: '网络诊断',
     assistant: 'AI 运维助手',
-    batch: '批量运维',
-    automation: '自动运维',
     backup: '备份恢复',
     about: '关于',
     plugins: '插件管理',
     extension: '插件工作区',
+    pluginSettings: '插件设置',
   },
 } as const;
 export type WorkspaceView = keyof (typeof messages)['zh-CN'];
@@ -51,7 +50,7 @@ export function globalKey(event: KeyboardEvent): string | null {
 }
 export interface BackgroundTask {
   id: string;
-  kind: 'diagnostic' | 'batch';
+  kind: 'diagnostic';
   hostIds: string[];
   state: string;
   label: string;
@@ -59,7 +58,7 @@ export interface BackgroundTask {
 }
 export interface BackupItem {
   id: string;
-  kind: 'host' | 'entry';
+  kind: 'host';
   name: string;
   detail: string;
   duplicate: boolean;
@@ -80,7 +79,6 @@ export interface RestoreInput {
 }
 export interface RestoreResult {
   hosts: number;
-  entries: number;
   skipped: number;
   preferencesRestored: boolean;
   warnings: string[];

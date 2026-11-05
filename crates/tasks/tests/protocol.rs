@@ -208,8 +208,7 @@ impl Fixture {
             servers.push(tokio::spawn(async move{let mut workers=tokio::task::JoinSet::new();loop{tokio::select!{r=listener.accept()=>{let(stream,_)=r.unwrap();let stream=stream.into_std().unwrap();peers.lock().unwrap().push(stream.try_clone().unwrap());let stream=tokio::net::TcpStream::from_std(stream).unwrap();let config=config.clone();let h=Handler{password:pw.clone(),label:label.clone(),status:if n==2{7}else{0},channels:HashMap::new(),stops:HashMap::new(),metrics:metrics.clone()};workers.spawn(async move{if let Ok(c)=server::run_stream(config,stream,h).await{let _=c.await;}});},_=workers.join_next(),if !workers.is_empty()=>()}}}));
         }
         let engine = Engine::new(db);
-        let files = serverdeck_sftp::Files::new(engine.clone(), 3);
-        let tasks = Tasks::new(engine.clone(), files);
+        let tasks = Tasks::new(engine.clone());
         Self {
             engine,
             tasks,
@@ -247,48 +246,6 @@ impl Fixture {
         .unwrap();
         s
     }
-    fn input(
-        &self,
-        sessions: &[TerminalSession],
-        command: &str,
-        concurrency: u8,
-        timeout: u16,
-    ) -> BatchInput {
-        BatchInput {
-            targets: sessions
-                .iter()
-                .map(|s| Target {
-                    host_id: s.host_id.clone(),
-                    session_id: Some(s.id.clone()),
-                })
-                .collect(),
-            operation: BatchOperation::Command {
-                command: command.into(),
-            },
-            concurrency,
-            timeout_secs: timeout,
-            confirmed: true,
-        }
-    }
-    async fn batch_done(&self, id: &str) -> Batch {
-        tokio::time::timeout(Duration::from_secs(6), async {
-            loop {
-                let b = self
-                    .tasks
-                    .batch_list()
-                    .unwrap()
-                    .into_iter()
-                    .find(|b| b.id == id)
-                    .unwrap();
-                if b.finished {
-                    return b;
-                }
-                tokio::time::sleep(Duration::from_millis(15)).await;
-            }
-        })
-        .await
-        .unwrap()
-    }
     async fn diag_done(&self, id: &str) -> Diagnostic {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
@@ -313,128 +270,6 @@ impl Fixture {
         self.engine.shutdown().await;
         assert_eq!(self.engine.counts().unwrap(), (0, 0));
     }
-}
-#[tokio::test]
-async fn independent_servers_partial_failure_exit_status_and_concurrency() {
-    let f = Fixture::new().await;
-    let mut ss = vec![];
-    for n in 0..3 {
-        ss.push(f.open(n).await);
-    }
-    let b = f
-        .tasks
-        .batch_start(f.input(&ss, "normal", 2, 3))
-        .await
-        .unwrap();
-    let result = f.batch_done(&b.id).await;
-    assert!(f.metrics.max.load(Ordering::SeqCst) <= 2);
-    for (n, row) in result.rows.iter().enumerate() {
-        assert_eq!(row.host_id, ss[n].host_id);
-        assert_eq!(row.session_id.as_deref(), Some(ss[n].id.as_str()));
-        assert!(row.stdout.contains(&format!("server-{n} 中文😀")));
-        assert!(!row.stdout.contains(&format!("server-{}", (n + 1) % 3)));
-        assert_eq!(row.exit_code, Some(if n == 2 { 7 } else { 0 }));
-        assert_eq!(row.state, if n == 2 { "failed" } else { "completed" });
-    }
-    assert!(result.rows[2].stderr.contains("permission denied"));
-    let permission = f
-        .tasks
-        .diagnostic_start(DiagnosticInput {
-            tool: Tool::Ping,
-            origin: Origin::Remote {
-                host_id: ss[2].host_id.clone(),
-                session_id: ss[2].id.clone(),
-            },
-            target: "127.0.0.1".into(),
-            port: 22,
-            count: 1,
-            timeout_secs: 3,
-        })
-        .unwrap();
-    let permission = f.diag_done(&permission.id).await;
-    assert_eq!(permission.state, "failed");
-    assert_eq!(permission.exit_code, Some(7));
-    assert!(permission.output.contains("permission denied"));
-    assert!(f.engine.ops_ready(&ss[0].id).unwrap());
-    assert!(
-        f.tasks
-            .batch_retry_file(&b.id, &ss[0].host_id, ss[0].id.clone(), true)
-            .await
-            .is_err()
-    );
-    f.finish().await;
-}
-#[tokio::test]
-async fn cancellation_skips_queued_targets_and_timeout_is_uncertain() {
-    let f = Fixture::new().await;
-    let mut ss = vec![];
-    for n in 0..3 {
-        ss.push(f.open(n).await);
-    }
-    let b = f
-        .tasks
-        .batch_start(f.input(&ss, "wait", 1, 1))
-        .await
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while f.metrics.calls.load(Ordering::SeqCst) == 0 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
-    f.tasks.batch_cancel(&b.id, false).unwrap();
-    let b = f.batch_done(&b.id).await;
-    assert_eq!(b.rows.iter().filter(|r| r.state == "uncertain").count(), 1);
-    assert_eq!(b.rows.iter().filter(|r| r.state == "cancelled").count(), 2);
-    assert_eq!(f.metrics.calls.load(Ordering::SeqCst), 1);
-    let d = f
-        .tasks
-        .diagnostic_start(DiagnosticInput {
-            tool: Tool::SshLatency,
-            origin: Origin::Remote {
-                host_id: ss[0].host_id.clone(),
-                session_id: ss[0].id.clone(),
-            },
-            target: String::new(),
-            port: 22,
-            count: 1,
-            timeout_secs: 2,
-        })
-        .unwrap();
-    let d = f.diag_done(&d.id).await;
-    assert_eq!(d.state, "completed");
-    assert!(d.output.contains("round-trip"));
-    f.finish().await;
-}
-#[tokio::test]
-async fn output_is_bounded_and_wrong_host_or_missing_connection_never_executes() {
-    let f = Fixture::new().await;
-    let s = f.open(0).await;
-    let b = f
-        .tasks
-        .batch_start(f.input(std::slice::from_ref(&s), "huge", 1, 3))
-        .await
-        .unwrap();
-    let b = f.batch_done(&b.id).await;
-    assert_eq!(b.rows[0].state, "completed");
-    assert!(b.rows[0].stdout.len() <= 32768);
-    assert!(b.rows[0].dropped_bytes > 0);
-    let before = f.metrics.calls.load(Ordering::SeqCst);
-    let mut input = f.input(std::slice::from_ref(&s), "normal", 1, 2);
-    input.targets[0].host_id = f.hosts[1].id.clone();
-    let b = f.tasks.batch_start(input).await.unwrap();
-    let b = f.batch_done(&b.id).await;
-    assert_eq!(b.rows[0].state, "failed");
-    assert_eq!(f.metrics.calls.load(Ordering::SeqCst), before);
-    let mut input = f.input(std::slice::from_ref(&s), "normal", 1, 2);
-    input.targets[0].session_id = None;
-    let b = f.tasks.batch_start(input.clone()).await.unwrap();
-    assert_eq!(f.batch_done(&b.id).await.rows[0].state, "failed");
-    input.confirmed = false;
-    assert!(f.tasks.batch_start(input).await.is_err());
-    assert_eq!(f.metrics.calls.load(Ordering::SeqCst), before);
-    f.finish().await;
 }
 #[tokio::test]
 async fn independent_diagnostics_cancel_and_tcp_disconnect_release_resources() {
@@ -547,11 +382,6 @@ async fn shutdown_cancels_active_and_queued_jobs_without_closing_shared_ssh() {
     for n in 0..3 {
         sessions.push(f.open(n).await);
     }
-    let b = f
-        .tasks
-        .batch_start(f.input(&sessions, "wait", 1, 30))
-        .await
-        .unwrap();
     let d = f
         .tasks
         .diagnostic_start(DiagnosticInput {
@@ -567,7 +397,7 @@ async fn shutdown_cancels_active_and_queued_jobs_without_closing_shared_ssh() {
         })
         .unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
-        while f.metrics.active.load(Ordering::SeqCst) < 2 {
+        while f.metrics.active.load(Ordering::SeqCst) < 1 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
@@ -577,15 +407,6 @@ async fn shutdown_cancels_active_and_queued_jobs_without_closing_shared_ssh() {
         .await
         .expect("all workers joined");
     assert_eq!(f.tasks.pending().unwrap(), 0);
-    assert!(
-        f.tasks
-            .batch_list()
-            .unwrap()
-            .iter()
-            .find(|x| x.id == b.id)
-            .unwrap()
-            .finished
-    );
     assert!(!active(
         &f.tasks
             .diagnostic_list()
@@ -601,4 +422,53 @@ async fn shutdown_cancels_active_and_queued_jobs_without_closing_shared_ssh() {
     );
     f.engine.shutdown().await;
     assert_eq!(f.engine.counts().unwrap(), (0, 0));
+}
+
+#[tokio::test]
+async fn direct_command_execution_retains_exit_status_deadline_and_bounded_admission() {
+    let f = Fixture::new().await;
+    let good = f.open(0).await;
+    let bad = f.open(2).await;
+    for (session, expected) in [(&good, 0), (&bad, 7)] {
+        let cancel = CancellationToken::new();
+        let slot = f.tasks.command_slot(&cancel).await.unwrap();
+        let mut stdout = String::new();
+        let mut stderr = String::new();
+        let result = f
+            .tasks
+            .execute_command(&session.id, "normal", 3, &cancel, slot, |text, error| {
+                if error {
+                    stderr.push_str(text);
+                } else {
+                    stdout.push_str(text);
+                }
+            })
+            .await;
+        assert_eq!(result.code, Some(expected));
+        assert!(stdout.contains("中文"));
+        if expected != 0 {
+            assert!(stderr.contains("permission denied"));
+        }
+    }
+    let cancel = CancellationToken::new();
+    let slot = f.tasks.command_slot(&cancel).await.unwrap();
+    let deadline = f
+        .tasks
+        .execute_command(&good.id, "wait", 1, &cancel, slot, |_, _| {})
+        .await;
+    assert_eq!(deadline.state, "uncertain");
+    let mut permits = Vec::new();
+    for _ in 0..8 {
+        permits.push(f.tasks.command_slot(&cancel).await.unwrap());
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), f.tasks.command_slot(&cancel))
+            .await
+            .is_err()
+    );
+    cancel.cancel();
+    assert!(f.tasks.command_slot(&cancel).await.is_err());
+    drop(permits);
+    assert!(f.engine.ops_ready(&good.id).unwrap());
+    f.finish().await;
 }

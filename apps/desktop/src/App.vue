@@ -30,7 +30,6 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useFilesStore } from './stores/files';
 import { filesApi } from './services/files';
 import { errorMessage } from './services/ipc';
-import { useAutomationStore } from './stores/automation';
 import { useWorkspaceStore } from './stores/workspace';
 import NotificationToasts from './components/NotificationToasts.vue';
 import { useNotificationsStore } from './stores/notifications';
@@ -45,7 +44,7 @@ import {
   settingsCategories,
   type WorkspaceView as View,
 } from './types/product';
-import type { WorkspaceCloseScope, WorkspaceTab } from './stores/workspace';
+import { isHostTab, type WorkspaceCloseScope, type WorkspaceTab } from './stores/workspace';
 import { isMonitorSection } from './types/server';
 import { serverPluginFor } from './services/server-plugins';
 import GlobalSearch from './components/GlobalSearch.vue';
@@ -53,6 +52,7 @@ import { usePluginsStore } from './stores/plugins';
 import PluginDialogs from './components/PluginDialogs.vue';
 const PluginsView = defineAsyncComponent(() => import('./views/PluginsView.vue'));
 const PluginPage = defineAsyncComponent(() => import('./views/PluginPage.vue'));
+const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
 const plugins = usePluginsStore();
 const TaskCenterView = defineAsyncComponent(() => import('./views/TaskCenterView.vue'));
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
@@ -64,11 +64,10 @@ const workspace = useWorkspaceStore(),
 const searching = ref(false),
   taskPanel = ref(false),
   taskTrigger = ref<HTMLButtonElement | null>(null),
-  entryIntent = ref(''),
-  automationHost = ref(''),
   networkHost = ref(''),
   networkRequest = ref(0);
 const currentHostId = computed(() => workspace.hostId);
+const pluginTarget = ref<{ id: string; contribution: string } | null>(null);
 function knownHost(id: string) {
   return (
     store.catalog?.hosts.find((h) => h.id === id) ??
@@ -142,23 +141,12 @@ const settingsOpen = computed(() =>
 );
 const showSidebar = computed(() => sidebarOpen.value);
 const showHostTree = computed(() => workspace.module === 'hosts');
-const cachedToolTabs = computed(() =>
-  workspace.tabs.filter((tab) => {
-    const contribution = plugins.installed
-      .find((plugin) => plugin.manifest.id === tab.pluginId)
-      ?.manifest.contributions.find((entry) => entry.id === tab.contributionId);
-    return contribution?.kind === 'tool' && contribution.tool !== 'assistant';
-  }),
-);
-const activeCachedTool = computed(() =>
-  cachedToolTabs.value.some((tab) => tab.key === workspace.active),
-);
+const cachedPluginPages = computed(() => workspace.pluginPages);
 function navigate(
   value: View,
   hostId = currentHostId.value,
   section?: WorkspaceTab['section'],
 ): void {
-  if (value !== 'automation') entryIntent.value = '';
   const host = knownHost(hostId);
   if (value === 'terminals' && (host || !hostId)) {
     terminals.activateHost(host?.id ?? '');
@@ -171,9 +159,7 @@ function navigate(
   workspace.navigate(value, hostId, section);
   if (hostViews.has(value)) store.selectedId = host?.id ?? null;
 }
-function fromSearch(value: View, hostId = currentHostId.value, entryId = '') {
-  entryIntent.value = entryId;
-  if (value === 'automation' && entryId) automationHost.value = hostId;
+function fromSearch(value: View, hostId = currentHostId.value) {
   navigate(value, hostId);
 }
 function fromTaskCenter(value: View, hostId = currentHostId.value) {
@@ -185,15 +171,17 @@ function closeTaskCenter() {
   void nextTick(() => taskTrigger.value?.focus({ preventScroll: true }));
 }
 function setContext(hostId: string, connectShell = false) {
-  const existing = workspace.tabs.some((tab) => hostViews.has(tab.view) && tab.hostId === hostId);
+  const existing = workspace.tabs.some((tab) => isHostTab(tab) && tab.hostId === hostId);
   workspace.selectHost(hostId);
   const tab = workspace.current;
   if (tab && (!existing || (connectShell && tab.view === 'terminals')))
     navigate(tab.view, tab.hostId, tab.section);
 }
 function tabName(tab: WorkspaceTab) {
+  if (isHostTab(tab))
+    return tab.hostId ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机' : '本地设备';
   if (tab.pluginId)
-    return `${plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件'}${tab.hostId ? ` · ${hostDisplayName(knownHost(tab.hostId)) || '已删除主机'}` : ''}`;
+    return `${plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件'}${tab.view === 'pluginSettings' ? ' · 设置' : ''}`;
   return hostViews.has(tab.view)
     ? tab.hostId
       ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机'
@@ -201,13 +189,11 @@ function tabName(tab: WorkspaceTab) {
     : messages['zh-CN'][tab.view];
 }
 function activate(tab: WorkspaceTab) {
-  if (tab.view !== 'automation') entryIntent.value = '';
   if (tab.view === 'terminals' && tab.hostId) navigate(tab.view, tab.hostId, tab.section);
   else workspace.activate(tab.key);
 }
 function selectModule(module: NavigationModule): void {
   workspace.selectModule(module);
-  if (view.value !== 'automation') entryIntent.value = '';
 }
 function revealActiveTab() {
   document
@@ -376,7 +362,6 @@ function sidebarKey(event: KeyboardEvent) {
   );
 }
 
-const automation = useAutomationStore();
 function currentConfiguration(host: Host): boolean {
   const configured = store.catalog?.hosts.find((h) => h.id === host.id);
   if (!configured || !sameHostConnection(host, configured)) {
@@ -387,11 +372,6 @@ function currentConfiguration(host: Host): boolean {
     return false;
   }
   return true;
-}
-function openAutomation(host: Host): void {
-  if (!currentConfiguration(host)) return;
-  automationHost.value = host.id;
-  navigate('automation');
 }
 function openNetwork(host: Host): void {
   if (!currentConfiguration(host)) return;
@@ -494,7 +474,6 @@ onMounted(async () => {
   await application.initialize();
   if (application.ready) {
     await store.load();
-    automation.start();
     background.start();
     plugins.start();
     window.addEventListener('keydown', globalShortcut, true);
@@ -523,7 +502,6 @@ onBeforeUnmount(() => {
   document.removeEventListener('contextmenu', dismissTabMenu, true);
   window.removeEventListener('resize', dismissTabMenu);
   document.removeEventListener('scroll', dismissTabMenu, true);
-  automation.stop();
   background.stop();
   plugins.stop();
   window.removeEventListener('keydown', globalShortcut, true);
@@ -534,24 +512,20 @@ onBeforeUnmount(() => {
 function openPlugin(
   id: string,
   contribution: string,
-  hostId = currentHostId.value,
+  hostId = workspace.current?.hostId ?? '',
   section?: WorkspaceTab['section'],
   logIntent?: WorkspaceTab['logIntent'],
 ): void {
   const installed = plugins.installed.find((p) => p.manifest.id === id);
   const entry = installed?.manifest.contributions.find((entry) => entry.id === contribution);
+  if (installed && entry && !hostId && !['tool', 'settings'].includes(entry.kind)) {
+    pluginTarget.value = { id, contribution };
+    return;
+  }
   if (installed)
-    void workspace
-      .openPlugin(
-        id,
-        contribution,
-        ['settings', 'tool'].includes(entry?.kind ?? '') ? '' : hostId,
-        section,
-        logIntent,
-      )
-      .catch((cause) => {
-        plugins.error = errorMessage(cause);
-      });
+    void workspace.openPlugin(id, contribution, hostId, section, logIntent).catch((cause) => {
+      plugins.error = errorMessage(cause);
+    });
 }
 async function surfaceNavigate(
   section: NonNullable<WorkspaceTab['section']>,
@@ -576,10 +550,13 @@ watch(
       (tab) => tab.pluginId && !plugins.installed.some((p) => p.manifest.id === tab.pluginId),
     );
     for (const tab of invalid) {
-      plugins.forget(tab.key);
-      void workspace.close(tab.key);
+      if (isHostTab(tab)) {
+        tab.view = 'terminals';
+        delete tab.pluginId;
+        delete tab.contributionId;
+      } else void workspace.close(tab.key);
     }
-    for (const tab of workspace.tabs) {
+    for (const tab of workspace.pluginPages) {
       if (
         tab.pluginId &&
         JSON.stringify(old[tab.pluginId]) !== JSON.stringify(plugins.grants[tab.pluginId])
@@ -588,6 +565,9 @@ watch(
         plugins.clearPlugin(tab.pluginId);
       }
     }
+    workspace.pluginPages = workspace.pluginPages.filter((page) =>
+      plugins.installed.some((plugin) => plugin.manifest.id === page.pluginId),
+    );
   },
 );
 watch(
@@ -607,7 +587,7 @@ watch(
     });
     const t = workspace.current;
     if (!t) return;
-    if (hostViews.has(t.view)) store.selectedId = currentHostId.value || null;
+    if (isHostTab(t)) store.selectedId = currentHostId.value || null;
     if (t.view === 'files') files.active = t.hostId;
     if (t.view === 'server') operations.active = t.hostId;
     if (t.view === 'terminals') terminals.activateHost(currentHostId.value);
@@ -642,9 +622,8 @@ watch(
         :active="view"
         :active-plugin="workspace.current?.pluginId"
         :module="workspace.module"
-        :tasks="(automation.status?.active ?? 0) + (automation.status?.awaiting ?? 0)"
         @navigate="navigate($event)"
-        @plugin="openPlugin"
+        @plugin-settings="workspace.openPluginSettings($event, 'plugins')"
         @collapse="toggleSidebar"
       >
         <HostSidebar
@@ -695,13 +674,13 @@ watch(
         <div
           v-for="tab in workspace.tabs"
           :key="tab.key"
-          :data-host-id="hostViews.has(tab.view) ? tab.hostId : undefined"
+          :data-host-id="isHostTab(tab) ? tab.hostId : undefined"
           :data-view="tab.view"
           :data-plugin-id="tab.pluginId"
           class="workspace-tab"
           :class="{
             active: workspace.active === tab.key,
-            'global-workspace-tab': !hostViews.has(tab.view),
+            'global-workspace-tab': !isHostTab(tab),
           }"
           @mousedown.middle.prevent
           @auxclick.middle.prevent="workspace.close(tab.key)"
@@ -715,14 +694,14 @@ watch(
             :title="tabName(tab)"
             @click="activate(tab)"
           >
-            <Server v-if="hostViews.has(tab.view) && tab.hostId" :size="14" aria-hidden="true" />
-            <Monitor v-else-if="hostViews.has(tab.view)" :size="14" aria-hidden="true" />
+            <Server v-if="isHostTab(tab) && tab.hostId" :size="14" aria-hidden="true" />
+            <Monitor v-else-if="isHostTab(tab)" :size="14" aria-hidden="true" />
             {{ tabName(tab) }}</button
           ><button
             class="tab-close"
             :disabled="workspace.closing.includes(tab.key)"
             :aria-label="`关闭工作区标签 ${tabName(tab)}`"
-            :title="hostViews.has(tab.view) ? '关闭该设备的全部终端会话及分屏' : '关闭此页面'"
+            :title="isHostTab(tab) ? '关闭该设备的全部终端会话及分屏' : '关闭此页面'"
             @click="workspace.close(tab.key)"
           >
             <X :size="14" aria-hidden="true" />
@@ -744,11 +723,6 @@ watch(
           currentHost?.port
         }}。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。
       </p>
-      <div v-if="automation.status?.awaiting" class="banner" role="status">
-        自动化：{{ automation.status.awaiting }} 个待确认任务。
-        <button class="text-button" @click="view = 'automation'">查看自动化任务</button>
-      </div>
-
       <div
         v-show="view !== 'terminals'"
         class="content-scroll"
@@ -762,17 +736,32 @@ watch(
             <button class="button" @click="openHost()">新建主机</button>
           </div>
         </section>
-        <PluginPage
-          v-for="tab in cachedToolTabs"
-          v-show="workspace.active === tab.key"
-          :key="tab.key"
-          :plugin-id="tab.pluginId!"
-          :contribution-id="tab.contributionId!"
-          host-id=""
-          :tab-key="tab.key"
-          :tool-intent="{ automationHost, entryId: entryIntent, networkHost, networkRequest }"
-          @intent-consumed="entryIntent = ''"
-          @contribution="(contribution) => openPlugin(tab.pluginId!, contribution)"
+        <PluginView
+          v-for="page in cachedPluginPages"
+          v-show="workspace.activePluginKey === page.key"
+          :key="page.key"
+          :active="workspace.activePluginKey === page.key"
+          :plugin-id="page.pluginId!"
+          :contribution-id="page.contributionId!"
+          :host-id="page.hostId"
+          :tab-key="page.key"
+          :initial-section="page.section"
+          :log-intent="page.logIntent"
+          :tool-intent="{
+            networkHost: page.hostId || networkHost,
+            networkRequest,
+          }"
+          @settings="workspace.openPluginSettings(page.pluginId!)"
+          @contribution="(contribution) => openPlugin(page.pluginId!, contribution, page.hostId)"
+          @section="
+            (section) => {
+              page.section = section;
+              if (workspace.activePluginKey === page.key && workspace.current)
+                workspace.current.section = section;
+            }
+          "
+          @surface-navigate="(section, intent) => surfaceNavigate(section, intent)"
+          @shell="containerTerminal"
         />
         <ServerView
           v-if="view === 'server'"
@@ -789,34 +778,11 @@ watch(
           @terminal="fileTerminal"
         />
         <BackupView v-else-if="view === 'backup'" />
-        <PluginsView v-else-if="view === 'plugins'" @plugin="openPlugin" />
+        <PluginsView v-else-if="view === 'plugins'" @settings="workspace.openPluginSettings" />
         <PluginPage
-          v-else-if="
-            view === 'extension' &&
-            !activeCachedTool &&
-            workspace.current?.pluginId &&
-            workspace.current?.contributionId
-          "
-          :key="workspace.active"
+          v-else-if="view === 'pluginSettings' && workspace.current?.pluginId"
+          :key="workspace.current.pluginId"
           :plugin-id="workspace.current.pluginId"
-          :contribution-id="workspace.current.contributionId"
-          :host-id="workspace.current.hostId"
-          :tab-key="workspace.active"
-          :initial-section="workspace.current.section"
-          :log-intent="workspace.current.logIntent"
-          :tool-intent="{ automationHost, entryId: entryIntent, networkHost, networkRequest }"
-          @intent-consumed="entryIntent = ''"
-          @section="
-            (section) => {
-              if (workspace.current) workspace.current.section = section;
-            }
-          "
-          @surface-navigate="surfaceNavigate"
-          @shell="containerTerminal"
-          @host="
-            (id) => openPlugin(workspace.current!.pluginId!, workspace.current!.contributionId!, id)
-          "
-          @contribution="(contribution) => openPlugin(workspace.current!.pluginId!, contribution)"
         />
         <ModelsView v-else-if="view === 'models'" />
         <AboutView v-else-if="view === 'about'" />
@@ -837,7 +803,6 @@ watch(
             toolbar-target="#terminal-session-tools"
             @files="openFiles"
             @server="openServer"
-            @automation="openAutomation"
             @network="openNetwork"
           />
         </div>
@@ -866,6 +831,23 @@ watch(
     </footer>
   </div>
   <NotificationToasts />
+  <Modal v-if="pluginTarget" title="选择使用工具的主机" @close="pluginTarget = null">
+    <p>选择主机后，工具将在该主机工作区打开。</p>
+    <div class="action-row">
+      <button
+        v-for="host in store.catalog?.hosts ?? []"
+        :key="host.id"
+        class="button"
+        @click="
+          openPlugin(pluginTarget.id, pluginTarget.contribution, host.id);
+          pluginTarget = null;
+        "
+      >
+        {{ hostDisplayName(host) }}
+      </button>
+      <p v-if="!store.catalog?.hosts.length">暂无主机，请先在主机管理中添加。</p>
+    </div>
+  </Modal>
   <PluginDialogs />
   <Modal v-if="taskPanel" title="任务中心" wide @close="closeTaskCenter">
     <TaskCenterView @navigate="fromTaskCenter" />
@@ -886,7 +868,7 @@ watch(
     @close="files.exitReview = false"
     ><p>
       退出将关闭所有 SSH
-      会话及模块连接，并停止本地调度。若有未完成的传输、诊断、批量或自动化任务，将请求取消；未保存文本修改将放弃。已完成文件保留，远端命令是否停止仍需核对。
+      会话及模块连接。若有未完成的传输或诊断任务，将请求取消；未保存文本修改将放弃。已完成文件保留，远端命令是否停止仍需核对。
     </p>
 
     <footer class="dialog-actions">

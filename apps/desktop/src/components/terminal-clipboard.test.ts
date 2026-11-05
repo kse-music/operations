@@ -64,7 +64,6 @@ const active = ref(true);
 const events = {
   files: vi.fn(),
   server: vi.fn(),
-  automation: vi.fn(),
   network: vi.fn(),
   close: vi.fn(),
 };
@@ -75,7 +74,6 @@ const PaneHarness = {
       active: active.value,
       onFiles: events.files,
       onServer: events.server,
-      onAutomation: events.automation,
       onNetwork: events.network,
       onClose: events.close,
     }),
@@ -270,10 +268,7 @@ it('routes remote menu actions to the same host, working directory and pane', as
     '/srv/project',
     tab.key,
   );
-  for (const [label, event] of [
-    ['服务器管理', events.server],
-    ['自动化', events.automation],
-  ] as const) {
+  for (const [label, event] of [['服务器管理', events.server]] as const) {
     await menuAction(label);
     expect(event).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: host.id }));
   }

@@ -151,14 +151,29 @@ impl Ui {
                         matches!(self.ui_version, 2..=4)
                             && valid_sections(
                                 sections,
-                                &[
-                                    "containers",
-                                    "images",
-                                    "processes",
-                                    "ports",
-                                    "services",
-                                    "logs",
-                                ],
+                                if self.ui_version == 4 {
+                                    &[
+                                        "overview",
+                                        "disks",
+                                        "network",
+                                        "diagnostics",
+                                        "containers",
+                                        "images",
+                                        "processes",
+                                        "ports",
+                                        "services",
+                                        "logs",
+                                    ]
+                                } else {
+                                    &[
+                                        "containers",
+                                        "images",
+                                        "processes",
+                                        "ports",
+                                        "services",
+                                        "logs",
+                                    ]
+                                },
                             )
                     }
                 };

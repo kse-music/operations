@@ -1,6 +1,5 @@
 use crate::{
     AppConfig, Error,
-    automation::{EntryInput, Group},
     hosts::{HostGroup, HostInput},
 };
 use serde::{Deserialize, Serialize};
@@ -14,19 +13,13 @@ pub struct BackupHost {
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BackupEntry {
-    pub id: String,
-    pub input: EntryInput,
-}
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Backup {
     pub format: String,
     pub version: u32,
     pub groups: Vec<HostGroup>,
     pub hosts: Vec<BackupHost>,
-    pub command_groups: Vec<Group>,
-    pub entries: Vec<BackupEntry>,
+    #[serde(skip)]
+    pub legacy_content_ignored: bool,
     pub preferences: AppConfig,
 }
 impl Backup {
@@ -34,8 +27,24 @@ impl Backup {
         if text.len() > 8 * 1024 * 1024 {
             return Err(Error::Validation("备份文件超过 8 MiB"));
         }
-        let mut b: Self = serde_json::from_str(text)
+        let mut raw: serde_json::Value = serde_json::from_str(text)
             .map_err(|_| Error::Validation("备份格式无效、包含未知字段或类型错误"))?;
+        let mut legacy_content_ignored = false;
+        if raw["version"].as_u64().is_some_and(|v| v <= 2)
+            && let Some(fields) = raw.as_object_mut()
+        {
+            for key in ["commandGroups", "entries"] {
+                if let Some(value) = fields.remove(key) {
+                    let values = value
+                        .as_array()
+                        .ok_or(Error::Validation("旧版备份列表类型无效"))?;
+                    legacy_content_ignored |= !values.is_empty();
+                }
+            }
+        }
+        let mut b: Self = serde_json::from_value(raw)
+            .map_err(|_| Error::Validation("备份格式无效、包含未知字段或类型错误"))?;
+        b.legacy_content_ignored = legacy_content_ignored;
         b.validate()?;
         for host in &mut b.hosts {
             host.config = host.config.clone().normalize()?;
@@ -43,14 +52,10 @@ impl Backup {
         Ok(b)
     }
     pub fn validate(&self) -> Result<(), Error> {
-        if self.format != "serverdeck-backup" || ![1, 2].contains(&self.version) {
+        if self.format != "serverdeck-backup" || ![1, 2, 3].contains(&self.version) {
             return Err(Error::Validation("不支持的备份格式或版本"));
         }
-        if self.hosts.len() > 5000
-            || self.groups.len() > 512
-            || self.entries.len() > 256
-            || self.command_groups.len() > 64
-        {
+        if self.hosts.len() > 5000 || self.groups.len() > 512 {
             return Err(Error::Validation("备份条目数量超过限制"));
         }
         self.preferences.validate()?;
@@ -70,20 +75,13 @@ impl Backup {
             .iter()
             .map(|g| &g.id)
             .chain(self.hosts.iter().map(|h| &h.id))
-            .chain(self.command_groups.iter().map(|g| &g.id))
-            .chain(self.entries.iter().map(|e| &e.id))
         {
-            crate::automation::uuid_id(id)?;
+            uuid::Uuid::parse_str(id).map_err(|_| Error::Validation("备份 ID 无效"))?;
             if !ids.insert(id) {
                 return Err(Error::Validation("备份 ID 重复"));
             }
         }
-        for name in self
-            .groups
-            .iter()
-            .map(|g| &g.name)
-            .chain(self.command_groups.iter().map(|g| &g.name))
-        {
+        for name in self.groups.iter().map(|g| &g.name) {
             crate::hosts::validate_name(name)?;
         }
         let host_ids = self
@@ -146,16 +144,6 @@ impl Backup {
                     .and_then(|h| h.config.ssh.jump_host_id.as_deref());
             }
         }
-        for e in &self.entries {
-            e.input.validate()?;
-            if e.input
-                .group_id
-                .as_ref()
-                .is_some_and(|id| !self.command_groups.iter().any(|g| g.id == *id))
-            {
-                return Err(Error::Validation("备份命令分组不存在"));
-            }
-        }
         Ok(())
     }
 }
@@ -196,7 +184,6 @@ pub struct RestoreInput {
 #[serde(rename_all = "camelCase")]
 pub struct RestoreResult {
     pub hosts: usize,
-    pub entries: usize,
     pub skipped: usize,
     pub preferences_restored: bool,
     pub warnings: Vec<String>,

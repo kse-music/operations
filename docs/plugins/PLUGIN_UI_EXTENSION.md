@@ -1,5 +1,17 @@
 # 插件 UI v1 / v2 / v3 / v4
 
+## 使用入口与上下文（2026-11-05）
+
+workspace/navigation/server/host_menu/command 等主机功能从当前设备打开，宿主提供固定 hostId，插件页面不提供第二个目标主机选择器；无上下文时由宿主统一选择一次。自动运维与批量运维已移除，不再接受其 tool 枚举。assistant/network 可从主机或全局进入。settings 贡献继续由插件自己的 UI/WASM 提供，在设置中的插件详情下展示。
+
+功能界面按插件/贡献/主机保留，详情与管理单独归属设置。隐藏 iframe 会收到 visible:false，不应继续轮询或提交操作；Host 会拒绝非当前页面请求，撤销在途交互并使旧资源失效。恢复 visible:true 后需重新获取监控/日志等不透明资源；不得复用已失效的句柄，错误须正常呈现。已读日志与输入草稿可保留，恢复不自动执行原操作。标准系统包提供对应可见性处理。
+
+Host API / Rust SDK / Vue SDK 当前为 2.1.0；ABI/wire 仍为 1，UI v1–v4 格式保留。仅剩 assistant/network 工具领域；旧 ^1.x 包未使用已删除权限与枚举时继续兼容。
+
+## 2.1 组合分类与缓存页面
+
+UI v4 的 operations.sections 可组合 overview/disks/network/diagnostics 与原运维分类，v2/v3 仍只接受其既有类别。系统服务用一个 server 贡献实现五分类，宿主根据声明定位功能，逐请求权限不改变。SDK usePluginVisibility 返回包含 KeepAlive 激活状态的响应式可见性；组件不可只依赖整个 iframe 的 visible 状态，否则隐藏分类仍会轮询。AI 的历史回答可保留，旧上下文命令引用失效后不能继续执行。
+
 ## UI v4：包内独立界面
 
 Host API 1.4.0 / Rust SDK 1.3.0 新增 `uiVersion:4` 和必填 `frontend:{script:"frontend.js",style:"frontend.css"}`。页面仍声明 id/title/fields/actions 等严格字段；`surface:{kind:"frontend"}` 允许全新业务页面，普通 workspace/navigation/host_menu/command/settings 贡献映射到同 ID 页面，无需增加宿主类型。通用页面的 actions/fields 声明可由 SDK invoke 使用；初始动作及 log 仍为空，插件自行管理 UI 状态。原 monitor/operations/tool surface 在 v4 也可使用，标准 surface 的单一 bridge 动作约束不变。
@@ -21,7 +33,7 @@ mountPlugin(App);
 
 ## UI v3：可信工作区工具
 
-`uiVersion:3` 可声明 `surface:{kind:"tool",tool:"assistant"}`，tool 还可取 batch、automation、network；manifest 对应贡献 `kind:"tool", tool:"assistant", id:"assistant"`。贡献与相同 ID 页面的类型必须匹配，标准视图必须有 WASM 后端；fields 为空、actions 只有 bridge、无 log/initialAction。未知枚举或脚本字段安装时拒绝。UI v3 也兼容原 monitor/operations 标准视图。
+`uiVersion:3` 可声明 `surface:{kind:"tool",tool:"assistant"}`，tool 还可取 network；manifest 对应贡献 `kind:"tool", tool:"assistant", id:"assistant"`。贡献与相同 ID 页面的类型必须匹配，标准视图必须有 WASM 后端；fields 为空、actions 只有 bridge、无 log/initialAction。未知枚举或脚本字段安装时拒绝。UI v3 也兼容原 monitor/operations 标准视图。
 
 可信共享组件根据封闭类型选择原有完整页面，注入的业务 API 每次通过实际 WASM 调用；上传包没有专用页面限制或 ID 特判。Host 表单通过主窗口限定 IPC 冻结用户确认的完整输入，Guest 仅看到单次工具票据。分块结果、撤销、重启及来源/权限设置均复用标准机制，详见 [内置插件](BUILTIN_PLUGINS.md)。顶部旧业务工具组已合并；任务中心作为宿主公共入口保留。
 
@@ -35,13 +47,13 @@ mountPlugin(App);
 
 manifest.contributions 的每个 id 必须存在对应页面：
 
-| kind       | 入口                                       |
-| ---------- | ------------------------------------------ |
-| workspace  | 工具下拉菜单打开该插件的首选功能页         |
-| navigation | 运维工具菜单下的插件导航                   |
-| host_menu  | 主机树右键菜单                             |
-| command    | Ctrl+K 全局搜索中的插件命令                |
-| settings   | 运维工具菜单下的插件设置页（无主机上下文） |
+| kind       | 入口                                      |
+| ---------- | ----------------------------------------- |
+| workspace  | 工具下拉菜单打开该插件的首选功能页        |
+| navigation | 功能贡献，可从主机工具/搜索等功能入口打开 |
+| host_menu  | 主机树右键菜单                            |
+| command    | Ctrl+K 全局搜索中的插件命令               |
+| settings   | 插件配置页中的自有设置（无主机上下文）    |
 
 启用且当前安装代获得 ui.contribute 权限/操作授权才注册。禁用、卸载、撤权、升级或修改授权后撤销页面/菜单；Host 同时停止相关能力资源。崩溃显示错误态，用户显式重新激活。同一插件仅保留一个工作区上下文；切换贡献/主机前处理未保存内容，关闭插件页不关闭主应用终端。
 
@@ -57,7 +69,7 @@ manifest.contributions 的每个 id 必须存在对应页面：
 
 ## 生命周期与限制
 
-离开但未关闭的插件标签保留内存草稿和 Host 文档；重新进入相同上下文不重新创建资源。切换主机/连接代会停止旧资源，关闭时询问放弃修改；禁用/授权变化/卸载对话框明确说明资源与草稿处理。程序退出仍使用已有后端 dirty 检查及统一确认。草稿不持久化到磁盘。
+离开但未关闭的插件标签保留内存界面草稿；隐藏时释放 Host 上下文资源及 WASM 实例，返回时先重新激活并重新获取所需句柄。文件/日志等 Host 句柄不能作为持久草稿保留。切换主机/连接代会停止旧资源，关闭时询问放弃修改；禁用/授权变化/卸载对话框明确说明资源与草稿处理。程序退出仍使用已有后端 dirty 检查及统一确认。草稿不持久化到磁盘。
 
 日志前端只保留最近 65,536 字符（不是字节），后台仍采用有界通道与 ACK。错误进入现有通知系统；命令输出/正文不进入主应用日志。安全边界和运行时限制另见 [PLUGIN_SECURITY.md](PLUGIN_SECURITY.md)、[PLUGIN_RUNTIME.md](PLUGIN_RUNTIME.md)。
 

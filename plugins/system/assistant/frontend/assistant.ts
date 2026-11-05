@@ -1,4 +1,5 @@
-import { onBeforeUnmount, ref, shallowRef } from 'vue';
+import { onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 import { useAssistantApi } from '@serverdeck/plugin-sdk/services/plugin-tool-services';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
 import type { AiExecution, AiPrepare, AiProposal, AiTurn } from '@serverdeck/plugin-sdk/types/ai';
@@ -26,6 +27,7 @@ function history(turns: AiTurn[]): NonNullable<AiPrepare['history']> {
 }
 export function useAssistant() {
   const aiApi = useAssistantApi();
+  const visible = usePluginVisibility();
   const hostContext = useAssistantHosts();
   let controller: AbortController | null = null;
   const turns = ref<AiTurn[]>([]),
@@ -33,16 +35,18 @@ export function useAssistant() {
   const error = ref(''),
     review = shallowRef<AiProposal | null>(null);
   const outputs = ref<Record<string, AiExecution>>({}),
-    attempted = ref<string[]>([]);
+    attempted = ref<string[]>([]),
+    expired = ref<string[]>([]);
   let version = 0,
     disposed = false,
     requestId = '';
   async function revoke(id: string) {
-    if (!id) return;
+    if (!id || !visible.value) return;
+    const current = version;
     try {
       await aiApi.cancel(id);
     } catch (e) {
-      if (!disposed) error.value = errorMessage(e);
+      if (!disposed && current === version && visible.value) error.value = errorMessage(e);
     }
   }
   function invalidate() {
@@ -57,8 +61,25 @@ export function useAssistant() {
     review.value = null;
     outputs.value = {};
     attempted.value = [];
+    expired.value = [];
     error.value = '';
   }
+  watch(visible, (active) => {
+    if (active) return;
+    controller?.abort();
+    ++version;
+    requestId = '';
+    review.value = null;
+    error.value = '';
+    // The Host revokes these resources when the page hides. Keep readable history,
+    // but never attempt to cancel or execute handles from the previous context.
+    for (const turn of turns.value) {
+      turn.requestId = '';
+      if (turn.state === 'pending') turn.state = 'cancelled';
+      for (const proposal of turn.answer?.proposals ?? [])
+        if (!expired.value.includes(proposal.id)) expired.value.push(proposal.id);
+    }
+  });
   async function send(input: AiPrepare) {
     if (busy.value) return;
     const current = version;
@@ -155,7 +176,12 @@ export function useAssistant() {
     await revoke(id);
   }
   function inspect(proposal: AiProposal) {
-    if (busy.value || attempted.value.includes(proposal.id) || proposal.risk === 'manual_only')
+    if (
+      busy.value ||
+      expired.value.includes(proposal.id) ||
+      attempted.value.includes(proposal.id) ||
+      proposal.risk === 'manual_only'
+    )
       return;
     review.value = proposal;
   }
@@ -163,6 +189,7 @@ export function useAssistant() {
     const proposal = review.value;
     if (
       !proposal ||
+      expired.value.includes(proposal.id) ||
       busy.value ||
       !confirmed ||
       (proposal.changeConfirmation !== null && proposal.changeConfirmation !== changeConfirmation)
@@ -198,6 +225,7 @@ export function useAssistant() {
     review,
     outputs,
     attempted,
+    expired,
     send,
     cancel,
     inspect,

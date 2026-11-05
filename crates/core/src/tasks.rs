@@ -1,9 +1,5 @@
-use crate::{
-    Error,
-    files::{ConflictPolicy, remote_absolute},
-};
+use crate::Error;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -87,85 +83,6 @@ pub fn target(s: &str) -> Result<(), Error> {
     }
     Ok(())
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Target {
-    pub host_id: String,
-    pub session_id: Option<String>,
-}
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "snake_case",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum BatchOperation {
-    Command {
-        command: String,
-    },
-    File {
-        source: String,
-        destination: String,
-        conflict: ConflictPolicy,
-        confirm_overwrite: bool,
-    },
-}
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BatchInput {
-    pub targets: Vec<Target>,
-    pub operation: BatchOperation,
-    pub concurrency: u8,
-    pub timeout_secs: u16,
-    pub confirmed: bool,
-}
-impl BatchInput {
-    pub fn validate(&self) -> Result<(), Error> {
-        if !self.confirmed {
-            return Err(Error::Validation("必须核对全部目标及命令/文件并显式确认"));
-        }
-        if self.targets.is_empty()
-            || self.targets.len() > 32
-            || !(1..=8).contains(&self.concurrency)
-            || !(1..=3600).contains(&self.timeout_secs)
-        {
-            return Err(Error::Validation(
-                "请选择 1–32 台主机，并发为 1–8，超时为 1–3600 秒",
-            ));
-        }
-        let mut ids = HashSet::new();
-        for t in &self.targets {
-            uuid::Uuid::parse_str(&t.host_id).map_err(|_| Error::Validation("主机标识无效"))?;
-            if let Some(id) = &t.session_id {
-                uuid::Uuid::parse_str(id).map_err(|_| Error::Validation("目标会话标识无效"))?;
-            }
-            if !ids.insert(&t.host_id) {
-                return Err(Error::Validation("批量目标不可重复"));
-            }
-        }
-        match &self.operation {
-            BatchOperation::Command { command } => {
-                if command.trim().is_empty() || command.len() > 16384 || command.contains('\0') {
-                    return Err(Error::Validation("命令为空、含 NUL 或超过 16 KiB"));
-                }
-            }
-            BatchOperation::File {
-                source,
-                destination,
-                conflict,
-                confirm_overwrite,
-            } => {
-                crate::files::valid_path(source)?;
-                remote_absolute(destination)?;
-                if *conflict == ConflictPolicy::Overwrite && !confirm_overwrite {
-                    return Err(Error::Validation("覆盖文件必须单独确认"));
-                }
-            }
-        }
-        Ok(())
-    }
-}
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostic {
@@ -178,31 +95,6 @@ pub struct Diagnostic {
     pub message: Option<String>,
     pub started_at: u64,
     pub finished_at: Option<u64>,
-    pub revision: u64,
-}
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BatchRow {
-    pub host_id: String,
-    pub session_id: Option<String>,
-    pub state: String,
-    pub stdout: String,
-    pub stderr: String,
-    pub dropped_bytes: u64,
-    pub exit_code: Option<u32>,
-    pub message: Option<String>,
-    pub transfer: Option<crate::files::TransferInfo>,
-    pub started_at: Option<u64>,
-    pub finished_at: Option<u64>,
-}
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Batch {
-    pub id: String,
-    pub input: BatchInput,
-    pub rows: Vec<BatchRow>,
-    pub finished: bool,
-    pub created_at: u64,
     pub revision: u64,
 }
 pub fn active(state: &str) -> bool {

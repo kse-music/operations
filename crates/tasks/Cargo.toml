@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 serverdeck-core.workspace = true
 serverdeck-ssh.workspace = true
-serverdeck-sftp.workspace = true
 tokio.workspace = true
 tokio-util = { version = "0.7", features = ["rt"] }
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }

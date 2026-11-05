@@ -90,4 +90,14 @@ it('loads its container details without environment secrets and requires the exa
     id: 'image',
     confirmed: true,
   });
+  api.query.mockResolvedValue({
+    success: false,
+    message: 'Docker daemon unavailable',
+    code: 'UNAVAILABLE',
+    detail: null,
+    records: [],
+  });
+  await click('刷新运维列表');
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('Docker daemon unavailable');
+  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
 });

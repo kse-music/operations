@@ -1,5 +1,4 @@
 mod ai_commands;
-mod automation_commands;
 pub mod commands;
 pub mod file_commands;
 mod monitor_commands;
@@ -58,10 +57,8 @@ pub fn run() {
             let config = tauri::async_runtime::block_on(application.bootstrap())?.config;
             let guard = logging::initialize(&logs, config.log_level)?;
             app.manage(guard);
-            let scheduler=application.clone();
             window_state::initialize(app.handle(), &application)?;
             app.manage(application);
-            tauri::async_runtime::spawn(async move{if scheduler.start_automation_scheduler().is_err(){tracing::error!(operation="automation_scheduler_start","local scheduler could not start");}});
             tracing::info!(operation = "startup", "ServerDeck initialized");
             Ok(())
         })
@@ -173,29 +170,9 @@ pub fn command_handler<R: tauri::Runtime>()
         product_commands::backup_preview,
         product_commands::backup_restore,
         product_commands::background_tasks,
-        automation_commands::automation_prepare,
-        automation_commands::automation_catalog,
-        automation_commands::automation_entry_save,
-        automation_commands::automation_entry_delete,
-        automation_commands::automation_group_save,
-        automation_commands::automation_group_delete,
-        automation_commands::automation_start,
-        automation_commands::automation_run,
-        automation_commands::automation_history,
-        automation_commands::automation_cancel,
-        automation_commands::automation_approve,
-        automation_commands::automation_schedule_save,
-        automation_commands::automation_schedule_disable,
-        automation_commands::automation_schedule_delete,
-        automation_commands::automation_status,
-        automation_commands::automation_run_delete,
         task_commands::diagnostic_start,
         task_commands::diagnostic_list,
         task_commands::diagnostic_cancel,
-        task_commands::batch_start,
-        task_commands::batch_list,
-        task_commands::batch_cancel,
-        task_commands::batch_retry_file,
         ops_commands::ops_open,
         ops_commands::ops_connections,
         ops_commands::ops_query,

@@ -68,6 +68,7 @@ impl Application {
     pub async fn plugin_clear_context(&self, id: String) -> Result<(), Error> {
         self.plugin_detail(id.clone()).await?;
         self.plugin_stop_resources(&id).await?;
+        self.plugin_runtime.deactivate(&id).await?;
         self.plugin_host.resume(&id, None)
     }
     pub async fn plugin_install(&self, input: InstallInput) -> Result<InstalledPlugin, Error> {

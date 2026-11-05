@@ -13,12 +13,9 @@ const permissions = ref<PluginPermission[]>([]),
   readRoots = ref(''),
   writeRoots = ref(''),
   allowExecute = ref(false),
-  allowTasks = ref(false),
   allowShell = ref(false);
 const labels: Record<PluginPermission, [string, string]> = {
   'assistant.use': ['AI 运维助手', '使用已配置模型分析脱敏上下文，命令执行仍需明确确认'],
-  'batch.run': ['批量运维', '读取批量任务，预览并确认后执行命令或分发文件'],
-  'automation.manage': ['自动运维', '管理命令、脚本、计划和执行历史，执行继续核对目标与风险'],
   'network.run': ['网络诊断', '从本机或已有 SSH 连接执行受控网络诊断并查看结果'],
   'metrics.read': ['资源监控', '读取 CPU、内存、磁盘和网络采样'],
   'system.read': ['系统信息', '读取容器、进程、端口和服务状态'],
@@ -31,12 +28,9 @@ const labels: Record<PluginPermission, [string, string]> = {
   'ui.contribute': ['插件界面', '显示插件功能和通知'],
   'settings.read': ['读取插件配置', '仅限这个插件自己的配置'],
   'settings.write': ['保存插件配置', '仅限这个插件自己的配置'],
-  'tasks.create': ['后台任务', '创建和管理插件任务'],
 };
 const operationMap: Record<PluginPermission, string[]> = {
   'assistant.use': ['assistant.use'],
-  'batch.run': ['batch.run'],
-  'automation.manage': ['automation.manage'],
   'network.run': ['network.run'],
   'metrics.read': ['metrics.read'],
   'system.read': ['system.read'],
@@ -49,7 +43,6 @@ const operationMap: Record<PluginPermission, string[]> = {
   'ui.contribute': ['ui.contribute', 'ui.notify'],
   'settings.read': ['settings.read'],
   'settings.write': ['settings.write'],
-  'tasks.create': ['tasks.read_only', 'tasks.manage'],
 };
 watch(
   () => JSON.stringify([props.plugin.revision, grant.value]),
@@ -58,7 +51,6 @@ watch(
     readRoots.value = grant.value?.readRoots.join('\n') ?? '';
     writeRoots.value = grant.value?.writeRoots.join('\n') ?? '';
     allowExecute.value = grant.value?.operations.includes('ssh.execute') ?? false;
-    allowTasks.value = grant.value?.operations.includes('tasks.execute') ?? false;
     allowShell.value = grant.value?.operations.includes('system.shell') ?? false;
   },
   { immediate: true },
@@ -70,8 +62,6 @@ async function save() {
   ];
   if (permissions.value.includes('ssh.execute') && allowExecute.value)
     operations.push('ssh.execute');
-  if (permissions.value.includes('tasks.create') && allowTasks.value)
-    operations.push('tasks.execute');
   if (permissions.value.includes('system.manage') && allowShell.value)
     operations.push('system.shell');
   const roots = (value: string) =>
@@ -95,7 +85,7 @@ async function revoke() {
   if (
     await plugins.ask(
       '撤销插件授权？',
-      '将停止插件调用，并关闭它的文档和日志。已提交的任务和计划继续由任务中心管理。',
+      '将停止插件调用，并关闭它的文档和日志。已提交的网络诊断任务继续由任务中心管理。',
     )
   )
     await plugins.mutate(() => pluginsApi.revoke(props.plugin.manifest.id));
@@ -152,7 +142,7 @@ async function revoke() {
         >
       </div>
       <div
-        v-if="permissions.some((p) => ['ssh.execute', 'tasks.create', 'system.manage'].includes(p))"
+        v-if="permissions.some((p) => ['ssh.execute', 'system.manage'].includes(p))"
         class="plugin-extra-scopes"
       >
         <label v-if="permissions.includes('ssh.execute')" class="checkbox-label"
@@ -161,13 +151,6 @@ async function revoke() {
             type="checkbox"
             :disabled="builtin || plugins.busy"
           />允许请求其他命令（仍逐次确认）</label
-        >
-        <label v-if="permissions.includes('tasks.create')" class="checkbox-label"
-          ><input
-            v-model="allowTasks"
-            type="checkbox"
-            :disabled="builtin || plugins.busy"
-          />允许请求非只读任务（仍逐次确认）</label
         >
         <label v-if="permissions.includes('system.manage')" class="checkbox-label"
           ><input

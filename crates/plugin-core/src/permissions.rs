@@ -6,8 +6,6 @@ use std::collections::BTreeSet;
 
 pub const OPERATIONS: &[&str] = &[
     "assistant.use",
-    "batch.run",
-    "automation.manage",
     "network.run",
     "metrics.read",
     "system.read",
@@ -22,9 +20,6 @@ pub const OPERATIONS: &[&str] = &[
     "settings.write",
     "ui.notify",
     "ui.contribute",
-    "tasks.read_only",
-    "tasks.execute",
-    "tasks.manage",
     "logs.read",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -123,15 +118,6 @@ impl Grant {
             || !self.permissions.contains(&operation.permission())
             || !self.operations.iter().any(|o| o == operation.operation())
             || (operation.uses_host() && host.is_none())
-        {
-            return Err(denied());
-        }
-        if matches!(operation, Capability::TaskCreate { .. })
-            && (!self.permissions.contains(&Permission::SshExecute)
-                || !plugin
-                    .manifest
-                    .permissions
-                    .contains(&Permission::SshExecute))
         {
             return Err(denied());
         }

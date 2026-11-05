@@ -33,12 +33,12 @@ try {
         workspace.active = '';
         workspace.navigate('terminals', '');
         workspace.navigate('terminals', 'a');
-        workspace.navigate('batch');
-        workspace.navigate('network');
+        workspace.navigate('settings');
+        workspace.navigate('credentials');
         useNotificationsStore(pinia).items = [];
         document.documentElement.dataset.theme = theme;
       }, theme);
-      await page.locator('.workspace-tab[data-view="network"].active').waitFor();
+      await page.locator('.workspace-tab[data-view="credentials"].active').waitFor();
     };
     const menu = page.getByRole('menu', { name: '工作区标签操作', exact: true });
     const target = page.locator('.workspace-tab[data-host-id="a"]');
@@ -49,7 +49,7 @@ try {
         return useWorkspaceStore(pinia).tabs.map((tab) => tab.key);
       });
     for (const [action, expected] of [
-      ['关闭', ['host:', 'batch:', 'network:']],
+      ['关闭', ['host:', 'settings:', 'credentials:']],
       ['关闭右侧', ['host:', 'host:a']],
       ['关闭其它', ['host:a']],
       ['关闭所有', []],
@@ -57,7 +57,7 @@ try {
       await seed();
       await target.click({ button: 'right' });
       await menu.waitFor();
-      assert.equal(await page.locator('.workspace-tab[data-view="network"].active').count(), 1);
+      assert.equal(await page.locator('.workspace-tab[data-view="credentials"].active').count(), 1);
       assert.deepEqual(
         (await menu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
         ['关闭', '关闭右侧', '关闭其它', '关闭所有'],
@@ -70,7 +70,7 @@ try {
     }
     // The rightmost tab has no right range; an only tab also has no other range.
     await seed();
-    await page.locator('.workspace-tab[data-view="network"]').click({ button: 'right' });
+    await page.locator('.workspace-tab[data-view="credentials"]').click({ button: 'right' });
     assert.equal(
       await menu.getByRole('menuitem', { name: '关闭右侧', exact: true }).isDisabled(),
       true,

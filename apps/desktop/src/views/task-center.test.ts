@@ -3,13 +3,11 @@ import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import TaskCenterView from './TaskCenterView.vue';
 import { useBackgroundStore } from '../stores/background';
-import { useAutomationStore } from '../stores/automation';
 import { useFilesStore } from '../stores/files';
 import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
 import { tasksApi } from '../services/tasks';
 import { filesApi } from '../services/files';
-import { automationApi } from '../services/automation';
 import { hostInput } from '../types/hosts';
 import type { TransferInfo } from '../types/files';
 
@@ -31,13 +29,6 @@ beforeEach(() => {
   pinia = createPinia();
   setActivePinia(pinia);
   navigate.mockClear();
-  vi.spyOn(automationApi, 'catalog').mockResolvedValue({
-    entries: [],
-    groups: [],
-    templates: [],
-    schedules: [],
-  });
-  vi.spyOn(automationApi, 'history').mockResolvedValue([]);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -72,77 +63,23 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
-it('keeps shared automation stop controls available without an installed plugin and confirms each exact target', async () => {
-  const catalog = vi.mocked(automationApi.catalog);
-  catalog.mockResolvedValue({
-    entries: [],
-    groups: [],
-    templates: [],
-    schedules: [{ id: 'schedule', name: '每日检查', enabled: true } as never],
-  });
-  vi.mocked(automationApi.history).mockResolvedValue([
-    { id: 'run', entryName: '检查任务', state: 'Running', targets: 2 } as never,
-  ]);
-  const disable = vi.spyOn(automationApi, 'scheduleDisable').mockResolvedValue();
-  const cancel = vi
-    .spyOn(automationApi, 'cancel')
-    .mockRejectedValueOnce({ message: 'stop rejected' })
-    .mockResolvedValue();
-  vi.spyOn(useAutomationStore(), 'poll').mockResolvedValue();
-  await flush();
-  button('刷新任务与计划').click();
-  await flush();
-  await flush();
-  button('暂停计划').click();
-  await flush();
-  expect(disable).not.toHaveBeenCalled();
-  const scheduleDialog = document.querySelector('dialog[aria-label="确认暂停自动化计划"]')!;
-  expect(scheduleDialog.textContent).toContain('每日检查');
-  expect(scheduleDialog.textContent).toContain('已经提交的任务需要单独停止');
-  button('确认暂停计划', scheduleDialog).click();
-  await flush();
-  await flush();
-  expect(disable).toHaveBeenCalledExactlyOnceWith('schedule');
-  await vi.waitFor(() => expect(root.textContent).toContain('请求停止自动化任务'));
-  button('请求停止自动化任务').click();
-  await flush();
-  const runDialog = document.querySelector('dialog[aria-label="确认停止自动化任务"]')!;
-  button('确认停止任务', runDialog).click();
-  await flush();
-  expect(runDialog.isConnected).toBe(true);
-  expect(useNotificationsStore().items.some((item) => item.text === 'stop rejected')).toBe(true);
-  button('确认停止任务', runDialog).click();
-  await flush();
-  await flush();
-  expect(cancel.mock.calls).toEqual([
-    ['run', true],
-    ['run', true],
-  ]);
-  expect(document.querySelector('dialog[aria-label="确认停止自动化任务"]')).toBeNull();
-  expect(navigate).not.toHaveBeenCalled();
-});
-
 it('shows loading, unavailable and empty task states without presenting an unread status as zero', async () => {
   expect(root.textContent).toContain('正在读取后台任务');
-  expect(root.textContent).toContain('正在读取自动化状态');
   useBackgroundStore().error = 'load failed';
-  useAutomationStore().error = 'status failed';
   await flush();
   expect(root.textContent).toContain('后台任务暂不可用');
-  expect(root.textContent).toContain('自动化状态暂不可用');
   useBackgroundStore().error = '';
   useBackgroundStore().connections = [];
   await flush();
-  expect(root.textContent).toContain('没有网络或批量任务');
+  expect(root.textContent).toContain('没有网络诊断任务');
   expect(root.textContent).toContain('没有传输任务');
 });
 
-it.each(['diagnostic', 'batch'] as const)(
+it.each(['diagnostic'] as const)(
   'confirms stopping only the selected %s and retains confirmation on failure',
   async (kind) => {
     const stop = vi.spyOn(tasksApi, 'stop').mockResolvedValue();
-    const cancel = vi.spyOn(tasksApi, 'cancel').mockResolvedValue();
-    const request = kind === 'diagnostic' ? stop : cancel;
+    const request = stop;
     request.mockRejectedValueOnce({ message: 'stop failed' });
     useBackgroundStore().connections = [];
     useBackgroundStore().tasks = [
@@ -166,7 +103,6 @@ it.each(['diagnostic', 'batch'] as const)(
     expect(dialog.textContent).toContain('a.example');
     expect(dialog.textContent).toContain('b.example');
     expect(stop).not.toHaveBeenCalled();
-    expect(cancel).not.toHaveBeenCalled();
     button('确认请求停止', dialog).click();
     await flush();
     expect(document.querySelector('dialog[aria-label="确认停止后台任务"]')).not.toBeNull();
@@ -174,16 +110,7 @@ it.each(['diagnostic', 'batch'] as const)(
     button('确认请求停止', dialog).click();
     await flush();
     expect(document.querySelector('dialog[aria-label="确认停止后台任务"]')).toBeNull();
-    if (kind === 'diagnostic') {
-      expect(stop.mock.calls).toEqual([['selected'], ['selected']]);
-      expect(cancel).not.toHaveBeenCalled();
-    } else {
-      expect(cancel.mock.calls).toEqual([
-        ['selected', true],
-        ['selected', true],
-      ]);
-      expect(stop).not.toHaveBeenCalled();
-    }
+    expect(stop.mock.calls).toEqual([['selected'], ['selected']]);
   },
 );
 
@@ -230,8 +157,6 @@ it('preserves transfer cancellation and retry targets and routes task results to
   expect(navigate).toHaveBeenLastCalledWith('files', 'b');
   button('查看任务结果').click();
   expect(navigate).toHaveBeenLastCalledWith('network', 'a');
-  button('查看自动化历史与全部目标').click();
-  expect(navigate).toHaveBeenLastCalledWith('automation', '');
   app!.unmount();
   app = undefined;
   expect(cancel).toHaveBeenCalledTimes(1);

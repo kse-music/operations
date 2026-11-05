@@ -20,7 +20,6 @@ serverdeck-sftp.workspace = true
 serverdeck-monitor.workspace = true
 serverdeck-ops.workspace = true
 serverdeck-tasks.workspace = true
-serverdeck-automation.workspace = true
 portable-pty = "0.9"
 uuid.workspace = true
 serde.workspace = true

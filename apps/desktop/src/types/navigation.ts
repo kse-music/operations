@@ -12,8 +12,6 @@ const viewModules: Record<WorkspaceView, NavigationModule> = {
   terminals: 'hosts',
   files: 'hosts',
   server: 'hosts',
-  batch: 'plugins',
-  automation: 'plugins',
   network: 'plugins',
   assistant: 'plugins',
   credentials: 'assets',
@@ -26,6 +24,7 @@ const viewModules: Record<WorkspaceView, NavigationModule> = {
   about: 'system',
   plugins: 'system',
   extension: 'plugins',
+  pluginSettings: 'system',
 };
 export function moduleForView(view: WorkspaceView | null): NavigationModule {
   return view === null ? 'hosts' : viewModules[view];

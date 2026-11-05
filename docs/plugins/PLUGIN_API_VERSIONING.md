@@ -1,5 +1,17 @@
 # 插件 API 版本策略
 
+## 2.1.0：UI v4 组合分类与缓存可见性
+
+Host API、Rust SDK、Vue SDK 为 2.1.0，三个系统包 services/docker/assistant 为 1.2.0。UI v4 operations.sections 新增 overview/disks/network/diagnostics，允许一个标准 server 贡献组合公开能力；UI v2/v3 类别保持原限制。没有新原生 IPC 或权限，后台仍按 Guest 白名单、grant、上下文和单次审批复验。SDK 新增 usePluginVisibility，组合页面文档和 KeepAlive 激活状态。
+
+保留网络 ToolInvoke/旧 monitor/tool UI 协议及兼容资源；旧 ^2.0 与未使用已删除能力的 ^1.x 包继续兼容。旧四项 system 记录归档、用户数据与上传来源保留，services 沿用自己的配置和启停。ABI/wire 与包/manifest 格式仍为 1。下文记录各历史版本。
+
+## 2.0.0：移除自动运维和批量运维
+
+Host API、Rust SDK 和 TypeScript/Vue SDK 均为 2.0.0。删除 batch.run、automation.manage、tasks.create 及其对应操作、Tool 枚举、DTO 和 IPC；系统包 1.1.3 声明 ^2.0.0。WASM ABI、wire、Manifest/包格式仍为 1，UI v4 不变。
+
+Host 同时协商当前 2.0 与保留能力的 1.4 范围；仅使用保留接口的旧 v1 包、UI v1–v3 和上传权限逻辑继续兼容。声明已移除权限的旧安装先转为非活动历史，新包请求未知/已移除权限或操作直接拒绝。较新的不支持范围仍拒绝，测试继续验证主版本边界。下文版本条目记录其发布时状态。
+
 ## 1.4.0：包内前端与公共 Vue SDK
 
 Host API 1.4.0、Rust SDK 1.3.0 新增 UI v4 的 frontend 入口及通用 frontend surface；新包声明 `apiVersion: "^1.4.0"`，避免旧 Host 严格字段检查失败。TypeScript/Vue SDK `@serverdeck/plugin-sdk` 独立版本为 1.0.0。SDK 实现统一有界桥，既有 Capability/WASM ABI/wire、manifest schemaVersion 和包 formatVersion 仍为 1，旧 SDK 1.0–1.2 的能力和 UI v1–v3 继续兼容。

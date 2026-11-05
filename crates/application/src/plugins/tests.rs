@@ -59,7 +59,6 @@ fn all_permissions() -> Vec<Permission> {
         Permission::UiContribute,
         Permission::SettingsRead,
         Permission::SettingsWrite,
-        Permission::TasksCreate,
     ]
 }
 fn grant(revision: String, host: String) -> GrantInput {
@@ -741,43 +740,6 @@ async fn linux_sdk_capability_roundtrip() {
         "approval must be single-use"
     );
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    let task = app
-        .plugin_capability(
-            "dev.sdk-linux",
-            request(Capability::TaskCreate {
-                command: "uname -a".into(),
-                timeout_secs: 5,
-            }),
-        )
-        .await
-        .unwrap();
-    assert!(
-        task.error.is_none(),
-        "task creation failed: {:?}",
-        task.error
-    );
-    let task_id = task.result["id"].as_str().unwrap().to_owned();
-    let completed = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let state = app
-                .plugin_capability(
-                    "dev.sdk-linux",
-                    request(Capability::TaskRead {
-                        task_id: task_id.clone(),
-                    }),
-                )
-                .await
-                .unwrap();
-            if state.result["finished"] == true {
-                break state.result;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(completed["exitCode"], 0);
-    assert!(completed["stdout"].as_str().unwrap().contains("Linux"));
     let log = app
         .plugin_capability(
             "dev.sdk-linux",
@@ -1022,7 +984,7 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
         .await
         .unwrap();
     }
-    let resource = "cn.hiboot.plugins.resources";
+    let resource = "cn.hiboot.plugins.services";
     let monitor = standard_rpc(
         app,
         resource,
@@ -1093,7 +1055,7 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
             assert!(response["message"].is_string());
         }
     }
-    let logs = "cn.hiboot.plugins.logs";
+    let logs = "cn.hiboot.plugins.services";
     let log=standard_rpc(app,logs,json!({"kind":"system_log_start","source":{"kind":"file","path":"/home/plugin/nginx/nginx.conf"},"lines":20,"follow":false})).await["id"].as_str().unwrap().to_string();
     let mut output = vec![];
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);

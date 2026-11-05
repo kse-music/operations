@@ -27,24 +27,14 @@ try {
       const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
       const { useTerminalsStore } = await import('/src/stores/terminals.ts');
       const { useBackgroundStore } = await import('/src/stores/background.ts');
-      const { useAutomationStore } = await import('/src/stores/automation.ts');
       const { usePluginsStore } = await import('/src/stores/plugins.ts');
       const { useNotificationsStore } = await import('/src/stores/notifications.ts');
-      const { automationApi } = await import('/src/services/automation.ts');
-      automationApi.catalog = async () => ({
-        entries: [],
-        groups: [],
-        templates: [],
-        schedules: [],
-      });
-      automationApi.history = async () => [];
       const terminals = useTerminalsStore();
       terminals.open(null);
       terminals.update(terminals.focused, { state: 'idle', connectRequested: false });
       useWorkspaceStore().navigate('terminals', '');
       useWorkspaceStore().selectModule('plugins');
       useBackgroundStore().connections = [];
-      useAutomationStore().status = { active: 0, awaiting: 0 };
       usePluginsStore().loaded = true;
       useNotificationsStore().items = [];
       document.documentElement.dataset.theme = theme;
@@ -65,13 +55,13 @@ try {
     assert.equal(await page.locator('.activity-rail [aria-label="任务中心"]').count(), 0);
     await navigateWorkspace(page, '任务中心');
     const dialog = page.getByRole('dialog', { name: '任务中心', exact: true });
-    await dialog.getByText('没有活动的自动化任务或计划', { exact: true }).waitFor();
+    await dialog.getByText('没有网络诊断任务', { exact: true }).waitFor();
     assert.equal(await dialog.count(), 1);
     assert.equal(await page.locator('.workspace-tab[data-view="tasks"]').count(), 0);
     assert.equal(await snapshot(), original);
     assert.equal(await dialog.getByRole('region', { name: '传输任务', exact: true }).count(), 1);
     assert.equal(
-      await dialog.getByRole('region', { name: '网络与批量任务', exact: true }).count(),
+      await dialog.getByRole('region', { name: '网络诊断任务', exact: true }).count(),
       1,
     );
     await page.screenshot({ path: `${output}/${name}-empty.png` });

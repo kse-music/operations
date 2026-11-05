@@ -7,6 +7,7 @@ import type { ServerSection } from '../types/server';
 import { usePluginsStore } from './plugins';
 import { primaryPluginPage } from '../services/plugin-pages';
 import { errorMessage } from '../services/ipc';
+import { serverPluginFor } from '../services/server-plugins';
 export interface WorkspaceTab {
   key: string;
   view: WorkspaceView;
@@ -15,6 +16,15 @@ export interface WorkspaceTab {
   pluginId?: string;
   contributionId?: string;
   logIntent?: { input: import('../types/ops').LogInput; title: string; sequence: number };
+  settingsModule?: 'plugins' | 'system';
+}
+export function isHostTab(tab: WorkspaceTab): boolean {
+  return hostViews.has(tab.view) || (tab.view === 'extension' && !!tab.hostId);
+}
+export function pluginPageKey(
+  tab: Pick<WorkspaceTab, 'pluginId' | 'contributionId' | 'hostId'>,
+): string {
+  return `extension:${tab.pluginId}:${tab.contributionId}:${tab.hostId}`;
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -23,11 +33,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     hostId = ref(''),
     module = ref<NavigationModule>('hosts');
   const current = computed(() => tabs.value.find((t) => t.key === active.value));
+  const pluginPages = ref<WorkspaceTab[]>([]);
+  const activePluginKey = computed(() =>
+    current.value?.view === 'extension' ? pluginPageKey(current.value) : '',
+  );
   function selectModule(id: NavigationModule): void {
     module.value = id;
   }
   function selectHost(id: string): void {
-    const tab = tabs.value.find((t) => hostViews.has(t.view) && t.hostId === id);
+    const tab = tabs.value.find((t) => isHostTab(t) && t.hostId === id);
     if (tab) activate(tab.key);
     else navigate('terminals', id);
   }
@@ -35,9 +49,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
     active.value = key;
-    module.value = moduleForView(tab.view);
-    if (hostViews.has(tab.view) || (tab.view === 'extension' && tab.hostId))
-      hostId.value = tab.hostId;
+    module.value = isHostTab(tab) ? 'hosts' : (tab.settingsModule ?? moduleForView(tab.view));
+    if (isHostTab(tab)) hostId.value = tab.hostId;
+  }
+  function openPluginSettings(pluginId: string, origin: 'plugins' | 'system' = 'system'): void {
+    if (!usePluginsStore().installed.some((plugin) => plugin.manifest.id === pluginId)) return;
+    const key = `plugin-settings:${pluginId}`;
+    let tab = tabs.value.find((tab) => tab.key === key);
+    if (!tab) {
+      tab = { key, view: 'pluginSettings', hostId: '', pluginId };
+      tabs.value.push(tab);
+    }
+    tab.settingsModule = origin;
+    activate(key);
   }
   async function openPlugin(
     pluginId: string,
@@ -54,31 +78,61 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const contribution = installed.manifest.contributions.find(
       (entry) => entry.id === contributionId,
     );
-    if (contribution?.kind === 'tool' || contribution?.kind === 'settings') target = '';
-    const key = `extension:${pluginId}:${contributionId}:${target}`;
-    const existing = tabs.value.find((t) => t.pluginId === pluginId);
-    if (existing && existing.key !== key) {
-      await close(existing.key);
-      if (tabs.value.includes(existing)) return;
+    if (!contribution || contribution.kind === 'settings') return openPluginSettings(pluginId);
+    const globalDiagnostic =
+      !target &&
+      section === 'diagnostics' &&
+      installed.manifest.permissions.includes('network.run') &&
+      (await plugins.schema(pluginId)).pages.some(
+        (page) =>
+          page.id === contributionId &&
+          page.surface?.kind === 'operations' &&
+          page.surface.sections.includes('diagnostics'),
+      );
+    if (!target && contribution.kind !== 'tool' && !globalDiagnostic) {
+      plugins.error = '请先选择主机，再打开此工具。';
+      return;
     }
-    if (!tabs.value.some((t) => t.key === key))
-      tabs.value.push({ key, view: 'extension', hostId: target, pluginId, contributionId });
-    const tab = tabs.value.find((t) => t.key === key)!;
-    if (section) tab.section = section;
-    if (logIntent) tab.logIntent = logIntent;
-    else if (section && section !== 'logs') tab.logIntent = undefined;
-    activate(key);
+    const key = pluginPageKey({ pluginId, contributionId, hostId: target });
+    let page = pluginPages.value.find((page) => page.key === key);
+    if (!page) {
+      page = { key, view: 'extension', hostId: target, pluginId, contributionId };
+      pluginPages.value.push(page);
+    }
+    if (section) page.section = section;
+    if (logIntent) page.logIntent = logIntent;
+    else if (section && section !== 'logs') page.logIntent = undefined;
+    const tabKey = target ? `host:${target}` : key;
+    let tab = tabs.value.find((tab) => tab.key === tabKey);
+    if (!tab) {
+      tab = { ...page, key: tabKey };
+      const firstGlobal = tabs.value.findIndex((item) => !isHostTab(item));
+      if (target && firstGlobal >= 0) tabs.value.splice(firstGlobal, 0, tab);
+      else tabs.value.push(tab);
+    } else Object.assign(tab, page, { key: tabKey });
+    activate(tabKey);
   }
   function navigate(
     view: WorkspaceView,
     target = hostId.value,
     section?: WorkspaceTab['section'],
   ): void {
-    if (['assistant', 'batch', 'automation', 'network'].includes(view)) {
+    if (['assistant', 'network'].includes(view)) {
       const plugins = usePluginsStore();
       const entry = plugins.extensions.find(
         (entry) => entry.kind === 'tool' && entry.tool === view,
       );
+      if (!entry && view === 'network') {
+        void serverPluginFor('', 'diagnostics')
+          .then((found) => {
+            if (!found) throw new Error('请先启用提供网络诊断的插件。');
+            return openPlugin(found.pluginId, found.id, '', 'diagnostics');
+          })
+          .catch((cause) => {
+            plugins.error = errorMessage(cause);
+          });
+        return;
+      }
       if (!entry) {
         plugins.error = '此运维工具未安装、未启用或未授权，请在设置中的插件管理检查。';
         return;
@@ -93,11 +147,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     let tab = tabs.value.find((t) => t.key === key);
     if (!tab) {
       tab = { key, view, hostId: hostView ? target : '', section };
-      const firstGlobal = tabs.value.findIndex((item) => !hostViews.has(item.view));
+      const firstGlobal = tabs.value.findIndex((item) => !isHostTab(item));
       if (hostView && firstGlobal >= 0) tabs.value.splice(firstGlobal, 0, tab);
       else tabs.value.push(tab);
     } else {
       tab.view = view;
+      delete tab.pluginId;
+      delete tab.contributionId;
+      delete tab.logIntent;
       if (section) tab.section = section;
     }
     activate(key);
@@ -124,11 +181,33 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (closing.value.includes(tab.key)) continue;
       closing.value.push(tab.key);
       try {
-        if (tab.pluginId) {
+        const pages = pluginPages.value.filter((page) =>
+          isHostTab(tab) ? page.hostId === tab.hostId : page.key === tab.key,
+        );
+        const settingsKeys =
+          tab.view === 'pluginSettings'
+            ? Object.keys(usePluginsStore().drafts).filter((key) => key.startsWith(`${tab.key}:`))
+            : [];
+        const draftKeys = [...pages.map((page) => page.key), ...settingsKeys];
+        if (draftKeys.length) {
           const plugins = usePluginsStore();
-          if (!(await plugins.discard(tab.key))) continue;
+          let accepted = true;
+          for (const key of draftKeys)
+            if (!(await plugins.discard(key))) {
+              accepted = false;
+              break;
+            }
+          if (!accepted) continue;
+        }
+        if (isHostTab(tab)) {
+          const first = terminals.hostTabs(tab.hostId)[0];
+          if (first) await terminals.closeAll(first.key);
+          if (terminals.hostTabs(tab.hostId).length) continue;
+        }
+        if (pages.length) {
+          const plugins = usePluginsStore();
           try {
-            await plugins.bind(tab.pluginId, null);
+            for (const page of pages) await plugins.release(page.pluginId!, page.key);
           } catch (cause) {
             if (
               !['NOT_FOUND', 'PLUGIN_PERMISSION_DENIED'].includes(
@@ -139,13 +218,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
               continue;
             }
           }
-          plugins.forget(tab.key);
         }
-        if (hostViews.has(tab.view)) {
-          const first = terminals.hostTabs(tab.hostId)[0];
-          if (first) await terminals.closeAll(first.key);
-          if (terminals.hostTabs(tab.hostId).length) continue;
-        }
+        for (const key of settingsKeys) await usePluginsStore().release(tab.pluginId!, key);
+        for (const key of draftKeys) usePluginsStore().forget(key);
+        pluginPages.value = pluginPages.value.filter((page) => !pages.includes(page));
         removed.add(tab);
       } finally {
         closing.value = closing.value.filter((key) => key !== tab.key);
@@ -172,5 +248,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     navigate,
     close,
     openPlugin,
+    openPluginSettings,
+    pluginPages,
+    activePluginKey,
   };
 });

@@ -3,6 +3,8 @@ import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import { createPluginUiBridge } from './plugin-ui-bridge';
 import { usePluginsStore } from '../stores/plugins';
 import { useOpsStore } from '../stores/ops';
+import { useWorkspaceStore } from '../stores/workspace';
+import { useNotificationsStore } from '../stores/notifications';
 import { hostInput } from '../types/hosts';
 import type { PluginPermission, PluginUiPage } from '../types/plugins';
 const api = vi.hoisted(() => ({ invoke: vi.fn(), tool: vi.fn(), server: vi.fn() }));
@@ -74,6 +76,34 @@ function grant(...permissions: PluginPermission[]) {
 function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
+it('rejects hidden frame requests and late results before a different host can receive them', async () => {
+  let active = true;
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: 'a',
+    isActive: () => active,
+    stream: vi.fn(),
+  });
+  let finish!: (value: unknown) => void;
+  api.invoke.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = ui.call('invoke', { action: 'greet', values: {} });
+  active = false;
+  ui.suspend();
+  finish({ output: 'late result for a' });
+  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  await expect(ui.call('invoke', { action: 'greet', values: {} })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  expect(api.invoke).toHaveBeenCalledOnce();
+  expect(ui.snapshot()).toMatchObject({ hostId: 'a' });
+});
 it('permits only declared Wasm actions and does not expose native commands or host inventory to a UI-only grant', async () => {
   const ui = bridge();
   api.invoke.mockResolvedValue({ output: 'from Wasm' });
@@ -111,7 +141,7 @@ it('rejects stale results and all later calls after an installation generation c
   });
 });
 it('keeps connection leases opaque and freezes approved input before dispatching through Wasm', async () => {
-  grant('ui.contribute', 'batch.run');
+  grant('ui.contribute', 'network.run');
   const host = {
     ...hostInput(),
     credentialId: 'private-credential-reference',
@@ -140,9 +170,12 @@ it('keeps connection leases opaque and freezes approved input before dispatching
   expect(JSON.stringify(snapshot)).not.toContain('private-credential-reference');
   const input = {
     input: {
-      targets: [{ hostId: 'host', sessionId: snapshot.operations.host!.session.id }],
-      operation: { kind: 'command', command: 'printf original' },
-      confirmed: true,
+      origin: { kind: 'remote', hostId: 'host', sessionId: snapshot.operations.host!.session.id },
+      tool: 'tcp',
+      target: 'original.example',
+      port: 22,
+      count: 1,
+      timeoutSecs: 3,
     },
   };
   let finish!: (value: unknown) => void;
@@ -152,17 +185,17 @@ it('keeps connection leases opaque and freezes approved input before dispatching
         finish = resolve;
       }),
   );
-  const request = ui.call('batch_start', input);
-  input.input.operation.command = 'printf changed';
+  const request = ui.call('diagnostic_start', input);
+  input.input.target = 'changed.example';
   finish({ id: 'task' });
   await request;
   expect(api.tool).toHaveBeenCalledWith(
     id,
-    'batch_start',
+    'diagnostic_start',
     expect.objectContaining({
       input: expect.objectContaining({
-        targets: [{ hostId: 'host', sessionId: 'private-session' }],
-        operation: { kind: 'command', command: 'printf original' },
+        origin: { kind: 'remote', hostId: 'host', sessionId: 'private-session' },
+        target: 'original.example',
       }),
     }),
     page,
@@ -170,38 +203,46 @@ it('keeps connection leases opaque and freezes approved input before dispatching
     true,
   );
 });
-it('rejects local file sources that were not selected in the native picker', async () => {
-  grant('ui.contribute', 'batch.run');
-  await expect(
-    bridge().call('batch_start', {
-      input: { operation: { kind: 'file', source: 'C:/private.txt' }, confirmed: true },
-    }),
-  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+it('rejects removed tool operations before dispatch', async () => {
+  grant('ui.contribute', 'network.run');
+  for (const method of ['batch_start', 'automation_catalog', 'files.pick'])
+    await expect(bridge().call(method, {})).rejects.toMatchObject({
+      code: 'PLUGIN_PERMISSION_DENIED',
+    });
   expect(api.tool).not.toHaveBeenCalled();
 });
-it('returns opaque automation profile bindings and restores them only for subsequent requests', async () => {
-  grant('ui.contribute', 'automation.manage');
+
+it('retains model navigation and notifications used by the remaining plugins', async () => {
+  grant('ui.contribute');
   const ui = bridge();
-  api.tool.mockResolvedValueOnce([
-    { id: 'entry', body: 'printf safe' },
-    [{ hostId: 'host', hostname: 'qa.example', port: 22, routeSignature: 'private-route' }],
-  ]);
-  const prepared = (await ui.call('automation_prepare', {
-    entryId: 'entry',
-    revision: 1,
-    hostIds: ['host'],
-  })) as [unknown, { routeSignature: string }[]];
-  const profile = prepared[1][0]!.routeSignature;
-  expect(profile).toMatch(/^sdk-profile-/);
-  expect(JSON.stringify(prepared)).not.toContain('private-route');
-  api.tool.mockResolvedValueOnce({ id: 'run' });
-  await ui.call('automation_start', { input: { expectedProfiles: { host: profile } } });
-  expect(api.tool).toHaveBeenLastCalledWith(
+  await ui.call('workspace.navigate', { view: 'models' });
+  expect(useWorkspaceStore().current?.view).toBe('models');
+  await ui.call('ui.notify', { message: 'Retained plugin notification', error: true });
+  expect(
+    useNotificationsStore().items.some((item) => item.text === 'Retained plugin notification'),
+  ).toBe(true);
+  await expect(ui.call('workspace.navigate', { view: 'settings' })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+});
+
+it('acknowledges approved model navigation when it hides its caller and denies subsequent hidden requests', async () => {
+  let active = true;
+  const navigate = vi.spyOn(useWorkspaceStore(), 'navigate').mockImplementation(() => {
+    active = false;
+    usePluginsStore().clearPlugin(id);
+  });
+  const ui = createPluginUiBridge({
     id,
-    'automation_start',
-    { input: { expectedProfiles: { host: 'private-route' } } },
+    revision: 'revision',
     page,
-    expect.any(AbortSignal),
-    true,
-  );
+    hostId: '',
+    isActive: () => active,
+    stream: vi.fn(),
+  });
+  await expect(ui.call('workspace.navigate', { view: 'models' })).resolves.toBeNull();
+  await expect(ui.call('workspace.navigate', { view: 'models' })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  expect(navigate).toHaveBeenCalledTimes(1);
 });

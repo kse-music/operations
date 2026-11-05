@@ -8,3 +8,5 @@ docs/product/PRD.md
 AGENTS.md
 .local
 plugins/compat/server/assets
+
+plugins/compat/network/assets

@@ -8,25 +8,37 @@ import { useFilesStore } from '../stores/files';
 import { useModelsStore } from '../stores/models';
 import { useApplicationStore } from '../stores/application';
 import { useNotificationsStore } from '../stores/notifications';
+import { usePluginsStore } from '../stores/plugins';
+import { useWorkspaceStore } from '../stores/workspace';
 import { errorMessage } from '../services/ipc';
 import type { PluginUiPage, PluginToolIntent } from '../types/plugins';
 import type { ServerSection } from '../types/server';
 import type { LogInput, ContainerShell } from '../types/ops';
 import type { Host } from '../types/hosts';
-const props = defineProps<{
-  pluginId: string;
-  revision: string;
-  hostId: string;
-  page: PluginUiPage;
-  initialSection?: ServerSection;
-  logIntent?: { input: LogInput; title: string; sequence: number };
-  toolIntent?: PluginToolIntent;
-}>();
+const props = withDefaults(
+  defineProps<{
+    pluginId: string;
+    revision: string;
+    hostId: string;
+    page: PluginUiPage;
+    initialSection?: ServerSection;
+    logIntent?: { input: LogInput; title: string; sequence: number };
+    toolIntent?: PluginToolIntent;
+    active?: boolean;
+    contextKey?: string;
+  }>(),
+  {
+    active: true,
+    contextKey: '',
+    initialSection: undefined,
+    logIntent: undefined,
+    toolIntent: undefined,
+  },
+);
 const emit = defineEmits<{
   navigate: [section: ServerSection, intent?: { input: LogInput; title: string; sequence: number }];
   shell: [host: Host, shell: ContainerShell];
   section: [section: ServerSection];
-  intentConsumed: [];
   retry: [];
 }>();
 const frame = ref<HTMLIFrameElement>(),
@@ -40,6 +52,17 @@ const hosts = useHostsStore(),
   models = useModelsStore();
 const application = useApplicationStore(),
   notifications = useNotificationsStore();
+const plugins = usePluginsStore(),
+  workspace = useWorkspaceStore();
+const active = computed(
+  () =>
+    props.active &&
+    (!props.contextKey ||
+      ((workspace.activePluginKey === props.contextKey ||
+        (workspace.current?.view === 'pluginSettings' &&
+          workspace.current.pluginId === props.pluginId)) &&
+        plugins.owns(props.pluginId, props.contextKey))),
+);
 const path = computed(() => `/${props.pluginId}/${props.revision}/${props.page.id}/index.html`);
 const source = computed(() =>
   isTauri()
@@ -58,6 +81,7 @@ const bridge = createPluginUiBridge({
   revision: props.revision,
   page: props.page,
   hostId: props.hostId,
+  isActive: () => active.value,
   stream: (id, event) =>
     port?.postMessage(JSON.parse(JSON.stringify({ kind: 'stream', id, event }))),
 });
@@ -70,20 +94,22 @@ function context() {
       JSON.parse(
         JSON.stringify({
           kind: 'context',
-          visible: visible.value,
+          visible: active.value && visible.value,
           state: bridge.snapshot(),
           props: {
             hostId: props.hostId,
+            boundHostId: props.hostId,
             initialSection: props.initialSection,
             initialTab: props.initialSection,
             logIntent: props.logIntent,
             page: props.page,
-            entryId: props.toolIntent?.entryId,
             requestId: props.toolIntent?.networkRequest,
-            ...(props.toolIntent?.automationHost
-              ? { hostId: props.toolIntent.automationHost }
+            ...(!props.hostId &&
+            props.page.surface?.kind === 'tool' &&
+            props.page.surface.tool === 'network' &&
+            props.toolIntent?.networkHost
+              ? { hostId: props.toolIntent.networkHost }
               : {}),
-            ...(props.toolIntent?.networkHost ? { hostId: props.toolIntent.networkHost } : {}),
           },
         }),
       ),
@@ -94,6 +120,7 @@ function context() {
   }
 }
 function uiEvent(name: string, args: unknown[]) {
+  if (!active.value) return;
   if (Date.now() - lastEvent < 40) return;
   lastEvent = Date.now();
   const sections = [
@@ -125,7 +152,7 @@ function uiEvent(name: string, args: unknown[]) {
         confirmed: false,
         pluginId: props.pluginId,
       });
-  } else if (name === 'intentConsumed') emit('intentConsumed');
+  }
 }
 function connect(event: MessageEvent) {
   if (
@@ -213,6 +240,16 @@ function connect(event: MessageEvent) {
   frame.value?.contentWindow?.postMessage({ kind: 'serverdeck-sdk-connect' }, '*', [channel.port2]);
 }
 watch(
+  () => active.value,
+  (value) => {
+    if (!value) bridge.suspend();
+    else if (props.page.surface?.kind === 'tool' && props.page.surface.tool === 'assistant')
+      void models.refresh();
+    context();
+  },
+  { flush: 'sync' },
+);
+watch(
   () => [
     hosts.catalog,
     ops.connections,
@@ -267,6 +304,7 @@ onBeforeUnmount(() => {
     <p v-else-if="!ready" role="status">正在加载插件界面…</p>
     <iframe
       ref="frame"
+      :inert="!active"
       :src="source"
       :title="typeof page.title === 'string' ? page.title : page.title['zh-CN']"
       sandbox="allow-scripts allow-forms"

@@ -13,9 +13,6 @@ function mount(pluginId: string) {
   document.body.append(root);
   app = createApp(PluginPage, {
     pluginId,
-    contributionId: 'server',
-    hostId: '',
-    tabKey: 'own-page',
   }).use(pinia);
   app.mount(root);
 }
@@ -54,7 +51,8 @@ it.each(['system', 'user'] as const)(
     const ui = vi.spyOn(pluginsApi, 'ui');
     const grant = vi.spyOn(pluginsApi, 'grant').mockResolvedValue({} as never);
     vi.spyOn(plugins, 'refresh').mockResolvedValue();
-    await useWorkspaceStore().openPlugin(plugin.manifest.id, 'server', '');
+    useWorkspaceStore().openPluginSettings(plugin.manifest.id);
+    expect(useWorkspaceStore().module).toBe('system');
     expect(useWorkspaceStore().current?.pluginId).toBe(plugin.manifest.id);
     useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
     mount(plugin.manifest.id);
@@ -120,4 +118,64 @@ it('does not overwrite permission edits when the installed list refreshes with u
   plugins.grants = { ...plugins.grants };
   await settle();
   expect(root.querySelector<HTMLInputElement>('[aria-label="metrics.read"]')!.checked).toBe(true);
+});
+
+it('keeps plugin-provided settings pages available under settings without a host selector', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const plugins = usePluginsStore(),
+    plugin = { ...systemPluginFixtures()[0]!, enabled: true };
+  plugin.manifest = {
+    ...plugin.manifest,
+    permissions: ['ui.contribute'],
+    contributions: [{ id: 'settings', label: '插件配置', kind: 'settings' }],
+  };
+  plugins.installed = [plugin];
+  plugins.grants[plugin.manifest.id] = {
+    version: 1,
+    pluginId: plugin.manifest.id,
+    pluginVersion: plugin.manifest.version,
+    revision: plugin.revision,
+    packageDigest: plugin.packageDigest,
+    publisher: null,
+    permissions: ['ui.contribute'],
+    operations: ['ui.contribute'],
+    readRoots: [],
+    writeRoots: [],
+  };
+  plugins.schemas[plugin.manifest.id] = {
+    revision: plugin.revision,
+    ui: {
+      uiVersion: 1,
+      title: '配置',
+      pages: [
+        {
+          id: 'settings',
+          title: '插件配置',
+          initialAction: null,
+          log: null,
+          actions: [],
+          fields: [
+            {
+              id: 'setting',
+              label: '配置项',
+              kind: 'text',
+              default: '配置草稿',
+              readonly: false,
+              documentField: null,
+            },
+          ],
+        },
+      ],
+    },
+  };
+  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
+  useWorkspaceStore().openPluginSettings(plugin.manifest.id);
+  mount(plugin.manifest.id);
+  await settle();
+  expect(useWorkspaceStore().module).toBe('system');
+  expect(root.querySelector<HTMLInputElement>('.plugin-form input')?.value).toBe('配置草稿');
+  expect(root.querySelector('[aria-label="插件目标主机"]')).toBeNull();
+  expect(pluginsApi.context).toHaveBeenCalledWith(plugin.manifest.id, null);
 });

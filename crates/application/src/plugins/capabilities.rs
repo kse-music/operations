@@ -1,10 +1,9 @@
-use super::state::{self, Call, Document, Log, Pending, Task, failure};
+use super::state::{self, Call, Document, Log, Pending, failure};
 use super::*;
 use serde_json::{Value, json};
 use serverdeck_core::{
     files::SaveText,
     ops::{LogEvent, LogInput, LogSource},
-    tasks::{BatchInput, BatchOperation, Target},
 };
 use serverdeck_plugin_core::{
     package::digest,
@@ -196,10 +195,6 @@ impl Application {
             Capability::Execute {
                 command,
                 timeout_secs,
-            }
-            | Capability::TaskCreate {
-                command,
-                timeout_secs,
             } => {
                 validate_command(command, *timeout_secs)?;
                 self.plugin_ops_session(call)?;
@@ -349,77 +344,6 @@ impl Application {
                 })?;
                 Value::Null
             }
-            Capability::TaskCreate {
-                command,
-                timeout_secs,
-            } => {
-                validate_command(&command, timeout_secs)?;
-                let session = self.plugin_ops_session(call)?;
-                let host = context(call)?.input.host_id.clone();
-                {
-                    let batches = self.tasks.batch_list()?;
-                    let mut data = self.plugin_host.lock()?;
-                    data.tasks
-                        .retain(|id, _| batches.iter().any(|b| &b.id == id));
-                    let owned = data
-                        .tasks
-                        .iter()
-                        .filter(|(_, t)| t.plugin == call.id)
-                        .map(|(id, _)| id.clone())
-                        .collect::<Vec<_>>();
-                    let active = owned
-                        .iter()
-                        .filter(|id| batches.iter().any(|b| &b.id == *id && !b.finished))
-                        .count();
-                    if active >= 4 {
-                        return Err(Error::Busy);
-                    }
-                    if owned.len() >= 16 {
-                        let retired = owned
-                            .iter()
-                            .find(|id| batches.iter().any(|b| &b.id == *id && b.finished))
-                            .ok_or(Error::Busy)?;
-                        data.tasks.remove(retired);
-                    }
-                }
-                let batch = self
-                    .tasks
-                    .batch_start(BatchInput {
-                        targets: vec![Target {
-                            host_id: host,
-                            session_id: Some(session),
-                        }],
-                        operation: BatchOperation::Command { command },
-                        concurrency: 1,
-                        timeout_secs,
-                        confirmed: true,
-                    })
-                    .await?;
-                self.plugin_host.lock()?.tasks.insert(
-                    batch.id.clone(),
-                    Task {
-                        plugin: call.id.clone(),
-                        generation: call.generation.clone(),
-                    },
-                );
-                json!({"id":batch.id,"finished":batch.finished})
-            }
-            Capability::TaskRead { task_id } => {
-                self.plugin_task_owner(call, &task_id)?;
-                let batch = self
-                    .tasks
-                    .batch_list()?
-                    .into_iter()
-                    .find(|b| b.id == task_id)
-                    .ok_or(Error::NotFound)?;
-                let row = batch.rows.first().ok_or(Error::NotFound)?;
-                json!({"id":batch.id,"finished":batch.finished,"state":row.state,"stdout":prefix(&row.stdout,4096),"stderr":prefix(&row.stderr,4096),"exitCode":row.exit_code,"message":row.message,"truncated":row.dropped_bytes>0||row.stdout.len()>4096||row.stderr.len()>4096})
-            }
-            Capability::TaskCancel { task_id } => {
-                self.plugin_task_owner(call, &task_id)?;
-                self.tasks.batch_cancel(&task_id, true)?;
-                Value::Null
-            }
             Capability::LogStart { path, lines } => {
                 if !(1..=200).contains(&lines) {
                     return Err(Error::Validation("插件日志行数须为 1–200"));
@@ -566,9 +490,7 @@ impl Application {
                 "打开容器 {id} 的 {} 终端",
                 if *bash { "bash" } else { "sh" }
             ),
-            Capability::Execute { command, .. } | Capability::TaskCreate { command, .. } => {
-                command.clone()
-            }
+            Capability::Execute { command, .. } => command.clone(),
             Capability::SaveFile {
                 document_id,
                 content,
@@ -659,14 +581,6 @@ impl Application {
         }
         Ok((d.internal_token.clone(), d.path.clone()))
     }
-    fn plugin_task_owner(&self, call: &Call, id: &str) -> Result<(), Error> {
-        let data = self.plugin_host.lock()?;
-        let task = data.tasks.get(id).ok_or(Error::NotFound)?;
-        if task.plugin != call.id || task.generation != call.generation {
-            return Err(denied());
-        }
-        Ok(())
-    }
     fn plugin_log_owner(&self, call: &Call, id: &str, grant: &Grant) -> Result<(), Error> {
         let data = self.plugin_host.lock()?;
         let log = data.logs.get(id).ok_or(Error::NotFound)?;
@@ -684,7 +598,7 @@ impl Application {
         validate_command(&command, timeout_secs)?;
         let session = self.plugin_ops_session(call)?;
         let cancel = call.cancel.child_token();
-        let slot = self.tasks.script_slot(&cancel).await?;
+        let slot = self.tasks.command_slot(&cancel).await?;
         let mut stdout = String::new();
         let mut stderr = String::new();
         let mut truncated = false;
@@ -736,19 +650,13 @@ impl Application {
         for monitor in monitors {
             monitor.backend.shutdown().await;
         }
-        let (documents, tasks, logs) = {
+        let (documents, logs) = {
             let mut data = self.plugin_host.lock()?;
             let docs = data
                 .documents
                 .iter()
                 .filter(|(_, d)| d.plugin == id)
                 .map(|(k, d)| (k.clone(), d.internal_token.clone()))
-                .collect::<Vec<_>>();
-            let tasks = data
-                .tasks
-                .iter()
-                .filter(|(_, t)| t.plugin == id)
-                .map(|(k, _)| k.clone())
                 .collect::<Vec<_>>();
             let logs = data
                 .logs
@@ -759,25 +667,15 @@ impl Application {
             for (key, _) in &docs {
                 data.documents.remove(key);
             }
-            for key in &tasks {
-                data.tasks.remove(key);
-            }
             for key in &logs {
                 data.logs.remove(key);
             }
             data.approvals.retain(|_, p| p.public.plugin_id != id);
-            (docs, tasks, logs)
+            (docs, logs)
         };
         let mut errors = Vec::new();
         for (_, token) in documents {
             if let Err(e) = self.files.close_editor(&token, true) {
-                errors.push(e);
-            }
-        }
-        for task in tasks {
-            if let Err(e) = self.tasks.batch_cancel(&task, true)
-                && !matches!(e, Error::NotFound)
-            {
                 errors.push(e);
             }
         }

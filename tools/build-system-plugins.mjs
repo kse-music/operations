@@ -5,17 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPluginUi } from './build-plugin-ui.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
-const names = [
-  'resources',
-  'docker',
-  'processes',
-  'services',
-  'logs',
-  'assistant',
-  'batch',
-  'automation',
-  'network',
-];
+const names = ['services', 'docker', 'assistant'];
 const artifacts = path.join(root, 'plugins/system/packages');
 await mkdir(path.join(root, '.local/plugin-build'), { recursive: true });
 await mkdir(artifacts, { recursive: true });
@@ -23,9 +13,14 @@ await buildPluginUi(
   path.join(root, 'plugins/compat/server'),
   path.join(root, 'plugins/compat/server/assets'),
   [
-    path.join(root, 'plugins/system/logs/frontend'),
-    path.join(root, 'plugins/system/resources/frontend'),
+    path.join(root, 'plugins/system/services/frontend/logs'),
+    path.join(root, 'plugins/system/services/frontend/monitor'),
   ],
+);
+await buildPluginUi(
+  path.join(root, 'plugins/compat/network'),
+  path.join(root, 'plugins/compat/network/assets'),
+  [path.join(root, 'plugins/system/services/frontend/network')],
 );
 const staging = await mkdtemp(path.join(root, '.local/plugin-build', 'system-'));
 for (const name of names) {

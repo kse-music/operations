@@ -71,18 +71,34 @@ export const usePluginsStore = defineStore('plugins', () => {
   const bindings = new Map<string, Promise<void>>();
   const contexts = new Map<string, string>();
   const contextVersions = new Map<string, number>();
+  const owners = new Map<string, string>();
   const contextVersion = (id: string) => contextVersions.get(id) ?? 0;
   function bind(
     id: string,
     input: import('../types/plugins').PluginContextInput | null,
+    owner = '',
   ): Promise<void> {
+    owners.set(id, owner);
     contextVersions.set(id, contextVersion(id) + 1);
     const prior = bindings.get(id) ?? Promise.resolve();
     const work = async () => {
       const signature = JSON.stringify(input);
-      if (input !== null && contexts.get(id) === signature) return;
-      await pluginsApi.context(id, input);
-      contexts.set(id, signature);
+      try {
+        if (input === null || contexts.get(id) !== signature) {
+          await pluginsApi.context(id, input);
+          contexts.set(id, signature);
+        }
+        if (
+          owner &&
+          owns(id, owner) &&
+          installed.value.find((plugin) => plugin.manifest.id === id)?.manifest.entry?.backend &&
+          statuses.value.find((status) => status.id === id)?.state !== 'crashed'
+        )
+          await pluginsApi.activate(id);
+      } catch (cause) {
+        contexts.delete(id);
+        throw cause;
+      }
     };
     const job = prior.then(work, work);
     const observed = job.then(
@@ -94,6 +110,16 @@ export const usePluginsStore = defineStore('plugins', () => {
       if (bindings.get(id) === observed) bindings.delete(id);
     });
     return job;
+  }
+  function release(id: string, owner: string): Promise<void> {
+    if (owners.get(id) !== owner) return Promise.resolve();
+    return bind(id, null).catch((cause) => {
+      if (owners.get(id) === '') owners.set(id, owner);
+      throw cause;
+    });
+  }
+  function owns(id: string, owner: string): boolean {
+    return owners.get(id) === owner;
   }
   async function refresh(quiet = false): Promise<void> {
     if (loading.value) return;
@@ -173,11 +199,13 @@ export const usePluginsStore = defineStore('plugins', () => {
     delete drafts.value[key];
   }
   function clearPlugin(id: string) {
+    owners.delete(id);
     contextVersions.set(id, contextVersion(id) + 1);
     delete schemas.value[id];
     contexts.delete(id);
     for (const key of Object.keys(drafts.value))
-      if (key.startsWith(`extension:${id}:`)) delete drafts.value[key];
+      if (key.startsWith(`extension:${id}:`) || key.startsWith(`plugin-settings:${id}:`))
+        delete drafts.value[key];
   }
   useErrorNotifications(error);
   onScopeDispose(stop);
@@ -208,5 +236,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     clearPlugin,
     bind,
     contextVersion,
+    release,
+    owns,
   };
 });

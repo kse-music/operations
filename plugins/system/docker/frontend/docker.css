@@ -1,0 +1,119 @@
+.docker-workbench {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-bottom: 24px;
+}
+.docker-workbench > .server-tabs {
+  position: static;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+  gap: 24px;
+  border-radius: 0;
+}
+.docker-workbench > .server-tabs button {
+  flex: 0 0 auto;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  padding: 4px 2px 13px;
+  background: none;
+  font-size: 13px;
+}
+.docker-workbench > .server-tabs [aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+.docker-workbench .ops-connection-status {
+  display: none;
+}
+.docker-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.docker-summary article {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.docker-stat-icon {
+  display: grid;
+  place-items: center;
+  background: var(--raised);
+  color: var(--muted);
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.docker-stat-icon.active {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.docker-summary article > div {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.docker-summary article span:not(.docker-stat-icon) {
+  font-size: 11px;
+  color: var(--muted);
+}
+.docker-summary strong {
+  font-weight: 550;
+  font-size: 25px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.docker-workbench .ops-capabilities {
+  padding: 0;
+  border: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.docker-workbench .ops-row-actions {
+  min-width: 175px;
+}
+.docker-workbench .ops-table td:first-child {
+  min-width: 155px;
+}
+.docker-workbench .ops-table td:nth-child(2) {
+  max-width: 220px;
+}
+.docker-image {
+  font-size: 11px;
+  font-family: Consolas, monospace;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+@container (max-width:640px) {
+  .docker-summary {
+    gap: 8px;
+  }
+  .docker-summary article {
+    padding: 14px 12px;
+    gap: 10px;
+  }
+  .docker-stat-icon {
+    width: 30px;
+    height: 30px;
+  }
+  .docker-summary strong {
+    font-size: 22px;
+  }
+}
+@container (max-width:420px) {
+  .docker-summary article {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+}

@@ -18,10 +18,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 it('requires the frozen native review even when a package sends its own confirmed flag and cancels unused tickets', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'batch' } } as PluginUiPage;
+  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
   vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
     inputId: 'reviewed',
-    operation: 'batch_start',
+    operation: 'ai_execute',
     review: {
       title: 'Actual target',
       message: 'Actual command',
@@ -34,7 +34,7 @@ it('requires the frozen native review even when a package sends its own confirme
   const check = expect(
     pluginToolRequest(
       'review-test',
-      'batch_start',
+      'ai_execute',
       { input: { confirmed: true } },
       toolPage,
       undefined,
@@ -163,27 +163,27 @@ it('never executes a queued old-context request after a connection or plugin cha
   expect(call).toHaveBeenCalledOnce();
 });
 it('freezes confirmed tool inputs before queuing and gives WASM only an opaque typed ticket', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'batch' } } as PluginUiPage;
+  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
   const stage = vi
     .spyOn(pluginsApi, 'toolStage')
-    .mockResolvedValue({ inputId: 'immutable', operation: 'batch_start' });
+    .mockResolvedValue({ inputId: 'immutable', operation: 'ai_execute' });
   const call = vi
     .spyOn(pluginsApi, 'call')
     .mockResolvedValue({ protocolVersion: 1, result: { id: 'job' }, error: null });
   const args = { input: { confirmed: true, command: 'exact approved command' } };
-  const job = pluginToolRequest('upload-any-id', 'batch_start', args, toolPage);
+  const job = pluginToolRequest('upload-any-id', 'ai_execute', args, toolPage);
   args.input.command = 'changed after confirmation';
   await vi.runAllTimersAsync();
   expect(await job).toEqual({ id: 'job' });
   expect(stage).toHaveBeenCalledWith('upload-any-id', {
-    operation: 'batch_start',
+    operation: 'ai_execute',
     args: { input: { confirmed: true, command: 'exact approved command' } },
   });
   const payload = call.mock.calls[0]![1] as { values: { request: string } };
   expect(JSON.parse(payload.values.request)).toEqual({
     kind: 'tool_invoke',
     inputId: 'immutable',
-    operation: 'batch_start',
+    operation: 'ai_execute',
   });
   expect(payload.values.request).not.toContain('approved command');
 });

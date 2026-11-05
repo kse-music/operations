@@ -7,7 +7,6 @@ import { useHostsStore } from './stores/hosts';
 import { useTerminalsStore } from './stores/terminals';
 import { useWorkspaceStore } from './stores/workspace';
 import { useFilesStore } from './stores/files';
-import { useAutomationStore } from './stores/automation';
 import { useBackgroundStore } from './stores/background';
 import { terminalApi } from './services/terminal';
 import { hostsApi } from './services/hosts';
@@ -31,30 +30,30 @@ vi.mock('@serverdeck/plugin-sdk/stores/ops', async () => import('./stores/ops'))
 vi.mock('@serverdeck/plugin-sdk/stores/files', async () => import('./stores/files'));
 vi.mock('@serverdeck/plugin-sdk/stores/models', async () => import('./stores/models'));
 vi.mock('@serverdeck/plugin-sdk/services/tasks', async () => import('./services/tasks'));
-vi.mock('@serverdeck/plugin-sdk/services/automation', async () => import('./services/automation'));
 vi.mock('@serverdeck/plugin-sdk/services/ai', async () => import('./services/ai'));
 vi.mock('./components/PluginFrame.vue', async () => {
   const { defineComponent, h } = await import('vue');
-  const batch = (await import('../../../plugins/system/batch/frontend/BatchView.vue')).default;
-  const network = (await import('../../../plugins/system/network/frontend/NetworkView.vue'))
-    .default;
+  const network = (
+    await import('../../../plugins/system/services/frontend/network/NetworkView.vue')
+  ).default;
   return {
     default: defineComponent({
       props: {
         page: { type: Object, required: true },
         toolIntent: { type: Object, default: undefined },
+        initialSection: { type: String, default: undefined },
+        hostId: { type: String, default: '' },
       },
       setup(props) {
         return () => {
           const tool = props.page.surface?.tool;
-          return tool === 'batch'
-            ? h(batch)
-            : tool === 'network'
-              ? h(network, {
-                  hostId: props.toolIntent?.networkHost,
-                  requestId: props.toolIntent?.networkRequest,
-                })
-              : h('div');
+          return tool === 'network' || props.initialSection === 'diagnostics'
+            ? h(network, {
+                hostId: props.hostId || props.toolIntent?.networkHost,
+                boundHostId: props.hostId,
+                requestId: props.toolIntent?.networkRequest,
+              })
+            : h('div');
         };
       },
     }),
@@ -72,6 +71,19 @@ async function sidebarMenu(module: NavigationModule, label: string): Promise<voi
   root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
   await flush();
   root.querySelector<HTMLButtonElement>(`.activity-rail [aria-label="${label}"]`)!.click();
+  await flush();
+}
+async function openGlobalTool(name: string): Promise<void> {
+  const plugin = usePluginsStore().installed.find(
+    (plugin) => plugin.manifest.name === (name === '网络诊断' ? '系统服务' : name),
+  )!;
+  const entry = plugin.manifest.contributions.find((entry) => entry.kind !== 'settings')!;
+  await useWorkspaceStore().openPlugin(
+    plugin.manifest.id,
+    entry.id,
+    '',
+    name === '网络诊断' ? 'diagnostics' : undefined,
+  );
   await flush();
 }
 async function sessionAction(index: number, label: string): Promise<void> {
@@ -133,24 +145,11 @@ beforeEach(async () => {
   vi.spyOn(pluginsApi, 'context').mockResolvedValue();
   vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
   vi.spyOn(aiApi, 'models').mockResolvedValue([]);
-  const toolInputs = new Map<string, string>();
-  vi.spyOn(pluginsApi, 'toolStage').mockImplementation(async (_id, input) => {
-    const inputId = crypto.randomUUID();
-    toolInputs.set(inputId, input.operation);
-    return { inputId, operation: input.operation };
-  });
-  vi.spyOn(pluginsApi, 'call').mockImplementation(async (_id, payload) => {
-    const capability = JSON.parse((payload as { values: { request: string } }).values.request);
-    const operation = toolInputs.get(capability.inputId);
-    return {
-      protocolVersion: 1,
-      error: null,
-      result:
-        operation === 'automation_catalog'
-          ? { entries: [], groups: [], schedules: [], templates: [] }
-          : [],
-    };
-  });
+  vi.spyOn(pluginsApi, 'toolStage').mockImplementation(async (_id, input) => ({
+    inputId: crypto.randomUUID(),
+    operation: input.operation,
+  }));
+  vi.spyOn(pluginsApi, 'call').mockResolvedValue({ protocolVersion: 1, error: null, result: [] });
   vi.spyOn(useApplicationStore(), 'initialize').mockResolvedValue();
   useHostsStore().catalog = {
     hosts: ['a', 'b'].map((id) => ({
@@ -192,7 +191,6 @@ it.each([null, '', 'a'])(
     app!.unmount();
     loadSidebarConfig();
     vi.spyOn(useHostsStore(), 'load').mockResolvedValue();
-    vi.spyOn(useAutomationStore(), 'start').mockImplementation(() => {});
     vi.spyOn(useBackgroundStore(), 'start').mockImplementation(() => {});
     vi.spyOn(useFilesStore(), 'poll').mockResolvedValue();
     const load = vi.spyOn(terminalApi, 'workspaceLoad').mockResolvedValue(
@@ -551,7 +549,7 @@ it('opens the task center from the footer without changing the workspace or term
   const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="任务中心"]')!;
   expect(dialog.open).toBe(true);
   expect(dialog.textContent).toContain('没有传输任务');
-  expect(dialog.textContent).toContain('没有网络或批量任务');
+  expect(dialog.textContent).toContain('没有网络诊断任务');
   open!.click();
   await flush();
   expect(document.querySelectorAll('dialog[aria-label="任务中心"]')).toHaveLength(1);
@@ -576,7 +574,6 @@ it('uses the configured task shortcut and search to open one task dialog while p
   loadSidebarConfig();
   useApplicationStore().state!.config.product.shortcuts.tasks = 'Ctrl+Shift+U';
   vi.spyOn(useHostsStore(), 'load').mockResolvedValue();
-  vi.spyOn(useAutomationStore(), 'start').mockImplementation(() => {});
   vi.spyOn(useBackgroundStore(), 'start').mockImplementation(() => {});
   vi.spyOn(useFilesStore(), 'poll').mockResolvedValue();
   app = createApp(AppShell).use(pinia);
@@ -642,7 +639,7 @@ it('closes the task dialog when opening a result in its original tool', async ()
   expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
   expect(useWorkspaceStore().current).toMatchObject({
     view: 'extension',
-    pluginId: 'cn.hiboot.plugins.network',
+    pluginId: 'cn.hiboot.plugins.services',
   });
 });
 
@@ -851,10 +848,10 @@ it('keeps the current terminal visible across top module switches and navigates 
     expect(root.querySelector('[aria-label="欢迎页面"]')).toBeNull();
     expect(root.textContent).not.toContain('请选择功能');
   }
-  await sidebarMenu('plugins', '网络诊断');
+  await sidebarMenu('plugins', 'AI 运维助手');
   expect(workspace.module).toBe('plugins');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['AI 运维助手', '批量运维', '自动运维', '网络诊断'],
+    ['AI 运维助手', '系统服务'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
   await sidebarMenu('assets', '备份恢复');
@@ -867,7 +864,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   expect(workspace.current?.view).toBe('about');
   root
     .querySelector<HTMLButtonElement>(
-      '.workspace-tab[data-plugin-id="cn.hiboot.plugins.network"] [role="tab"]',
+      '.workspace-tab[data-plugin-id="cn.hiboot.plugins.assistant"] [role="tab"]',
     )!
     .click();
   await flush();
@@ -875,19 +872,19 @@ it('keeps the current terminal visible across top module switches and navigates 
     '运维工具',
   );
   expect(
-    root.querySelector('.activity-rail [aria-label="网络诊断"][aria-current="page"]'),
+    root.querySelector('.activity-rail [aria-label="AI 运维助手"][aria-current="page"]'),
   ).not.toBeNull();
   root.querySelector<HTMLButtonElement>('.module-navigation [data-module="hosts"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({
-    view: 'extension',
-    pluginId: 'cn.hiboot.plugins.network',
+    view: 'pluginSettings',
+    pluginId: 'cn.hiboot.plugins.assistant',
   });
   root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
   expect(root.querySelector('.workspace-header .host-tools')).not.toBeNull();
-  expect(root.querySelector('.activity-rail [aria-label="批量运维"]')).toBeNull();
+  expect(root.querySelector('.activity-rail [aria-label="AI 运维助手"]')).toBeNull();
   expect(terminals.panes[0]?.key).toBe(pane.key);
   expect(terminals.panes[0]?.connectRequested).toBe(false);
   expect(open).not.toHaveBeenCalled();
@@ -1620,29 +1617,10 @@ it('restores each host tool, file connection and terminal session through primar
   expect(files.connections.b?.id).toBe('files-b');
 });
 
-it('retains a batch draft and explicit diagnostic source across host workspace switches', async () => {
+it('retains an explicit diagnostic source across host workspace switches', async () => {
   root.querySelector<HTMLButtonElement>('.tree-host')!.click();
   await flush();
-  await sidebarMenu('plugins', '批量运维');
-  await flush();
-  const checkbox = root.querySelector<HTMLInputElement>('[aria-label="选择批量目标 Host b"]')!;
-  checkbox.checked = true;
-  checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-  const command = root.querySelector<HTMLTextAreaElement>('[aria-label="批量统一命令"]')!;
-  command.value = 'hostname';
-  command.dispatchEvent(new Event('input', { bubbles: true }));
-  await nextTick();
-  root.querySelector<HTMLButtonElement>('.workspace-tabs [role="tab"]')!.click();
-  await flush();
-  await sidebarMenu('plugins', '批量运维');
-  await flush();
-  expect(root.querySelector<HTMLInputElement>('[aria-label="选择批量目标 Host b"]')!.checked).toBe(
-    true,
-  );
-  expect(root.querySelector<HTMLTextAreaElement>('[aria-label="批量统一命令"]')!.value).toBe(
-    'hostname',
-  );
-  await sidebarMenu('plugins', '网络诊断');
+  await openGlobalTool('网络诊断');
   await flush();
   const source = root.querySelector<HTMLSelectElement>('[aria-label="诊断来源"]')!;
   source.value = 'remote';
@@ -1656,7 +1634,7 @@ it('retains a batch draft and explicit diagnostic source across host workspace s
   await flush();
   root.querySelectorAll<HTMLButtonElement>('.tree-host')[1]!.click();
   await flush();
-  await sidebarMenu('plugins', '网络诊断');
+  await openGlobalTool('网络诊断');
   await flush();
   expect(root.querySelector<HTMLSelectElement>('[aria-label="诊断主机"]')!.value).toBe('b');
   expect(root.querySelector<HTMLSelectElement>('[aria-label="诊断来源"]')!.value).toBe('remote');
@@ -1665,12 +1643,8 @@ it('retains a batch draft and explicit diagnostic source across host workspace s
 it.each([
   [
     '关闭',
-    [
-      'host:',
-      'extension:cn.hiboot.plugins.batch:batch:',
-      'extension:cn.hiboot.plugins.network:network:',
-    ],
-    'extension:cn.hiboot.plugins.network:network:',
+    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    'credentials:',
   ],
   ['关闭右侧', ['host:', 'host:a'], 'host:a'],
   ['关闭其它', ['host:a'], 'host:a'],
@@ -1691,8 +1665,8 @@ it.each([
     const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
     workspace.navigate('terminals', '');
     workspace.navigate('files', 'a');
-    workspace.navigate('batch');
-    workspace.navigate('network');
+    workspace.navigate('assistant');
+    workspace.navigate('credentials');
     files.connections.a = {
       host: useHostsStore().catalog!.hosts[0]!,
       id: 'existing-files',
@@ -1713,7 +1687,7 @@ it.each([
       }),
     );
     await nextTick();
-    expect(workspace.active).toBe('extension:cn.hiboot.plugins.network:network:');
+    expect(workspace.active).toBe('credentials:');
     const menu = document.querySelector('[role="menu"][aria-label="工作区标签操作"]')!;
     const buttons = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([
@@ -1828,4 +1802,142 @@ it('activating an empty host workspace does not silently create a replacement Sh
   expect(terminals.hostTabs('')).toHaveLength(0);
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: '' });
   expect(terminals.hostTabs('a')).toHaveLength(1);
+});
+
+it('keeps single-host plugin drafts in their host workspace through host, core-tool and settings switches', async () => {
+  const workspace = useWorkspaceStore(),
+    plugins = usePluginsStore();
+  const plugin = { ...systemPluginFixtures()[0]!, source: 'user' as const, enabled: true };
+  plugin.manifest = {
+    ...plugin.manifest,
+    id: 'dev.host-draft',
+    name: '主机草稿工具',
+    permissions: ['ui.contribute'],
+    entry: { backend: null, ui: 'ui.json' },
+    contributions: [{ id: 'draft', kind: 'workspace', label: '主机草稿工具' }],
+  };
+  plugins.installed.push(plugin);
+  plugins.grants[plugin.manifest.id] = {
+    version: 1,
+    pluginId: plugin.manifest.id,
+    pluginVersion: plugin.manifest.version,
+    publisher: null,
+    packageDigest: plugin.packageDigest,
+    revision: plugin.revision,
+    permissions: ['ui.contribute'],
+    operations: ['ui.contribute'],
+    readRoots: [],
+    writeRoots: [],
+  };
+  plugins.schemas[plugin.manifest.id] = {
+    revision: plugin.revision,
+    ui: {
+      uiVersion: 1,
+      title: '主机草稿工具',
+      pages: [
+        {
+          id: 'draft',
+          title: '草稿',
+          initialAction: null,
+          fields: [
+            {
+              id: 'content',
+              label: '内容',
+              kind: 'textarea',
+              default: '',
+              readonly: false,
+              documentField: null,
+            },
+          ],
+          actions: [],
+          log: null,
+        },
+      ],
+    },
+  };
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(plugins.installed);
+  const show = async (id: string) => {
+    root.querySelector<HTMLButtonElement>(`.tree-host[data-host-id="${id}"]`)!.click();
+    await flush();
+    root.querySelector<HTMLButtonElement>('.workspace-header [aria-haspopup="menu"]')!.click();
+    await flush();
+    document
+      .querySelector<HTMLButtonElement>('.host-plugin-menu [data-plugin-id="dev.host-draft"]')!
+      .click();
+    await flush();
+  };
+  await show('a');
+  const editorA = root.querySelector<HTMLTextAreaElement>(
+    '.plugin-workspace[data-host-id="a"] textarea',
+  )!;
+  editorA.value = 'draft for a';
+  editorA.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  expect(workspace.active).toBe('host:a');
+  expect(workspace.module).toBe('hosts');
+  expect(root.querySelector('[aria-label="插件目标主机"]')).toBeNull();
+  await show('b');
+  const editorB = root.querySelector<HTMLTextAreaElement>(
+    '.plugin-workspace[data-host-id="b"] textarea',
+  )!;
+  editorB.value = 'draft for b';
+  editorB.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  root.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+  await flush();
+  expect(workspace.current).toMatchObject({
+    view: 'extension',
+    hostId: 'a',
+    pluginId: 'dev.host-draft',
+  });
+  expect(editorA.value).toBe('draft for a');
+  expect(editorB.value).toBe('draft for b');
+  expect(root.querySelector('.plugin-workspace[data-host-id="a"] textarea')).toBe(editorA);
+  root
+    .querySelector<HTMLButtonElement>(
+      '.plugin-workspace[data-host-id="a"] [aria-label="插件设置"]',
+    )!
+    .click();
+  await flush();
+  expect(workspace.current?.view).toBe('pluginSettings');
+  expect(workspace.module).toBe('system');
+  expect(root.querySelector('.plugin-page [aria-label="插件设置"]')).not.toBeNull();
+  workspace.selectHost('a');
+  await flush();
+  expect(root.querySelector('.plugin-workspace[data-host-id="a"] textarea')).toBe(editorA);
+  root.querySelector<HTMLButtonElement>('.host-tools [aria-label="SSH 终端"]')!.click();
+  await flush();
+  expect(workspace.current?.view).toBe('terminals');
+  await show('a');
+  expect(editorA.value).toBe('draft for a');
+  expect(workspace.tabs.filter((tab) => tab.hostId === 'a')).toHaveLength(1);
+  expect(plugins.drafts['extension:dev.host-draft:draft:a']?.values.content).toBe('draft for a');
+  expect(plugins.drafts['extension:dev.host-draft:draft:b']?.values.content).toBe('draft for b');
+});
+
+it('opens every installed plugin configuration from Operations Tools without choosing or connecting a host', async () => {
+  const workspace = useWorkspaceStore(),
+    plugins = usePluginsStore();
+  plugins.installed.push(...systemPluginFixtures());
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(plugins.installed);
+  workspace.navigate('settings');
+  await flush();
+  const schema = vi.mocked(pluginsApi.ui);
+  schema.mockClear();
+  const activate = vi.mocked(pluginsApi.activate);
+  activate.mockClear();
+  for (const plugin of plugins.installed) {
+    await sidebarMenu('plugins', plugin.manifest.name);
+    expect(workspace.current).toMatchObject({
+      view: 'pluginSettings',
+      pluginId: plugin.manifest.id,
+      hostId: '',
+    });
+    expect(workspace.module).toBe('plugins');
+    expect(document.querySelector('[aria-label="选择使用工具的主机"]')).toBeNull();
+    expect(root.querySelector('.plugin-page [aria-label="插件设置"]')).not.toBeNull();
+  }
+  expect(schema).not.toHaveBeenCalled();
+  expect(activate).not.toHaveBeenCalled();
+  expect(workspace.pluginPages).toHaveLength(0);
 });

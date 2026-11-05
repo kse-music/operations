@@ -1,7 +1,5 @@
 export type PluginPermission =
   | 'assistant.use'
-  | 'batch.run'
-  | 'automation.manage'
   | 'network.run'
   | 'metrics.read'
   | 'system.read'
@@ -13,8 +11,7 @@ export type PluginPermission =
   | 'sftp.write'
   | 'ui.contribute'
   | 'settings.read'
-  | 'settings.write'
-  | 'tasks.create';
+  | 'settings.write';
 export interface PluginManifest {
   schemaVersion: number;
   id: string;
@@ -99,7 +96,7 @@ export type PluginCapability =
   | { kind: 'result_read'; resultId: string; chunk: number }
   | { kind: 'result_close'; resultId: string }
   | { kind: 'hosts_read' }
-  | { kind: 'execute' | 'task_create'; command: string; timeoutSecs: number }
+  | { kind: 'execute'; command: string; timeoutSecs: number }
   | { kind: 'read_file'; path: string }
   | { kind: 'save_file'; documentId: string; content: string }
   | { kind: 'close_file'; documentId: string; discard: boolean }
@@ -107,7 +104,6 @@ export type PluginCapability =
   | { kind: 'settings_read' }
   | { kind: 'settings_write'; value: unknown }
   | { kind: 'notify'; message: string }
-  | { kind: 'task_read' | 'task_cancel'; taskId: string }
   | { kind: 'log_start'; path: string; lines: number }
   | { kind: 'log_poll' | 'log_stop'; logId: string }
   | { kind: 'log_pause'; logId: string; paused: boolean };
@@ -176,7 +172,7 @@ export interface PluginUiResult {
   output?: unknown;
   saved?: boolean;
 }
-export type PluginTool = 'assistant' | 'batch' | 'automation' | 'network';
+export type PluginTool = 'assistant' | 'network';
 export interface PluginToolTicket {
   inputId: string;
   operation: PluginToolOperation;
@@ -189,30 +185,8 @@ export type PluginToolOperation =
   | 'ai_execute'
   | 'diagnostic_start'
   | 'diagnostic_list'
-  | 'diagnostic_cancel'
-  | 'batch_start'
-  | 'batch_list'
-  | 'batch_cancel'
-  | 'batch_retry_file'
-  | 'automation_catalog'
-  | 'automation_prepare'
-  | 'automation_entry_save'
-  | 'automation_entry_delete'
-  | 'automation_group_save'
-  | 'automation_group_delete'
-  | 'automation_start'
-  | 'automation_run'
-  | 'automation_history'
-  | 'automation_cancel'
-  | 'automation_approve'
-  | 'automation_schedule_save'
-  | 'automation_schedule_disable'
-  | 'automation_schedule_delete'
-  | 'automation_status'
-  | 'automation_run_delete';
+  | 'diagnostic_cancel';
 export interface PluginToolIntent {
-  automationHost: string;
-  entryId: string;
   networkHost: string;
   networkRequest: number;
 }

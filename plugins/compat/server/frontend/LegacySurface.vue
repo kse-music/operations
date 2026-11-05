@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue';
-import MonitorView from '../../../system/resources/frontend/MonitorView.vue';
+import MonitorView from '../../../system/services/frontend/monitor/MonitorView.vue';
 import OperationsView from './OperationsView.vue';
 import {
   pluginServerServices,

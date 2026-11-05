@@ -1,4 +1,3 @@
-import type { ConflictPolicy, TransferInfo } from './files';
 export type Tool =
   'ping' | 'tcp' | 'dns' | 'traceroute' | 'mtr' | 'interfaces' | 'connections' | 'ssh_latency';
 export type Origin = { kind: 'local' } | { kind: 'remote'; hostId: string; sessionId: string };
@@ -20,47 +19,6 @@ export interface Diagnostic {
   message: string | null;
   startedAt: number;
   finishedAt: number | null;
-  revision: number;
-}
-export interface Target {
-  hostId: string;
-  sessionId: string | null;
-}
-export type BatchOperation =
-  | { kind: 'command'; command: string }
-  | {
-      kind: 'file';
-      source: string;
-      destination: string;
-      conflict: ConflictPolicy;
-      confirmOverwrite: boolean;
-    };
-export interface BatchInput {
-  targets: Target[];
-  operation: BatchOperation;
-  concurrency: number;
-  timeoutSecs: number;
-  confirmed: boolean;
-}
-export interface BatchRow {
-  hostId: string;
-  sessionId: string | null;
-  state: string;
-  stdout: string;
-  stderr: string;
-  droppedBytes: number;
-  exitCode: number | null;
-  message: string | null;
-  transfer: TransferInfo | null;
-  startedAt: number | null;
-  finishedAt: number | null;
-}
-export interface Batch {
-  id: string;
-  input: BatchInput;
-  rows: BatchRow[];
-  finished: boolean;
-  createdAt: number;
   revision: number;
 }
 export const taskLabels: Record<string, string> = {

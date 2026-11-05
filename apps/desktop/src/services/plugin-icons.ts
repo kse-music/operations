@@ -29,15 +29,9 @@ import {
 } from '@lucide/vue';
 import type { Component } from 'vue';
 import type { InstalledPlugin, PluginManifest } from '../types/plugins';
-import resources from '../../../../plugins/system/resources/manifest.json';
 import docker from '../../../../plugins/system/docker/manifest.json';
-import processes from '../../../../plugins/system/processes/manifest.json';
 import services from '../../../../plugins/system/services/manifest.json';
-import logs from '../../../../plugins/system/logs/manifest.json';
 import assistant from '../../../../plugins/system/assistant/manifest.json';
-import batch from '../../../../plugins/system/batch/manifest.json';
-import automation from '../../../../plugins/system/automation/manifest.json';
-import network from '../../../../plugins/system/network/manifest.json';
 
 export const pluginIcons = new Map<string, Component>([
   ['activity', Activity],
@@ -70,9 +64,7 @@ export const pluginIcons = new Map<string, Component>([
 ]);
 // Old installed system records keep their original package metadata and grants.
 const bundledIcons = new Map(
-  [resources, docker, processes, services, logs, assistant, batch, automation, network].map(
-    (manifest) => [manifest.id, manifest.icon],
-  ),
+  [services, docker, assistant].map((manifest) => [manifest.id, manifest.icon]),
 );
 export function pluginIcon(
   manifest: Pick<PluginManifest, 'id' | 'icon'>,

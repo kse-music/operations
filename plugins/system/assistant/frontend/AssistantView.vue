@@ -24,6 +24,7 @@ import {
 } from '@lucide/vue';
 import { useAssistant } from './assistant';
 import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
+import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
 import { useWorkspaceStore } from '@serverdeck/plugin-sdk/stores/workspace';
 import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
 import type { AiSelection } from '@serverdeck/plugin-sdk/types/ai';
@@ -33,6 +34,19 @@ import AssistantTargets from './AssistantTargets.vue';
 import AssistantMarkdown from './AssistantMarkdown';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import './assistant.css';
+const props = defineProps<{ hostId?: string }>();
+const crossHosts = ref(false);
+const contextOpen = ref(window.innerWidth >= 900);
+const suggestions = [
+  {
+    icon: Activity,
+    title: '资源异常',
+    question: '帮我排查当前主机 CPU 和内存使用异常的可能原因。',
+  },
+  { icon: Boxes, title: '容器排查', question: '如何逐步排查 Docker 容器无法正常启动的问题？' },
+  { icon: ListTree, title: '服务诊断', question: '帮我整理服务响应缓慢的排查步骤。' },
+];
+const ops = useOpsStore();
 const hosts = useHostsStore(),
   workspace = useWorkspaceStore();
 const ai = useAssistant(),
@@ -41,7 +55,7 @@ onMounted(() => {
   void models.refresh();
   if (!hosts.catalog) void hosts.load();
 });
-const { turns, busy, error, review, outputs, attempted } = ai;
+const { turns, busy, error, review, outputs, attempted, expired } = ai;
 const messages = ref<HTMLElement>(),
   chatForm = ref<HTMLFormElement>();
 watch(
@@ -73,6 +87,8 @@ const ready = computed(
 );
 watch(
   [
+    crossHosts,
+    () => props.hostId,
     maskAddresses,
     redactValues,
     () => JSON.stringify(selection.value),
@@ -100,12 +116,22 @@ function send() {
     log = { kind: 'service', scope: logScope.value, unit: logTarget.value };
   if (logKind.value === 'container') log = { kind: 'container', id: logTarget.value };
   const context: AiSelection = { ...selection.value, log, logLines: logLines.value };
+  const boundSession =
+    props.hostId && !crossHosts.value ? ops.connections[props.hostId] : undefined;
+  if (
+    props.hostId &&
+    !crossHosts.value &&
+    (!boundSession?.session || boundSession.state !== 'connected')
+  ) {
+    error.value = '当前主机尚未连接，请先完成连接或指纹核验。';
+    return;
+  }
   const text = question.value;
   question.value = '';
   void ai.send({
     modelId: models.selectedId,
-    sessionId: null,
-    autoHosts: true,
+    sessionId: boundSession?.session?.id ?? null,
+    autoHosts: !props.hostId || crossHosts.value,
     question: text,
     selection: context,
     maskAddresses: maskAddresses.value,
@@ -168,6 +194,17 @@ const readinessHint = computed(() => {
       </div>
       <div class="ai-model-actions">
         <button
+          class="button ai-context-toggle"
+          type="button"
+          :aria-expanded="contextOpen"
+          aria-controls="assistant-context"
+          @click="contextOpen = !contextOpen"
+        >
+          <SlidersHorizontal :size="14" aria-hidden="true" />上下文<span v-if="contextCount">{{
+            contextCount
+          }}</span>
+        </button>
+        <button
           class="icon-button"
           type="button"
           :disabled="!!busy || models.loading"
@@ -198,7 +235,7 @@ const readinessHint = computed(() => {
       </p>
     </section>
 
-    <div class="ai-workspace">
+    <div class="ai-workspace" :class="{ 'without-context': !contextOpen }">
       <section class="ai-chat" aria-label="对话">
         <div class="ai-chat-heading">
           <div>
@@ -226,6 +263,18 @@ const readinessHint = computed(() => {
             <div class="ai-empty-icon"><Bot :size="28" aria-hidden="true" /></div>
             <h3>有什么需要一起排查？</h3>
             <p>直接提问，或让助手自动匹配相关服务器。</p>
+            <div class="ai-suggestions">
+              <button
+                v-for="suggestion in suggestions"
+                :key="suggestion.title"
+                type="button"
+                @click="question = suggestion.question"
+              >
+                <component :is="suggestion.icon" :size="16" aria-hidden="true" /><span>{{
+                  suggestion.title
+                }}</span>
+              </button>
+            </div>
           </div>
           <article v-for="turn in turns" :key="turn.id" class="ai-chat-turn">
             <div class="ai-chat-message user">
@@ -306,11 +355,19 @@ const readinessHint = computed(() => {
                         <button
                           class="button"
                           type="button"
-                          :disabled="!!busy || attempted.includes(proposal.id)"
+                          :disabled="
+                            !!busy ||
+                            attempted.includes(proposal.id) ||
+                            expired.includes(proposal.id)
+                          "
                           @click="ai.inspect(proposal)"
                         >
                           {{
-                            attempted.includes(proposal.id) ? '已提交，不自动重试' : '审核此命令'
+                            expired.includes(proposal.id)
+                              ? '上下文已切换，请重新提问'
+                              : attempted.includes(proposal.id)
+                                ? '已提交，不自动重试'
+                                : '审核此命令'
                           }}
                         </button>
                       </div>
@@ -378,7 +435,12 @@ const readinessHint = computed(() => {
           </div>
         </form>
       </section>
-      <aside class="ai-card ai-context" aria-label="服务器上下文">
+      <aside
+        v-show="contextOpen"
+        id="assistant-context"
+        class="ai-card ai-context"
+        aria-label="服务器上下文"
+      >
         <div class="ai-panel-heading">
           <div>
             <Server :size="17" aria-hidden="true" />
@@ -387,7 +449,18 @@ const readinessHint = computed(() => {
           <span class="ai-context-count">已选 {{ contextCount }} 项</span>
         </div>
         <fieldset :disabled="!!busy">
+          <template v-if="hostId">
+            <p>
+              当前主机：{{
+                hostDisplayName(hosts.catalog?.hosts.find((host) => host.id === hostId))
+              }}
+            </p>
+            <label class="checkbox-label"
+              ><input v-model="crossHosts" type="checkbox" />跨主机分析</label
+            >
+          </template>
           <AssistantTargets
+            v-if="!hostId || crossHosts"
             :loading="hosts.busy"
             :hosts="ai.hostContext.matched.value"
             :total="hosts.catalog?.hosts.length ?? 0"

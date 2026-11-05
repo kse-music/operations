@@ -14,20 +14,18 @@ import { messages, type WorkspaceView } from '../types/product';
 import { computed } from 'vue';
 import { navigationModules, type NavigationModule } from '../types/navigation';
 import { usePluginsStore } from '../stores/plugins';
-import { primaryPluginPage } from '../services/plugin-pages';
 import PluginIcon from './PluginIcon.vue';
 const plugins = usePluginsStore();
 
 const props = defineProps<{
   active: WorkspaceView | null;
-  tasks: number;
   module: NavigationModule;
   activePlugin?: string;
 }>();
 defineEmits<{
   navigate: [view: WorkspaceView];
   collapse: [];
-  plugin: [id: string, contribution: string];
+  pluginSettings: [id: string];
 }>();
 const groups = {
   hosts: [],
@@ -50,12 +48,7 @@ const module = computed(() => props.module);
 const moduleLabel = computed(
   () => navigationModules.find((item) => item.id === module.value)!.label,
 );
-const pluginEntries = computed(() =>
-  plugins.installed.map((plugin) => ({
-    plugin,
-    contribution: primaryPluginPage(plugin),
-  })),
-);
+const pluginEntries = computed(() => plugins.installed);
 </script>
 
 <template>
@@ -80,7 +73,13 @@ const pluginEntries = computed(() =>
       <button
         v-for="item in groups[module]"
         :key="item.view"
-        :class="['nav-item', { active: active === item.view }]"
+        :class="[
+          'nav-item',
+          {
+            active:
+              active === item.view || (item.view === 'plugins' && active === 'pluginSettings'),
+          },
+        ]"
         :aria-label="messages['zh-CN'][item.view]"
         :aria-current="active === item.view ? 'page' : undefined"
         :data-tooltip="messages['zh-CN'][item.view]"
@@ -92,27 +91,22 @@ const pluginEntries = computed(() =>
     </div>
     <div v-if="module === 'plugins'" class="activity-group module-menu" aria-label="运维工具导航">
       <button
-        v-for="{ plugin, contribution } in pluginEntries"
+        v-for="plugin in pluginEntries"
         :key="plugin.manifest.id"
         :class="[
           'nav-item',
-          { active: active === 'extension' && activePlugin === plugin.manifest.id },
+          { active: active === 'pluginSettings' && activePlugin === plugin.manifest.id },
         ]"
         :aria-current="
-          active === 'extension' && activePlugin === plugin.manifest.id ? 'page' : undefined
+          active === 'pluginSettings' && activePlugin === plugin.manifest.id ? 'page' : undefined
         "
         :data-plugin-id="plugin.manifest.id"
         :aria-label="plugin.manifest.name"
-        @click="$emit('plugin', plugin.manifest.id, contribution)"
+        @click="$emit('pluginSettings', plugin.manifest.id)"
       >
         <PluginIcon :manifest="plugin.manifest" :source="plugin.source" /><span class="nav-label">{{
           plugin.manifest.name
         }}</span>
-        <small
-          v-if="tasks && plugin.manifest.contributions.some((entry) => entry.tool === 'automation')"
-          class="nav-badge"
-          >{{ Math.min(99, tasks) }}</small
-        >
       </button>
       <p v-if="plugins.loaded && !pluginEntries.length" class="plugin-sidebar-empty">
         尚未安装运维工具

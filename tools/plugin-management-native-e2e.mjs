@@ -145,7 +145,7 @@ try {
   await settings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
   await settings.getByRole('button', { name: '启用插件', exact: true }).click();
   await settings.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
-  assert.equal((await invoke('plugin_health', { id: 'cn.hiboot.plugins.resources' })).error, null);
+  assert.equal((await invoke('plugin_health', { id: 'cn.hiboot.plugins.services' })).error, null);
   passed.push(
     'system permissions are preset and read-only; enable controls stay in individual settings; real WASM health succeeds',
   );

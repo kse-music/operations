@@ -18,7 +18,16 @@
       "log": null,
       "surface": {
         "kind": "operations",
-        "sections": ["services"]
+        "sections": [
+          "overview",
+          "disks",
+          "network",
+          "processes",
+          "ports",
+          "services",
+          "logs",
+          "diagnostics"
+        ]
       }
     }
   ],

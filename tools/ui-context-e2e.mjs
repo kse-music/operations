@@ -215,16 +215,6 @@ try {
       'independent.example',
     );
     assert.equal(await page.getByLabel('诊断来源', { exact: true }).inputValue(), 'remote');
-    await nav('批量运维');
-    await page.getByLabel('选择批量目标 Production b', { exact: true }).check();
-    await page.getByLabel('批量统一命令', { exact: true }).fill('hostname');
-    await selectHostWorkspace(page, 'a');
-    await nav('批量运维');
-    assert.equal(
-      await page.getByLabel('选择批量目标 Production b', { exact: true }).isChecked(),
-      true,
-    );
-    assert.equal(await page.getByLabel('批量统一命令', { exact: true }).inputValue(), 'hostname');
     await selectHostWorkspace(page, 'b');
     await nav('SSH 终端');
     await assertHost('b', 'terminals');
@@ -264,7 +254,7 @@ try {
     );
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['批量运维', '自动运维', '网络诊断', 'AI 运维助手'],
+      ['网络诊断', 'AI 运维助手'],
     );
     await nav('任务中心');
     await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();

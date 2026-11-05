@@ -13,10 +13,6 @@ pub const MAX_MESSAGE: usize = 64 * 1024;
 pub enum Permission {
     #[serde(rename = "assistant.use")]
     AssistantUse,
-    #[serde(rename = "batch.run")]
-    BatchRun,
-    #[serde(rename = "automation.manage")]
-    AutomationManage,
     #[serde(rename = "network.run")]
     NetworkRun,
     #[serde(rename = "metrics.read")]
@@ -41,8 +37,6 @@ pub enum Permission {
     SettingsRead,
     #[serde(rename = "settings.write")]
     SettingsWrite,
-    #[serde(rename = "tasks.create")]
-    TasksCreate,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(
@@ -127,16 +121,6 @@ pub enum Capability {
     Notify {
         message: String,
     },
-    TaskCreate {
-        command: String,
-        timeout_secs: u16,
-    },
-    TaskRead {
-        task_id: String,
-    },
-    TaskCancel {
-        task_id: String,
-    },
     LogStart {
         path: String,
         lines: u16,
@@ -180,9 +164,6 @@ impl Capability {
             Self::SettingsRead => Permission::SettingsRead,
             Self::SettingsWrite { .. } => Permission::SettingsWrite,
             Self::Notify { .. } => Permission::UiContribute,
-            Self::TaskCreate { .. } | Self::TaskRead { .. } | Self::TaskCancel { .. } => {
-                Permission::TasksCreate
-            }
         }
     }
     pub fn operation(&self) -> &'static str {
@@ -208,9 +189,6 @@ impl Capability {
             Self::SettingsRead => "settings.read",
             Self::SettingsWrite { .. } => "settings.write",
             Self::Notify { .. } => "ui.notify",
-            Self::TaskCreate { command, .. } if read_only(command) => "tasks.read_only",
-            Self::TaskCreate { .. } => "tasks.execute",
-            Self::TaskRead { .. } | Self::TaskCancel { .. } => "tasks.manage",
             Self::LogStart { .. }
             | Self::LogPoll { .. }
             | Self::LogPause { .. }
@@ -221,7 +199,7 @@ impl Capability {
         matches!(self, Self::SaveFile { .. })
             || matches!(self, Self::SystemQuery { request } if request.sensitive())
             || matches!(self, Self::ContainerShell { .. })
-            || matches!(self, Self::Execute { command, .. } | Self::TaskCreate { command, .. } if !read_only(command))
+            || matches!(self, Self::Execute { command, .. } if !read_only(command))
     }
     pub fn uses_host(&self) -> bool {
         !matches!(

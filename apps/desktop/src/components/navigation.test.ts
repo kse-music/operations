@@ -44,7 +44,6 @@ it.each([
   mountNavigation({
     active,
     module: moduleForView(active),
-    tasks: 1,
     onNavigate: navigate,
     onCollapse: collapse,
   });
@@ -100,7 +99,7 @@ it.each(['plugins', 'system'] as const)(
       operations: ['ui.contribute'],
     } as PluginGrant;
     const open = vi.fn();
-    mountNavigation({ active: null, module, tasks: 0, onPlugin: open });
+    mountNavigation({ active: null, module, onPluginSettings: open });
     if (module === 'system') {
       expect(root.querySelector('[aria-label="运维工具导航"]')).toBeNull();
       return;
@@ -113,12 +112,12 @@ it.each(['plugins', 'system'] as const)(
       '[aria-label="运维工具导航"] [data-plugin-id]',
     ))
       button.click();
-    expect(open.mock.calls).toEqual([['dev.example', 'main']]);
+    expect(open.mock.calls).toEqual([['dev.example']]);
     plugins.grants['dev.example'] = null;
     await nextTick();
     expect(root.querySelectorAll('[aria-label="运维工具导航"] [data-plugin-id]')).toHaveLength(1);
     expect(root.querySelector('.plugin-source')).toBeNull();
     root.querySelector<HTMLButtonElement>('[aria-label="运维工具导航"] [data-plugin-id]')!.click();
-    expect(open).toHaveBeenLastCalledWith('dev.example', 'main');
+    expect(open).toHaveBeenLastCalledWith('dev.example');
   },
 );

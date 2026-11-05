@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { usePluginVisibility } from '../visibility';
+const panelVisible = usePluginVisibility();
 import { useOpsStore } from '../stores/ops';
 import { useHostsStore } from '../stores/hosts';
 import { opsApi } from '../services/ops';
@@ -12,6 +14,7 @@ import type { Host } from '../types/hosts';
 import Modal from './Modal.vue';
 import OpsTable from './OpsTable.vue';
 import OpsDetails from './OpsDetails.vue';
+import { Search, RefreshCw, ShieldCheck } from '@lucide/vue';
 
 const props = defineProps<{
   hostId?: string;
@@ -78,7 +81,7 @@ function closeDetail() {
   detailError.value = null;
 }
 async function load() {
-  if (!connected.value) return;
+  if (!connected.value || !panelVisible.value) return;
   const token = ++generation;
   busy.value = true;
   error.value = null;
@@ -152,13 +155,13 @@ async function apply() {
   }
 }
 watch(
-  () => [connection.value?.session?.id, connection.value?.state],
+  [() => connection.value?.session?.id, () => connection.value?.state],
   async () => {
     closeDetail();
     ++generation;
     rows.value = [];
     capabilities.value = null;
-    if (!connected.value) return;
+    if (!connected.value || !panelVisible.value) return;
     const id = session();
     try {
       const value = await query({ kind: 'capabilities' });
@@ -172,14 +175,21 @@ watch(
   { immediate: true },
 );
 watch(
-  () => props.listRequest,
+  () => JSON.stringify(props.listRequest),
   () => {
     filter.value = '';
     closeDetail();
     void load();
   },
-  { deep: true },
 );
+function visibility() {
+  ++generation;
+  closeDetail();
+  pending.value = null;
+  busy.value = false;
+  if (panelVisible.value) void load();
+}
+watch(panelVisible, visibility);
 onMounted(async () => {
   try {
     history.value = await opsApi.feedback();
@@ -207,7 +217,9 @@ const slotContext = {
       {{ stateLabels[connection?.state ?? 'idle'] ?? connection?.state }}
     </p>
     <p v-if="notice" class="banner success" role="status">{{ notice }}</p>
+    <p v-if="error" class="banner error" role="alert">{{ error }}</p>
     <template v-if="connected">
+      <slot name="summary" :rows="rows" :loading="busy" :error="error" />
       <div v-if="capabilities" class="ops-capabilities">
         <slot name="capabilities" :value="capabilities" />
         <button
@@ -224,10 +236,15 @@ const slotContext = {
         <button class="text-button" @click="probe = !probe">TCP 连通性检测</button>
       </div>
       <div class="ops-toolbar">
-        <input v-model="filter" aria-label="运维项目搜索" placeholder="搜索名称、PID、端口…" />
+        <label class="ops-search"
+          ><Search :size="15" aria-hidden="true" /><input
+            v-model="filter"
+            aria-label="运维项目搜索"
+            placeholder="搜索名称、PID、端口…"
+        /></label>
         <slot name="toolbar" />
         <button class="button" :disabled="busy" @click="load">
-          {{ busy ? '正在读取…' : '刷新运维列表' }}
+          <RefreshCw :size="14" aria-hidden="true" />{{ busy ? '正在读取…' : '刷新运维列表' }}
         </button>
         <span v-if="hint" class="subtle">{{ hint }}</span>
       </div>
@@ -239,6 +256,11 @@ const slotContext = {
         :row-key="rowKey"
         :sort="sort"
       >
+        <template #cell="context"
+          ><slot name="cell" v-bind="context">{{
+            context.row[context.column.key] ?? '不可用'
+          }}</slot></template
+        >
         <template #actions="{ row }"
           ><slot name="actions" v-bind="slotContext" :row="row" :busy="busy"
         /></template>
@@ -256,7 +278,8 @@ const slotContext = {
     </template>
     <p v-else class="host-empty">请选择主机并建立运维连接后查看。</p>
     <footer class="ops-footer">
-      <span class="subtle">当前 SSH 账号执行 · 不自动提权</span
+      <span class="subtle"
+        ><ShieldCheck :size="13" aria-hidden="true" />当前 SSH 账号执行 · 不自动提权</span
       ><button class="text-button" @click="historyOpen = true">操作反馈</button>
     </footer>
     <Modal v-if="probe" title="TCP 连通性检测" @close="probe = false">

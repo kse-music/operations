@@ -1,5 +1,4 @@
 mod ai;
-mod automation;
 mod bundled_plugins;
 mod files;
 mod hosts;
@@ -45,7 +44,6 @@ pub struct Application {
     monitors: serverdeck_monitor::Monitors,
     operations_host: serverdeck_ops::Operations,
     tasks: serverdeck_tasks::Tasks,
-    automation: serverdeck_automation::Automation,
     database: Database,
     secrets: Arc<dyn SecretStore>,
     data_directory: PathBuf,
@@ -69,12 +67,7 @@ impl Application {
         );
         let monitors = serverdeck_monitor::Monitors::new(terminals.clone());
         let operations_host = serverdeck_ops::Operations::new(terminals.clone());
-        let tasks = serverdeck_tasks::Tasks::new(terminals.clone(), files.clone());
-        let automation = serverdeck_automation::Automation::new(
-            database.clone(),
-            terminals.clone(),
-            tasks.clone(),
-        )?;
+        let tasks = serverdeck_tasks::Tasks::new(terminals.clone());
         let plugins = serverdeck_plugin_core::Repository::open(data_directory.join("plugins"))?;
         Ok(Self {
             plugin_runtime: serverdeck_plugin_runtime::Runtime::new(plugins.clone()),
@@ -83,7 +76,6 @@ impl Application {
             assistant: serverdeck_ai::Assistant::default(),
             terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
-            automation,
             tasks,
             operations_host,
             monitors,
@@ -191,7 +183,6 @@ impl Application {
         if let Err(error) = self.local_terminals.close_all(true).await {
             tracing::error!(operation = "local_terminal_shutdown", error = %error);
         }
-        self.automation.shutdown().await;
         self.tasks.shutdown().await;
         self.operations_host.shutdown().await;
         self.monitors.shutdown().await;

@@ -50,7 +50,7 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
             .unwrap()
     };
     let initial = invoke("plugin_list", json!({}));
-    assert_eq!(initial.as_array().unwrap().len(), 9);
+    assert_eq!(initial.as_array().unwrap().len(), 3);
     for plugin in initial.as_array().unwrap() {
         assert_eq!(plugin["source"], "system");
         assert_eq!(plugin["enabled"], true);
@@ -94,7 +94,7 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
         ("plugin_set_enabled", json!({"id":id,"enabled":false})),
         (
             "plugin_tool_stage",
-            json!({"id":"cn.hiboot.plugins.network","input":{"operation":"diagnostic_list","args":{}}}),
+            json!({"id":"cn.hiboot.plugins.services","input":{"operation":"diagnostic_list","args":{}}}),
         ),
         (
             "plugin_tool_cancel_request",
@@ -123,7 +123,7 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
         .provision_bundled_plugins()
         .expect("provision after uninstall");
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    assert_eq!(runtime.block_on(reopened.plugin_list()).unwrap().len(), 8);
+    assert_eq!(runtime.block_on(reopened.plugin_list()).unwrap().len(), 2);
 }
 
 #[test]

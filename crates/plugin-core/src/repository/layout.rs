@@ -1,6 +1,61 @@
 use super::*;
 
 impl Repository {
+    /// Retain old records as inactive history before decoding removed SDK contracts.
+    pub(super) fn retire_removed_tools(&self) -> Result<(), Error> {
+        for entry in fs::read_dir(self.root.join("packages")).map_err(io)? {
+            let entry = entry.map_err(io)?;
+            check_directory(&entry.path())?;
+            let id = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| invalid("插件目录名无效"))?;
+            validate_id(&id)?;
+            let path = entry.path().join("record.json");
+            if !path.try_exists().map_err(io)? {
+                continue;
+            }
+            let record: serde_json::Value =
+                serde_json::from_slice(&read_bounded(&path, 128 * 1024)?)
+                    .map_err(|e| Error::Storage(Box::new(e)))?;
+            let merged_system = record["current"]["source"] == "system"
+                && [
+                    "cn.hiboot.plugins.",
+                    serverdeck_core::identity::LEGACY_PLUGIN_PREFIX,
+                ]
+                .iter()
+                .any(|prefix| {
+                    matches!(
+                        id.strip_prefix(prefix),
+                        Some("resources" | "processes" | "logs" | "network")
+                    )
+                });
+            let removed = merged_system
+                || crate::manifest::is_removed_tool_id(&id)
+                || ["current", "backup"].iter().any(|key| {
+                    record[key]["manifest"]["permissions"]
+                        .as_array()
+                        .is_some_and(|permissions| {
+                            permissions.iter().any(|permission| {
+                                matches!(
+                                    permission.as_str(),
+                                    Some("batch.run" | "automation.manage" | "tasks.create")
+                                )
+                            })
+                        })
+                });
+            if !removed {
+                continue;
+            }
+            let archive = self.root.join("retired");
+            ensure_directory(&archive)?;
+            let target = archive.join(format!("{id}-removed-{}", uuid::Uuid::new_v4()));
+            check_ancestors(&target)?;
+            fs::rename(entry.path(), target).map_err(io)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn payload_folder(&self, source: PluginSource, id: &str) -> Result<PathBuf, Error> {
         validate_id(id)?;
         let path = self

@@ -14,8 +14,6 @@ const pages = [
   ['SSH 终端', 'terminals'],
   ['SFTP 文件', 'files'],
   ['服务器管理', 'server'],
-  ['自动运维', 'automation'],
-  ['批量运维', 'batch'],
   ['网络诊断', 'network'],
   ['安全凭据', 'credentials'],
   ['备份恢复', 'backup'],
@@ -37,7 +35,6 @@ async function fixtures(page, theme) {
     const { defaultTerminalPreferences } = await import('/src/types/preferences.ts');
     const { defaultProductPreferences } = await import('/src/types/product.ts');
     const { hostInput } = await import('/src/types/hosts.ts');
-    const { entryInput } = await import('/src/types/automation.ts');
     const hosts = useHostsStore(pinia),
       application = useApplicationStore(pinia);
     hosts.catalog = {
@@ -127,34 +124,8 @@ async function fixtures(page, theme) {
           ? { dockerState: 'running', dockerInstalled: true, systemd: true }
           : {},
     });
-    const { automationApi } = await import('/src/services/automation.ts');
-    const entry = {
-      ...entryInput(),
-      id: 'ui-command',
-      revision: 1,
-      updatedAt: 0,
-      name: '查看系统状态',
-      body: 'uptime',
-      description: '系统负载',
-      favorite: true,
-    };
-    automationApi.catalog = async () => ({
-      entries: [entry],
-      groups: [],
-      schedules: [],
-      templates: [{ ...entryInput(), name: '磁盘使用', body: 'df -h' }],
-    });
-    automationApi.history = async () => [];
-    automationApi.status = async () => ({
-      active: 0,
-      awaiting: 0,
-      latestFailure: null,
-      schedules: [],
-      schedulerError: null,
-    });
     const { tasksApi } = await import('/src/services/tasks.ts');
     tasksApi.diagnostics = async () => [];
-    tasksApi.batches = async () => [];
     const { filesApi } = await import('/src/services/files.ts');
     const listing = {
       path: '/srv/application',
@@ -407,30 +378,12 @@ try {
         }
         await page.screenshot({ path: `${output}/${variant}-${view}-last-tab.png` });
       }
-      if (view === 'batch') {
-        await page.getByLabel('批量任务类型').selectOption('file');
-        await inspect(page, `${variant}/distribution`);
-        await page.screenshot({ path: `${output}/${variant}-distribution.png` });
-      }
       if (view === 'backup') {
         await page.getByLabel('待恢复备份 JSON').fill('{}');
         await page.getByRole('button', { name: '校验并预览备份', exact: true }).click();
         await page.getByLabel('确认备份恢复').waitFor();
         await inspect(page, `${variant}/restore-preview`);
         await page.screenshot({ path: `${output}/${variant}-restore-preview.png` });
-      }
-      if (view === 'automation') {
-        await page.getByRole('button', { name: '新建命令 / 脚本', exact: true }).click();
-        await page.getByRole('dialog').waitFor();
-        await page.getByLabel('自动化条目类型').selectOption('script');
-        await page.getByRole('button', { name: '添加脚本参数', exact: true }).click();
-        await inspect(page, `${variant}/script-editor`);
-        await page.screenshot({ path: `${output}/${variant}-script-editor.png` });
-        await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
-        for (const tab of ['本地计划', '执行历史']) {
-          await page.getByRole('tab', { name: tab, exact: true }).click();
-          await inspect(page, `${variant}/${tab}`);
-        }
       }
       if (view === 'settingsWorkspace') {
         await page.getByLabel('全局默认代理').selectOption('socks5');

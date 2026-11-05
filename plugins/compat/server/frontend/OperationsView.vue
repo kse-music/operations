@@ -26,7 +26,7 @@ import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import OpsDetails from '@serverdeck/plugin-sdk/ui/OpsDetails.vue';
 import type { OperationsSection } from '@serverdeck/plugin-sdk/types/server';
 import OpsTable from '@serverdeck/plugin-sdk/ui/OpsTable.vue';
-import OpsLogPanel from '../../../../plugins/system/logs/frontend/OpsLogPanel.vue';
+import OpsLogPanel from '../../../../plugins/system/services/frontend/logs/OpsLogPanel.vue';
 const props = defineProps<{
   hostId?: string;
   initialTab?: OperationsSection;

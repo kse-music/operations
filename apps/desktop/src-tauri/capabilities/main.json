@@ -112,26 +112,6 @@
     "allow-ops-connections",
     "allow-diagnostic-start",
     "allow-diagnostic-list",
-    "allow-diagnostic-cancel",
-    "allow-batch-start",
-    "allow-batch-list",
-    "allow-batch-cancel",
-    "allow-batch-retry-file",
-    "allow-automation-catalog",
-    "allow-automation-entry-save",
-    "allow-automation-entry-delete",
-    "allow-automation-group-save",
-    "allow-automation-group-delete",
-    "allow-automation-start",
-    "allow-automation-run",
-    "allow-automation-history",
-    "allow-automation-cancel",
-    "allow-automation-approve",
-    "allow-automation-schedule-save",
-    "allow-automation-schedule-disable",
-    "allow-automation-schedule-delete",
-    "allow-automation-status",
-    "allow-automation-run-delete",
-    "allow-automation-prepare"
+    "allow-diagnostic-cancel"
   ]
 }

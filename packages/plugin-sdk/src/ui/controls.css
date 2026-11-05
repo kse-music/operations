@@ -119,8 +119,7 @@ input[type='file']::file-selector-button {
   flex-shrink: 0;
   accent-color: var(--accent);
 }
-:is(.ops-toolbar, .form-row, .automation-form, .settings-form)
-  label:not(:has(input[type='checkbox'])) {
+:is(.ops-toolbar, .form-row, .settings-form) label:not(:has(input[type='checkbox'])) {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -334,21 +333,6 @@ input[type='file']::file-selector-button {
 }
 .backup-view .export-text {
   min-height: 220px;
-}
-.automation-view .ops-detail > details {
-  margin-top: 12px;
-}
-.batch-targets {
-  border-radius: 4px;
-  margin: 0;
-  padding: 12px;
-}
-.batch-targets legend {
-  font-size: 12px;
-  padding: 0 6px;
-}
-.batch-targets label {
-  padding: 5px 0;
 }
 .ops-table th .text-button {
   color: var(--muted);

@@ -1,18 +1,11 @@
 use crate::{Database, storage_error};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
-use serverdeck_core::{
-    Error,
-    automation::{Entry, Group},
-    backup::*,
-    hosts::HostGroup,
-    product::WindowGeometry,
-};
+use serverdeck_core::{Error, backup::*, hosts::HostGroup, product::WindowGeometry};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 fn names(c: &Connection, table: &str) -> Result<HashSet<String>, Error> {
     let sql = match table {
         "hosts" => "SELECT name FROM hosts",
-        "entries" => "SELECT json_extract(document,'$.name') FROM automation_entries",
         _ => return Err(Error::Validation("未知备份类型")),
     };
     c.prepare(sql)
@@ -78,35 +71,6 @@ fn read(c: &Connection) -> Result<Backup, Error> {
             proxy_auth_required,
         });
     }
-    let command_groups = c
-        .prepare("SELECT id,name FROM automation_groups")
-        .map_err(storage_error)?
-        .query_map([], |r| {
-            Ok(Group {
-                id: r.get(0)?,
-                name: r.get(1)?,
-            })
-        })
-        .map_err(storage_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(storage_error)?;
-    let docs = c
-        .prepare("SELECT document FROM automation_entries")
-        .map_err(storage_error)?
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(storage_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(storage_error)?;
-    let entries = docs
-        .into_iter()
-        .map(|d| {
-            let e: Entry = serde_json::from_str(&d).map_err(storage_error)?;
-            Ok(BackupEntry {
-                id: e.id,
-                input: e.input,
-            })
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
     let config: String = c
         .query_row(
             "SELECT value FROM application_settings WHERE key='app_config'",
@@ -131,11 +95,10 @@ fn read(c: &Connection) -> Result<Backup, Error> {
     }
     Ok(Backup {
         format: "serverdeck-backup".into(),
-        version: 2,
+        version: 3,
         groups,
         hosts,
-        command_groups,
-        entries,
+        legacy_content_ignored: false,
         preferences,
     })
 }
@@ -174,21 +137,16 @@ fn preview(c: &Connection, b: &Backup) -> Result<BackupPreview, Error> {
             warnings,
         });
     }
-    for e in &b.entries {
-        items.push(PreviewItem {
-            id: e.id.clone(),
-            kind: "entry",
-            name: e.input.name.clone(),
-            detail: format!("{:?} / {:?}", e.input.kind, e.input.risk),
-            duplicate: existing
-                .entries
-                .iter()
-                .any(|x| x.input.name.eq_ignore_ascii_case(&e.input.name)),
-            blocked: false,
-            warnings: vec![],
-        });
+    let mut warnings = Vec::new();
+    if b.legacy_content_ignored {
+        warnings.push("旧版命令库已不再支持，仅恢复主机与偏好。".into());
     }
-    Ok(BackupPreview{version:b.version,items,warnings:vec!["只新增数据或跳过冲突，不覆盖已有主机/条目；文件夹按名称与父目录合并；父目录冲突时拒绝恢复。".into(),"备份没有凭据、私钥路径、秘密参数值、信任记录、任务历史或可自动执行的计划。正文/描述/普通默认值可能包含你自行填写的秘密，请自行审查。".into(),"恢复偏好需单独选择，将替换当前非敏感设置（包括新建主机的默认代理）；认证代理默认值不会导出。".into()]})
+    warnings.extend(vec!["只新增数据或跳过冲突，不覆盖已有主机；文件夹按名称与父目录合并；父目录冲突时拒绝恢复。".into(),"备份没有凭据、私钥路径、秘密参数值、信任记录、任务历史或可自动执行的计划。主机描述可能包含你自行填写的秘密，请自行审查。".into(),"恢复偏好需单独选择，将替换当前非敏感设置（包括新建主机的默认代理）；认证代理默认值不会导出。".into()]);
+    Ok(BackupPreview {
+        version: b.version,
+        items,
+        warnings,
+    })
 }
 fn merge_host_groups(
     c: &Connection,
@@ -244,43 +202,6 @@ fn merge_host_groups(
     Ok(map)
 }
 
-fn merge_command_groups(
-    c: &Connection,
-    groups: impl IntoIterator<Item = (String, String)>,
-) -> Result<HashMap<String, String>, Error> {
-    let mut map = HashMap::new();
-    for (old, name) in groups {
-        let existing = c
-            .query_row(
-                "SELECT id FROM automation_groups WHERE name=?1 COLLATE NOCASE",
-                [&name],
-                |r| r.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(storage_error)?;
-        let id = if let Some(id) = existing {
-            id
-        } else {
-            if c.query_row("SELECT count(*) FROM automation_groups", [], |r| {
-                r.get::<_, u32>(0)
-            })
-            .map_err(storage_error)?
-                >= 64
-            {
-                return Err(Error::Validation("恢复后命令分组超过 64 个"));
-            }
-            let id = Uuid::new_v4().to_string();
-            c.execute(
-                "INSERT INTO automation_groups(id,name) VALUES(?1,?2)",
-                params![id, name],
-            )
-            .map_err(storage_error)?;
-            id
-        };
-        map.insert(old, id);
-    }
-    Ok(map)
-}
 impl Database {
     pub fn backup_export(&self) -> Result<String, Error> {
         let mut c = self.connect()?;
@@ -305,10 +226,10 @@ impl Database {
         }
         let b = Backup::parse(&input.text)?;
         let selected = input.selected.into_iter().collect::<HashSet<_>>();
-        if selected.len() > 5256
-            || selected.iter().any(|id| {
-                !b.hosts.iter().any(|h| h.id == *id) && !b.entries.iter().any(|e| e.id == *id)
-            })
+        if selected.len() > 5000
+            || selected
+                .iter()
+                .any(|id| !b.hosts.iter().any(|h| h.id == *id))
         {
             return Err(Error::Validation("选择的恢复条目无效"));
         }
@@ -327,14 +248,11 @@ impl Database {
         }
         let mut result = RestoreResult {
             hosts: 0,
-            entries: 0,
             skipped: 0,
             preferences_restored: input.restore_preferences,
-            warnings: vec![],
+            warnings: p.warnings,
         };
         let host_groups = merge_host_groups(&tx, b.groups)?;
-        let command_groups =
-            merge_command_groups(&tx, b.command_groups.into_iter().map(|g| (g.id, g.name)))?;
         let current = read(&tx)?;
         let mut host_map = HashMap::new();
         let mut host_names = names(&tx, "hosts")?;
@@ -398,49 +316,6 @@ impl Database {
                 ));
             }
             pending = rest;
-        }
-        let mut entry_names = names(&tx, "entries")?;
-        let mut count = tx
-            .query_row("SELECT count(*) FROM automation_entries", [], |r| {
-                r.get::<_, u32>(0)
-            })
-            .map_err(storage_error)?;
-        for e in b.entries.into_iter().filter(|e| selected.contains(&e.id)) {
-            if input.conflict == ConflictPolicy::Skip
-                && entry_names.contains(&e.input.name.to_lowercase())
-            {
-                result.skipped += 1;
-                continue;
-            }
-            if count >= 256 {
-                return Err(Error::Validation("恢复后命令/脚本库超过 256 条"));
-            }
-            count += 1;
-            let mut data = e.input;
-            data.name = unique_name(&data.name, &mut entry_names);
-            data.group_id = data
-                .group_id
-                .and_then(|id| command_groups.get(&id).cloned());
-            data.validate()?;
-            let record = Entry {
-                id: Uuid::new_v4().to_string(),
-                revision: 1,
-                input: data,
-                updated_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-            };
-            tx.execute(
-                "INSERT INTO automation_entries(id,revision,group_id,document) VALUES(?1,1,?2,?3)",
-                params![
-                    record.id,
-                    record.input.group_id,
-                    serde_json::to_string(&record).map_err(storage_error)?
-                ],
-            )
-            .map_err(storage_error)?;
-            result.entries += 1;
         }
         if input.restore_preferences {
             tx.execute("INSERT INTO application_settings(key,value) VALUES('app_config',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",[serde_json::to_string(&b.preferences).map_err(storage_error)?]).map_err(storage_error)?;

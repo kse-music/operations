@@ -422,8 +422,8 @@ try {
   assert.equal(await page.locator('.statusbar button').count(), 1);
   assert.equal(await page.getByRole('dialog', { name: '任务中心', exact: true }).count(), 1);
   assert.equal(await page.getByRole('region', { name: '传输任务', exact: true }).count(), 1);
-  assert.equal(await page.getByRole('region', { name: '网络与批量任务', exact: true }).count(), 1);
-  assert.equal(await page.getByRole('region', { name: '自动化任务', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('region', { name: '网络诊断任务', exact: true }).count(), 1);
+  assert.equal(await page.getByRole('region', { name: '自动化任务', exact: true }).count(), 0);
   await page.keyboard.press('Control+Shift+J');
   assert.equal(await page.locator('.workspace-tab[data-view="tasks"]').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'task-center.png') });
@@ -439,53 +439,6 @@ try {
   await command("[Console]::WriteLine(('SD_TASK_CENTER_' + $sdValue))", 'SD_TASK_CENTER_323');
   passed.push(
     'footer and shortcut share one task dialog; Escape and close preserve the real local shell without a task workspace',
-  );
-  await navigateWorkspace(page, '自动运维');
-  const templateCatalog = await rpc('automation_catalog');
-  const automationContent = page.frameLocator('.plugin-frame-container:visible iframe');
-  const templateDrawers = automationContent.locator('.automation-template-drawer');
-  await templateDrawers.first().waitFor();
-  assert.equal(await templateDrawers.count(), templateCatalog.templates.length);
-  assert.equal(await automationContent.locator('.automation-template-drawer[open]').count(), 0);
-  assert.equal(await templateDrawers.getByRole('button').first().isVisible(), false);
-  await page.screenshot({ path: path.join(artifacts, 'template-drawers-collapsed.png') });
-  const scriptTemplate = templateCatalog.templates.find((template) => template.parameters.length);
-  assert(scriptTemplate, 'a parameterized template is required for editor verification');
-  const templateDrawer = templateDrawers.filter({
-    has: automationContent.getByText(scriptTemplate.name, { exact: true }),
-  });
-  await templateDrawer.locator('summary').press('Enter');
-  assert.equal(await templateDrawer.getAttribute('open'), '');
-  assert.equal(await templateDrawer.locator('pre').innerText(), scriptTemplate.body);
-  assert.equal(await automationContent.locator('.automation-template-drawer[open]').count(), 1);
-  await page.screenshot({ path: path.join(artifacts, 'template-drawer-expanded.png') });
-  await templateDrawer.getByRole('button', { name: `使用“${scriptTemplate.name}”模板` }).click();
-  const templateEditor = automationContent.getByRole('dialog', {
-    name: '新建命令 / 脚本',
-    exact: true,
-  });
-  await templateEditor.waitFor();
-  assert.equal(
-    await templateEditor.getByLabel('自动化条目正文', { exact: true }).inputValue(),
-    scriptTemplate.body,
-  );
-  assert.equal(
-    await templateEditor.locator('.automation-param').count(),
-    scriptTemplate.parameters.length,
-  );
-  await templateEditor.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await templateDrawer.locator('summary').press('Space');
-  assert.equal(await templateDrawer.getAttribute('open'), null);
-  assert.deepEqual((await rpc('automation_catalog')).entries, templateCatalog.entries);
-  assert.deepEqual(await rpc('automation_history', { query: {} }), []);
-  await selectHostWorkspace(page, '');
-  await page
-    .locator('.workspace-tab[data-view="automation"] [role="tab"]')
-    .click({ button: 'middle' });
-  assert.equal(await page.locator('.workspace-tab[data-view="batch"]').count(), 0);
-  assert.equal(await page.locator('.workspace-tab').count(), 1);
-  passed.push(
-    'template drawers start collapsed; keyboard disclosure and full template editor leave stored entries and history unchanged',
   );
   const groups = [];
   for (const name of ['UI A', 'UI B']) {

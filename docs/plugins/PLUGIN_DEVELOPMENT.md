@@ -2,11 +2,11 @@
 
 ## 当前推荐：完整插件目录与 UI v4
 
-九个系统插件和上传插件采用同一源码/包结构：
+三个系统插件和上传插件采用同一源码/包结构：
 
 ```text
 plugins/system/<name>/       # 上传源码可放任意显式目录
-  manifest.json              # apiVersion ^1.4.0
+  manifest.json              # apiVersion ^2.1.0
   ui.json                    # uiVersion 4 + frontend 入口
   frontend/
     main.ts                  # SDK mountPlugin
@@ -22,27 +22,27 @@ plugins/system/<name>/       # 上传源码可放任意显式目录
 ```powershell
 npm run typecheck
 npm test
-cargo test --manifest-path plugins/system/network/backend/Cargo.toml --offline --locked
-node tools/build-plugin.mjs plugins/system/network .local/network-v4.sdplugin
+cargo test --manifest-path plugins/system/services/backend/Cargo.toml --offline --locked
+node tools/build-plugin.mjs plugins/system/services .local/services-v4.sdplugin
 npm run plugins:build
 node tools/plugin-ui-isolation-e2e.mjs
 ```
 
 单包构建同时编译独立 WASM 与 Vue 前端，并检查源码边界，打成 backend.wasm/ui.json/frontend.js/frontend.css。运行时使用 sandbox iframe，不访问宿主 DOM；仅使用 SDK 已公开服务和自身声明动作。UI资源必须单文件，不可远程加载或任意读取本地文件。打包输出仍需不存在且在源目录之外。原生 QA 使用全新目录和自己的 HTTP/TCP 夹具，不能代替真实 SSH 或其他平台验收。
 
-版本为 Host API 1.4.0、Rust SDK 1.3.0、Vue SDK 1.0.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。已有安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
+版本为 Host API / Rust SDK / Vue SDK 2.1.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。自动运维、批量运维及依赖已删除权限的旧安装记录会停用归档，保留用户数据；其余已有上传安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
 
 ## 配置插件图标
 
-在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^1.3.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
+在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^2.1.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
 
 ## 工作区工具插件
 
-AI 助手、批量运维、自动运维和网络诊断位于 plugins/system 的独立目录，只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v3 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
+AI 助手独立，网络诊断位于系统服务插件内；两者只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v3 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
 
-九个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v2 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
+三个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v2 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
 
-平台 SDK 1.2.0，API wire version=1（继续兼容 ^1.0.0）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
+平台 SDK 2.1.0，API wire version=1（兼容不使用已移除能力的 ^1.x 包）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
 
 ## 构建公开 SDK 示例
 
@@ -63,9 +63,9 @@ Host Info 演示主机脱敏信息、只读 uname、独立设置和五种贡献�
 
 “设置 → 插件管理” → 拖入一个 .sdplugin 文件或点击“选择插件包” → 弹窗核对身份/权限/摘要 → 明确接受未验证包 → 安装。没有手工路径输入；默认禁用且未授权。拖放复用 Tauri 原生文件事件，Rust 仍重新验证普通文件、包大小、摘要和预览绑定。
 
-顶部“运维工具”侧栏只显示已安装插件，不显示来源或管理入口。点击任意插件可进入自己的页面，即使未启用、未授权或没有 UI 贡献；来源、启停、权限和目录范围在该页的“插件设置”。已授权功能页可返回设置，其他声明页面通过页内选择器进入。管理列表只有卸载操作。终端右上角 SFTP 右侧“工具”下拉菜单按插件名称显示已启用项，点击在当前主机打开，未启用项不显示。配置页与管理页铺满工作区可用宽度。语言统一使用全局偏好，目前完整界面仅简体中文，SDK 双语契约保留。
+顶部“运维工具”侧栏显示全部已安装插件并直接打开配置，不选择主机或加载业务页面；单主机功能从主机工具进入当前主机工作区，无上下文的功能入口由宿主统一选择一次。主机 SSH/SFTP 右侧“工具”只显示具有功能页面的启用插件，不再显示主机选择器。未授权/未启用功能显示状态及设置入口；详情、来源、启停、权限、目录范围及包声明的 settings 页面集中在“设置 → 插件管理”。主机工作区、全局工具和设置之间切换保留功能草稿，不自动执行。管理列表提供安装、详情入口和卸载。语言沿用全局偏好。
 
-全部插件无需选择允许访问的主机，启用并具备对应能力后适用于所有已登记主机，使用时选择当前目标并连接。上传插件仍在自己的设置页授予清单内权限、具体操作和规范远程目录；内置系统分发包的声明权限、操作和所需目录由系统预置且不可修改，已有禁用选择保留。SSH 其他命令、文件写入及系统修改仍逐次确认，首次连接核验主机指纹；上传包不要为方便测试授予 `/` 写入范围。详见 [内置插件](BUILTIN_PLUGINS.md)。
+全部插件无需选择允许访问的主机，启用并具备对应能力后适用于所有已登记主机，单主机工具由宿主传入入口主机并建立/复用连接，批量和自动化在执行表单明确选择多目标。上传插件仍在自己的设置页授予清单内权限、具体操作和规范远程目录；内置系统分发包的声明权限、操作和所需目录由系统预置且不可修改，已有禁用选择保留。SSH 其他命令、文件写入及系统修改仍逐次确认，首次连接核验主机指纹；上传包不要为方便测试授予 `/` 写入范围。详见 [内置插件](BUILTIN_PLUGINS.md)。
 
 安装更高版本时提示旧版本并保留备份，全部授权失效，升级后需重新授权并启用。包变化/非法版本拒绝且保留已安装代。禁用、撤权会停止调用/流；卸载默认保留本地设置，另有明确清理选择；均不会删除远程服务器配置或日志。
 

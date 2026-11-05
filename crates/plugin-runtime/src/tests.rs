@@ -287,6 +287,12 @@ async fn malformed_reply_and_incompatible_abi_do_not_escape_guest() {
         "PLUGIN_PROTOCOL"
     );
     assert_eq!(f.runtime.statuses().unwrap()[0].state, State::Crashed);
+    f.runtime.deactivate("dev.runtime").await.unwrap();
+    assert_eq!(f.runtime.statuses().unwrap()[0].state, State::Crashed);
+    assert_eq!(
+        f.runtime.statuses().unwrap()[0].error_code.as_deref(),
+        Some("PLUGIN_PROTOCOL")
+    );
     f.runtime.shutdown().await.unwrap();
 }
 

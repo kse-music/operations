@@ -9,7 +9,7 @@ fn app() -> (tempfile::TempDir, Application) {
 #[tokio::test]
 async fn chunk_resources_are_bounded_owned_expiring_and_released_on_stop() {
     let (_dir, app) = app();
-    let id = "cn.hiboot.plugins.resources";
+    let id = "cn.hiboot.plugins.services";
     let plugin = app.plugins.detail(id).unwrap();
     let grant = Grant::new(
         &plugin,

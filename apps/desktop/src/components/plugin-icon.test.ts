@@ -17,11 +17,18 @@ function mount(manifest: Pick<PluginManifest, 'id' | 'icon'>, source?: 'system' 
   app = createApp(PluginIcon, { manifest, source, size: 21 });
   app.mount(root);
 }
-it('uses nine distinct configured icons and restores icons for legacy system records only', () => {
-  const plugins = [...systemPluginFixtures(), ...toolPluginState().installed];
+it('uses three distinct configured icons and restores icons for legacy system records only', () => {
+  const plugins = [
+    ...new Map(
+      [...systemPluginFixtures(), ...toolPluginState().installed].map((plugin) => [
+        plugin.manifest.id,
+        plugin,
+      ]),
+    ).values(),
+  ];
   const configured = plugins.map((plugin) => plugin.manifest.icon);
-  expect(configured).toHaveLength(9);
-  expect(new Set(configured).size).toBe(9);
+  expect(configured).toHaveLength(3);
+  expect(new Set(configured).size).toBe(3);
   for (const plugin of plugins) {
     expect(pluginIcons.has(plugin.manifest.icon!)).toBe(true);
     const old = { ...plugin.manifest, icon: undefined };
