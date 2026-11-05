@@ -11,7 +11,7 @@ import { pluginsApi } from './plugins';
 import { pluginInvokeRequest, pluginServerRequest, pluginToolRequest } from './plugin-server';
 import { clipboardApi } from './clipboard';
 import { terminalApi } from './terminal';
-import { downloadResult } from './tasks';
+import { downloadResult } from './download';
 import type {
   PluginUiPage,
   PluginToolOperation,
@@ -24,10 +24,6 @@ const tools: Record<string, { permission: PluginPermission; operations: readonly
   assistant: {
     permission: 'assistant.use',
     operations: ['ai_resolve_hosts', 'ai_prepare', 'ai_send', 'ai_execute', 'ai_cancel'],
-  },
-  network: {
-    permission: 'network.run',
-    operations: ['diagnostic_start', 'diagnostic_list', 'diagnostic_cancel'],
   },
 };
 const denied = () => ({
@@ -154,7 +150,6 @@ export function createPluginUiBridge(input: {
     const canRead = hasAny(
       'hosts.read',
       'assistant.use',
-      'network.run',
       'system.read',
       'metrics.read',
       'logs.read',
@@ -185,10 +180,7 @@ export function createPluginUiBridge(input: {
             ]),
           )
         : {},
-      models:
-        input.page.surface?.kind === 'tool' && input.page.surface.tool === 'assistant'
-          ? models.models
-          : [],
+      models: hasAny('assistant.use') ? models.models : [],
       monitorIntervalSecs: application.state?.config.monitorIntervalSecs ?? 3,
     });
   }
@@ -205,7 +197,7 @@ export function createPluginUiBridge(input: {
     return Object.values(ops.connections).find((c) => c.session?.id === id);
   }
   async function call(method: string, raw: Record<string, unknown>): Promise<unknown> {
-    const surface = check(true);
+    check(true);
     const args = restore(raw) as Record<string, unknown>;
     const domain = Object.values(tools).find((tool) => tool.operations.includes(method));
     if (domain) {
@@ -245,38 +237,20 @@ export function createPluginUiBridge(input: {
       case 'capability':
         return server(args.operation as PluginCapability);
       case 'hosts.list':
-        if (
-          !hasAny(
-            'hosts.read',
-            'assistant.use',
-            'network.run',
-            'system.read',
-            'metrics.read',
-            'logs.read',
-          )
-        )
+        if (!hasAny('hosts.read', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
           throw denied();
         await hosts.load();
         if (hosts.error) throw new Error(hosts.error);
         return snapshotCatalog();
       case 'ai_models':
-        if (surface?.kind !== 'tool' || surface.tool !== 'assistant') throw denied();
+        if (!hasAny('assistant.use')) throw denied();
         await models.refresh();
         if (models.error) throw new Error(models.error);
         return models.models;
       case 'ops_open': {
         if (typeof args.events === 'string' && (args.events.length > 80 || listeners.size >= 32))
           throw { code: 'PLUGIN_LIMIT', message: '插件连接事件流超过限制' };
-        if (
-          !hasAny(
-            'ssh.execute',
-            'assistant.use',
-            'network.run',
-            'system.read',
-            'metrics.read',
-            'logs.read',
-          )
-        )
+        if (!hasAny('ssh.execute', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
           throw denied();
         const host = hosts.catalog?.hosts.find((h) => h.id === args.hostId);
         if (!host) throw denied();
@@ -315,32 +289,14 @@ export function createPluginUiBridge(input: {
         return current.session;
       }
       case 'ops_connections':
-        if (
-          !hasAny(
-            'ssh.execute',
-            'assistant.use',
-            'network.run',
-            'system.read',
-            'metrics.read',
-            'logs.read',
-          )
-        )
+        if (!hasAny('ssh.execute', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
           throw denied();
         await ops.sync();
         return Object.values(ops.connections)
           .filter((c) => c.state === 'connected')
           .map((c) => c.session);
       case 'ops_close': {
-        if (
-          !hasAny(
-            'ssh.execute',
-            'assistant.use',
-            'network.run',
-            'system.read',
-            'metrics.read',
-            'logs.read',
-          )
-        )
+        if (!hasAny('ssh.execute', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
           throw denied();
         const c = connectionForSession(String(args.id));
         if (!c) throw denied();

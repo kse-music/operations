@@ -11,7 +11,6 @@ import TerminalPane from '../components/TerminalPane.vue';
 import Modal from '../components/Modal.vue';
 const emit = defineEmits<{
   server: [host: import('../types/hosts').Host];
-  network: [host: import('../types/hosts').Host];
   files: [host: import('../types/hosts').Host, path: string | undefined, pane: string];
 }>();
 const store = useTerminalsStore(),
@@ -251,7 +250,6 @@ onBeforeUnmount(() => {
           @action="action"
           @files="(host, path, pane) => emit('files', host, path, pane)"
           @server="(host) => emit('server', host)"
-          @network="(host) => emit('network', host)"
         />
       </div>
       <div

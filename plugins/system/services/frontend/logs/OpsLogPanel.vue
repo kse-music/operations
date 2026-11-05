@@ -190,14 +190,18 @@ useErrorNotifications(() => [error.value, ...tabs.value.map((tab) => tab.message
       仅主动打开指定来源；每标签最多 1 MiB / 5000
       行，关闭标签或离开运维页面会停止远端流。导出仅包含当前过滤结果。
     </p>
-    <div class="ops-toolbar">
-      <input v-model="path" aria-label="远程日志绝对路径" placeholder="/var/log/…" /><input
-        v-model.number="lines"
-        type="number"
-        min="1"
-        max="5000"
-        aria-label="日志最近行数"
-      /><label><input v-model="follow" type="checkbox" />实时跟踪</label
+    <div class="ops-toolbar ops-log-source">
+      <label class="ops-log-path"
+        >日志文件<input v-model="path" aria-label="远程日志绝对路径" placeholder="/var/log/…"
+      /></label>
+      <label class="ops-log-lines"
+        >最近行数<input
+          v-model.number="lines"
+          type="number"
+          min="1"
+          max="5000"
+          aria-label="日志最近行数" /></label
+      ><label class="ops-log-follow"><input v-model="follow" type="checkbox" />实时跟踪</label
       ><button
         class="button"
         :disabled="!path"

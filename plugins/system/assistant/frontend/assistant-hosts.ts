@@ -125,7 +125,7 @@ export function useAssistantHosts() {
       }
     }
     if (failures.length) throw new Error(failures.join('\n'));
-    phase.value = '正在读取授权上下文…';
+    phase.value = '正在读取主机上下文…';
     return { route, sessionIds };
   }
   return { matched, phase, cleanupError, resolve, clear };

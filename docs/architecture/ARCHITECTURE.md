@@ -1,5 +1,39 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-05：插件配置与功能页布局
+
+PluginPage 将自有 settings 贡献放在主区域，PluginSettings 的生命周期、权限和包信息置于辅助区域；容器宽度不足时按配置优先堆叠。移除设置根页面因后代 iframe 而撑满剩余高度的规则，为配置 surface 提供独立可用高度；模型设置内部以 flex 分配候选列表和固定操作区，长列表滚动不挤出保存按钮。权限的展示折叠不影响授权数据、表单校验和上传包默认展开。共享 SDK 资源表格调整行距、滚动上限及粘性表头；系统服务四等分导航、日志表单、Docker 摘要和 AI 快捷问题沿用既有数据及事件。无新增依赖、IPC、数据库或权限变化。系统服务/Docker 包 1.3.1，助手包 1.3.3。
+
+## 2026-11-05：助手模型绑定作为插件配置
+
+助手新增 settings 贡献与独立 SettingsView，公开 SDK SurfaceState 允许本插件 SettingsRead/SettingsWrite；清单增加 settings.read/settings.write，系统自动预置，包版本 1.3.2。model-binding composable 通过既有能力读取/合并写入插件自己的 settings.json（modelId；16 KiB），不保存模型 Key，不新增 IPC、数据库结构或依赖。App 按贡献路由聊天/设置，聊天删除整条模型栏及对应样式，读取绑定模型；返回可见页面时重新加载，模型版本或绑定变化撤销旧对话。
+
+宿主 assistant.use 权限允许设置页获取公开模型列表。Rust 对系统内置助手在工具 stage 与执行前核对持久绑定；空绑定/已删除模型/传入其他模型均拒绝。SettingsWrite 验证登记模型，绑定变化时调用原有 plugin_cancel_tool_requests 撤销该插件的旧票据、预览和建议，不影响其他插件/模型。普通 AI IPC 和上传插件继续原契约，模型凭据仍只由系统库提供。
+
+## 2026-11-05：内置助手固定上下文与免外发弹窗
+
+AssistantView 采用全宽对话，删除侧栏、读取范围、日志及脱敏配置状态；入口主机作为首次匹配线索，后续沿用本次命中目标。首次 SSH 指纹核验在聊天区内显示。宿主根据 PluginSource::System 与 cn.hiboot.plugins.assistant 双重条件识别内置助手，ai_resolve_hosts/ai_send 不再返回 ToolReview，ai_execute 保留独立审核；上传插件不能靠 ID 取得免审。
+
+内置 AiPrepare 使用 ai_prepare_builtin 固定开启上下文和地址脱敏，既有 selection/IPC 不变。固定监控采集器复用同一已验证运维 Transport 临时读取两次，间隔 250ms，不创建后台监控；进程和 Docker 复用原类型化查询，日志固定使用无 follow 的 system journal 最近 100 行/32 KiB。可选数据失败写入上下文及脱敏 warning，连接/资产绑定失效仍中止；取消绑定插件 call token，日志不记录载荷。普通 AI IPC 和上传插件保持原显式采集语义。无新依赖、数据库迁移、任意 Shell 或模型执行权限。助手标准包升级为 1.3.1，保留其他插件版本与用户状态。
+
+## 2026-11-05：删除网络诊断完整调用链
+
+删除 services/frontend/network、compat/network、Guest 的网络工具转发、Core 的诊断 DTO、Tasks 网络队列/本机进程、Application 包装及 Tauri diagnostic_* IPC/ACL；SDK 删除网络权限、工具枚举、诊断操作、分类与专属 intent。Tasks 仅保留 AI/公开 execute 共用的有界 SSH 单次执行、超时、取消和输入通道；监控网卡、端口与 AI 只读查询不改。BackgroundSnapshot 仅返回连接状态；通用下载从 services/tasks 移至 services/download。
+
+系统服务页面缓存上限为四类。Host/SDK 3.0 与系统包 1.3 协商接口移除，保留 ^1.x/^2.x 的其他能力和 ABI/wire 1。仓库先保留原始记录：已知 system 服务的旧权限收窄后由启动标准升级保留 enabled/设置，旧授权按安装代和版本先判失效，避免反序列化已删除枚举；诊断上传包归档停用，旧 payload/data 保留。废弃 backup 指针退出活动反序列化，原始记录已归档。所有迁移故障继续传播，目录链接与范围校验保持。
+
+## 2026-11-05：SFTP 记录归属主机工作区
+
+移除 App 任务中心组件/弹窗、搜索事件和专用样式；设置与默认快捷键只保留 search/settings。ProductPreferences 反序列化 shortcuts 时仅移除历史 tasks 键，保留其他键的严格验证与原配置/备份兼容，无数据库迁移。
+
+TransferPanel 按 hostId 筛选传输及未完成数量。Workspace.close 在主机关闭期间通过 files.closingHosts 阻止新连接和传输提交，Files Store 等待已经发出的连接请求，获取该主机全部文件租约和传输；存在活动传输时复用共享确认对话框，再调用现有 files_close 的取消/排空机制。未保存文档阻止关闭。终端或插件关闭失败保留设备与记录；成功关闭前调用仅限主窗口的 transfer_clear_host，后端持队列锁拒绝清理任何尚未结束的本主机传输，仅移除该 hostId 的内存记录，不操作文件。清理失败不移除工作区。
+
+前端清理成功后移除该主机文件连接和记录，并递增轮询代号，拒绝清理前发出的迟到快照恢复旧记录。其他主机连接和任务保留。后台传输引擎、SHA-256、安全提交、恢复路径、退出检查不变；切换页面只隐藏界面，实际关闭主机才结束本次记录生命周期。以下任务中心章节为历史设计。
+
+## 2026-11-05：主机工具栏直接展示插件
+
+HostTools 将启用且具备功能贡献的安装身份直接渲染为 SSH/SFTP 后的同级按钮，复用 primaryPluginPage 与 plugin 事件传递。App 传入活动插件 ID，extension 页面按该 ID 设置 active 与 aria-current，避免同时选中其他插件。移除下拉状态、Teleport 菜单、定位、窗口/文档监听及专属样式；主机工具栏使用 flex-wrap 在窄窗口换行。主机绑定、插件配置入口、权限和页面生命周期保持，无 Rust、IPC、SDK 或持久化变化。以下工具菜单描述为历史入口。
+
 ## 2026-11-05：插件导航集中到设置与主机工作区
 
 NavigationModule 只保留 hosts/assets/system；删除 AppNavigation 的插件侧栏、插件设置事件及安装列表依赖。插件管理 plugins 与单插件 pluginSettings 均映射 system，配置页激活时“插件管理”菜单同时标记 active 与 aria-current。WorkspaceTab 移除 settingsModule 来源字段，openPluginSettings 复用同一配置标签且始终通过 moduleForView 归属设置，不再随入口改变模块。

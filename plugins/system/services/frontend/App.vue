@@ -1,22 +1,20 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { Activity, ListTree, Settings2, ScrollText, Network, Server } from '@lucide/vue';
+import { Activity, ListTree, Settings2, ScrollText, Server } from '@lucide/vue';
 import Monitor from './monitor/App.vue';
 import Processes from './processes/App.vue';
 import Logs from './logs/App.vue';
-import Diagnostics from './network/NetworkView.vue';
 import Units from './ServiceUnits.vue';
 import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
 import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
 import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
-import type { PluginUiPage, PluginToolIntent } from '@serverdeck/plugin-sdk/types/plugins';
+import type { PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
 import type { LogInput } from '@serverdeck/plugin-sdk/types/ops';
 import './system.css';
 const props = defineProps<{
   hostId?: string;
   initialSection?: ServerSection;
   page?: PluginUiPage;
-  toolIntent?: PluginToolIntent;
   logIntent?: { input: LogInput; title: string; sequence: number };
 }>();
 const emit = defineEmits<{ section: [value: ServerSection] }>();
@@ -50,13 +48,6 @@ const tabs = [
     description: '文件与服务实时日志',
     icon: ScrollText,
     component: Logs,
-  },
-  {
-    id: 'diagnostics',
-    label: '网络诊断',
-    description: '连接测试与故障定位',
-    icon: Network,
-    component: Diagnostics,
   },
 ] as const;
 type TabId = (typeof tabs)[number]['id'];
@@ -130,12 +121,10 @@ async function keys(event: KeyboardEvent) {
     <header v-if="!legacyMonitor" class="system-host-strip">
       <span class="system-host-icon"><Server :size="17" /></span>
       <div>
-        <strong>{{ hostDisplayName(host) || '本地诊断工作区' }}</strong
-        ><span>{{
-          host ? `${host.username}@${host.hostname}:${host.port}` : '选择网络工具，开始本地诊断'
-        }}</span>
+        <strong>{{ hostDisplayName(host) || '系统服务' }}</strong
+        ><span>{{ host ? `${host.username}@${host.hostname}:${host.port}` : '请先选择主机' }}</span>
       </div>
-      <span class="system-host-note">{{ host ? '当前主机' : '本地设备' }}</span>
+      <span class="system-host-note">{{ host ? '当前主机' : '未选择主机' }}</span>
     </header>
     <div
       v-if="!legacyMonitor"
@@ -152,7 +141,7 @@ async function keys(event: KeyboardEvent) {
         role="tab"
         :tabindex="selected === tab.id ? 0 : -1"
         :aria-label="tab.label"
-        :disabled="!hostId && tab.id !== 'diagnostics'"
+        :disabled="!hostId"
         :aria-selected="selected === tab.id"
         aria-controls="system-panel"
         @click="select(tab.id)"
@@ -169,13 +158,11 @@ async function keys(event: KeyboardEvent) {
       role="tabpanel"
       :aria-labelledby="`system-tab-${selected}`"
     >
-      <KeepAlive :max="5">
+      <KeepAlive :max="4">
         <component
           :is="legacyMonitor ? Monitor : current.component"
           :key="legacyMonitor ? 'legacy' : selected"
-          :host-id="selected === 'diagnostics' ? hostId || toolIntent?.networkHost : hostId"
-          :bound-host-id="hostId"
-          :request-id="toolIntent?.networkRequest"
+          :host-id="hostId"
           :initial-section="sections[selected]"
           :page="legacyMonitor ? page : undefined"
           :log-intent="localLog"

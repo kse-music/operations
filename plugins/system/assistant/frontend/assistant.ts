@@ -80,11 +80,12 @@ export function useAssistant() {
         if (!expired.value.includes(proposal.id)) expired.value.push(proposal.id);
     }
   });
-  async function send(input: AiPrepare) {
+  async function send(input: AiPrepare, initialHostIds: string[] = []) {
     if (busy.value) return;
     const current = version;
     const previous = history(turns.value);
-    const previousHostIds = [...turns.value].reverse().find((t) => t.hostIds.length)?.hostIds ?? [];
+    const previousHostIds =
+      [...turns.value].reverse().find((t) => t.hostIds.length)?.hostIds ?? initialHostIds;
     controller = new AbortController();
     const turn: AiTurn = {
       id: crypto.randomUUID(),
@@ -147,7 +148,7 @@ export function useAssistant() {
       requestId = prepared.id;
       entry.requestId = prepared.id;
       busy.value = 'send';
-      // The host SDK reviews the frozen native request before sending it.
+      // Sending consumes the frozen native request; command execution is reviewed separately.
       const answer = await aiApi.send(prepared.id, true);
       if (!disposed && current === version) {
         entry.answer = answer;

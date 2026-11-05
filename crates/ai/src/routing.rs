@@ -107,6 +107,8 @@ pub fn local_choice(
     }
     if [
         "这台",
+        "当前主机",
+        "当前服务器",
         "那台",
         "刚才",
         "上述主机",
@@ -243,6 +245,12 @@ mod tests {
         );
         assert_eq!(
             local_choice("继续排查那台", &assets, &["b".into()])
+                .unwrap()
+                .host_ids,
+            vec!["b"]
+        );
+        assert_eq!(
+            local_choice("检查当前主机的负载", &assets, &["b".into()])
                 .unwrap()
                 .host_ids,
             vec!["b"]

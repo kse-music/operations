@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, access, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import net from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -25,18 +25,24 @@ await writeFile(
     app: { appDirectoriesOverride: data, windows: [{ ...base.app.windows[0], visible: false }] },
   }),
 );
-const built = spawnSync(
-  process.execPath,
-  [path.join(root, 'tools/tauri.mjs'), 'build', '--debug', '--no-bundle', '--config', config],
-  {
-    cwd: root,
-    stdio: 'inherit',
-    windowsHide: true,
-    env: { ...process.env, CARGO_TARGET_DIR: path.join(root, '.local/native-ui-build') },
-  },
-);
-if (built.error) throw built.error;
-assert.equal(built.status, 0, 'native QA build');
+function build(args) {
+  const built = spawnSync(
+    process.execPath,
+    [path.join(root, 'tools/tauri.mjs'), 'build', '--debug', '--no-bundle', ...args],
+    {
+      cwd: root,
+      stdio: 'inherit',
+      windowsHide: true,
+      env: { ...process.env, CARGO_TARGET_DIR: path.join(root, 'target') },
+    },
+  );
+  if (built.error) throw built.error;
+  assert.equal(built.status, 0, 'native build');
+}
+build(['--config', config]);
+const executable = path.join(run, 'PluginManagementQa.exe');
+await copyFile(path.join(root, 'target/debug/serverdeck-desktop.exe'), executable);
+build([]);
 const packagePath = path.join(run, 'metadata.sdplugin');
 const packed = spawnSync(
   process.execPath,
@@ -57,7 +63,7 @@ const port = await new Promise((resolve, reject) => {
     server.close(() => resolve(port));
   });
 });
-const child = spawn(path.join(root, '.local/native-ui-build/debug/serverdeck-desktop.exe'), [], {
+const child = spawn(executable, [], {
   cwd: run,
   stdio: 'ignore',
   windowsHide: true,

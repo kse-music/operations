@@ -94,7 +94,6 @@ try {
     'terminals',
     'files',
     'server',
-    'network',
     'credentials',
     'backup',
     'settings',
@@ -124,7 +123,6 @@ try {
         const { defaultTerminalPreferences } = await import('/src/types/preferences.ts');
         const { defaultProductPreferences } = await import('/src/types/product.ts');
         const { hostInput } = await import('/src/types/hosts.ts');
-        const { tasksApi } = await import('/src/services/tasks.ts');
         const { filesApi } = await import('/src/services/files.ts');
         const { monitorApi } = await import('/src/services/monitor.ts');
         const { opsApi } = await import('/src/services/ops.ts');
@@ -137,7 +135,6 @@ try {
         const { pluginsApi } = await import('/src/services/plugins.ts');
         pluginsApi.list = view === 'server' ? fail : async () => [];
         pluginsApi.statuses = async () => [];
-        tasksApi.diagnostics = view === 'network' ? fail : async () => [];
         filesApi.open = fail;
         filesApi.local = async () => ({
           path: 'C:/test',

@@ -14,7 +14,6 @@ const pages = [
   ['SSH 终端', 'terminals'],
   ['SFTP 文件', 'files'],
   ['服务器管理', 'server'],
-  ['网络诊断', 'network'],
   ['安全凭据', 'credentials'],
   ['备份恢复', 'backup'],
   ['关于', 'about'],
@@ -124,8 +123,6 @@ async function fixtures(page, theme) {
           ? { dockerState: 'running', dockerInstalled: true, systemd: true }
           : {},
     });
-    const { tasksApi } = await import('/src/services/tasks.ts');
-    tasksApi.diagnostics = async () => [];
     const { filesApi } = await import('/src/services/files.ts');
     const listing = {
       path: '/srv/application',
@@ -370,7 +367,7 @@ try {
         await page.screenshot({ path: `${output}/${variant}-${view}-dialog.png` });
         await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
       }
-      if (view === 'network' || view === 'server') {
+      if (view === 'server') {
         const tabs = page.locator('.page-view [role=tablist]').getByRole('tab');
         for (let n = 0; n < (await tabs.count()); n++) {
           await tabs.nth(n).click();

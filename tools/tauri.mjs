@@ -1,5 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { requireBuildSpace } from './build-space.mjs';
+
+if (['build', 'dev'].includes(process.argv[2]) && !process.argv.includes('--help')) {
+  requireBuildSpace(fileURLToPath(new URL('../', import.meta.url)));
+}
 
 // Preserve CLI flags across the root npm workspace entry point on Windows.
 const result = spawnSync(

@@ -82,7 +82,6 @@ it('keeps nested reactive context cloneable across the frame boundary and reject
     log: null,
     initialAction: null,
   });
-  const intent = reactive({ networkRequest: 1 });
   pinia = createPinia();
   root = document.createElement('div');
   document.body.append(root);
@@ -91,7 +90,6 @@ it('keeps nested reactive context cloneable across the frame boundary and reject
     revision: 'revision',
     hostId: '',
     page,
-    toolIntent: intent,
   }).use(pinia);
   app.mount(root);
   const frame = root.querySelector('iframe')!;
@@ -110,11 +108,12 @@ it('keeps nested reactive context cloneable across the frame boundary and reject
   port.onmessage!({ data: { kind: 'connected' } });
   expect(messages.at(-1)).toMatchObject({
     kind: 'context',
-    props: { page: { id: 'custom' }, requestId: 1 },
+    props: { page: { id: 'custom', title: 'Custom' } },
   });
-  intent.networkRequest = 2;
+  page.title = 'Updated';
+  useModelsStore(pinia).models = [];
   await nextTick();
-  expect(messages.at(-1)).toMatchObject({ props: { requestId: 2 } });
+  expect(messages.at(-1)).toMatchObject({ props: { page: { title: 'Updated' } } });
   expect(root.textContent).not.toContain('could not be cloned');
   expect(port.close).not.toHaveBeenCalled();
 });

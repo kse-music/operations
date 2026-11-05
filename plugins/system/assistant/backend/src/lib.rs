@@ -2,7 +2,11 @@ use serverdeck_plugin_sdk::{Capability, serde_json::Value, server::SurfaceState,
 use std::sync::Mutex;
 static STATE: Mutex<Option<SurfaceState>> = Mutex::new(None);
 fn allows(cap: &Capability) -> bool {
-    matches!(cap, Capability::ToolInvoke {operation, ..} if operation.tool() == Tool::Assistant)
+    match cap {
+        Capability::SettingsRead | Capability::SettingsWrite { .. } => true,
+        Capability::ToolInvoke { operation, .. } => operation.tool() == Tool::Assistant,
+        _ => false,
+    }
 }
 fn handle(operation: i32, payload: Value) -> Value {
     let Ok(mut guard) = STATE.lock() else {
@@ -18,12 +22,14 @@ mod tests {
     use super::*;
     #[test]
     fn limits_calls_to_its_public_tool_domain() {
-        assert!(!allows(&Capability::SettingsRead));
+        assert!(allows(&Capability::SettingsRead));
+        assert!(allows(&Capability::SettingsWrite {
+            value: serverdeck_plugin_sdk::serde_json::json!({"modelId":null})
+        }));
+        assert!(!allows(&Capability::HostsRead));
         for operation in [
             serverdeck_plugin_sdk::tools::Operation::AiPrepare,
             serverdeck_plugin_sdk::tools::Operation::AiSend,
-            serverdeck_plugin_sdk::tools::Operation::DiagnosticCancel,
-            serverdeck_plugin_sdk::tools::Operation::DiagnosticList,
         ] {
             assert_eq!(
                 allows(&Capability::ToolInvoke {

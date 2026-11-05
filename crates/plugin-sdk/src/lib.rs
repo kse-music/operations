@@ -13,8 +13,6 @@ pub const MAX_MESSAGE: usize = 64 * 1024;
 pub enum Permission {
     #[serde(rename = "assistant.use")]
     AssistantUse,
-    #[serde(rename = "network.run")]
-    NetworkRun,
     #[serde(rename = "metrics.read")]
     MetricsRead,
     #[serde(rename = "system.read")]

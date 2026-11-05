@@ -9,7 +9,6 @@ mod monitor;
 mod ops;
 mod plugins;
 mod product;
-mod tasks;
 mod terminal;
 mod terminal_upload;
 pub use hosts::SecureStatus;

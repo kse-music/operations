@@ -11,4 +11,4 @@ license = "MIT"
 crate-type = ["cdylib"]
 
 [dependencies]
-serverdeck-plugin-sdk = { path = "../../../../../crates/plugin-sdk", version = "1.0.0" }
+serverdeck-plugin-sdk = { path = "../../../../../crates/plugin-sdk", version = "3.0.0" }

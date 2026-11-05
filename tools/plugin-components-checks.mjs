@@ -5,6 +5,7 @@ import { writeFile, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openPluginFunction,
+  bindAssistantModel,
   openPluginSettings,
   showHostTree,
   selectHostWorkspace,
@@ -113,26 +114,43 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     'upgrade retires both enabled tools without deleting settings; removed IPC/activation are denied and backup omits the command library',
   );
   for (const plugin of list) {
-    assert.equal(plugin.manifest.version, '1.2.0');
+    const expectedPackage = JSON.parse(
+      await readFile(
+        `plugins/system/packages/${plugin.manifest.id.split('.').at(-1)}.sdplugin`,
+        'utf8',
+      ),
+    );
+    assert.equal(plugin.manifest.version, expectedPackage.manifest.version);
     await openPluginSettings(page, plugin.manifest.name);
     await page.locator('.plugin-page:visible [aria-label="插件设置"]').waitFor();
     assert.equal(
       await page.getByRole('dialog', { name: '选择使用工具的主机', exact: true }).count(),
       0,
     );
-    assert.equal(await page.locator('.plugin-frame-container:visible').count(), 0);
+    const hasSettings = plugin.manifest.contributions.some((entry) => entry.kind === 'settings');
+    assert.equal(
+      await page.locator('.plugin-frame-container:visible').count(),
+      hasSettings ? 1 : 0,
+    );
+    if (hasSettings) await content().getByRole('group', { name: '使用模型' }).waitFor();
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').innerText(),
       '设置',
     );
   }
-  assert.equal(
-    Object.values(await counts()).reduce((sum, value) => sum + value, 0),
-    0,
+  const configurationRequests = await counts();
+  assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) > 0);
+  assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) <= 4);
+  assert.equal(configurationRequests['cn.hiboot.plugins.services'] ?? 0, 0);
+  assert.equal(configurationRequests['cn.hiboot.plugins.docker'] ?? 0, 0);
+  assert.deepEqual(
+    (await poll(runtimeStatuses, Boolean))
+      .filter((status) => status.state === 'active')
+      .map((status) => status.id),
+    ['cn.hiboot.plugins.assistant'],
   );
-  assert.equal((await poll(runtimeStatuses, Boolean)).length, 0);
   passed.push(
-    'all three plugins open configuration under Settings without host selection, connection or business Wasm calls',
+    'all three plugins open configuration under Settings without host selection or connections; only the assistant settings surface activates its own guest to read model binding',
   );
 
   const credential = (
@@ -209,16 +227,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     assert.equal(await page.getByLabel('插件目标主机', { exact: true }).count(), 0);
     await noBusy();
     await dismissNotifications();
-  };
-  const parentApproval = async (expected) => {
-    const dialog = page.getByRole('dialog').filter({ has: page.locator('.plugin-prompt') });
-    await dialog.waitFor();
-    assert((await dialog.innerText()).includes(expected), 'unexpected native approval target');
-    const field = dialog.getByLabel('插件操作确认文字', { exact: true });
-    if (await field.count())
-      await field.fill((await dialog.locator('label code').innerText()).trim());
-    await dialog.getByRole('button', { name: '明确确认', exact: true }).click();
-    await dialog.waitFor({ state: 'hidden' });
   };
   const cancelMutation = async (row, button, target) => {
     if (!(await row.getByRole('button', { name: button, exact: true }).isVisible()))
@@ -330,30 +338,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     'host switching: two real SSH host workspaces keep independent plugin frames and drafts',
   );
 
-  await open('网络诊断');
-  assert.equal(await content().getByLabel('诊断来源', { exact: true }).inputValue(), 'remote');
-  assert.equal(await content().getByLabel('诊断主机', { exact: true }).count(), 0);
-  await content().getByRole('tab', { name: 'TCP 端口', exact: true }).click();
-  await content().getByLabel('诊断目标', { exact: true }).fill('127.0.0.1');
-  await content().getByLabel('诊断端口', { exact: true }).fill(String(resources.tcpPort));
-  await content().getByLabel('诊断次数', { exact: true }).fill('1');
-  await content().getByRole('button', { name: '开始诊断', exact: true }).click();
-  await poll(
-    () => invoke('diagnostic_list', { versions: {} }),
-    (rows) =>
-      rows.some(
-        (row) =>
-          row.input.origin.kind === 'remote' &&
-          row.input.origin.hostId === hosts[0].id &&
-          row.input.port === resources.tcpPort &&
-          row.state === 'completed',
-      ),
-  );
-  await stable('cn.hiboot.plugins.services');
-  passed.push(
-    'network: terminal entry fixes the origin host and completes a real remote TCP probe',
-  );
-
   const server = createServer(async (req, res) => {
     let body = '';
     for await (const part of req) body += part;
@@ -397,35 +381,31 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     };
     input.testId = (await invoke('ai_model_test', { input })).id;
     model = (await invoke('ai_model_save', { input })).value;
-    await open('AI 运维助手');
-    await content().getByLabel('使用模型', { exact: true }).selectOption(model.id);
+    await bindAssistantModel(page, model.id);
     await content().getByRole('button', { name: '管理模型', exact: true }).click();
     await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
     await open('AI 运维助手');
-    assert.equal(await content().getByLabel('使用模型', { exact: true }).inputValue(), model.id);
-    assert(
-      (await content().locator('.ai-view').innerText()).includes(`当前主机：${hosts[0].name}`),
-    );
     assert.equal(
-      await content().getByRole('checkbox', { name: '跨主机分析', exact: true }).isChecked(),
-      false,
+      await content().locator('.ai-model-bar, select, [aria-controls="assistant-context"]').count(),
+      0,
     );
-    await content().getByLabel('问题', { exact: true }).fill('COMPONENT_AI_CURRENT_HOST');
+    await content()
+      .getByLabel('问题', { exact: true })
+      .fill('检查当前主机 COMPONENT_AI_CURRENT_HOST');
     await content().getByRole('button', { name: '发送', exact: true }).click();
-    await parentApproval('COMPONENT_AI_CURRENT_HOST');
     await content().getByText('COMPONENT_AI_CURRENT_HOST_OK', { exact: true }).waitFor();
-    await content().getByLabel('问题', { exact: true }).fill('COMPONENT_AI_FAILURE');
+    await content().getByLabel('问题', { exact: true }).fill('检查当前主机 COMPONENT_AI_FAILURE');
     await content().getByRole('button', { name: '发送', exact: true }).click();
-    await parentApproval('COMPONENT_AI_FAILURE');
     await content().locator('.ai-chat-error').waitFor();
     await dismissNotifications();
-    await content().getByLabel('问题', { exact: true }).fill('COMPONENT_AI_CURRENT_HOST_RETRY');
+    await content()
+      .getByLabel('问题', { exact: true })
+      .fill('检查当前主机 COMPONENT_AI_CURRENT_HOST_RETRY');
     await content().getByRole('button', { name: '发送', exact: true }).click();
-    await parentApproval('COMPONENT_AI_CURRENT_HOST_RETRY');
     await content().getByText('COMPONENT_AI_CURRENT_HOST_OK', { exact: true }).nth(1).waitFor();
     await stable('cn.hiboot.plugins.assistant');
     passed.push(
-      'assistant: current host fixed by terminal entry, real reviewed HTTP answer and HTTP 500 recovery',
+      'assistant: persisted plugin model binding, entry-host hint, direct HTTP answer and HTTP 500 recovery',
     );
   } finally {
     if (model)
@@ -445,17 +425,12 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     .getByRole('row')
     .filter({ hasText: `serverdeck-e2e-${fixture.uuid}` })
     .waitFor();
-  await open('网络诊断');
-  await content().getByLabel('诊断目标', { exact: true }).fill('retained.example');
+  await open('日志查看');
   await content().getByRole('tab', { name: '日志查看', exact: true }).click();
   await content().getByLabel('远程日志绝对路径', { exact: true }).fill(resources.log);
   await content().getByRole('button', { name: '打开日志文件', exact: true }).click();
   await content().locator('.ops-log-output').filter({ hasText: 'fixture initial 中文' }).waitFor();
-  await content().getByRole('tab', { name: '网络诊断', exact: true }).click();
-  assert.equal(
-    await content().getByLabel('诊断目标', { exact: true }).inputValue(),
-    'retained.example',
-  );
+  await content().getByRole('tab', { name: '进程与端口', exact: true }).click();
   await content().getByRole('tab', { name: '日志查看', exact: true }).click();
   assert((await content().locator('.ops-log-output').innerText()).includes('fixture initial 中文'));
   assert.equal(await content().getByRole('button', { name: '继续日志', exact: true }).count(), 0);
@@ -467,7 +442,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     resources.unit,
   );
   passed.push(
-    'system panel navigation retains diagnostic, service and log drafts; leaving logs closes the stream and retains read output',
+    'system panel navigation retains service and log drafts; leaving logs closes the stream and retains read output',
   );
   for (const [width, height, theme] of [
     [1440, 960, 'dark'],

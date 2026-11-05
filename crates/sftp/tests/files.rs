@@ -49,6 +49,110 @@ async fn assert_completed(files: &Files, id: &str) {
 }
 
 #[tokio::test]
+async fn closing_host_cancels_before_clearing_records_and_preserves_other_hosts_and_files() {
+    let mut server = Server::start(true, Duration::from_millis(8)).await;
+    let first = server.open().await;
+    let files = Files::new(server.engine.clone(), 2);
+    let source = tempfile::tempdir().expect("source");
+    let saved = source.path().join("saved.txt");
+    tokio::fs::write(&saved, b"completed file survives record cleanup")
+        .await
+        .expect("source");
+    let completed = files
+        .transfers
+        .start(input(
+            &first.id,
+            Direction::Upload,
+            vec![path(&saved)],
+            "/".into(),
+            ConflictPolicy::Skip,
+        ))
+        .expect("first upload");
+    assert_completed(&files, &completed.id).await;
+    files.close(&first.id, false).await.expect("first close");
+
+    // A second configured host alias uses the same owned protocol server.
+    server.host.id = uuid::Uuid::new_v4().to_string();
+    let second = server.open().await;
+    let large = source.path().join("active.bin");
+    tokio::fs::write(&large, vec![42u8; 8 * 1024 * 1024])
+        .await
+        .expect("large source");
+    let active = files
+        .transfers
+        .start(input(
+            &second.id,
+            Direction::Upload,
+            vec![path(&large)],
+            "/".into(),
+            ConflictPolicy::Skip,
+        ))
+        .expect("second upload");
+    assert_ne!(first.host_id, second.host_id);
+    files
+        .transfers
+        .clear_host(&first.host_id)
+        .expect("clear first host");
+    let records = files.transfers.list().expect("records");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].id, active.id);
+    assert!(records[0].unfinished());
+    assert_eq!(
+        IpcError::from(
+            files
+                .transfers
+                .clear_host(&second.host_id)
+                .expect_err("active guard")
+        )
+        .code,
+        "TRANSFERS_ACTIVE"
+    );
+    assert_eq!(
+        IpcError::from(
+            files
+                .close(&second.id, false)
+                .await
+                .expect_err("confirmation required")
+        )
+        .code,
+        "TRANSFERS_ACTIVE"
+    );
+    files
+        .close(&second.id, true)
+        .await
+        .expect("cancel and drain");
+    let cancelled = files.transfers.list().expect("ended records");
+    assert_eq!(cancelled[0].state, "cancelled");
+    assert!(
+        cancelled[0].recovery_paths.is_empty(),
+        "{:?}",
+        cancelled[0].recovery_paths
+    );
+    files
+        .transfers
+        .clear_host(&second.host_id)
+        .expect("clear second host");
+    files
+        .transfers
+        .clear_host(&second.host_id)
+        .expect("idempotent clear");
+    assert!(files.transfers.list().expect("empty").is_empty());
+    assert_eq!(
+        tokio::fs::read(server.root.path().join("saved.txt"))
+            .await
+            .expect("preserved remote file"),
+        b"completed file survives record cleanup"
+    );
+    assert!(saved.is_file());
+    assert!(large.is_file());
+    server
+        .engine
+        .close_all()
+        .await
+        .expect("close server leases");
+}
+
+#[tokio::test]
 async fn real_protocol_crud_unicode_properties_and_terminal_lease_independence() {
     let server = Server::start(true, Duration::ZERO).await;
     let info = server.open().await;

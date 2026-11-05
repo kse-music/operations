@@ -2,15 +2,15 @@
 
 ## 使用入口与上下文（2026-11-05）
 
-workspace/navigation/server/host_menu/command 等主机功能从当前设备打开，宿主提供固定 hostId，插件页面不提供第二个目标主机选择器；无上下文时由宿主统一选择一次。自动运维与批量运维已移除，不再接受其 tool 枚举。assistant/network 可从主机或全局进入。settings 贡献继续由插件自己的 UI/WASM 提供，在设置中的插件详情下展示。
+workspace/navigation/server/host_menu/command 等主机功能从当前设备打开，宿主提供固定 hostId，插件页面不提供第二个目标主机选择器；无上下文时由宿主统一选择一次。自动运维与批量运维已移除，不再接受其 tool 枚举。assistant 可从主机或全局进入。settings 贡献继续由插件自己的 UI/WASM 提供，在设置中的插件详情下展示。
 
 功能界面按插件/贡献/主机保留，详情与管理单独归属设置。隐藏 iframe 会收到 visible:false，不应继续轮询或提交操作；Host 会拒绝非当前页面请求，撤销在途交互并使旧资源失效。恢复 visible:true 后需重新获取监控/日志等不透明资源；不得复用已失效的句柄，错误须正常呈现。已读日志与输入草稿可保留，恢复不自动执行原操作。标准系统包提供对应可见性处理。
 
-Host API / Rust SDK / Vue SDK 当前为 2.1.0；ABI/wire 仍为 1，UI v1–v4 格式保留。仅剩 assistant/network 工具领域；旧 ^1.x 包未使用已删除权限与枚举时继续兼容。
+Host API / Rust SDK / Vue SDK 当前为 3.0.0；ABI/wire 仍为 1，UI v1–v4 格式保留。仅剩 assistant 工具领域；旧 ^1.x 包未使用已删除权限与枚举时继续兼容。
 
 ## 2.1 组合分类与缓存页面
 
-UI v4 的 operations.sections 可组合 overview/disks/network/diagnostics 与原运维分类，v2/v3 仍只接受其既有类别。系统服务用一个 server 贡献实现五分类，宿主根据声明定位功能，逐请求权限不改变。SDK usePluginVisibility 返回包含 KeepAlive 激活状态的响应式可见性；组件不可只依赖整个 iframe 的 visible 状态，否则隐藏分类仍会轮询。AI 的历史回答可保留，旧上下文命令引用失效后不能继续执行。
+UI v4 的 operations.sections 可组合 overview/disks/network 与原运维分类，v2/v3 仍只接受其既有类别。系统服务用一个 server 贡献实现四分类，宿主根据声明定位功能，逐请求权限不改变。SDK usePluginVisibility 返回包含 KeepAlive 激活状态的响应式可见性；组件不可只依赖整个 iframe 的 visible 状态，否则隐藏分类仍会轮询。AI 的历史回答可保留，旧上下文命令引用失效后不能继续执行。
 
 ## UI v4：包内独立界面
 
@@ -29,11 +29,11 @@ mountPlugin(App);
 
 宿主 PluginFrame 用不透明来源的 sandbox iframe 加载包入口，theme/当前主机/允许读取的状态经 MessageChannel 注入；插件 API 仅通过白名单桥到实际 WASM 和授权 Host。可信 Host 操作确认根据冻结输入生成，不接受 Guest 自行批准。iframe 的请求、并发、事件和速率有界；资源每次检查安装代、grant 和摘要。详见[安全边界](PLUGIN_SECURITY.md#ui-v4-的页面隔离与原生能力)。
 
-工具标签持续挂载，切换标签或查看自身设置保留草稿；隐藏页面经 SDK 收到可见性通知，监控暂停。禁用/撤权/升级/卸载释放对应资源；已提交后台工作仍由任务中心接管。UI v1 保持原表单；旧 v2/v3 标准视图使用兼容资源进入相同 iframe，已有包不强制升级。下文 v1–v3 的“不执行包内 JS、frame-src none”是这些协议最初的约束，不适用于新增 v4；主窗口当前仅允许本地 sdplugin frame。
+工具标签持续挂载，切换标签或查看自身设置保留草稿；隐藏页面经 SDK 收到可见性通知，监控暂停。禁用/撤权/升级/卸载释放对应资源；网络诊断及专属后台任务已删除。UI v1 保持原表单；旧 v2/v3 标准视图使用兼容资源进入相同 iframe，保留能力的旧包不强制升级。下文 v1–v3 的“不执行包内 JS、frame-src none”是这些协议最初的约束，不适用于新增 v4；主窗口当前仅允许本地 sdplugin frame。
 
 ## UI v3：可信工作区工具
 
-`uiVersion:3` 可声明 `surface:{kind:"tool",tool:"assistant"}`，tool 还可取 network；manifest 对应贡献 `kind:"tool", tool:"assistant", id:"assistant"`。贡献与相同 ID 页面的类型必须匹配，标准视图必须有 WASM 后端；fields 为空、actions 只有 bridge、无 log/initialAction。未知枚举或脚本字段安装时拒绝。UI v3 也兼容原 monitor/operations 标准视图。
+`uiVersion:3` 可声明 `surface:{kind:"tool",tool:"assistant"}`，tool 仅为 assistant；manifest 对应贡献 `kind:"tool", tool:"assistant", id:"assistant"`。贡献与相同 ID 页面的类型必须匹配，标准视图必须有 WASM 后端；fields 为空、actions 只有 bridge、无 log/initialAction。未知枚举或脚本字段安装时拒绝。UI v3 也兼容原 monitor/operations 标准视图。
 
 可信共享组件根据封闭类型选择原有完整页面，注入的业务 API 每次通过实际 WASM 调用；上传包没有专用页面限制或 ID 特判。Host 表单通过主窗口限定 IPC 冻结用户确认的完整输入，Guest 仅看到单次工具票据。分块结果、撤销、重启及来源/权限设置均复用标准机制，详见 [内置插件](BUILTIN_PLUGINS.md)。顶部旧业务工具组已合并；任务中心作为宿主公共入口保留。
 
@@ -49,7 +49,7 @@ manifest.contributions 的每个 id 必须存在对应页面：
 
 | kind       | 入口                                      |
 | ---------- | ----------------------------------------- |
-| workspace  | 工具下拉菜单打开该插件的首选功能页        |
+| workspace  | 主机工具栏按钮打开该插件的首选功能页      |
 | navigation | 功能贡献，可从主机工具/搜索等功能入口打开 |
 | host_menu  | 主机树右键菜单                            |
 | command    | Ctrl+K 全局搜索中的插件命令               |
@@ -81,4 +81,4 @@ SDK 1.1.0 起 uiVersion 可为 2；旧 v1 表单不变。server 贡献需要相�
 
 ## 管理与自身设置入口
 
-管理和全部插件配置统一位于“设置 → 插件管理”，顶部不再提供运维工具模块或插件侧栏；公共任务中心从底部状态栏打开弹窗。可信宿主 PluginPage 提供来源、运行状态、启停、权限和包信息，禁用、未授权或无 UI 包也能进入。功能页“插件设置”打开同一配置标签，始终归属设置并选中插件管理；返回设备标签保留功能页与草稿。只有功能区挂载经过授权的 PluginView；禁用/撤权释放功能与资源，保留自身设置。其他声明页面通过页内选择器访问，管理列表提供安装、升级、详情入口和卸载。终端右上角 SFTP 右侧工具下拉菜单为每个已启用且有功能页面的插件提供一个入口，不再把 workspace 贡献逐项平铺在工具栏。所有插件适用于全部主机，使用当前选中主机；系统预置权限和路径只读，上传权限可编辑。页面铺满可用宽度，安装仍为拖放或文件选择，无手填路径。
+管理和全部插件配置统一位于“设置 → 插件管理”，顶部不再提供运维工具模块或插件侧栏；公共任务中心从底部状态栏打开弹窗。可信宿主 PluginPage 提供来源、运行状态、启停、权限和包信息，禁用、未授权或无 UI 包也能进入。功能页“插件设置”打开同一配置标签，始终归属设置并选中插件管理；返回设备标签保留功能页与草稿。只有功能区挂载经过授权的 PluginView；禁用/撤权释放功能与资源，保留自身设置。其他声明页面通过页内选择器访问，管理列表提供安装、升级、详情入口和卸载。终端右上角 SFTP 右侧平铺显示每个已启用且有功能页面的插件按钮，每个安装身份一项，保留图标并高亮当前插件；不再提供工具下拉菜单。所有插件适用于全部主机，使用当前选中主机；系统预置权限和路径只读，上传权限可编辑。页面铺满可用宽度，安装仍为拖放或文件选择，无手填路径。

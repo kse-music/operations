@@ -16,9 +16,10 @@
     "build": "npm run build -w @serverdeck/desktop",
     "typecheck": "npm run typecheck -w @serverdeck/desktop && npm run typecheck -w @serverdeck/plugin-sdk",
     "test": "npm run test -w @serverdeck/desktop",
+    "test:build": "node --test tools/build-space.test.mjs",
     "test:native": "node tools/native-e2e.mjs",
     "test:terminal": "node tools/native-terminal-e2e.mjs",
-    "lint": "eslint apps/desktop/src apps/desktop/vite.config.ts packages/plugin-sdk/src plugins/system plugins/compat/server/frontend plugins/compat/network/frontend tests/fixtures/plugins/custom-ui/frontend --max-warnings 0",
+    "lint": "eslint apps/desktop/src apps/desktop/vite.config.ts packages/plugin-sdk/src plugins/system plugins/compat/server/frontend tests/fixtures/plugins/custom-ui/frontend --max-warnings 0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "tauri": "node tools/tauri.mjs"

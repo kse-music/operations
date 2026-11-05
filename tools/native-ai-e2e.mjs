@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
+import { navigateWorkspace, bindAssistantModel } from './ui-navigation.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 assert.equal(process.platform, 'win32');
 const output = path.join(root, '.local', 'assistant-hosts', 'native', randomUUID());
@@ -173,7 +174,7 @@ try {
     if (name === '模型 A') {
       mode = 'failure';
       await page.getByRole('button', { name: '测试连接', exact: true }).click();
-      await page.getByRole('alert').filter({ hasText: '模型服务返回错误' }).waitFor();
+      await view.getByRole('alert').filter({ hasText: '模型服务返回错误' }).waitFor();
       assert.equal(
         await page.getByRole('button', { name: '保存模型', exact: true }).isDisabled(),
         true,
@@ -260,12 +261,18 @@ db.close()`,
     await page.getByRole('button', { name: '取消', exact: true }).click();
     modelScreenshots.push(name);
   }
-  await page.locator('[data-module=tools]').click();
-  await page.getByRole('button', { name: 'AI 运维助手', exact: true }).click();
-  const view = page.getByRole('region', { name: 'AI 运维助手', exact: true });
+  await navigateWorkspace(page, 'AI 运维助手');
+  const view = page
+    .frameLocator('.plugin-frame-container:visible iframe')
+    .getByRole('region', { name: 'AI 运维助手', exact: true });
+  async function useBoundModel(id) {
+    await bindAssistantModel(page, id);
+    await navigateWorkspace(page, 'AI 运维助手');
+    await view.waitFor();
+  }
   await view.waitFor();
   assert.equal(await view.locator('input[type=password]').count(), 0);
-  await page.getByLabel('使用模型', { exact: true }).selectOption(a.id);
+  await useBoundModel(a.id);
   const assistantScreenshots = [];
   async function captureAssistant(state) {
     for (const [name, width, height, theme] of [
@@ -294,12 +301,12 @@ db.close()`,
         'no horizontal page overflow',
       );
       const chat = await view.getByRole('region', { name: '对话', exact: true }).boundingBox();
-      const context = await view
-        .getByRole('complementary', { name: '服务器上下文', exact: true })
-        .boundingBox();
-      if (width === 1440)
-        assert(chat.x + chat.width <= context.x, 'desktop context is beside chat');
-      else assert(context.y >= chat.y + chat.height, 'small layout has chat before context');
+      assert.equal(
+        await view.getByRole('complementary', { name: '服务器上下文', exact: true }).count(),
+        0,
+      );
+      const workspace = await view.locator('.ai-workspace').boundingBox();
+      assert(Math.abs(chat.width - workspace.width) < 2, 'chat fills the workspace');
       const action = await view.getByRole('button', { name: '发送', exact: true }).boundingBox();
       assert(action.y + action.height <= height - 28, 'send action fits in the first viewport');
       assistantScreenshots.push(`${state}-${name}`);
@@ -307,16 +314,16 @@ db.close()`,
   }
   await captureAssistant('empty');
   assert.equal(await page.getByLabel('当前服务器', { exact: true }).count(), 0);
-  assert.match(await view.textContent(), /已关联全部 0 台资产/);
-  for (const label of ['服务器信息', '当前监控指标', '进程状态', 'Docker 容器状态'])
-    assert.equal(await page.getByLabel(label, { exact: true }).isChecked(), false);
+  assert.equal(await view.locator('[aria-controls="assistant-context"]').count(), 0);
+  assert.equal(await view.locator('input[type=checkbox], .ai-model-bar, select').count(), 0);
   assert.equal(await page.getByRole('button', { name: '批准发送', exact: true }).count(), 0);
   assert.equal(await page.getByRole('region', { name: '发送预览', exact: true }).count(), 0);
   assert.equal(calls, 0);
-  await page.getByLabel('使用模型', { exact: true }).selectOption(b.id);
-  await page.getByLabel('问题', { exact: true }).fill('协议测试，password=must-not-transmit');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await useBoundModel(b.id);
+  await view.getByLabel('问题', { exact: true }).fill('协议测试，password=must-not-transmit');
+  await view.getByRole('button', { name: '发送', exact: true }).click();
   await view.locator('.ai-markdown').waitFor();
+  assert.equal(await page.getByRole('dialog').count(), 0, 'chat sends without a popup');
   assert.equal(calls, 1, 'one click makes one model call without a second approval');
   assert.equal(await view.locator('script,img,iframe').count(), 0);
   assert.match(await view.textContent(), /<script>untrusted\(\)<\/script>/);
@@ -326,28 +333,28 @@ db.close()`,
   assert.equal(await view.locator('a[href^="javascript:"]').count(), 0);
   assert.equal(await page.getByRole('button', { name: '审核此命令', exact: true }).count(), 0);
   await captureAssistant('answer');
-  await page.getByLabel('问题', { exact: true }).fill('请继续解释刚才的建议');
-  await page.getByLabel('问题', { exact: true }).press('Enter');
-  await page.waitForFunction(() => document.querySelectorAll('.ai-markdown').length === 2);
+  await view.getByLabel('问题', { exact: true }).fill('请继续解释刚才的建议');
+  await view.getByLabel('问题', { exact: true }).press('Enter');
+  await view.locator('.ai-markdown').nth(1).waitFor();
   assert.equal(calls, 2);
   assert.equal(requestedHistories[1].length, 2);
   assert.equal(requestedHistories[1][0].role, 'user');
   assert.equal(requestedHistories[1][1].role, 'assistant');
   assert(!JSON.stringify(requestedHistories[1]).includes('must-not-transmit'));
   await captureAssistant('followup');
-  await page.getByLabel('使用模型', { exact: true }).selectOption(a.id);
+  await useBoundModel(a.id);
   assert.equal(await view.locator('.ai-chat-turn').count(), 0);
-  await page.getByLabel('问题', { exact: true }).fill('新模型测试');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
+  await view.getByLabel('问题', { exact: true }).fill('新模型测试');
+  await view.getByRole('button', { name: '发送', exact: true }).click();
   await view.locator('.ai-markdown').waitFor();
   assert.equal(calls, 3);
   assert.equal(requestedHistories[2].length, 0, 'model switch clears prior conversation');
   assert.deepEqual(requestedModels, ['fixture-other', 'fixture-other', 'fixture-model']);
   const screenshots = assistantScreenshots;
   mode = 'failure';
-  await page.getByLabel('问题', { exact: true }).fill('服务失败测试');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: '模型服务返回错误' }).waitFor();
+  await view.getByLabel('问题', { exact: true }).fill('服务失败测试');
+  await view.getByRole('button', { name: '发送', exact: true }).click();
+  await view.getByRole('alert').filter({ hasText: '模型服务返回错误' }).waitFor();
   assert.equal(calls, 4);
   await captureAssistant('error');
   assert.equal((await rpc('host_list')).hosts.length, 0);
@@ -386,15 +393,15 @@ db.close()`,
   await fixtureHost('自动匹配未命中夹具', unrelatedServer.address().port);
   mode = 'success';
   routeTargetId = failedHost.id;
-  await page.getByLabel('问题', { exact: true }).fill('检查自动匹配故障夹具的状态');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
-  await page.getByRole('alert').filter({ hasText: '命中主机「自动匹配故障夹具」' }).waitFor();
+  await view.getByLabel('问题', { exact: true }).fill('检查自动匹配故障夹具的状态');
+  await view.getByRole('button', { name: '发送', exact: true }).click();
+  await view.getByRole('alert').filter({ hasText: '命中主机「自动匹配故障夹具」' }).waitFor();
   assert.equal(calls, 4, 'connection failure prevents a diagnosis request');
   assert.equal(routeCalls, 0, 'explicit name resolves locally');
   assert.equal(unrelatedAttempts, 0, 'unmatched host is never connected');
-  await page.getByLabel('问题', { exact: true }).fill('排查生产服务异常');
-  await page.getByRole('button', { name: '发送', exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll('.ai-chat-error').length === 3);
+  await view.getByLabel('问题', { exact: true }).fill('排查生产服务异常');
+  await view.getByRole('button', { name: '发送', exact: true }).click();
+  await view.locator('.ai-chat-error').nth(2).waitFor();
   assert.equal(routeCalls, 1, 'semantic fallback uses the real model protocol');
   assert.equal(calls, 4);
   assert.equal(unrelatedAttempts, 0);

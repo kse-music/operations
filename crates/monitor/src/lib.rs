@@ -54,6 +54,31 @@ pub struct Monitors {
 }
 
 impl Monitors {
+    /// Bounded one-shot sampling on an existing verified operations connection.
+    pub async fn sample_once(&self, id: &str, cancel: &CancellationToken) -> Result<Sample, Error> {
+        let mut processor = parse::Processor::default();
+        let mut sample = None;
+        // CPU usage and network rates require two readings from the same transport.
+        for reading in 0..2 {
+            if reading == 1 {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(250)) => (),
+                    _ = cancel.cancelled() => return Err(Error::ShuttingDown),
+                }
+            }
+            let bytes = self.engine.collect_ops_monitor(id, cancel).await?;
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| failure("MONITOR_CLOCK", "本地时钟无效"))?
+                .as_millis() as u64;
+            sample = Some(
+                processor
+                    .ingest(&bytes, now)
+                    .map_err(|_| failure("MONITOR_FORMAT", "监控响应不完整或格式不兼容"))?,
+            );
+        }
+        sample.ok_or_else(|| failure("MONITOR_FORMAT", "监控响应为空"))
+    }
     pub fn new(engine: Engine) -> Self {
         Self {
             engine,

@@ -1,5 +1,7 @@
 # 本地插件包 v1
 
+当前 Host/Rust/Vue SDK 为 3.0.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；旧包处理见[版本策略](PLUGIN_API_VERSIONING.md#300移除网络诊断)。下述版本号同时记录字段首次引入的最低宿主版本。
+
 ## UI v4 前端入口（Host API 1.4.0）
 
 包格式仍为 1。`entry.ui` 仍指向严格 JSON，不接收包内 HTML。`uiVersion:4` 必须声明 `frontend:{"script":"frontend.js","style":"frontend.css"}`，二者必须是包内真实普通文件，进入 files 的长度/SHA256 校验和现有单文件/总量上限。入口仅允许最长 80 字节的平面 ASCII 文件名，分别以 `.js`/`.css` 结束，不允许点开头、`..`、路径、URL 或额外资源入口。
@@ -17,15 +19,15 @@
 }
 ```
 
-以上仅展示新增字段，其他必填字段继续保留。图标无需额外权限或资源文件。系统和上传插件共用此配置，主机工具菜单、设置中的管理列表、插件页面及安装预览统一显示，不再提供独立插件侧栏。省略或设为 null 时使用默认 `boxes` 图标；符合名称格式但宿主尚不支持的图标名也回退默认。旧版已安装系统插件缺少字段时，从当前分发清单读取图标，仅用于显示，不改写包、摘要、安装代、启停或授权；上传插件不继承同 ID 系统插件的图标。
+以上仅展示新增字段，其他必填字段继续保留。图标无需额外权限或资源文件。系统和上传插件共用此配置，主机工具栏、设置中的管理列表、插件页面及安装预览统一显示，不再提供独立插件侧栏。省略或设为 null 时使用默认 `boxes` 图标；符合名称格式但宿主尚不支持的图标名也回退默认。旧版已安装系统插件缺少字段时，从当前分发清单读取图标，仅用于显示，不改写包、摘要、安装代、启停或授权；上传插件不继承同 ID 系统插件的图标。
 
 名称最多 64 字节，使用小写字母、数字和单个连字符分隔，首字符为字母。空串、路径、URL、标记文本及其他类型无效。当前支持：`activity`、`archive`、`bot`、`boxes`、`calendar-clock`、`chart-no-axes-combined`、`cloud`、`code`、`container`、`cpu`、`database`、`file-text`、`folder`、`globe`、`hard-drive`、`layers`、`list-tree`、`network`、`radio`、`rocket`、`scroll-text`、`search`、`server`、`settings-2`、`shield`、`terminal`、`wrench`。这些名称对应宿主静态内置的 Lucide 图标，大小与颜色随界面统一控制。
 
 使用 icon 的新包应声明 `apiVersion: "^1.3.0"`，避免将含新字段的包分发给严格拒绝未知字段的旧宿主。formatVersion/schemaVersion 仍为 1，SDK 1.2.0 与 WASM ABI、UI v1/v2/v3 不变；旧包无需补 icon。
 
-## SDK 1.2 工具贡献
+## SDK 3.0 工具贡献
 
-formatVersion/schemaVersion 仍为 1。使用工具的新包声明 apiVersion ^2.0.0、uiVersion 3；贡献 kind=tool 且 tool 为 assistant/network 之一，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
+formatVersion/schemaVersion 仍为 1。使用工具的新包声明 apiVersion ^3.0.0、uiVersion 3 或 4；贡献 kind=tool 且 tool 仅为 assistant，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
 
 13A-1 使用 `.sdplugin`，UTF-8 JSON：`{formatVersion: 1, manifest, files: [{path, content}]}`。content 为严格标准 base64，不压缩，不支持链接、设备文件或权限位。源码目录使用 `manifest.json`；打包器将其嵌入 manifest 字段并生成 files 校验清单。不得当作 ZIP 解包。
 

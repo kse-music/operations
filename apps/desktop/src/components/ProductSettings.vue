@@ -139,9 +139,7 @@ useErrorNotifications(error);
       的代理连接本身不使用 TLS。
     </p>
     <h3>全局快捷键</h3>
-    <label
-      v-for="(title, key) in { search: '全局搜索', settings: '打开设置', tasks: '任务中心' }"
-      :key="key"
+    <label v-for="(title, key) in { search: '全局搜索', settings: '打开设置' }" :key="key"
       >{{ title
       }}<input
         :value="model.shortcuts[key]"

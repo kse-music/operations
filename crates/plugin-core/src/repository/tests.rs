@@ -461,7 +461,7 @@ fn rejects_paths_aliases_duplicate_files_and_file_directory_conflicts() {
 
 #[test]
 fn rejects_incompatible_versions_permissions_unknown_fields_links_and_corruption() {
-    for api in ["^3.0", "not a range"] {
+    for api in ["^99.0", "not a range"] {
         let mut p = package("1.0.0");
         p.manifest.api_version = api.into();
         assert!(validate(&p).is_err());
@@ -976,4 +976,53 @@ fn merged_system_records_are_archived_but_uploaded_identities_and_settings_stay_
         );
     }
     assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 2);
+}
+
+#[test]
+fn removed_network_uploads_are_inactive_and_new_packages_cannot_reintroduce_the_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("plugins");
+    let repo = Repository::open(root.clone()).unwrap();
+    let retained = repo
+        .install(input(&save(dir.path(), &package("1.0.0")), None))
+        .unwrap();
+    let mut old: Value =
+        serde_json::from_slice(&fs::read(root.join("packages/dev.example/record.json")).unwrap())
+            .unwrap();
+    let id = "dev.removed-network";
+    old["current"]["manifest"]["id"] = serde_json::json!(id);
+    old["current"]["manifest"]["permissions"] = serde_json::json!(["network.run"]);
+    old["current"]["enabled"] = serde_json::json!(true);
+    let folder = root.join("packages").join(id);
+    fs::create_dir(&folder).unwrap();
+    let original = serde_json::to_vec(&old).unwrap();
+    fs::write(folder.join("record.json"), &original).unwrap();
+    let data = root.join("data").join(id);
+    fs::create_dir(&data).unwrap();
+    fs::write(data.join("settings.json"), b"keep user settings").unwrap();
+    let repo = Repository::open(root.clone()).unwrap();
+    assert_eq!(repo.list().unwrap().len(), 1);
+    assert_eq!(
+        repo.detail(&retained.manifest.id).unwrap().revision,
+        retained.revision
+    );
+    assert!(matches!(repo.detail(id), Err(Error::NotFound)));
+    assert_eq!(
+        fs::read(data.join("settings.json")).unwrap(),
+        b"keep user settings"
+    );
+    let archived = fs::read_dir(root.join("retired"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert_eq!(fs::read(archived.join("record.json")).unwrap(), original);
+    let mut invalid = serde_json::to_value(package("1.0.0")).unwrap();
+    invalid["manifest"]["permissions"] = serde_json::json!(["network.run"]);
+    assert!(
+        Package::validate_bytes(&serde_json::to_vec(&invalid).unwrap(), std::env::consts::OS)
+            .is_err()
+    );
+    assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 1);
 }

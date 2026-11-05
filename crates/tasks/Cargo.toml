@@ -11,14 +11,10 @@ serverdeck-ssh.workspace = true
 tokio.workspace = true
 tokio-util = { version = "0.7", features = ["rt"] }
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
-uuid.workspace = true
 zeroize.workspace = true
-tracing.workspace = true
-
-[target.'cfg(windows)'.dependencies]
-encoding_rs = "0.8.35"
 
 [dev-dependencies]
+uuid.workspace = true
 serverdeck-storage.workspace = true
 tempfile.workspace = true
 rand = "0.10"

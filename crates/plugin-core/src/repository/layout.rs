@@ -15,7 +15,7 @@ impl Repository {
             if !path.try_exists().map_err(io)? {
                 continue;
             }
-            let record: serde_json::Value =
+            let mut record: serde_json::Value =
                 serde_json::from_slice(&read_bounded(&path, 128 * 1024)?)
                     .map_err(|e| Error::Storage(Box::new(e)))?;
             let merged_system = record["current"]["source"] == "system"
@@ -30,8 +30,52 @@ impl Repository {
                         Some("resources" | "processes" | "logs" | "network")
                     )
                 });
+            let has_network = |plugin: &serde_json::Value| {
+                plugin["manifest"]["permissions"]
+                    .as_array()
+                    .is_some_and(|permissions| {
+                        permissions
+                            .iter()
+                            .any(|permission| permission == "network.run")
+                    })
+                    || plugin["manifest"]["contributions"]
+                        .as_array()
+                        .is_some_and(|entries| {
+                            entries.iter().any(|entry| entry["tool"] == "network")
+                        })
+            };
+            let system_services = record["current"]["source"] == "system"
+                && (id == "cn.hiboot.plugins.services"
+                    || id
+                        == format!(
+                            "{}services",
+                            serverdeck_core::identity::LEGACY_PLUGIN_PREFIX
+                        ));
+            if (system_services && has_network(&record["current"]))
+                || has_network(&record["backup"])
+            {
+                // Keep the exact old record before narrowing an obsolete system permission.
+                // Startup provisioning must replace its package before any runtime is exposed.
+                let archive = self
+                    .root
+                    .join("retired")
+                    .join(format!("{id}-contract-{}", uuid::Uuid::new_v4()));
+                ensure_directory(&archive)?;
+                write_json(&archive.join("record.json"), &record)?;
+                if system_services
+                    && let Some(permissions) =
+                        record["current"]["manifest"]["permissions"].as_array_mut()
+                {
+                    permissions.retain(|permission| permission != "network.run");
+                }
+                if has_network(&record["backup"]) {
+                    record["backup"] = serde_json::Value::Null;
+                }
+                write_json(&path, &record)?;
+            }
             let removed = merged_system
                 || crate::manifest::is_removed_tool_id(&id)
+                || (!system_services && has_network(&record["current"]))
                 || ["current", "backup"].iter().any(|key| {
                     record[key]["manifest"]["permissions"]
                         .as_array()

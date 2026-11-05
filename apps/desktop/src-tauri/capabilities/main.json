@@ -54,6 +54,7 @@
     "allow-files-pick",
     "allow-transfer-start",
     "allow-transfer-list",
+    "allow-transfer-clear-host",
     "allow-transfer-cancel",
     "allow-transfer-retry",
     "allow-text-read",
@@ -109,9 +110,6 @@
     "allow-ops-log-ack",
     "allow-ops-log-close",
     "allow-ops-container-shell",
-    "allow-ops-connections",
-    "allow-diagnostic-start",
-    "allow-diagnostic-list",
-    "allow-diagnostic-cancel"
+    "allow-ops-connections"
   ]
 }

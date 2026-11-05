@@ -41,6 +41,7 @@ export const filesApi = {
   pick: (kind: 'files' | 'folder') => call<string[]>('files_pick', { kind }),
   start: (input: TransferInput) => call<TransferInfo>('transfer_start', { input }),
   tasks: () => call<TransferInfo[]>('transfer_list'),
+  clearTransfers: (hostId: string) => call<void>('transfer_clear_host', { hostId }),
   cancel: (id: string) => call<void>('transfer_cancel', { id }),
   retry: (id: string, sessionId: string, conflict: ConflictPolicy, confirmed: boolean) =>
     call<TransferInfo>('transfer_retry', { id, sessionId, conflict, confirmed }),

@@ -8,7 +8,7 @@ export async function togglePlugin(plugin: InstalledPlugin): Promise<boolean> {
     plugin.enabled &&
     !(await plugins.ask(
       '禁用插件？',
-      '将停止插件调用并放弃未保存的插件编辑。已提交的网络诊断任务继续由任务中心管理，已打开的终端不受影响。',
+      '将停止插件调用并放弃未保存的插件编辑。已打开的终端不受影响。',
     ))
   )
     return false;

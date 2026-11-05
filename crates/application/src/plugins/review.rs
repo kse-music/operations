@@ -1,6 +1,11 @@
 use super::{tools::ToolInput, *};
 use serde::Serialize;
 use serde_json::{Value, json};
+use serverdeck_plugin_core::{InstalledPlugin, repository::PluginSource};
+
+pub(super) fn builtin_assistant(plugin: &InstalledPlugin) -> bool {
+    plugin.source == PluginSource::System && plugin.manifest.id == "cn.hiboot.plugins.assistant"
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -36,8 +41,16 @@ impl Application {
         &self,
         input: &ToolInput,
         mut raw: Value,
-        name: &str,
+        plugin: &InstalledPlugin,
     ) -> Result<Option<ToolReview>, Error> {
+        if builtin_assistant(plugin)
+            && matches!(
+                input,
+                ToolInput::AiResolveHosts { .. } | ToolInput::AiSend { .. }
+            )
+        {
+            return Ok(None);
+        }
         redacted(&mut raw);
         let mut confirmation_text = None;
         let details = match input {
@@ -57,7 +70,7 @@ impl Application {
         let message =
             serde_json::to_string_pretty(&details).map_err(|e| Error::Worker(Box::new(e)))?;
         Ok(Some(ToolReview {
-            title: format!("确认插件操作 · {name}"),
+            title: format!("确认插件操作 · {}", plugin.manifest.name),
             message,
             confirmation_text,
         }))

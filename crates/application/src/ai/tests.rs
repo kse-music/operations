@@ -38,7 +38,7 @@ impl SecretStore for Store {
         Ok(())
     }
 }
-fn input(id: &str, question: &str) -> PrepareInput {
+pub(super) fn input(id: &str, question: &str) -> PrepareInput {
     PrepareInput {
         model_id: id.into(),
         session_id: None,

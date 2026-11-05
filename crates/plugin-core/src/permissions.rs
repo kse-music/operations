@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 
 pub const OPERATIONS: &[&str] = &[
     "assistant.use",
-    "network.run",
     "metrics.read",
     "system.read",
     "system.manage",

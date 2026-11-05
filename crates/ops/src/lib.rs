@@ -69,8 +69,17 @@ impl Operations {
             follow: false,
         }
         .command()?;
+        self.read_log_excerpt(id, &command).await
+    }
+    /// Fixed, bounded system journal snapshot for the built-in assistant.
+    pub async fn system_log_excerpt(&self, id: &str) -> Result<Response, Error> {
+        let command =
+            format!("{PRELUDE}exec journalctl --system --no-pager --quiet -n 100 -o short-iso");
+        self.read_log_excerpt(id, &command).await
+    }
+    async fn read_log_excerpt(&self, id: &str, command: &str) -> Result<Response, Error> {
         let _slot = self.slots.try_acquire().map_err(|_| Error::Busy)?;
-        let output = self.execute(id, &command).await?;
+        let output = self.execute(id, command).await?;
         if output.status != Some(0) {
             return Err(error(
                 "AI_LOG_FAILED",

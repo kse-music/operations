@@ -64,7 +64,6 @@ const active = ref(true);
 const events = {
   files: vi.fn(),
   server: vi.fn(),
-  network: vi.fn(),
   close: vi.fn(),
 };
 const PaneHarness = {
@@ -74,7 +73,6 @@ const PaneHarness = {
       active: active.value,
       onFiles: events.files,
       onServer: events.server,
-      onNetwork: events.network,
       onClose: events.close,
     }),
 };
@@ -280,8 +278,8 @@ it('routes remote menu actions to the same host, working directory and pane', as
   forwardDialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await nextTick();
   tab.state = 'failed';
-  await menuAction('诊断连接异常');
-  expect(events.network).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: host.id }));
+  await nextTick();
+  expect(root.textContent).not.toContain('诊断连接异常');
 });
 
 it('opens an idle SSH pane once after an explicit connection request and keeps trust confirmation', async () => {

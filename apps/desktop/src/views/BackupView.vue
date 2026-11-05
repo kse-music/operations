@@ -2,7 +2,7 @@
 import { useErrorNotifications } from '../composables/error-notifications';
 import { ref, shallowRef, watch } from 'vue';
 import { productApi } from '../services/product';
-import { downloadResult } from '../services/tasks';
+import { downloadResult } from '../services/download';
 import { errorMessage } from '../services/ipc';
 import { useHostsStore } from '../stores/hosts';
 import { useApplicationStore } from '../stores/application';

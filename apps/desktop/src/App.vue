@@ -17,7 +17,7 @@ import AppNavigation from './components/AppNavigation.vue';
 import AppModules from './components/AppModules.vue';
 import type { NavigationModule } from './types/navigation';
 import HostTools from './components/HostTools.vue';
-import { ListChecks, Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
+import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
@@ -54,18 +54,14 @@ const PluginsView = defineAsyncComponent(() => import('./views/PluginsView.vue')
 const PluginPage = defineAsyncComponent(() => import('./views/PluginPage.vue'));
 const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
 const plugins = usePluginsStore();
-const TaskCenterView = defineAsyncComponent(() => import('./views/TaskCenterView.vue'));
 const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
 const ModelsView = defineAsyncComponent(() => import('./views/ModelsView.vue'));
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
   background = useBackgroundStore(),
   operations = useOpsStore();
-const searching = ref(false),
-  taskPanel = ref(false),
-  taskTrigger = ref<HTMLButtonElement | null>(null),
-  networkHost = ref(''),
-  networkRequest = ref(0);
+const searching = ref(false);
+
 const currentHostId = computed(() => workspace.hostId);
 const pluginTarget = ref<{ id: string; contribution: string } | null>(null);
 function knownHost(id: string) {
@@ -161,14 +157,6 @@ function navigate(
 }
 function fromSearch(value: View, hostId = currentHostId.value) {
   navigate(value, hostId);
-}
-function fromTaskCenter(value: View, hostId = currentHostId.value) {
-  taskPanel.value = false;
-  navigate(value, hostId);
-}
-function closeTaskCenter() {
-  taskPanel.value = false;
-  void nextTick(() => taskTrigger.value?.focus({ preventScroll: true }));
 }
 function setContext(hostId: string, connectShell = false) {
   const existing = workspace.tabs.some((tab) => isHostTab(tab) && tab.hostId === hostId);
@@ -306,13 +294,12 @@ function globalShortcut(event: KeyboardEvent) {
   if (!key) return;
   const action = Object.entries(
     application.state?.config.product?.shortcuts ?? defaultShortcuts,
-  ).find(([, v]) => v === key)?.[0];
+  ).find(([action, v]) => ['search', 'settings'].includes(action) && v === key)?.[0];
   if (!action) return;
   event.preventDefault();
   event.stopPropagation();
   if (action === 'search') searching.value = true;
   else if (action === 'settings') navigate('settings');
-  else if (action === 'tasks') taskPanel.value = true;
 }
 const sidebarDraft = ref<number | null>(null);
 const sidebarOpen = ref(!window.matchMedia('(max-width: 720px)').matches);
@@ -372,12 +359,6 @@ function currentConfiguration(host: Host): boolean {
     return false;
   }
   return true;
-}
-function openNetwork(host: Host): void {
-  if (!currentConfiguration(host)) return;
-  networkHost.value = host.id;
-  networkRequest.value++;
-  navigate('network');
 }
 const ServerView = defineAsyncComponent(() => import('./views/ServerView.vue'));
 function openServer(host: Host): void {
@@ -699,18 +680,23 @@ watch(
             class="tab-close"
             :disabled="workspace.closing.includes(tab.key)"
             :aria-label="`关闭工作区标签 ${tabName(tab)}`"
-            :title="isHostTab(tab) ? '关闭该设备的全部终端会话及分屏' : '关闭此页面'"
+            :title="isHostTab(tab) ? '关闭该设备的连接和临时传输记录' : '关闭此页面'"
             @click="workspace.close(tab.key)"
           >
             <X :size="14" aria-hidden="true" />
           </button>
         </div>
       </div>
-      <div v-show="isHostWorkspace" class="workspace-header">
+      <div
+        v-show="isHostWorkspace"
+        class="workspace-header"
+        :inert="workspace.closing.includes(workspace.active)"
+      >
         <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
         <HostTools
           v-if="isHostWorkspace && view && currentHostId"
           :active="view"
+          :active-plugin="workspace.current?.pluginId"
           :local="false"
           @navigate="navigate($event)"
           @plugin="openPlugin"
@@ -725,6 +711,8 @@ watch(
         v-show="view !== 'terminals'"
         class="content-scroll"
         :class="{ 'plugin-frame-workspace': view === 'extension' }"
+        :inert="workspace.closing.includes(workspace.active)"
+        :aria-busy="workspace.closing.includes(workspace.active)"
       >
         <section v-if="view === null" class="workspace-empty" aria-label="欢迎页面">
           <h1>欢迎使用 ServerDeck</h1>
@@ -738,17 +726,16 @@ watch(
           v-for="page in cachedPluginPages"
           v-show="workspace.activePluginKey === page.key"
           :key="page.key"
-          :active="workspace.activePluginKey === page.key"
+          :active="
+            workspace.activePluginKey === page.key &&
+            !workspace.closing.includes(page.hostId ? `host:${page.hostId}` : page.key)
+          "
           :plugin-id="page.pluginId!"
           :contribution-id="page.contributionId!"
           :host-id="page.hostId"
           :tab-key="page.key"
           :initial-section="page.section"
           :log-intent="page.logIntent"
-          :tool-intent="{
-            networkHost: page.hostId || networkHost,
-            networkRequest,
-          }"
           @settings="workspace.openPluginSettings(page.pluginId!)"
           @contribution="(contribution) => openPlugin(page.pluginId!, contribution, page.hostId)"
           @section="
@@ -792,7 +779,11 @@ watch(
           @category="(id) => navigate(settingsCategories.find((item) => item.id === id)!.view)"
         />
       </div>
-      <div v-show="view === 'terminals'" class="terminal-workspace">
+      <div
+        v-show="view === 'terminals'"
+        class="terminal-workspace"
+        :inert="workspace.closing.includes(workspace.active)"
+      >
         <div class="terminal-primary">
           <TerminalsView
             v-if="view === 'terminals' || terminals.tabs.length"
@@ -801,21 +792,11 @@ watch(
             toolbar-target="#terminal-session-tools"
             @files="openFiles"
             @server="openServer"
-            @network="openNetwork"
           />
         </div>
       </div>
     </main>
     <footer class="statusbar">
-      <button
-        ref="taskTrigger"
-        class="text-button task-center-trigger"
-        aria-label="任务中心"
-        aria-haspopup="dialog"
-        @click="taskPanel = true"
-      >
-        <ListChecks :size="14" aria-hidden="true" />任务中心
-      </button>
       <span
         ><span :class="['status-dot', { offline: !application.ready }]"></span
         >{{
@@ -847,16 +828,12 @@ watch(
     </div>
   </Modal>
   <PluginDialogs />
-  <Modal v-if="taskPanel" title="任务中心" wide @close="closeTaskCenter">
-    <TaskCenterView @navigate="fromTaskCenter" />
-  </Modal>
   <GlobalSearch
     v-if="searching"
     @close="searching = false"
     @navigate="fromSearch"
     @select-host="setContext"
     @plugin="openPlugin"
-    @tasks="taskPanel = true"
   />
   <RemoteEditor v-if="files.document" />
   <Modal

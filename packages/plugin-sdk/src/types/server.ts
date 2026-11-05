@@ -7,12 +7,11 @@ export const serverSections = [
   { key: 'processes', label: '进程' },
   { key: 'ports', label: '监听端口' },
   { key: 'services', label: 'systemd 服务' },
-  { key: 'diagnostics', label: '网络诊断' },
   { key: 'logs', label: '日志' },
 ] as const;
 export type ServerSection = (typeof serverSections)[number]['key'];
 export type MonitorSection = 'overview' | 'disks' | 'network';
-export type OperationsSection = Exclude<ServerSection, MonitorSection | 'diagnostics'>;
+export type OperationsSection = Exclude<ServerSection, MonitorSection>;
 export function isMonitorSection(section: ServerSection): section is MonitorSection {
   return section === 'overview' || section === 'disks' || section === 'network';
 }

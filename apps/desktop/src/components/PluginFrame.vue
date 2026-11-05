@@ -11,7 +11,7 @@ import { useNotificationsStore } from '../stores/notifications';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
 import { errorMessage } from '../services/ipc';
-import type { PluginUiPage, PluginToolIntent } from '../types/plugins';
+import type { PluginUiPage } from '../types/plugins';
 import type { ServerSection } from '../types/server';
 import type { LogInput, ContainerShell } from '../types/ops';
 import type { Host } from '../types/hosts';
@@ -23,7 +23,6 @@ const props = withDefaults(
     page: PluginUiPage;
     initialSection?: ServerSection;
     logIntent?: { input: LogInput; title: string; sequence: number };
-    toolIntent?: PluginToolIntent;
     active?: boolean;
     contextKey?: string;
   }>(),
@@ -32,7 +31,6 @@ const props = withDefaults(
     contextKey: '',
     initialSection: undefined,
     logIntent: undefined,
-    toolIntent: undefined,
   },
 );
 const emit = defineEmits<{
@@ -103,13 +101,6 @@ function context() {
             initialTab: props.initialSection,
             logIntent: props.logIntent,
             page: props.page,
-            requestId: props.toolIntent?.networkRequest,
-            ...(!props.hostId &&
-            props.page.surface?.kind === 'tool' &&
-            props.page.surface.tool === 'network' &&
-            props.toolIntent?.networkHost
-              ? { hostId: props.toolIntent.networkHost }
-              : {}),
           },
         }),
       ),
@@ -258,7 +249,7 @@ watch(
     application.state?.config.monitorIntervalSecs,
     props.initialSection,
     props.logIntent,
-    props.toolIntent,
+    props.page,
   ],
   context,
   { deep: true },

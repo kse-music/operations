@@ -20,6 +20,7 @@ import { pluginsApi } from './services/plugins';
 import { usePluginsStore } from './stores/plugins';
 import { systemPluginFixtures, toolPluginState } from './services/system-plugins.fixture';
 import { aiApi } from './services/ai';
+import type { TransferInfo } from './types/files';
 
 // Exercise the shell and both tab bars without xterm's browser canvas or a remote connection.
 vi.mock('./components/TerminalPane.vue', () => ({ default: { render: () => null } }));
@@ -29,36 +30,8 @@ vi.mock('@serverdeck/plugin-sdk/stores/hosts', async () => import('./stores/host
 vi.mock('@serverdeck/plugin-sdk/stores/ops', async () => import('./stores/ops'));
 vi.mock('@serverdeck/plugin-sdk/stores/files', async () => import('./stores/files'));
 vi.mock('@serverdeck/plugin-sdk/stores/models', async () => import('./stores/models'));
-vi.mock('@serverdeck/plugin-sdk/services/tasks', async () => import('./services/tasks'));
 vi.mock('@serverdeck/plugin-sdk/services/ai', async () => import('./services/ai'));
-vi.mock('./components/PluginFrame.vue', async () => {
-  const { defineComponent, h } = await import('vue');
-  const network = (
-    await import('../../../plugins/system/services/frontend/network/NetworkView.vue')
-  ).default;
-  return {
-    default: defineComponent({
-      props: {
-        page: { type: Object, required: true },
-        toolIntent: { type: Object, default: undefined },
-        initialSection: { type: String, default: undefined },
-        hostId: { type: String, default: '' },
-      },
-      setup(props) {
-        return () => {
-          const tool = props.page.surface?.tool;
-          return tool === 'network' || props.initialSection === 'diagnostics'
-            ? h(network, {
-                hostId: props.hostId || props.toolIntent?.networkHost,
-                boundHostId: props.hostId,
-                requestId: props.toolIntent?.networkRequest,
-              })
-            : h('div');
-        };
-      },
-    }),
-  };
-});
+vi.mock('./components/PluginFrame.vue', () => ({ default: { render: () => null } }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 let app: App | undefined, pinia: Pinia, root: HTMLDivElement;
 const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
@@ -78,19 +51,6 @@ async function openPluginSettings(name: string): Promise<void> {
   [...root.querySelectorAll<HTMLButtonElement>('.plugin-name-button')]
     .find((button) => button.textContent?.trim() === name)!
     .click();
-  await flush();
-}
-async function openGlobalTool(name: string): Promise<void> {
-  const plugin = usePluginsStore().installed.find(
-    (plugin) => plugin.manifest.name === (name === '网络诊断' ? '系统服务' : name),
-  )!;
-  const entry = plugin.manifest.contributions.find((entry) => entry.kind !== 'settings')!;
-  await useWorkspaceStore().openPlugin(
-    plugin.manifest.id,
-    entry.id,
-    '',
-    name === '网络诊断' ? 'diagnostics' : undefined,
-  );
   await flush();
 }
 async function sessionAction(index: number, label: string): Promise<void> {
@@ -150,6 +110,10 @@ beforeEach(async () => {
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'ui').mockImplementation(async (id) => pluginState.schemas[id]!.ui);
   vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'close').mockResolvedValue();
+  vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
   vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
   vi.spyOn(aiApi, 'models').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'toolStage').mockImplementation(async (_id, input) => ({
@@ -537,47 +501,7 @@ it('removes the host management page and keeps creation available in the workspa
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
 
-it('opens the task center from the footer without changing the workspace or terminal', async () => {
-  const terminals = useTerminalsStore();
-  terminals.open(useHostsStore().catalog!.hosts[0]!);
-  terminals.update(terminals.focused, { state: 'connected', sessionId: 'live-shell' });
-  useWorkspaceStore().navigate('terminals', 'a');
-  useBackgroundStore().connections = [];
-  const original = JSON.stringify(terminals.tabs);
-  const workspace = useWorkspaceStore();
-  const originalTabs = JSON.stringify(workspace.tabs);
-  const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
-  root.querySelector<HTMLButtonElement>('.module-navigation [data-module="assets"]')!.click();
-  await flush();
-  expect(root.querySelector('.activity-rail [aria-label="任务中心"]')).toBeNull();
-  const open = root.querySelector<HTMLButtonElement>('.statusbar [aria-label="任务中心"]');
-  expect(open).not.toBeNull();
-  open!.click();
-  await flush();
-  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="任务中心"]')!;
-  expect(dialog.open).toBe(true);
-  expect(dialog.textContent).toContain('没有传输任务');
-  expect(dialog.textContent).toContain('没有网络诊断任务');
-  open!.click();
-  await flush();
-  expect(document.querySelectorAll('dialog[aria-label="任务中心"]')).toHaveLength(1);
-  expect(JSON.stringify(workspace.tabs)).toBe(originalTabs);
-  expect(workspace.current?.key).toBe('host:a');
-  expect(workspace.module).toBe('assets');
-  dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
-  await flush();
-  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
-  expect(document.activeElement).toBe(open);
-  open!.click();
-  await flush();
-  document.querySelector('dialog[aria-label="任务中心"]')!.dispatchEvent(new Event('cancel'));
-  await flush();
-  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
-  expect(JSON.stringify(terminals.tabs)).toBe(original);
-  expect(close).not.toHaveBeenCalled();
-});
-
-it('uses the configured task shortcut and search to open one task dialog while preserving the current page', async () => {
+it('removes the task center from the footer, search and legacy shortcuts without changing the terminal', async () => {
   app!.unmount();
   loadSidebarConfig();
   useApplicationStore().state!.config.product.shortcuts.tasks = 'Ctrl+Shift+U';
@@ -590,65 +514,109 @@ it('uses the configured task shortcut and search to open one task dialog while p
   root.querySelector<HTMLButtonElement>('[aria-label="本地终端"]')!.click();
   await flush();
   const original = JSON.stringify(useTerminalsStore().tabs);
-  for (let index = 0; index < 2; index++) {
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'U',
-        ctrlKey: true,
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    await flush();
-  }
-  expect(useWorkspaceStore().current?.view).toBe('terminals');
-  expect(useWorkspaceStore().module).toBe('hosts');
-  expect(useWorkspaceStore().tabs).toHaveLength(1);
-  expect(document.querySelectorAll('dialog[aria-label="任务中心"][open]')).toHaveLength(1);
-  expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
-  document.querySelector('dialog[aria-label="任务中心"]')!.dispatchEvent(new Event('cancel'));
+  expect(root.querySelector('[aria-label="任务中心"]')).toBeNull();
+  const legacy = new KeyboardEvent('keydown', {
+    key: 'U',
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  window.dispatchEvent(legacy);
   await flush();
+  expect(legacy.defaultPrevented).toBe(false);
+  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
   window.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true }),
+    new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
   );
   await flush();
   const search = document.querySelector<HTMLInputElement>('[aria-label="全局搜索内容"]')!;
+  expect(search).not.toBeNull();
   search.value = '任务中心';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await flush();
-  document.querySelector<HTMLButtonElement>('[role="option"]')!.click();
-  await flush();
-  expect(document.querySelector('dialog[aria-label="全局搜索"]')).toBeNull();
-  expect(document.querySelectorAll('dialog[aria-label="任务中心"][open]')).toHaveLength(1);
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
   expect(useWorkspaceStore().current?.view).toBe('terminals');
-  expect(useWorkspaceStore().module).toBe('hosts');
-  expect(useWorkspaceStore().tabs).toHaveLength(1);
+  expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
 });
 
-it('closes the task dialog when opening a result in its original tool', async () => {
-  useBackgroundStore().tasks = [
-    {
-      id: 'diag',
-      kind: 'diagnostic',
-      hostIds: ['b'],
-      state: 'completed',
-      label: '诊断结果',
-      active: false,
-    },
-  ];
-  root.querySelector<HTMLButtonElement>('.statusbar [aria-label="任务中心"]')!.click();
-  await flush();
-  const result = [
-    ...document.querySelectorAll<HTMLButtonElement>('dialog[aria-label="任务中心"] button'),
-  ].find((button) => button.textContent?.trim() === '查看任务结果')!;
-  result.click();
-  await flush();
-  expect(document.querySelector('dialog[aria-label="任务中心"]')).toBeNull();
-  expect(useWorkspaceStore().current).toMatchObject({
-    view: 'extension',
-    pluginId: 'cn.hiboot.plugins.services',
+it('confirms active transfer cancellation before closing a host and preserves the adjacent host', async () => {
+  const workspace = useWorkspaceStore(),
+    files = useFilesStore(),
+    terminals = useTerminalsStore();
+  const hosts = useHostsStore().catalog!.hosts;
+  for (const host of hosts) {
+    terminals.open(host);
+    terminals.update(terminals.focused, { sessionId: `shell-${host.id}`, state: 'connected' });
+    workspace.navigate('terminals', host.id);
+  }
+  workspace.selectHost('a');
+  let nativeTasks = ['a', 'b'].map((hostId) => ({
+    id: `task-${hostId}`,
+    hostId,
+    sessionId: `files-${hostId}`,
+    direction: 'upload',
+    state: 'running',
+    sources: ['source.txt'],
+    destination: '/srv',
+    totalBytes: 100,
+    transferredBytes: 0,
+    remainingBytes: 100,
+    bytesPerSecond: 0,
+    filesTotal: 1,
+    filesDone: 0,
+    skipped: 0,
+    message: null,
+    recoveryPaths: [],
+  })) as TransferInfo[];
+  vi.spyOn(filesApi, 'tasks').mockImplementation(async () => nativeTasks);
+  vi.spyOn(filesApi, 'connections').mockResolvedValue(
+    hosts.map((host) => ({ id: `files-${host.id}`, hostId: host.id })) as never,
+  );
+  const closeFiles = vi.spyOn(filesApi, 'close').mockImplementation(async () => {
+    nativeTasks = nativeTasks.map((task) =>
+      task.hostId === 'a' ? { ...task, state: 'cancelled' } : task,
+    );
   });
+  const closeTerminal = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  const clear = vi.spyOn(filesApi, 'clearTransfers').mockImplementation(async (hostId) => {
+    nativeTasks = nativeTasks.filter((task) => task.hostId !== hostId);
+  });
+  await flush();
+  root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] .tab-close')!.click();
+  await flush();
+  const dialog = () =>
+    document.querySelector<HTMLDialogElement>('dialog[aria-label="取消传输并关闭主机"]');
+  expect(dialog()?.textContent).toContain('1 个未完成');
+  expect(closeFiles).not.toHaveBeenCalled();
+  expect(closeTerminal).not.toHaveBeenCalled();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '取消')!
+    .click();
+  await flush();
+  expect(workspace.current?.hostId).toBe('a');
+  expect(files.tasks).toHaveLength(2);
+  root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] .tab-close')!.click();
+  await flush();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '明确确认')!
+    .click();
+  await flush();
+  expect(dialog()).toBeNull();
+  expect(workspace.tabs.map((tab) => tab.hostId)).toEqual(['b']);
+  expect(terminals.hostTabs('b')).toHaveLength(1);
+  expect(closeFiles).toHaveBeenCalledExactlyOnceWith('files-a', true);
+  expect(closeTerminal).toHaveBeenCalledExactlyOnceWith('shell-a');
+  expect(clear).toHaveBeenCalledExactlyOnceWith('a');
+  expect(files.tasks.map((task) => task.hostId)).toEqual(['b']);
+  workspace.selectHost('a');
+  await flush();
+  expect(files.tasks.filter((task) => task.hostId === 'a')).toEqual([]);
 });
 
 it('merges navigation with the host tree and keeps the sidebar available on global pages', async () => {
@@ -939,10 +907,9 @@ it('switches full file pages from the toolbar without closing file or terminal s
   );
   const plugin = { ...systemPluginFixtures()[0]!, enabled: true };
   usePluginsStore().installed = [plugin];
-  root.querySelector<HTMLButtonElement>('.workspace-header [aria-haspopup="menu"]')!.click();
   await flush();
-  document
-    .querySelector<HTMLButtonElement>(`.host-plugin-menu [data-plugin-id="${plugin.manifest.id}"]`)!
+  root
+    .querySelector<HTMLButtonElement>(`.host-tools [data-plugin-id="${plugin.manifest.id}"]`)!
     .click();
   await flush();
   expect(workspace.current).toMatchObject({
@@ -950,6 +917,10 @@ it('switches full file pages from the toolbar without closing file or terminal s
     hostId: 'a',
     pluginId: plugin.manifest.id,
   });
+  expect(
+    root.querySelector('.host-tools [aria-current="page"]')?.getAttribute('data-plugin-id'),
+  ).toBe(plugin.manifest.id);
+  expect(root.querySelector('.workspace-header [aria-haspopup="menu"]')).toBeNull();
   expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
   expect(root.querySelector('.operations-view, .monitor-view')).toBeNull();
   await tool('SSH 终端');
@@ -1351,7 +1322,7 @@ it('merges session controls into the host toolbar and retains names within the c
     [...root.querySelectorAll('.workspace-header .host-tools button')].map((button) =>
       button.textContent?.trim(),
     ),
-  ).toEqual(['SSH 终端', 'SFTP 文件', '工具']);
+  ).toEqual(['SSH 终端', 'SFTP 文件', 'AI 运维助手', '系统服务']);
   expect(root.querySelector('.terminal-session-header .terminal-tabs')).not.toBeNull();
   expect(root.querySelector('.split-toolbar, [aria-label="会话操作"]')).toBeNull();
   expect(root.querySelector('#terminal-session-tools .terminal-session-header')).not.toBeNull();
@@ -1621,31 +1592,10 @@ it('restores each host tool, file connection and terminal session through primar
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: '' });
   expect(root.querySelectorAll('.host-tools button')).toHaveLength(1);
-  expect(files.connections.a?.id).toBe('files-a');
-  expect(files.connections.b?.id).toBe('files-b');
-});
-
-it('retains an explicit diagnostic source across host workspace switches', async () => {
-  root.querySelector<HTMLButtonElement>('.tree-host')!.click();
-  await flush();
-  await openGlobalTool('网络诊断');
-  await flush();
-  const source = root.querySelector<HTMLSelectElement>('[aria-label="诊断来源"]')!;
-  source.value = 'remote';
-  source.dispatchEvent(new Event('change', { bubbles: true }));
-  await nextTick();
-  const host = root.querySelector<HTMLSelectElement>('[aria-label="诊断主机"]')!;
-  host.value = 'b';
-  host.dispatchEvent(new Event('change', { bubbles: true }));
-  await nextTick();
-  root.querySelector<HTMLButtonElement>('.workspace-tabs [role="tab"]')!.click();
-  await flush();
-  root.querySelectorAll<HTMLButtonElement>('.tree-host')[1]!.click();
-  await flush();
-  await openGlobalTool('网络诊断');
-  await flush();
-  expect(root.querySelector<HTMLSelectElement>('[aria-label="诊断主机"]')!.value).toBe('b');
-  expect(root.querySelector<HTMLSelectElement>('[aria-label="诊断来源"]')!.value).toBe('remote');
+  expect(files.connections.a).toBeUndefined();
+  expect(files.connections.b).toBeUndefined();
+  expect(filesApi.close).toHaveBeenCalledWith('files-a', false);
+  expect(filesApi.close).toHaveBeenCalledWith('files-b', false);
 });
 
 it.each([
@@ -1721,7 +1671,15 @@ it.each([
       expect(terminals.panes).toHaveLength(0);
       expect(close).toHaveBeenCalledExactlyOnceWith('existing-session');
     }
-    expect(files.connections.a).toMatchObject({ id: 'existing-files', state: 'connected' });
+    if (keys.includes('host:a')) {
+      expect(files.connections.a).toMatchObject({ id: 'existing-files', state: 'connected' });
+      expect(filesApi.close).not.toHaveBeenCalled();
+      expect(filesApi.clearTransfers).not.toHaveBeenCalled();
+    } else {
+      expect(files.connections.a).toBeUndefined();
+      expect(filesApi.close).toHaveBeenCalledExactlyOnceWith('existing-files', false);
+      expect(filesApi.clearTransfers).toHaveBeenCalledExactlyOnceWith('a');
+    }
     if (!keys.length) expect(root.querySelector('[aria-label="欢迎页面"]')).not.toBeNull();
   },
 );
@@ -1867,11 +1825,7 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   const show = async (id: string) => {
     root.querySelector<HTMLButtonElement>(`.tree-host[data-host-id="${id}"]`)!.click();
     await flush();
-    root.querySelector<HTMLButtonElement>('.workspace-header [aria-haspopup="menu"]')!.click();
-    await flush();
-    document
-      .querySelector<HTMLButtonElement>('.host-plugin-menu [data-plugin-id="dev.host-draft"]')!
-      .click();
+    root.querySelector<HTMLButtonElement>('.host-tools [data-plugin-id="dev.host-draft"]')!.click();
     await flush();
   };
   await show('a');

@@ -1,5 +1,11 @@
 # 插件 API 版本策略
 
+## 3.0.0：移除网络诊断
+
+Host API、Rust SDK 和 Vue SDK 升至 3.0.0，三个系统包升至 1.3.0。删除 network.run、tools::Tool::Network、DiagnosticStart/List/Cancel、网络诊断 UI 分类/兼容页面以及原生 diagnostic_* IPC；前端不再导出 services/tasks、types/tasks 或 PluginToolIntent。通用导出使用 services/download；AI、SSH/SFTP、监控网络流量与端口能力保留，ABI/wire/包格式仍为 1。未使用移除契约的 ^1.x/^2.x 包继续使用。
+
+启动时只对已知系统服务记录归档原始元数据、收窄旧权限，再以标准包升级保留启停/配置/卸载选择；升级完成前不开放运行时。旧诊断上传包退出注册并保留记录、payload 和用户数据，不能通过旧包恢复能力；旧备份记录中的已删除能力不再反序列化为活动安装。新包及旧 IPC 请求均拒绝已删除契约。以下为历史版本说明。
+
 ## 2.1.0：UI v4 组合分类与缓存可见性
 
 Host API、Rust SDK、Vue SDK 为 2.1.0，三个系统包 services/docker/assistant 为 1.2.0。UI v4 operations.sections 新增 overview/disks/network/diagnostics，允许一个标准 server 贡献组合公开能力；UI v2/v3 类别保持原限制。没有新原生 IPC 或权限，后台仍按 Guest 白名单、grant、上下文和单次审批复验。SDK 新增 usePluginVisibility，组合页面文档和 KeepAlive 激活状态。

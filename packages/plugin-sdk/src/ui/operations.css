@@ -46,8 +46,13 @@
 .ops-table {
   overflow: auto;
   min-width: 0;
+  max-height: min(560px, 60vh);
+  scrollbar-width: thin;
 }
 .ops-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background: var(--panel);
   color: var(--muted);
   font-size: 11px;
@@ -183,7 +188,7 @@
   font-size: 11px;
 }
 .ops-table td {
-  padding: 14px 12px;
+  padding: 10px 12px;
   vertical-align: middle;
   font-size: 12px;
 }
@@ -205,6 +210,7 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
   margin-top: 4px;
+  flex-wrap: wrap;
 }
 .ops-footer > .subtle {
   display: inline-flex;
@@ -222,7 +228,7 @@
   font:
     10px/1.8 Consolas,
     monospace;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .resource-state {
   display: inline-flex;

@@ -9,6 +9,8 @@ import { filesApi } from '../services/files';
 import { useTerminalsStore } from './terminals';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
+import { usePluginsStore } from './plugins';
+import type { TerminalSession } from '../types/terminal';
 export interface FileConnection {
   host: Host;
   id?: string;
@@ -32,10 +34,13 @@ export const useFilesStore = defineStore('files', () => {
     document = ref<TextDocument | null>(null),
     dirty = ref(false),
     editorBusy = ref(false),
-    exitReview = ref(false);
+    exitReview = ref(false),
+    closingHosts = ref<string[]>([]);
   const current = computed(() => connections.value[active.value]);
   const pending = computed(() => tasks.value.filter(unfinished).length);
   let localGeneration = 0;
+  let transferGeneration = 0;
+  const opening = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
   async function localLoad(path: string | null = null): Promise<void> {
     const generation = ++localGeneration;
@@ -81,6 +86,7 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
   async function open(host: Host, path?: string, pane?: string): Promise<void> {
+    if (closingHosts.value.includes(host.id)) return;
     active.value = host.id;
     let connection = connections.value[host.id];
     if (connection?.id && connection.state === 'connected') {
@@ -113,7 +119,7 @@ export const useFilesStore = defineStore('files', () => {
     };
     connection = connections.value[host.id]!;
     try {
-      const value = await filesApi.open(host.id, (event) => {
+      const request = filesApi.open(host.id, (event) => {
         if (event.type === 'state') {
           connection.state = event.state;
           if (event.message) connection.error = event.message;
@@ -122,12 +128,16 @@ export const useFilesStore = defineStore('files', () => {
             void navigate(connection.path, connection);
         } else if (event.type === 'trust') connection.trust = event;
       });
+      opening.set(host.id, request);
+      const value = await request;
       connection.id = value.id;
       connection.routeHostIds = value.routeHostIds;
       if (connection.state === 'connected') await navigate(connection.path, connection);
     } catch (cause) {
       connection.state = 'failed';
       connection.error = errorMessage(cause);
+    } finally {
+      opening.delete(host.id);
     }
     if (!local.value) await localLoad();
   }
@@ -146,7 +156,7 @@ export const useFilesStore = defineStore('files', () => {
     if (local.value) await localLoad(local.value.path);
   }
   async function edit(path: string): Promise<void> {
-    if (!current.value?.id || editorBusy.value) return;
+    if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value)) return;
     if (document.value) {
       error.value = '请先保存或关闭当前编辑文档。';
       return;
@@ -161,15 +171,83 @@ export const useFilesStore = defineStore('files', () => {
       editorBusy.value = false;
     }
   }
+  async function prepareHostClose(hostId: string): Promise<boolean> {
+    try {
+      // Wait for an already requested lease so it cannot arrive after the workspace closes.
+      await opening.get(hostId)?.catch(() => undefined);
+      const [latest, live] = await Promise.all([filesApi.tasks(), filesApi.connections()]);
+      tasks.value = latest;
+      const connection = connections.value[hostId];
+      const ids = new Set(live.filter((session) => session.hostId === hostId).map((s) => s.id));
+      if (connection?.id) ids.add(connection.id);
+      for (const task of latest)
+        if (task.hostId === hostId && unfinished(task)) ids.add(task.sessionId);
+      if (
+        (document.value && ids.has(document.value.sessionId) && dirty.value) ||
+        (editorBusy.value && active.value === hostId)
+      ) {
+        error.value = '请先保存或关闭此主机的编辑文档，再关闭主机。';
+        return false;
+      }
+      const count = latest.filter((task) => task.hostId === hostId && unfinished(task)).length;
+      if (
+        count &&
+        !(await usePluginsStore().ask(
+          '取消传输并关闭主机',
+          `此主机还有 ${count} 个未完成的传输。确认后取消传输并关闭主机，已完成文件保留，传输记录将清除。提交中的单个文件会等待结果。`,
+        ))
+      )
+        return false;
+      for (const id of ids) {
+        const previous = connection?.state;
+        if (connection?.id === id) connection.state = 'closing';
+        try {
+          await filesApi.close(id, count > 0);
+        } catch (cause) {
+          if (connection?.id === id) connection.state = previous!;
+          throw cause;
+        }
+        if (connection?.id === id) {
+          connection.state = 'closed';
+          connection.id = undefined;
+          connection.trust = null;
+        }
+        if (document.value?.sessionId === id) {
+          document.value = null;
+          dirty.value = false;
+        }
+      }
+      // Keep cancellation failures and recovery paths visible before clearing the records.
+      tasks.value = await filesApi.tasks();
+      return true;
+    } catch (cause) {
+      error.value = errorMessage(cause);
+      return false;
+    }
+  }
+  async function clearHostTransfers(hostId: string): Promise<boolean> {
+    try {
+      await filesApi.clearTransfers(hostId);
+      transferGeneration++;
+      tasks.value = tasks.value.filter((task) => task.hostId !== hostId);
+      delete connections.value[hostId];
+      return true;
+    } catch (cause) {
+      error.value = errorMessage(cause);
+      return false;
+    }
+  }
   let polling = false,
     disposed = false,
     timer: ReturnType<typeof setTimeout> | undefined;
   async function poll(): Promise<void> {
     if (polling || disposed) return;
     polling = true;
+    const generation = transferGeneration;
     clearTimeout(timer);
     try {
       const [value, live] = await Promise.all([filesApi.tasks(), filesApi.connections()]);
+      if (generation !== transferGeneration) return;
       for (const connection of Object.values(connections.value)) {
         if (connection.state === 'connected' && !live.some((c) => c.id === connection.id)) {
           connection.state = 'failed';
@@ -182,7 +260,6 @@ export const useFilesStore = defineStore('files', () => {
       );
       tasks.value = value;
       if (finished.length) {
-        notice.value = `${finished.length} 个传输任务完成，详见校验和跳过统计。`;
         void refresh();
       }
     } catch (cause) {
@@ -214,11 +291,13 @@ export const useFilesStore = defineStore('files', () => {
   useErrorNotifications(() => [
     error.value,
     ...Object.values(connections.value).map((connection) => connection.error),
-    ...tasks.value.map((task) =>
-      task.message || task.recoveryPaths.length
-        ? `文件传输 ${task.id}（HostId=${task.hostId}）：${[task.message, ...task.recoveryPaths.map((path) => `待检查临时文件：${path}`)].filter(Boolean).join('；')}`
-        : null,
-    ),
+    ...tasks.value
+      .filter((task) => task.state === 'failed' || task.recoveryPaths.length > 0)
+      .map((task) =>
+        task.message || task.recoveryPaths.length
+          ? `文件传输 ${task.id}（HostId=${task.hostId}）：${[task.message, ...task.recoveryPaths.map((path) => `待检查临时文件：${path}`)].filter(Boolean).join('；')}`
+          : null,
+      ),
   ]);
   return {
     hostState,
@@ -235,6 +314,9 @@ export const useFilesStore = defineStore('files', () => {
     dirty,
     editorBusy,
     exitReview,
+    closingHosts,
+    prepareHostClose,
+    clearHostTransfers,
     open,
     navigate,
     localLoad,

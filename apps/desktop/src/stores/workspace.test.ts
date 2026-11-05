@@ -7,13 +7,80 @@ import { usePluginsStore } from './plugins';
 import { toolPluginState } from '../services/system-plugins.fixture';
 import { pluginsApi } from '../services/plugins';
 import type { Host } from '../types/hosts';
+import { filesApi } from '../services/files';
+import { useFilesStore } from './files';
 
 beforeEach(async () => {
   setActivePinia(createPinia());
   Object.assign(usePluginsStore(), toolPluginState());
   vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
 });
 afterEach(() => disposePinia(getActivePinia()!));
+
+it('keeps the host and terminal intact when transfer cancellation is declined', async () => {
+  const workspace = useWorkspaceStore(),
+    files = useFilesStore(),
+    terminals = useTerminalsStore();
+  workspace.navigate('terminals', 'a');
+  terminals.open({ id: 'a', name: 'A' } as Host);
+  terminals.update(terminals.focused, { sessionId: 'shell-a' });
+  const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  vi.spyOn(files, 'prepareHostClose').mockResolvedValue(false);
+  await workspace.close('host:a');
+  expect(workspace.current?.hostId).toBe('a');
+  expect(terminals.tabs).toHaveLength(1);
+  expect(close).not.toHaveBeenCalled();
+  expect(filesApi.clearTransfers).not.toHaveBeenCalled();
+  expect(files.closingHosts).toEqual([]);
+});
+
+it('clears history only after a successful host close and reopens with no old records', async () => {
+  const workspace = useWorkspaceStore(),
+    files = useFilesStore();
+  workspace.navigate('files', 'a');
+  vi.spyOn(files, 'prepareHostClose').mockResolvedValue(true);
+  vi.spyOn(filesApi, 'clearTransfers').mockRejectedValueOnce({ message: 'cleanup failed' });
+  await workspace.close('host:a');
+  expect(workspace.current?.hostId).toBe('a');
+  expect(files.error).toBe('cleanup failed');
+  await workspace.close('host:a');
+  expect(workspace.tabs).toEqual([]);
+  expect(files.tasks).toEqual([]);
+  workspace.navigate('files', 'a');
+  expect(files.tasks).toEqual([]);
+  expect(files.closingHosts).toEqual([]);
+});
+
+it('blocks reopening tools while closing a host and removes completed closes before awaiting the next host', async () => {
+  const workspace = useWorkspaceStore(),
+    files = useFilesStore();
+  workspace.navigate('terminals', 'a');
+  workspace.navigate('terminals', 'b');
+  let finish!: (accepted: boolean) => void;
+  vi.spyOn(files, 'prepareHostClose')
+    .mockResolvedValueOnce(true)
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  const pending = workspace.close('host:a', 'all');
+  await vi.waitFor(() => expect(files.prepareHostClose).toHaveBeenCalledTimes(2));
+  expect(workspace.tabs.map((tab) => tab.hostId)).toEqual(['b']);
+  workspace.navigate('files', 'b');
+  await workspace.openPlugin('cn.hiboot.plugins.services', 'server', 'b');
+  expect(workspace.current?.view).toBe('terminals');
+  expect(workspace.pluginPages).toEqual([]);
+  workspace.navigate('terminals', 'a');
+  finish(false);
+  await pending;
+  expect(workspace.tabs.map((tab) => tab.hostId)).toEqual(['b', 'a']);
+  expect(files.closingHosts).toEqual([]);
+});
 
 it.each(['', 'target'])(
   'retains workspace %s on partial session close failure and resets numbers only after the last successful close',

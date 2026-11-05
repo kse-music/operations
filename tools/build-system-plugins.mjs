@@ -4,7 +4,9 @@ import { mkdir, mkdtemp, readFile, writeFile, rename, lstat } from 'node:fs/prom
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPluginUi } from './build-plugin-ui.mjs';
+import { requireBuildSpace } from './build-space.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
+requireBuildSpace(root);
 const names = ['services', 'docker', 'assistant'];
 const artifacts = path.join(root, 'plugins/system/packages');
 await mkdir(path.join(root, '.local/plugin-build'), { recursive: true });
@@ -16,11 +18,6 @@ await buildPluginUi(
     path.join(root, 'plugins/system/services/frontend/logs'),
     path.join(root, 'plugins/system/services/frontend/monitor'),
   ],
-);
-await buildPluginUi(
-  path.join(root, 'plugins/compat/network'),
-  path.join(root, 'plugins/compat/network/assets'),
-  [path.join(root, 'plugins/system/services/frontend/network')],
 );
 const staging = await mkdtemp(path.join(root, '.local/plugin-build', 'system-'));
 for (const name of names) {

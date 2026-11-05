@@ -1,5 +1,11 @@
 # 验证记录索引
 
+最新：[三个插件布局、模型选择与宽窄窗口验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05插件布局与模型选择优化)。
+
+最新：[完整移除系统服务网络诊断及旧包迁移验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05完整移除网络诊断)。旧网络诊断验收仅为历史证据，当前版本已删除该能力。
+
+最新：[移除任务中心与 SFTP 主机临时传输记录](files/VALIDATION_STAGE4.md#2026-11-05移除任务中心与主机临时传输记录)。
+
 最新：[系统服务合并、Docker/AI 界面与三插件逐项验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05系统服务合并与界面优化)。
 
 最新：[移除自动运维与批量运维，七插件逐项验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05移除自动运维与批量运维)。旧自动化/批量验收记录仅作历史证据，不代表当前仍支持这些工具。
@@ -10,6 +16,7 @@
 
 ## 基础与配置
 
+- [本地构建缓存清理与磁盘保护验证](foundation/VALIDATION_BUILD_CACHE.md)
 - [cn.hiboot 应用身份统一验证](foundation/VALIDATION_IDENTITY.md)
 - [阶段一交付与验证记录](foundation/VALIDATION.md)
 - [主机、凭据与配置导入导出阶段验收](foundation/VALIDATION_STAGE2.md)
@@ -47,6 +54,7 @@
 
 ## SFTP 与文件
 
+- [SFTP 仅提示异常（2026-11-05）](files/VALIDATION_STAGE4.md#2026-11-05sftp仅提示异常)
 - [SFTP 权限与拥有者显示验收](files/VALIDATION_SFTP_METADATA.md)
 - [SFTP 文件管理阶段验收](files/VALIDATION_STAGE4.md)
 
@@ -82,7 +90,7 @@
 ## 模型与 AI 助手
 
 - [AI 运维助手验证记录](ai/VALIDATION_AI_ASSISTANT.md)
-- [助手直接对话验证](ai/VALIDATION_ASSISTANT_CHAT.md)
+- [助手直接对话验证](ai/VALIDATION_ASSISTANT_CHAT.md)：含 2026-11-05 删除模型栏并在插件设置持久绑定（377 项前端/20 项 Rust/12 组布局），以及发送免弹窗、全宽对话与默认完整上下文的历史验证。
 - [助手自动关联主机验证](ai/VALIDATION_ASSISTANT_HOSTS.md)
 - [AI 运维助手布局验证](ai/VALIDATION_ASSISTANT_LAYOUT.md)
 - [模型管理验证记录](ai/VALIDATION_MODEL_MANAGEMENT.md)
@@ -90,7 +98,7 @@
 
 ## 插件系统
 
-- [插件阶段验证记录](plugins/PLUGIN_TEST_REPORT.md)：含 2026-11-05 取消顶部运维工具、配置统一归属设置及四布局回归；保留配置入口/请求循环/缓存 VM/九插件真实 SSH，以及插件使用统一、主机草稿隔离、系统包升级、源码归属/UI v4/SDK 边界、图标、上传安装和旧夹具清理的历史证据。
+- [插件阶段验证记录](plugins/PLUGIN_TEST_REPORT.md)：含 2026-11-05 网络诊断完整调用链删除、SDK 3.0/系统包 1.3、旧包归档与保留状态升级的 Windows 原生验证；以及主机工具按钮平铺、配置统一归属设置的回归。保留旧插件真实 SSH、主机草稿隔离、包升级、UI/SDK、图标及上传安装的历史证据。
 
 维护时优先更新同一主题的记录；新增独立记录后在对应模块补充链接。构建产物、截图和原始日志继续使用项目约定的 `.local/` 目录，不迁入文档目录。
 

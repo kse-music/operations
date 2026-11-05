@@ -20,6 +20,24 @@
         "kind": "tool",
         "tool": "assistant"
       }
+    },
+    {
+      "id": "settings",
+      "title": "模型绑定",
+      "initialAction": null,
+      "fields": [],
+      "actions": [
+        {
+          "id": "bridge",
+          "label": "执行操作",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null,
+      "surface": {
+        "kind": "frontend"
+      }
     }
   ],
   "frontend": {

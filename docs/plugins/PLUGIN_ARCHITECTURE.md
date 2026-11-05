@@ -10,9 +10,9 @@ Host API / Rust SDK / Vue SDK 当前为 2.1，三个标准插件的前端和测�
 
 ## 工作区工具标准化
 
-AI 助手独立分发，网络诊断归入系统服务标准包，源码/锁文件/产物独立，系统与上传使用相同公开 ToolInvoke/UI v3 契约。PluginToolSurface 注入通过实际 WASM 的领域 API；App/workspace 仅解析已安装且启用/授权的贡献，不直接挂载原生业务页。插件功能从当前主机工具菜单进入并归属主机运维，插件管理及配置统一归属设置，不再提供顶部运维工具模块；任务中心与诊断引擎为宿主公共能力，禁用或卸载不删除已授权工作。票据及 AI 资源归属和边界见 [内置插件](BUILTIN_PLUGINS.md)。
+AI 助手独立分发，系统服务仅保留监控、进程端口、systemd 与日志，源码/锁文件/产物独立，系统与上传使用相同公开 ToolInvoke/UI v3 契约。PluginToolSurface 注入通过实际 WASM 的领域 API；App/workspace 仅解析已安装且启用/授权的贡献，不直接挂载原生业务页。插件功能从当前主机工具栏进入并归属主机运维，插件管理及配置统一归属设置，不再提供顶部运维工具模块；网络诊断引擎及其专属任务和兼容资源已移除；SSH/SFTP 和 AI 共用的受控执行能力保留。票据及 AI 资源归属和边界见 [内置插件](BUILTIN_PLUGINS.md)。
 
-2026-11-04：系统内置与上传插件统一为标准 WASM 包及运行时，来源由宿主记录。系统包预置声明权限和必要路径，grant/revoke IPC 不允许改写；上传包仍显式授权。全部插件使用当前主机，无主机白名单，旧 hostIds 仅兼容读取且不再输出。工具下拉只显示已启用插件，管理列表只有卸载。三个插件源码和完整契约见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)；下文 13A 为历史阶段，默认禁用只描述上传安装。
+2026-11-04：系统内置与上传插件统一为标准 WASM 包及运行时，来源由宿主记录。系统包预置声明权限和必要路径，grant/revoke IPC 不允许改写；上传包仍显式授权。全部插件使用当前主机，无主机白名单，旧 hostIds 仅兼容读取且不再输出。主机工具栏平铺显示已启用且有功能页面的插件，管理列表只有卸载。三个插件源码和完整契约见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)；下文 13A 为历史阶段，默认禁用只描述上传安装。
 
 13A-1：desktop → application → plugin-core → core。插件包、元数据、信任接口和仓库独立于 SSH、Agent 与 Tauri。13A-2 新增 application → plugin-runtime → plugin-core/core/Wasmi，带后端的包在启用或按需激活时真实执行 WASM。元数据包继续不执行代码。能力 API/UI 尚未实现，不能视为可用。ABI、配额与未实现的 OS 保障见 [PLUGIN_RUNTIME.md](PLUGIN_RUNTIME.md)。
 

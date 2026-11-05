@@ -28,14 +28,12 @@ const props = withDefaults(
     logIntent?: { input: LogInput; title: string; sequence: number };
     active?: boolean;
     settingsPage?: boolean;
-    toolIntent?: import('../types/plugins').PluginToolIntent;
   }>(),
   {
     active: true,
     settingsPage: false,
     initialSection: undefined,
     logIntent: undefined,
-    toolIntent: undefined,
   },
 );
 const emit = defineEmits<{
@@ -87,7 +85,6 @@ const needsConnection = computed(
         'system.manage',
         'logs.read',
         'assistant.use',
-        'network.run',
       ].includes(permission),
     ) ?? false,
 );
@@ -279,7 +276,6 @@ async function connect() {
           'system.manage',
           'logs.read',
           'assistant.use',
-          'network.run',
         ].includes(p),
       )
     )
@@ -367,6 +363,7 @@ useErrorNotifications(error);
 <template>
   <section
     class="plugin-workspace plugin-embedded"
+    :class="{ 'plugin-settings-workspace': settingsPage }"
     :data-plugin-id="pluginId"
     :data-host-id="hostId"
   >
@@ -440,7 +437,6 @@ useErrorNotifications(error);
           :page="page"
           :initial-section="initialSection"
           :log-intent="logIntent"
-          :tool-intent="toolIntent"
           @navigate="(section, intent) => emit('surfaceNavigate', section, intent)"
           @shell="(host, shell) => emit('shell', host, shell)"
           @section="emit('section', $event)"

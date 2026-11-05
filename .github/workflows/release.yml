@@ -44,6 +44,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
         if: runner.os != 'Linux'
+      - run: npm run test:build
       - run: xvfb-run -a cargo test --workspace --locked
         if: runner.os == 'Linux'
       - run: npm run format:check

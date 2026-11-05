@@ -6,7 +6,6 @@ mod ops_commands;
 mod plugin_commands;
 mod plugin_ui_protocol;
 mod product_commands;
-mod task_commands;
 mod terminal_upload_commands;
 mod window_state;
 
@@ -170,9 +169,6 @@ pub fn command_handler<R: tauri::Runtime>()
         product_commands::backup_preview,
         product_commands::backup_restore,
         product_commands::background_tasks,
-        task_commands::diagnostic_start,
-        task_commands::diagnostic_list,
-        task_commands::diagnostic_cancel,
         ops_commands::ops_open,
         ops_commands::ops_connections,
         ops_commands::ops_query,
@@ -197,6 +193,7 @@ pub fn command_handler<R: tauri::Runtime>()
         file_commands::files_pick,
         file_commands::transfer_start,
         file_commands::transfer_list,
+        file_commands::transfer_clear_host,
         file_commands::transfer_cancel,
         file_commands::transfer_retry,
         file_commands::text_read,

@@ -13,7 +13,6 @@ const emit = defineEmits<{
   selectHost: [hostId: string];
   plugin: [id: string, contribution: string, hostId: string];
   navigate: [view: WorkspaceView, hostId?: string];
-  tasks: [];
 }>();
 const hosts = useHostsStore(),
   query = ref(''),
@@ -31,14 +30,6 @@ const results = computed(() => {
         hostId: hosts.selectedId ?? '',
         entryId: '',
       })),
-    {
-      key: 'tasks',
-      kind: 'tasks',
-      name: '任务中心',
-      view: 'tasks' as const,
-      hostId: '',
-      entryId: '',
-    },
     ...(hosts.catalog?.hosts ?? []).map((h) => ({
       key: h.id,
       kind: 'host',
@@ -65,8 +56,7 @@ const results = computed(() => {
 function choose(n: number) {
   const r = results.value[n];
   if (r) {
-    if (r.view === 'tasks') emit('tasks');
-    else if (r.kind === 'host') emit('selectHost', r.hostId);
+    if (r.kind === 'host') emit('selectHost', r.hostId);
     else if (r.kind === 'plugin' && 'pluginId' in r)
       emit('plugin', String(r.pluginId), r.entryId, r.hostId);
     else emit('navigate', r.view, r.hostId);

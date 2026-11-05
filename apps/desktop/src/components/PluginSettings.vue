@@ -16,7 +16,6 @@ const permissions = ref<PluginPermission[]>([]),
   allowShell = ref(false);
 const labels: Record<PluginPermission, [string, string]> = {
   'assistant.use': ['AI 运维助手', '使用已配置模型分析脱敏上下文，命令执行仍需明确确认'],
-  'network.run': ['网络诊断', '从本机或已有 SSH 连接执行受控网络诊断并查看结果'],
   'metrics.read': ['资源监控', '读取 CPU、内存、磁盘和网络采样'],
   'system.read': ['系统信息', '读取容器、进程、端口和服务状态'],
   'system.manage': ['系统操作', '修改状态、发送信号或查看敏感信息，逐次确认'],
@@ -31,7 +30,6 @@ const labels: Record<PluginPermission, [string, string]> = {
 };
 const operationMap: Record<PluginPermission, string[]> = {
   'assistant.use': ['assistant.use'],
-  'network.run': ['network.run'],
   'metrics.read': ['metrics.read'],
   'system.read': ['system.read'],
   'system.manage': ['system.manage'],
@@ -82,12 +80,7 @@ async function save() {
 }
 async function revoke() {
   if (builtin.value) return;
-  if (
-    await plugins.ask(
-      '撤销插件授权？',
-      '将停止插件调用，并关闭它的文档和日志。已提交的网络诊断任务继续由任务中心管理。',
-    )
-  )
+  if (await plugins.ask('撤销插件授权？', '将停止插件调用，并关闭它的文档和日志。'))
     await plugins.mutate(() => pluginsApi.revoke(props.plugin.manifest.id));
 }
 </script>
@@ -108,92 +101,102 @@ async function revoke() {
         {{ plugin.enabled ? '禁用插件' : '启用插件' }}
       </button>
     </section>
-    <form class="plugin-settings-section" @submit.prevent="save">
-      <header class="plugin-section-heading">
-        <div>
-          <h2><ShieldCheck :size="18" aria-hidden="true" />权限与访问范围</h2>
-          <p class="subtle">
-            {{
-              builtin
-                ? '内置插件的权限和访问范围由系统预置，无需配置。'
-                : '仅授予需要的能力；写入、修改和其他敏感操作仍会逐次确认。'
-            }}
-          </p>
-        </div>
+    <details class="plugin-settings-section plugin-permissions" :open="!builtin">
+      <summary class="plugin-permissions-summary">
+        <span><ShieldCheck :size="16" aria-hidden="true" />权限与访问范围</span>
         <span class="plugin-status" :class="{ enabled: !!grant }">{{
           grant ? '已授权' : '尚未授权'
         }}</span>
-      </header>
-      <div class="plugin-permission-list">
-        <label
-          v-for="permission in plugin.manifest.permissions"
-          :key="permission"
-          class="plugin-permission-option"
-          ><input
-            v-model="permissions"
-            type="checkbox"
-            :value="permission"
-            :aria-label="permission"
-            :disabled="builtin || plugins.busy"
-          /><span
-            ><strong>{{ labels[permission][0] }}</strong
-            ><small>{{ labels[permission][1] }}</small></span
-          ></label
+      </summary>
+      <form @submit.prevent="save">
+        <header class="plugin-section-heading">
+          <div>
+            <p class="subtle">
+              {{
+                builtin
+                  ? '内置插件的权限和访问范围由系统预置，无需配置。'
+                  : '仅授予需要的能力；写入、修改和其他敏感操作仍会逐次确认。'
+              }}
+            </p>
+          </div>
+        </header>
+        <div class="plugin-permission-list">
+          <label
+            v-for="permission in plugin.manifest.permissions"
+            :key="permission"
+            class="plugin-permission-option"
+            ><input
+              v-model="permissions"
+              type="checkbox"
+              :value="permission"
+              :aria-label="permission"
+              :disabled="builtin || plugins.busy"
+            /><span
+              ><strong>{{ labels[permission][0] }}</strong
+              ><small>{{ labels[permission][1] }}</small></span
+            ></label
+          >
+        </div>
+        <div
+          v-if="permissions.some((p) => ['ssh.execute', 'system.manage'].includes(p))"
+          class="plugin-extra-scopes"
         >
-      </div>
-      <div
-        v-if="permissions.some((p) => ['ssh.execute', 'system.manage'].includes(p))"
-        class="plugin-extra-scopes"
-      >
-        <label v-if="permissions.includes('ssh.execute')" class="checkbox-label"
-          ><input
-            v-model="allowExecute"
-            type="checkbox"
-            :disabled="builtin || plugins.busy"
-          />允许请求其他命令（仍逐次确认）</label
+          <label v-if="permissions.includes('ssh.execute')" class="checkbox-label"
+            ><input
+              v-model="allowExecute"
+              type="checkbox"
+              :disabled="builtin || plugins.busy"
+            />允许请求其他命令（仍逐次确认）</label
+          >
+          <label v-if="permissions.includes('system.manage')" class="checkbox-label"
+            ><input
+              v-model="allowShell"
+              type="checkbox"
+              :disabled="builtin || plugins.busy"
+            />允许请求容器终端（仍逐次确认）</label
+          >
+        </div>
+        <p class="plugin-all-hosts subtle">
+          适用于所有主机，使用时操作当前选择的主机。敏感操作仍需逐次确认。
+        </p>
+        <div
+          v-if="permissions.some((p) => p === 'sftp.read' || p === 'sftp.write')"
+          class="plugin-path-scopes"
         >
-        <label v-if="permissions.includes('system.manage')" class="checkbox-label"
-          ><input
-            v-model="allowShell"
-            type="checkbox"
-            :disabled="builtin || plugins.busy"
-          />允许请求容器终端（仍逐次确认）</label
-        >
-      </div>
-      <p class="plugin-all-hosts subtle">
-        适用于所有主机，使用时操作当前选择的主机。敏感操作仍需逐次确认。
-      </p>
-      <div
-        v-if="permissions.some((p) => p === 'sftp.read' || p === 'sftp.write')"
-        class="plugin-path-scopes"
-      >
-        <h3><FolderKey :size="16" aria-hidden="true" />远程目录</h3>
-        <label v-if="permissions.includes('sftp.read')"
-          >可读目录<textarea
-            v-model="readRoots"
-            rows="3"
-            aria-label="插件可读目录"
-            placeholder="每行一个绝对目录，例如 /var/log"
-            :disabled="builtin || plugins.busy"
-          />
-        </label>
-        <label v-if="permissions.includes('sftp.write')"
-          >可写目录<textarea
-            v-model="writeRoots"
-            rows="3"
-            aria-label="插件可写目录"
-            placeholder="每行一个绝对目录"
-            :disabled="builtin || plugins.busy"
-          />
-        </label>
-      </div>
-      <footer v-if="!builtin" class="action-row plugin-settings-actions">
-        <button class="button primary" :disabled="plugins.busy">保存并授权</button
-        ><button v-if="grant" type="button" class="button" :disabled="plugins.busy" @click="revoke">
-          撤销授权
-        </button>
-      </footer>
-    </form>
+          <h3><FolderKey :size="16" aria-hidden="true" />远程目录</h3>
+          <label v-if="permissions.includes('sftp.read')"
+            >可读目录<textarea
+              v-model="readRoots"
+              rows="3"
+              aria-label="插件可读目录"
+              placeholder="每行一个绝对目录，例如 /var/log"
+              :disabled="builtin || plugins.busy"
+            />
+          </label>
+          <label v-if="permissions.includes('sftp.write')"
+            >可写目录<textarea
+              v-model="writeRoots"
+              rows="3"
+              aria-label="插件可写目录"
+              placeholder="每行一个绝对目录"
+              :disabled="builtin || plugins.busy"
+            />
+          </label>
+        </div>
+        <footer v-if="!builtin" class="action-row plugin-settings-actions">
+          <button class="button primary" :disabled="plugins.busy">保存并授权</button
+          ><button
+            v-if="grant"
+            type="button"
+            class="button"
+            :disabled="plugins.busy"
+            @click="revoke"
+          >
+            撤销授权
+          </button>
+        </footer>
+      </form>
+    </details>
     <details class="plugin-settings-section plugin-package-details">
       <summary>插件信息</summary>
       <dl class="plugin-details">

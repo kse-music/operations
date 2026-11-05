@@ -60,6 +60,9 @@ impl Application {
     pub fn transfer_list(&self) -> Result<Vec<TransferInfo>, Error> {
         self.files.transfers.list()
     }
+    pub fn transfer_clear_host(&self, host_id: &str) -> Result<(), Error> {
+        self.files.transfers.clear_host(host_id)
+    }
     pub fn transfer_cancel(&self, id: &str) -> Result<(), Error> {
         self.files.transfers.cancel(id)
     }
@@ -90,8 +93,7 @@ impl Application {
     pub fn exit_pending(&self) -> (usize, usize) {
         (
             self.files.transfers.unfinished().unwrap_or(1)
-                + self.terminal_uploads.pending().unwrap_or(1)
-                + self.tasks.pending().unwrap_or(1),
+                + self.terminal_uploads.pending().unwrap_or(1),
             self.files.dirty_count(),
         )
     }

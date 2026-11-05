@@ -2,7 +2,6 @@ use serverdeck_plugin_sdk::{
     Capability,
     serde_json::Value,
     server::{Query, SurfaceState},
-    tools::Tool,
 };
 use std::sync::Mutex;
 static STATE: Mutex<Option<SurfaceState>> = Mutex::new(None);
@@ -28,7 +27,7 @@ fn allows(cap: &Capability) -> bool {
             | Capability::SystemLogPause { .. }
             | Capability::SystemLogStop { .. }
             | Capability::SystemFeedback
-    ) || matches!(cap, Capability::ToolInvoke { operation, .. } if operation.tool() == Tool::Network)
+    )
 }
 fn handle(operation: i32, payload: Value) -> Value {
     let Ok(mut guard) = STATE.lock() else {
@@ -53,10 +52,6 @@ mod tests {
     #[test]
     fn accepts_its_domain_and_rejects_other_server_domains() {
         assert!(allows(&Capability::MetricsOpen { interval_secs: 3 }));
-        assert!(allows(&Capability::ToolInvoke {
-            input_id: "owned".into(),
-            operation: serverdeck_plugin_sdk::tools::Operation::DiagnosticList
-        }));
         assert!(!allows(&Capability::ToolInvoke {
             input_id: "owned".into(),
             operation: serverdeck_plugin_sdk::tools::Operation::AiPrepare

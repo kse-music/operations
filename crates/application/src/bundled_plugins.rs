@@ -35,13 +35,6 @@ pub(crate) fn legacy_frontend(
         Surface::Frontend => return Err(Error::Validation("独立界面没有兼容渲染器")),
         Surface::Tool { tool } => match tool {
             Tool::Assistant => "assistant",
-            Tool::Network => {
-                return Ok(if path.ends_with(".js") {
-                    include_bytes!("../../../plugins/compat/network/assets/frontend.js").to_vec()
-                } else {
-                    include_bytes!("../../../plugins/compat/network/assets/frontend.css").to_vec()
-                });
-            }
         },
         Surface::Monitor { .. } => "services",
         Surface::Operations { .. } => {
@@ -152,7 +145,6 @@ fn bundled_grant(
         .iter()
         .flat_map(|p| match p {
             Permission::AssistantUse => &["assistant.use"][..],
-            Permission::NetworkRun => &["network.run"],
             Permission::MetricsRead => &["metrics.read"][..],
             Permission::SystemRead => &["system.read"],
             Permission::SystemManage => &["system.manage", "system.shell"],
@@ -258,7 +250,7 @@ mod tests {
         for (index, old_revision) in old_revisions.iter().take(2).enumerate() {
             let id = PACKAGES[index].0;
             let plugin = app.plugins.detail(id).unwrap();
-            assert_eq!(plugin.manifest.version, "1.2.0");
+            assert_eq!(plugin.manifest.version, "1.3.1");
             assert_ne!(&plugin.revision, old_revision);
             assert_eq!(plugin.enabled, index == 0);
             assert_eq!(plugin.previous_version.as_deref(), Some("1.1.1"));
@@ -379,7 +371,15 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            assert_eq!(denied.error.unwrap().code, "CAPABILITY");
+            if id == "cn.hiboot.plugins.assistant" {
+                assert!(
+                    denied.error.is_none(),
+                    "assistant owns its model binding settings"
+                );
+                assert_eq!(denied.result, json!({}));
+            } else {
+                assert_eq!(denied.error.unwrap().code, "CAPABILITY");
+            }
             let capability = if id.ends_with("resources") {
                 json!({"kind":"metrics_open","intervalSecs":3})
             } else {
@@ -526,5 +526,82 @@ mod tests {
         app.provision_bundled_plugins().unwrap();
         assert_eq!(app.plugin_list().await.unwrap().len(), PACKAGES.len() - 1);
         app.shutdown().await;
+    }
+    #[tokio::test]
+    async fn removed_diagnostic_permission_upgrades_system_service_without_resetting_user_state() {
+        use serde_json::{Value, json};
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let logs = dir.path().join("logs");
+        let id = "cn.hiboot.plugins.services";
+        let app = Application::initialize(data.clone(), logs.clone()).unwrap();
+        app.provision_bundled_plugins().unwrap();
+        app.plugins.set_enabled(id, false).unwrap();
+        app.plugins
+            .settings_write(id, &json!({"retained":"user draft"}))
+            .unwrap();
+        let path = data.join("plugins/packages").join(id).join("record.json");
+        let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        record["current"]["manifest"]["version"] = json!("1.2.0");
+        record["current"]["manifest"]["apiVersion"] = json!("^2.1.0");
+        record["current"]["manifest"]["permissions"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("network.run"));
+        let old_revision = record["current"]["revision"].as_str().unwrap().to_owned();
+        let original = serde_json::to_vec(&record).unwrap();
+        std::fs::write(&path, &original).unwrap();
+        let grant_path = data
+            .join("plugins/authorizations")
+            .join(format!("{id}.json"));
+        let mut grant: Value =
+            serde_json::from_slice(&std::fs::read(&grant_path).unwrap()).unwrap();
+        grant["pluginVersion"] = json!("1.2.0");
+        grant["permissions"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("network.run"));
+        std::fs::write(grant_path, serde_json::to_vec(&grant).unwrap()).unwrap();
+        app.shutdown().await;
+        drop(app);
+        let upgraded = Application::initialize(data.clone(), logs).unwrap();
+        upgraded.provision_bundled_plugins().unwrap();
+        let plugin = upgraded.plugins.detail(id).unwrap();
+        assert_eq!(plugin.manifest.version, "1.3.1");
+        assert_ne!(plugin.revision, old_revision);
+        assert!(!plugin.enabled);
+        assert_eq!(
+            upgraded.plugins.settings_read(id).unwrap()["retained"],
+            "user draft"
+        );
+        assert!(
+            !serde_json::to_string(&plugin)
+                .unwrap()
+                .contains("network.run")
+        );
+        let grant = upgraded.plugins.grant(id).unwrap().unwrap();
+        assert_eq!(grant.revision, plugin.revision);
+        assert!(
+            !grant
+                .operations
+                .iter()
+                .any(|operation| operation == "network.run")
+        );
+        assert!(
+            data.join("plugins/system")
+                .join(id)
+                .join("versions")
+                .join(old_revision)
+                .join("backend.wasm")
+                .is_file()
+        );
+        assert!(
+            std::fs::read_dir(data.join("plugins/retired"))
+                .unwrap()
+                .any(|entry| {
+                    std::fs::read(entry.unwrap().path().join("record.json")).unwrap() == original
+                })
+        );
+        upgraded.shutdown().await;
     }
 }

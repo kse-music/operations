@@ -3,7 +3,6 @@ pub mod backup;
 pub mod monitor;
 pub mod ops;
 pub mod product;
-pub mod tasks;
 use serde::{Deserialize, Serialize};
 
 pub mod connection;

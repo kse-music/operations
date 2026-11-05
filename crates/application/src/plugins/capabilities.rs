@@ -328,6 +328,23 @@ impl Application {
             Capability::SettingsWrite { value } => {
                 let repo = self.plugins.clone();
                 let id = call.id.clone();
+                if super::review::builtin_assistant(&plugin) {
+                    let previous = self
+                        .blocking({
+                            let repo = repo.clone();
+                            let id = id.clone();
+                            move |_| repo.settings_read(&id)
+                        })
+                        .await?;
+                    let model_id = super::tools::assistant_model_id(&value)?.map(str::to_owned);
+                    if let Some(model_id) = model_id {
+                        self.blocking(move |db| db.ai_model(&model_id).map(|_| ()))
+                            .await?;
+                    }
+                    if previous.get("modelId") != value.get("modelId") {
+                        self.plugin_cancel_tool_requests(&id)?;
+                    }
+                }
                 self.blocking(move |_| repo.settings_write(&id, &value))
                     .await?;
                 Value::Null

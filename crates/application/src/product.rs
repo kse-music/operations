@@ -19,7 +19,6 @@ impl Application {
     }
     pub fn background_tasks(&self) -> Result<BackgroundSnapshot, Error> {
         Ok(BackgroundSnapshot {
-            tasks: self.tasks.summary()?,
             connections: self.terminals.connection_status()?,
         })
     }

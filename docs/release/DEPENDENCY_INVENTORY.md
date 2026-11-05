@@ -4,6 +4,8 @@
 
 2026-11-03 补充 rz 上传使用的 zmodem.js 0.1.10 和 crc-32 1.2.2；两项完整许可文本已加入 THIRD_PARTY_NOTICES.txt。
 
+2026-11-05 随网络诊断本机执行链移除 encoding_rs 0.8.35；工作区和独立插件锁文件均已不包含该依赖，对应许可文本同步移除。其他条目沿用原清单，未重新审计。
+
 | 名称与版本                              | 声明许可证                                          | 来源           |
 | --------------------------------------- | --------------------------------------------------- | -------------- |
 | adler2 2.0.1                            | 0BSD OR MIT OR Apache-2.0                           | Cargo          |
@@ -132,7 +134,6 @@
 | elliptic-curve 0.14.3                   | Apache-2.0 OR MIT                                   | Cargo          |
 | embed-resource 3.0.12                   | MIT                                                 | Cargo          |
 | embed_plist 1.2.2                       | MIT OR Apache-2.0                                   | Cargo          |
-| encoding_rs 0.8.35                      | (Apache-2.0 OR MIT) AND BSD-3-Clause                | Cargo          |
 | endi 1.1.1                              | MIT                                                 | Cargo          |
 | enum_dispatch 0.3.13                    | MIT OR Apache-2.0                                   | Cargo          |
 | enumflags2 0.7.12                       | MIT OR Apache-2.0                                   | Cargo          |

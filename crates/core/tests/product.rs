@@ -6,11 +6,31 @@ fn global_shortcuts_cannot_capture_terminal_control_keys_or_collide() {
     p.shortcuts.insert("search".into(), "Ctrl+C".into());
     assert!(p.validate().is_err());
     p.shortcuts.insert("search".into(), "Ctrl+Shift+J".into());
+    p.validate().unwrap();
+    p.shortcuts.insert("search".into(), "Ctrl+,".into());
     assert!(p.validate().is_err());
     p.shortcuts.insert("search".into(), "Ctrl+Shift+P".into());
     p.validate().unwrap();
     p.language = "en-US".into();
     assert!(p.validate().is_err());
+}
+#[test]
+fn legacy_task_shortcut_is_retired_without_resetting_other_preferences() {
+    let mut value = serde_json::to_value(AppConfig::default()).unwrap();
+    value["product"]["shortcuts"]["search"] = "Ctrl+Shift+P".into();
+    value["product"]["shortcuts"]["tasks"] = "Ctrl+Shift+J".into();
+    value["product"]["sshDefaults"]["keepaliveIntervalSecs"] = 25.into();
+    let config: AppConfig = serde_json::from_value(value).unwrap();
+    config.validate().unwrap();
+    assert_eq!(config.product.shortcuts.len(), 2);
+    assert_eq!(config.product.shortcuts["search"], "Ctrl+Shift+P");
+    assert_eq!(config.product.shortcuts["settings"], "Ctrl+,");
+    assert_eq!(config.product.ssh_defaults.keepalive_interval_secs, 25);
+    assert!(
+        serde_json::to_value(config).unwrap()["product"]["shortcuts"]
+            .get("tasks")
+            .is_none()
+    );
 }
 #[test]
 fn settings_reject_partial_proxy_auth_relative_download_and_invalid_keepalive() {

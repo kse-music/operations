@@ -156,7 +156,6 @@ impl Ui {
                                         "overview",
                                         "disks",
                                         "network",
-                                        "diagnostics",
                                         "containers",
                                         "images",
                                         "processes",

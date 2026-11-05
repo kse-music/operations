@@ -129,18 +129,23 @@ try {
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
       '主机运维',
     );
-    await page.locator('.host-tools [aria-haspopup=menu]').click();
-    const menu = page.getByRole('menu', { name: '已启用的插件', exact: true });
+    const toolbar = page.getByRole('navigation', { name: '当前主机工具', exact: true });
+    assert.equal(await toolbar.locator('[aria-haspopup]').count(), 0);
+    assert.equal(await page.locator('.host-plugin-menu').count(), 0);
     for (const [id, icon, functional] of expected) {
       assert.equal(
-        await menu.locator(`[data-plugin-id="${id}"] svg.lucide-${icon}`).count(),
+        await toolbar.locator(`[data-plugin-id="${id}"] svg.lucide-${icon}`).count(),
         functional ? 1 : 0,
       );
     }
+    for (const button of await toolbar.getByRole('button').all()) {
+      assert(await button.isVisible());
+      const box = await button.boundingBox();
+      assert(box && box.x >= 0 && box.x + box.width <= width + 1);
+    }
+    assert.equal(await toolbar.getByRole('button').count(), 5);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({ path: `${output}/${name}-host-tools.png` });
-    await page.keyboard.press('Escape');
-    await menu.waitFor({ state: 'hidden' });
     assert.deepEqual(errors, []);
     results.push({ name, width, height, theme, passed: true });
     await page.close();

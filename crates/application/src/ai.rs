@@ -8,6 +8,7 @@ use serverdeck_core::{
 };
 use serverdeck_storage::ai::ModelRecord;
 use zeroize::Zeroizing;
+mod context;
 mod routing;
 
 impl Application {
@@ -138,6 +139,34 @@ impl Application {
         Ok(())
     }
     pub async fn ai_prepare(&self, input: PrepareInput) -> Result<Preview, Error> {
+        self.ai_prepare_context(input, None).await
+    }
+    pub(crate) async fn ai_prepare_builtin(
+        &self,
+        mut input: PrepareInput,
+        cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<Preview, Error> {
+        input.auto_hosts = true;
+        input.mask_addresses = true;
+        input.selection = ContextSelection {
+            server: true,
+            metrics: true,
+            processes: true,
+            docker: true,
+            log: None,
+            log_lines: 100,
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(failure("PLUGIN_CANCELLED", "插件请求已取消")),
+            result = self.ai_prepare_context(input, Some(cancel)) => result,
+        }
+    }
+    async fn ai_prepare_context(
+        &self,
+        input: PrepareInput,
+        automatic: Option<&tokio_util::sync::CancellationToken>,
+    ) -> Result<Preview, Error> {
         validate_history(&input.history)?;
         if input.question.trim().is_empty() || input.question.len() > 8192 {
             return Err(Error::Validation("问题须为 1–8192 字节"));
@@ -228,6 +257,12 @@ impl Application {
             if input.auto_hosts {
                 context["matchedHost"] = json!({"hostId":binding.session.host_id,"hostname":binding.hostname,"username":binding.username,"port":binding.port,"connected":true});
             }
+            if let Some(cancel) = automatic {
+                self.ai_builtin_context(binding, &mut context, &mut warnings, cancel)
+                    .await?;
+                host_contexts.push(context);
+                continue;
+            }
             if selection.server {
                 context["server"] = json!({"hostname":binding.hostname,"username":binding.username,"port":binding.port});
             }
@@ -308,6 +343,10 @@ impl Application {
             None
         };
         let related_bindings = if bindings.len() > 1 { bindings } else { vec![] };
+        let warnings = warnings
+            .into_iter()
+            .map(|value| redactor.text(&value))
+            .collect();
         self.assistant.prepare(serverdeck_ai::PreparedContext {
             related_bindings,
             history: input.history,

@@ -9,7 +9,7 @@ export const defaultProductPreferences = (): ProductPreferences => ({
   language: 'zh-CN',
   downloadDirectory: null,
   sshDefaults: defaultSshOptions(),
-  shortcuts: { search: 'Ctrl+K', settings: 'Ctrl+,', tasks: 'Ctrl+Shift+J' },
+  shortcuts: { search: 'Ctrl+K', settings: 'Ctrl+,' },
 });
 // Locale registry: add a complete dictionary before advertising another UI language.
 export const messages = {
@@ -23,7 +23,6 @@ export const messages = {
     terminals: 'SSH 终端',
     files: 'SFTP 文件',
     server: '服务器管理',
-    network: '网络诊断',
     assistant: 'AI 运维助手',
     backup: '备份恢复',
     about: '关于',
@@ -47,14 +46,6 @@ export function globalKey(event: KeyboardEvent): string | null {
   const key =
     event.key === ',' ? ',' : /^[a-z0-9]$/i.test(event.key) ? event.key.toUpperCase() : '';
   return key ? `Ctrl+${event.shiftKey ? 'Shift+' : ''}${key}` : null;
-}
-export interface BackgroundTask {
-  id: string;
-  kind: 'diagnostic';
-  hostIds: string[];
-  state: string;
-  label: string;
-  active: boolean;
 }
 export interface BackupItem {
   id: string;
@@ -96,6 +87,5 @@ export interface ConnectionStatus {
   state: string;
 }
 export interface BackgroundSnapshot {
-  tasks: BackgroundTask[];
   connections: ConnectionStatus[];
 }

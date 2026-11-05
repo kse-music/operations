@@ -4,11 +4,11 @@ use super::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serverdeck_core::{ai, tasks};
+use serverdeck_core::ai;
 use serverdeck_plugin_core::{InstalledPlugin, permissions::denied};
 use serverdeck_plugin_sdk::{Capability, tools::Operation};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::BTreeSet,
     time::{Duration, Instant},
 };
 
@@ -24,29 +24,22 @@ use std::{
     deny_unknown_fields
 )]
 pub enum ToolInput {
-    AiResolveHosts {
-        input: ai::ResolveHostsInput,
-    },
-    AiPrepare {
-        input: ai::PrepareInput,
-    },
-    AiSend {
-        id: String,
-        confirmed: bool,
-    },
-    AiExecute {
-        input: ai::ExecuteInput,
-    },
-    DiagnosticStart {
-        input: tasks::DiagnosticInput,
-    },
-    DiagnosticList {
-        #[serde(default)]
-        versions: HashMap<String, u64>,
-    },
-    DiagnosticCancel {
-        id: String,
-    },
+    AiResolveHosts { input: ai::ResolveHostsInput },
+    AiPrepare { input: ai::PrepareInput },
+    AiSend { id: String, confirmed: bool },
+    AiExecute { input: ai::ExecuteInput },
+}
+
+pub(super) fn assistant_model_id(value: &Value) -> Result<Option<&str>, Error> {
+    if !value.is_object() {
+        return Err(Error::Validation("插件模型绑定配置无效"));
+    }
+    match value.get("modelId") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(id)) if id.is_empty() => Ok(None),
+        Some(Value::String(id)) => Ok(Some(id)),
+        _ => Err(Error::Validation("插件模型绑定配置无效")),
+    }
 }
 
 #[cfg(test)]
@@ -54,15 +47,166 @@ mod tests {
     use super::*;
     use serde_json::json;
     use serverdeck_plugin_core::{InstallInput, permissions::GrantInput};
+    #[derive(Default)]
+    struct TestSecrets(std::sync::Mutex<std::collections::BTreeMap<String, Vec<u8>>>);
+    impl serverdeck_security::SecretStore for TestSecrets {
+        fn write(&self, reference: &str, secret: &[u8]) -> Result<(), Error> {
+            self.0
+                .lock()
+                .unwrap()
+                .insert(reference.into(), secret.to_vec());
+            Ok(())
+        }
+        fn read(&self, reference: &str) -> Result<Option<zeroize::Zeroizing<Vec<u8>>>, Error> {
+            Ok(self
+                .0
+                .lock()
+                .unwrap()
+                .get(reference)
+                .cloned()
+                .map(zeroize::Zeroizing::new))
+        }
+        fn delete(&self, reference: &str) -> Result<(), Error> {
+            self.0.lock().unwrap().remove(reference);
+            Ok(())
+        }
+    }
     fn app() -> (tempfile::TempDir, Application) {
         let dir = tempfile::tempdir().unwrap();
-        let app =
+        let mut app =
             Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        app.secrets = std::sync::Arc::new(TestSecrets::default());
+        app.secrets
+            .write("owned-model-key", b"ephemeral-ticket-test-key")
+            .unwrap();
         app.provision_bundled_plugins().unwrap();
+        app.database
+            .ai_model_save(
+                serverdeck_storage::ai::ModelRecord {
+                    id: "00000000-0000-4000-8000-000000000001".into(),
+                    name: "Owned test model".into(),
+                    revision: "owned-model".into(),
+                    secret_ref: Some("owned-model-key".into()),
+                    config: ai::Config {
+                        model: "owned-model".into(),
+                        ..ai::Config::default()
+                    },
+                },
+                None,
+            )
+            .unwrap();
+        app.plugins
+            .settings_write(
+                "cn.hiboot.plugins.assistant",
+                &json!({
+                    "modelId":"00000000-0000-4000-8000-000000000001"
+                }),
+            )
+            .unwrap();
         (dir, app)
+    }
+    fn stage_input() -> Value {
+        json!({"operation":"ai_prepare","args":{"input":{
+            "modelId":"00000000-0000-4000-8000-000000000001", "sessionId":null,
+            "question":"Owned ticket check", "selection":{"server":false,"metrics":false,"processes":false,"docker":false,"log":null,"logLines":1},
+            "maskAddresses":true,"redactValues":[]
+        }}})
     }
     async fn ready(app: &Application, id: &str) {
         app.plugin_set_enabled(id.into(), true).await.unwrap();
+    }
+    async fn settings(
+        app: &Application,
+        id: &str,
+        value: Value,
+    ) -> serverdeck_plugin_sdk::Response {
+        app.plugin_capability(
+            id,
+            serverdeck_plugin_sdk::Request {
+                api_version: 1,
+                request_id: uuid::Uuid::new_v4().to_string(),
+                operation: Capability::SettingsWrite { value },
+            },
+        )
+        .await
+        .unwrap()
+    }
+    #[tokio::test]
+    async fn model_binding_persists_and_changes_revoke_old_requests_without_fallback() {
+        let (dir, app) = app();
+        let id = "cn.hiboot.plugins.assistant";
+        ready(&app, id).await;
+        let second = "00000000-0000-4000-8000-000000000002";
+        let mut model = app
+            .database
+            .ai_model("00000000-0000-4000-8000-000000000001")
+            .unwrap();
+        model.id = second.into();
+        model.name = "Second model".into();
+        model.revision = "second-revision".into();
+        app.database.ai_model_save(model, None).unwrap();
+        let initial = app
+            .plugin_tool_stage(id.into(), stage_input())
+            .await
+            .unwrap();
+        let preview = invoke(&app, id, &initial).await;
+        assert!(preview.error.is_none());
+        let preview_id = preview.result["id"].as_str().unwrap();
+        let pending = app
+            .plugin_tool_stage(id.into(), stage_input())
+            .await
+            .unwrap();
+        let written = settings(&app, id, json!({"modelId":second,"keep":"retained"})).await;
+        assert!(written.error.is_none(), "{:?}", written.error);
+        assert!(app.assistant.preview_model_id(preview_id).is_err());
+        assert!(invoke(&app, id, &pending).await.error.is_some());
+        assert!(
+            app.plugin_tool_stage(id.into(), stage_input())
+                .await
+                .is_err(),
+            "old or forged model cannot override binding"
+        );
+        let mut input = stage_input();
+        input["args"]["input"]["modelId"] = json!(second);
+        let ticket = app.plugin_tool_stage(id.into(), input).await.unwrap();
+        assert!(invoke(&app, id, &ticket).await.error.is_none());
+        assert!(
+            settings(&app, id, json!({"modelId":"missing"}))
+                .await
+                .error
+                .is_some()
+        );
+        assert_eq!(app.plugins.settings_read(id).unwrap()["modelId"], second);
+        assert!(
+            settings(&app, id, json!({"modelId":true}))
+                .await
+                .error
+                .is_some()
+        );
+        app.shutdown().await;
+        drop(app);
+        let reopened =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        reopened.provision_bundled_plugins().unwrap();
+        assert_eq!(
+            reopened.plugins.settings_read(id).unwrap(),
+            json!({"modelId":second,"keep":"retained"})
+        );
+        ready(&reopened, id).await;
+        assert!(
+            settings(&reopened, id, json!({"modelId":null,"keep":"retained"}))
+                .await
+                .error
+                .is_none()
+        );
+        assert!(
+            reopened
+                .plugin_tool_stage(id.into(), stage_input())
+                .await
+                .is_err(),
+            "unbound assistant cannot auto-select another model"
+        );
+        reopened.shutdown().await;
     }
     async fn invoke(
         app: &Application,
@@ -117,24 +261,59 @@ mod tests {
     #[tokio::test]
     async fn real_wasm_tools_execute_host_services_and_validate_inputs() {
         let (_dir, app) = app();
-        for (id, operation) in [("services", "diagnostic_list")] {
-            let id = format!("cn.hiboot.plugins.{id}");
-            ready(&app, &id).await;
-            let ticket = tokio::time::timeout(
-                Duration::from_secs(2),
-                app.plugin_tool_stage(id.clone(), json!({"operation":operation,"args":{}})),
+        let id = "cn.hiboot.plugins.assistant";
+        ready(&app, id).await;
+        let ticket = app
+            .plugin_tool_stage(id.into(), stage_input())
+            .await
+            .unwrap();
+        let reply = invoke(&app, id, &ticket).await;
+        assert!(reply.error.is_none(), "{:?}", reply.error);
+        assert!(reply.result.get("id").is_some());
+        let send = app
+            .plugin_tool_stage(
+                id.into(),
+                json!({"operation":"ai_send","args":{
+                    "id":reply.result["id"], "confirmed":true
+                }}),
             )
             .await
-            .unwrap()
             .unwrap();
-            let reply = invoke(&app, &id, &ticket).await;
-            assert!(reply.error.is_none(), "{:?}", reply.error);
-            assert!(reply.result.is_array() || reply.result.get("entries").is_some());
-            assert!(
-                invoke(&app, &id, &ticket).await.error.is_some(),
-                "tickets are single-use"
-            );
-        }
+        assert!(send.review.is_none(), "built-in chat sends without a popup");
+        app.plugin_tool_abort_input(id, &send.input_id).unwrap();
+        let resolve: ToolInput = serde_json::from_value(json!({"operation":"ai_resolve_hosts","args":{"input":{
+            "modelId":"00000000-0000-4000-8000-000000000001", "requestId":uuid::Uuid::new_v4().to_string(),
+            "question":"diagnose", "previousHostIds":[], "maskAddresses":true, "redactValues":[]
+        }}})).unwrap();
+        let mut plugin = app.plugins.detail(id).unwrap();
+        assert!(
+            app.plugin_tool_review(&resolve, json!({}), &plugin)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        plugin.source = serverdeck_plugin_core::repository::PluginSource::User;
+        assert!(
+            app.plugin_tool_review(&resolve, json!({}), &plugin)
+                .await
+                .unwrap()
+                .is_some(),
+            "an uploaded package with the same ID still requires review"
+        );
+        let send = ToolInput::AiSend {
+            id: reply.result["id"].as_str().unwrap().into(),
+            confirmed: true,
+        };
+        assert!(
+            app.plugin_tool_review(&send, json!({}), &plugin)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            invoke(&app, id, &ticket).await.error.is_some(),
+            "tickets are single-use"
+        );
         let id = "cn.hiboot.plugins.assistant";
         ready(&app, id).await;
         assert!(
@@ -153,7 +332,13 @@ mod tests {
             .await
             .is_err()
         );
-        for operation in ["batch_start", "automation_catalog"] {
+        for operation in [
+            "batch_start",
+            "automation_catalog",
+            "diagnostic_start",
+            "diagnostic_list",
+            "diagnostic_cancel",
+        ] {
             assert!(
                 app.plugin_tool_stage(
                     "cn.hiboot.plugins.services".into(),
@@ -168,13 +353,13 @@ mod tests {
     #[tokio::test]
     async fn tickets_bind_owner_revision_generation_operation_expiry_and_quotas() {
         let (dir, app) = app();
-        let system = "cn.hiboot.plugins.services";
+        let system = "cn.hiboot.plugins.assistant";
         ready(&app, system).await;
         let mut package: Value = serde_json::from_slice(include_bytes!(
-            "../../../../plugins/system/packages/services.sdplugin"
+            "../../../../plugins/system/packages/assistant.sdplugin"
         ))
         .unwrap();
-        package["manifest"]["id"] = json!("dev.upload-network");
+        package["manifest"]["id"] = json!("dev.upload-assistant");
         let path = dir.path().join("upload.sdplugin");
         std::fs::write(&path, serde_json::to_vec(&package).unwrap()).unwrap();
         let upload = app
@@ -199,7 +384,7 @@ mod tests {
                 expected_revision: upload.revision,
                 permissions: upload.manifest.permissions,
                 host_ids: vec![],
-                operations: vec!["network.run".into(), "ui.contribute".into()],
+                operations: vec!["assistant.use".into(), "ui.contribute".into()],
                 read_roots: vec![],
                 write_roots: vec![],
                 confirmed: true,
@@ -207,7 +392,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let input = || json!({"operation":"diagnostic_list","args":{}});
+        let input = stage_input;
         let ticket = app.plugin_tool_stage(system.into(), input()).await.unwrap();
         assert!(
             invoke(&app, &upload.manifest.id, &ticket)
@@ -217,7 +402,7 @@ mod tests {
         );
         let forged = ToolTicket {
             input_id: ticket.input_id.clone(),
-            operation: Operation::DiagnosticCancel,
+            operation: Operation::AiSend,
             review: None,
         };
         assert!(invoke(&app, system, &forged).await.error.is_some());
@@ -306,12 +491,12 @@ mod tests {
     #[tokio::test]
     async fn abort_targets_owned_inputs_and_never_cancels_a_new_call_or_the_vm() {
         let (_dir, app) = app();
-        let id = "cn.hiboot.plugins.services";
+        let id = "cn.hiboot.plugins.assistant";
         ready(&app, id).await;
-        let stage = || json!({"operation":"diagnostic_list","args":{}});
+        let stage = stage_input;
         let ticket = app.plugin_tool_stage(id.into(), stage()).await.unwrap();
         assert!(
-            app.plugin_tool_abort_input("cn.hiboot.plugins.assistant", &ticket.input_id)
+            app.plugin_tool_abort_input("cn.hiboot.plugins.services", &ticket.input_id)
                 .is_err()
         );
         app.plugin_tool_abort_input(id, &ticket.input_id).unwrap();
@@ -380,9 +565,6 @@ impl ToolInput {
             Self::AiPrepare { .. } => Operation::AiPrepare,
             Self::AiSend { .. } => Operation::AiSend,
             Self::AiExecute { .. } => Operation::AiExecute,
-            Self::DiagnosticStart { .. } => Operation::DiagnosticStart,
-            Self::DiagnosticList { .. } => Operation::DiagnosticList,
-            Self::DiagnosticCancel { .. } => Operation::DiagnosticCancel,
         }
     }
 }
@@ -420,6 +602,41 @@ impl Drop for ActiveInputGuard {
 }
 
 impl Application {
+    async fn plugin_check_model_binding(
+        &self,
+        plugin: &InstalledPlugin,
+        input: &ToolInput,
+    ) -> Result<(), Error> {
+        if !super::review::builtin_assistant(plugin) {
+            return Ok(());
+        }
+        let requested = match input {
+            ToolInput::AiResolveHosts { input } => input.model_id.clone(),
+            ToolInput::AiPrepare { input } => input.model_id.clone(),
+            ToolInput::AiSend { id, .. } => self.assistant.preview_model_id(id)?,
+            ToolInput::AiExecute { .. } => return Ok(()),
+        };
+        let repository = self.plugins.clone();
+        let id = plugin.manifest.id.clone();
+        let bound = self
+            .blocking(move |db| {
+                let value = repository.settings_read(&id)?;
+                let model = assistant_model_id(&value)?
+                    .ok_or(Error::Validation("请先在插件设置中绑定模型"))?;
+                match db.ai_model(model) {
+                    Ok(model) => Ok(model.id),
+                    Err(Error::NotFound) => {
+                        Err(Error::Validation("绑定模型已删除，请在插件设置中重新绑定"))
+                    }
+                    Err(error) => Err(error),
+                }
+            })
+            .await?;
+        if requested != bound {
+            return Err(Error::Validation("插件绑定模型已变化，请重新发送"));
+        }
+        Ok(())
+    }
     pub async fn plugin_tool_stage(&self, id: String, input: Value) -> Result<ToolTicket, Error> {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
@@ -465,9 +682,8 @@ impl Application {
             }
             _ => (),
         }
-        let review = self
-            .plugin_tool_review(&input, raw, &plugin.manifest.name)
-            .await?;
+        self.plugin_check_model_binding(&plugin, &input).await?;
+        let review = self.plugin_tool_review(&input, raw, &plugin).await?;
         let ticket = uuid::Uuid::new_v4().to_string();
         let mut data = self.plugin_host.lock()?;
         if !super::state::Host::current(&data, &id, &generation) {
@@ -712,6 +928,8 @@ impl Application {
         fn value<T: Serialize>(value: T) -> Result<Value, Error> {
             serde_json::to_value(value).map_err(|e| Error::Worker(Box::new(e)))
         }
+        let plugin = self.plugins.detail(&call.id)?;
+        self.plugin_check_model_binding(&plugin, &input).await?;
         match input {
             ToolInput::AiResolveHosts { mut input } => {
                 let public_id = input.request_id.clone();
@@ -726,7 +944,12 @@ impl Application {
                 )
             }
             ToolInput::AiPrepare { input } => {
-                let preview = self.ai_prepare(input).await?;
+                let plugin = self.plugins.detail(&call.id)?;
+                let preview = if super::review::builtin_assistant(&plugin) {
+                    self.ai_prepare_builtin(input, &call.cancel).await?
+                } else {
+                    self.ai_prepare(input).await?
+                };
                 if call.cancel.is_cancelled() {
                     self.ai_cancel(&preview.id)?;
                     return Err(failure("PLUGIN_CANCELLED", "插件请求已取消"));
@@ -760,17 +983,6 @@ impl Application {
             ToolInput::AiExecute { input } => {
                 self.plugin_ai_owner(&call.id, &call.generation, &input.proposal_id)?;
                 value(self.ai_execute(input).await?)
-            }
-            ToolInput::DiagnosticStart { input } => value(self.diagnostic_start(input)?),
-            ToolInput::DiagnosticList { versions } => value(
-                self.diagnostic_list()?
-                    .into_iter()
-                    .filter(|i| versions.get(&i.id) != Some(&i.revision))
-                    .collect::<Vec<_>>(),
-            ),
-            ToolInput::DiagnosticCancel { id } => {
-                self.diagnostic_cancel(&id)?;
-                Ok(Value::Null)
             }
         }
     }

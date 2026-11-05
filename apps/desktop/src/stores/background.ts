@@ -1,16 +1,13 @@
 import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
-import { computed, ref, shallowRef } from 'vue';
+import { ref, shallowRef } from 'vue';
 import { productApi } from '../services/product';
 import { useOpsStore } from './ops';
-import { useNotificationsStore } from './notifications';
 import { errorMessage } from '../services/ipc';
-import type { BackgroundTask, ConnectionStatus } from '../types/product';
+import type { ConnectionStatus } from '../types/product';
 export const useBackgroundStore = defineStore('background', () => {
-  const tasks = shallowRef<BackgroundTask[]>([]),
-    connections = shallowRef<ConnectionStatus[] | null>(null),
+  const connections = shallowRef<ConnectionStatus[] | null>(null),
     error = ref('');
-  const pending = computed(() => tasks.value.filter((t) => t.active).length);
   let timer: ReturnType<typeof setTimeout> | undefined,
     stopped = true;
   async function poll() {
@@ -18,14 +15,6 @@ export const useBackgroundStore = defineStore('background', () => {
     if (stopped) return;
     const data = results[0];
     if (data.status === 'fulfilled') {
-      const previous = new Map(tasks.value.map((t) => [t.id, t.state]));
-      for (const t of data.value.tasks)
-        if (['failed', 'uncertain'].includes(t.state) && previous.get(t.id) !== t.state)
-          useNotificationsStore().push(
-            `${t.label}：${t.state === 'uncertain' ? '结果未确认' : '失败'}，请打开对应页面查看任务状态。`,
-            true,
-          );
-      tasks.value = data.value.tasks;
       connections.value = data.value.connections;
     }
     const failure = results.find((r) => r.status === 'rejected');
@@ -47,5 +36,5 @@ export const useBackgroundStore = defineStore('background', () => {
     return rows.some((c) => c.state === 'connected') ? '已连接' : rows.length ? '连接中' : '未连接';
   }
   useErrorNotifications(error);
-  return { tasks, connections, hostState, pending, error, start, stop };
+  return { connections, hostState, error, start, stop };
 });

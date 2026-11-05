@@ -398,29 +398,17 @@ try {
     await disable.getByRole('button', { name: '明确确认', exact: true }).click();
     await settings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
     await page.locator('.workspace-tab[data-host-id="server-ui"] [role=tab]').click();
-    const tools = page
-      .locator('.workspace-header')
-      .getByRole('button', { name: '工具', exact: true });
-    await tools.click();
-    const toolMenu = page.getByRole('menu', { name: '已启用的插件', exact: true });
-    assert.equal(await toolMenu.getByRole('menuitem').count(), 5);
-    assert.equal(
-      await toolMenu.getByRole('menuitem', { name: 'Docker 管理', exact: true }).count(),
-      0,
-    );
-    assert.equal(
-      await toolMenu.getByRole('menuitem', { name: '上传资源插件', exact: true }).count(),
-      1,
-    );
-    await page.screenshot({ path: `${output}/${name}-tools-menu.png` });
-    await toolMenu.press('Escape');
+    const tools = page.getByRole('navigation', { name: '当前主机工具', exact: true });
+    assert.equal(await tools.locator('[data-plugin-id]').count(), 5);
+    assert.equal(await tools.getByRole('button', { name: 'Docker 管理', exact: true }).count(), 0);
+    assert.equal(await tools.getByRole('button', { name: '上传资源插件', exact: true }).count(), 1);
+    await page.screenshot({ path: `${output}/${name}-tools-toolbar.png` });
     await openPluginSettings(page, 'Docker 管理');
     await settings.getByRole('button', { name: '启用插件', exact: true }).click();
     await settings.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
     await page.screenshot({ path: `${output}/${name}-plugin-settings.png` });
     await page.locator('.workspace-tab[data-host-id="server-ui"] [role=tab]').click();
-    await tools.click();
-    await toolMenu.getByRole('menuitem', { name: 'Docker 管理', exact: true }).click();
+    await tools.getByRole('button', { name: 'Docker 管理', exact: true }).click();
     await navigateWorkspace(page, '插件管理');
 
     await openPluginFunction(page, '上传资源插件', 'server-ui');

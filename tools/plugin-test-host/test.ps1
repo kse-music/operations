@@ -6,7 +6,7 @@ New-Item -ItemType Directory -Path $stateDirectory,(Join-Path $stateDirectory 't
 $containerName = 'serverdeck-plugin13a-' + [Guid]::NewGuid().ToString('N')
 $containerId = $null
 $taskPassword = [Guid]::NewGuid().ToString('N') + 'SdA1!'
-$keys = @('SERVERDECK_PLUGIN_TEST_PORT','SERVERDECK_PLUGIN_TEST_HTTP_PORT','SERVERDECK_PLUGIN_TEST_PASSWORD','SERVERDECK_PLUGIN_TEST_HOST_KEY','SERVERDECK_PLUGIN_TEST_CONTAINER_ID','SERVERDECK_PLUGIN_TEST_DISTRO','SERVERDECK_PLUGIN_SDK_WASM','TEMP','TMP','CARGO_PROFILE_DEV_DEBUG')
+$keys = @('SERVERDECK_PLUGIN_TEST_PORT','SERVERDECK_PLUGIN_TEST_HTTP_PORT','SERVERDECK_PLUGIN_TEST_PASSWORD','SERVERDECK_PLUGIN_TEST_HOST_KEY','SERVERDECK_PLUGIN_TEST_CONTAINER_ID','SERVERDECK_PLUGIN_TEST_DISTRO','SERVERDECK_PLUGIN_SDK_WASM','TEMP','TMP')
 $savedEnvironment = @{}
 if ($Mode -ne 'sdk') { Push-Location $workspace; try { node tools/plugin-native-e2e.mjs --build; if ($LASTEXITCODE -ne 0) { throw 'Native QA build failed' } } finally { Pop-Location } }
 foreach ($key in $keys) { $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
@@ -63,12 +63,11 @@ try {
     $env:SERVERDECK_PLUGIN_SDK_WASM = Join-Path $stateDirectory 'sdk-guest/wasm32-unknown-unknown/release/serverdeck_diagnostics_example.wasm'
     $env:TEMP = Join-Path $stateDirectory 'tmp'
     $env:TMP = $env:TEMP
-    $env:CARGO_PROFILE_DEV_DEBUG = '0'
     @{ containerId=$containerId; containerName=$containerName; sshPort=[int]$env:SERVERDECK_PLUGIN_TEST_PORT; image='serverdeck-plugin13a-test:13a'; scope='owned isolated test container, no host mounts' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stateDirectory 'linux-test-host.json') -Encoding utf8
     Push-Location $workspace
     try {
         if ($Mode -eq 'ui') { node tools/plugin-native-e2e.mjs }
-        else { cargo test -p serverdeck-application --offline --locked -j 2 --target-dir .local/plugin-13a/cargo-target plugins::tests::linux_sdk_capability_roundtrip -- --ignored --nocapture }
+        else { cargo test -p serverdeck-application --offline --locked -j 2 plugins::tests::linux_sdk_capability_roundtrip -- --ignored --nocapture }
         if ($LASTEXITCODE -ne 0) { throw 'Real Linux plugin integration test failed' }
     } finally { Pop-Location }
 } catch {

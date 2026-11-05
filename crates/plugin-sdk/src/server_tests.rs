@@ -136,7 +136,7 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
     let allow = |cap: &Capability| matches!(cap,Capability::ToolInvoke{operation,..} if operation.tool()==Tool::Assistant);
     let bridge = |operation| json!({"action":"bridge","values":{"request":serde_json::to_string(&Capability::ToolInvoke{input_id:"opaque".into(),operation}).unwrap()}});
     assert_eq!(
-        state.handle(6, bridge(Operation::DiagnosticCancel), allow)["error"]["code"],
+        state.handle(6, json!({"action":"bridge","values":{"request":serde_json::to_string(&Capability::SettingsRead).unwrap()}}), allow)["error"]["code"],
         "CAPABILITY"
     );
     let accepted = state.handle(6, bridge(Operation::AiPrepare), allow);

@@ -40,7 +40,7 @@ it.each([false, true])('scopes secondary tools to the selected host (local=%s)',
     local,
     onNavigate: navigate,
   });
-  expect(root.querySelectorAll('button')).toHaveLength(local ? 1 : 3);
+  expect(root.querySelectorAll('button')).toHaveLength(local ? 1 : 2);
   expect(root.querySelector('[aria-current="page"]')?.textContent).toContain(
     local ? '本地终端' : 'SFTP 文件',
   );
@@ -48,10 +48,10 @@ it.each([false, true])('scopes secondary tools to the selected host (local=%s)',
   expect(navigate).toHaveBeenCalledWith(local ? 'terminals' : 'files');
   expect(root.querySelector('[aria-label="网络诊断"]')).toBeNull();
   expect([...root.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
-    local ? ['本地终端'] : ['SSH 终端', 'SFTP 文件', '工具'],
+    local ? ['本地终端'] : ['SSH 终端', 'SFTP 文件'],
   );
 });
-it('shows only enabled plugins once and opens them from the tools menu without host grants', async () => {
+it('shows enabled plugin functions beside SSH and SFTP without requiring host grants', async () => {
   const pinia = createPinia();
   const plugins = usePluginsStore(pinia);
   const items = systemPluginFixtures();
@@ -62,34 +62,51 @@ it('shows only enabled plugins once and opens them from the tools menu without h
   plugins.installed = items;
   const select = vi.fn();
   mount({ active: 'terminals', local: false, onPlugin: select }, pinia);
-  const trigger = root.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
-  trigger.click();
-  await nextTick();
-  const menu = document.querySelector<HTMLElement>('[aria-label="已启用的插件"]')!;
-  expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(1);
+  const toolbar = root.querySelector<HTMLElement>('[aria-label="当前主机工具"]')!;
+  expect(toolbar.querySelectorAll('[data-plugin-id]')).toHaveLength(1);
+  expect(toolbar.querySelector('[aria-haspopup]')).toBeNull();
+  expect(document.querySelector('.host-plugin-menu')).toBeNull();
   expect(
-    menu.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-settings-2`),
+    toolbar.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-settings-2`),
   ).not.toBeNull();
   expect(
-    menu.querySelector(`[data-plugin-id="${items[0]!.manifest.id}"] svg.lucide-settings-2`),
-  ).not.toBeNull();
-  expect(menu.textContent).not.toContain('进程与端口');
-  menu.querySelector<HTMLButtonElement>(`[data-plugin-id="${items[0]!.manifest.id}"]`)!.click();
+    [...toolbar.querySelectorAll('button')].map((button) => button.textContent?.trim()),
+  ).toEqual(['SSH 终端', 'SFTP 文件', items[0]!.manifest.name]);
+  toolbar.querySelector<HTMLButtonElement>(`[data-plugin-id="${items[0]!.manifest.id}"]`)!.click();
   await nextTick();
   expect(select).toHaveBeenCalledWith(items[0]!.manifest.id, 'server');
-  expect(menu.querySelector(`[data-plugin-id="${items[1]!.manifest.id}"]`)).toBeNull();
+  expect(toolbar.querySelector(`[data-plugin-id="${items[1]!.manifest.id}"]`)).toBeNull();
   expect(document.querySelector('[role="menu"]')).toBeNull();
-  trigger.click();
-  await nextTick();
-  document
-    .querySelector('[role="menu"]')!
-    .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await nextTick();
-  expect(document.activeElement).toBe(trigger);
   items[0]!.enabled = false;
   items[1]!.enabled = false;
   plugins.installed = [...items];
-  trigger.click();
   await nextTick();
-  expect(document.querySelector('[role="menu"]')?.textContent).toContain('暂无已启用的插件');
+  expect(
+    [...toolbar.querySelectorAll('button')].map((button) => button.textContent?.trim()),
+  ).toEqual(['SSH 终端', 'SFTP 文件']);
+});
+
+it('highlights the current plugin and hides remote plugins on the local device', async () => {
+  const pinia = createPinia();
+  const plugins = usePluginsStore(pinia);
+  plugins.installed = systemPluginFixtures().map((plugin) => ({ ...plugin, enabled: true }));
+  const props = {
+    active: 'extension' as const,
+    activePlugin: plugins.installed[1]!.manifest.id,
+    local: false,
+  };
+  mount(props, pinia);
+  expect(root.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  expect(root.querySelector('[aria-current="page"]')?.getAttribute('data-plugin-id')).toBe(
+    props.activePlugin,
+  );
+  expect(root.querySelector('.host-tool.active')?.getAttribute('data-plugin-id')).toBe(
+    props.activePlugin,
+  );
+  app.unmount();
+  root.remove();
+  mount({ ...props, active: 'terminals', local: true }, pinia);
+  await nextTick();
+  expect(root.querySelectorAll('button')).toHaveLength(1);
+  expect(root.querySelector('[data-plugin-id]')).toBeNull();
 });

@@ -1,7 +1,7 @@
 // Real Windows WebView2 + native IPC + isolated SQLite/OS credential + disposable Linux host.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, copyFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
@@ -18,14 +18,7 @@ import {
 const root = fileURLToPath(new URL('../', import.meta.url)),
   base = path.join(root, '.local', 'plugin-13a', 'native');
 const config = path.join(base, 'config.json'),
-  executable = path.join(
-    root,
-    '.local',
-    'plugin-13a',
-    'cargo-target',
-    'debug',
-    'serverdeck-desktop.exe',
-  );
+  executable = path.join(base, 'PluginNativeQa.exe');
 await mkdir(base, { recursive: true });
 if (process.argv.includes('--build')) {
   await writeFile(
@@ -35,23 +28,27 @@ if (process.argv.includes('--build')) {
       app: { appDirectoriesOverride: path.join(base, `data-${randomUUID()}`) },
     }),
   );
-  const result = spawnSync(
-    process.execPath,
-    [path.join(root, 'tools', 'tauri.mjs'), 'build', '--debug', '--no-bundle', '--config', config],
-    {
-      cwd: root,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        CARGO_TARGET_DIR: path.join(root, '.local', 'plugin-13a', 'cargo-target'),
-        CARGO_BUILD_JOBS: '2',
-        CARGO_PROFILE_DEV_DEBUG: '0',
+  function build(args) {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(root, 'tools', 'tauri.mjs'), 'build', '--debug', '--no-bundle', ...args],
+      {
+        cwd: root,
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          CARGO_TARGET_DIR: path.join(root, 'target'),
+          CARGO_BUILD_JOBS: '2',
+        },
+        windowsHide: true,
       },
-      windowsHide: true,
-    },
-  );
-  if (result.error) throw result.error;
-  assert.equal(result.status, 0, 'native QA build failed');
+    );
+    if (result.error) throw result.error;
+    assert.equal(result.status, 0, 'native build failed');
+  }
+  build(['--config', config]);
+  await copyFile(path.join(root, 'target/debug/serverdeck-desktop.exe'), executable);
+  build([]);
   process.exit(0);
 }
 assert.equal(process.platform, 'win32');
@@ -227,10 +224,9 @@ try {
     .waitFor();
   await page.keyboard.press('Escape');
   await page
-    .locator('.workspace-header')
-    .getByRole('button', { name: '工具', exact: true })
+    .getByRole('navigation', { name: '当前主机工具', exact: true })
+    .getByRole('button', { name: 'Host Info', exact: true })
     .click();
-  await page.getByRole('menuitem', { name: 'Host Info', exact: true }).click();
   await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
   await showHostTree(page);
   await hostContextAction(

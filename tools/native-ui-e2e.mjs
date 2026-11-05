@@ -30,7 +30,7 @@ await writeFile(
   }),
 );
 const executable = path.join(artifacts, 'ServerDeckUiE2E.exe');
-const buildDirectory = path.join(root, '.local', 'native-ui-build');
+const buildDirectory = path.join(root, 'target');
 function build(args) {
   const result = spawnSync(
     process.execPath,
@@ -417,29 +417,14 @@ try {
   passed.push(
     'top-level modules only change sidebar menus; the visible PowerShell and its state survive every switch',
   );
-  await navigateWorkspace(page, '任务中心');
-  await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
-  assert.equal(await page.locator('.statusbar button').count(), 1);
-  assert.equal(await page.getByRole('dialog', { name: '任务中心', exact: true }).count(), 1);
-  assert.equal(await page.getByRole('region', { name: '传输任务', exact: true }).count(), 1);
-  assert.equal(await page.getByRole('region', { name: '网络诊断任务', exact: true }).count(), 1);
-  assert.equal(await page.getByRole('region', { name: '自动化任务', exact: true }).count(), 0);
+  assert.equal(await page.locator('.statusbar [aria-label="任务中心"]').count(), 0);
   await page.keyboard.press('Control+Shift+J');
-  assert.equal(await page.locator('.workspace-tab[data-view="tasks"]').count(), 0);
-  await page.screenshot({ path: path.join(artifacts, 'task-center.png') });
-  await page.keyboard.press('Escape');
-  await page.getByRole('dialog', { name: '任务中心', exact: true }).waitFor({ state: 'hidden' });
-  await page.keyboard.press('Control+Shift+J');
-  await page.getByRole('dialog', { name: '任务中心', exact: true }).waitFor();
-  await page
-    .getByRole('dialog', { name: '任务中心', exact: true })
-    .getByRole('button', { name: '关闭对话框', exact: true })
-    .click();
-  await selectHostWorkspace(page, '');
-  await command("[Console]::WriteLine(('SD_TASK_CENTER_' + $sdValue))", 'SD_TASK_CENTER_323');
-  passed.push(
-    'footer and shortcut share one task dialog; Escape and close preserve the real local shell without a task workspace',
+  assert.equal(await page.getByRole('dialog', { name: '任务中心', exact: true }).count(), 0);
+  await command(
+    "[Console]::WriteLine(('SD_WITHOUT_TASK_CENTER_' + $sdValue))",
+    'SD_WITHOUT_TASK_CENTER_323',
   );
+  passed.push('task center is removed; its retired shortcut preserves the real local shell');
   const groups = [];
   for (const name of ['UI A', 'UI B']) {
     await hostTreeAction(page, null, '新建文件夹');

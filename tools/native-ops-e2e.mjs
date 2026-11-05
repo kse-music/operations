@@ -33,7 +33,7 @@ export async function remotePython({ page, hostId }, script) {
     ...fixture.manifest,
     id,
     name: 'Owned SSH fixture',
-    permissions: ['ssh.execute', 'ui.contribute', 'network.run'],
+    permissions: ['ssh.execute', 'ui.contribute'],
   };
   const source = path.join(folder, `${id}.sdplugin`);
   await writeFile(source, JSON.stringify(fixture), { flag: 'wx' });
@@ -53,7 +53,7 @@ export async function remotePython({ page, hostId }, script) {
           input: {
             expectedRevision: plugin.revision,
             permissions: plugin.manifest.permissions,
-            operations: ['ssh.execute', 'ui.contribute', 'network.run'],
+            operations: ['ssh.execute', 'ui.contribute'],
             readRoots: [],
             writeRoots: [],
             confirmed: true,

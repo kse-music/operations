@@ -1,4 +1,3 @@
-import { networkFixture } from './plugin-fixtures.mjs';
 // Real WebView2, installed packages, Wasm and SQLite in a fresh QA profile.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -30,7 +29,7 @@ await writeFile(
     app: { appDirectoriesOverride: run },
   }),
 );
-const buildDirectory = path.join(root, '.local', 'native-ui-build');
+const buildDirectory = path.join(root, 'target');
 if (!reuse) {
   const fixture = spawnSync(
     process.execPath,
@@ -43,19 +42,23 @@ if (!reuse) {
   );
   if (fixture.error) throw fixture.error;
   assert.equal(fixture.status, 0, 'custom UI fixture build failed');
-  const build = spawnSync(
-    process.execPath,
-    [path.join(root, 'tools/tauri.mjs'), 'build', '--debug', '--no-bundle', '--config', config],
-    {
-      cwd: root,
-      stdio: 'inherit',
-      windowsHide: true,
-      env: { ...process.env, CARGO_TARGET_DIR: buildDirectory },
-    },
-  );
-  if (build.error) throw build.error;
-  assert.equal(build.status, 0, 'QA build failed');
+  function build(args) {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(root, 'tools/tauri.mjs'), 'build', '--debug', '--no-bundle', ...args],
+      {
+        cwd: root,
+        stdio: 'inherit',
+        windowsHide: true,
+        env: { ...process.env, CARGO_TARGET_DIR: buildDirectory },
+      },
+    );
+    if (result.error) throw result.error;
+    assert.equal(result.status, 0, 'native build failed');
+  }
+  build(['--config', config]);
   await copyFile(path.join(buildDirectory, 'debug', 'serverdeck-desktop.exe'), executable);
+  build([]);
 }
 if (!reuse && process.env.SERVERDECK_PLUGIN_COMPONENT_FIXTURE) {
   // Old enabled records must be retired before the new SDK decodes their removed permissions.
@@ -196,27 +199,17 @@ try {
         await invoke('plugin_set_enabled', { id: plugin.manifest.id, enabled: true });
     }
     await refreshPlugins();
-    for (const name of ['网络诊断', 'AI 运维助手']) await open(name);
-    passed.push('two independently packaged UIs load from the installed repository');
-    await open('网络诊断');
-    await scope().getByLabel('诊断目标', { exact: true }).fill('preserved.example');
     await open('AI 运维助手');
-    await open('网络诊断');
-    assert.equal(
-      await scope().getByLabel('诊断目标', { exact: true }).inputValue(),
-      'preserved.example',
-    );
+    await scope().locator('.ai-view').waitFor();
+    await scope().getByLabel('问题', { exact: true }).fill('retained draft');
     await page.getByRole('button', { name: '插件设置', exact: true }).click();
-    await open('网络诊断');
-    assert.equal(
-      await scope().getByLabel('诊断目标', { exact: true }).inputValue(),
-      'preserved.example',
-    );
-    passed.push('tab switches and own settings retain the plugin iframe and diagnostic draft');
+    await open('AI 运维助手');
+    assert.equal(await scope().getByLabel('问题', { exact: true }).inputValue(), 'retained draft');
+    passed.push('own settings retain the assistant iframe and draft');
     const frame = page
       .frames()
-      .find((f) => f.url().includes('sdplugin.localhost') && f.url().includes('services'));
-    assert(frame, 'network frame missing');
+      .find((f) => f.url().includes('sdplugin.localhost') && f.url().includes('assistant'));
+    assert(frame, 'assistant frame missing');
     const forbiddenHost = `blocked-${randomUUID()}`;
     const isolated = await frame.evaluate((name) => {
       let blocked = false;
@@ -336,7 +329,7 @@ try {
     );
     await page.locator(`.workspace-tab[data-host-id="${draftHosts[0].id}"] [role=tab]`).click();
     assert.equal(await scope().getByLabel('姓名', { exact: true }).inputValue(), '独立插件');
-    await open('网络诊断');
+    await open('AI 运维助手');
     await page.evaluate(
       (id) =>
         document
@@ -363,13 +356,13 @@ try {
       'single-host plugin shares the device tab; host switches and settings preserve separate iframe drafts, results and working Wasm contexts without opening SSH',
     );
 
-    const packed = await networkFixture();
+    const packed = JSON.parse(await readFile(path.join(run, 'custom-ui.sdplugin'), 'utf8'));
     packed.manifest.id = 'dev.qa.independent-ui';
     packed.manifest.name = 'Independent upload QA';
     const script = packed.files.find((file) => file.path === 'frontend.js');
     const original = Buffer.from(script.content, 'base64').toString();
-    assert(original.includes('诊断工具'));
-    const customized = Buffer.from(original.replaceAll('诊断工具', '独立上传界面'));
+    assert(original.includes('完全由上传包定义的页面'));
+    const customized = Buffer.from(original.replaceAll('完全由上传包定义的页面', '独立上传界面'));
     script.content = customized.toString('base64');
     const digest = packed.manifest.files.find((file) => file.path === 'frontend.js');
     digest.size = customized.length;
@@ -390,7 +383,7 @@ try {
       input: {
         expectedRevision: installed.revision,
         permissions: installed.manifest.permissions,
-        operations: ['network.run', 'ui.contribute'],
+        operations: ['ui.contribute'],
         readRoots: [],
         writeRoots: [],
         confirmed: true,
@@ -398,56 +391,28 @@ try {
     });
     await invoke('plugin_set_enabled', { id: installed.manifest.id, enabled: true });
     await refreshPlugins();
-    // This fixture exercises local diagnostics, with an explicit global context.
     await page.evaluate(
       (id) =>
         document
           .querySelector('#app')
           .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
-          .openPlugin(id, 'network', ''),
-      installed.manifest.id,
+          .openPlugin(id.id, 'custom', id.host),
+      { id: installed.manifest.id, host: draftHosts[0].id },
     );
     await scope().locator('#app > *').waitFor();
-    await scope().getByRole('tablist', { name: '独立上传界面', exact: true }).waitFor();
+    await scope().getByRole('heading', { name: '独立上传界面', exact: true }).waitFor();
     passed.push(
       'an unrelated upload executes its own changed UI asset through the same loader after explicit grants',
     );
 
-    const tcp = createServer((socket) => {
-      socket.on('error', (error) => {
-        if (!['ECONNRESET', 'EPIPE'].includes(error.code))
-          errors.push(`fixture socket: ${error.message}`);
-      });
-      socket.end('owned QA');
-    });
-    await new Promise((resolve) => tcp.listen(0, '127.0.0.1', resolve));
-    try {
-      await scope().getByRole('tab', { name: 'TCP 端口', exact: true }).click();
-      await scope().getByLabel('诊断目标', { exact: true }).fill('127.0.0.1');
-      await scope().getByLabel('诊断端口', { exact: true }).fill(String(tcp.address().port));
-      await scope().getByLabel('诊断次数', { exact: true }).fill('100');
-      await scope().getByLabel('诊断超时', { exact: true }).fill('180');
-      await scope().getByRole('button', { name: '开始诊断', exact: true }).click();
-      let task;
-      for (let i = 0; i < 100 && !task; i++) {
-        task = (await invoke('diagnostic_list', { versions: {} })).find(
-          (t) => t.state === 'running',
-        );
-        if (!task) await delay(100);
-      }
-      assert(task, 'real diagnostic did not start');
-      await setPluginEnabled(page, 'Independent upload QA', false);
-      assert((await invoke('diagnostic_list', { versions: {} })).some((t) => t.id === task.id));
-      await assert.rejects(() =>
-        invoke('plugin_ui', { id: installed.manifest.id, revision: installed.revision }),
-      );
-      await invoke('diagnostic_cancel', { id: task.id });
-      passed.push('real SDK diagnostic survives plugin disable; revoked UI assets are denied');
-    } finally {
-      tcp.closeAllConnections?.();
-      await new Promise((resolve) => tcp.close(resolve));
-    }
-    await open('网络诊断');
+    await setPluginEnabled(page, 'Independent upload QA', false);
+    await assert.rejects(() =>
+      invoke('plugin_ui', { id: installed.manifest.id, revision: installed.revision }),
+    );
+    passed.push(
+      'disabled uploaded UI assets are denied after explicit grants and real package rendering',
+    );
+    await open('AI 运维助手');
     for (const [width, height, theme] of [
       [1440, 960, 'dark'],
       [900, 600, 'light'],
@@ -462,7 +427,7 @@ try {
       );
     }
     await checkWorkspaceTools({ page, invoke, run, passed });
-    await open('网络诊断');
+    await open('AI 运维助手');
     await page.locator(`.workspace-tab[data-host-id="${draftHosts[0].id}"] [role=tab]`).click();
     await scope().getByLabel('姓名', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(run, 'host-workspace-draft.png'), fullPage: true });

@@ -294,7 +294,8 @@ kbd {
 .workspace-header > .host-tools {
   margin-left: auto;
   max-width: 100%;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .workspace-header .host-tool {
   flex-shrink: 0;
@@ -398,12 +399,6 @@ kbd {
   white-space: nowrap;
   overflow: auto;
   gap: 14px;
-}
-.task-center-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
 }
 .settings-form > fieldset {
   min-width: 0;

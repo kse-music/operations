@@ -21,7 +21,6 @@ afterEach(() => {
 
 it.each([
   ['terminals', ['收起主机栏'], []],
-  ['network', ['收起主机栏'], []],
   [
     'credentials',
     ['收起主机栏', '安全凭据', '模型管理', '备份恢复'],
@@ -66,7 +65,7 @@ it.each([
   expect(heading.closest('button, a, [role="button"]')).toBeNull();
   expect(heading.hasAttribute('tabindex')).toBe(false);
   if (active === 'terminals') expect(heading.textContent?.trim()).toBe('主机管理');
-  if (active !== 'terminals' && active !== 'network')
+  if (active !== 'terminals')
     expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
       labels[active === 'plugins' ? 5 : 1],
     );
@@ -92,7 +91,7 @@ it('highlights plugin management while an individual plugin settings tab is acti
   expect(root.querySelector('.nav-item.active')?.getAttribute('aria-label')).toBe('插件管理');
 });
 
-it.each(['assistant', 'network', 'extension'] as const)(
+it.each(['assistant', 'extension'] as const)(
   'keeps the %s plugin function in the host module',
   (view) => expect(moduleForView(view)).toBe('hosts'),
 );

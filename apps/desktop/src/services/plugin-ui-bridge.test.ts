@@ -76,6 +76,24 @@ function grant(...permissions: PluginPermission[]) {
 function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
+it('lets an assistant settings page list public model metadata only with assistant permission', async () => {
+  const { useModelsStore } = await import('../stores/models');
+  const { aiApi } = await import('./ai');
+  const { defaultAiConfig } = await import('../types/ai');
+  const models = [
+    { id: 'model-a', name: 'Bound model', revision: 'r1', hasKey: true, config: defaultAiConfig() },
+  ];
+  const list = vi.spyOn(aiApi, 'models').mockResolvedValue(models);
+  const ui = bridge();
+  await expect(ui.call('ai_models', {})).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  grant('ui.contribute', 'assistant.use');
+  expect(await ui.call('ai_models', {})).toEqual(models);
+  expect(useModelsStore().models).toEqual(models);
+  expect(ui.snapshot()).toMatchObject({ models });
+  expect(list).toHaveBeenCalledOnce();
+});
 it('rejects hidden frame requests and late results before a different host can receive them', async () => {
   let active = true;
   const ui = createPluginUiBridge({
@@ -141,7 +159,7 @@ it('rejects stale results and all later calls after an installation generation c
   });
 });
 it('keeps connection leases opaque and freezes approved input before dispatching through Wasm', async () => {
-  grant('ui.contribute', 'network.run');
+  grant('ui.contribute', 'assistant.use');
   const host = {
     ...hostInput(),
     credentialId: 'private-credential-reference',
@@ -170,12 +188,8 @@ it('keeps connection leases opaque and freezes approved input before dispatching
   expect(JSON.stringify(snapshot)).not.toContain('private-credential-reference');
   const input = {
     input: {
-      origin: { kind: 'remote', hostId: 'host', sessionId: snapshot.operations.host!.session.id },
-      tool: 'tcp',
-      target: 'original.example',
-      port: 22,
-      count: 1,
-      timeoutSecs: 3,
+      sessionId: snapshot.operations.host!.session.id,
+      question: 'original question',
     },
   };
   let finish!: (value: unknown) => void;
@@ -185,17 +199,17 @@ it('keeps connection leases opaque and freezes approved input before dispatching
         finish = resolve;
       }),
   );
-  const request = ui.call('diagnostic_start', input);
-  input.input.target = 'changed.example';
+  const request = ui.call('ai_prepare', input);
+  input.input.question = 'changed question';
   finish({ id: 'task' });
   await request;
   expect(api.tool).toHaveBeenCalledWith(
     id,
-    'diagnostic_start',
+    'ai_prepare',
     expect.objectContaining({
       input: expect.objectContaining({
-        origin: { kind: 'remote', hostId: 'host', sessionId: 'private-session' },
-        target: 'original.example',
+        sessionId: 'private-session',
+        question: 'original question',
       }),
     }),
     page,
@@ -204,8 +218,15 @@ it('keeps connection leases opaque and freezes approved input before dispatching
   );
 });
 it('rejects removed tool operations before dispatch', async () => {
-  grant('ui.contribute', 'network.run');
-  for (const method of ['batch_start', 'automation_catalog', 'files.pick'])
+  grant('ui.contribute', 'assistant.use');
+  for (const method of [
+    'batch_start',
+    'automation_catalog',
+    'diagnostic_start',
+    'diagnostic_list',
+    'diagnostic_cancel',
+    'files.pick',
+  ])
     await expect(bridge().call(method, {})).rejects.toMatchObject({
       code: 'PLUGIN_PERMISSION_DENIED',
     });

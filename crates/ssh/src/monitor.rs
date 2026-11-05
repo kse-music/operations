@@ -21,6 +21,20 @@ impl Engine {
         if !self.monitor_ready(id)? {
             return Err(failure("MONITOR_NOT_READY", "监控连接尚未就绪"));
         }
+        self.collect_sample(id, cancel).await
+    }
+    /// Reuse the fixed collector on a verified operations lease without starting a monitor.
+    pub async fn collect_ops_monitor(
+        &self,
+        id: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<u8>, Error> {
+        if !self.ops_ready(id)? {
+            return Err(failure("OPS_NOT_READY", "运维连接尚未就绪"));
+        }
+        self.collect_sample(id, cancel).await
+    }
+    async fn collect_sample(&self, id: &str, cancel: &CancellationToken) -> Result<Vec<u8>, Error> {
         let owner = self.control(id)?;
         let transport = locked(&self.registry)?
             .transports

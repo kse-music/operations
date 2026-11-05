@@ -6,7 +6,7 @@
 
 ```text
 plugins/system/<name>/       # 上传源码可放任意显式目录
-  manifest.json              # apiVersion ^2.1.0
+  manifest.json              # apiVersion ^3.0.0
   ui.json                    # uiVersion 4 + frontend 入口
   frontend/
     main.ts                  # SDK mountPlugin
@@ -30,19 +30,19 @@ node tools/plugin-ui-isolation-e2e.mjs
 
 单包构建同时编译独立 WASM 与 Vue 前端，并检查源码边界，打成 backend.wasm/ui.json/frontend.js/frontend.css。运行时使用 sandbox iframe，不访问宿主 DOM；仅使用 SDK 已公开服务和自身声明动作。UI资源必须单文件，不可远程加载或任意读取本地文件。打包输出仍需不存在且在源目录之外。原生 QA 使用全新目录和自己的 HTTP/TCP 夹具，不能代替真实 SSH 或其他平台验收。
 
-版本为 Host API / Rust SDK / Vue SDK 2.1.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。自动运维、批量运维及依赖已删除权限的旧安装记录会停用归档，保留用户数据；其余已有上传安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
+版本为 Host API / Rust SDK / Vue SDK 3.0.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。自动运维、批量运维及依赖已删除权限的旧安装记录会停用归档，保留用户数据；其余已有上传安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
 
 ## 配置插件图标
 
-在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^2.1.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
+在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^3.0.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
 
 ## 工作区工具插件
 
-AI 助手独立，网络诊断位于系统服务插件内；两者只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v3 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
+AI 助手独立，系统服务保留监控、进程端口、systemd 与日志；两者只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v3 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
 
 三个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v2 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
 
-平台 SDK 2.1.0，API wire version=1（兼容不使用已移除能力的 ^1.x 包）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
+平台 SDK 3.0.0，API wire version=1（兼容不使用已移除能力的 ^1.x/^2.x 包）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
 
 ## 构建公开 SDK 示例
 
@@ -63,7 +63,7 @@ Host Info 演示主机脱敏信息、只读 uname、独立设置和五种贡献�
 
 “设置 → 插件管理” → 拖入一个 .sdplugin 文件或点击“选择插件包” → 弹窗核对身份/权限/摘要 → 明确接受未验证包 → 安装。没有手工路径输入；默认禁用且未授权。拖放复用 Tauri 原生文件事件，Rust 仍重新验证普通文件、包大小、摘要和预览绑定。
 
-顶部不再提供运维工具模块或插件侧栏。单主机功能从主机工具进入当前主机工作区，无上下文的快捷功能入口仍由宿主统一选择一次。主机 SSH/SFTP 右侧“工具”只显示具有功能页面的启用插件，不再显示主机选择器。未授权/未启用功能显示状态及设置入口；全部安装身份及其详情、来源、启停、权限、目录范围和包声明的 settings 页面集中在“设置 → 插件管理”，禁用、未授权或无功能页面的包也保留在管理列表。功能页“插件设置”打开同一配置标签，始终归属设置并选中插件管理。主机工作区、全局功能和设置之间切换保留功能草稿，不自动执行。管理列表提供安装、升级、详情入口和卸载。语言沿用全局偏好，公开贡献协议不变。
+顶部不再提供运维工具模块或插件侧栏。单主机功能从主机工具进入当前主机工作区，无上下文的快捷功能入口仍由宿主统一选择一次。主机 SSH/SFTP 右侧平铺显示具有功能页面的启用插件按钮，不再显示主机选择器。未授权/未启用功能显示状态及设置入口；全部安装身份及其详情、来源、启停、权限、目录范围和包声明的 settings 页面集中在“设置 → 插件管理”，禁用、未授权或无功能页面的包也保留在管理列表。功能页“插件设置”打开同一配置标签，始终归属设置并选中插件管理。主机工作区、全局功能和设置之间切换保留功能草稿，不自动执行。管理列表提供安装、升级、详情入口和卸载。语言沿用全局偏好，公开贡献协议不变。
 
 全部插件无需选择允许访问的主机，启用并具备对应能力后适用于所有已登记主机，单主机工具由宿主传入入口主机并建立/复用连接，批量和自动化在执行表单明确选择多目标。上传插件仍在自己的设置页授予清单内权限、具体操作和规范远程目录；内置系统分发包的声明权限、操作和所需目录由系统预置且不可修改，已有禁用选择保留。SSH 其他命令、文件写入及系统修改仍逐次确认，首次连接核验主机指纹；上传包不要为方便测试授予 `/` 写入范围。详见 [内置插件](BUILTIN_PLUGINS.md)。
 
@@ -77,4 +77,4 @@ WASM ABI、受控 API、取消/配额/错误码见 [PLUGIN_RUNTIME.md](PLUGIN_RU
 
 Windows 本地自动化：`cargo test --workspace`、前端 test/typecheck/build/lint；隔离 Linux SDK 验证使用 `tools/plugin-test-host/test.ps1`。真实桌面 UI 使用 `-Mode ui`，会构建任务专用 Tauri 客户端、创建全新独立数据目录及无宿主挂载的临时容器，测试结束清理其 OS 凭据与容器，不读取用户主机配置。Docker 镜像准备、环境调整、真实执行结果与平台范围见 [PLUGIN_TEST_REPORT.md](../validation/plugins/PLUGIN_TEST_REPORT.md)。用户服务器不作为开发测试目标。
 
-仓库 plugins/upload 与客户端安装仓库是不同位置，前者不被启动扫描或自动注册。Windows 普通配置的上传内容位于 `%APPDATA%/cn.hiboot.desktop/plugins/upload/<ID>/versions`，安装记录位于同一 plugins 根目录的 packages/<ID>/record.json。安装成功后设置中的插件管理立即显示插件，禁用或未授权不会隐藏安装身份；启用且有功能页面时才显示在当前主机工具菜单。旧路径自动迁移且授权/配置保持不变。内置源码/内容分别位于项目 plugins/system 和应用数据目录 plugins/system，协议测试夹具位于 tests/fixtures/plugins，完整迁移边界见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
+仓库 plugins/upload 与客户端安装仓库是不同位置，前者不被启动扫描或自动注册。Windows 普通配置的上传内容位于 `%APPDATA%/cn.hiboot.desktop/plugins/upload/<ID>/versions`，安装记录位于同一 plugins 根目录的 packages/<ID>/record.json。安装成功后设置中的插件管理立即显示插件，禁用或未授权不会隐藏安装身份；启用且有功能页面时才显示在当前主机工具栏。旧路径自动迁移且授权/配置保持不变。内置源码/内容分别位于项目 plugins/system 和应用数据目录 plugins/system，协议测试夹具位于 tests/fixtures/plugins，完整迁移边界见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。

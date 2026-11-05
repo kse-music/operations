@@ -8,7 +8,16 @@ pub struct ProductPreferences {
     pub language: String,
     pub download_directory: Option<String>,
     pub ssh_defaults: SshOptions,
+    #[serde(deserialize_with = "retire_task_shortcut")]
     pub shortcuts: BTreeMap<String, String>,
+}
+fn retire_task_shortcut<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let mut shortcuts = BTreeMap::<String, String>::deserialize(deserializer)?;
+    shortcuts.remove("tasks");
+    Ok(shortcuts)
 }
 impl Default for ProductPreferences {
     fn default() -> Self {
@@ -16,13 +25,9 @@ impl Default for ProductPreferences {
             language: "zh-CN".into(),
             download_directory: None,
             ssh_defaults: SshOptions::default(),
-            shortcuts: [
-                ("search", "Ctrl+K"),
-                ("settings", "Ctrl+,"),
-                ("tasks", "Ctrl+Shift+J"),
-            ]
-            .map(|(k, v)| (k.into(), v.into()))
-            .into(),
+            shortcuts: [("search", "Ctrl+K"), ("settings", "Ctrl+,")]
+                .map(|(k, v)| (k.into(), v.into()))
+                .into(),
         }
     }
 }
@@ -43,10 +48,10 @@ impl ProductPreferences {
             return Err(Error::Validation("全局默认不设置跳板，请在主机配置中选择"));
         }
         let mut seen = HashSet::new();
-        if self.shortcuts.len() != 3 {
+        if self.shortcuts.len() != 2 {
             return Err(Error::Validation("全局快捷键定义不完整"));
         }
-        for key in ["search", "settings", "tasks"] {
+        for key in ["search", "settings"] {
             let value = self
                 .shortcuts
                 .get(key)
@@ -97,17 +102,6 @@ impl WindowGeometry {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BackgroundTask {
-    pub id: String,
-    pub kind: &'static str,
-    pub host_ids: Vec<String>,
-    pub state: String,
-    pub label: String,
-    pub active: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ConnectionStatus {
     pub hostname: String,
     pub port: u16,
@@ -122,6 +116,5 @@ pub struct ConnectionStatus {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackgroundSnapshot {
-    pub tasks: Vec<BackgroundTask>,
     pub connections: Vec<ConnectionStatus>,
 }

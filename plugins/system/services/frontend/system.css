@@ -1,21 +1,23 @@
 .system-workbench {
-  min-height: 100vh;
-  padding: 2px 0 24px;
+  min-height: 0;
+  padding: 0 0 16px;
+  max-width: 1600px;
+  margin-inline: auto;
   container-type: inline-size;
 }
 .system-host-strip {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 2px 0 18px;
+  padding: 0 0 12px;
 }
 .system-host-icon {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 7px;
   color: var(--accent);
   background: var(--panel);
 }
@@ -46,20 +48,20 @@
 }
 .system-navigation {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 14px;
-  margin-bottom: 22px;
+  padding-bottom: 8px;
+  margin-bottom: 14px;
 }
 .system-navigation button {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
-  padding: 13px 12px;
+  padding: 9px 10px;
   border: 1px solid transparent;
-  border-radius: 9px;
+  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   min-width: 0;
@@ -70,7 +72,7 @@
 .system-navigation button > span {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
 }
 .system-navigation strong {
@@ -103,8 +105,8 @@
   position: static;
   display: flex;
   gap: 20px;
-  padding: 0 0 11px;
-  margin-bottom: 18px;
+  padding: 0 0 8px;
+  margin-bottom: 12px;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
@@ -190,23 +192,50 @@
   line-height: 1.9;
   font-size: 12px;
 }
+.system-panel .ops-log-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto auto;
+  align-items: end;
+  max-width: 960px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+}
+.ops-log-source > label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.system-panel .ops-log-source input:not([type='checkbox']) {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+.ops-log-source > .ops-log-follow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
 .system-panel .monitor-cards {
   gap: 12px;
 }
 .system-panel .monitor-cards > .panel {
-  padding: 18px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 7px;
   background: var(--panel);
 }
 .system-panel .monitor-cards h2 {
   font-size: 11px;
   font-weight: 500;
   color: var(--muted);
-  margin: 0 0 12px;
+  margin: 0 0 8px;
 }
 .system-panel .monitor-cards strong {
-  font-size: 28px;
+  font-size: 24px;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.6px;
   color: var(--text);
@@ -217,8 +246,8 @@
   letter-spacing: 0;
 }
 .system-panel .trend-chart {
-  border-radius: 10px;
-  padding: 18px;
+  border-radius: 7px;
+  padding: 12px 14px;
   background: var(--panel);
 }
 .system-panel .trend-chart figcaption {
@@ -226,7 +255,7 @@
   font-size: 11px;
 }
 .system-panel .trend-chart svg {
-  height: 140px;
+  height: 112px;
 }
 .system-panel .monitor-table {
   border: 1px solid var(--border);
@@ -252,7 +281,7 @@
 }
 @container (max-width:850px) {
   .system-navigation button {
-    padding: 12px 8px;
+    padding: 9px 8px;
     gap: 7px;
   }
   .system-navigation small {
@@ -263,6 +292,9 @@
   }
 }
 @container (max-width:580px) {
+  .system-panel .ops-log-source {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
   .system-navigation {
     display: flex;
     overflow: auto;
@@ -287,4 +319,9 @@
 .system-panel .monitor-view > div,
 .system-panel .monitor-cards > .panel {
   min-width: 0;
+}
+@media (max-height: 720px) {
+  .system-panel .trend-chart svg {
+    height: 86px;
+  }
 }

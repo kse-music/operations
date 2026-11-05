@@ -5,7 +5,6 @@ use russh::{
 };
 use serverdeck_core::{
     hosts::{AuthType, Host, HostInput},
-    tasks::*,
     terminal::TerminalSession,
 };
 use serverdeck_ssh::{Authentication, ConnectionPlan, Engine, Hop};
@@ -14,7 +13,7 @@ use serverdeck_tasks::Tasks;
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -95,16 +94,6 @@ impl server::Handler for Handler {
         self.metrics.calls.fetch_add(1, Ordering::SeqCst);
         s.channel_success(id)?;
         let text = String::from_utf8_lossy(command).to_string();
-        if text.contains("exec mtr ") {
-            s.extended_data(id, 1, b"mtr: not found".to_vec())?;
-            s.exit_status_request(id, 127)?;
-            return s.close(id);
-        }
-        if text == "printf '__SERVERDECK_LATENCY__'" {
-            s.data(id, b"__SERVERDECK_LATENCY__".to_vec())?;
-            s.exit_status_request(id, 0)?;
-            return s.close(id);
-        }
         let stop = CancellationToken::new();
         self.stops.insert(id, stop.clone());
         let h = s.handle();
@@ -120,7 +109,7 @@ impl server::Handler for Handler {
                 let _ = h
                     .data(id, format!("{label} 中文😀 live\n").into_bytes())
                     .await;
-                if text == "wait" || text.contains("-c 100") {
+                if text == "wait" {
                     tokio::time::sleep(Duration::from_secs(20)).await;
                 } else {
                     tokio::time::sleep(Duration::from_millis(120)).await;
@@ -148,7 +137,6 @@ struct Fixture {
     password: String,
     metrics: Arc<Metrics>,
     servers: Vec<tokio::task::JoinHandle<()>>,
-    sockets: Arc<Mutex<Vec<std::net::TcpStream>>>,
     _dir: tempfile::TempDir,
 }
 impl Drop for Fixture {
@@ -166,7 +154,6 @@ impl Fixture {
         let password = uuid::Uuid::new_v4().to_string();
         let mut hosts = vec![];
         let mut servers = vec![];
-        let sockets = Arc::new(Mutex::new(vec![]));
         for n in 0..3 {
             let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
             let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -204,8 +191,7 @@ impl Fixture {
             });
             let metrics = metrics.clone();
             let pw = password.clone();
-            let peers = sockets.clone();
-            servers.push(tokio::spawn(async move{let mut workers=tokio::task::JoinSet::new();loop{tokio::select!{r=listener.accept()=>{let(stream,_)=r.unwrap();let stream=stream.into_std().unwrap();peers.lock().unwrap().push(stream.try_clone().unwrap());let stream=tokio::net::TcpStream::from_std(stream).unwrap();let config=config.clone();let h=Handler{password:pw.clone(),label:label.clone(),status:if n==2{7}else{0},channels:HashMap::new(),stops:HashMap::new(),metrics:metrics.clone()};workers.spawn(async move{if let Ok(c)=server::run_stream(config,stream,h).await{let _=c.await;}});},_=workers.join_next(),if !workers.is_empty()=>()}}}));
+            servers.push(tokio::spawn(async move{let mut workers=tokio::task::JoinSet::new();loop{tokio::select!{r=listener.accept()=>{let(stream,_)=r.unwrap();let stream=stream.into_std().unwrap();let stream=tokio::net::TcpStream::from_std(stream).unwrap();let config=config.clone();let h=Handler{password:pw.clone(),label:label.clone(),status:if n==2{7}else{0},channels:HashMap::new(),stops:HashMap::new(),metrics:metrics.clone()};workers.spawn(async move{if let Ok(c)=server::run_stream(config,stream,h).await{let _=c.await;}});},_=workers.join_next(),if !workers.is_empty()=>()}}}));
         }
         let engine = Engine::new(db);
         let tasks = Tasks::new(engine.clone());
@@ -216,7 +202,6 @@ impl Fixture {
             password,
             metrics,
             servers,
-            sockets,
             _dir: dir,
         }
     }
@@ -246,182 +231,11 @@ impl Fixture {
         .unwrap();
         s
     }
-    async fn diag_done(&self, id: &str) -> Diagnostic {
-        tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let d = self
-                    .tasks
-                    .diagnostic_list()
-                    .unwrap()
-                    .into_iter()
-                    .find(|d| d.id == id)
-                    .unwrap();
-                if !active(&d.state) {
-                    return d;
-                }
-                tokio::time::sleep(Duration::from_millis(15)).await;
-            }
-        })
-        .await
-        .unwrap()
-    }
     async fn finish(&self) {
         self.tasks.shutdown().await;
         self.engine.shutdown().await;
         assert_eq!(self.engine.counts().unwrap(), (0, 0));
     }
-}
-#[tokio::test]
-async fn independent_diagnostics_cancel_and_tcp_disconnect_release_resources() {
-    let f = Fixture::new().await;
-    let s = f.open(0).await;
-    let input = DiagnosticInput {
-        tool: Tool::Ping,
-        origin: Origin::Remote {
-            host_id: s.host_id.clone(),
-            session_id: s.id.clone(),
-        },
-        target: "127.0.0.1".into(),
-        port: 22,
-        count: 100,
-        timeout_secs: 10,
-    };
-    let a = f.tasks.diagnostic_start(input.clone()).unwrap();
-    let b = f.tasks.diagnostic_start(input).unwrap();
-    let missing = f
-        .tasks
-        .diagnostic_start(DiagnosticInput {
-            tool: Tool::Mtr,
-            origin: Origin::Remote {
-                host_id: s.host_id.clone(),
-                session_id: s.id.clone(),
-            },
-            target: "127.0.0.1".into(),
-            port: 22,
-            count: 1,
-            timeout_secs: 3,
-        })
-        .unwrap();
-    let missing = f.diag_done(&missing.id).await;
-    assert_eq!(missing.state, "failed");
-    assert_eq!(missing.exit_code, Some(127));
-    assert!(missing.output.contains("not found"));
-    assert!(missing.message.unwrap().contains("工具不存在"));
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while f
-            .tasks
-            .diagnostic_list()
-            .unwrap()
-            .iter()
-            .any(|d| d.output.is_empty())
-        {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
-    f.tasks.diagnostic_cancel(&a.id).unwrap();
-    assert_eq!(f.diag_done(&a.id).await.state, "uncertain");
-    assert!(
-        f.tasks
-            .diagnostic_list()
-            .unwrap()
-            .iter()
-            .any(|d| d.id == b.id && active(&d.state))
-    );
-    for socket in f.sockets.lock().unwrap().iter() {
-        let _ = socket.shutdown(std::net::Shutdown::Both);
-    }
-    assert_eq!(f.diag_done(&b.id).await.state, "uncertain");
-    f.finish().await;
-}
-#[tokio::test]
-async fn local_dns_tcp_and_cancel_use_real_network_without_ssh() {
-    let f = Fixture::new().await;
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
-        .await
-        .unwrap();
-    let input = DiagnosticInput {
-        tool: Tool::Tcp,
-        origin: Origin::Local,
-        target: "127.0.0.1".into(),
-        port: listener.local_addr().unwrap().port(),
-        count: 1,
-        timeout_secs: 2,
-    };
-    let t = f.tasks.diagnostic_start(input.clone()).unwrap();
-    let d = f.diag_done(&t.id).await;
-    assert_eq!(d.state, "completed");
-    assert!(d.output.contains("connected"));
-    let mut i = input.clone();
-    i.tool = Tool::Dns;
-    i.target = "localhost".into();
-    let t = f.tasks.diagnostic_start(i).unwrap();
-    assert!(
-        f.diag_done(&t.id).await.output.contains("127.0.0.1")
-            || f.tasks
-                .diagnostic_list()
-                .unwrap()
-                .iter()
-                .any(|d| d.id == t.id && d.output.contains("::1"))
-    );
-    let mut i = input;
-    i.count = 100;
-    let t = f.tasks.diagnostic_start(i).unwrap();
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    f.tasks.diagnostic_cancel(&t.id).unwrap();
-    assert_eq!(f.diag_done(&t.id).await.state, "cancelled");
-    assert_eq!(f.metrics.calls.load(Ordering::SeqCst), 0);
-    f.finish().await;
-}
-
-#[tokio::test]
-async fn shutdown_cancels_active_and_queued_jobs_without_closing_shared_ssh() {
-    let f = Fixture::new().await;
-    let mut sessions = Vec::new();
-    for n in 0..3 {
-        sessions.push(f.open(n).await);
-    }
-    let d = f
-        .tasks
-        .diagnostic_start(DiagnosticInput {
-            tool: Tool::Ping,
-            origin: Origin::Remote {
-                host_id: sessions[0].host_id.clone(),
-                session_id: sessions[0].id.clone(),
-            },
-            target: "127.0.0.1".into(),
-            port: 22,
-            count: 100,
-            timeout_secs: 30,
-        })
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(3), async {
-        while f.metrics.active.load(Ordering::SeqCst) < 1 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(3), f.tasks.shutdown())
-        .await
-        .expect("all workers joined");
-    assert_eq!(f.tasks.pending().unwrap(), 0);
-    assert!(!active(
-        &f.tasks
-            .diagnostic_list()
-            .unwrap()
-            .iter()
-            .find(|x| x.id == d.id)
-            .unwrap()
-            .state
-    ));
-    assert!(
-        f.engine.ops_ready(&sessions[0].id).unwrap(),
-        "task shutdown must not close shared SSH"
-    );
-    f.engine.shutdown().await;
-    assert_eq!(f.engine.counts().unwrap(), (0, 0));
 }
 
 #[tokio::test]
@@ -469,6 +283,14 @@ async fn direct_command_execution_retains_exit_status_deadline_and_bounded_admis
     cancel.cancel();
     assert!(f.tasks.command_slot(&cancel).await.is_err());
     drop(permits);
+    assert_eq!(f.metrics.calls.load(Ordering::SeqCst), 3);
+    f.tasks.shutdown().await;
+    assert!(
+        f.tasks
+            .command_slot(&CancellationToken::new())
+            .await
+            .is_err()
+    );
     assert!(f.engine.ops_ready(&good.id).unwrap());
     f.finish().await;
 }

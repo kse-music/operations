@@ -8,8 +8,7 @@ ServerDeck 是面向开发者和运维人员的本地优先服务器运维桌面
 - **主机与凭据管理**：分组、标签、收藏、搜索、OpenSSH Config 预览导入，以及系统凭据库存储。
 - **SSH 终端**：多标签、分屏、搜索、主题与快捷键设置，支持密码、私钥、SSH Agent、跳板、代理和端口转发。
 - **SFTP 文件管理**：本地/远程双栏浏览、后台上传下载、冲突处理、校验和远程文本编辑。
-- **Linux 监控与运维**：三个独立标准 WASM 插件：系统服务（资源监控、进程端口、systemd、日志、网络诊断）、Docker 管理、AI 运维助手。功能从当前主机 SSH/SFTP 右侧“工具”菜单进入，只列具有功能页面的启用插件；安装、升级、卸载和各插件的启停、权限及配置统一从“设置 → 插件管理”进入，功能页也可打开自身设置。全部插件适用于所有主机，内置权限/范围预置且只读，上传权限自行配置。见[内置插件说明](docs/plugins/BUILTIN_PLUGINS.md)。
-- **网络诊断与文件管理**：本机/远端诊断，以及独立 SFTP 文件传输。
+- **Linux 监控与运维**：三个独立标准 WASM 插件：系统服务（资源监控、进程端口、systemd、日志）、Docker 管理、AI 运维助手。功能从当前主机 SSH/SFTP 右侧平铺的工具按钮进入，只列具有功能页面的启用插件；安装、升级、卸载和各插件的启停、权限及配置统一从“设置 → 插件管理”进入，功能页也可打开自身设置。全部插件适用于所有主机，内置权限/范围预置且只读，上传权限自行配置。见[内置插件说明](docs/plugins/BUILTIN_PLUGINS.md)。
 - **运维自动化**：命令/脚本库、执行历史和本地计划，执行前预览目标并确认。
 - **模型管理与 AI 助手**：注册、查看、编辑和删除 OpenAI 兼容模型，Key 独立存于系统凭据库；助手直接多轮对话，默认关联全部资产，按问题匹配并连接主机，提供授权上下文、脱敏、Markdown 回答和逐条命令审核。见 [AI 助手说明](docs/guides/AI_ASSISTANT.md)。
 - **统一工作区**：全局搜索、主题与偏好设置，以及不含凭据的配置备份与恢复。
@@ -61,12 +60,17 @@ node tools/tauri.mjs build --bundles nsis
 
 独立调试二进制、原生验收和发布复验步骤见[发布检查表](docs/release/RELEASE_CHECKLIST.md)。
 
+本地构建使用 `.cargo/config.toml`：关闭增量编译，开发/测试只保留行号级调试信息；桌面和原生验收统一复用 `target/`，WASM 插件继续使用 `.local/plugin-build/<插件>/`。原生测试运行 QA 目录中的 EXE 副本，避免占用编译输出。清缓存后的首次构建会重新编译依赖，速度会慢一些；需要变量级断点调试时应在确认空间充足后临时覆盖配置。
+
+桌面 `build/dev` 和插件构建入口在项目磁盘空闲不足 10 GiB 时拒绝启动，不自动删除文件。该检查仅发生在启动前，不是硬配额；直接执行 Cargo 或其他程序写盘仍需留意可用空间。清理缓存前须确认没有构建在运行，不能整删 `.local/` 或应用数据目录。详见[本地构建缓存验证](docs/validation/foundation/VALIDATION_BUILD_CACHE.md)。
+
 ## 测试
 
 ```powershell
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+npm run test:build
 npm run format:check
 npm run lint
 npm run typecheck

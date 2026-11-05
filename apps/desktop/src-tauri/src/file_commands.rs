@@ -89,6 +89,15 @@ pub async fn files_close(
         .map_err(Into::into)
 }
 #[tauri::command]
+pub fn transfer_clear_host(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+) -> Result<(), IpcError> {
+    application
+        .transfer_clear_host(&host_id)
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn files_pick<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     kind: String,

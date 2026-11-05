@@ -190,6 +190,27 @@ impl Transfers {
     pub fn unfinished(&self) -> Result<usize, Error> {
         Ok(self.list()?.iter().filter(|i| i.unfinished()).count())
     }
+    pub fn clear_host(&self, host_id: &str) -> Result<(), Error> {
+        let mut queue = locked(&self.queue)?;
+        let snapshots = queue
+            .tasks
+            .iter()
+            .map(|task| task.snapshot())
+            .collect::<Result<Vec<_>, _>>()?;
+        if snapshots
+            .iter()
+            .any(|info| info.host_id == host_id && info.unfinished())
+        {
+            return Err(fail("TRANSFERS_ACTIVE", "请先取消并等待此主机的传输结束"));
+        }
+        let mut index = 0;
+        queue.tasks.retain(|_| {
+            let keep = snapshots[index].host_id != host_id;
+            index += 1;
+            keep
+        });
+        Ok(())
+    }
     pub fn session_unfinished(&self, session: &str) -> Result<usize, Error> {
         Ok(self
             .list()?

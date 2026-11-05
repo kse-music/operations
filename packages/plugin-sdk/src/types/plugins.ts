@@ -1,6 +1,5 @@
 export type PluginPermission =
   | 'assistant.use'
-  | 'network.run'
   | 'metrics.read'
   | 'system.read'
   | 'system.manage'
@@ -172,21 +171,10 @@ export interface PluginUiResult {
   output?: unknown;
   saved?: boolean;
 }
-export type PluginTool = 'assistant' | 'network';
+export type PluginTool = 'assistant';
 export interface PluginToolTicket {
   inputId: string;
   operation: PluginToolOperation;
   review?: { title: string; message: string; confirmationText?: string | null } | null;
 }
-export type PluginToolOperation =
-  | 'ai_resolve_hosts'
-  | 'ai_prepare'
-  | 'ai_send'
-  | 'ai_execute'
-  | 'diagnostic_start'
-  | 'diagnostic_list'
-  | 'diagnostic_cancel';
-export interface PluginToolIntent {
-  networkHost: string;
-  networkRequest: number;
-}
+export type PluginToolOperation = 'ai_resolve_hosts' | 'ai_prepare' | 'ai_send' | 'ai_execute';

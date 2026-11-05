@@ -176,6 +176,13 @@ it('keeps plugin-provided settings pages available under settings without a host
   await settle();
   expect(useWorkspaceStore().module).toBe('system');
   expect(root.querySelector<HTMLInputElement>('.plugin-form input')?.value).toBe('配置草稿');
+  // Configuration must remain the first usable section, ahead of lifecycle/permission controls.
+  const configuration = root.querySelector('.plugin-configuration')!;
+  const management = root.querySelector('[aria-label="插件设置"]')!;
+  expect(configuration.contains(root.querySelector('.plugin-form'))).toBe(true);
+  expect(
+    configuration.compareDocumentPosition(management) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
   expect(root.querySelector('[aria-label="插件目标主机"]')).toBeNull();
   expect(pluginsApi.context).toHaveBeenCalledWith(plugin.manifest.id, null);
 });

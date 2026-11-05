@@ -33,30 +33,32 @@ const selection = computed(() =>
             <span>v{{ plugin.manifest.version }}</span>
             <span>{{ plugin.enabled ? '已启用' : '已禁用' }}</span>
           </p>
+          <p v-if="plugin.manifest.description" class="plugin-page-description">
+            {{ plugin.manifest.description }}
+          </p>
         </div>
       </div>
     </header>
-    <p v-if="plugin.manifest.description" class="plugin-page-description">
-      {{ plugin.manifest.description }}
-    </p>
-    <p class="subtle">能力适用于所有主机；使用工具时由主机工作区或任务目标确定实际操作对象。</p>
-    <PluginSettings :plugin="plugin" />
-    <label v-if="settingPages.length > 1"
-      >插件配置<select v-model="selected" aria-label="插件配置页面">
-        <option v-for="entry in settingPages" :key="entry.id" :value="entry.id">
-          {{ entry.label }}
-        </option>
-      </select></label
-    >
-    <PluginView
-      v-if="selection"
-      :key="selection"
-      settings-page
-      :plugin-id="pluginId"
-      :contribution-id="selection"
-      host-id=""
-      :tab-key="`plugin-settings:${pluginId}:${selection}`"
-    />
+    <div class="plugin-page-layout" :class="{ 'has-configuration': !!selection }">
+      <section v-if="selection" class="plugin-configuration" aria-label="插件配置">
+        <label v-if="settingPages.length > 1" class="plugin-contribution-select"
+          >插件配置<select v-model="selected" aria-label="插件配置页面">
+            <option v-for="entry in settingPages" :key="entry.id" :value="entry.id">
+              {{ entry.label }}
+            </option>
+          </select></label
+        >
+        <PluginView
+          :key="selection"
+          settings-page
+          :plugin-id="pluginId"
+          :contribution-id="selection"
+          host-id=""
+          :tab-key="`plugin-settings:${pluginId}:${selection}`"
+        />
+      </section>
+      <PluginSettings :plugin="plugin" />
+    </div>
   </section>
   <p v-else class="host-empty">{{ plugins.loading ? '正在读取插件…' : '插件已卸载。' }}</p>
 </template>

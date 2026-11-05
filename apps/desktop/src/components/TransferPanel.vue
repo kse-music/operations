@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import { useFilesStore } from '../stores/files';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 import { bytes, taskLabels, unfinished, type TransferInfo } from '../types/files';
 const store = useFilesStore();
+const props = defineProps<{ hostId: string }>();
+const tasks = computed(() => store.tasks.filter((task) => task.hostId === props.hostId));
+const pending = computed(() => tasks.value.filter(unfinished).length);
 defineEmits<{ retry: [task: TransferInfo] }>();
 async function cancel(id: string): Promise<void> {
   try {
@@ -15,17 +19,16 @@ async function cancel(id: string): Promise<void> {
 }
 </script>
 <template>
-  <section class="transfer-panel" aria-label="传输任务">
+  <section v-if="tasks.length" class="transfer-panel" aria-label="传输任务">
     <div class="section-heading">
       <h2>传输任务</h2>
-      <span>{{ store.pending }} 个未完成 · 关闭文件页面后继续执行</span>
+      <span>{{ pending }} 个未完成 · 关闭此主机后清除记录</span>
     </div>
     <p class="subtle">
       失败后从头重新传输；不支持断点续传。取消保留已完成文件，提交中的单文件会等待结果。
     </p>
-    <p v-if="!store.tasks.length" class="host-empty">没有传输任务</p>
     <div
-      v-for="task in [...store.tasks].reverse()"
+      v-for="task in [...tasks].reverse()"
       :key="task.id"
       class="transfer-row"
       :data-task-id="task.id"

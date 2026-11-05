@@ -4,8 +4,14 @@ import { usePluginsStore } from './plugins';
 import { useWorkspaceStore } from './workspace';
 import { useTerminalsStore } from './terminals';
 import { pluginsApi } from '../services/plugins';
+import { filesApi } from '../services/files';
 import type { InstalledPlugin, PluginGrant } from '../types/plugins';
-beforeEach(() => setActivePinia(createPinia()));
+beforeEach(() => {
+  setActivePinia(createPinia());
+  vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
+});
 afterEach(() => {
   vi.restoreAllMocks();
   disposePinia(getActivePinia()!);

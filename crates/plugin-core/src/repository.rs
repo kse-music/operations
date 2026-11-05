@@ -378,9 +378,20 @@ impl Repository {
         if !path.try_exists().map_err(io)? {
             return Ok(None);
         }
+        let bytes = read_bounded(&path, 32 * 1024)?;
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&bytes).map_err(|e| Error::Storage(Box::new(e)))?;
+        let revision = metadata["revision"]
+            .as_str()
+            .ok_or_else(|| invalid("插件授权记录缺少安装代号"))?;
+        let version = metadata["pluginVersion"]
+            .as_str()
+            .ok_or_else(|| invalid("插件授权记录缺少版本"))?;
+        if revision != plugin.revision || version != plugin.manifest.version {
+            return Ok(None);
+        }
         let grant: crate::permissions::Grant =
-            serde_json::from_slice(&read_bounded(&path, 32 * 1024)?)
-                .map_err(|e| Error::Storage(Box::new(e)))?;
+            serde_json::from_slice(&bytes).map_err(|e| Error::Storage(Box::new(e)))?;
         Ok(grant.matches(&plugin).then_some(grant))
     }
     pub fn set_grant(

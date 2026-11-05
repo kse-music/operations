@@ -11,12 +11,6 @@ const menuModules = {
   插件管理: 'system',
 };
 
-async function closeTaskCenter(page) {
-  const dialog = page.getByRole('dialog', { name: '任务中心', exact: true });
-  if (await dialog.count())
-    await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
-}
-
 export async function terminalAction(page, pane, name) {
   await pane.locator('.xterm-helper-textarea').press('Shift+F10');
   await page
@@ -31,7 +25,6 @@ export async function terminalTabAction(page, name, tab = page.locator('.termina
 }
 
 export async function showHostTree(page) {
-  await closeTaskCenter(page);
   await page.locator('.module-navigation [data-module="hosts"]').click();
   if (!(await page.locator('.sidebar').isVisible())) {
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
@@ -127,7 +120,6 @@ export async function previewPluginPackage(page, packagePath) {
 }
 
 export async function openPluginSettings(page, name) {
-  await closeTaskCenter(page);
   await navigateWorkspace(page, '插件管理');
   await page.locator('.plugin-installed-row').getByRole('button', { name, exact: true }).click();
   const settings = page.locator('.plugin-page:visible [aria-label="插件设置"]');
@@ -156,17 +148,9 @@ export async function setPluginEnabled(page, name, enabled) {
 }
 
 export async function navigateWorkspace(page, name) {
-  const taskDialog = page.getByRole('dialog', { name: '任务中心', exact: true });
-  if (name === '任务中心') {
-    if (!(await taskDialog.count()))
-      await page.locator('.statusbar').getByRole('button', { name, exact: true }).click();
-    await taskDialog.waitFor();
-    return;
-  }
-  await closeTaskCenter(page);
   const module = hostTools.has(name) ? 'hosts' : menuModules[name];
   if (!module) {
-    if (['AI 运维助手', '网络诊断'].includes(name)) {
+    if (name === 'AI 运维助手') {
       // Focus the host shell before its shortcut; input focus may currently be inside an iframe.
       await page.locator('.module-navigation [data-module="hosts"]').click();
       await page.keyboard.press('Control+k');
@@ -210,17 +194,29 @@ export async function navigateWorkspace(page, name) {
   }
 }
 
+// Model choice belongs to the assistant's persisted plugin settings.
+export async function bindAssistantModel(page, modelId) {
+  await openPluginSettings(page, 'AI 运维助手');
+  const settings = page.frameLocator('.plugin-frame-container:visible iframe');
+  await settings.locator(`input[type="radio"][value=${JSON.stringify(modelId)}]`).check();
+  const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
+  if (await save.isEnabled()) {
+    await save.click();
+    await settings
+      .getByText(modelId ? '模型绑定已保存' : '已解除模型绑定', { exact: true })
+      .waitFor();
+  }
+}
+
 export async function openPluginFunction(page, name, hostId) {
   const systemPages = {
     资源监控: '资源监控',
     进程与端口: '进程与端口',
     日志查看: '日志查看',
-    网络诊断: '网络诊断',
     'systemd 服务': 'systemd 服务',
   };
   const subpage = systemPages[name];
   if (subpage) name = '系统服务';
-  await closeTaskCenter(page);
   const id =
     hostId ??
     (await page.evaluate(() => {
@@ -232,12 +228,8 @@ export async function openPluginFunction(page, name, hostId) {
   if (!id) throw new Error(`Opening ${name} requires an explicit host workspace`);
   await selectHostWorkspace(page, id);
   await page
-    .locator('.workspace-header')
-    .getByRole('button', { name: '工具', exact: true })
-    .click();
-  await page
-    .getByRole('menu', { name: '已启用的插件', exact: true })
-    .getByRole('menuitem', { name, exact: true })
+    .getByRole('navigation', { name: '当前主机工具', exact: true })
+    .getByRole('button', { name, exact: true })
     .click();
   if (subpage)
     await page
@@ -247,7 +239,6 @@ export async function openPluginFunction(page, name, hostId) {
 }
 
 export async function selectHostWorkspace(page, id) {
-  await closeTaskCenter(page);
   if (await page.evaluate(() => innerWidth <= 720)) {
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
     if (await collapse.isVisible()) await collapse.click();

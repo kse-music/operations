@@ -173,7 +173,7 @@ async function chooseDestination(): Promise<void> {
 }
 async function startTransfer(): Promise<void> {
   const input = transfer.value;
-  if (!input) return;
+  if (!input || store.closingHosts.includes(chosen.value)) return;
   busy.value = true;
   store.error = null;
   try {
@@ -351,7 +351,11 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section class="files-view page-view">
+  <section
+    class="files-view page-view"
+    :inert="store.closingHosts.includes(chosen)"
+    :aria-busy="store.closingHosts.includes(chosen)"
+  >
     <div class="section-heading">
       <div>
         <p class="eyebrow">SFTP WORKSPACE</p>
@@ -558,7 +562,7 @@ onBeforeUnmount(() => {
         />
       </section>
     </div>
-    <TransferPanel @retry="retry" />
+    <TransferPanel :host-id="chosen" @retry="retry" />
   </section>
   <template v-if="menu"
     ><button class="context-backdrop" aria-label="关闭文件菜单" @click="menu = null"></button>

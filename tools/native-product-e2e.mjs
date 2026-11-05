@@ -223,16 +223,6 @@ export async function productChecks(context) {
   await rpc('host_update', { id, input });
   await reloadHosts(page);
   await selectHostWorkspace(page, id);
-  await terminalAction(page, page.locator('.terminal-pane:visible'), '诊断连接异常');
-  assert.equal(
-    await page.getByLabel('诊断目标', { exact: true }).inputValue(),
-    originalHost.hostname,
-  );
-  await page.getByRole('button', { name: '开始诊断', exact: true }).click();
-  await until(async () => {
-    const b = await rpc('background_tasks');
-    return b.tasks.some((t) => t.kind === 'diagnostic' && t.state === 'failed');
-  });
   assert(
     (await rpc('background_tasks')).connections.some(
       (c) => c.hostId === hostId && c.state === 'connected',
@@ -242,16 +232,11 @@ export async function productChecks(context) {
   await nav('SSH 终端');
   await command("printf '\\n__SD_%s__\\n' PRODUCT_CONTEXT_SURVIVED");
   await contains('__SD_PRODUCT_CONTEXT_SURVIVED__');
-  await nav('任务中心');
-  await page
-    .getByRole('region', { name: '任务中心', exact: true })
-    .getByText(/TCP|Tcp/)
-    .first()
-    .waitFor();
+  assert.equal(await page.locator('[aria-label="任务中心"]').count(), 0);
   await selectHostWorkspace(page, hostId);
   await nav('SSH 终端');
   passed(
-    'native host-context switching, real TCP failure notification and background task visibility leave the original SSH session usable',
+    'native host-context switching and connection snapshots leave the original SSH session usable',
   );
   for (let n = 0; n < 5; n++) {
     const close = page.getByRole('button', { name: '关闭通知', exact: true });

@@ -17,14 +17,9 @@ const api = vi.hoisted(() => ({
     records: request.kind === 'services' ? [{ unit: 'owned.service' }] : [],
   })),
   feedback: vi.fn(async () => []),
-  diagnostics: vi.fn(async () => []),
 }));
 vi.mock('@serverdeck/plugin-sdk/services/monitor', () => ({ monitorApi: api }));
 vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({ opsApi: api }));
-vi.mock('@serverdeck/plugin-sdk/services/tasks', () => ({
-  tasksApi: api,
-  downloadResult: vi.fn(),
-}));
 let app: App | undefined, root: HTMLDivElement, pinia: Pinia;
 const settle = async () => {
   for (let i = 0; i < 30; i++) await Promise.resolve();
@@ -37,7 +32,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
 });
-it('keeps panel drafts while stopping hidden monitoring and diagnostic polling, and resumes only the selected panel', async () => {
+it('keeps panel drafts while stopping hidden monitoring, and resumes only the selected panel', async () => {
   vi.useFakeTimers();
   pinia = createPinia();
   setActivePinia(pinia);
@@ -65,24 +60,13 @@ it('keeps panel drafts while stopping hidden monitoring and diagnostic polling, 
   filter.value = 'retained.service';
   filter.dispatchEvent(new Event('input', { bubbles: true }));
   await settle();
-  await select('网络诊断');
-  const target = root.querySelector<HTMLInputElement>('[aria-label="诊断目标"]')!;
-  target.value = 'retained.example';
-  target.dispatchEvent(new Event('input', { bubbles: true }));
-  await settle();
-  await vi.advanceTimersByTimeAsync(1600);
-  const requests = api.diagnostics.mock.calls.length;
-  expect(requests).toBeGreaterThan(1);
+  await select('进程与端口');
   await select('systemd 服务');
   expect(root.querySelector<HTMLInputElement>('[aria-label="运维项目搜索"]')!.value).toBe(
     'retained.service',
   );
-  await vi.advanceTimersByTimeAsync(1600);
-  expect(api.diagnostics).toHaveBeenCalledTimes(requests);
-  await select('网络诊断');
-  expect(root.querySelector<HTMLInputElement>('[aria-label="诊断目标"]')!.value).toBe(
-    'retained.example',
-  );
+  expect(root.querySelector('[aria-label="网络诊断"]')).toBeNull();
+  expect(root.querySelectorAll('[role="tab"]')).toHaveLength(4);
   await select('资源监控');
   expect(api.open).toHaveBeenCalledTimes(2);
   const tabs = root.querySelector('[aria-label="系统服务功能"]')!;

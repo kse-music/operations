@@ -3,11 +3,11 @@ import { computed, ref } from 'vue';
 import { hostViews, type WorkspaceView } from '../types/product';
 import { moduleForView, type NavigationModule } from '../types/navigation';
 import { useTerminalsStore } from './terminals';
+import { useFilesStore } from './files';
 import type { ServerSection } from '../types/server';
 import { usePluginsStore } from './plugins';
 import { primaryPluginPage } from '../services/plugin-pages';
 import { errorMessage } from '../services/ipc';
-import { serverPluginFor } from '../services/server-plugins';
 export interface WorkspaceTab {
   key: string;
   view: WorkspaceView;
@@ -77,21 +77,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       (entry) => entry.id === contributionId,
     );
     if (!contribution || contribution.kind === 'settings') return openPluginSettings(pluginId);
-    const globalDiagnostic =
-      !target &&
-      section === 'diagnostics' &&
-      installed.manifest.permissions.includes('network.run') &&
-      (await plugins.schema(pluginId)).pages.some(
-        (page) =>
-          page.id === contributionId &&
-          page.surface?.kind === 'operations' &&
-          page.surface.sections.includes('diagnostics'),
-      );
-    if (!target && contribution.kind !== 'tool' && !globalDiagnostic) {
+    if (!target && contribution.kind !== 'tool') {
       plugins.error = '请先选择主机，再打开此工具。';
       return;
     }
     const key = pluginPageKey({ pluginId, contributionId, hostId: target });
+    if (closing.value.includes(target ? `host:${target}` : key)) return;
     let page = pluginPages.value.find((page) => page.key === key);
     if (!page) {
       page = { key, view: 'extension', hostId: target, pluginId, contributionId };
@@ -115,22 +106,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     target = hostId.value,
     section?: WorkspaceTab['section'],
   ): void {
-    if (['assistant', 'network'].includes(view)) {
+    if (view === 'assistant') {
       const plugins = usePluginsStore();
       const entry = plugins.extensions.find(
         (entry) => entry.kind === 'tool' && entry.tool === view,
       );
-      if (!entry && view === 'network') {
-        void serverPluginFor('', 'diagnostics')
-          .then((found) => {
-            if (!found) throw new Error('请先启用提供网络诊断的插件。');
-            return openPlugin(found.pluginId, found.id, '', 'diagnostics');
-          })
-          .catch((cause) => {
-            plugins.error = errorMessage(cause);
-          });
-        return;
-      }
       if (!entry) {
         plugins.error = '此运维工具未安装、未启用或未授权，请在设置中的插件管理检查。';
         return;
@@ -142,6 +122,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const hostView = hostViews.has(view);
     const key = hostView ? `host:${target}` : `${view}:`;
+    if (closing.value.includes(key)) return;
     let tab = tabs.value.find((t) => t.key === key);
     if (!tab) {
       tab = { key, view, hostId: hostView ? target : '', section };
@@ -175,9 +156,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     });
     const removed = new Set<WorkspaceTab>();
     const terminals = useTerminalsStore();
+    const files = useFilesStore();
     for (const tab of targets) {
       if (closing.value.includes(tab.key)) continue;
       closing.value.push(tab.key);
+      if (isHostTab(tab) && tab.hostId) files.closingHosts.push(tab.hostId);
       try {
         const pages = pluginPages.value.filter((page) =>
           isHostTab(tab) ? page.hostId === tab.hostId : page.key === tab.key,
@@ -198,6 +181,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           if (!accepted) continue;
         }
         if (isHostTab(tab)) {
+          if (tab.hostId && !(await files.prepareHostClose(tab.hostId))) continue;
           const first = terminals.hostTabs(tab.hostId)[0];
           if (first) await terminals.closeAll(first.key);
           if (terminals.hostTabs(tab.hostId).length) continue;
@@ -218,10 +202,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           }
         }
         for (const key of settingsKeys) await usePluginsStore().release(tab.pluginId!, key);
+        if (isHostTab(tab) && tab.hostId && !(await files.clearHostTransfers(tab.hostId))) continue;
         for (const key of draftKeys) usePluginsStore().forget(key);
         pluginPages.value = pluginPages.value.filter((page) => !pages.includes(page));
         removed.add(tab);
+        tabs.value = tabs.value.filter((item) => item !== tab);
       } finally {
+        if (isHostTab(tab))
+          files.closingHosts = files.closingHosts.filter((id) => id !== tab.hostId);
         closing.value = closing.value.filter((key) => key !== tab.key);
       }
     }

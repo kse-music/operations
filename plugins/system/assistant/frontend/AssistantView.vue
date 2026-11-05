@@ -3,13 +3,9 @@ import { computed, onMounted, ref, watch } from 'vue';
 import {
   Bot,
   ShieldCheck,
-  Server,
   Activity,
   ListTree,
   Boxes,
-  SlidersHorizontal,
-  RefreshCw,
-  Settings2,
   FileSearch,
   Send,
   LoaderCircle,
@@ -17,7 +13,6 @@ import {
   AlertTriangle,
   MessageSquare,
   CheckCircle2,
-  LockKeyhole,
   Square,
   Plus,
   UserRound,
@@ -25,34 +20,39 @@ import {
 import { useAssistant } from './assistant';
 import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
-import { useWorkspaceStore } from '@serverdeck/plugin-sdk/stores/workspace';
 import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
-import type { AiSelection } from '@serverdeck/plugin-sdk/types/ai';
-import type { LogSource } from '@serverdeck/plugin-sdk/types/ops';
-import { useModelsStore } from '@serverdeck/plugin-sdk/stores/models';
+import { useModelBinding } from './model-binding';
 import AssistantTargets from './AssistantTargets.vue';
 import AssistantMarkdown from './AssistantMarkdown';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import './assistant.css';
 const props = defineProps<{ hostId?: string }>();
-const crossHosts = ref(false);
-const contextOpen = ref(window.innerWidth >= 900);
 const suggestions = [
   {
     icon: Activity,
     title: '资源异常',
+    description: '检查 CPU、内存与负载',
     question: '帮我排查当前主机 CPU 和内存使用异常的可能原因。',
   },
-  { icon: Boxes, title: '容器排查', question: '如何逐步排查 Docker 容器无法正常启动的问题？' },
-  { icon: ListTree, title: '服务诊断', question: '帮我整理服务响应缓慢的排查步骤。' },
+  {
+    icon: Boxes,
+    title: '容器排查',
+    description: '分析容器状态与启动问题',
+    question: '如何逐步排查 Docker 容器无法正常启动的问题？',
+  },
+  {
+    icon: ListTree,
+    title: '服务诊断',
+    description: '梳理服务响应慢的原因',
+    question: '帮我整理服务响应缓慢的排查步骤。',
+  },
 ];
 const ops = useOpsStore();
-const hosts = useHostsStore(),
-  workspace = useWorkspaceStore();
-const ai = useAssistant(),
-  models = useModelsStore();
+const hosts = useHostsStore();
+const ai = useAssistant();
+const binding = useModelBinding();
+const { models, modelId, selected, loaded, loading, error: bindingError } = binding;
 onMounted(() => {
-  void models.refresh();
   if (!hosts.catalog) void hosts.load();
 });
 const { turns, busy, error, review, outputs, attempted, expired } = ai;
@@ -65,40 +65,27 @@ watch(
   },
   { flush: 'post' },
 );
-const question = ref(''),
-  maskAddresses = ref(true),
-  redactValues = ref('');
-const selection = ref({ server: false, metrics: false, processes: false, docker: false });
-const logKind = ref('none'),
-  logTarget = ref(''),
-  logLines = ref(100),
-  logScope = ref<'system' | 'user'>('system');
+const question = ref('');
+const trustRequired = computed(() =>
+  ai.hostContext.matched.value.some((host) => ops.connections[host.id]?.trust),
+);
 const commandApproved = ref(false),
   changeConfirmation = ref('');
 const ready = computed(
   () =>
     !busy.value &&
+    loaded.value &&
+    !loading.value &&
+    !bindingError.value &&
     models.loaded &&
     !models.loading &&
     !models.error &&
-    !!models.selected?.hasKey &&
+    !!selected.value?.hasKey &&
     (!hosts.busy || hosts.catalog !== null) &&
     !!question.value.trim(),
 );
 watch(
-  [
-    crossHosts,
-    () => props.hostId,
-    maskAddresses,
-    redactValues,
-    () => JSON.stringify(selection.value),
-    logKind,
-    logTarget,
-    logScope,
-    logLines,
-    () => models.selectedId,
-    () => models.selected?.revision,
-  ],
+  [() => props.hostId, modelId, () => selected.value?.revision],
   () => {
     ai.invalidate();
   },
@@ -110,132 +97,46 @@ watch(review, () => {
 });
 function send() {
   if (!ready.value) return;
-  let log: LogSource | null = null;
-  if (logKind.value === 'file') log = { kind: 'file', path: logTarget.value };
-  if (logKind.value === 'service')
-    log = { kind: 'service', scope: logScope.value, unit: logTarget.value };
-  if (logKind.value === 'container') log = { kind: 'container', id: logTarget.value };
-  const context: AiSelection = { ...selection.value, log, logLines: logLines.value };
-  const boundSession =
-    props.hostId && !crossHosts.value ? ops.connections[props.hostId] : undefined;
-  if (
-    props.hostId &&
-    !crossHosts.value &&
-    (!boundSession?.session || boundSession.state !== 'connected')
-  ) {
-    error.value = '当前主机尚未连接，请先完成连接或指纹核验。';
-    return;
-  }
   const text = question.value;
   question.value = '';
-  void ai.send({
-    modelId: models.selectedId,
-    sessionId: boundSession?.session?.id ?? null,
-    autoHosts: !props.hostId || crossHosts.value,
-    question: text,
-    selection: context,
-    maskAddresses: maskAddresses.value,
-    redactValues: redactValues.value.split('\n').filter((v) => v.trim()),
-  });
+  void ai.send(
+    {
+      modelId: modelId.value,
+      sessionId: null,
+      autoHosts: true,
+      question: text,
+      selection: {
+        server: true,
+        metrics: true,
+        processes: true,
+        docker: true,
+        log: null,
+        logLines: 100,
+      },
+      maskAddresses: true,
+      redactValues: [],
+    },
+    props.hostId ? [props.hostId] : [],
+  );
 }
 function enter(event: KeyboardEvent) {
   if (event.isComposing || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return;
   event.preventDefault();
   if (ready.value) chatForm.value?.requestSubmit();
 }
-const contextCount = computed(
-  () => Object.values(selection.value).filter(Boolean).length + (logKind.value !== 'none' ? 1 : 0),
-);
 const readinessHint = computed(() => {
-  if (models.loading) return '正在读取模型列表…';
-  if (!models.selected) return '请先选择已注册模型';
-  if (!models.selected.hasKey) return '请在模型管理中补充 Key';
+  if (loading.value || models.loading) return '正在读取模型配置…';
+  if (bindingError.value || models.error) return '模型配置读取失败，请在插件设置中重试';
+  if (modelId.value && !selected.value) return '绑定模型已删除，请在插件设置中重新绑定';
+  if (!selected.value) return '请先在插件设置中绑定模型';
+  if (!selected.value.hasKey) return '绑定模型未配置 Key，请在模型管理中补充';
   if (hosts.busy && !hosts.catalog) return '正在读取资产列表…';
   return 'Enter 发送 · Shift + Enter 换行';
 });
 </script>
 <template>
   <section class="view ai-view" aria-label="AI 运维助手">
-    <header class="ai-page-heading">
-      <div class="ai-page-title">
-        <div class="ai-page-icon"><Bot :size="24" aria-hidden="true" /></div>
-        <div>
-          <h1>AI 运维助手</h1>
-          <p>结合授权上下文，分析异常原因与排查方向。</p>
-        </div>
-      </div>
-      <span class="ai-safety-badge"
-        ><ShieldCheck :size="14" aria-hidden="true" />命令执行需审核</span
-      >
-    </header>
-
-    <section class="ai-model-bar" aria-label="选择模型">
-      <div class="ai-model-picker">
-        <label for="assistant-model">使用模型</label
-        ><select
-          id="assistant-model"
-          v-model="models.selectedId"
-          aria-label="使用模型"
-          :disabled="!!busy || models.loading"
-        >
-          <option value="">请选择已注册模型</option>
-          <option v-for="model in models.models" :key="model.id" :value="model.id">
-            {{ model.name }} · {{ model.config.model }}{{ model.hasKey ? '' : '（未设置 Key）' }}
-          </option>
-        </select>
-      </div>
-      <div v-if="models.selected" class="ai-model-summary">
-        <span class="ai-model-key" :class="{ configured: models.selected.hasKey }"
-          ><span aria-hidden="true"></span
-          >{{ models.selected.hasKey ? 'Key 已配置' : '未设置 Key' }}</span
-        ><span class="ai-model-endpoint" :title="models.selected.config.baseUrl">{{
-          models.selected.config.baseUrl
-        }}</span>
-      </div>
-      <div class="ai-model-actions">
-        <button
-          class="button ai-context-toggle"
-          type="button"
-          :aria-expanded="contextOpen"
-          aria-controls="assistant-context"
-          @click="contextOpen = !contextOpen"
-        >
-          <SlidersHorizontal :size="14" aria-hidden="true" />上下文<span v-if="contextCount">{{
-            contextCount
-          }}</span>
-        </button>
-        <button
-          class="icon-button"
-          type="button"
-          :disabled="!!busy || models.loading"
-          aria-label="刷新模型列表"
-          title="刷新模型列表"
-          @click="models.refresh"
-        >
-          <RefreshCw :size="15" :class="{ 'ai-spin': models.loading }" aria-hidden="true" /></button
-        ><button
-          class="button"
-          type="button"
-          :disabled="!!busy"
-          @click="workspace.navigate('models')"
-        >
-          <Settings2 :size="14" aria-hidden="true" />管理模型
-        </button>
-      </div>
-      <p v-if="models.loading" class="ai-model-message" role="status">正在读取模型列表…</p>
-      <p v-if="models.error" class="ai-model-message error-text" role="alert">{{ models.error }}</p>
-      <p v-else-if="models.loaded && !models.models.length" class="ai-model-message muted">
-        尚未注册模型，请前往资产管理 → 模型管理。
-      </p>
-      <p
-        v-else-if="models.selected && !models.selected.hasKey"
-        class="ai-model-message warning-text"
-      >
-        所选模型未设置 Key，请在模型管理中编辑。
-      </p>
-    </section>
-
-    <div class="ai-workspace" :class="{ 'without-context': !contextOpen }">
+    <div class="ai-workspace">
       <section class="ai-chat" aria-label="对话">
         <div class="ai-chat-heading">
           <div>
@@ -259,6 +160,19 @@ const readinessHint = computed(() => {
           aria-label="对话消息"
           aria-live="polite"
         >
+          <p v-if="bindingError || models.error" class="error-text" role="alert">
+            {{ bindingError || models.error }}
+          </p>
+          <p v-if="hosts.error" class="error-text" role="alert">{{ hosts.error }}</p>
+          <p v-if="ai.hostContext.cleanupError.value" class="error-text" role="alert">
+            {{ ai.hostContext.cleanupError.value }}
+          </p>
+          <AssistantTargets
+            v-if="trustRequired"
+            :hosts="ai.hostContext.matched.value"
+            :total="hosts.catalog?.hosts.length ?? 0"
+            :busy="!!busy"
+          />
           <div v-if="!turns.length" class="ai-chat-empty">
             <div class="ai-empty-icon"><Bot :size="28" aria-hidden="true" /></div>
             <h3>有什么需要一起排查？</h3>
@@ -268,11 +182,14 @@ const readinessHint = computed(() => {
                 v-for="suggestion in suggestions"
                 :key="suggestion.title"
                 type="button"
+                :aria-label="suggestion.title"
                 @click="question = suggestion.question"
               >
-                <component :is="suggestion.icon" :size="16" aria-hidden="true" /><span>{{
-                  suggestion.title
-                }}</span>
+                <component :is="suggestion.icon" :size="17" aria-hidden="true" /><span
+                  class="ai-suggestion-text"
+                  ><strong>{{ suggestion.title }}</strong
+                  ><small>{{ suggestion.description }}</small></span
+                >
               </button>
             </div>
           </div>
@@ -297,7 +214,7 @@ const readinessHint = computed(() => {
                 <div v-if="turn.state === 'pending'" class="ai-chat-waiting" role="status">
                   <LoaderCircle :size="16" class="ai-spin" aria-hidden="true" />{{
                     busy === 'prepare'
-                      ? ai.hostContext.phase.value || '正在读取授权上下文…'
+                      ? ai.hostContext.phase.value || '正在读取主机上下文…'
                       : '正在思考…'
                   }}
                 </div>
@@ -435,131 +352,6 @@ const readinessHint = computed(() => {
           </div>
         </form>
       </section>
-      <aside
-        v-show="contextOpen"
-        id="assistant-context"
-        class="ai-card ai-context"
-        aria-label="服务器上下文"
-      >
-        <div class="ai-panel-heading">
-          <div>
-            <Server :size="17" aria-hidden="true" />
-            <h2>服务器上下文</h2>
-          </div>
-          <span class="ai-context-count">已选 {{ contextCount }} 项</span>
-        </div>
-        <fieldset :disabled="!!busy">
-          <template v-if="hostId">
-            <p>
-              当前主机：{{
-                hostDisplayName(hosts.catalog?.hosts.find((host) => host.id === hostId))
-              }}
-            </p>
-            <label class="checkbox-label"
-              ><input v-model="crossHosts" type="checkbox" />跨主机分析</label
-            >
-          </template>
-          <AssistantTargets
-            v-if="!hostId || crossHosts"
-            :loading="hosts.busy"
-            :hosts="ai.hostContext.matched.value"
-            :total="hosts.catalog?.hosts.length ?? 0"
-            :busy="!!busy"
-          />
-          <p v-if="hosts.error" class="error-text" role="alert">{{ hosts.error }}</p>
-          <p v-if="ai.hostContext.cleanupError.value" class="error-text" role="alert">
-            {{ ai.hostContext.cleanupError.value }}
-          </p>
-          <p v-if="!hosts.catalog?.hosts.length" class="ai-context-note">
-            尚无服务器资产，可在主机管理中添加。
-          </p>
-          <div class="ai-context-section">
-            <h3>授权读取范围</h3>
-            <p class="ai-context-note">发送时仅读取已勾选内容。</p>
-            <div class="ai-scope-list">
-              <label class="ai-scope" :class="{ selected: selection.server }"
-                ><Server :size="16" aria-hidden="true" /><span
-                  ><strong>服务器信息</strong><small>系统信息与连接端点</small></span
-                ><input v-model="selection.server" type="checkbox" aria-label="服务器信息"
-              /></label>
-              <label class="ai-scope" :class="{ selected: selection.metrics }"
-                ><Activity :size="16" aria-hidden="true" /><span
-                  ><strong>当前监控指标</strong><small>负载、内存、磁盘与网络</small></span
-                ><input v-model="selection.metrics" type="checkbox" aria-label="当前监控指标"
-              /></label>
-              <label class="ai-scope" :class="{ selected: selection.processes }"
-                ><ListTree :size="16" aria-hidden="true" /><span
-                  ><strong>进程状态</strong><small>进程与资源使用情况</small></span
-                ><input v-model="selection.processes" type="checkbox" aria-label="进程状态"
-              /></label>
-              <label class="ai-scope" :class="{ selected: selection.docker }"
-                ><Boxes :size="16" aria-hidden="true" /><span
-                  ><strong>Docker 容器状态</strong><small>容器列表与运行状态</small></span
-                ><input v-model="selection.docker" type="checkbox" aria-label="Docker 容器状态"
-              /></label>
-            </div>
-          </div>
-          <div class="ai-context-section ai-log-settings">
-            <label
-              >选定日志<select v-model="logKind">
-                <option value="none">不读取日志</option>
-                <option value="file">指定日志文件</option>
-                <option value="service">指定 systemd 服务</option>
-                <option value="container">指定 Docker 容器</option>
-              </select></label
-            >
-            <template v-if="logKind !== 'none'"
-              ><label
-                >{{
-                  logKind === 'file'
-                    ? '日志绝对路径'
-                    : logKind === 'service'
-                      ? '服务名（.service）'
-                      : '完整容器 ID'
-                }}<input v-model="logTarget" form="assistant-chat-form" required autocomplete="off"
-              /></label>
-              <div class="ai-log-options">
-                <label v-if="logKind === 'service'"
-                  >服务范围<select v-model="logScope">
-                    <option value="system">系统</option>
-                    <option value="user">当前用户</option>
-                  </select></label
-                ><label
-                  >末尾行数<input
-                    v-model.number="logLines"
-                    form="assistant-chat-form"
-                    type="number"
-                    min="1"
-                    max="200"
-                    required
-                /></label></div
-            ></template>
-          </div>
-          <details class="ai-redaction">
-            <summary><SlidersHorizontal :size="14" aria-hidden="true" />脱敏设置</summary>
-            <div>
-              <label class="check"
-                ><input v-model="maskAddresses" type="checkbox" />脱敏 IP 地址和邮箱</label
-              ><label
-                >额外脱敏内容（每行一个，域名、用户名或业务标识等）<textarea
-                  v-model="redactValues"
-                  rows="3"
-                  autocomplete="off"
-                  placeholder="每行填写一项敏感内容"
-                />
-              </label>
-              <p class="ai-context-note">
-                自动脱敏覆盖常见凭据和私钥，仍需注意可能遗漏的敏感内容。
-              </p>
-            </div>
-          </details>
-          <p class="ai-context-footnote">
-            <LockKeyhole :size="13" aria-hidden="true" /><span
-              >监控指标需先启动监控。对话仅在当前会话保留，执行输出不回传。</span
-            >
-          </p>
-        </fieldset>
-      </aside>
     </div>
     <Modal
       v-if="review"

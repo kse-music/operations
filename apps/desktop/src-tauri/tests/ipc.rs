@@ -94,7 +94,7 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
         ("plugin_set_enabled", json!({"id":id,"enabled":false})),
         (
             "plugin_tool_stage",
-            json!({"id":"cn.hiboot.plugins.services","input":{"operation":"diagnostic_list","args":{}}}),
+            json!({"id":"cn.hiboot.plugins.assistant","input":{"operation":"ai_prepare","args":{}}}),
         ),
         (
             "plugin_tool_cancel_request",

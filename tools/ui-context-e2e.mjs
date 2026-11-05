@@ -203,18 +203,6 @@ try {
     await assertHost('', 'terminals');
     assert.equal(await page.locator('.host-tools button').count(), 1);
     assert.equal(await page.getByLabel('当前工作区主机', { exact: true }).count(), 0);
-    await nav('网络诊断');
-    await page.getByLabel('诊断来源', { exact: true }).selectOption('remote');
-    await page.getByLabel('诊断主机', { exact: true }).selectOption('b');
-    await page.getByLabel('诊断目标', { exact: true }).fill('independent.example');
-    await selectHostWorkspace(page, 'a');
-    await nav('网络诊断');
-    assert.equal(await page.getByLabel('诊断主机', { exact: true }).inputValue(), 'b');
-    assert.equal(
-      await page.getByLabel('诊断目标', { exact: true }).inputValue(),
-      'independent.example',
-    );
-    assert.equal(await page.getByLabel('诊断来源', { exact: true }).inputValue(), 'remote');
     await selectHostWorkspace(page, 'b');
     await nav('SSH 终端');
     await assertHost('b', 'terminals');
@@ -247,20 +235,6 @@ try {
         throw new Error('close-all must close only the target host sessions');
     });
     await page.screenshot({ path: `${output}/${name}-closed-all.png` });
-    await nav('网络诊断');
-    assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '主机运维',
-    );
-    assert.deepEqual(
-      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      [],
-    );
-    await nav('任务中心');
-    await page.getByRole('heading', { name: '任务中心', exact: true }).waitFor();
-    assert.equal(await page.locator('.statusbar button').count(), 1);
-    assert.equal(await page.getByRole('dialog', { name: '任务中心', exact: true }).count(), 1);
-    await page.screenshot({ path: `${output}/${name}-task-center.png` });
     await nav('备份恢复');
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
@@ -281,15 +255,6 @@ try {
     await nav('备份恢复');
     await page.locator('.module-navigation [data-module="system"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'backup');
-    await nav('网络诊断');
-    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'network');
-    assert.equal(
-      await page.getByLabel('诊断目标', { exact: true }).inputValue(),
-      'independent.example',
-    );
-    await page.locator('.module-navigation [data-module="hosts"]').click();
-    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'network');
-    assert.equal(await page.locator('.terminal-pane[data-host-id="b"]').count(), 0);
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();

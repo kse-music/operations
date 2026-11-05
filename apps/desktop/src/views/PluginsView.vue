@@ -136,7 +136,7 @@ onBeforeUnmount(() => {
       <div>
         <p class="eyebrow">扩展与集成</p>
         <h1>插件管理</h1>
-        <p class="subtle">安装和配置插件。插件功能从当前主机工作区的工具菜单使用。</p>
+        <p class="subtle">安装和配置插件。插件功能从当前主机工作区顶部的工具按钮使用。</p>
       </div>
       <button class="button" :disabled="plugins.loading || plugins.busy" @click="plugins.refresh()">
         <RefreshCw :size="15" aria-hidden="true" />刷新
@@ -275,7 +275,7 @@ onBeforeUnmount(() => {
       ><p>
         卸载
         {{ deleting.manifest.name }}
-        将停止插件调用并放弃未保存的编辑。已提交的网络诊断任务继续由任务中心管理，服务器文件和已有终端不受影响。
+        将停止插件调用并放弃未保存的编辑。服务器文件和已有终端不受影响。
       </p>
       <label class="checkbox-label"
         ><input v-model="clearData" type="checkbox" />同时清除这个插件的本地配置和数据</label

@@ -5,6 +5,7 @@ import { useOpsStore } from './ops';
 import { hostInput } from '../types/hosts';
 import { pidPorts, sameHostConnection } from '../services/product-links';
 import { globalKey } from '../types/product';
+import { filesApi } from '../services/files';
 vi.mock('../services/ops', () => ({ opsApi: { close: vi.fn(), connections: vi.fn() } }));
 vi.mock('../services/terminal', () => ({ terminalApi: { trust: vi.fn() } }));
 import { opsApi } from '../services/ops';
@@ -16,6 +17,9 @@ describe('product integration boundaries', () => {
     setActivePinia(createPinia());
     Object.assign(usePluginsStore(), toolPluginState());
     vi.clearAllMocks();
+    vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
+    vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
+    vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
   });
   it('has no fixed navigation tabs and returns to an empty workspace after the last close', () => {
     const workspace = useWorkspaceStore();
@@ -66,12 +70,12 @@ describe('product integration boundaries', () => {
     expect(w.hostId).toBe('');
     expect(opsApi.close).not.toHaveBeenCalled();
   });
-  it('closing one host workspace activates the adjacent host without closing background sessions', () => {
+  it('closing one host workspace activates the adjacent host without closing unrelated background sessions', async () => {
     const w = useWorkspaceStore();
     for (let n = 0; n < 40; n++) w.navigate('server', `host-${n}`);
     expect(w.tabs).toHaveLength(40);
     const last = w.current!.key;
-    w.close(last);
+    await w.close(last);
     expect(w.current?.key).not.toBe(last);
     expect(w.hostId).toBe('host-38');
     expect(w.tabs).toHaveLength(39);

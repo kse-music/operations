@@ -4,6 +4,7 @@ import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, type Pinia, disposePinia } from 'pinia';
 const api = vi.hoisted(() => ({
   models: vi.fn(),
+  settings: vi.fn(),
   prepare: vi.fn(),
   send: vi.fn(),
   execute: vi.fn(),
@@ -15,12 +16,16 @@ const api = vi.hoisted(() => ({
   trust: vi.fn(),
 }));
 vi.mock('@serverdeck/plugin-sdk/services/ai', () => ({ aiApi: api }));
+vi.mock('@serverdeck/plugin-sdk/services/plugin-server', () => ({
+  pluginServerRequest: api.settings,
+}));
 vi.mock('@serverdeck/plugin-sdk/services/hosts', () => ({ hostsApi: { list: api.hostList } }));
 vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({
   opsApi: { open: api.opsOpen, close: api.opsClose },
 }));
 vi.mock('@serverdeck/plugin-sdk/services/terminal', () => ({ terminalApi: { trust: api.trust } }));
 import AssistantView from './AssistantView.vue';
+import SettingsView from './SettingsView.vue';
 import { useAssistant } from './assistant';
 import { useModelsStore } from '@serverdeck/plugin-sdk/stores/models';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
@@ -151,6 +156,7 @@ beforeEach(() => {
       hasKey: true,
     },
   ]);
+  api.settings.mockResolvedValue({ modelId: 'model-a' });
   api.prepare.mockResolvedValue(preview);
   api.resolveHosts.mockResolvedValue({ hostIds: [], message: '', modelRevision: 'r1' });
   api.hostList.mockResolvedValue({
@@ -176,11 +182,31 @@ afterEach(() => {
   root?.remove();
   disposePinia(pinia);
 });
-it('sends on one click with explicit scope, renders safely and never executes commands automatically', async () => {
+it('sends with built-in full context without a configuration panel or send dialog', async () => {
   await mount();
-  for (const label of ['服务器信息', '当前监控指标', '进程状态', 'Docker 容器状态'])
-    expect(check(label).checked).toBe(false);
+  expect(root.querySelector('aside, [aria-controls="assistant-context"]')).toBeNull();
+  expect(root.querySelector('input[type=checkbox]')).toBeNull();
+  expect(root.querySelector('.ai-model-bar, select')).toBeNull();
   await generate();
+  expect(api.prepare).toHaveBeenCalledWith(
+    expect.objectContaining({
+      autoHosts: true,
+      maskAddresses: true,
+      redactValues: [],
+      selection: {
+        server: true,
+        metrics: true,
+        processes: true,
+        docker: true,
+        log: null,
+        logLines: 100,
+      },
+    }),
+  );
+  expect(api.send).toHaveBeenCalledOnce();
+  expect(api.send).toHaveBeenCalledWith('preview-a', true);
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(api.execute).not.toHaveBeenCalled();
 });
 it('retains a conversation when the SDK refreshes unchanged model metadata and clears it for a new revision', async () => {
   await mount();
@@ -252,7 +278,7 @@ it('keeps conversation when editing a draft, carries prior messages and recovers
   await send();
   expect(root.querySelectorAll('.ai-markdown')).toHaveLength(2);
 });
-it('selects registered models and revokes old previews on model switch, edit and deletion', async () => {
+it('loads the persisted plugin binding and revokes old previews on rebind, edit and deletion', async () => {
   await mount();
   await generate();
   expect(root.querySelector('input[type=password]')).toBeNull();
@@ -266,11 +292,15 @@ it('selects registered models and revokes old previews on model switch, edit and
   };
   store.models.push(b);
   await settle();
-  const select = root.querySelector<HTMLSelectElement>('[aria-label="选择模型"] select')!;
-  select.value = 'model-b';
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+  const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
+  api.models.mockResolvedValue([...store.models]);
+  api.settings.mockResolvedValue({ modelId: 'model-b' });
+  updateVisibility(false);
   await settle();
-  expect(api.cancel).toHaveBeenCalledWith('preview-a');
+  updateVisibility(true);
+  await settle();
+  expect(root.querySelector('select')).toBeNull();
+  expect(root.querySelectorAll('.ai-chat-turn, .ai-proposal')).toHaveLength(0);
   expect(root.querySelector('[aria-label="发送预览"]')).toBeNull();
   await generate();
   expect(api.prepare.mock.lastCall![0].modelId).toBe('model-b');
@@ -279,7 +309,6 @@ it('selects registered models and revokes old previews on model switch, edit and
   expect(root.querySelector('[aria-label="发送预览"]')).toBeNull();
   await generate();
   store.models = store.models.filter((m) => m.id !== 'model-b');
-  store.selectedId = '';
   await settle();
   expect(button('发送').disabled).toBe(true);
   expect(root.querySelector('[aria-label="发送预览"]')).toBeNull();
@@ -317,14 +346,6 @@ it('revokes a late preview after the view has been disposed', async () => {
   expect(api.send).not.toHaveBeenCalled();
 });
 
-async function select(label: string, value: string) {
-  const element = [...root.querySelectorAll('label')]
-    .find((l) => l.textContent?.trim().startsWith(label))!
-    .querySelector('select')!;
-  element.value = value;
-  element.dispatchEvent(new Event('change', { bubbles: true }));
-  await settle();
-}
 const fixtureHost = (id: string) => ({
   ...hostInput(),
   id,
@@ -343,32 +364,15 @@ function openConnected() {
     return { id: `session-${id}`, hostId: id, transportId: `transport-${id}`, routeHostIds: [] };
   });
 }
-it('automatically connects matched hosts and preserves selected logs and custom redaction', async () => {
+it('matches all assets automatically and only connects the matched host', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
   api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
   openConnected();
   await mount();
-  expect(root.querySelectorAll('select')).toHaveLength(2); // model and log source; no host selector
-  expect(root.textContent).toContain('已关联全部 2 台资产');
+  expect(root.querySelectorAll('select')).toHaveLength(0);
   expect(api.opsOpen).not.toHaveBeenCalled();
   useOpsStore().active = 'b';
-  await toggle(check('当前监控指标'));
-  await select('选定日志', 'service');
-  await select('服务范围', 'user');
-  const target = [...root.querySelectorAll('label')]
-    .find((l) => l.textContent?.trim().startsWith('服务名'))!
-    .querySelector('input')!;
-  target.value = 'worker.service';
-  target.dispatchEvent(new Event('input', { bubbles: true }));
-  const details = root.querySelector<HTMLDetailsElement>('.ai-redaction')!;
-  details.open = true;
-  await toggle(check('脱敏 IP 地址和邮箱'));
-  const redaction = details.querySelector('textarea')!;
-  redaction.value = 'business-user\ninternal.example';
-  redaction.dispatchEvent(new Event('input', { bubbles: true }));
-  details.open = false;
-  await settle();
-  await generate();
+  await send();
   expect(api.opsOpen).toHaveBeenCalledOnce();
   expect(api.opsOpen.mock.calls[0]![0]).toBe('a');
   expect(useOpsStore().active).toBe('b');
@@ -378,23 +382,10 @@ it('automatically connects matched hosts and preserves selected logs and custom 
       sessionIds: ['session-a'],
       autoHosts: true,
       expectedModelRevision: 'r1',
-      maskAddresses: false,
-      redactValues: ['business-user', 'internal.example'],
-      selection: {
-        server: false,
-        metrics: true,
-        processes: false,
-        docker: false,
-        log: { kind: 'service', scope: 'user', unit: 'worker.service' },
-        logLines: 100,
-      },
     }),
   );
   expect(api.send).toHaveBeenCalledOnce();
   expect(root.textContent).toContain('命中：主机 a');
-  await select('选定日志', 'none');
-  expect(root.querySelectorAll('.ai-chat-turn')).toHaveLength(0);
-  expect(api.cancel).toHaveBeenCalledWith('preview-a');
 });
 it('returns the matched host connection failure without calling the diagnosis model or another host', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
@@ -469,7 +460,7 @@ it('shows progress and cancels analysis without another submit or a late answer'
   await mount();
   await generate();
   expect(root.querySelector('[role="status"]')?.textContent).toContain('正在思考');
-  expect(root.querySelector<HTMLSelectElement>('#assistant-model')!.disabled).toBe(true);
+  expect(root.querySelector<HTMLTextAreaElement>('#assistant-question')!.disabled).toBe(true);
   button('停止').click();
   await settle();
   expect(api.cancel).toHaveBeenCalledWith('preview-a');
@@ -591,57 +582,33 @@ it('preserves an asynchronous SSH failure reason after the state and message upd
   expect(api.prepare).not.toHaveBeenCalled();
 });
 
-it('uses the entry host session by default and only performs cross-host matching after an explicit selection', async () => {
-  const host = {
-    ...hostInput(),
-    id: 'a',
-    name: 'Host a',
-    hostname: 'a.example',
-    createdAt: '',
-    updatedAt: '',
-  };
-  api.hostList.mockResolvedValue({
-    hosts: [host],
-    groups: [],
-    credentials: [],
-    pendingSecretDeletions: 0,
-  });
-  useOpsStore().connections.a = {
-    host,
-    state: 'connected',
-    trust: null,
-    error: null,
-    session: { id: 'session-a', hostId: 'a', transportId: 'transport-a', routeHostIds: ['a'] },
-  };
+it('uses the entry host as a matching hint while allowing other registered hosts by default', async () => {
+  api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
+  api.resolveHosts.mockResolvedValue({ hostIds: ['b'], message: '', modelRevision: 'r1' });
+  openConnected();
   await mount('a');
-  await generate();
-  expect(api.resolveHosts).not.toHaveBeenCalled();
-  expect(api.prepare).toHaveBeenCalledWith(
-    expect.objectContaining({ sessionId: 'session-a', autoHosts: false }),
+  await send();
+  expect(api.resolveHosts).toHaveBeenCalledWith(
+    expect.objectContaining({ previousHostIds: ['a'] }),
   );
-  expect(root.textContent).toContain('当前主机：Host a');
-  await toggle(check('跨主机分析'));
-  await generate();
-  expect(api.resolveHosts).toHaveBeenCalledOnce();
+  expect(api.prepare).toHaveBeenCalledWith(
+    expect.objectContaining({ sessionIds: ['session-b'], autoHosts: true }),
+  );
+  expect(api.opsOpen.mock.calls[0]![0]).toBe('b');
+  await send();
+  expect(api.resolveHosts).toHaveBeenLastCalledWith(
+    expect.objectContaining({ previousHostIds: ['b'] }),
+  );
 });
 
-it('quick questions only fill the draft and collapsing context preserves the selected read scope', async () => {
+it('quick questions only fill the draft without sending or exposing context controls', async () => {
   await mount();
-  button('容器排查', root).click();
+  root.querySelector<HTMLButtonElement>('[aria-label="容器排查"]')!.click();
   await settle();
-  expect(
-    root.querySelector<HTMLTextAreaElement>('[aria-label="问题"], #assistant-question')!.value,
-  ).toContain('Docker');
+  expect(root.querySelector<HTMLTextAreaElement>('#assistant-question')!.value).toContain('Docker');
   expect(api.prepare).not.toHaveBeenCalled();
   expect(api.resolveHosts).not.toHaveBeenCalled();
-  await toggle(check('服务器信息', root));
-  const collapse = root.querySelector<HTMLButtonElement>('[aria-controls="assistant-context"]')!;
-  collapse.click();
-  await settle();
-  expect(collapse.getAttribute('aria-expanded')).toBe('false');
-  collapse.click();
-  await settle();
-  expect(check('服务器信息', root).checked).toBe(true);
+  expect(root.querySelector('aside, [aria-controls="assistant-context"]')).toBeNull();
 });
 it('retains readable replies after hiding but expires old command handles without cancelling them in a new host context', async () => {
   const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
@@ -668,4 +635,108 @@ it('retains readable replies after hiding but expires old command handles withou
   await settle();
   expect(api.cancel).not.toHaveBeenCalledWith('old-context-preview');
   expect(state.error.value).toBe('');
+});
+
+it('blocks unbound, deleted and unreadable model bindings without silently choosing another model', async () => {
+  api.settings.mockResolvedValue({});
+  await mount();
+  expect(root.textContent).toContain('请先在插件设置中绑定模型');
+  await generate();
+  expect(button('发送').disabled).toBe(true);
+  expect(api.prepare).not.toHaveBeenCalled();
+  const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
+  updateVisibility(false);
+  await settle();
+  api.settings.mockResolvedValue({ modelId: 'removed-model' });
+  updateVisibility(true);
+  await settle();
+  expect(root.textContent).toContain('绑定模型已删除');
+  expect(button('发送').disabled).toBe(true);
+  updateVisibility(false);
+  await settle();
+  api.settings.mockRejectedValue({ message: '插件配置读取失败' });
+  updateVisibility(true);
+  await settle();
+  expect(root.textContent).toContain('插件配置读取失败');
+  expect(button('发送').disabled).toBe(true);
+  expect(api.send).not.toHaveBeenCalled();
+});
+
+async function mountSettings() {
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(SettingsView);
+  app.use(pinia);
+  app.mount(root);
+  await settle();
+}
+it('shows model identity and missing Key status without changing the saved binding on selection', async () => {
+  const original = (await api.models())[0] as AiModel;
+  api.models.mockResolvedValue([
+    original,
+    {
+      ...original,
+      id: 'model-b',
+      name: '备用模型',
+      config: { ...original.config, model: 'backup-model' },
+      hasKey: false,
+    },
+  ]);
+  await mountSettings();
+  expect(root.querySelector('select')).toBeNull();
+  expect(root.textContent).toContain('backup-model');
+  expect(root.textContent).toContain('未设置 Key');
+  expect(root.querySelector<HTMLInputElement>('input[value="model-a"]')!.checked).toBe(true);
+  root.querySelector<HTMLInputElement>('input[value="model-b"]')!.click();
+  await settle();
+  expect(root.querySelector('.binding-current')!.textContent).toContain('模型 A');
+  expect(root.textContent).toContain('有未保存的更改');
+  expect(api.settings.mock.calls.some(([, operation]) => operation.kind === 'settings_write')).toBe(
+    false,
+  );
+  expect(button('保存模型绑定').disabled).toBe(false);
+});
+
+it('binds a model from plugin settings, persists it across remounts and preserves other settings', async () => {
+  let value: Record<string, unknown> = { otherSetting: 'keep' };
+  api.settings.mockImplementation(
+    async (_id: string, operation: { kind: string; value?: Record<string, unknown> }) => {
+      if (operation.kind === 'settings_write') {
+        value = operation.value!;
+        return null;
+      }
+      return value;
+    },
+  );
+  await mountSettings();
+  expect(root.textContent).toContain('绑定模型');
+  expect(root.querySelector<HTMLInputElement>('input[value=""]')!.checked).toBe(true);
+  const choice = root.querySelector<HTMLInputElement>('input[value="model-a"]')!;
+  choice.click();
+  await settle();
+  button('保存模型绑定').click();
+  await settle();
+  expect(value).toEqual({ otherSetting: 'keep', modelId: 'model-a' });
+  expect(root.textContent).toContain('模型绑定已保存');
+  app.unmount();
+  root.remove();
+  await mount();
+  await send();
+  expect(api.prepare.mock.lastCall![0].modelId).toBe('model-a');
+  expect(root.querySelector('select')).toBeNull();
+});
+it('keeps the previous model binding visible when saving fails and allows retry', async () => {
+  await mountSettings();
+  root.querySelector<HTMLInputElement>('input[value=""]')!.click();
+  await settle();
+  api.settings.mockRejectedValueOnce({ message: '无法保存插件设置' });
+  button('保存模型绑定').click();
+  await settle();
+  expect(root.textContent).toContain('无法保存插件设置');
+  expect(root.textContent).not.toContain('已解除模型绑定');
+  expect(button('保存模型绑定').disabled).toBe(false);
+  api.settings.mockResolvedValueOnce(null);
+  button('保存模型绑定').click();
+  await settle();
+  expect(root.textContent).toContain('已解除模型绑定');
 });

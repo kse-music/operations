@@ -4,10 +4,12 @@ import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildPluginUi } from './build-plugin-ui.mjs';
+import { requireBuildSpace } from './build-space.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const [name, output] = process.argv.slice(2);
 if (!name || !output)
   throw new Error('Usage: node tools/build-plugin.mjs PLUGIN_OR_SOURCE_DIRECTORY OUTPUT.sdplugin');
+requireBuildSpace(root);
 const source = /^[a-z0-9-]+$/.test(name)
     ? path.join(root, 'plugins', 'upload', name)
     : path.resolve(root, name),

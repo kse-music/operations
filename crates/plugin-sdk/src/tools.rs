@@ -8,19 +8,16 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum Tool {
     Assistant,
-    Network,
 }
 impl Tool {
     pub fn permission(self) -> Permission {
         match self {
             Self::Assistant => Permission::AssistantUse,
-            Self::Network => Permission::NetworkRun,
         }
     }
     pub fn operation(self) -> &'static str {
         match self {
             Self::Assistant => "assistant.use",
-            Self::Network => "network.run",
         }
     }
 }
@@ -31,9 +28,6 @@ pub enum Operation {
     AiPrepare,
     AiSend,
     AiExecute,
-    DiagnosticStart,
-    DiagnosticList,
-    DiagnosticCancel,
 }
 impl Operation {
     pub fn tool(self) -> Tool {
@@ -41,7 +35,6 @@ impl Operation {
             Self::AiResolveHosts | Self::AiPrepare | Self::AiSend | Self::AiExecute => {
                 Tool::Assistant
             }
-            Self::DiagnosticStart | Self::DiagnosticList | Self::DiagnosticCancel => Tool::Network,
         }
     }
 }

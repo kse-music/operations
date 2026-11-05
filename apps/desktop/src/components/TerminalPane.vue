@@ -32,7 +32,6 @@ const props = defineProps<{ tab: TerminalPaneModel; active: boolean }>();
 const emit = defineEmits<{
   close: [];
   server: [host: Host];
-  network: [host: Host];
   action: [key: string, name: string];
   files: [host: Host, path: string | undefined, pane: string];
 }>();
@@ -69,9 +68,6 @@ const menuActions = computed(() => [
     ? [
         { key: 'server', label: '服务器管理', disabled: false },
         { key: 'files', label: 'SFTP 文件', disabled: false },
-        ...(['failed', 'disconnected'].includes(props.tab.state)
-          ? [{ key: 'network', label: '诊断连接异常', disabled: false }]
-          : []),
         { key: 'forwards', label: '端口转发', disabled: props.tab.state !== 'connected' },
       ]
     : []),
@@ -345,9 +341,6 @@ function runMenuAction(key: string): void {
       break;
     case 'files':
       if (props.tab.host) emit('files', props.tab.host, props.tab.cwd, props.tab.key);
-      break;
-    case 'network':
-      if (props.tab.host) emit('network', props.tab.host);
       break;
     case 'forwards':
       forwards.value = true;
