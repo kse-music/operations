@@ -1,0 +1,30 @@
+[package]
+name = "serverdeck-windows-file-drag"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+serverdeck-core.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+windows = { version = "0.62.2", features = [
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Com_StructuredStorage",
+  "Win32_System_DataExchange",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_SystemServices",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+] }
+windows-core = "0.62.2"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"

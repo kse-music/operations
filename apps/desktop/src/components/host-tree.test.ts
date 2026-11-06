@@ -98,7 +98,7 @@ it('bounds initial host DOM, exposes further rows, and supports arrow/Home/End k
   expect(root.textContent).toContain('Host 449');
 });
 
-it('uses address and non-default port when the host name is empty', async () => {
+it('shows an address only once when it already serves as the host name', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const store = useHostsStore();
@@ -109,6 +109,8 @@ it('uses address and non-default port when the host name is empty', async () => 
       { id: 'named', name: '生产', hostname: '192.0.2.20', port: 2222 },
       { id: 'spaces', name: '   ', hostname: 'server.example', port: 22 },
       { id: 'ipv6', name: '', hostname: '2001:db8::1', port: 2200 },
+      { id: 'duplicate', name: '192.0.2.30', hostname: '192.0.2.30', port: 22 },
+      { id: 'named-ipv6', name: '实验室', hostname: '2001:db8::2', port: 2200 },
     ].map((host) => ({ ...hostInput(), ...host, createdAt: '', updatedAt: '' })),
     groups: [],
     credentials: [],
@@ -119,14 +121,18 @@ it('uses address and non-default port when the host name is empty', async () => 
   app = createApp(HostSidebar).use(pinia);
   app.mount(root);
   await nextTick();
-  for (const [id, name] of [
+  for (const [id, name, address] of [
     ['default', '192.0.2.10'],
     ['custom', '192.0.2.10:2222'],
-    ['named', '生产'],
+    ['named', '生产', '192.0.2.20:2222'],
     ['spaces', 'server.example'],
     ['ipv6', '[2001:db8::1]:2200'],
+    ['duplicate', '192.0.2.30'],
+    ['named-ipv6', '实验室', '[2001:db8::2]:2200'],
   ]) {
-    expect(root.querySelector(`[data-host-id="${id}"] .host-name`)?.textContent).toBe(name);
+    const row = root.querySelector(`[data-host-id="${id}"]`)!;
+    expect(row.querySelector('.host-name')?.textContent).toBe(name);
+    expect(row.querySelector('.host-address')?.textContent).toBe(address);
   }
 });
 
@@ -368,7 +374,7 @@ it('moves hosts with pointer dragging into empty, collapsed and ungrouped target
     await nextTick();
     expect(update).toHaveBeenLastCalledWith('host', { ...hostInput(host), groupId: target });
     expect(store.catalog!.hosts[0]!.groupId).toBe(target);
-    expect(root.querySelector('.drop-target, .host-drag-preview')).toBeNull();
+    expect(root.querySelector('.drop-target, .host-drag-preview, .drag-ready')).toBeNull();
   }
   expect(select).not.toHaveBeenCalled();
   update.mockRejectedValueOnce({ message: 'permission denied' });
@@ -396,22 +402,32 @@ it.each(['Escape', 'pointercancel', 'outside', 'same-group'])(
     expect(update).not.toHaveBeenCalled();
     expect(select).not.toHaveBeenCalled();
     expect(store.catalog!.hosts[0]!.groupId).toBe('a');
-    expect(root.querySelector('.drop-target, .host-drag-preview')).toBeNull();
+    expect(root.querySelector('.drop-target, .host-drag-preview, .drag-ready')).toBeNull();
   },
 );
 it('keeps normal clicks and ignores tiny moves, right buttons and dragging while saving', async () => {
   const { store, select, update } = await mountDragTree();
   const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
+  expect(row.classList.contains('drag-ready')).toBe(false);
   pointer(row, 'pointerdown', 10, 10);
   pointer(window, 'pointermove', 13, 12);
+  await nextTick();
+  expect(row.classList.contains('drag-ready')).toBe(true);
+  expect(root.querySelector('.host-dragging')).toBeNull();
   pointer(window, 'pointerup', 13, 12);
   row.click();
+  await nextTick();
+  expect(row.classList.contains('drag-ready')).toBe(false);
   expect(select).toHaveBeenCalledOnce();
   pointer(row, 'pointerdown', 10, 10, 2);
+  await nextTick();
+  expect(row.classList.contains('drag-ready')).toBe(false);
   pointer(window, 'pointermove', 50, 90);
   pointer(window, 'pointerup', 50, 90);
   store.busy = true;
   pointer(row, 'pointerdown', 10, 10);
+  await nextTick();
+  expect(row.classList.contains('drag-ready')).toBe(false);
   pointer(window, 'pointermove', 50, 90);
   pointer(window, 'pointerup', 50, 90);
   await nextTick();

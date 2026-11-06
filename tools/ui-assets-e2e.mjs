@@ -51,7 +51,6 @@ async function fixtures(page, theme) {
       credentials: [],
     };
     useHostsStore(pinia).catalog = catalog;
-    hostsApi.status = async () => ({ available: true, message: '系统凭据库可用。' });
     hostsApi.list = async () => ({ ...catalog, hosts: [...catalog.hosts] });
     hostsApi.test = async (input, authentication, _confirmed, hostId) => {
       if (hostId === 'fixture-host') {
@@ -183,10 +182,9 @@ try {
     const screenshot = (view) => page.screenshot({ path: `${output}/${name}-${view}.png` });
 
     await navigateWorkspace(page, '数据与存储');
-    const vault = page.getByRole('group', { name: '系统凭据库', exact: true });
-    await vault.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
-    await vault.getByText('系统凭据库可用。', { exact: true }).waitFor();
-    await inspect(page, `${name}: credential store maintenance`);
+    await page.getByLabel('默认下载目录', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('group', { name: '系统凭据库', exact: true }).count(), 0);
+    await inspect(page, `${name}: data and storage settings`);
 
     await hostTreeAction(page, null, '新建主机');
     const hostDialog = page.getByRole('dialog', { name: '新建主机', exact: true });
@@ -269,7 +267,7 @@ try {
   }
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
   console.log(
-    `Passed host authentication, credential store and model checks in ${results.length} window/theme variants.`,
+    `Passed host authentication, storage settings and model checks in ${results.length} window/theme variants.`,
   );
 } finally {
   await browser.close();

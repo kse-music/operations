@@ -124,29 +124,34 @@ async function fixtures(page, theme) {
           : {},
     });
     const { filesApi } = await import('/src/services/files.ts');
+    const directories = ['config', 'logs', '数据库备份'];
     const listing = {
       path: '/srv/application',
       parent: '/srv',
       entries: [
-        'config',
+        ...directories,
+        'current',
         'application.log',
+        'backup.tar.gz',
         'compose.yaml',
+        'deploy.sh',
+        'cover.webp',
         '跨环境发布与数据库迁移记录-2026-11-07.md',
         ...Array.from({ length: 60 }, (_, n) => `fixture-${n + 1}.txt`),
-      ].map((name, n) => ({
+      ].map((name, index) => ({
         name,
         path: `/srv/application/${name}`,
-        kind: n ? 'file' : 'directory',
-        size: n ? 2048 : null,
+        kind: index < directories.length ? 'directory' : name === 'current' ? 'symlink' : 'file',
+        size: index < directories.length ? null : 2048,
         modified: 1700000000,
-        permissions: n ? 0o644 : 0o755,
+        permissions: index < directories.length ? 0o755 : 0o644,
         uid: 0,
         owner: 'root',
         gid: 1000,
       })),
     };
-    filesApi.local = async () => listing;
-    filesApi.list = async () => listing;
+    filesApi.local = async (path) => ({ ...listing, path: path ?? listing.path });
+    filesApi.list = async (_session, path) => ({ ...listing, path });
     filesApi.connections = async () => [session];
     filesApi.tasks = async () => [];
     const { useFilesStore } = await import('/src/stores/files.ts');
@@ -281,6 +286,184 @@ async function inspect(page, name) {
 
 const results = [];
 
+async function verifyDownloadDragAndDelete(page) {
+  await page.evaluate(async () => {
+    const { filesApi } = await import('/src/services/files.ts');
+    const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+    pinia._s.get('application').state.config.product.downloadDirectory = '/configured/downloads';
+    window.sftpTestCalls = { transfers: [], actions: [] };
+    filesApi.start = async (input) => window.sftpTestCalls.transfers.push(input);
+    filesApi.action = async (session, input) =>
+      window.sftpTestCalls.actions.push({ session, input });
+  });
+  const remote = page.getByRole('table', { name: '远程文件', exact: true });
+  const directory = remote.getByRole('button', { name: 'config', exact: true });
+  const file = remote.getByRole('button', { name: 'deploy.sh', exact: true });
+  const destination = page.getByRole('textbox', { name: '本地路径', exact: true });
+  const download = page.getByRole('dialog', { name: '确认文件传输', exact: true });
+  const deleteDialog = page.getByRole('dialog', { name: '确认删除远程项目', exact: true });
+  const remove = page.getByRole('button', { name: '删除选中', exact: true });
+  const dropHint = page.getByText('松开后下载到当前目录', { exact: true });
+  const moveToLocal = async (entry) => {
+    await entry.hover();
+    const target = await destination.boundingBox();
+    assert(target);
+    await page.mouse.down();
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 8 });
+    await dropHint.waitFor();
+  };
+  await directory.click();
+  await file.click({ modifiers: ['Control'] });
+  await moveToLocal(file);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  assert.equal(await download.count(), 0);
+  await moveToLocal(file);
+  await page.mouse.up();
+  assert.equal(
+    await download.getByRole('textbox', { name: '传输目标目录' }).inputValue(),
+    '/srv/application',
+  );
+  assert.equal(
+    await download.locator('.file-path-preview').textContent(),
+    '/srv/application/config\n/srv/application/deploy.sh',
+  );
+  await download.getByRole('button', { name: '加入传输队列', exact: true }).click();
+  await download.waitFor({ state: 'hidden' });
+  const calls = () => page.evaluate(() => window.sftpTestCalls);
+  assert.deepEqual((await calls()).transfers, [
+    {
+      sessionId: 'ui-session',
+      direction: 'download',
+      sources: ['/srv/application/config', '/srv/application/deploy.sh'],
+      destination: '/srv/application',
+      conflict: 'fail',
+      confirmOverwrite: false,
+    },
+  ]);
+  await moveToLocal(remote.getByRole('button', { name: 'cover.webp', exact: true }));
+  await page.mouse.up();
+  assert.equal(
+    await download.locator('.file-path-preview').textContent(),
+    '/srv/application/cover.webp',
+  );
+  await download.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal((await calls()).transfers.length, 1);
+
+  await directory.click();
+  await remove.click();
+  assert.equal(
+    (await deleteDialog.locator('.file-delete-message').innerText()).trim(),
+    '确定要永久删除「config」吗？',
+  );
+  assert.equal(await deleteDialog.getByRole('checkbox').count(), 0);
+  assert.equal(await deleteDialog.getByRole('button', { name: '帮助' }).count(), 0);
+  const cancel = deleteDialog.getByRole('button', { name: '取消', exact: true });
+  const confirm = deleteDialog.getByRole('button', { name: '确认删除', exact: true });
+  assert(await cancel.evaluate((element) => document.activeElement === element));
+  await deleteDialog.screenshot({ path: `${output}/delete-remote-directory.png` });
+  await cancel.click();
+  assert.deepEqual((await calls()).actions, []);
+  await remove.click();
+  await confirm.click();
+  await deleteDialog.waitFor({ state: 'hidden' });
+  assert.deepEqual((await calls()).actions, [
+    {
+      session: 'ui-session',
+      input: {
+        kind: 'remove',
+        paths: ['/srv/application/config'],
+        recursive: true,
+        confirmed: true,
+      },
+    },
+  ]);
+  await file.click();
+  await remove.click();
+  assert.match(await deleteDialog.textContent(), /确定要永久删除「deploy\.sh」吗/);
+  assert.equal(await deleteDialog.getByRole('checkbox').count(), 0);
+  await confirm.click();
+  await deleteDialog.waitFor({ state: 'hidden' });
+  const { actions } = await calls();
+  assert.equal(actions.length, 2);
+  assert.deepEqual(actions[1], {
+    session: 'ui-session',
+    input: {
+      kind: 'remove',
+      paths: ['/srv/application/deploy.sh'],
+      recursive: false,
+      confirmed: true,
+    },
+  });
+}
+
+async function verifyMouseDirectoryHistory(page) {
+  const local = page.getByRole('textbox', { name: '本地路径', exact: true });
+  const remote = page.getByRole('textbox', { name: '远程路径', exact: true });
+  const paths = async (localPath, remotePath) => {
+    await page.waitForFunction(
+      ([localPath, remotePath]) => {
+        const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+        const files = pinia._s.get('files');
+        return files.local?.path === localPath && files.current?.path === remotePath;
+      },
+      [localPath, remotePath],
+    );
+  };
+  const cdp = await page.context().newCDPSession(page);
+  const press = async (input, button) => {
+    const box = await input.boundingBox();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed',
+      button,
+      buttons: button === 'back' ? 8 : 16,
+      x,
+      y,
+      clickCount: 1,
+    });
+    await cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased',
+      button,
+      buttons: 0,
+      x,
+      y,
+      clickCount: 1,
+    });
+  };
+  try {
+    const start = '/srv/application';
+    await local.fill('/local/next');
+    await local.press('Enter');
+    await page
+      .getByRole('table', { name: '远程文件', exact: true })
+      .getByRole('button', { name: 'config', exact: true })
+      .dblclick();
+    await paths('/local/next', '/srv/application/config');
+    await page.evaluate(() => history.pushState(null, '', '#mouse-side-button'));
+    const url = page.url();
+
+    await press(remote, 'back');
+    await paths('/local/next', start);
+    await press(local, 'back');
+    await paths(start, start);
+    await press(local, 'back');
+    assert.equal(page.url(), url);
+
+    await press(local, 'forward');
+    await paths('/local/next', start);
+    await press(remote, 'forward');
+    await paths('/local/next', '/srv/application/config');
+    assert.equal(page.url(), url);
+    await press(local, 'back');
+    await press(remote, 'back');
+    await paths(start, start);
+  } finally {
+    await cdp.detach();
+  }
+}
+
 async function verifyInterfaceFontSize(page, variant, width) {
   const columns = page.locator('.file-columns');
   const measure = () =>
@@ -291,12 +474,21 @@ async function verifyInterfaceFontSize(page, variant, width) {
       fontSizes: [...element.querySelectorAll('table, .path-bar input, .toolbar .button')].map(
         (item) => parseFloat(getComputedStyle(item).fontSize),
       ),
-      tables: [...element.querySelectorAll('.file-table')].map((table) => ({
-        top: table.getBoundingClientRect().top,
-        width: table.clientWidth,
-        scrollWidth: table.scrollWidth,
-        scrolls: table.scrollHeight > table.clientHeight,
-      })),
+      tables: [...element.querySelectorAll('.file-table')].map((table) => {
+        const folderIcon = table.querySelector('.file-entry-icon[data-kind="directory"]');
+        const icon = folderIcon.getBoundingClientRect();
+        const label = folderIcon.nextElementSibling.getBoundingClientRect();
+        return {
+          top: table.getBoundingClientRect().top,
+          width: table.clientWidth,
+          scrollWidth: table.scrollWidth,
+          scrolls: table.scrollHeight > table.clientHeight,
+          folderIconWidth: icon.width,
+          folderIconAligned:
+            icon.right < label.left &&
+            Math.abs(icon.top + icon.height / 2 - label.top - label.height / 2) < 1,
+        };
+      }),
     }));
   const standard = await measure();
   await navigateWorkspace(page, '通用');
@@ -336,7 +528,9 @@ async function verifyInterfaceFontSize(page, variant, width) {
   assert.equal(largest.columns, width >= 1440 ? 2 : 1);
   if (width === 1366 || width === 1240) assert.equal(standard.columns, 2);
   if (largest.columns === 2) assert.equal(largest.tables[0].top, largest.tables[1].top);
-  for (const table of largest.tables) {
+  for (const [index, table] of largest.tables.entries()) {
+    assert(standard.tables[index].folderIconAligned && table.folderIconAligned);
+    assert(Math.abs(table.folderIconWidth - standard.tables[index].folderIconWidth * 1.45) < 0.1);
     assert(table.scrolls, `${variant}: file list lost vertical scrolling`);
     if (width >= 900) {
       assert(
@@ -347,6 +541,28 @@ async function verifyInterfaceFontSize(page, variant, width) {
   }
   await inspect(page, `${variant}/files-ultra-large`);
   await page.screenshot({ path: `${output}/${variant}-files-ultra-large.png` });
+  if (width === 900) {
+    await page
+      .getByRole('table', { name: '远程文件', exact: true })
+      .getByRole('button', { name: 'config', exact: true })
+      .click();
+    await page.getByRole('button', { name: '删除选中', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '确认删除远程项目', exact: true });
+    await dialog.waitFor();
+    assert(
+      await dialog.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return (
+          box.width <= 470 &&
+          box.top >= 0 &&
+          box.bottom <= innerHeight &&
+          element.scrollWidth <= element.clientWidth
+        );
+      }),
+    );
+    await dialog.screenshot({ path: `${output}/delete-remote-directory-ultra-large.png` });
+    await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  }
   await navigateWorkspace(page, '通用');
   await slider.press('Home');
   await slider.press('ArrowRight');
@@ -487,6 +703,18 @@ try {
       await page.evaluate(() => (document.querySelector('.content-scroll').scrollTop = 0));
       if (view === 'files') {
         const remote = page.getByRole('table', { name: '远程文件', exact: true });
+        const local = page.getByRole('table', { name: '本地文件', exact: true });
+        for (const pane of [local, remote]) {
+          for (const [name, glyph] of [
+            ['deploy.sh', 'file-terminal'],
+            ['backup.tar.gz', 'file-archive'],
+            ['cover.webp', 'file-image'],
+            ['application.log', 'file'],
+          ]) {
+            const file = pane.getByRole('button', { name, exact: true });
+            assert.equal(await file.locator(`svg.lucide-${glyph}`).count(), 1);
+          }
+        }
         assert.equal(
           await remote.getByRole('columnheader', { name: '权限', exact: true }).count(),
           1,
@@ -499,13 +727,7 @@ try {
           await remote.locator('tbody tr').first().locator('.file-metadata').allTextContents(),
           ['rwxr-xr-x', 'root'],
         );
-        assert.equal(
-          await page
-            .getByRole('table', { name: '本地文件', exact: true })
-            .locator('.file-metadata')
-            .count(),
-          0,
-        );
+        assert.equal(await local.locator('.file-metadata').count(), 0);
         // A plain browser cannot register Tauri's native drag/drop listener.
         await page
           .getByText(/^拖放入口不可用/)
@@ -531,6 +753,10 @@ try {
         if (!fontSizeOnly || variant === 'desktop') await verifyTransferLayout(page, variant);
         const largest = await verifyInterfaceFontSize(page, variant, width);
         results.push({ variant, view: 'files-ultra-large', ...largest });
+        if (variant === 'desktop') {
+          await verifyMouseDirectoryHistory(page);
+          await verifyDownloadDragAndDelete(page);
+        }
       }
       await page.mouse.move(width - 8, height - 8);
       await inspect(page, `${variant}/${view}`);

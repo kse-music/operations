@@ -1,8 +1,8 @@
 use serverdeck_application::Application;
-use serverdeck_core::IpcError;
+use serverdeck_core::{Error, IpcError};
 use serverdeck_plugin_core::{InstallInput, InstalledPlugin, Manifest, UninstallInput};
-use std::path::PathBuf;
-use tauri::State;
+use std::{io::Write, path::PathBuf};
+use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 #[tauri::command]
 pub fn plugin_tool_abort_input(
@@ -99,6 +99,55 @@ pub async fn plugin_pick<R: tauri::Runtime>(
     })
     .await
     .map_err(|e| serverdeck_core::Error::Worker(Box::new(e)))?
+    .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn plugin_save_development_kit<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+) -> Result<Option<String>, IpcError> {
+    const NAME: &str = "serverdeck-plugin-development-kit.zip";
+    tokio::task::spawn_blocking(move || -> Result<Option<String>, Error> {
+        let archive = window
+            .app_handle()
+            .asset_resolver()
+            .get(NAME.into())
+            .filter(|asset| asset.bytes().starts_with(b"PK\x03\x04"))
+            .ok_or(Error::Validation(
+                "当前客户端缺少插件开发包，请重新构建或安装",
+            ))?;
+        let Some(selected) = window
+            .dialog()
+            .file()
+            .set_parent(&window)
+            .set_title("保存插件开发包")
+            .set_file_name(NAME)
+            .add_filter("ZIP 压缩包", &["zip"])
+            .blocking_save_file()
+        else {
+            return Ok(None);
+        };
+        let destination = selected
+            .into_path()
+            .map_err(|_| Error::Validation("请选择本地文件保存插件开发包"))?;
+        let parent = destination
+            .parent()
+            .filter(|path| path.is_absolute())
+            .ok_or(Error::Validation("插件开发包保存路径无效"))?;
+        let storage = |error| {
+            tracing::warn!(operation = "plugin_save_development_kit", %error, "could not save development kit");
+            Error::Storage(Box::new(error))
+        };
+        let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(storage)?;
+        temporary.write_all(archive.bytes()).map_err(storage)?;
+        temporary.as_file().sync_all().map_err(storage)?;
+        temporary
+            .persist(&destination)
+            .map_err(|error| storage(error.error))?;
+        Ok(Some(destination.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|error| Error::Worker(Box::new(error)))?
     .map_err(Into::into)
 }
 

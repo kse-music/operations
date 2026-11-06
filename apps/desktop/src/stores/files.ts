@@ -23,6 +23,28 @@ export interface FileConnection {
   loading: boolean;
   followPane?: string;
 }
+
+type HistoryDirection = 'back' | 'forward';
+type DirectoryHistory = Record<HistoryDirection, string[]>;
+const directoryHistoryLimit = 100;
+
+function recordDirectory(
+  history: DirectoryHistory,
+  previous: string | undefined,
+  next: string,
+  direction?: HistoryDirection,
+): void {
+  if (!previous) return;
+  if (direction) {
+    history[direction].pop();
+    if (previous !== next) history[direction === 'back' ? 'forward' : 'back'].push(previous);
+  } else if (previous !== next) {
+    history.back.push(previous);
+    if (history.back.length > directoryHistoryLimit) history.back.shift();
+    history.forward.length = 0;
+  }
+}
+
 export const useFilesStore = defineStore('files', () => {
   const connections = ref<Record<string, FileConnection>>({}),
     active = ref(''),
@@ -42,31 +64,51 @@ export const useFilesStore = defineStore('files', () => {
   let transferGeneration = 0;
   const opening = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
-  async function localLoad(path: string | null = null): Promise<void> {
+  const localHistory: DirectoryHistory = { back: [], forward: [] };
+  const remoteHistories = new WeakMap<FileConnection, DirectoryHistory>();
+  async function localLoad(
+    path: string | null = null,
+    direction?: HistoryDirection,
+  ): Promise<void> {
     const generation = ++localGeneration;
     localLoading.value = true;
     try {
       const value = await filesApi.local(path);
-      if (generation === localGeneration) local.value = value;
+      if (generation === localGeneration) {
+        recordDirectory(localHistory, local.value?.path, value.path, direction);
+        local.value = value;
+      }
     } catch (cause) {
-      error.value = errorMessage(cause);
+      if (generation === localGeneration) error.value = errorMessage(cause);
     } finally {
       if (generation === localGeneration) localLoading.value = false;
     }
   }
-  async function navigate(path: string, connection = current.value): Promise<void> {
+  async function navigate(
+    path: string,
+    connection = current.value,
+    direction?: HistoryDirection,
+  ): Promise<void> {
     if (!connection?.id) return;
-    const generation = (generations.get(connection.host.id) ?? 0) + 1;
-    generations.set(connection.host.id, generation);
+    const { id, host } = connection;
+    const generation = (generations.get(host.id) ?? 0) + 1;
+    generations.set(host.id, generation);
+    const isCurrentRequest = () =>
+      generation === generations.get(host.id) &&
+      connections.value[host.id] === connection &&
+      connection.id === id;
     connection.loading = true;
     connection.error = null;
     try {
-      const value = await filesApi.list(connection.id, path);
-      if (generation === generations.get(connection.host.id)) {
-        connection.listing = value;
-        connection.path = value.path;
-      }
+      const value = await filesApi.list(id, path);
+      if (!isCurrentRequest()) return;
+      const history = remoteHistories.get(connection) ?? { back: [], forward: [] };
+      recordDirectory(history, connection.listing?.path, value.path, direction);
+      remoteHistories.set(connection, history);
+      connection.listing = value;
+      connection.path = value.path;
     } catch (cause) {
+      if (!isCurrentRequest()) return;
       connection.error = errorMessage(cause);
       if (
         typeof cause === 'object' &&
@@ -82,8 +124,28 @@ export const useFilesStore = defineStore('files', () => {
       )
         connection.state = 'failed';
     } finally {
-      if (generation === generations.get(connection.host.id)) connection.loading = false;
+      if (generation === generations.get(host.id)) connection.loading = false;
     }
+  }
+  function stepHistory(side: 'local' | 'remote', direction: HistoryDirection): boolean {
+    if (side === 'local') {
+      const path = localHistory[direction].at(-1);
+      if (!path || localLoading.value) return false;
+      void localLoad(path, direction);
+      return true;
+    }
+    const connection = current.value;
+    if (
+      !connection?.id ||
+      connection.state !== 'connected' ||
+      connection.loading ||
+      closingHosts.value.includes(connection.host.id)
+    )
+      return false;
+    const path = remoteHistories.get(connection)?.[direction].at(-1);
+    if (!path) return false;
+    void navigate(path, connection, direction);
+    return true;
   }
   async function open(host: Host, path?: string, pane?: string): Promise<void> {
     if (closingHosts.value.includes(host.id)) return;
@@ -151,9 +213,9 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
   async function refresh(): Promise<void> {
-    if (current.value?.id && current.value.state === 'connected')
+    if (current.value?.id && current.value.state === 'connected' && !current.value.loading)
       await navigate(current.value.path);
-    if (local.value) await localLoad(local.value.path);
+    if (local.value && !localLoading.value) await localLoad(local.value.path);
   }
   async function edit(path: string): Promise<void> {
     if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value)) return;
@@ -319,6 +381,7 @@ export const useFilesStore = defineStore('files', () => {
     clearHostTransfers,
     open,
     navigate,
+    stepHistory,
     localLoad,
     trust,
     refresh,

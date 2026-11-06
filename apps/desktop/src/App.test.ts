@@ -18,6 +18,7 @@ import { defaultProductPreferences } from './types/product';
 import type { NavigationModule } from './types/navigation';
 import { pluginsApi } from './services/plugins';
 import { usePluginsStore } from './stores/plugins';
+import { useNotificationsStore } from './stores/notifications';
 import { systemPluginFixtures, toolPluginState } from './services/system-plugins.fixture';
 import { aiApi } from './services/ai';
 import type { TransferInfo } from './types/files';
@@ -362,6 +363,35 @@ it('opens plugin management under Plugins, keeps language in Settings and preser
   expect(workspace.tabs.filter((tab) => tab.view === 'plugins')).toHaveLength(1);
   expect(JSON.stringify(terminals.tabs)).toBe(original);
   expect(close).not.toHaveBeenCalled();
+});
+
+it('shows the saved development kit path or save error and lets the user retry after cancellation', async () => {
+  const save = vi
+    .spyOn(pluginsApi, 'saveDevelopmentKit')
+    .mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new Error('目录不可写'))
+    .mockResolvedValueOnce('D:\\QA\\serverdeck-plugin-development-kit.zip');
+  await sidebarMenu('plugins', '插件管理');
+  const button = [
+    ...root.querySelectorAll<HTMLButtonElement>('.plugin-heading-actions button'),
+  ].find((item) => item.textContent?.trim() === '下载插件开发包')!;
+  const notices = () =>
+    useNotificationsStore().items.filter((item) => item.text.startsWith('插件开发包'));
+  button.click();
+  await flush();
+  expect(notices()).toEqual([]);
+  expect(button.disabled).toBe(false);
+  button.click();
+  await flush();
+  expect(notices()).toMatchObject([{ text: '插件开发包保存失败：目录不可写', error: true }]);
+  expect(button.disabled).toBe(false);
+  button.click();
+  await flush();
+  expect(save).toHaveBeenCalledTimes(3);
+  expect(notices().at(-1)).toMatchObject({
+    text: '插件开发包已保存到 D:\\QA\\serverdeck-plugin-development-kit.zip',
+    error: false,
+  });
 });
 
 it('keeps the About page available before bootstrap and updates its real version state', async () => {

@@ -126,9 +126,7 @@ onMounted(() => void store.refresh());
       <p v-if="store.error" class="error-text" role="alert">{{ store.error }}</p>
       <p>删除“{{ deleting.name }}”（{{ deleting.config.model }}）及其系统保存的 Key？</p>
       <p class="path">{{ deleting.config.baseUrl }}</p>
-      <p class="muted">
-        该模型的旧发送预览和命令建议会失效。可在“设置 → 数据与存储”重试清理旧秘密。
-      </p>
+      <p class="muted">该模型的旧发送预览和命令建议会失效。</p>
       <div class="dialog-actions">
         <button class="button" :disabled="store.busy" @click="deleting = null">取消</button
         ><button class="button danger" :disabled="store.busy" @click="remove">确认删除模型</button>

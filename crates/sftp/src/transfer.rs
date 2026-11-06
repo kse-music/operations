@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 struct Task {
     input: TransferInput,
+    drag_export: bool,
     info: Mutex<TransferInfo>,
     cancel: CancellationToken,
     owner_closed: CancellationToken,
@@ -116,6 +117,13 @@ impl Transfers {
         self.schedule();
     }
     pub fn start(&self, input: TransferInput) -> Result<TransferInfo, Error> {
+        self.enqueue(input, false).map(|(info, _)| info)
+    }
+    fn enqueue(
+        &self,
+        input: TransferInput,
+        drag_export: bool,
+    ) -> Result<(TransferInfo, Arc<Task>), Error> {
         input.validate()?;
         tokio::runtime::Handle::try_current()
             .map_err(|_| fail("TRANSFER_RUNTIME", "传输必须从异步工作线程提交"))?;
@@ -141,6 +149,7 @@ impl Transfers {
         };
         let task = Arc::new(Task {
             input,
+            drag_export,
             info: Mutex::new(info.clone()),
             cancel: CancellationToken::new(),
             owner_closed,
@@ -175,16 +184,82 @@ impl Transfers {
                     return Err(Error::Busy);
                 }
             }
-            queue.tasks.push_back(task);
+            queue.tasks.push_back(task.clone());
         }
         self.schedule();
-        Ok(info)
+        Ok((info, task))
+    }
+    pub async fn stage_drag_download(
+        &self,
+        session_id: String,
+        sources: Vec<String>,
+        destination: &Path,
+    ) -> Result<(), serverdeck_core::IpcError> {
+        let (_, task) = self.enqueue(
+            TransferInput {
+                session_id,
+                direction: Direction::Download,
+                sources,
+                destination: local::text(destination)?,
+                conflict: ConflictPolicy::Fail,
+                confirm_overwrite: false,
+            },
+            true,
+        )?;
+        loop {
+            let done = task.done.notified();
+            let info = task.snapshot()?;
+            if !info.unfinished() {
+                return if info.state == "completed" {
+                    Ok(())
+                } else {
+                    Err(serverdeck_core::IpcError {
+                        code: "DRAG_DOWNLOAD_FAILED",
+                        message: info.message.unwrap_or_else(|| "拖放下载未完成".into()),
+                    })
+                };
+            }
+            done.await;
+        }
+    }
+    pub fn drag_download_names(
+        session_id: &str,
+        sources: Vec<String>,
+    ) -> Result<Vec<String>, Error> {
+        let input = TransferInput {
+            session_id: session_id.into(),
+            direction: Direction::Download,
+            sources,
+            destination: ".".into(),
+            conflict: ConflictPolicy::Fail,
+            confirm_overwrite: false,
+        };
+        input.validate()?;
+        let mut names = std::collections::HashSet::new();
+        input
+            .sources
+            .iter()
+            .map(|source| {
+                remote_absolute(source)?;
+                let name = source.rsplit('/').next().unwrap_or_default();
+                local::validate_name(name)?;
+                if name.encode_utf16().count() >= 260 || !names.insert(name.to_lowercase()) {
+                    return Err(Error::Validation(
+                        "拖放文件名过长或在 Windows 下重名，请分开下载",
+                    ));
+                }
+                Ok(name.to_owned())
+            })
+            .collect()
     }
     pub fn list(&self) -> Result<Vec<TransferInfo>, Error> {
         locked(&self.queue)?
             .tasks
             .iter()
-            .map(|t| t.snapshot())
+            .filter_map(|task| match task.snapshot() {
+                Ok(info) if task.drag_export && !info.unfinished() => None,
+                result => Some(result),
+            })
             .collect()
     }
     pub fn unfinished(&self) -> Result<usize, Error> {
@@ -254,7 +329,10 @@ impl Transfers {
                 .find(|t| t.snapshot().is_ok_and(|i| i.id == id))
                 .ok_or(Error::NotFound)?;
             let info = task.snapshot()?;
-            if info.unfinished() || !["failed", "cancelled"].contains(&info.state.as_str()) {
+            if task.drag_export
+                || info.unfinished()
+                || !["failed", "cancelled"].contains(&info.state.as_str())
+            {
                 return Err(Error::Validation("只能重试失败或取消的任务"));
             }
             if self.engine.session_info(session)?.host_id != info.host_id {
@@ -523,6 +601,7 @@ impl Transfers {
 struct Item {
     local: PathBuf,
     remote: String,
+    source_link: Option<String>,
     directory: bool,
     size: u64,
     attrs: Option<FileAttributes>,
@@ -624,13 +703,30 @@ async fn plan(task: &Task, remote: &Remote) -> Result<Vec<Item>, Error> {
             result.push(Item {
                 local,
                 remote: path,
+                source_link: None,
                 directory: meta.is_dir(),
                 size: if meta.is_file() { meta.len() } else { 0 },
                 attrs: None,
             });
         } else {
-            let attrs = remote.attrs(&path).await?;
+            let mut attrs = remote.attrs(&path).await?;
+            let (path, source_link) = if depth == 0 && remote::kind(&attrs) == EntryKind::Symlink {
+                let target = remote.canonical(&path).await?;
+                attrs = remote.attrs(&target).await?;
+                if remote::kind(&attrs) != EntryKind::File {
+                    return Err(fail("TRANSFER_LINK", "只能下载指向普通文件的符号链接"));
+                }
+                (target, Some(path))
+            } else {
+                (path, None)
+            };
             let kind = remote::kind(&attrs);
+            if task.drag_export && kind != EntryKind::File {
+                return Err(fail(
+                    "TRANSFER_LINK",
+                    "拖到 Windows 的项目须为普通文件或文件链接",
+                ));
+            }
             if !matches!(kind, EntryKind::File | EntryKind::Directory) {
                 return Err(fail("TRANSFER_LINK", "不递归跟随远程链接或下载特殊文件"));
             }
@@ -660,6 +756,7 @@ async fn plan(task: &Task, remote: &Remote) -> Result<Vec<Item>, Error> {
             result.push(Item {
                 local,
                 remote: path,
+                source_link,
                 directory: kind == EntryKind::Directory,
                 size,
                 attrs: Some(attrs),
@@ -790,6 +887,14 @@ async fn download(
     mutation: &tokio::sync::Mutex<()>,
     item: Item,
 ) -> Result<(), Error> {
+    if let Some(link) = &item.source_link
+        && remote.canonical(link).await? != item.remote
+    {
+        return Err(fail(
+            "TRANSFER_SOURCE_CHANGED",
+            "远程链接目标已变化，未提交下载",
+        ));
+    }
     let mut target = item.local;
     let expected = {
         let _mutation = mutation.lock().await;
@@ -902,6 +1007,14 @@ async fn download(
         return Err(fail(
             "TRANSFER_HASH",
             "下载 SHA-256 校验失败或源文件已改变，未替换目标",
+        ));
+    }
+    if let Some(link) = &item.source_link
+        && remote.canonical(link).await? != item.remote
+    {
+        return Err(fail(
+            "TRANSFER_SOURCE_CHANGED",
+            "远程链接目标已变化，未提交下载",
         ));
     }
     task.check_cancel()?;

@@ -1,0 +1,23 @@
+{
+  "name": "serverdeck-plugin-development-kit",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "workspaces": [
+    "packages/plugin-sdk"
+  ],
+  "scripts": {
+    "package": "node tools/build-plugin.mjs ./example ./example.sdplugin"
+  },
+  "dependencies": {
+    "@serverdeck/plugin-sdk": "4.0.0",
+    "pinia": "3.0.4",
+    "vue": "3.5.44"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.10",
+    "vite": "8.3.5"
+  }
+}

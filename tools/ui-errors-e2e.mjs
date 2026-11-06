@@ -126,7 +126,6 @@ try {
         const { opsApi } = await import('/src/services/ops.ts');
         const { productApi } = await import('/src/services/product.ts');
         const { terminalApi } = await import('/src/services/terminal.ts');
-        const { hostsApi } = await import('/src/services/hosts.ts');
         const fail = async () => {
           throw new Error(message);
         };
@@ -146,7 +145,6 @@ try {
         opsApi.connections = async () => [];
         productApi.preview = fail;
         terminalApi.openLocal = fail;
-        hostsApi.status = async () => ({ available: false, message });
         const application = useApplicationStore(pinia);
         application.state = {
           appVersion: 'browser-ui-test',

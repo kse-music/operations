@@ -307,6 +307,7 @@ fn plugin_metadata_real_ipc_lifecycle_and_acl() {
         "plugin_preview_info",
         "plugin_ui",
         "plugin_pick",
+        "plugin_save_development_kit",
         "plugin_install",
         "plugin_list",
         "plugin_detail",
@@ -694,6 +695,17 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     let other = tauri::WebviewWindowBuilder::new(&app, "untrusted", Default::default())
         .build()
         .expect("window");
+    let drag = json!({"sessionId":"missing","sources":["/fixture.txt"]});
+    assert_eq!(
+        get_ipc_response(&main, request("files_drag_download", drag.clone(), origin))
+            .expect_err("export requires a connected SFTP session")["code"],
+        "VALIDATION"
+    );
+    for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+        let error = get_ipc_response(window, request("files_drag_download", drag.clone(), url))
+            .expect_err("only the local main window can start native file dragging");
+        assert!(error.as_str().is_some_and(|s| s.contains("not allowed")));
+    }
     for command in [
         "ai_models",
         "ai_model_save",

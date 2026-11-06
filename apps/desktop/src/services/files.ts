@@ -39,6 +39,8 @@ export const filesApi = {
   action: (id: string, action: RemoteAction) => call<void>('files_action', { id, action }),
   close: (id: string, cancel: boolean) => call<void>('files_close', { id, cancel }),
   pick: (kind: 'files' | 'folder') => call<string[]>('files_pick', { kind }),
+  dragDownload: (sessionId: string, sources: string[]) =>
+    call<void>('files_drag_download', { sessionId, sources }),
   start: (input: TransferInput) => call<TransferInfo>('transfer_start', { input }),
   tasks: () => call<TransferInfo[]>('transfer_list'),
   clearTransfers: (hostId: string) => call<void>('transfer_clear_host', { hostId }),

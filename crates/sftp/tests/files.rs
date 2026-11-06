@@ -49,6 +49,167 @@ async fn assert_completed(files: &Files, id: &str) {
 }
 
 #[tokio::test]
+async fn downloads_selected_file_links_under_the_link_name_without_following_tree_links() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 3);
+    let destination = tempfile::tempdir().expect("destination");
+    tokio::fs::write(server.root.path().join("image.bin"), b"image contents")
+        .await
+        .expect("target file");
+    let directory = server.root.path().join("directory");
+    tokio::fs::create_dir(&directory).await.expect("directory");
+    // The placeholder supplies the directory entry; LSTAT identifies it as a fixture link.
+    tokio::fs::write(directory.join("nested"), b"")
+        .await
+        .expect("nested entry");
+    server.faults.links.lock().expect("links").extend([
+        ("/image".into(), "/image.bin".into()),
+        ("/folder-link".into(), "/directory".into()),
+        ("/broken".into(), "/missing".into()),
+        ("/directory/nested".into(), "/image.bin".into()),
+    ]);
+    let download = |source: &str| {
+        files
+            .transfers
+            .start(input(
+                &session.id,
+                Direction::Download,
+                vec![source.into()],
+                path(destination.path()),
+                ConflictPolicy::Fail,
+            ))
+            .expect("queue download")
+    };
+    assert_completed(&files, &download("/image").id).await;
+    assert_eq!(
+        tokio::fs::read(destination.path().join("image"))
+            .await
+            .expect("downloaded file"),
+        b"image contents"
+    );
+    assert!(!destination.path().join("image.bin").exists());
+    for source in ["/folder-link", "/broken", "/directory"] {
+        let info = finished(&files, &download(source).id).await;
+        assert_eq!(info.state, "failed", "{source}");
+        assert!(!destination.path().join(&source[1..]).exists());
+    }
+}
+
+#[tokio::test]
+async fn stages_windows_drag_files_and_selected_file_links() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 3);
+    let destination = tempfile::tempdir().expect("drop staging directory");
+    tokio::fs::write(server.root.path().join("actual.txt"), b"verified bytes")
+        .await
+        .expect("remote file");
+    tokio::fs::create_dir(server.root.path().join("folder"))
+        .await
+        .expect("remote directory");
+    server.faults.links.lock().expect("links").extend([
+        ("/shortcut.txt".into(), "/actual.txt".into()),
+        ("/folder-link".into(), "/folder".into()),
+    ]);
+
+    let sources = vec!["/actual.txt".into(), "/shortcut.txt".into()];
+    assert_eq!(
+        serverdeck_sftp::Transfers::drag_download_names(&session.id, sources.clone())
+            .expect("export names"),
+        ["actual.txt", "shortcut.txt"]
+    );
+    assert!(
+        serverdeck_sftp::Transfers::drag_download_names(
+            &session.id,
+            vec!["/first/readme.txt".into(), "/second/README.txt".into()],
+        )
+        .is_err()
+    );
+    files
+        .transfers
+        .stage_drag_download(session.id.clone(), sources, destination.path())
+        .await
+        .expect("successful export");
+    for name in ["actual.txt", "shortcut.txt"] {
+        assert_eq!(
+            tokio::fs::read(destination.path().join(name))
+                .await
+                .unwrap(),
+            b"verified bytes"
+        );
+    }
+    for remote_path in ["/folder", "/folder-link"] {
+        let error = files
+            .transfers
+            .stage_drag_download(
+                session.id.clone(),
+                vec![remote_path.into()],
+                destination.path(),
+            )
+            .await
+            .expect_err("directory export is unsupported");
+        assert_eq!(error.code, "DRAG_DOWNLOAD_FAILED");
+        assert!(!destination.path().join(&remote_path[1..]).exists());
+    }
+    assert!(files.transfers.list().expect("transfer history").is_empty());
+}
+
+#[tokio::test]
+async fn a_link_retargeted_during_download_does_not_commit_local_bytes() {
+    let server = Server::start(true, Duration::from_millis(20)).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 3);
+    let destination = tempfile::tempdir().expect("destination");
+    let root = server.root.path();
+    tokio::fs::write(root.join("first"), vec![1; 512 * 1024])
+        .await
+        .expect("first target");
+    tokio::fs::write(root.join("second"), vec![2; 512 * 1024])
+        .await
+        .expect("second target");
+    let retarget = |target: &str| {
+        server
+            .faults
+            .links
+            .lock()
+            .expect("links")
+            .insert("/image".into(), target.into());
+    };
+    retarget("/first");
+    let task = files
+        .transfers
+        .start(input(
+            &session.id,
+            Direction::Download,
+            vec!["/image".into()],
+            path(destination.path()),
+            ConflictPolicy::Fail,
+        ))
+        .expect("queue download");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if files.transfers.list().expect("tasks")[0].transferred_bytes > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("transfer started");
+    retarget("/second");
+    let result = finished(&files, &task.id).await;
+    assert_eq!(result.state, "failed");
+    assert!(
+        result
+            .message
+            .expect("reason")
+            .contains("远程链接目标已变化")
+    );
+    assert!(!destination.path().join("image").exists());
+}
+
+#[tokio::test]
 async fn closing_host_cancels_before_clearing_records_and_preserves_other_hosts_and_files() {
     let mut server = Server::start(true, Duration::from_millis(8)).await;
     let first = server.open().await;

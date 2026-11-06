@@ -132,6 +132,37 @@ pub async fn files_pick<R: tauri::Runtime>(
     .map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_drag_download<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    application: tauri::State<'_, Application>,
+    session_id: String,
+    sources: Vec<String>,
+) -> Result<(), IpcError> {
+    #[cfg(windows)]
+    {
+        let names = application.drag_download_names(&session_id, sources.clone())?;
+        let application = application.inner().clone();
+        serverdeck_windows_file_drag::start(
+            names,
+            move |directory| {
+                tauri::async_runtime::block_on(
+                    application.stage_drag_download(session_id, sources, directory),
+                )
+            },
+            |run| {
+                app.run_on_main_thread(run)
+                    .map_err(|error| Error::Worker(Box::new(error)).into())
+            },
+        )
+        .await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, application, session_id, sources);
+        Err(Error::Validation("拖到系统文件夹仅在 Windows 上可用").into())
+    }
+}
+#[tauri::command]
 pub async fn transfer_start(
     application: tauri::State<'_, Application>,
     input: TransferInput,

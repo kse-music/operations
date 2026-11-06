@@ -1,5 +1,17 @@
 # 验证记录索引
 
+最新：[SFTP 拖到 Windows 桌面和文件夹](files/VALIDATION_STAGE4.md#2026-11-07-sftp-拖到-windows-桌面和文件夹)。
+
+最新：[SFTP 文件链接下载、拖放与删除确认](files/VALIDATION_STAGE4.md#2026-11-07-sftp-文件链接下载拖放与删除确认)。
+
+最新：[SFTP 鼠标侧键](files/VALIDATION_STAGE4.md#2026-11-07-sftp-鼠标侧键)。
+
+最新：[SFTP 文件列表图标](files/VALIDATION_STAGE4.md#2026-11-07-sftp-文件列表图标)。
+
+最新：[主机树紧凑布局](workspace/VALIDATION_LAYOUT.md#2026-11-07-主机树紧凑布局)。
+
+最新：[插件开发包下载与独立构建](plugins/PLUGIN_TEST_REPORT.md#2026-11-07-插件开发包下载)。
+
 最新：[通用设置界面字号](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-通用设置界面字号)。
 
 最新：[模型管理移至设置](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-模型管理移至设置)。

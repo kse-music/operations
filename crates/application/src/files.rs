@@ -57,6 +57,39 @@ impl Application {
         }
         self.files.transfers.start(input)
     }
+    #[cfg(windows)]
+    pub fn drag_download_names(
+        &self,
+        session_id: &str,
+        sources: Vec<String>,
+    ) -> Result<Vec<String>, Error> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        if !self
+            .file_connections()?
+            .iter()
+            .any(|session| session.id == session_id)
+        {
+            return Err(Error::Validation("拖放下载需要有效的 SFTP 文件连接"));
+        }
+        serverdeck_sftp::Transfers::drag_download_names(session_id, sources)
+    }
+    #[cfg(windows)]
+    pub async fn stage_drag_download(
+        &self,
+        session_id: String,
+        sources: Vec<String>,
+        destination: &std::path::Path,
+    ) -> Result<(), serverdeck_core::IpcError> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown.into());
+        }
+        self.files
+            .transfers
+            .stage_drag_download(session_id, sources, destination)
+            .await
+    }
     pub fn transfer_list(&self) -> Result<Vec<TransferInfo>, Error> {
         self.files.transfers.list()
     }

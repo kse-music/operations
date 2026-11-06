@@ -37,10 +37,13 @@ serverdeck-plugin-sdk.workspace = true
 serde_json.workspace = true
 serverdeck-application.workspace = true
 tracing.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+serverdeck-windows-file-drag = { path = "../../../crates/windows-file-drag" }
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
-tempfile.workspace = true
 wat = "1"
 base64 = "0.22.1"
 

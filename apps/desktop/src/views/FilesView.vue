@@ -15,8 +15,10 @@ import {
   Upload,
   Download,
   Trash2,
+  CircleX,
 } from '@lucide/vue';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { isTauri } from '@tauri-apps/api/core';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import FilePane from '../components/FilePane.vue';
 import TransferPanel from '../components/TransferPanel.vue';
@@ -55,8 +57,10 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   showRemoteHidden = ref(false),
   busy = ref(false),
   over = ref(false),
+  overLocal = ref(false),
   following = ref(false),
   transferHistory = ref(false),
+  localArea = ref<HTMLElement>(),
   remoteArea = ref<HTMLElement>();
 const hasTransferHistory = computed(() =>
   store.tasks.some((task) => task.hostId === chosen.value && !unfinished(task)),
@@ -65,10 +69,11 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
   operation = ref<{
     kind: 'mkdir' | 'rename' | 'delete';
     id: string;
+    host: string;
     parent: string;
     paths: string[];
     name: string;
-    recursive: boolean;
+    hasDirectory: boolean;
   } | null>(null),
   properties = ref<FileEntry | null>(null),
   disconnecting = ref(false),
@@ -149,6 +154,16 @@ async function navigateLocal(): Promise<void> {
     localPath.value = displayLocalPath(store.local.path);
   }
 }
+function navigateWithMouse(side: 'local' | 'remote', event: MouseEvent): void {
+  if (event.button !== 3 && event.button !== 4) return;
+  // Side buttons can also navigate WebView history on mouseup.
+  event.preventDefault();
+  if (store.closingHosts.includes(chosen.value)) return;
+  if (store.stepHistory(side, event.button === 3 ? 'back' : 'forward')) {
+    menu.value = null;
+    if (side === 'remote') following.value = false;
+  }
+}
 async function browseLocal(): Promise<void> {
   try {
     const paths = await filesApi.pick('folder');
@@ -165,7 +180,7 @@ async function picked(folder = false): Promise<void> {
     store.error = errorMessage(cause);
   }
 }
-function prepareTransfer(direction: Direction, sources: string[]): void {
+function prepareTransfer(direction: Direction, sources: string[], destination?: string): void {
   menu.value = null;
   const current = store.current;
   if (!current?.id || current.state !== 'connected') {
@@ -182,12 +197,134 @@ function prepareTransfer(direction: Direction, sources: string[]): void {
     direction,
     sources,
     destination:
-      direction === 'upload'
+      destination ??
+      (direction === 'upload'
         ? current.path
-        : application.state?.config.product?.downloadDirectory || store.local?.path || '',
+        : application.state?.config.product?.downloadDirectory || store.local?.path || ''),
     conflict: 'fail',
     confirmed: false,
   };
+}
+let downloadDrag:
+  | {
+      pointerId: number;
+      x: number;
+      y: number;
+      source: HTMLElement;
+      sessionId: string;
+      sources: string[];
+      started: boolean;
+    }
+  | undefined;
+let suppressRemoteClick = false;
+const windowsFileDrag = isTauri() && navigator.platform.startsWith('Win');
+
+function beginDownloadDrag(entry: FileEntry, event: PointerEvent): void {
+  const current = store.current;
+  if (
+    event.button !== 0 ||
+    event.pointerType !== 'mouse' ||
+    busy.value ||
+    !current?.id ||
+    current.state !== 'connected' ||
+    (!store.local && !windowsFileDrag)
+  )
+    return;
+  endDownloadDrag();
+  downloadDrag = {
+    pointerId: event.pointerId,
+    x: event.clientX,
+    y: event.clientY,
+    source: event.currentTarget as HTMLElement,
+    sessionId: current.id,
+    sources: remoteSelection.value.includes(entry.path) ? [...remoteSelection.value] : [entry.path],
+    started: false,
+  };
+  window.addEventListener('pointermove', moveDownloadDrag);
+  window.addEventListener('pointerup', dropDownload);
+  window.addEventListener('pointercancel', endDownloadDrag);
+  window.addEventListener('blur', endDownloadDrag);
+  window.addEventListener('keydown', cancelDownloadDrag);
+}
+function overLocalPane(event: PointerEvent): boolean {
+  const hit = document.elementFromPoint(event.clientX, event.clientY);
+  return !!localArea.value?.contains(hit);
+}
+function moveDownloadDrag(event: PointerEvent): void {
+  const drag = downloadDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  if (event.buttons !== 1 || !drag.source.isConnected) {
+    endDownloadDrag();
+    return;
+  }
+  if (!drag.started) {
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 6) return;
+    drag.started = true;
+    suppressRemoteClick = true;
+    drag.source.setPointerCapture(event.pointerId);
+  }
+  event.preventDefault();
+  if (
+    windowsFileDrag &&
+    (event.clientX < 0 ||
+      event.clientY < 0 ||
+      event.clientX >= window.innerWidth ||
+      event.clientY >= window.innerHeight)
+  ) {
+    endDownloadDrag();
+    void exportDownloadDrag(drag.sessionId, drag.sources);
+    return;
+  }
+  overLocal.value = !store.localLoading && overLocalPane(event);
+}
+async function exportDownloadDrag(sessionId: string, sources: string[]): Promise<void> {
+  const connection = store.current;
+  if (connection?.id !== sessionId || connection.state !== 'connected') return;
+  const supported = new Set(
+    connection.listing?.entries
+      .filter((entry) => entry.kind === 'file' || entry.kind === 'symlink')
+      .map((entry) => entry.path),
+  );
+  if (!sources.every((path) => supported.has(path))) {
+    store.error = '拖到 Windows 桌面或文件夹的项目须为文件或文件链接。';
+    return;
+  }
+  try {
+    await filesApi.dragDownload(sessionId, sources);
+  } catch (cause) {
+    store.error = errorMessage(cause);
+  }
+}
+function dropDownload(event: PointerEvent): void {
+  const drag = downloadDrag;
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  const destination =
+    drag.started && !store.localLoading && overLocalPane(event) ? store.local?.path : undefined;
+  endDownloadDrag();
+  if (destination && store.current?.id === drag.sessionId)
+    prepareTransfer('download', drag.sources, destination);
+}
+function endDownloadDrag(): void {
+  const drag = downloadDrag;
+  downloadDrag = undefined;
+  overLocal.value = false;
+  window.removeEventListener('pointermove', moveDownloadDrag);
+  window.removeEventListener('pointerup', dropDownload);
+  window.removeEventListener('pointercancel', endDownloadDrag);
+  window.removeEventListener('blur', endDownloadDrag);
+  window.removeEventListener('keydown', cancelDownloadDrag);
+  if (drag?.source.hasPointerCapture(drag.pointerId))
+    drag.source.releasePointerCapture(drag.pointerId);
+}
+function cancelDownloadDrag(event: KeyboardEvent): void {
+  if (event.key !== 'Escape' || !downloadDrag?.started) return;
+  event.preventDefault();
+  endDownloadDrag();
+}
+function ignoreDownloadClick(event: MouseEvent): void {
+  if (!suppressRemoteClick || !event.detail) return;
+  event.preventDefault();
+  event.stopPropagation();
 }
 async function chooseDestination(): Promise<void> {
   if (!transfer.value) return;
@@ -266,16 +403,21 @@ function mutate(kind: 'mkdir' | 'rename' | 'delete'): void {
   operation.value = {
     kind,
     id: current.id,
+    host: hostDisplayName(current.host),
     parent: current.path,
     paths,
     name: kind === 'rename' ? (menu.value?.entry.name ?? '') : '',
-    recursive: false,
+    hasDirectory:
+      kind === 'delete' &&
+      !!current.listing?.entries.some(
+        (entry) => entry.kind === 'directory' && paths.includes(entry.path),
+      ),
   };
   menu.value = null;
 }
 async function submitOperation(): Promise<void> {
   const op = operation.value;
-  if (!op) return;
+  if (!op || busy.value) return;
   busy.value = true;
   store.error = null;
   try {
@@ -291,7 +433,7 @@ async function submitOperation(): Promise<void> {
       await filesApi.action(op.id, {
         kind: 'remove',
         paths: op.paths,
-        recursive: op.recursive,
+        recursive: op.hasDirectory,
         confirmed: true,
       });
     operation.value = null;
@@ -375,6 +517,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  endDownloadDrag();
   unlisten?.();
 });
 </script>
@@ -427,8 +570,12 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="file-columns">
-      <section class="file-side">
-        <h2>本地文件</h2>
+      <section
+        ref="localArea"
+        :class="['file-side', { dropping: overLocal }]"
+        @mouseup="navigateWithMouse('local', $event)"
+      >
+        <h2>本地文件 <span v-if="overLocal">松开后下载到当前目录</span></h2>
         <form class="path-bar" @submit.prevent="navigateLocal">
           <button
             class="tool-button"
@@ -506,7 +653,14 @@ onBeforeUnmount(() => {
           @menu="(entry, event) => context('local', entry, event)"
         />
       </section>
-      <section ref="remoteArea" :class="['file-side', { dropping: over }]">
+      <section
+        ref="remoteArea"
+        :class="['file-side', { dropping: over }]"
+        @pointerdown.capture="suppressRemoteClick = false"
+        @click.capture="ignoreDownloadClick"
+        @dblclick.capture="ignoreDownloadClick"
+        @mouseup="navigateWithMouse('remote', $event)"
+      >
         <h2>远程文件 <span v-if="over">松开后选择上传策略</span></h2>
         <form
           class="path-bar"
@@ -603,6 +757,7 @@ onBeforeUnmount(() => {
           @select="remoteSelection = $event"
           @open="openEntry('remote', $event)"
           @menu="(entry, event) => context('remote', entry, event)"
+          @drag="beginDownloadDrag"
         />
       </section>
     </div>
@@ -660,46 +815,49 @@ onBeforeUnmount(() => {
     </div></template
   >
   <Modal
-    v-if="operation"
-    :title="
-      operation.kind === 'delete'
-        ? '确认删除远程项目'
-        : operation.kind === 'mkdir'
-          ? '创建远程文件夹'
-          : '重命名远程项目'
-    "
+    v-if="operation?.kind === 'delete'"
+    title="确认删除远程项目"
     :busy="busy"
     @close="operation = null"
-    ><p>{{ hostDisplayName(store.current?.host) }} · {{ operation.parent }}</p>
+  >
+    <form class="file-delete-confirm" @submit.prevent="submitOperation">
+      <div class="file-delete-message">
+        <CircleX :size="32" aria-hidden="true" />
+        <p class="file-delete-question">
+          {{
+            operation.paths.length === 1
+              ? `确定要永久删除「${operation.paths[0]?.split('/').at(-1)}」吗？`
+              : `确定要永久删除这 ${operation.paths.length} 个远程项目吗？`
+          }}
+        </p>
+      </div>
+      <pre v-if="operation.paths.length > 1" class="file-path-preview">{{
+        operation.paths.join('\n')
+      }}</pre>
+      <footer class="dialog-actions">
+        <button class="button" type="button" autofocus :disabled="busy" @click="operation = null">
+          取消
+        </button>
+        <button class="button danger" type="submit" :disabled="busy">确认删除</button>
+      </footer>
+    </form>
+  </Modal>
+  <Modal
+    v-else-if="operation"
+    :title="operation.kind === 'mkdir' ? '创建远程文件夹' : '重命名远程项目'"
+    :busy="busy"
+    @close="operation = null"
+    ><p>{{ operation.host }} · {{ operation.parent }}</p>
 
     <form class="editor-form" @submit.prevent="submitOperation">
-      <label v-if="operation.kind !== 'delete'"
+      <label
         >{{ operation.kind === 'mkdir' ? '文件夹名称' : '新名称'
-        }}<input
-          v-model="operation.name"
-          aria-label="远程项目名称"
-          required
-          maxlength="255" /></label
-      ><template v-else
-        ><p class="error-text">将永久删除 {{ operation.paths.length }} 项，无法撤销。</p>
-        <pre class="file-path-preview">{{ operation.paths.join('\n') }}</pre>
-        <label class="checkbox-label"
-          ><input
-            v-model="operation.recursive"
-            type="checkbox"
-          />递归删除所选目录及全部内容；不跟随链接。未选中时只删除文件或空目录。</label
-        ></template
-      >
+        }}<input v-model="operation.name" aria-label="远程项目名称" required maxlength="255"
+      /></label>
       <footer class="dialog-actions">
         <button class="button" type="button" :disabled="busy" @click="operation = null">取消</button
         ><button class="button danger" :disabled="busy">
-          {{
-            operation.kind === 'delete'
-              ? '确认删除'
-              : operation.kind === 'mkdir'
-                ? '创建文件夹'
-                : '确认重命名'
-          }}
+          {{ operation.kind === 'mkdir' ? '创建文件夹' : '确认重命名' }}
         </button>
       </footer>
     </form></Modal
@@ -749,7 +907,12 @@ onBeforeUnmount(() => {
         inode，ACL、扩展属性或硬链接关系不保证保留。</label
       >
       <p class="subtle">
-        不跟随链接；目录将合并；不支持断点续传，重试从头开始。任务在后台继续，取消保留已完成文件。
+        {{
+          transfer.direction === 'download'
+            ? '直接选中的文件链接会下载目标内容。目录链接和递归扫描遇到的链接不跟随。'
+            : '上传不跟随链接。'
+        }}
+        目录将合并；不支持断点续传，重试从头开始。任务在后台继续，取消保留已完成文件。
       </p>
       <footer class="dialog-actions">
         <button class="button" type="button" @click="transfer = null">取消</button

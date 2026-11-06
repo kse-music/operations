@@ -1,0 +1,27 @@
+{
+  "uiVersion": 4,
+  "title": "问候示例",
+  "frontend": { "script": "frontend.js", "style": "frontend.css" },
+  "pages": [
+    {
+      "id": "hello",
+      "title": "问候示例",
+      "initialAction": null,
+      "surface": { "kind": "frontend" },
+      "fields": [
+        {
+          "id": "name",
+          "label": "姓名",
+          "kind": "text",
+          "default": "",
+          "readonly": false,
+          "documentField": null
+        }
+      ],
+      "actions": [
+        { "id": "greet", "label": "生成问候", "discardDirty": false, "enabledWhen": null }
+      ],
+      "log": null
+    }
+  ]
+}

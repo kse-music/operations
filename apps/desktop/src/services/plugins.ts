@@ -62,6 +62,10 @@ export const pluginsApi = {
     ensureDesktop();
     return invoke('plugin_pick');
   },
+  saveDevelopmentKit(): Promise<string | null> {
+    ensureDesktop();
+    return invoke('plugin_save_development_kit');
+  },
   ui(id: string, revision: string): Promise<PluginUi> {
     ensureDesktop();
     return invoke('plugin_ui', { id, revision });

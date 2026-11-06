@@ -65,7 +65,7 @@ impl Application {
                     secret_ref: reference,
                     revision: uuid::Uuid::new_v4().to_string(),
                 };
-                // On commit failure the new immutable secret stays in durable GC for explicit cleanup.
+                // On commit failure the new immutable secret stays in durable GC for retry.
                 let record = db.ai_model_save(record, input.expected_revision.as_deref())?;
                 Ok(Mutation {
                     value: record.public(),

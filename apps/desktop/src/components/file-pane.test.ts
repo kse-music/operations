@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, type App } from 'vue';
 import FilePane from './FilePane.vue';
-import type { DirectoryListing } from '../types/files';
+import type { DirectoryListing, FileEntry } from '../types/files';
 import { permissionText } from '../types/files';
 
 let app: App, root: HTMLDivElement;
@@ -27,22 +27,27 @@ const listing: DirectoryListing = {
     gid: null,
   })),
 };
+function mountPane(side: 'local' | 'remote', directory = listing) {
+  const select = vi.fn();
+  const open = vi.fn();
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(FilePane, {
+    side,
+    listing: directory,
+    loading: false,
+    selected: [],
+    onSelect: select,
+    onOpen: open,
+  });
+  app.mount(root);
+  return { select, open };
+}
+
 it.each(['remote', 'local'] as const)(
   'renders symbolic permissions and server owner names only in the remote pane (%s)',
   (side) => {
-    const select = vi.fn(),
-      open = vi.fn();
-    root = document.createElement('div');
-    document.body.append(root);
-    app = createApp(FilePane, {
-      side,
-      listing,
-      loading: false,
-      selected: [],
-      onSelect: select,
-      onOpen: open,
-    });
-    app.mount(root);
+    const { select, open } = mountPane(side);
     const headers = [...root.querySelectorAll('th')].map((th) => th.textContent?.trim());
     expect(headers.includes('权限')).toBe(side === 'remote');
     expect(headers.includes('拥有者')).toBe(side === 'remote');
@@ -70,6 +75,43 @@ it.each(['remote', 'local'] as const)(
     expect(select).toHaveBeenCalledWith(['/srv/app']);
     rows[0]!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     expect(open).toHaveBeenCalledWith(listing.entries[0]);
+  },
+);
+
+it.each(['local', 'remote'] as const)(
+  'shows file-kind icons beside the names in the %s pane',
+  (side) => {
+    const cases = [
+      ['directory', 'images.png', 'folder'],
+      ['symlink', 'deploy.sh', 'file-symlink'],
+      ['other', 'pipe.zip', 'file-question-mark'],
+      ['file', 'deploy.PS1', 'file-terminal'],
+      ['file', '.hidden.sh', 'file-terminal'],
+      ['file', 'backup.tar.GZ', 'file-archive'],
+      ['file', 'preview.JPEG', 'file-image'],
+      ['file', 'README.md', 'file'],
+      ['file', 'zip', 'file'],
+      ['file', '.png', 'file'],
+    ] as const;
+    const entries: FileEntry[] = cases.map(([kind, name]) => ({
+      ...listing.entries[0]!,
+      kind,
+      name,
+      path: `/srv/${name}`,
+    }));
+    const { select, open } = mountPane(side, { ...listing, entries });
+    for (const [kind, name, glyph] of cases) {
+      const button = root.querySelector<HTMLButtonElement>(`.file-name[title="${name}"]`)!;
+      expect(button.textContent?.trim()).toBe(name);
+      const icon = button.querySelector('svg[aria-hidden="true"]')!;
+      expect(icon.classList.contains(`lucide-${glyph}`)).toBe(true);
+      if (kind === 'directory') {
+        icon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        icon.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      }
+    }
+    expect(select).toHaveBeenCalledExactlyOnceWith(['/srv/images.png']);
+    expect(open).toHaveBeenCalledExactlyOnceWith(entries[0]);
   },
 );
 

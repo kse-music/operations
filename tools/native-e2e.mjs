@@ -344,8 +344,9 @@ try {
     await page.getByText('尚未添加主机', { exact: true }).waitFor();
     results.push('host JSON controls and commands are unavailable');
     await navigateWorkspace(page, '数据与存储');
-    await page.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
-    await page.getByText(/^系统凭据库可读取/).waitFor();
+    await page.getByLabel('默认下载目录', { exact: true }).waitFor();
+    assert.equal(await page.getByRole('group', { name: '系统凭据库', exact: true }).count(), 0);
+    assert.equal((await invoke('credential_status')).available, true);
     const afterDeletion = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('host_list'));
     assert.equal(afterDeletion.pendingSecretDeletions, 0);
     results.push('native OS secret deletion');

@@ -1,5 +1,15 @@
 <script setup lang="ts">
-import { ArrowDown, ArrowUp } from '@lucide/vue';
+import {
+  ArrowDown,
+  ArrowUp,
+  File,
+  FileArchive,
+  FileImage,
+  FileQuestionMark,
+  FileSymlink,
+  FileTerminal,
+  Folder,
+} from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import type { DirectoryListing, FileEntry } from '../types/files';
 import { bytes, permissionText } from '../types/files';
@@ -14,6 +24,7 @@ const emit = defineEmits<{
   select: [paths: string[]];
   open: [entry: FileEntry];
   menu: [entry: FileEntry, event: MouseEvent];
+  drag: [entry: FileEntry, event: PointerEvent];
 }>();
 const localColumns = [
   ['name', '名称'],
@@ -93,7 +104,84 @@ function context(entry: FileEntry, event: MouseEvent): void {
   if (!props.selected.includes(entry.path)) emit('select', [entry.path]);
   emit('menu', entry, event);
 }
-const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '特殊' };
+function beginDrag(entry: FileEntry, event: PointerEvent): void {
+  if (props.side === 'remote' && !(event.target instanceof HTMLInputElement))
+    emit('drag', entry, event);
+}
+const kinds = {
+  file: { label: '文件', icon: File },
+  directory: { label: '目录', icon: Folder },
+  symlink: { label: '链接', icon: FileSymlink },
+  other: { label: '特殊', icon: FileQuestionMark },
+};
+const fileIcons = [
+  {
+    icon: FileTerminal,
+    extensions: new Set([
+      'sh',
+      'bash',
+      'zsh',
+      'fish',
+      'ksh',
+      'ps1',
+      'psm1',
+      'bat',
+      'cmd',
+      'py',
+      'rb',
+      'pl',
+      'lua',
+      'js',
+      'mjs',
+      'cjs',
+      'vbs',
+    ]),
+  },
+  {
+    icon: FileArchive,
+    extensions: new Set([
+      'zip',
+      'rar',
+      '7z',
+      'tar',
+      'gz',
+      'bz2',
+      'xz',
+      'zst',
+      'tgz',
+      'tbz',
+      'tbz2',
+      'txz',
+      'tzst',
+    ]),
+  },
+  {
+    icon: FileImage,
+    extensions: new Set([
+      'png',
+      'jpg',
+      'jpeg',
+      'gif',
+      'webp',
+      'svg',
+      'bmp',
+      'ico',
+      'tif',
+      'tiff',
+      'heic',
+      'heif',
+      'avif',
+      'apng',
+    ]),
+  },
+];
+function entryIcon(entry: FileEntry) {
+  const defaultIcon = kinds[entry.kind].icon;
+  const dot = entry.name.lastIndexOf('.');
+  if (entry.kind !== 'file' || dot <= 0) return defaultIcon;
+  const extension = entry.name.slice(dot + 1).toLowerCase();
+  return fileIcons.find(({ extensions }) => extensions.has(extension))?.icon ?? defaultIcon;
+}
 </script>
 <template>
   <div class="file-list-tools">
@@ -146,6 +234,7 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
           v-for="entry in visibleEntries"
           :key="entry.path"
           :class="{ selected: selected.includes(entry.path) }"
+          @pointerdown="beginDrag(entry, $event)"
           @click="clicked(entry, $event)"
           @contextmenu.prevent="context(entry, $event)"
           @dblclick="emit('open', entry)"
@@ -160,17 +249,23 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
           </td>
           <td>
             <button
+              type="button"
               class="file-name"
               :title="entry.name"
               @click.stop="clicked(entry, $event)"
               @dblclick.stop="emit('open', entry)"
             >
-              {{ entry.kind === 'directory' ? '▸' : entry.kind === 'symlink' ? '↗' : '·' }}
-              {{ entry.name }}
+              <component
+                :is="entryIcon(entry)"
+                class="file-entry-icon"
+                :data-kind="entry.kind"
+                aria-hidden="true"
+              />
+              <span class="file-name-text">{{ entry.name }}</span>
             </button>
           </td>
           <td>{{ entry.kind === 'directory' ? '—' : bytes(entry.size) }}</td>
-          <td>{{ kinds[entry.kind] }}</td>
+          <td>{{ kinds[entry.kind].label }}</td>
           <td>
             {{ entry.modified === null ? '—' : new Date(entry.modified * 1000).toLocaleString() }}
           </td>

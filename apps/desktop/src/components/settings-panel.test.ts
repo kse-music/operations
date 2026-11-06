@@ -311,6 +311,15 @@ it('groups language, SSH defaults, shortcuts and storage under their correspondi
   expect(panel('[aria-label="默认下载目录"]')).toBe('settings-panel-storage');
 });
 
+it('shows storage settings without a credential maintenance section', async () => {
+  await storageDraft();
+  expect(
+    [...root.querySelectorAll('#settings-panel-storage legend')].map(
+      (legend) => legend.textContent,
+    ),
+  ).toEqual(['应用数据位置', '下载与传输', '传输与日志']);
+});
+
 it('previews migration without saving and cancellation preserves all drafts', async () => {
   const save = vi.spyOn(ipc, 'saveConfig');
   const migrate = vi.spyOn(ipc, 'storageMigrate');

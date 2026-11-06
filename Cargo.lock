@@ -4939,6 +4939,7 @@ dependencies = [
  "serverdeck-plugin-core",
  "serverdeck-plugin-runtime",
  "serverdeck-plugin-sdk",
+ "serverdeck-windows-file-drag",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
@@ -5116,6 +5117,17 @@ dependencies = [
  "tokio-util",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "serverdeck-windows-file-drag"
+version = "0.2.0"
+dependencies = [
+ "serverdeck-core",
+ "tempfile",
+ "tokio",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

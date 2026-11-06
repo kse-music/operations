@@ -12,7 +12,6 @@ import type {
   HostInput,
   ImportPreview,
   Mutation,
-  SecureStatus,
 } from '../types/hosts';
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   ensureDesktop();
@@ -45,8 +44,6 @@ export const hostsApi = {
   groupRemove: (id: string) => call<void>('group_delete', { id }),
   credentialSave: (id: string | null, expectedRevision: number | null, input: CredentialInput) =>
     call<Mutation<Credential>>('credential_save', { id, expectedRevision, input }),
-  cleanup: () => call<Mutation<void>>('credential_cleanup'),
-  status: () => call<SecureStatus>('credential_status'),
   preview: (text: string) => call<ImportPreview>('hosts_import_preview', { text }),
   import: (text: string, selected: string[], groupId: string | null) =>
     call<Mutation<Host[]>>('hosts_import', { text, selected, groupId }),

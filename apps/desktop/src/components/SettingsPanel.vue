@@ -9,9 +9,6 @@ import {
   type SettingsCategory,
 } from '../types/product';
 import { useApplicationStore } from '../stores/application';
-import { useHostsStore } from '../stores/hosts';
-import { hostsApi } from '../services/hosts';
-import type { SecureStatus } from '../types/hosts';
 import type { AppConfig } from '../types/ipc';
 import {
   defaultInterfaceFontSize,
@@ -22,12 +19,6 @@ import {
 } from '../types/preferences';
 
 const application = useApplicationStore();
-const hosts = useHostsStore();
-const secureStatus = ref<SecureStatus>();
-async function checkSecureStore(): Promise<void> {
-  const result = await hosts.run(hostsApi.status);
-  if (result.ok) secureStatus.value = result.value;
-}
 const migration = useStorageMigration();
 const { target, preview, discardDocuments, busy, changed } = migration;
 const props = withDefaults(defineProps<{ category?: SettingsCategory }>(), { category: 'general' });
@@ -382,21 +373,6 @@ function restoreDefaults(): void {
           section="storage"
           :disabled="application.saving || busy"
         />
-        <fieldset :disabled="application.saving || busy || hosts.busy">
-          <legend>系统凭据库</legend>
-          <p class="subtle">待清理旧秘密 {{ hosts.catalog?.pendingSecretDeletions ?? '—' }} 项</p>
-          <div class="toolbar">
-            <button type="button" class="button" @click="checkSecureStore">检查系统凭据库</button>
-            <button
-              type="button"
-              class="button"
-              @click="hosts.run(hostsApi.cleanup, '清理检查已完成。')"
-            >
-              重试清理旧秘密
-            </button>
-          </div>
-          <p v-if="secureStatus" class="subtle" role="status">{{ secureStatus.message }}</p>
-        </fieldset>
         <fieldset :disabled="application.saving || busy">
           <legend>传输与日志</legend>
           <div class="settings-fields">

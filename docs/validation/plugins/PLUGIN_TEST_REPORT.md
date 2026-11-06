@@ -1,5 +1,13 @@
 # 插件阶段验证记录
 
+## 2026-11-07 插件开发包下载
+
+- 插件管理在「安装插件」旁提供「下载插件开发包」。Vite 在开发环境生成 ZIP 供原生资源解析器读取，并将同一生成流程接入生产前端构建。包内含 Rust 与 Vue SDK、快速入门与接口参考、独立样例、两套依赖锁文件和原有打包器。
+- Windows WebView2 验收从客户端按钮下载 ZIP，在仓库外、含空格的系统临时路径解压。修改插件 ID、名称、Vue 标题和 Rust 问候词，执行 `npm ci`、`cargo fetch --locked` 和 `npm run package`。通过真实插件管理的拖放处理器提交产物，完成预览、安装确认、授权与启用，从配置弹窗打开页面。验证空白输入返回 WASM 校验错误，合法输入返回修改后的问候语。
+- 验收脚本为 `node tools/native-plugin-development-kit-e2e.mjs <QA_DIR>`。先用 `appDirectoriesOverride` 指向 `<QA_DIR>/data` 的临时 Tauri 配置构建 Windows Debug，并将 EXE 复制到 `<QA_DIR>/PluginDevelopmentKitQa.exe`。运行后保存 `results.json` 与下载入口、样例页面截图。
+- 首次验收捕获了 WebView 下载事件，遗漏了普通客户端的保存交互。修复后由本地主窗口调用系统保存对话框，保存成功显示路径，失败显示提示。Windows 验收通过原生窗口控件验证对话框打开、取消后无文件或成功提示，以及选择路径保存后继续完成仓库外打包、安装和 WASM 调用。前端回归覆盖取消后重试、失败和成功提示，Rust IPC 回归验证远程来源和其他窗口无法调用保存命令。
+- 修复后 54 个前端测试文件、426 项测试通过。前端类型检查、ESLint、Prettier、脚本语法、Rust 编译检查、IPC 权限回归、Vite 生产构建和 Windows 调试构建通过。安装包和 macOS/Linux 原生保存未在本轮验收。
+
 ## 2026-11-06 Docker 容器详情标签
 
 - `ContainerDetails.vue` 将运行状态、时间、重启策略、端口和挂载展示为带中文标签的字段，资源独立分页。`ContainerEnvironment.vue` 进入标签后读取明文，离开后卸载并丢弃迟到结果。Rust 按真实安装来源和插件 ID 限定免弹窗范围，保留 `system.manage` 和 SSH 上下文校验。

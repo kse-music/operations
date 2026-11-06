@@ -1,5 +1,35 @@
 # SFTP 文件管理阶段验收
 
+## 2026-11-07 SFTP 拖到 Windows 桌面和文件夹
+
+- `FilesView.vue` 把离开 Windows 窗口的文件拖动交给 `files_drag_download`。IPC 只允许本地主窗口和已连接的 SFTP 会话。`crates/windows-file-drag` 提供 OLE 文件描述符和文件流，`transfer.rs` 复用原队列校验暂存内容。
+- 433 项前端测试通过，覆盖 Windows 边界、选区交接、单次触发及拒绝目录。SFTP 单元和本机真实协议测试 11 项通过，覆盖普通文件、文件链接、拒绝目录和清理临时记录。IPC 权限回归 1 项通过。
+- Windows 原生测试 2 项通过。第一项核对取消、长 Unicode 名称、流内容与临时目录清理。第二项让 Windows Shell 的真实文件夹落点处理程序复制文件，并核对落盘字节。
+- 类型、ESLint、Clippy、格式和差异检查通过。Windows 调试构建含 Vite 生产构建，试用副本位于 `.local/qa/windows-file-drag/ServerDeck.exe`。
+- 手动验收时让 Explorer 目标窗口露出一部分，从 ServerDeck 远程栏拖出测试文件，在目标处松手并核对内容。在桌面重复操作，再验证按 Esc 取消。上述 Windows Shell 测试覆盖落点处理，鼠标从 WebView2 跨到桌面或 Explorer 的整条手势、实际远程主机及安装包尚未验收。
+
+## 2026-11-07 SFTP 文件链接下载、拖放与删除确认
+
+- `transfer.rs` 下载显式选择的普通文件链接目标，使用链接名保存。两项新增本机 SFTP 协议测试覆盖正确内容、目录链接、断链、目录内链接及链接目标变化。SFTP 单元和集成测试共 10 项通过，运行自隔离 QA 副本。
+- `FilePane.vue` 与 `FilesView.vue` 增加远程到本地的拖放入口，沿用传输确认。删除框由 `FilesView.vue` 和 `files.css` 收紧，取消默认聚焦。仅所选项目含目录时显示递归选项，提交仍逐次确认。
+- 432 项前端测试、Vite 生产构建、类型、ESLint、Clippy 和格式检查通过。Edge 使用内存夹具验证已选及未选条目拖放、取消、实际传输参数、删除确认和递归勾选，并检查超大字号。截图位于 `.local/qa/sftp-transfer-polish/pages/`。原生 WebView2 拖放、真实远端操作与安装包尚未验收。
+- 后续移除递归复选框，目录确认框改为显示删除范围。436 项前端测试通过，覆盖目录、文件与目录混选、仅文件、取消和实际提交的参数。Vite 生产构建、类型、相关 ESLint 和格式检查通过。隔离 Edge 的 10 项 SFTP 页面及弹窗检查通过，截图位于 `.local/qa/sftp-delete-confirmation/pages/`。本轮未验收真实远端删除或安装包。
+- 删除确认框随后去掉主机、当前路径和目录内容说明，保留待删除对象及确认操作。436 项前端测试和 Edge 的 10 项页面及弹窗检查通过，核对弹窗正文、取消和递归删除请求参数。Vite 生产构建、类型、相关 ESLint 和格式检查通过。截图位于 `.local/qa/sftp-delete-confirmation/compact-pages/`。本轮未验收真实远端删除或安装包。
+
+## 2026-11-07 SFTP 鼠标侧键
+
+- `FilesView.vue` 将侧键释放路由到鼠标所在文件栏。文件 Store 记录成功访问的目录。本地历史随本地栏共享，远程按连接隔离。刷新、失败、历史边界和过期请求不会写入历史，访问新目录后清除前进项。
+- 54 个文件、432 项前端测试通过。覆盖两栏路由、连接替换、刷新、失败后重试、新分支及过期响应。类型、ESLint、格式、差异及 Vite 生产构建通过。
+- 隔离 Edge 使用 CDP 发送实际的鼠标后退和前进事件，核对两栏路径、历史边界和页面 URL。五组 SFTP 浏览器布局检查通过，产物位于 `.local/qa/sftp-mouse-history/pages/`。原生窗口、实体鼠标和安装包尚未验收。
+
+## 2026-11-07 SFTP 文件列表图标
+
+普通文件图标按扩展名细分为脚本、压缩包和图片，其他文件显示通用图标。两栏组件测试覆盖大小写、`.tar.gz`、无扩展名及目录和链接优先。428 项前端测试、类型、ESLint、生产构建及五组 Edge 布局检查通过。复验截图位于 `.local/qa/sftp-file-type-icons/pages/`。
+
+- `FilePane.vue` 在本地和远程名称列复用 Lucide 图标，区分黄色文件夹、文件、符号链接和特殊条目。图标不计入无障碍名称，点击图标沿用原选择与双击打开行为。`styles/files.css` 保留长名称省略与悬停全名，图标随字号缩放。
+- 54 个文件、428 项前端测试通过。类型、ESLint、格式和 Vite 生产构建通过。隔离 Edge 五组窗口验证标准和超大字号的图标缩放、双栏对齐与表格滚动。截图和结果位于 `.local/qa/sftp-entry-icons/pages/`。
+- 本轮验收使用浏览器目录夹具，未重建安装包或复验原生窗口与真实远程传输。
+
 ## 2026-11-07 SFTP 列表高度与传输面板
 
 - `styles/files.css` 移除表格的固定高度上限，按工作区计算可用高度。本地和远程表格独立滚动。活动任务由底部有高度上限的 `TransferPanel.vue` 展示，含源项目、进度和取消入口。`FilesView.vue` 将完成、失败和取消的记录放在页头“传输记录”对话框，并保留原重试流程。
@@ -162,7 +192,7 @@ finally { Remove-Item Env:SERVERDECK_TEST_PASSWORD }
 
 - 仅验证 Windows 客户端与该 Linux/OpenSSH；macOS/Linux 客户端、其他服务器/发行版、长期重协商、20 会话及整进程性能尚未验收。原生选择器、系统拖放、剪贴板和输入法完整矩阵尚未自动化；入口接真实 Tauri。
 - 任务只在本次应用进程内保留，不支持断点续传、跨重启任务恢复。默认队列有界；服务器 MaxSessions 可能限制附加 Channel，失败会提示，不自动创建额外 Transport。
-- 不跟随传输中的 symlink/junction，不传输设备/socket 等特殊文件；非 Unicode 或 Windows 不可表示的下载文件名明确失败。单目录最多 20,000 项；递归传输最多 100,000 项/64 层，路径预算 8 MiB。
+- 上传与递归扫描不跟随 symlink/junction。显式选择的远程文件符号链接可下载目标普通文件。设备和 socket 等特殊文件、非 Unicode 或 Windows 不可表示的下载文件名明确失败。单目录最多 20,000 项，递归传输最多 100,000 项/64 层，路径预算 8 MiB。
 - SFTP v3 没有服务端 CAS、openat/O_NOFOLLOW 或完整 ACL/xattr 协议。保存重检与 rename 之间仍有竞态；原子替换改变 inode，不能完整保留 ACL/xattr/硬链接关系，UI 要求明确确认。缺少所需扩展时不伪装成原子覆盖；网络故障可能留有 0600 暂存文件，显示恢复路径供核对。
 - 保存和传输校验会增加一次远端回读，不以未测的吞吐数字承诺性能。Monaco 按需加载，但编辑器 chunk 约 2.79 MB（gzip 715 kB），保留 Vite 大 chunk 提示。
 - OSC 7 需要远端 Shell/程序主动报告；本轮不自动改写 Shell 启动文件。目录/less/tail 联动面向 POSIX Shell 和相应可执行程序；报告是导航信息，不是权限授权。

@@ -176,6 +176,60 @@ describe('file workspace ownership', () => {
     finish({ path: '/old', parent: '/', entries: [] });
     await slow;
     expect(store.current?.path).toBe('/new');
+    expect(store.stepHistory('remote', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.current?.path).toBe('/home'));
+    expect(store.stepHistory('remote', 'back')).toBe(false);
+  });
+
+  it('keeps remote history on each connection and discards it when the connection is replaced', async () => {
+    mocks.open.mockImplementation(async (hostId, receive) => {
+      receive({ type: 'state', state: 'connected' });
+      return { id: `session-${hostId}` };
+    });
+    mocks.list.mockImplementation(async (_id, path) => ({ path, parent: '/', entries: [] }));
+    const store = useFilesStore();
+    await store.open(host, '/start');
+    await store.navigate('/second');
+    await store.open({ ...host, id: 'other' }, '/other');
+    expect(store.stepHistory('remote', 'back')).toBe(false);
+
+    store.active = host.id;
+    expect(store.stepHistory('remote', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.current?.path).toBe('/start'));
+    expect(mocks.list).toHaveBeenLastCalledWith(`session-${host.id}`, '/start');
+
+    expect(await store.clearHostTransfers(host.id)).toBe(true);
+    await store.open(host, '/start');
+    expect(store.stepHistory('remote', 'forward')).toBe(false);
+  });
+
+  it('preserves failed history steps and drops forward entries only after a new visit', async () => {
+    mocks.open.mockImplementation(async (_host, receive) => {
+      receive({ type: 'state', state: 'connected' });
+      return { id: 'session' };
+    });
+    mocks.list.mockImplementation(async (_id, path) => ({ path, parent: '/', entries: [] }));
+    const store = useFilesStore();
+    await store.open(host, '/first');
+    await store.navigate('/second');
+    mocks.list.mockRejectedValueOnce({ message: 'directory unavailable' });
+    expect(store.stepHistory('remote', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.current?.error).toBe('directory unavailable'));
+    expect(store.current?.path).toBe('/second');
+
+    expect(store.stepHistory('remote', 'back')).toBe(true);
+    expect(store.stepHistory('remote', 'back')).toBe(false);
+    await store.refresh();
+    expect(store.current?.path).toBe('/first');
+    expect(store.stepHistory('remote', 'back')).toBe(false);
+    await store.refresh();
+    expect(store.stepHistory('remote', 'forward')).toBe(true);
+    await vi.waitFor(() => expect(store.current?.path).toBe('/second'));
+
+    expect(store.stepHistory('remote', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.current?.path).toBe('/first'));
+    await store.navigate('/different');
+    expect(store.stepHistory('remote', 'forward')).toBe(false);
   });
 });
 

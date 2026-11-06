@@ -41,6 +41,8 @@
 }
 .plugin-heading-actions {
   flex-shrink: 0;
+  flex-wrap: wrap;
+  max-width: 100%;
 }
 .plugin-manager .plugin-heading > div > .subtle {
   margin: 8px 0 0;

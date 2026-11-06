@@ -131,6 +131,9 @@
   text-overflow: ellipsis;
 }
 .file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
   border: 0;
   background: none;
   color: var(--text);
@@ -138,9 +141,29 @@
   cursor: pointer;
   max-width: 100%;
   overflow: hidden;
-  text-overflow: ellipsis;
   text-align: left;
+  vertical-align: middle;
   padding: 0;
+}
+.file-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-entry-icon {
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  color: var(--muted);
+}
+.file-entry-icon[data-kind='directory'] {
+  color: #f6c65d;
+  fill: #e1a53c;
+}
+:root[data-theme='light'] .file-entry-icon[data-kind='directory'] {
+  color: #9c651d;
+  fill: #ffd478;
 }
 .file-path-preview {
   max-height: 140px;
@@ -149,6 +172,37 @@
   overflow-wrap: anywhere;
   padding: 12px;
   background: var(--panel-soft);
+}
+.modal:has(> .file-delete-confirm) {
+  width: min(470px, calc(100vw - 32px));
+  padding: 16px 20px;
+}
+.modal:has(> .file-delete-confirm) > .modal-heading {
+  margin-bottom: 12px;
+}
+.file-delete-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  overflow-wrap: anywhere;
+}
+.file-delete-message > svg {
+  flex: none;
+  color: var(--error);
+}
+.file-delete-question {
+  margin: 0;
+  font-size: calc(14px * var(--interface-font-scale, 1));
+  font-weight: 600;
+  line-height: 1.45;
+}
+.file-delete-confirm > .dialog-actions {
+  margin-top: 14px;
+  padding-top: 12px;
+}
+.file-delete-confirm .danger {
+  border-color: color-mix(in srgb, var(--error) 35%, var(--border));
+  background: var(--error-bg);
 }
 .transfer-panel {
   border-top: 1px solid var(--border);

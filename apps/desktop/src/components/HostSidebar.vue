@@ -13,7 +13,7 @@ const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
 import { usePluginsStore } from '../stores/plugins';
 const plugins = usePluginsStore();
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
@@ -25,6 +25,7 @@ import { folderAncestors, hostFolderRows } from '../services/host-tree';
 const store = useHostsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
+const hostAddress = ({ hostname, port }: Host) => hostDisplayName({ name: '', hostname, port });
 const props = withDefaults(defineProps<{ localActive?: boolean; active?: boolean }>(), {
   active: true,
 });
@@ -47,8 +48,13 @@ const tree = ref<HTMLElement>();
 const dragged = ref<string | null>(null),
   dropTarget = ref<string | null>(null),
   dragPosition = ref({ x: 0, y: 0 });
-let pendingDrag:
-  { host: Host; x: number; y: number; pointerId: number; source: HTMLElement } | undefined;
+const pendingDrag = shallowRef<{
+  host: Host;
+  x: number;
+  y: number;
+  pointerId: number;
+  source: HTMLElement;
+}>();
 let suppressClick = false,
   clickTimer: ReturnType<typeof setTimeout> | undefined;
 function targetGroup(event: PointerEvent): string | null {
@@ -57,12 +63,12 @@ function targetGroup(event: PointerEvent): string | null {
     ?.closest<HTMLElement>('.tree-group');
   if (!group || !tree.value?.contains(group)) return null;
   const id = group.dataset.groupId || null;
-  return id === pendingDrag?.host.groupId ? null : (id ?? 'root');
+  return id === pendingDrag.value?.host.groupId ? null : (id ?? 'root');
 }
 function beginDrag(host: Host, event: PointerEvent): void {
   if (event.button !== 0 || event.pointerType === 'touch' || store.busy) return;
   endDrag();
-  pendingDrag = {
+  pendingDrag.value = {
     host,
     x: event.clientX,
     y: event.clientY,
@@ -76,23 +82,24 @@ function beginDrag(host: Host, event: PointerEvent): void {
   window.addEventListener('keydown', dragKey);
 }
 function moveDrag(event: PointerEvent): void {
-  if (!pendingDrag || event.pointerId !== pendingDrag.pointerId) return;
+  const pending = pendingDrag.value;
+  if (!pending || event.pointerId !== pending.pointerId) return;
   if (store.busy || event.buttons !== 1) {
     cancelDrag();
     return;
   }
   if (!dragged.value) {
-    if (Math.hypot(event.clientX - pendingDrag.x, event.clientY - pendingDrag.y) < 6) return;
-    dragged.value = pendingDrag.host.id;
-    pendingDrag.source.setPointerCapture(event.pointerId);
+    if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 6) return;
+    dragged.value = pending.host.id;
+    pending.source.setPointerCapture(event.pointerId);
   }
   event.preventDefault();
   dragPosition.value = { x: event.clientX, y: event.clientY };
   dropTarget.value = targetGroup(event);
 }
 function endDrag(): void {
-  const pending = pendingDrag;
-  pendingDrag = undefined;
+  const pending = pendingDrag.value;
+  pendingDrag.value = undefined;
   dragged.value = null;
   dropTarget.value = null;
   window.removeEventListener('pointermove', moveDrag);
@@ -111,7 +118,7 @@ function blockDragClick(): void {
   }, 0);
 }
 function dropHost(event: PointerEvent): void {
-  if (!pendingDrag || event.pointerId !== pendingDrag.pointerId) return;
+  if (event.pointerId !== pendingDrag.value?.pointerId) return;
   const id = dragged.value,
     target = id ? targetGroup(event) : null;
   if (id) blockDragClick();
@@ -439,7 +446,11 @@ onBeforeUnmount(() => {
           >
             <button
               :data-host-id="host.id"
-              :class="['tree-host', { selected: store.selectedId === host.id }]"
+              class="tree-host"
+              :class="{
+                selected: store.selectedId === host.id,
+                'drag-ready': pendingDrag?.host.id === host.id,
+              }"
               :title="`${host.username}@${host.hostname}:${host.port} · 拖动可移动到其他文件夹`"
               :aria-current="store.selectedId === host.id ? 'true' : undefined"
               :draggable="false"
@@ -458,10 +469,9 @@ onBeforeUnmount(() => {
               ></span
               ><span class="host-label"
                 ><span class="host-name">{{ hostDisplayName(host) }}</span
-                ><span class="host-address"
-                  >{{ host.hostname
-                  }}<template v-if="host.port !== 22">:{{ host.port }}</template></span
-                ></span
+                ><span v-if="hostDisplayName(host) !== hostAddress(host)" class="host-address">{{
+                  hostAddress(host)
+                }}</span></span
               >
             </button>
             <HostTreeControls

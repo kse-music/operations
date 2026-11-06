@@ -23,7 +23,7 @@ pub struct SecureStatus {
 pub(crate) fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<String> {
     let pending = match database.pending_secret_gc() {
         Ok(pending) => pending,
-        Err(_) => return vec!["配置已保存，但无法读取旧秘密清理状态，请重试清理。".into()],
+        Err(_) => return vec!["无法读取旧秘密清理状态。后续凭据变更时将重试。".into()],
     };
     let mut failed = 0;
     for reference in pending {
@@ -38,7 +38,7 @@ pub(crate) fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<Str
     }
     if failed > 0 {
         vec![format!(
-            "配置已保存；{failed} 个旧秘密清理未完成，可在“设置 → 数据与存储”重试"
+            "旧秘密清理未完成（{failed} 项）。后续凭据变更时将重试。"
         )]
     } else {
         vec![]

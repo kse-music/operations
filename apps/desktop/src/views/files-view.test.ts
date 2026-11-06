@@ -25,6 +25,11 @@ const entry: FileEntry = {
   uid: 1000,
   gid: 1000,
 };
+async function mountView() {
+  app = createApp(FilesView, { hostId: 'a' }).use(pinia);
+  app.mount(root);
+  await nextTick();
+}
 beforeEach(async () => {
   pinia = createPinia();
   const host = {
@@ -53,24 +58,118 @@ beforeEach(async () => {
   };
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp(FilesView, { hostId: 'a' }).use(pinia);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value() {
       this.open = true;
     },
   });
-  app.mount(root);
-  await nextTick();
+  await mountView();
 });
 afterEach(() => {
   app?.unmount();
   disposePinia(pinia);
   root.remove();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   if (originalShowModal)
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+});
+
+it.each([
+  { names: ['config'], recursive: true },
+  { names: ['guide.txt', 'config'], recursive: true },
+  { names: ['guide.txt'], recursive: false },
+])('confirms deletion of $names with recursive=$recursive', async ({ names, recursive }) => {
+  const files = useFilesStore(pinia);
+  files.current!.listing!.entries.push({
+    ...entry,
+    name: 'guide.txt',
+    path: '/srv/api/guide.txt',
+    kind: 'file',
+  });
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue(undefined);
+  vi.spyOn(files, 'refresh').mockResolvedValue(undefined);
+  await nextTick();
+  for (const name of names) {
+    root.querySelector<HTMLInputElement>(`[aria-label="选择 ${name}"]`)!.click();
+    await nextTick();
+  }
+  const remove = root.querySelector<HTMLButtonElement>('[aria-label="删除选中"]')!;
+  const openDialog = async () => {
+    remove.click();
+    await nextTick();
+    return document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除远程项目"]')!;
+  };
+
+  const dialog = await openDialog();
+  expect(dialog.querySelector('input[type="checkbox"]')).toBeNull();
+  expect(dialog.querySelectorAll('.file-delete-message p')).toHaveLength(1);
+  dialog.querySelector<HTMLButtonElement>('button[autofocus]')!.click();
+  await nextTick();
+  expect(dialog.isConnected).toBe(false);
+  expect(action).not.toHaveBeenCalled();
+
+  (await openDialog()).querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+  expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+    kind: 'remove',
+    paths: names.map((name) => `/srv/api/${name}`),
+    recursive,
+    confirmed: true,
+  });
+});
+
+it('hands a Windows drag to the native exporter once it crosses the window edge', async () => {
+  vi.stubGlobal('isTauri', true);
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+  const files = useFilesStore(pinia);
+  const drag = vi.spyOn(filesApi, 'dragDownload').mockResolvedValue(undefined);
+  files.current!.listing!.entries = [
+    { ...entry, name: 'guide.txt', path: '/srv/api/guide.txt', kind: 'file' },
+    { ...entry, name: 'alias.txt', path: '/srv/api/alias.txt', kind: 'symlink' },
+    entry,
+  ];
+  app?.unmount();
+  await mountView();
+
+  const rows = [...root.querySelectorAll<HTMLTableRowElement>('[aria-label="远程文件"] tbody tr')];
+  const row = (name: string) => rows.find((item) => item.textContent?.includes(name))!;
+  const point = (target: EventTarget, name: string, clientX: number) => {
+    const event = new MouseEvent(name, { button: 0, buttons: 1, bubbles: true, clientX });
+    Object.defineProperties(event, {
+      pointerId: { value: 42 },
+      pointerType: { value: 'mouse' },
+    });
+    target.dispatchEvent(event);
+  };
+  const prepare = (source: HTMLElement) => {
+    Object.assign(source, {
+      setPointerCapture: vi.fn(),
+      hasPointerCapture: () => true,
+      releasePointerCapture: vi.fn(),
+    });
+    point(source, 'pointerdown', 10);
+  };
+  row('guide.txt').querySelector('input')!.click();
+  await nextTick();
+  row('alias.txt').querySelector('input')!.click();
+  await nextTick();
+  prepare(row('guide.txt'));
+  point(window, 'pointermove', 13);
+  expect(drag).not.toHaveBeenCalled();
+  point(window, 'pointermove', -3);
+  point(window, 'pointermove', -30);
+  expect(drag).toHaveBeenCalledExactlyOnceWith('sftp-a', [
+    '/srv/api/guide.txt',
+    '/srv/api/alias.txt',
+  ]);
+  expect(row('guide.txt').releasePointerCapture).toHaveBeenCalledWith(42);
+
+  prepare(row('config'));
+  point(window, 'pointermove', -3);
+  expect(drag).toHaveBeenCalledTimes(1);
+  expect(files.error).toContain('须为文件或文件链接');
 });
 
 it.each([
@@ -239,6 +338,51 @@ it('uses the existing SFTP connection to navigate and keeps it alive when the pa
   expect(close).not.toHaveBeenCalled();
   expect(useFilesStore(pinia).connections.a?.id).toBe('sftp-a');
   expect(release).toHaveBeenCalled();
+});
+
+it('routes mouse back and forward to the hovered pane and consumes them at the history boundary', async () => {
+  const local = vi.spyOn(filesApi, 'local').mockImplementation(async (path) => ({
+    path: path ?? 'D:/test',
+    parent: null,
+    entries: [],
+  }));
+  const list = vi
+    .spyOn(filesApi, 'list')
+    .mockImplementation(async (_id, path) => ({ path, parent: null, entries: [] }));
+  const localInput = root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')!;
+  const remoteInput = root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')!;
+  const sideButton = (element: Element, button: number) =>
+    element.dispatchEvent(new MouseEvent('mouseup', { button, bubbles: true, cancelable: true }));
+
+  expect(sideButton(remoteInput, 3)).toBe(false);
+  expect(list).not.toHaveBeenCalled();
+  expect(sideButton(remoteInput, 1)).toBe(true);
+  localInput.value = 'D:/new';
+  localInput.dispatchEvent(new Event('input', { bubbles: true }));
+  localInput.form!.dispatchEvent(new Event('submit', { cancelable: true }));
+  root
+    .querySelector('[aria-label="远程文件"] .file-name')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await vi.waitFor(() => {
+    expect(useFilesStore(pinia).local?.path).toBe('D:/new');
+    expect(remoteInput.value).toBe('/srv/api/config');
+  });
+
+  expect(sideButton(localInput, 3)).toBe(false);
+  await vi.waitFor(() => expect(localInput.value).toBe('D:/test'));
+  expect(remoteInput.value).toBe('/srv/api/config');
+  expect(sideButton(remoteInput, 3)).toBe(false);
+  await vi.waitFor(() => expect(remoteInput.value).toBe('/srv/api'));
+  expect(localInput.value).toBe('D:/test');
+  expect(sideButton(localInput, 3)).toBe(false);
+  expect(local).toHaveBeenCalledTimes(2);
+
+  expect(sideButton(localInput, 4)).toBe(false);
+  expect(sideButton(remoteInput, 4)).toBe(false);
+  await vi.waitFor(() => {
+    expect(localInput.value).toBe('D:/new');
+    expect(remoteInput.value).toBe('/srv/api/config');
+  });
 });
 
 it('displays conventional upload paths and submits the original paths after conflict confirmation', async () => {

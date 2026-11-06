@@ -3,15 +3,27 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { Puzzle, PackagePlus, RefreshCw, Search, Settings2, Trash2, Upload } from '@lucide/vue';
+import {
+  Download,
+  Puzzle,
+  PackagePlus,
+  RefreshCw,
+  Search,
+  Settings2,
+  Trash2,
+  Upload,
+} from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
+import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
 import { errorMessage } from '../services/ipc';
 import type { InstalledPlugin, PluginPackagePreview } from '../types/plugins';
 const emit = defineEmits<{ settings: [id: string] }>();
 const plugins = usePluginsStore();
+const notifications = useNotificationsStore();
+const savingDevelopmentKit = ref(false);
 const path = ref(''),
   preview = ref<PluginPackagePreview | null>(null),
   ack = ref(false),
@@ -83,6 +95,17 @@ async function pick() {
     if (chosen) await inspect([chosen]);
   } catch (cause) {
     plugins.error = errorMessage(cause);
+  }
+}
+async function saveDevelopmentKit() {
+  savingDevelopmentKit.value = true;
+  try {
+    const destination = await pluginsApi.saveDevelopmentKit();
+    if (destination) notifications.push(`插件开发包已保存到 ${destination}`);
+  } catch (cause) {
+    notifications.push(`插件开发包保存失败：${errorMessage(cause)}`, true);
+  } finally {
+    savingDevelopmentKit.value = false;
   }
 }
 async function install() {
@@ -171,6 +194,14 @@ onBeforeUnmount(() => {
           @click="plugins.refresh()"
         >
           <RefreshCw :size="15" aria-hidden="true" />刷新
+        </button>
+        <button
+          class="button"
+          type="button"
+          :disabled="savingDevelopmentKit"
+          @click="saveDevelopmentKit"
+        >
+          <Download :size="16" aria-hidden="true" />下载插件开发包
         </button>
         <button class="button primary" :disabled="plugins.busy || inspecting" @click="pick">
           <PackagePlus :size="16" aria-hidden="true" />安装插件

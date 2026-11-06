@@ -29,6 +29,8 @@
 
 ## 复建及产物
 
+客户端前端构建会生成并嵌入 `serverdeck-plugin-development-kit.zip`。更新 Host API 或 SDK 时，同步样例清单及依赖锁文件，并从客户端重新下载，在仓库外完成样例打包和安装验证。操作记录见[插件开发包验收](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-07-插件开发包下载)。
+
 ```powershell
 npm ci
 rustup target add wasm32-unknown-unknown

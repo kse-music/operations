@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
+import { pluginDevelopmentKit } from './plugin-development-kit.ts';
 
 export default defineConfig({
   resolve: {
@@ -10,7 +11,7 @@ export default defineConfig({
     },
     dedupe: ['vue', 'pinia'],
   },
-  plugins: [vue()],
+  plugins: [vue(), pluginDevelopmentKit()],
   clearScreen: false,
   server: { host: '127.0.0.1', port: 1420, strictPort: true },
   test: {

@@ -56,6 +56,7 @@ fn attrs(m: &std::fs::Metadata) -> FileAttributes {
 pub struct FileFaults {
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
+    pub links: Mutex<HashMap<String, String>>,
 }
 enum HandleValue {
     File(tokio::fs::File),
@@ -85,6 +86,14 @@ impl Disk {
         }
         Ok(self.root.join(path.trim_start_matches('/')))
     }
+    fn link_target(&self, path: &str) -> Option<String> {
+        self.faults
+            .links
+            .lock()
+            .expect("fixture links")
+            .get(path)
+            .cloned()
+    }
 }
 impl russh_sftp::server::Handler for Disk {
     type Error = StatusCode;
@@ -100,6 +109,7 @@ impl russh_sftp::server::Handler for Disk {
         Ok(v)
     }
     async fn realpath(&mut self, id: u32, path: String) -> Result<Name, StatusCode> {
+        let path = self.link_target(&path).unwrap_or(path);
         let p = self.path(&path)?;
         tokio::fs::metadata(p).await.map_err(io)?;
         Ok(Name {
@@ -111,6 +121,16 @@ impl russh_sftp::server::Handler for Disk {
         })
     }
     async fn lstat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {
+        if let Some(target) = self.link_target(&path) {
+            return Ok(Attrs {
+                id,
+                attrs: FileAttributes {
+                    permissions: Some(0o120777),
+                    size: Some(target.len() as u64),
+                    ..Default::default()
+                },
+            });
+        }
         Ok(Attrs {
             id,
             attrs: attrs(
