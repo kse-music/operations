@@ -1,4 +1,4 @@
-import { terminalAction, terminalTabAction, navigateWorkspace } from './ui-navigation.mjs';
+import { terminalAction, navigateWorkspace } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,7 +21,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     await pane.locator('.xterm-container[data-state="connected"]').waitFor();
   }
   async function rename(title) {
-    await terminalTabAction(page, '重命名');
+    await page.locator('.terminal-tab.active [role=tab]').dblclick();
     const dialog = page.getByRole('dialog', { name: '重命名标签', exact: true });
     await dialog.getByLabel('标签名称').fill(title);
     await dialog.getByRole('button', { name: '保存名称' }).click();
@@ -98,11 +98,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     document.querySelector('[aria-label="终端标签"] [role=tab]')?.textContent.includes('Extra C'),
   );
   for (const title of ['Extra B', 'Extra C'])
-    await terminalTabAction(
-      page,
-      '关闭',
-      page.getByRole('tab', { name: new RegExp(title) }).locator('..'),
-    );
+    await page.getByRole('button', { name: `关闭标签 ${title}`, exact: true }).click();
   await page.waitForFunction(
     () => document.querySelectorAll('[aria-label="终端标签"] [role=tab]').length === 1,
   );

@@ -51,27 +51,37 @@ try {
     const menu = page.getByRole('menu', { name: '工作区标签操作', exact: true });
     const target = page.locator('.workspace-tab[data-host-id="a"]');
     const local = page.locator('.workspace-tab[data-host-id=""]');
+    const allHosts = page
+      .getByRole('tablist', { name: '工作区页面', exact: true })
+      .getByRole('tab', { name: '全部主机', exact: true });
     const keys = () =>
       page.evaluate(async () => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
         const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
         return useWorkspaceStore(pinia).tabs.map((tab) => tab.key);
       });
-    for (const [action, expected] of [
-      ['关闭', ['host:', 'settings:', 'credentials:']],
-      ['关闭右侧', ['host:', 'settings:', 'credentials:']],
-      ['关闭其它', ['host:a']],
-      ['关闭所有', []],
+    for (const [tab, action, expected] of [
+      [target, '关闭', ['host:', 'settings:', 'credentials:']],
+      [local, '关闭右侧', ['host:', 'settings:', 'credentials:']],
+      [target, '关闭其它', ['host:a']],
+      [target, '关闭所有', []],
+      [allHosts, '关闭', ['settings:', 'credentials:']],
+      [allHosts, '关闭右侧', ['host:', 'host:a']],
+      [allHosts, '关闭其它', ['host:', 'host:a']],
+      [allHosts, '关闭所有', []],
     ]) {
       await seed();
-      await (action === '关闭右侧' ? local : target).click({ button: 'right' });
+      await tab.click({ button: 'right' });
       await menu.waitFor();
       assert.equal(await local.getByRole('tab').getAttribute('aria-selected'), 'true');
       assert.deepEqual(
         (await menu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
         ['关闭', '关闭右侧', '关闭其它', '关闭所有'],
       );
-      if (action === '关闭') await page.screenshot({ path: `${output}/${name}.png` });
+      if (action === '关闭')
+        await page.screenshot({
+          path: `${output}/${tab === allHosts ? 'all-hosts-' : ''}${name}.png`,
+        });
       await menu.getByRole('menuitem', { name: action, exact: true }).click();
       await menu.waitFor({ state: 'hidden' });
       await page.waitForFunction(
@@ -80,6 +90,15 @@ try {
       );
       assert.deepEqual(await keys(), expected);
       if (!expected.length) await page.getByRole('region', { name: '欢迎页面' }).waitFor();
+      if (tab === allHosts && action === '关闭右侧') {
+        await allHosts.press('Shift+F10');
+        await menu.waitFor();
+        assert(await menu.getByRole('menuitem', { name: '关闭右侧', exact: true }).isDisabled());
+        assert(await menu.getByRole('menuitem', { name: '关闭其它', exact: true }).isDisabled());
+        await page.keyboard.press('Escape');
+        await menu.waitFor({ state: 'hidden' });
+        assert(await allHosts.evaluate((button) => document.activeElement === button));
+      }
     }
     // The rightmost tab has no right range; an only tab also has no other range.
     await seed();

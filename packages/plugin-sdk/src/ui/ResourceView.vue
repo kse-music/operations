@@ -290,8 +290,10 @@ const slotContext = {
           <p v-if="detailLoading" class="host-empty" role="status">正在读取详情…</p>
           <p v-else-if="detailError" class="banner error" role="alert">{{ detailError }}</p>
           <template v-else-if="detail">
-            <slot name="detail" v-bind="slotContext" :detail="detail" />
-            <OpsDetails :detail="detail" />
+            <slot name="detail-content" v-bind="slotContext" :detail="detail">
+              <slot name="detail" v-bind="slotContext" :detail="detail" />
+              <OpsDetails :detail="detail" />
+            </slot>
           </template>
         </div>
       </Modal>

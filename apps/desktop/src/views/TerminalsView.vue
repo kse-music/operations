@@ -41,7 +41,6 @@ function sessionTitle(item: TerminalTab): string {
     : item.title;
 }
 const area = ref<HTMLElement>();
-const menu = ref<{ key: string; x: number; y: number } | null>(null);
 const renaming = ref<string | null>(null),
   title = ref('');
 const tab = computed(() => store.tabs.find((t) => t.key === store.active));
@@ -65,25 +64,12 @@ function paneStyle(
       }
     : { display: 'none' };
 }
-function duplicateSession(key: string): void {
-  const pane = store.tabs.find((t) => t.key === key)?.panes[0];
-  if (pane) store.open(pane.host);
-  menu.value = null;
-}
 function rename(key: string): void {
-  menu.value = null;
   renaming.value = key;
   title.value = store.tabs.find((t) => t.key === key)?.title ?? '';
 }
 function submitRename(): void {
   if (renaming.value && store.rename(renaming.value, title.value)) renaming.value = null;
-}
-function context(key: string, event: MouseEvent): void {
-  menu.value = {
-    key,
-    x: Math.min(event.clientX, window.innerWidth - 190),
-    y: Math.min(event.clientY, window.innerHeight - 240),
-  };
 }
 function dragTab(event: DragEvent, key: string): void {
   event.dataTransfer?.setData('text/plain', key);
@@ -199,7 +185,6 @@ onBeforeUnmount(() => {
             @dragstart="dragTab($event, item.key)"
             @dragover.prevent
             @drop.prevent="dropTab($event, item.key)"
-            @contextmenu.prevent="context(item.key, $event)"
           >
             <button
               role="tab"
@@ -283,29 +268,5 @@ onBeforeUnmount(() => {
         ><button class="button primary" type="submit">保存名称</button>
       </footer>
     </form></Modal
-  >
-  <template v-if="menu"
-    ><button class="context-backdrop" aria-label="关闭标签菜单" @click="menu = null"></button>
-    <div class="context-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
-      <button role="menuitem" @click="duplicateSession(menu.key)">复制</button>
-      <button role="menuitem" @click="rename(menu.key)">重命名</button
-      ><button
-        role="menuitem"
-        @click="
-          store.closeAll(menu.key);
-          menu = null;
-        "
-      >
-        关闭所有</button
-      ><button
-        role="menuitem"
-        @click="
-          store.close(menu.key);
-          menu = null;
-        "
-      >
-        关闭
-      </button>
-    </div></template
   >
 </template>

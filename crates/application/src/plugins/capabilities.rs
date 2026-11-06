@@ -8,21 +8,26 @@ use serverdeck_core::{
 use serverdeck_plugin_core::{
     package::digest,
     permissions::{Grant, GrantInput, denied},
+    repository::PluginSource,
 };
-use serverdeck_plugin_sdk::{ApiError, Capability, Request, Response};
+use serverdeck_plugin_sdk::{ApiError, Capability, Request, Response, server::Query};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
-fn requires_confirmation(
-    source: &serverdeck_plugin_core::repository::PluginSource,
-    plugin_id: &str,
-    operation: &Capability,
-) -> bool {
+fn requires_confirmation(source: &PluginSource, plugin_id: &str, operation: &Capability) -> bool {
     operation.needs_confirmation()
-        && !(matches!(operation, Capability::ContainerShell { .. })
-            && *source == serverdeck_plugin_core::repository::PluginSource::System
+        && !(matches!(
+            operation,
+            Capability::ContainerShell { .. }
+                | Capability::SystemQuery {
+                    request: Query::ContainerDetails {
+                        reveal_env: true,
+                        ..
+                    },
+                }
+        ) && *source == PluginSource::System
             && plugin_id == "cn.hiboot.plugins.docker")
 }
 
@@ -767,7 +772,6 @@ impl std::error::Error for CleanupErrors {
 #[cfg(test)]
 mod confirmation_policy_tests {
     use super::*;
-    use serverdeck_plugin_core::repository::PluginSource;
 
     #[test]
     fn direct_shell_is_limited_to_the_builtin_docker_identity() {
@@ -798,6 +802,44 @@ mod confirmation_policy_tests {
             &PluginSource::System,
             "cn.hiboot.plugins.docker",
             &write
+        ));
+    }
+
+    #[test]
+    fn direct_environment_reads_keep_the_manage_permission_and_require_builtin_docker() {
+        let read = Capability::SystemQuery {
+            request: Query::ContainerDetails {
+                id: "a".repeat(64),
+                reveal_env: true,
+            },
+        };
+        assert_eq!(
+            read.permission(),
+            serverdeck_plugin_sdk::Permission::SystemManage
+        );
+        assert_eq!(read.operation(), "system.manage");
+        assert!(!requires_confirmation(
+            &PluginSource::System,
+            "cn.hiboot.plugins.docker",
+            &read
+        ));
+        assert!(requires_confirmation(
+            &PluginSource::User,
+            "cn.hiboot.plugins.docker",
+            &read
+        ));
+        assert!(requires_confirmation(
+            &PluginSource::System,
+            "dev.other-system-plugin",
+            &read
+        ));
+        let delete = Capability::SystemQuery {
+            request: Query::ImageRemove { id: "a".repeat(64) },
+        };
+        assert!(requires_confirmation(
+            &PluginSource::System,
+            "cn.hiboot.plugins.docker",
+            &delete
         ));
     }
 }

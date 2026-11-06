@@ -87,6 +87,82 @@
 .docker-workbench .ops-row-actions {
   min-width: 175px;
 }
+.docker-workbench .ops-row-actions .text-button.danger {
+  color: var(--error);
+}
+.docker-container-details,
+.docker-detail-panel {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+.docker-detail-tabs {
+  align-self: start;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.docker-detail-tabs button {
+  padding: 7px 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.docker-detail-row,
+.docker-env-values > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr));
+  gap: 8px 14px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.docker-detail-row dt,
+.docker-env-values dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.docker-detail-row dd,
+.docker-env-values dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.docker-env-values {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.docker-env-values > div {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  align-items: baseline;
+}
+.docker-env-values dt {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.docker-env-values dd,
+.docker-detail-panel > p {
+  margin: 0;
+}
+.docker-detail-panel > button {
+  justify-self: start;
+}
+.docker-resources {
+  display: grid;
+  gap: 8px;
+}
+.docker-resources .ops-detail-fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.docker-resources .ops-detail-fields > div {
+  padding: 8px 10px;
+}
+@media (min-width: 520px) {
+  .docker-resources .ops-detail-fields {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
 .docker-workbench .ops-table td:first-child {
   min-width: 155px;
 }

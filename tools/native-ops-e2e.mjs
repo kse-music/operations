@@ -252,9 +252,7 @@ export async function operationsChecks(context) {
   }
   async function action(target, label) {
     const targetRow = await row(target);
-    const button = targetRow.getByRole('button', { name: label, exact: true });
-    if (!(await button.isVisible())) await targetRow.locator('summary').click();
-    await button.click();
+    await targetRow.getByRole('button', { name: label, exact: true }).click();
   }
   async function confirm(target) {
     const dialog = content().getByRole('dialog', { name: '确认主机运维操作', exact: true });
@@ -285,8 +283,20 @@ export async function operationsChecks(context) {
   let list = await query({ kind: 'containers' });
   assert.equal(list.records.find((r) => r.ID === fixture.container).State, 'running');
   await (await row(fixture.container)).getByRole('button', { name: '详情', exact: true }).click();
-  const detail = content().getByTestId('operations-detail');
-  await detail.filter({ hasText: 'SD_E2E_SECRET' }).waitFor();
+  const containerDetails = content().getByRole('dialog', { name: '容器详情', exact: true });
+  const detail = containerDetails.getByRole('tabpanel');
+  await detail.getByText('运行中', { exact: true }).waitFor();
+  assert.equal(await detail.locator('pre').count(), 0);
+  await containerDetails.getByRole('tab', { name: '端口映射', exact: true }).click();
+  await detail.getByText('127.0.0.1', { exact: true }).first().waitFor();
+  await containerDetails.getByRole('tab', { name: '挂载', exact: true }).click();
+  await detail.getByText('绑定挂载', { exact: true }).first().waitFor();
+  await containerDetails.getByRole('tab', { name: '资源使用', exact: true }).click();
+  await containerDetails
+    .getByRole('region', { name: '资源使用' })
+    .getByText(/^\d+(\.\d+)?%$/)
+    .first()
+    .waitFor();
   assert(!(await detail.innerText()).includes('protect-' + fixture.uuid));
   await page.screenshot({ path: path.join(artifacts, 'ops-container.png') });
   const inspected = await query({
@@ -298,15 +308,15 @@ export async function operationsChecks(context) {
   assert(!JSON.stringify(inspected).includes('protect-' + fixture.uuid));
   assert(inspected.detail.mounts.length);
   assert(inspected.detail.ports['8080/tcp'][0].HostIp === '127.0.0.1');
-  await content().getByRole('button', { name: '显示环境变量值…', exact: true }).click();
-  await confirm(fixture.container);
+  await containerDetails.getByRole('tab', { name: '环境变量', exact: true }).click();
   await detail.filter({ hasText: 'protect-' + fixture.uuid }).waitFor();
-  await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await (await row(fixture.container)).getByRole('button', { name: '资源', exact: true }).click();
-  await detail.filter({ hasText: 'CPUPerc' }).waitFor();
+  assert.equal(await content().getByLabel('确认运维目标').count(), 0);
+  assert.equal(await page.getByRole('dialog', { name: '插件操作需要单独确认' }).count(), 0);
+  await containerDetails.getByRole('tab', { name: '概览', exact: true }).click();
+  assert(!(await containerDetails.innerText()).includes('protect-' + fixture.uuid));
   await content().getByRole('button', { name: '关闭对话框', exact: true }).click();
   passed(
-    'native Docker detection/version, container list/start, masked environment, explicit reveal, ports/mounts and stats',
+    'native Docker detection/version, container list/start, structured detail tabs and direct scoped environment access',
   );
   await (await row(fixture.container)).getByRole('button', { name: '日志', exact: true }).click();
   const output = content().getByTestId('operations-log-output');
@@ -376,34 +386,16 @@ export async function operationsChecks(context) {
   passed('standalone file-log UI is absent; closing container log dialogs releases remote streams');
   await switchTab('Docker 容器');
   await content().getByLabel('运维项目搜索').fill(fixture.uuid);
-  const beforeRestart = await query({
-    kind: 'container_details',
-    id: fixture.container,
-    revealEnv: false,
-    confirmed: false,
-  });
-  for (const label of ['重启', '停止', '删除']) {
-    await action(fixture.container, label);
-    await confirm(fixture.container);
-    if (label === '重启') {
-      const changed = await query({
-        kind: 'container_details',
-        id: fixture.container,
-        revealEnv: false,
-        confirmed: false,
-      });
-      assert.notEqual(changed.detail.state.StartedAt, beforeRestart.detail.state.StartedAt);
-      assert.equal(changed.detail.state.Running, true);
-    }
-    if (label === '停止') {
-      const stopped = await query({ kind: 'containers' });
-      assert.equal(stopped.records.find((r) => r.ID === fixture.container).State, 'exited');
-    }
-  }
+  await action(fixture.container, '停止');
+  await confirm(fixture.container);
+  const stopped = await query({ kind: 'containers' });
+  assert.equal(stopped.records.find((r) => r.ID === fixture.container).State, 'exited');
+  await action(fixture.container, '删除');
+  await confirm(fixture.container);
   assert(!(await query({ kind: 'containers' })).records.some((r) => r.ID === fixture.container));
   await switchTab('镜像');
   await content().getByLabel('运维项目搜索').fill(fixture.uuid);
-  await (await row(fixture.image)).getByRole('button', { name: '删除镜像', exact: true }).click();
+  await (await row(fixture.image)).getByRole('button', { name: '删除', exact: true }).click();
   const imageReview = page.getByRole('dialog', { name: '删除镜像？', exact: true });
   await imageReview.waitFor();
   assert.equal(await imageReview.locator('input').count(), 0);
@@ -421,6 +413,6 @@ export async function operationsChecks(context) {
   assert.equal(cleaned.cleaned, true, cleaned.error);
   registerCleanup(undefined);
   passed(
-    'native confirmed container restart/stop/remove, isolated image removal and full fixture cleanup; original SSH shell survives',
+    'native confirmed container stop/remove, isolated image removal and full fixture cleanup; original SSH shell survives',
   );
 }

@@ -4,6 +4,14 @@
 
 最新：[本地终端默认 Shell 修复](workspace/VALIDATION_INTERACTIONS.md#2026-11-06-本地终端默认-shell-修复)。
 
+最新：[全部主机右键和会话栏](hosts/VALIDATION_HOST_WORKSPACES.md#全部主机右键和会话栏)。
+
+最新：[退出确认弹窗布局](workspace/VALIDATION_LAYOUT.md#2026-11-06-退出确认弹窗布局)。
+
+最新：[Docker 容器详情标签和环境变量直接查看](plugins/PLUGIN_TEST_REPORT.md#2026-11-06-docker-容器详情标签)。
+
+最新：[Docker 列表操作与合并详情弹窗](plugins/PLUGIN_TEST_REPORT.md#2026-11-06-docker-列表操作)。
+
 最新：[Linux 默认终端字体回退修复与真实 SSH 验证](terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-linux-默认字体回退修复)。
 
 最新：[OpenSSH 导入弹窗高度修复](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗高度修复)。

@@ -8,6 +8,18 @@
 
 已将 Unix 本地终端从固定 `/bin/sh -i` 改为解析用户默认 Shell 后以 `-i` 启动，Bash 正常加载 `~/.bashrc`；返回实际程序名并同步子进程 `SHELL`。5 项本地终端测试、Linux 桌面开发构建、Rustfmt、文档格式和差异检查通过；严格 Clippy 被既有 OpenSSH `single_element_loop` 告警阻止，仅在检查命令中允许该项后通过。未进行原生 GUI、Windows/macOS 或安装包验收。无剩余实现依赖，使用修复需重启开发应用并新开本地会话；自定义 Shell 配置仍决定实际提示符。详见[验证记录](../validation/workspace/VALIDATION_INTERACTIONS.md#2026-11-06-本地终端默认-shell-修复)。本阶段完成后停止。
 
+## 2026-11-06 退出确认弹窗布局
+
+退出影响按连接、任务和未保存修改分组，底部仅保留「确认」，右上角关闭与 Esc 可取消。打开时聚焦标题，按 Tab 导航到按钮时显示焦点提示。前端回归和深浅主题、宽窄窗口验证见[页面布局验收](../validation/workspace/VALIDATION_LAYOUT.md#2026-11-06-退出确认弹窗布局)。
+
+## 2026-11-06 Docker 容器详情标签
+
+Docker 1.5.3 将容器详情拆为概览、资源使用、端口映射、挂载和环境变量，概览和列表用带标签的字段显示。内置包在选中环境变量标签后直接读取值，离开时清除。宿主保留权限和连接校验。详见[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-06-docker-容器详情标签)。
+
+## 2026-11-06 Docker 列表操作
+
+Docker 1.5.2 在同一弹窗显示容器详情和资源，行内提供按状态显示的启停及删除按钮，镜像列表使用「删除」。内置包与兼容界面已重新构建。前端回归、浏览器布局与调试构建结果见[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-06-docker-列表操作)。
+
 ## 2026-11-06 OpenSSH 导入弹窗高度修复
 
 已将导入弹窗外层改为纵向 Flex，修复 WebKitGTK 初始状态撑满视口的问题，保留长预览独立滚动和固定底部操作区。WebKitGTK/Chromium 五组尺寸与主题的 40 项布局/状态检查、77 项相关前端测试、类型、ESLint、修改文件格式和生产前端构建通过。未重建桌面二进制或安装包，原生 Tauri/WebView2 及 macOS 未复验；当前无剩余实现依赖。详见[验证记录](../validation/hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗高度修复)。
@@ -29,6 +41,8 @@
 ## 2026-11-06 主机管理标题与工作区标签分层
 
 顶部和侧栏统一使用「主机管理」，左侧「全部主机」行右端提供本地终端快捷入口。右侧「全部主机」与资产、插件、设置页面标签并列，切换顶部模块时保持可见，选择该标签恢复最近的主机工作区。验证结果见[主机工作区布局验收](../validation/hosts/VALIDATION_HOST_WORKSPACES.md#全部主机与其他二级页面并列)。
+
+「全部主机」复用同排标签右键菜单，关闭主机组沿用逐主机的连接清理。会话标签去掉右键菜单，加号紧跟会话标签。验收见[全部主机右键和会话栏](../validation/hosts/VALIDATION_HOST_WORKSPACES.md#全部主机右键和会话栏)。
 
 主机树底部统计行已移除，原空间分配给列表滚动区。验证结果见[主机树底部统计验收](../validation/hosts/VALIDATION_HOST_WORKSPACES.md#移除主机树底部统计)。
 

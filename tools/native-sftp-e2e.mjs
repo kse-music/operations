@@ -323,7 +323,7 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
   closeNativeWindow(processId());
   dialog = page.getByRole('dialog', { name: '确认退出 ServerDeck', exact: true });
   await dialog.waitFor();
-  await dialog.getByRole('button', { name: '继续使用', exact: true }).click();
+  await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page
     .locator(`[data-task-id="${active.id}"]`)
     .getByRole('button', { name: '取消传输', exact: true })

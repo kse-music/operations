@@ -247,8 +247,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     await dismissNotifications();
   };
   const cancelMutation = async (row, button, target) => {
-    if (!(await row.getByRole('button', { name: button, exact: true }).isVisible()))
-      await row.locator('.row-action-menu summary').click();
     await row.getByRole('button', { name: button, exact: true }).click();
     const dialog = content().getByRole('dialog', { name: '确认主机运维操作', exact: true });
     await dialog.waitFor();

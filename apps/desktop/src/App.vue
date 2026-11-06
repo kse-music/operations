@@ -17,7 +17,16 @@ import AppNavigation from './components/AppNavigation.vue';
 import AppModules from './components/AppModules.vue';
 import type { NavigationModule } from './types/navigation';
 import HostTools from './components/HostTools.vue';
-import { Monitor, PanelLeftOpen, Server, X } from '@lucide/vue';
+import {
+  FileWarning,
+  Info,
+  ListTodo,
+  Monitor,
+  PanelLeftOpen,
+  Server,
+  Unplug,
+  X,
+} from '@lucide/vue';
 import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
@@ -43,7 +52,12 @@ import {
   settingsCategories,
   type WorkspaceView as View,
 } from './types/product';
-import { isHostTab, type WorkspaceCloseScope, type WorkspaceTab } from './stores/workspace';
+import {
+  allHostsTabKey,
+  isHostTab,
+  type WorkspaceCloseScope,
+  type WorkspaceTab,
+} from './stores/workspace';
 import { serverPluginFor } from './services/server-plugins';
 import GlobalSearch from './components/GlobalSearch.vue';
 import { usePluginsStore } from './stores/plugins';
@@ -211,7 +225,9 @@ let tabMenuTrigger: HTMLButtonElement | null = null;
 const tabMenuIndex = computed(() =>
   workspace.tabs.findIndex((tab) => tab.key === tabMenu.value?.key),
 );
+const menuForAllHosts = computed(() => tabMenu.value?.key === allHostsTabKey);
 const hasTabsToRight = computed(() => {
+  if (menuForAllHosts.value) return workspace.tabs.some((tab) => !isHostTab(tab));
   const tab = workspace.tabs[tabMenuIndex.value];
   return (
     !!tab &&
@@ -220,6 +236,9 @@ const hasTabsToRight = computed(() => {
       .some((candidate) => isHostTab(candidate) === isHostTab(tab))
   );
 });
+const hasOtherTabs = computed(() =>
+  menuForAllHosts.value ? hasTabsToRight.value : workspace.tabs.length > 1,
+);
 const tabCloseActions: { scope: WorkspaceCloseScope; label: string }[] = [
   { scope: 'current', label: '关闭' },
   { scope: 'right', label: '关闭右侧' },
@@ -234,13 +253,16 @@ function restoreTabFocus() {
   if (tabMenuTrigger?.isConnected) tabMenuTrigger.focus({ preventScroll: true });
   else document.querySelector<HTMLButtonElement>('.workspace-tab.active [role=tab]')?.focus();
 }
-async function openTabMenu(tab: WorkspaceTab, event: MouseEvent | KeyboardEvent) {
+async function openTabMenu(key: string, event: MouseEvent | KeyboardEvent) {
   const target = event.currentTarget as HTMLElement;
-  tabMenuTrigger = target.querySelector<HTMLButtonElement>('[role=tab]');
+  tabMenuTrigger =
+    target instanceof HTMLButtonElement
+      ? target
+      : target.querySelector<HTMLButtonElement>('[role=tab]');
   const anchor = target.getBoundingClientRect();
   const keyboard = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
   tabMenu.value = {
-    key: tab.key,
+    key,
     x: keyboard ? anchor.left : event.clientX,
     y: keyboard ? anchor.bottom : event.clientY,
   };
@@ -253,11 +275,11 @@ async function openTabMenu(tab: WorkspaceTab, event: MouseEvent | KeyboardEvent)
     .querySelector<HTMLButtonElement>('[role=menuitem]')
     ?.focus({ preventScroll: true });
 }
-function tabContextKeys(tab: WorkspaceTab, event: KeyboardEvent) {
+function tabContextKeys(key: string, event: KeyboardEvent) {
   if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
   event.preventDefault();
   event.stopPropagation();
-  void openTabMenu(tab, event);
+  void openTabMenu(key, event);
 }
 async function closeFromTabMenu(scope: WorkspaceCloseScope) {
   if (!tabMenu.value) return;
@@ -663,6 +685,8 @@ watch(
             :aria-selected="isHostWorkspace"
             :tabindex="isHostWorkspace ? 0 : -1"
             @click="activateAllHosts"
+            @contextmenu.prevent.stop="openTabMenu(allHostsTabKey, $event)"
+            @keydown="tabContextKeys(allHostsTabKey, $event)"
           >
             全部主机
           </button>
@@ -679,8 +703,8 @@ watch(
             }"
             @mousedown.middle.prevent
             @auxclick.middle.prevent="workspace.close(tab.key)"
-            @contextmenu.prevent.stop="openTabMenu(tab, $event)"
-            @keydown="tabContextKeys(tab, $event)"
+            @contextmenu.prevent.stop="openTabMenu(tab.key, $event)"
+            @keydown="tabContextKeys(tab.key, $event)"
           >
             <button
               role="tab"
@@ -857,19 +881,44 @@ watch(
     v-if="files.exitReview"
     title="确认退出 ServerDeck"
     :busy="exitBusy"
+    focus-heading
     @close="files.exitReview = false"
-    ><p>
-      退出将关闭所有 SSH
-      会话及模块连接。若有未完成的传输或诊断任务，将请求取消；未保存文本修改将放弃。已完成文件保留，远端命令是否停止仍需核对。
-    </p>
-
-    <footer class="dialog-actions">
-      <button class="button" :disabled="exitBusy" @click="files.exitReview = false">继续使用</button
-      ><button class="button danger" :disabled="exitBusy" @click="confirmExit">
-        取消任务并退出
-      </button>
-    </footer></Modal
   >
+    <div class="exit-review-body">
+      <ul class="exit-review-effects" aria-label="退出影响">
+        <li>
+          <Unplug :size="16" aria-hidden="true" />
+          <div>
+            <strong>连接与会话</strong>
+            <p>断开所有模块连接，结束 SSH 和本地终端会话。</p>
+          </div>
+        </li>
+        <li>
+          <ListTodo :size="16" aria-hidden="true" />
+          <div>
+            <strong>未完成的任务</strong>
+            <p>请求取消未完成的传输和诊断。</p>
+          </div>
+        </li>
+        <li>
+          <FileWarning :size="16" aria-hidden="true" />
+          <div>
+            <strong>未保存的修改</strong>
+            <p>放弃未保存的文本编辑。</p>
+          </div>
+        </li>
+      </ul>
+      <p class="exit-review-note">
+        <Info :size="14" aria-hidden="true" />
+        <span>已完成的文件会保留。远端命令是否停止仍需核对。</span>
+      </p>
+    </div>
+    <footer class="dialog-actions exit-review-actions">
+      <button class="button danger" type="button" :disabled="exitBusy" @click="confirmExit">
+        确认
+      </button>
+    </footer>
+  </Modal>
   <HostDialog
     v-if="hostDialog"
     :group-id="hostFolderId"
@@ -879,7 +928,7 @@ watch(
   <ImportDialog v-if="importingOpenSsh" @close="importingOpenSsh = false" />
   <Teleport to="body">
     <div
-      v-if="tabMenu && tabMenuIndex >= 0"
+      v-if="tabMenu && (menuForAllHosts ? hostWorkspaceTabs.length : tabMenuIndex >= 0)"
       ref="tabMenuElement"
       class="context-menu workspace-tab-menu"
       role="menu"
@@ -894,7 +943,7 @@ watch(
         tabindex="-1"
         :disabled="
           (action.scope === 'right' && !hasTabsToRight) ||
-          (action.scope === 'others' && workspace.tabs.length < 2)
+          (action.scope === 'others' && !hasOtherTabs)
         "
         @click="closeFromTabMenu(action.scope)"
       >

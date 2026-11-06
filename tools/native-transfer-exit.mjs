@@ -72,7 +72,7 @@ export async function transferExitChecks(context) {
     const started = Date.now();
     page = await restart(0, async () => {
       await review
-        .getByRole('button', { name: '取消任务并退出', exact: true })
+        .getByRole('button', { name: '确认', exact: true })
         .click()
         .catch((error) => {
           if (!/closed/i.test(String(error))) throw error;

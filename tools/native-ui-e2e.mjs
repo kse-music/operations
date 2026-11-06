@@ -1,6 +1,6 @@
 import { hostContextAction } from './ui-navigation.mjs';
 import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
-import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
+import { terminalAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, writeFile, copyFile } from 'node:fs/promises';
@@ -150,7 +150,7 @@ async function quit() {
   closeNativeWindow(child.pid);
   const dialog = page.getByRole('dialog', { name: '确认退出 ServerDeck', exact: true });
   await dialog.waitFor();
-  await dialog.getByRole('button', { name: '取消任务并退出', exact: true }).click();
+  await dialog.getByRole('button', { name: '确认', exact: true }).click();
   await Promise.race([exited, delay(15000)]);
   assert.equal(child.exitCode, 0, 'confirmed native exit must finish cleanly');
   await browser.close().catch(() => {});
@@ -234,18 +234,20 @@ try {
     .getByRole('button', { name: '关闭终端菜单', exact: true })
     .click({ position: { x: 2, y: 2 } });
   await assertNativeMenuSuppressed(page.locator('.terminal-tab.active [role=tab]'));
+  assert.equal(await page.getByRole('menu').count(), 0);
+  await assertNativeMenuSuppressed(page.getByRole('tab', { name: '全部主机', exact: true }));
+  const workspaceMenu = page.getByRole('menu', { name: '工作区标签操作', exact: true });
   assert.deepEqual(
-    await page
+    await workspaceMenu
       .getByRole('menuitem')
       .allTextContents()
       .then((items) => items.map((text) => text.trim())),
-    ['复制', '重命名', '关闭所有', '关闭'],
+    ['关闭', '关闭右侧', '关闭其它', '关闭所有'],
   );
-  await page.screenshot({ path: path.join(artifacts, 'session-menu.png') });
-  await page.getByRole('button', { name: '关闭标签菜单', exact: true }).click({
-    position: { x: 2, y: 2 },
-  });
-  passed.push('native context menus suppressed across shell, inputs and xterm; tab menu retained');
+  await page.screenshot({ path: path.join(artifacts, 'all-hosts-menu.png') });
+  await page.keyboard.press('Escape');
+  await workspaceMenu.waitFor({ state: 'hidden' });
+  passed.push('native session tabs suppress context menus; all hosts opens the workspace tab menu');
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
   await command("$sdValue = 17*19; [Console]::WriteLine(('SD_VALUE_' + $sdValue))", 'SD_VALUE_323');
   await active().locator('.xterm-helper-textarea').press('Shift+F10');
@@ -382,7 +384,7 @@ try {
   passed.push(
     'native OS clipboard handles Unicode, menu/right-click/shortcut paste and selection/shortcut copy with web clipboard disabled; large paste confirmation remains and the original clipboard is preserved',
   );
-  await terminalTabAction(page, '复制');
+  await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
   await active().locator('.xterm-container[data-state="connected"]').waitFor();
   assert.equal(await page.locator('.terminal-tab').count(), 2);
   await command("[Console]::WriteLine(('SD_FRESH_' + ($null -eq $sdValue)))", 'SD_FRESH_True');
@@ -390,7 +392,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 1);
   await command("[Console]::WriteLine(('SD_SURVIVED_' + $sdValue))", 'SD_SURVIVED_323');
   passed.push(
-    'duplicate creates an independent PowerShell; middle-click close preserves the original',
+    'the plus button creates an independent PowerShell; middle-click close preserves the original',
   );
   const tabsBeforeModuleSwitch = await page.locator('.workspace-tab').count();
   for (const module of ['assets', 'system']) {
@@ -522,7 +524,7 @@ try {
     .getByRole('alert')
     .filter({ hasText: /主机尚未绑定安全凭据/ })
     .waitFor();
-  await terminalTabAction(page, '复制');
+  await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
   await active().locator('.xterm-container[data-state="failed"]').waitFor();
   await page
     .getByRole('alert')
@@ -646,7 +648,7 @@ try {
   passed.push(
     'remote tabs are absent after restart; explicit host selection opens one fresh shell and repeated selection reuses it',
   );
-  await terminalTabAction(page, '关闭所有');
+  await page.locator('.terminal-tab.active [aria-label^="关闭标签 "]').click();
   // Other hosts remain in the background; closing the last local session must not switch host.
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
   await page.getByRole('heading', { name: '没有打开的终端', exact: true }).waitFor();

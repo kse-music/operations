@@ -52,6 +52,6 @@ WASM 无 WASI/原生导入，Host 能力通过显式消息 yield/resume，不把
 
 ## SDK 1.1 服务器能力
 
-内置系统包与上传包执行同一权限与上下文校验。system/manage 封闭请求、采样器、结构化日志和分块结果都绑定当前插件/上下文/安装代；停止时仅清理自有资源。通用文件日志仍额外校验 SFTP 权限和规范根；系统服务已移除 SFTP 权限，Guest 只接受 Service 日志，Docker Guest 只接受 Container 日志。敏感环境、状态修改/信号继续逐次批准。按用户授权，仅 System 来源且 ID 为 cn.hiboot.plugins.docker 的 ContainerShell 允许点击直接进入；其他插件及同 ID 上传包仍需宿主批准，Guest 不能注入 confirmed。终端单次票据仍绑定主机/容器/Shell/连接配置并限制 60 秒，仅可信主窗口可交接事件通道。
+内置系统包与上传包执行同一权限与上下文校验。system/manage 封闭请求、采样器、结构化日志和分块结果都绑定当前插件/上下文/安装代；停止时仅清理自有资源。通用文件日志仍额外校验 SFTP 权限和规范根；系统服务已移除 SFTP 权限，Guest 只接受 Service 日志，Docker Guest 只接受 Container 日志。状态修改和信号继续逐次批准。仅实际 System 来源且 ID 为 cn.hiboot.plugins.docker 的 ContainerShell 和读取明文环境变量可直接执行；后者仍需 system.manage 与已验证的 SSH 租约。其他插件及同 ID 上传包仍需宿主批准，Guest 不能注入 confirmed。终端单次票据仍绑定主机/容器/Shell/连接配置并限制 60 秒，仅可信主窗口可交接事件通道。
 
 超过 1 KiB 的结构化结果不进入 Guest JSON 负载，改用限额结果句柄，避免提高全体插件的执行预算。每结果最多 4 MiB、总 8 MiB、八项/每插件两项、TTL 60 秒；32 KiB 分块检查归属、范围和安装代，读取后释放。UI v2 只增加封闭声明，仍拒绝脚本、资源地址或动态组件。详情见 [内置标准插件](BUILTIN_PLUGINS.md)。

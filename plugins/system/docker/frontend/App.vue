@@ -2,9 +2,11 @@
 import { computed, ref, watch } from 'vue';
 import ResourceView from '@serverdeck/plugin-sdk/ui/ResourceView.vue';
 import ServerTabs from '@serverdeck/plugin-sdk/ui/ServerTabs.vue';
+import OpsDetails from '@serverdeck/plugin-sdk/ui/OpsDetails.vue';
 import { Container, Layers, CircleCheck, Box } from '@lucide/vue';
+import ContainerDetails from './ContainerDetails.vue';
 import './docker.css';
-import type { ContainerAction, ContainerShell } from '@serverdeck/plugin-sdk/types/ops';
+import type { ContainerShell } from '@serverdeck/plugin-sdk/types/ops';
 import type { Host } from '@serverdeck/plugin-sdk/types/hosts';
 import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
 import type { PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
@@ -50,6 +52,8 @@ const columns = computed(() =>
         { key: 'CreatedSince', label: '创建时间' },
       ],
 );
+const activeStates = ['running', 'paused', 'restarting'];
+const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
 </script>
 <template>
   <div class="plugin-server-surface docker-workbench">
@@ -145,34 +149,25 @@ const columns = computed(() =>
               详情
             </button>
             <button
+              v-for="action in [
+                activeStates.includes(String(row.State).toLowerCase()) ? 'stop' : 'start',
+                'remove',
+              ] as const"
+              :key="action"
               class="text-button"
+              :class="{ danger: action !== 'start' }"
               :disabled="busy"
-              @click="inspect({ kind: 'container_stats', id: String(row.ID) }, '容器资源使用')"
+              @click="
+                ask(`容器${actionLabels[action]}`, String(row.ID), {
+                  kind: 'container_action',
+                  id: String(row.ID),
+                  action,
+                  confirmed: true,
+                })
+              "
             >
-              资源
+              {{ actionLabels[action] }}
             </button>
-            <details class="row-action-menu">
-              <summary>操作</summary>
-              <div>
-                <button
-                  v-for="action in ['start', 'stop', 'restart', 'remove'] as ContainerAction[]"
-                  :key="action"
-                  class="text-button"
-                  :class="{ danger: action === 'remove' || action === 'stop' }"
-                  :disabled="busy"
-                  @click="
-                    ask(`容器 ${action}`, String(row.ID), {
-                      kind: 'container_action',
-                      id: String(row.ID),
-                      action,
-                      confirmed: true,
-                    })
-                  "
-                >
-                  {{ { start: '启动', stop: '停止', restart: '重启', remove: '删除' }[action] }}
-                </button>
-              </div>
-            </details>
             <button
               class="text-button"
               @click="
@@ -200,35 +195,19 @@ const columns = computed(() =>
               })
             "
           >
-            删除镜像
+            删除
           </button>
         </template>
-        <template #detail="{ detail, ask }">
-          <p v-if="detail.environmentRevealed" class="banner error">
-            敏感环境值正在显示，离开详情即清除；不会记录到操作历史。
-          </p>
-          <button
-            v-if="detail.environment && !detail.environmentRevealed"
-            class="button"
-            @click="
-              ask(
-                '显式显示容器环境变量',
-                String(detail.id),
-                {
-                  kind: 'container_details',
-                  id: String(detail.id),
-                  revealEnv: true,
-                  confirmed: true,
-                },
-                undefined,
-                true,
-              )
-            "
-          >
-            显示环境变量值…
-          </button>
-        </template>
-      </ResourceView></KeepAlive
-    >
+        <template #detail-content="{ detail, query }">
+          <ContainerDetails
+            v-if="typeof detail.id === 'string' && Array.isArray(detail.environment)"
+            :key="detail.id"
+            :container-id="detail.id"
+            :detail="detail"
+            :query="query"
+          />
+          <OpsDetails v-else :detail="detail" />
+        </template> </ResourceView
+    ></KeepAlive>
   </div>
 </template>

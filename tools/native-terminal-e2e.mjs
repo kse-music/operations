@@ -1,5 +1,5 @@
 import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
-import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
+import { terminalAction } from './ui-navigation.mjs';
 import { probeOps, operationsChecks } from './native-ops-e2e.mjs';
 // Real packaged WebView2 -> Tauri -> OS credential store -> SSH -> Linux PTY.
 // Password must arrive through process environment (or the invoking secure prompt), never argv/files.
@@ -273,7 +273,7 @@ try {
     await page.locator('.tree-host').filter({ hasText: 'Linux SSH verification' }).click();
     await page.locator(`.terminal-pane:visible[data-host-id="${hostId}"]`).waitFor();
     if ((await page.locator('.terminal-pane').count()) === panes)
-      await terminalTabAction(page, '复制');
+      await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
   }
   const active = () => page.locator('.terminal-pane:visible');
   const screen = () => active().locator('.xterm-rows');

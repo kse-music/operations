@@ -1,5 +1,19 @@
 # 插件阶段验证记录
 
+## 2026-11-06 Docker 容器详情标签
+
+- `ContainerDetails.vue` 将运行状态、时间、重启策略、端口和挂载展示为带中文标签的字段，资源独立分页。`ContainerEnvironment.vue` 进入标签后读取明文，离开后卸载并丢弃迟到结果。Rust 按真实安装来源和插件 ID 限定免弹窗范围，保留 `system.manage` 和 SSH 上下文校验。
+- 前端 54 个文件、406 项测试通过。八组 Edge 宽窄屏和深浅色检查覆盖五个标签、键盘切换、结构化字段、直接读取测试变量和离开后清除。TypeScript、ESLint、代码格式和脚本语法通过。截图位于 `.local/docker-detail-qa/layout/`。
+- Rust application 74 项通过，1 项依赖隔离 Docker 测试主机的既有用例跳过。沙箱内回环连接和文件夹具受限，使用工作区内的 QA 副本复验通过。运维安全 5 项通过，包括默认脱敏和不可变目标校验。
+- 已重建 Windows 调试 EXE，并核对其嵌入本次 Docker 1.5.3 包。真实 SSH/Docker 的 WebView2 端到端场景仍需隔离测试主机；未生成安装包。
+
+## 2026-11-06 Docker 列表操作
+
+- `plugins/system/docker/frontend/App.vue` 和 `ContainerResources.vue` 将详情和资源使用放入同一弹窗。容器行按状态显示启动或停止，另提供删除、日志和 Shell。镜像行使用「删除」，仍由宿主核对完整镜像 ID 并确认。资源查询失败时保留已加载的容器信息。
+- 54 个前端测试文件、406 项测试通过，覆盖合并展示、资源错误、启停按钮、完整目标确认、日志和 Shell 入口及镜像删除请求。TypeScript、ESLint、改动代码格式和脚本语法检查通过。首次 Vitest 启动因沙箱临时目录无法重命名缓存而失败，改用工作区内临时目录后通过。
+- 使用打包界面和本地夹具，在 Edge 四种窗口尺寸和深浅主题共八组场景验证行内操作、同窗显示、镜像确认取消与删除。截图位于 `.local/docker-actions-qa/layout/`。
+- Windows 调试构建重新生成 Docker 1.5.2、兼容资源和默认桌面 EXE。真实 SSH、Docker 和 WebView2 端到端验证仍需隔离的测试主机。未生成安装包。
+
 ## 2026-11-06 插件配置弹窗
 
 ### 全部插件统一入口

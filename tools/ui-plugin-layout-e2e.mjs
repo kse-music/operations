@@ -221,7 +221,8 @@ try {
                     id: 'layout-image-approval',
                     hostId: 'layout-host',
                     pluginName: 'Docker 管理',
-                    pluginVersion: '1.5.1',
+                    pluginVersion: packages.find((pkg) => pkg.manifest.name === 'Docker 管理')
+                      .manifest.version,
                     imageId: operation.request.id,
                     description: 'Remove frozen test image',
                   },
@@ -299,6 +300,16 @@ try {
                     Status: n ? 'Up 3 days' : 'Exited (1)',
                     Ports: '0.0.0.0:8080->80/tcp',
                   })),
+                  container_stats: [
+                    {
+                      CPUPerc: '12.34%',
+                      MemUsage: '42 MiB / 128 MiB',
+                      MemPerc: '32.81%',
+                      NetIO: '1.2 MB / 500 kB',
+                      BlockIO: '0 B / 24 kB',
+                      PIDs: '4',
+                    },
+                  ],
                   images: imageDeleted
                     ? []
                     : [
@@ -315,6 +326,26 @@ try {
                   success: true,
                   code: null,
                   message: null,
+                  detail:
+                    operation.request.kind === 'container_details'
+                      ? {
+                          id: operation.request.id,
+                          name: '/app-service-1',
+                          image: 'registry.example/application:stable',
+                          state: { Status: 'running', Health: { Status: 'healthy' } },
+                          restartPolicy: { Name: 'unless-stopped' },
+                          ports: { '80/tcp': [{ HostIp: '0.0.0.0', HostPort: '8080' }] },
+                          mounts: [
+                            { Type: 'bind', Source: '/srv/data', Destination: '/data', RW: true },
+                          ],
+                          environment: [
+                            operation.request.revealEnv
+                              ? 'TEST_VAR=fixture=value'
+                              : 'TEST_VAR=••••••',
+                          ],
+                          environmentRevealed: operation.request.revealEnv,
+                        }
+                      : null,
                   records: data[operation.request.kind] ?? [],
                 };
                 break;
@@ -444,7 +475,48 @@ try {
       });
       await openPluginFunction(page, 'Docker 管理', 'layout-host');
       await content().getByText('app-service-1', { exact: true }).waitFor();
+      const stoppedRow = content().getByRole('row').filter({ hasText: 'app-service-1' });
+      const runningRow = content().getByRole('row').filter({ hasText: 'app-service-2' });
+      const actionLabels = async (row) =>
+        (await row.getByRole('button').allTextContents()).map((label) => label.trim());
+      assert.deepEqual(await actionLabels(stoppedRow), ['详情', '启动', '删除', '日志', 'Shell']);
+      assert.deepEqual(await actionLabels(runningRow), ['详情', '停止', '删除', '日志', 'Shell']);
       await capture('docker-containers', '.plugin-workspace');
+      await stoppedRow.getByRole('button', { name: '详情', exact: true }).click();
+      const containerDetails = content().getByRole('dialog', { name: '容器详情', exact: true });
+      const panel = containerDetails.getByRole('tabpanel');
+      await panel.getByText('app-service-1', { exact: true }).waitFor();
+      await panel.getByText('除非手动停止，否则重启', { exact: true }).waitFor();
+      assert.equal(await panel.locator('pre').count(), 0);
+      const detailTabs = containerDetails.getByRole('tablist');
+      assert.equal(
+        await detailTabs.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
+        false,
+      );
+      await capture('docker-container-overview', '.plugin-workspace');
+      const overviewTab = containerDetails.getByRole('tab', { name: '概览', exact: true });
+      const environmentTab = containerDetails.getByRole('tab', { name: '环境变量', exact: true });
+      await overviewTab.focus();
+      await overviewTab.press('End');
+      assert(await environmentTab.evaluate((tab) => document.activeElement === tab));
+      assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');
+      await environmentTab.press('Enter');
+      await panel.getByText('fixture=value', { exact: true }).waitFor();
+      assert.equal(await content().getByRole('dialog').count(), 1);
+      assert.equal(await page.getByRole('dialog', { name: '插件操作需要单独确认' }).count(), 0);
+      await containerDetails.getByRole('tab', { name: '端口映射', exact: true }).click();
+      await panel.getByText('8080', { exact: true }).waitFor();
+      assert.equal(await containerDetails.getByText('fixture=value', { exact: true }).count(), 0);
+      await containerDetails.getByRole('tab', { name: '挂载', exact: true }).click();
+      await panel.getByText('/srv/data', { exact: true }).waitFor();
+      await containerDetails.getByRole('tab', { name: '资源使用', exact: true }).click();
+      await panel.getByText('12.34%', { exact: true }).waitFor();
+      assert.equal(
+        await containerDetails.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
+        false,
+      );
+      await capture('docker-container-details', '.plugin-workspace');
+      await containerDetails.getByRole('button', { name: '关闭对话框', exact: true }).click();
       await content().getByRole('button', { name: '日志', exact: true }).first().click();
       await content()
         .getByTestId('operations-log-output')
@@ -490,7 +562,7 @@ try {
       await content().getByRole('tab', { name: '镜像', exact: true }).click();
       await content().getByText('registry.example/application', { exact: true }).waitFor();
       await capture('docker-images', '.plugin-workspace');
-      await content().getByRole('button', { name: '删除镜像', exact: true }).click();
+      await content().getByRole('button', { name: '删除', exact: true }).click();
       const imageReview = page.getByRole('dialog', { name: '删除镜像？', exact: true });
       await imageReview.waitFor();
       assert.equal(await imageReview.locator('input').count(), 0);
@@ -514,7 +586,7 @@ try {
       });
       await imageReview.getByRole('button', { name: '取消', exact: true }).click();
       assert.equal(await page.evaluate(() => window.imageDeleteExecutions), 0);
-      await content().getByRole('button', { name: '删除镜像', exact: true }).click();
+      await content().getByRole('button', { name: '删除', exact: true }).click();
       await imageReview.getByRole('button', { name: '确认删除', exact: true }).click();
       await content().getByText('没有匹配项目。', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.imageDeleteExecutions), 1);

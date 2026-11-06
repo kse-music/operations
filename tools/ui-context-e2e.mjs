@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace, selectHostWorkspace, terminalTabAction } from './ui-navigation.mjs';
+import { navigateWorkspace, selectHostWorkspace } from './ui-navigation.mjs';
 
 // Rendering fixtures are confined to these browser pages; no persisted data or remote operations.
 const output = process.env.SERVERDECK_CONTEXT_OUTPUT ?? '.local/ui-context';
@@ -170,7 +170,7 @@ try {
     const sessionActions = page.getByRole('toolbar', { name: '会话操作', exact: true });
     assert.equal(await sessionActions.count(), 0);
     assert.equal(await page.locator('.split-toolbar').count(), 0);
-    await terminalTabAction(page, '复制');
+    await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
     await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 2);
     await page.evaluate(async () => {
       const { useTerminalsStore } = await import('/src/stores/terminals.ts');
@@ -178,16 +178,27 @@ try {
       const added = store.tabs.find((tab) => tab.key === store.active);
       const pane = added.panes[0];
       if (pane.host?.id !== 'a' || added.panes.length !== 1 || pane.key !== store.focused)
-        throw new Error('duplicate must open and focus a single new session for the source host');
+        throw new Error('plus must open and focus a single new session for the current host');
+      store.rename(store.hostTabs('a')[0].key, '长会话名称'.repeat(24));
+    });
+    const scrollable = page.getByRole('tablist', { name: '终端标签', exact: true });
+    assert(await scrollable.evaluate((tabs) => tabs.scrollWidth > tabs.clientWidth));
+    assert(
+      await page
+        .getByRole('button', { name: '新建终端会话', exact: true })
+        .evaluate(
+          (button) =>
+            button.getBoundingClientRect().right <=
+            button.parentElement.getBoundingClientRect().right,
+        ),
+    );
+    await scrollable.evaluate((tabs) => {
+      tabs.scrollLeft = 0;
     });
     assert.equal(await page.getByRole('menu').count(), 0);
     await page.locator('.terminal-tab').first().click({ button: 'right' });
-    assert.deepEqual(
-      (await page.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
-      ['复制', '重命名', '关闭所有', '关闭'],
-    );
-    await page.screenshot({ path: `${output}/${name}-session-menu.png` });
-    await page.getByRole('menuitem', { name: '关闭', exact: true }).click();
+    assert.equal(await page.getByRole('menu').count(), 0);
+    await page.locator('.terminal-tab [aria-label^="关闭标签 "]').first().click();
     await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 1);
     const compactHeader = await page.evaluate(() => {
       const box = (selector) => document.querySelector(selector).getBoundingClientRect();
@@ -196,7 +207,8 @@ try {
         area = box('.split-area'),
         workspace = box('.workspace-host-tabs'),
         tools = box('.workspace-header .host-tools'),
-        add = box('[aria-label="新建终端会话"]');
+        add = box('[aria-label="新建终端会话"]'),
+        lastTab = box('.terminal-tab:last-child');
       return {
         hostHeight: host.height,
         toolsInsideToolbar:
@@ -205,6 +217,8 @@ try {
           tools.top >= host.top &&
           tools.bottom <= host.bottom,
         toolsAfterSessions: tools.left >= add.right || tools.top >= sessions.bottom,
+        plusNextToTabs: add.left >= lastTab.right && add.left - lastTab.right <= 8,
+        plusVisible: add.right <= sessions.right,
         toolsSameRow: Math.abs(tools.top - sessions.top) <= 4,
         sessionHeight: sessions.height,
         terminalGap: area.top - host.bottom,
@@ -214,6 +228,10 @@ try {
     });
     assert(compactHeader.toolsInsideToolbar, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.toolsAfterSessions, JSON.stringify({ name, compactHeader }));
+    assert(
+      compactHeader.plusNextToTabs && compactHeader.plusVisible,
+      JSON.stringify({ name, compactHeader }),
+    );
     if (width >= 900) assert(compactHeader.toolsSameRow, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.terminalGap <= 4, JSON.stringify({ name, compactHeader }));
     assert(compactHeader.sessionsInsideToolbar, JSON.stringify({ name, compactHeader }));
@@ -309,15 +327,15 @@ try {
     );
     assert.deepEqual(errors, []);
     await page.screenshot({ path: `${output}/${name}-terminal.png` });
-    await terminalTabAction(page, '关闭所有');
+    await page.locator('.terminal-tab.active [aria-label^="关闭标签 "]').click();
     await page.getByRole('heading', { name: '没有打开的终端', exact: true }).waitFor();
     await page.evaluate(async () => {
       const { useTerminalsStore } = await import('/src/stores/terminals.ts');
       const store = useTerminalsStore();
       if (store.hostTabs('a').length !== 1 || store.hostTabs('b').length !== 0)
-        throw new Error('close-all must close only the target host sessions');
+        throw new Error('closing a session must leave other hosts running');
     });
-    await page.screenshot({ path: `${output}/${name}-closed-all.png` });
+    await page.screenshot({ path: `${output}/${name}-closed-session.png` });
     await nav('模型管理');
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),

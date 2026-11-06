@@ -96,7 +96,8 @@ it('loads container details without secrets and delegates image removal to the h
     revealEnv: false,
     confirmed: false,
   });
-  expect(document.querySelector('dialog')?.textContent).toContain('TOKEN=[已隐藏]');
+  expect(document.querySelector('[role="tabpanel"]')?.textContent).toContain('owned-image');
+  expect(api.query.mock.calls.some(([, request]) => request.revealEnv)).toBe(false);
   document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await settle();
   await click('日志');
@@ -120,7 +121,7 @@ it('loads container details without secrets and delegates image removal to the h
   });
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
-  await click('删除镜像');
+  await click('删除');
   expect(document.querySelector('dialog')).toBeNull();
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   expect(api.query).toHaveBeenCalledWith('lease', {

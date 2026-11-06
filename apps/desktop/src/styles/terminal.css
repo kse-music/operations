@@ -18,7 +18,7 @@
 .terminal-tabs {
   display: flex;
   align-items: center;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   gap: 3px;
   overflow-x: auto;
@@ -188,12 +188,10 @@
 }
 @media (max-width: 720px) {
   .terminal-session-header {
-    flex-wrap: wrap;
-    gap: 0;
+    gap: 6px;
     padding: 0;
   }
   .terminal-tabs {
-    flex-basis: 100%;
     min-height: 36px;
     padding: 2px 8px;
   }

@@ -54,14 +54,14 @@ async function openPluginModal(name: string): Promise<HTMLDialogElement> {
   await flush();
   return document.querySelector<HTMLDialogElement>(`dialog[aria-label="${name} · 配置"]`)!;
 }
-async function sessionAction(index: number, label: string): Promise<void> {
+async function newSession(): Promise<void> {
+  root.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
+  await flush();
+}
+async function closeSession(index: number): Promise<void> {
   root
-    .querySelectorAll('.terminal-tab')
-    [index]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-  await nextTick();
-  [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-    .find((button) => button.textContent?.trim() === label)!
-    .click();
+    .querySelectorAll<HTMLButtonElement>('.terminal-tab [aria-label^="关闭标签 "]')
+    [index]!.click();
   await flush();
 }
 function loadSidebarConfig(): void {
@@ -458,7 +458,7 @@ it('covers body-level inputs and stops the native menu before a child stops prop
   }
 });
 
-it('opens host context menus without connecting and keeps terminal tab menus working', async () => {
+it('opens the host tree menu without connecting and closes sessions through their tabs', async () => {
   const host = root.querySelector<HTMLButtonElement>('.tree-host')!;
   host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await nextTick();
@@ -472,12 +472,8 @@ it('opens host context menus without connecting and keeps terminal tab menus wor
     .querySelector('.terminal-tab [role="tab"]')!
     .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await nextTick();
-  const close = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
-    (button) => button.textContent?.trim() === '关闭',
-  );
-  expect(close).toBeDefined();
-  close!.click();
-  await flush();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  await closeSession(0);
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
 
@@ -1283,6 +1279,51 @@ it('middle-click closes only the target terminal session and retains a tab if cl
   expect(root.querySelector('.terminal-tab')).toBeNull();
 });
 
+it('lets the user dismiss exit review and disables its controls during confirmed exit', async () => {
+  let finishExit: (() => void) | undefined;
+  const exit = vi.spyOn(filesApi, 'exit').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finishExit = resolve;
+      }),
+  );
+  const files = useFilesStore();
+  const openReview = async () => {
+    files.exitReview = true;
+    await nextTick();
+    return document.querySelector<HTMLDialogElement>('dialog[aria-label="确认退出 ServerDeck"]')!;
+  };
+  const dismiss = (dialog: HTMLDialogElement) =>
+    dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  let review = await openReview();
+  expect(review.querySelector('h2[autofocus]')?.getAttribute('tabindex')).toBe('-1');
+  expect([...review.querySelectorAll('li strong')].map((item) => item.textContent)).toEqual([
+    '连接与会话',
+    '未完成的任务',
+    '未保存的修改',
+  ]);
+  expect(
+    [...review.querySelectorAll('footer button')].map((button) => button.textContent?.trim()),
+  ).toEqual(['确认']);
+  review.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await nextTick();
+  expect(files.exitReview).toBe(false);
+  review = await openReview();
+  dismiss(review);
+  await nextTick();
+  expect(files.exitReview).toBe(false);
+  expect(exit).not.toHaveBeenCalled();
+  review = await openReview();
+  review.querySelector<HTMLButtonElement>('button.danger')!.click();
+  await nextTick();
+  expect(exit).toHaveBeenCalledExactlyOnceWith(true);
+  expect([...review.querySelectorAll('button')].every((button) => button.disabled)).toBe(true);
+  dismiss(review);
+  expect(files.exitReview).toBe(true);
+  finishExit?.();
+  await nextTick();
+});
+
 it('keeps settings in the system module and omits the old topbar exit action', async () => {
   expect(root.querySelector('.topbar [aria-label="退出应用"]')).toBeNull();
   expect(root.querySelector('.topbar [aria-label="打开通用"]')).toBeNull();
@@ -1328,17 +1369,18 @@ it('merges session controls into the host toolbar and retains names within the c
   expect(root.querySelector('.split-toolbar, [aria-label="会话操作"]')).toBeNull();
   expect(root.querySelector('#terminal-session-tools .terminal-session-header')).not.toBeNull();
   expect(root.querySelectorAll('.terminal-session-header button')).toHaveLength(3);
-  expect(root.querySelector('[aria-label="新建终端会话"]')).not.toBeNull();
-  await sessionAction(0, '复制');
+  expect(root.querySelector('.terminal-tabs + [aria-label="新建终端会话"]')).not.toBeNull();
+  await newSession();
   expect(terminals.tabs).toHaveLength(2);
   const current = terminals.active;
   terminals.open(host);
   await flush();
-  await sessionAction(2, '关闭');
-  await sessionAction(0, '关闭');
+  await closeSession(2);
+  await closeSession(0);
   expect(terminals.tabs).toHaveLength(1);
   expect(terminals.tabs[0]!.key).toBe(current);
-  await sessionAction(0, '重命名');
+  root.querySelector('.terminal-tab [role="tab"]')!.dispatchEvent(new MouseEvent('dblclick'));
+  await flush();
   const dialog = document.querySelector('dialog[aria-label="重命名标签"]')!;
   const input = dialog.querySelector<HTMLInputElement>('input')!;
   input.value = '新会话';
@@ -1375,9 +1417,9 @@ it.each(['remote', 'local'])(
     terminals.rename(terminals.tabs[0]!.key, '部署');
     await flush();
     expect(names()).toEqual(['部署', '会话 1', '会话 3']);
-    await sessionAction(0, '复制');
+    await newSession();
     expect(names()).toEqual(['部署', '会话 1', '会话 3', '会话 5']);
-    await sessionAction(0, '关闭所有');
+    for (let count = names().length; count > 0; count--) await closeSession(0);
     root
       .querySelector<HTMLButtonElement>(
         host ? `.tree-host[data-host-id="${host.id}"]` : '[aria-label="本地终端"]',
@@ -1389,7 +1431,7 @@ it.each(['remote', 'local'])(
 );
 
 it.each(['remote', 'local'])(
-  'duplicates the right-clicked inactive %s tab as a fresh single-pane session',
+  'ignores right-click and opens a fresh single-pane %s session from the plus button',
   async (target) => {
     const terminals = useTerminalsStore();
     const host = target === 'remote' ? useHostsStore().catalog!.hosts[0]! : null;
@@ -1417,8 +1459,8 @@ it.each(['remote', 'local'])(
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await nextTick();
     expect(terminals.active).toBe(previous);
-    root.querySelector<HTMLButtonElement>('[aria-label="关闭标签菜单"]')!.click();
-    await sessionAction(0, '复制');
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    await newSession();
     expect(terminals.tabs).toHaveLength(3);
     const added = terminals.tabs[2]!;
     expect(added.key).not.toBe(source.key);
@@ -1438,7 +1480,7 @@ it.each(['remote', 'local'])(
 );
 
 it.each(['remote', 'local'])(
-  'orders the %s tab menu and closes one/all relative to the unselected right-click target',
+  'closes %s session tabs through their close buttons without affecting other hosts',
   async (kind) => {
     const terminals = useTerminalsStore();
     const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
@@ -1456,20 +1498,7 @@ it.each(['remote', 'local'])(
       terminals.update(pane.key, { sessionId: pane.key });
     useWorkspaceStore().navigate('terminals', host?.id ?? '');
     await flush();
-    root
-      .querySelectorAll('.terminal-tab')[1]!
-      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    await nextTick();
-    expect(terminals.active).toBe(selected!.key);
-    const menu = root.querySelector('[role="menu"]')!;
-    expect([...menu.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual([
-      '复制',
-      '重命名',
-      '关闭所有',
-      '关闭',
-    ]);
-    menu.querySelectorAll<HTMLButtonElement>('button')[3]!.click();
-    await flush();
+    await closeSession(1);
     expect(terminals.tabs.map((tab) => tab.key)).toEqual([other.key, first!.key, selected!.key]);
     expect(terminals.active).toBe(selected!.key);
     expect(terminals.focused).toBe(selected!.panes[0]!.key);
@@ -1480,7 +1509,7 @@ it.each(['remote', 'local'])(
     terminals.update(added.panes[0]!.key, { sessionId: added.panes[0]!.key });
     await flush();
     expect(terminals.active).toBe(added.key);
-    await sessionAction(0, '关闭所有');
+    for (let count = 0; count < 3; count++) await closeSession(0);
     expect(terminals.tabs.map((tab) => tab.key)).toEqual([other.key]);
     expect(terminals.active).toBe('');
     expect(terminals.focused).toBe('');
@@ -1491,7 +1520,7 @@ it.each(['remote', 'local'])(
   },
 );
 
-it('reports the terminal limit when duplicating and keeps the existing sessions selected', async () => {
+it('reports the terminal limit from the plus button and keeps the existing sessions selected', async () => {
   const terminals = useTerminalsStore();
   const host = useHostsStore().catalog!.hosts[0]!;
   for (let index = 0; index < 32; index++) terminals.open(host);
@@ -1500,7 +1529,7 @@ it('reports the terminal limit when duplicating and keeps the existing sessions 
     focused = terminals.focused;
   useWorkspaceStore().navigate('terminals', host.id);
   await flush();
-  await sessionAction(0, '复制');
+  await newSession();
   expect(terminals.tabs).toHaveLength(32);
   expect(JSON.stringify(terminals.tabs)).toBe(original);
   expect(terminals.active).toBe(active);
@@ -1545,7 +1574,7 @@ it('restores each host tool, file connection and terminal session through primar
     };
   root.querySelector<HTMLButtonElement>('.tree-host')!.click();
   await flush();
-  await sessionAction(0, '复制');
+  await newSession();
   const lastSession = terminals.active;
   const selectHost = async (id: string) => {
     const name = id ? `Host ${id}` : '本地设备';
@@ -1603,17 +1632,32 @@ it('restores each host tool, file connection and terminal session through primar
 });
 
 it.each([
-  ['关闭', ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'], 'host:'],
   [
+    '主机',
+    '关闭',
+    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    'host:',
+  ],
+  [
+    '主机',
     '关闭右侧',
     ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
     'host:',
   ],
-  ['关闭其它', ['host:a'], 'host:a'],
-  ['关闭所有', [], ''],
+  ['主机', '关闭其它', ['host:a'], 'host:a'],
+  ['主机', '关闭所有', [], ''],
+  [
+    '全部主机',
+    '关闭',
+    ['extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    'extension:cn.hiboot.plugins.assistant:assistant:',
+  ],
+  ['全部主机', '关闭右侧', ['host:', 'host:a'], 'host:a'],
+  ['全部主机', '关闭其它', ['host:', 'host:a'], 'host:a'],
+  ['全部主机', '关闭所有', [], ''],
 ])(
-  'workspace tab menu %s closes sessions only for the removed host workspaces',
-  async (label, keys, active) => {
+  'workspace tab menu (%s / %s) closes sessions only for the removed host workspaces',
+  async (target, label, keys, active) => {
     const workspace = useWorkspaceStore(),
       terminals = useTerminalsStore(),
       files = useFilesStore();
@@ -1629,7 +1673,10 @@ it.each([
     workspace.navigate('files', 'a');
     workspace.navigate('assistant');
     workspace.navigate('credentials');
-    workspace.activate('host:');
+    const peerPageActive = target === '全部主机' && ['关闭右侧', '关闭其它'].includes(label);
+    if (peerPageActive) workspace.activate('host:a');
+    const beforeMenu = peerPageActive ? 'credentials:' : 'host:';
+    workspace.activate(beforeMenu);
     files.connections.a = {
       host: useHostsStore().catalog!.hosts[0]!,
       id: 'existing-files',
@@ -1642,7 +1689,9 @@ it.each([
     };
     await flush();
     const hostId = label === '关闭右侧' ? '' : 'a';
-    root.querySelector(`.workspace-tab[data-host-id="${hostId}"]`)!.dispatchEvent(
+    const selector =
+      target === '全部主机' ? '.workspace-group-tab' : `.workspace-tab[data-host-id="${hostId}"]`;
+    root.querySelector(selector)!.dispatchEvent(
       new MouseEvent('contextmenu', {
         bubbles: true,
         cancelable: true,
@@ -1651,7 +1700,7 @@ it.each([
       }),
     );
     await nextTick();
-    expect(workspace.active).toBe('host:');
+    expect(workspace.active).toBe(beforeMenu);
     const menu = document.querySelector('[role="menu"][aria-label="工作区标签操作"]')!;
     const buttons = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([

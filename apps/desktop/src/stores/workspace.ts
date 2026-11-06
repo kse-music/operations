@@ -25,6 +25,7 @@ export function pluginPageKey(
   return `extension:${tab.pluginId}:${tab.contributionId}:${tab.hostId}`;
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';
+export const allHostsTabKey = 'all-hosts';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const tabs = ref<WorkspaceTab[]>([]),
     active = ref(''),
@@ -139,10 +140,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   const closing = ref<string[]>([]);
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
-    const index = tabs.value.findIndex((t) => t.key === key);
+    const hostGroup = key === allHostsTabKey;
+    const index = hostGroup
+      ? tabs.value.findIndex(isHostTab)
+      : tabs.value.findIndex((t) => t.key === key);
     if (index < 0) return;
     const targetIsHost = isHostTab(tabs.value[index]!);
     const targets = tabs.value.filter((tab, i) => {
+      if (hostGroup) return scope === 'all' || isHostTab(tab) === (scope === 'current');
       switch (scope) {
         case 'current':
           return tab.key === key;
@@ -213,8 +218,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (!tabs.value.length) {
       active.value = '';
       module.value = 'hosts';
-    } else if (active.value && !tabs.value.some((tab) => tab.key === active.value))
-      activate(tabs.value[Math.min(index, tabs.value.length - 1)]!.key);
+    } else if (active.value && !tabs.value.some((tab) => tab.key === active.value)) {
+      const rememberedHost =
+        hostGroup && (scope === 'right' || scope === 'others')
+          ? tabs.value.find((tab) => isHostTab(tab) && tab.hostId === hostId.value)
+          : undefined;
+      activate((rememberedHost ?? tabs.value[Math.min(index, tabs.value.length - 1)])!.key);
+    }
   }
   return {
     tabs,

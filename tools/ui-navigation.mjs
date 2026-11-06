@@ -19,11 +19,6 @@ export async function terminalAction(page, pane, name) {
     .click();
 }
 
-export async function terminalTabAction(page, name, tab = page.locator('.terminal-tab.active')) {
-  await tab.click({ button: 'right' });
-  await page.getByRole('menuitem', { name, exact: true }).click();
-}
-
 export async function showHostTree(page) {
   await page.locator('.module-navigation [data-module="hosts"]').click();
   if (!(await page.locator('.sidebar').isVisible())) {

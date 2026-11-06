@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { X } from '@lucide/vue';
-const props = defineProps<{ title: string; busy?: boolean; wide?: boolean }>();
+const props = defineProps<{
+  title: string;
+  busy?: boolean;
+  wide?: boolean;
+  focusHeading?: boolean;
+}>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
 onMounted(() => dialog.value?.showModal());
@@ -13,7 +18,7 @@ function close(): void {
   <Teleport to="body">
     <dialog ref="dialog" :class="['modal', { wide }]" :aria-label="title" @cancel.prevent="close">
       <header class="modal-heading">
-        <h2>{{ title }}</h2>
+        <h2 :tabindex="focusHeading ? -1 : undefined" :autofocus="focusHeading">{{ title }}</h2>
         <button
           class="icon-button"
           type="button"
@@ -29,3 +34,9 @@ function close(): void {
     </dialog>
   </Teleport>
 </template>
+
+<style scoped>
+.modal-heading h2[autofocus]:focus {
+  outline: none;
+}
+</style>

@@ -26,7 +26,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.restoreAllMocks();
 });
-it('loads container details without secrets and delegates image removal to the host confirmation', async () => {
+it('shows container detail tabs, scopes environment values to their tab and preserves action confirmation', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -42,22 +42,37 @@ it('loads container details without secrets and delegates image removal to the h
     trust: null,
     session: { id: 'lease', hostId: 'host', transportId: 'transport', routeHostIds: ['host'] },
   };
+  let statsAvailable = true;
   api.query.mockImplementation(async (_id, request) => ({
-    success: true,
-    message: null,
+    success: request.kind !== 'container_stats' || statsAvailable,
+    message: request.kind === 'container_stats' && !statsAvailable ? '资源查询失败' : null,
     code: null,
     detail:
       request.kind === 'capabilities'
         ? { dockerState: 'running' }
         : request.kind === 'container_details'
-          ? { id: 'container', image: 'owned-image', environment: ['TOKEN=[已隐藏]'] }
+          ? {
+              id: 'container',
+              image: 'owned-image',
+              state: { Status: 'running', Health: { Status: 'healthy' } },
+              ports: { '8080/tcp': [{ HostIp: '::', HostPort: '8081' }], '8443/tcp': null },
+              mounts: [{ Type: 'bind', Source: '/srv/fixture', Destination: '/data', RW: false }],
+              restartPolicy: { Name: 'on-failure', MaximumRetryCount: 3 },
+              environment: [request.revealEnv ? 'TOKEN=fixture=value' : 'TOKEN=[已隐藏]'],
+              environmentRevealed: request.revealEnv,
+            }
           : null,
     records:
       request.kind === 'containers'
-        ? [{ ID: 'container', Names: 'owned-container' }]
+        ? [
+            { ID: 'container', Names: 'owned-container', State: 'running' },
+            { ID: 'exited', Names: 'exited-container', State: 'exited' },
+          ]
         : request.kind === 'images'
           ? [{ ID: 'image', Repository: 'owned-image' }]
-          : [],
+          : request.kind === 'container_stats'
+            ? [{ CPUPerc: '12.34%', MemUsage: '42 MiB / 128 MiB' }]
+            : [],
   }));
   root = document.createElement('div');
   document.body.append(root);
@@ -65,9 +80,16 @@ it('loads container details without secrets and delegates image removal to the h
   app = createApp(Docker, { hostId: 'host', onShell: shell }).use(pinia);
   app.mount(root);
   await settle();
+  const actionLabels = (id: string) =>
+    [...root.querySelectorAll(`[data-ops-target="${id}"] .ops-row-actions button`)].map((button) =>
+      button.textContent?.trim(),
+    );
+  expect(actionLabels('container')).toEqual(['详情', '停止', '删除', '日志', 'Shell']);
+  expect(actionLabels('exited')).toEqual(['详情', '启动', '删除', '日志', 'Shell']);
+  expect(root.querySelector('.row-action-menu')).toBeNull();
   const click = async (label: string) => {
     const button = [...document.querySelectorAll('button')].find(
-      (node) => node.textContent?.trim() === label,
+      (node) => node.textContent?.trim() === label || node.getAttribute('aria-label') === label,
     );
     expect(button).toBeDefined();
     button!.click();
@@ -80,9 +102,69 @@ it('loads container details without secrets and delegates image removal to the h
     revealEnv: false,
     confirmed: false,
   });
-  expect(document.querySelector('dialog')?.textContent).toContain('TOKEN=[已隐藏]');
-  document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  const detail = () => document.querySelector('dialog[aria-label="容器详情"]');
+  const panel = () => detail()?.querySelector('[role="tabpanel"]');
+  const selectTab = async (label: string) => {
+    const tab = [...(detail()?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])].find(
+      (button) => button.textContent?.trim() === label,
+    );
+    expect(tab).toBeDefined();
+    tab!.click();
+    await settle();
+  };
+  expect(panel()?.textContent).toContain('运行中');
+  expect(panel()?.textContent).toContain('健康');
+  expect(panel()?.textContent).toContain('异常退出时重启');
+  expect(panel()?.querySelector('pre')).toBeNull();
+  expect(api.query.mock.calls.some(([, request]) => request.revealEnv)).toBe(false);
+  expect(api.query.mock.calls.some(([, request]) => request.kind === 'container_stats')).toBe(
+    false,
+  );
+  await selectTab('资源使用');
+  expect(api.query).toHaveBeenCalledWith('lease', { kind: 'container_stats', id: 'container' });
+  expect(panel()?.textContent).toContain('12.34%');
+  await selectTab('端口映射');
+  expect(panel()?.textContent).toContain('8080/tcp');
+  expect(panel()?.textContent).toContain('8081');
+  expect(panel()?.textContent).toContain('未发布到主机');
+  await selectTab('挂载');
+  expect(panel()?.textContent).toContain('/srv/fixture');
+  expect(panel()?.textContent).toContain('/data');
+  expect(panel()?.textContent).toContain('只读');
+  await selectTab('环境变量');
+  expect(api.query).toHaveBeenCalledWith('lease', {
+    kind: 'container_details',
+    id: 'container',
+    revealEnv: true,
+    confirmed: false,
+  });
+  expect(panel()?.querySelector('dt')?.textContent).toBe('TOKEN');
+  expect(panel()?.querySelector('code')?.textContent).toBe('fixture=value');
+  expect(document.querySelectorAll('dialog')).toHaveLength(1);
+  await selectTab('概览');
+  expect(detail()?.textContent).not.toContain('fixture=value');
+  statsAvailable = false;
+  await selectTab('资源使用');
+  expect(detail()?.querySelector('[role="alert"]')?.textContent).toContain('资源查询失败');
+  await selectTab('概览');
+  expect(panel()?.textContent).toContain('owned-image');
+  let finishEnvironment: (value: unknown) => void = () => {};
+  api.query.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishEnvironment = resolve;
+      }),
+  );
+  await selectTab('环境变量');
+  expect(panel()?.querySelector('[role="status"]')?.textContent).toContain('正在读取');
+  await click('关闭对话框');
+  finishEnvironment({
+    success: true,
+    detail: { id: 'container', environmentRevealed: true, environment: ['TOKEN=late-fixture'] },
+    records: [],
+  });
   await settle();
+  expect(document.body.textContent).not.toContain('late-fixture');
   await click('日志');
   expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe(
     'owned-container · 日志',
@@ -105,6 +187,33 @@ it('loads container details without secrets and delegates image removal to the h
   expect(api.query.mock.calls.some(([, request]) => request.kind === 'container_action')).toBe(
     false,
   );
+  const exitedRow = () => root.querySelector('[data-ops-target="exited"]')!;
+  const confirmExitedAction = async (label: string) => {
+    const action = [...exitedRow().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === label,
+    )!;
+    action.click();
+    await settle();
+    const target = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
+    target.value = 'exited';
+    target.dispatchEvent(new Event('input'));
+    await settle();
+    await click('确认执行');
+  };
+  await confirmExitedAction('启动');
+  await confirmExitedAction('删除');
+  expect(api.query).toHaveBeenCalledWith('lease', {
+    kind: 'container_action',
+    id: 'exited',
+    action: 'start',
+    confirmed: true,
+  });
+  expect(api.query).toHaveBeenCalledWith('lease', {
+    kind: 'container_action',
+    id: 'exited',
+    action: 'remove',
+    confirmed: true,
+  });
   await click('Shell');
   expect(shell).toHaveBeenCalledWith(expect.objectContaining({ id: 'host' }), {
     id: 'container',
@@ -113,7 +222,8 @@ it('loads container details without secrets and delegates image removal to the h
   });
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
-  await click('删除镜像');
+  expect(actionLabels('image')).toEqual(['删除']);
+  await click('删除');
   expect(document.querySelector('dialog')).toBeNull();
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   expect(api.query).toHaveBeenCalledWith('lease', {
@@ -122,7 +232,7 @@ it('loads container details without secrets and delegates image removal to the h
     confirmed: true,
   });
   api.query.mockRejectedValueOnce({ code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' });
-  await click('删除镜像');
+  await click('删除');
   expect(root.querySelector('[role="alert"]')).toBeNull();
   api.query.mockResolvedValue({
     success: false,

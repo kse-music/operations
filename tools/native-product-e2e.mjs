@@ -1,5 +1,5 @@
 import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
-import { terminalAction, terminalTabAction } from './ui-navigation.mjs';
+import { terminalAction } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { navigateWorkspace, selectHostWorkspace, showHostTree } from './ui-navigation.mjs';
 import path from 'node:path';
@@ -380,11 +380,18 @@ export async function productChecks(context) {
   dialog = page.getByRole('dialog', { name: '确认退出 ServerDeck', exact: true });
   await dialog.waitFor();
   await page.screenshot({ path: path.join(artifacts, 'product-close-review.png') });
-  await dialog.getByRole('button', { name: '继续使用', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'hidden' });
   closeNativeWindow(processId());
   dialog = page.getByRole('dialog', { name: '确认退出 ServerDeck', exact: true });
   await dialog.waitFor();
-  await dialog.getByRole('button', { name: '继续使用', exact: true }).click();
+  const closeExitReview = dialog.getByRole('button', { name: '关闭对话框', exact: true });
+  assert(await dialog.getByRole('heading').evaluate((node) => document.activeElement === node));
+  assert(!(await closeExitReview.evaluate((node) => node.matches(':focus-visible'))));
+  await page.keyboard.press('Tab');
+  assert(await closeExitReview.evaluate((node) => node.matches(':focus-visible')));
+  await closeExitReview.click();
+  await dialog.waitFor({ state: 'hidden' });
   await cleanup();
   registerCleanup(undefined);
   await page.reload();
@@ -395,7 +402,7 @@ export async function productChecks(context) {
   await page.locator('.tree-host').filter({ hasText: originalHost.name }).click();
   await page.locator(`.terminal-pane:visible[data-host-id="${hostId}"]`).waitFor();
   if ((await page.locator('.terminal-pane').count()) === previousPanes)
-    await terminalTabAction(page, '复制');
+    await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
   await page
     .locator('.terminal-pane:visible')
     .locator('.xterm-container[data-state="connected"]')
