@@ -107,33 +107,25 @@ useErrorNotifications(() =>
           {{ store.busy ? '正在读取凭据…' : '凭据列表暂不可用。' }}
         </p>
       </section>
-      <div class="asset-stack">
-        <section class="asset-panel" aria-labelledby="credential-store-title">
-          <h2 id="credential-store-title" class="asset-title">
-            <ShieldCheck :size="16" aria-hidden="true" />系统凭据库
-          </h2>
-          <p class="subtle">待清理 {{ store.catalog?.pendingSecretDeletions ?? '—' }} 项</p>
-          <div class="toolbar">
-            <button class="button" :disabled="store.busy" @click="check">检查系统凭据库</button>
-            <button
-              class="button"
-              :disabled="store.busy"
-              @click="store.run(hostsApi.cleanup, '清理检查已完成。')"
-            >
-              重试清理旧秘密
-            </button>
-          </div>
-          <p v-if="status?.available" class="asset-feedback success" role="status">
-            {{ status.message }}
-          </p>
-        </section>
-        <section class="asset-panel" aria-labelledby="ssh-agent-title">
-          <h2 id="ssh-agent-title">系统 SSH Agent</h2>
-          <p class="subtle">
-            在主机认证方式中选择“系统 SSH Agent”。连接前请启动 Agent 并加载密钥。
-          </p>
-        </section>
-      </div>
+      <section class="asset-panel" aria-labelledby="credential-store-title">
+        <h2 id="credential-store-title" class="asset-title">
+          <ShieldCheck :size="16" aria-hidden="true" />系统凭据库
+        </h2>
+        <p class="subtle">待清理 {{ store.catalog?.pendingSecretDeletions ?? '—' }} 项</p>
+        <div class="toolbar">
+          <button class="button" :disabled="store.busy" @click="check">检查系统凭据库</button>
+          <button
+            class="button"
+            :disabled="store.busy"
+            @click="store.run(hostsApi.cleanup, '清理检查已完成。')"
+          >
+            重试清理旧秘密
+          </button>
+        </div>
+        <p v-if="status?.available" class="asset-feedback success" role="status">
+          {{ status.message }}
+        </p>
+      </section>
     </div>
   </section>
   <CredentialDialog

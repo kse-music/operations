@@ -21,17 +21,13 @@
   white-space: nowrap;
 }
 .asset-columns,
-.asset-stack,
 .asset-panel {
   display: grid;
   min-width: 0;
 }
-.asset-columns,
-.asset-stack {
+.asset-columns {
   gap: 20px;
   align-items: start;
-}
-.asset-columns {
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
 }
 .asset-panel {

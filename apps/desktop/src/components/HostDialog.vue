@@ -11,12 +11,21 @@ const emit = defineEmits<{ close: []; saved: [host: Host] }>();
 const store = useHostsStore();
 const application = useApplicationStore();
 const draft = reactive(hostInput(props.host, application.state?.config.connectTimeoutSecs));
-if (!props.host) draft.groupId = props.groupId ?? null;
+if (!props.host) {
+  draft.groupId = props.groupId ?? null;
+  draft.authType = 'password';
+}
 if (!props.host && application.state?.config.product)
   draft.ssh = JSON.parse(
     JSON.stringify(application.state.config.product.sshDefaults),
   ) as typeof draft.ssh;
 const newCredential = ref(false);
+const authSelection = computed({
+  get: () => (draft.authType === 'agent' ? '' : draft.authType),
+  set: (authType: '' | 'password' | 'private_key') => {
+    if (authType) draft.authType = authType;
+  },
+});
 const proxyMode = computed({
   get: () => draft.ssh.proxy?.kind ?? 'direct',
   set: (kind: 'direct' | 'socks5' | 'http_connect') => {
@@ -89,8 +98,8 @@ function credentialSaved(id: string): void {
           >用户名<input v-model="draft.username" required maxlength="128" autocomplete="off"
         /></label>
         <label
-          >认证方式<select v-model="draft.authType" aria-label="认证方式">
-            <option value="agent">系统 SSH Agent</option>
+          >认证方式<select v-model="authSelection" aria-label="认证方式">
+            <option v-if="draft.authType === 'agent'" value="" disabled hidden>沿用当前认证</option>
             <option value="password">SSH 密码</option>
             <option value="private_key">SSH 私钥</option>
           </select></label
@@ -118,8 +127,7 @@ function credentialSaved(id: string): void {
           </button>
         </div>
         <p v-else class="subtle full-width">
-          使用系统 SSH Agent，请预先启动 Agent 并加载密钥。不会转发
-          Agent，也不会自动回退其他认证方式。
+          当前主机使用系统 SSH Agent。可改用 SSH 密码或 SSH 私钥。
         </p>
         <details class="full-width">
           <summary>SSH 高级连接设置</summary>

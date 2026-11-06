@@ -1,5 +1,15 @@
 # 主机列表操作入口调整验收
 
+## 2026-11-06 主机表单移除 SSH Agent 选项
+
+`HostDialog.vue` 的认证下拉框仅提供 SSH 密码和 SSH 私钥，新建时默认使用密码。已有 Agent 主机可沿用当前认证，或改用密码、私钥。`CredentialsView.vue` 删除引导用户选择 Agent 的旧说明。OpenSSH Config 导入继续沿用原有认证规则，已有数据无需迁移。
+
+- 前端 54 个文件、416 项测试通过。主机表单回归核对新建时的选项及保存值、旧 Agent 主机保存其他字段后的认证类型，以及切换私钥和关联凭据。TypeScript、ESLint、修改文件格式和 Vite 生产构建通过。
+- 无头 Edge 使用内存夹具验证新建下拉选项、默认密码保存和旧 Agent 主机保存其他字段的流程。首次启动遇到 Crashpad 管道错误，允许隔离浏览器进程运行后通过。
+- `node tools/tauri.mjs build --debug --no-bundle` 通过，更新 Windows 调试程序。首次经 npm 入口调用时未传入调试和跳过打包参数，Release 编译完成，随后尝试下载 NSIS 被网络权限阻止，未生成安装包。
+
+未复验真实 SSH、原生 WebView2 交互或跨平台行为。当前无新增实现依赖。
+
 ## 2026-11-06 OpenSSH 导入弹窗高度修复
 
 将导入弹窗外层的三行 Grid 改为纵向 Flex，标题和底部操作区不收缩，内容区设置 `min-height: 0` 并继续独立滚动。初始状态随内容收缩，长预览和小窗口仍受视口最大高度限制。修改仅涉及 `styles/hosts.css`；`tools/ui-layout-e2e.mjs` 增加无多余纵向空白和底部操作区可见的回归断言，不改变导入解析、IPC、配置或数据。

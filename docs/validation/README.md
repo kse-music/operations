@@ -2,6 +2,8 @@
 
 最新：[AppImage 本地终端 Python 环境修复](workspace/VALIDATION_INTERACTIONS.md#2026-11-06-appimage-本地终端-python-环境修复)。
 
+最新：[主机表单移除 SSH Agent 选项](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-主机表单移除-ssh-agent-选项)。
+
 最新：[Linux 终端下划线裁切修复](terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-linux-终端下划线裁切修复)。
 
 最新：[平台版本更新为 0.2.0](foundation/VALIDATION_BUILD_CACHE.md#2026-11-06-平台版本更新为-020)。

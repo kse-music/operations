@@ -42,6 +42,9 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   await nextTick();
   const form = document.querySelector('dialog form') as HTMLFormElement;
   expect(form.textContent).not.toMatch(/标签|备注|收藏|分组/);
+  const auth = form.querySelector<HTMLSelectElement>('[aria-label="认证方式"]')!;
+  expect(Array.from(auth.options, ({ value }) => value)).toEqual(['password', 'private_key']);
+  expect(auth.value).toBe('password');
   const fields = form.querySelectorAll<HTMLInputElement>('.form-grid > label input');
   expect(fields[0]!.required).toBe(false);
   expect(fields[0]!.value).toBe('');
@@ -75,6 +78,8 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
       hostname: '192.0.2.10',
       port,
       username: 'ops',
+      authType: 'password',
+      credentialId: null,
       tags: [],
       description: '',
       favorite: false,
@@ -85,54 +90,93 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   expect(store.catalog?.hosts).toHaveLength(1);
 });
 
-it('edits connection fields without exposing or erasing legacy metadata', async () => {
-  pinia = createPinia();
-  setActivePinia(pinia);
-  const store = useHostsStore();
-  const host: Host = {
-    ...hostInput(),
-    id: 'existing-host',
-    name: 'Existing',
-    hostname: 'server.example',
-    username: 'ops',
-    tags: ['legacy-tag'],
-    description: 'legacy note',
-    favorite: true,
-    groupId: 'legacy-folder',
-    createdAt: '',
-    updatedAt: '',
-  };
-  store.catalog = { hosts: [host], groups: [], credentials: [], pendingSecretDeletions: 0 };
-  const { saved, close } = mountDialog(host);
-  await nextTick();
-  const form = document.querySelector('dialog form') as HTMLFormElement;
-  expect(form.textContent).not.toMatch(/标签|备注|收藏|分组/);
-  expect(form.querySelector('textarea, input[type="checkbox"]')).toBeNull();
-  const name = form.querySelector<HTMLInputElement>('input')!;
-  name.value = 'Updated';
-  name.dispatchEvent(new Event('input', { bubbles: true }));
-  await nextTick();
-  const update = vi.spyOn(hostsApi, 'update').mockImplementation(async (_id, input) => ({
-    ...host,
-    ...input,
-  }));
-  vi.spyOn(hostsApi, 'list').mockImplementation(async () => ({
-    ...store.catalog!,
-    hosts: [await update.mock.results[0]!.value],
-  }));
-  form.querySelector<HTMLButtonElement>('[type="submit"]')!.click();
-  await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
-  await vi.waitFor(() => expect(store.busy).toBe(false));
-  expect(update).toHaveBeenCalledExactlyOnceWith(host.id, {
-    ...hostInput(host),
-    name: 'Updated',
-  });
-  expect(store.catalog?.hosts[0]).toMatchObject({
-    name: 'Updated',
-    tags: ['legacy-tag'],
-    description: 'legacy note',
-    favorite: true,
-  });
-  expect(saved).toHaveBeenCalledOnce();
-  expect(close).toHaveBeenCalledOnce();
-});
+it.each(['agent', 'private_key'] as const)(
+  'saves an existing Agent host with %s auth and preserves legacy metadata',
+  async (authType) => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    const store = useHostsStore();
+    const host: Host = {
+      ...hostInput(),
+      id: 'existing-host',
+      name: 'Existing',
+      hostname: 'server.example',
+      username: 'ops',
+      authType: 'agent',
+      tags: ['legacy-tag'],
+      description: 'legacy note',
+      favorite: true,
+      groupId: 'legacy-folder',
+      createdAt: '',
+      updatedAt: '',
+    };
+    store.catalog = {
+      hosts: [host],
+      groups: [],
+      credentials: [
+        {
+          id: 'ssh-key',
+          name: 'SSH key',
+          kind: 'private_key',
+          keyPath: null,
+          hasSecret: true,
+          hostCount: 0,
+          revision: 1,
+        },
+      ],
+      pendingSecretDeletions: 0,
+    };
+    const { saved, close } = mountDialog(host);
+    await nextTick();
+    const form = document.querySelector('dialog form') as HTMLFormElement;
+    expect(form.textContent).not.toMatch(/标签|备注|收藏|分组/);
+    expect(form.querySelector('textarea, input[type="checkbox"]')).toBeNull();
+    const auth = form.querySelector<HTMLSelectElement>('[aria-label="认证方式"]')!;
+    expect(
+      Array.from(auth.options)
+        .filter((option) => !option.disabled)
+        .map(({ value }) => value),
+    ).toEqual(['password', 'private_key']);
+    expect(auth.selectedOptions[0]?.textContent).toBe('沿用当前认证');
+    expect(form.textContent).toContain('当前主机使用系统 SSH Agent');
+    expect(form.querySelector('[aria-label="安全凭据引用"]')).toBeNull();
+    if (authType === 'private_key') {
+      auth.value = authType;
+      auth.dispatchEvent(new Event('change', { bubbles: true }));
+      await nextTick();
+      expect(form.textContent).not.toContain('当前主机使用系统 SSH Agent');
+      const credential = form.querySelector<HTMLSelectElement>('[aria-label="安全凭据引用"]')!;
+      credential.value = 'ssh-key';
+      credential.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const name = form.querySelector<HTMLInputElement>('input')!;
+    name.value = 'Updated';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+    const update = vi.spyOn(hostsApi, 'update').mockImplementation(async (_id, input) => ({
+      ...host,
+      ...input,
+    }));
+    vi.spyOn(hostsApi, 'list').mockImplementation(async () => ({
+      ...store.catalog!,
+      hosts: [await update.mock.results[0]!.value],
+    }));
+    form.querySelector<HTMLButtonElement>('[type="submit"]')!.click();
+    await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(store.busy).toBe(false));
+    expect(update).toHaveBeenCalledExactlyOnceWith(host.id, {
+      ...hostInput(host),
+      name: 'Updated',
+      authType,
+      credentialId: authType === 'private_key' ? 'ssh-key' : null,
+    });
+    expect(store.catalog?.hosts[0]).toMatchObject({
+      name: 'Updated',
+      tags: ['legacy-tag'],
+      description: 'legacy note',
+      favorite: true,
+    });
+    expect(saved).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+  },
+);
