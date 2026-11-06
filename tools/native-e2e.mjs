@@ -1,4 +1,4 @@
-import { hostTreeAction, reloadHosts } from './ui-navigation.mjs';
+import { hostTreeAction, navigateWorkspace, reloadHosts, showHostTree } from './ui-navigation.mjs';
 // Real packaged WebView2 + Rust IPC + SQLite + OS credential store. No IPC mocking.
 // Test config and browser debugging apply only to a copied, isolated test executable.
 import { spawn, spawnSync } from 'node:child_process';
@@ -7,8 +7,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import net from 'node:net';
 import assert from 'node:assert/strict';
-import { showHostTree } from './ui-navigation.mjs';
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
 
 if (process.platform !== 'win32')
@@ -92,13 +91,6 @@ async function start() {
   }
   assert(connected, 'WebView2 CDP did not start');
   browser = await chromium.connectOverCDP(websocket);
-  await mkdir(path.join(artifacts, 'downloads'), { recursive: true });
-  const cdp = await browser.newBrowserCDPSession();
-  await cdp.send('Browser.setDownloadBehavior', {
-    behavior: 'allow',
-    downloadPath: path.join(artifacts, 'downloads'),
-    eventsEnabled: true,
-  });
   page = browser.contexts()[0].pages()[0];
   assert(page, 'missing native WebView page');
   page.setDefaultTimeout(10000);
@@ -145,7 +137,7 @@ async function showHosts() {
   await showHostTree(page);
 }
 async function showCredentials() {
-  await page.getByRole('navigation').getByRole('button', { name: '安全凭据', exact: true }).click();
+  await navigateWorkspace(page, '安全凭据');
 }
 async function saveHost(title) {
   const form = dialog(title);
@@ -158,8 +150,21 @@ async function newCredential(name, kind, secret) {
   const form = dialog('新建凭据');
   await form.getByLabel('凭据名称', { exact: true }).fill(name);
   await form.getByLabel('凭据类型', { exact: true }).selectOption(kind);
-  if (kind === 'private_key')
-    await form.getByLabel('本地私钥路径', { exact: true }).fill('~/.ssh/serverdeck-e2e-key');
+  if (kind === 'private_key') {
+    const { privateKey } = generateKeyPairSync('ed25519');
+    await form.getByLabel('选择私钥文件', { exact: true }).setInputFiles({
+      name: 'e2e-ed25519.key',
+      mimeType: 'application/octet-stream',
+      buffer: Buffer.from(
+        privateKey.export({
+          type: 'pkcs8',
+          format: 'pem',
+          cipher: 'aes-256-cbc',
+          passphrase: secret,
+        }),
+      ),
+    });
+  }
   await form
     .getByLabel(kind === 'password' ? 'SSH 密码' : '加密私钥口令（可选）', { exact: true })
     .fill(secret);
@@ -219,6 +224,10 @@ try {
     const cards = page.locator('.credential-list li');
     assert.equal(await cards.count(), 2);
     await cards
+      .filter({ hasText: 'E2E 私钥' })
+      .getByText('私钥已导入系统凭据库', { exact: true })
+      .waitFor();
+    await cards
       .filter({ hasText: 'E2E 密码' })
       .getByRole('button', { name: '编辑', exact: true })
       .click();
@@ -241,7 +250,7 @@ try {
     );
     const log = await readFile(path.join(artifacts, 'logs', 'serverdeck.log'), 'utf8');
     assert(!log.includes(secret) && !log.includes(passphrase), 'secret found in logs');
-    results.push('native password/passphrase store + host link + no secret readback/leak');
+    results.push('native password and private key import + host link + no secret readback/leak');
     await stop();
     await start();
     await row('E2E-Host').waitFor();
@@ -252,7 +261,7 @@ try {
     );
     results.push('native process restart restores SQLite data');
     await showHostTree(page);
-    await page.getByRole('button', { name: '导入 OpenSSH', exact: true }).click();
+    await hostTreeAction(page, null, '导入 OpenSSH Config…');
     form = dialog('导入 OpenSSH Config');
     await form
       .getByLabel('OpenSSH Config 内容', { exact: true })
@@ -268,39 +277,18 @@ try {
     await form.waitFor({ state: 'hidden' });
     await row('imported-new').waitFor();
     results.push('native OpenSSH preview + duplicates + unsafe option blocking + selective import');
-    await page.getByRole('button', { name: '导出配置', exact: true }).click();
-    form = dialog('导出非敏感主机配置');
-    const exported = await form.getByLabel('导出内容', { exact: true }).inputValue();
-    assert.equal(JSON.parse(exported).hosts.length, 3);
-    for (const forbidden of [secret, passphrase, 'credentialId', 'secretRef', 'keyPath'])
-      assert(!exported.includes(forbidden));
-    await form.getByRole('button', { name: '下载 JSON', exact: true }).click();
-    let downloaded;
-    const downloadDeadline = Date.now() + 10000;
-    while (Date.now() < downloadDeadline) {
-      try {
-        downloaded = await readFile(
-          path.join(artifacts, 'downloads', 'serverdeck-hosts.json'),
-          'utf8',
-        );
-        break;
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw error;
-      }
-      await delay(100);
+    assert.equal(await page.locator('.host-list-heading button').count(), 0);
+    assert.equal(await page.getByLabel('选择 ServerDeck 主机文件', { exact: true }).count(), 0);
+    for (const command of ['hosts_export', 'hosts_import_archive']) {
+      await assert.rejects(invoke(command, { text: '{}' }), /not allowed|not found/);
     }
-    assert.equal(downloaded, exported, 'native download must match the non-sensitive export');
-    await writeFile(path.join(artifacts, 'export.json'), exported);
-    await form.getByRole('button', { name: '关闭', exact: true }).click();
-    results.push('native non-sensitive JSON export and actual download');
+    const catalog = await invoke('host_list');
+    assert.equal(catalog.hosts.length, 3);
     await page.screenshot({ path: path.join(artifacts, 'hosts.png') });
-    for (const name of ['E2E-Host', 'E2E-Host 副本', 'imported-new']) {
-      const host = (await invoke('host_list')).hosts.find((item) => item.name === name);
-      await invoke('host_delete', { id: host.id });
-    }
+    for (const host of catalog.hosts) await invoke('host_delete', { id: host.id });
     await reloadHosts(page);
     await page.getByText('尚未添加主机', { exact: true }).waitFor();
-    results.push('native host deletion via real IPC in the isolated test scope');
+    results.push('host JSON controls and commands are unavailable');
     await showCredentials();
     for (const name of ['E2E 密码', 'E2E 私钥']) {
       await page

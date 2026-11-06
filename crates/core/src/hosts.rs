@@ -102,7 +102,7 @@ impl HostInput {
     }
 
     pub fn normalize(mut self) -> Result<Self, Error> {
-        self.ssh.normalize()?;
+        self.ssh.normalize_host()?;
         self.name = self.name.trim().to_owned();
         if !self.name.is_empty() {
             validate_name(&self.name)?;
@@ -200,6 +200,7 @@ pub struct CredentialInput {
     pub name: String,
     pub kind: AuthType,
     pub key_path: Option<String>,
+    pub key_data: Option<Zeroizing<String>>,
     pub secret: Option<Zeroizing<String>>,
     pub clear_secret: bool,
 }
@@ -209,17 +210,27 @@ impl CredentialInput {
         if self.kind == AuthType::Agent {
             return Err(Error::Validation("Agent 无需创建凭据"));
         }
-        match (&self.key_path, self.kind) {
-            (Some(path), AuthType::PrivateKey)
-                if !path.trim().is_empty()
-                    && path.len() <= 4096
-                    && !path.chars().any(char::is_control) => {}
-            (None, AuthType::Password) => (),
-            _ => {
-                return Err(Error::Validation(
-                    "私钥凭据需要本地文件路径；密码凭据不应包含私钥路径",
-                ));
-            }
+        if (self.key_path.is_some() || self.key_data.is_some()) && self.kind != AuthType::PrivateKey
+        {
+            return Err(Error::Validation("密码凭据不能包含私钥"));
+        }
+        if let Some(path) = &self.key_path
+            && (self.key_data.is_some()
+                || path.trim().is_empty()
+                || path.len() > 4096
+                || path.chars().any(char::is_control))
+        {
+            return Err(Error::Validation("旧式私钥路径无效或与导入文件冲突"));
+        }
+        if self
+            .key_data
+            .as_ref()
+            .is_some_and(|key| key.is_empty() || key.len() > 1024 * 1024)
+        {
+            return Err(Error::Validation("私钥文件须为 1 字节至 1 MiB"));
+        }
+        if self.key_data.is_some() && self.clear_secret {
+            return Err(Error::Validation("导入私钥时不能同时清除旧口令"));
         }
         if self
             .secret

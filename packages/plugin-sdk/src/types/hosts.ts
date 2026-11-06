@@ -39,6 +39,7 @@ export interface CredentialInput {
   name: string;
   kind: 'password' | 'private_key';
   keyPath: string | null;
+  keyData?: string | null;
   secret: string | null;
   clearSecret: boolean;
 }

@@ -61,12 +61,14 @@ fn authentication(
         AuthType::Password => {
             Authentication::Password(value.ok_or(Error::Validation("密码凭据未保存秘密"))?)
         }
-        AuthType::PrivateKey => Authentication::PrivateKey {
-            path: record
-                .public
-                .key_path
-                .ok_or(Error::Validation("私钥路径未配置"))?,
-            passphrase: value,
+        AuthType::PrivateKey => match record.public.key_path {
+            Some(path) => Authentication::PrivateKey {
+                path,
+                passphrase: value,
+            },
+            None => Authentication::ImportedKey(
+                value.ok_or(Error::Validation("系统凭据库缺少导入的私钥，请重新导入"))?,
+            ),
         },
         AuthType::Agent => Authentication::Agent,
     };
@@ -87,6 +89,7 @@ pub(crate) fn connection_plan(
         }
         let mut host = db.host(&id)?;
         host.config = host.config.normalize()?;
+        host.config.ssh.require_proxy_credentials()?;
         current = host.config.ssh.jump_host_id.clone();
         hosts.push(host);
     }

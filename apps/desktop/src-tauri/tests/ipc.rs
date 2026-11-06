@@ -668,6 +668,15 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         .deserialize::<Value>()
         .expect("json");
     assert_eq!(response["config"], saved);
+    for command in ["backup_export", "backup_preview", "backup_restore"] {
+        let error = get_ipc_response(&main, request(command, json!({}), origin))
+            .expect_err("removed backup commands must be rejected by the local main window");
+        assert!(
+            error
+                .as_str()
+                .is_some_and(|message| message.contains("not allowed"))
+        );
+    }
     assert!(
         get_ipc_response(
             &main,
@@ -828,20 +837,17 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
     assert_eq!(copy["groupId"], child["id"]);
     let catalog = invoke("host_list", json!({}));
     assert_eq!(catalog["hosts"].as_array().expect("hosts").len(), 2);
-    let export = invoke("hosts_export", json!({}));
-    assert!(!export.as_str().expect("export").contains("credentialId"));
-    let exported: Value =
-        serde_json::from_str(export.as_str().expect("export")).expect("json export");
-    assert_eq!(exported["version"], 2);
-    assert_eq!(
-        exported["groups"]
-            .as_array()
-            .expect("groups")
-            .iter()
-            .find(|g| g["id"] == child["id"])
-            .expect("child")["parentId"],
-        group["id"]
-    );
+    for (command, body) in [
+        ("hosts_export", json!({})),
+        ("hosts_import_archive", json!({"text":"{}"})),
+    ] {
+        let error = get_ipc_response(&main, request(command, body, origin))
+            .expect_err("removed host JSON commands must be unavailable");
+        assert!(error.as_str().is_some_and(|message| {
+            message.contains("not allowed") || message.contains("not found")
+        }));
+    }
+    assert_eq!(invoke("host_list", json!({})), catalog);
     let credential = invoke(
         "credential_save",
         json!({"id":null,"expectedRevision":null,"input":{"name":"IPC 私钥路径","kind":"private_key","keyPath":"~/.ssh/id_ed25519","secret":null,"clearSecret":false}}),

@@ -95,7 +95,6 @@ try {
     'files',
     'server',
     'credentials',
-    'backup',
     'settings',
     'settingsTerminal',
     'settingsShortcuts',
@@ -192,10 +191,6 @@ try {
     );
     if (view === 'credentials')
       await page.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
-    if (view === 'backup') {
-      await page.getByLabel('待恢复备份 JSON', { exact: true }).fill('invalid');
-      await page.getByRole('button', { name: '校验并预览备份', exact: true }).click();
-    }
     if (view.startsWith('settings')) {
       // Real browser preview has no Tauri IPC; saving must surface the safe desktop error.
       await page.getByRole('button', { name: '保存设置', exact: true }).click();

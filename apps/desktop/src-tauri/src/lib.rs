@@ -197,9 +197,6 @@ pub fn command_handler<R: tauri::Runtime>()
         ai_commands::ai_send,
         ai_commands::ai_execute,
         ai_commands::ai_cancel,
-        product_commands::backup_export,
-        product_commands::backup_preview,
-        product_commands::backup_restore,
         product_commands::background_tasks,
         ops_commands::ops_open,
         ops_commands::ops_connections,
@@ -264,7 +261,6 @@ pub fn command_handler<R: tauri::Runtime>()
         commands::credential_cleanup,
         commands::credential_status,
         commands::hosts_import_preview,
-        commands::hosts_import,
-        commands::hosts_export
+        commands::hosts_import
     ]
 }

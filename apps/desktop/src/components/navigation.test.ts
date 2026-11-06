@@ -21,11 +21,7 @@ afterEach(() => {
 
 it.each([
   ['terminals', ['收起主机栏'], []],
-  [
-    'credentials',
-    ['收起主机栏', '安全凭据', '模型管理', '备份恢复'],
-    ['credentials', 'models', 'backup'],
-  ],
+  ['credentials', ['收起主机栏', '安全凭据', '模型管理'], ['credentials', 'models']],
   ['plugins', ['收起主机栏', '插件管理'], ['plugins']],
   [
     'settings',

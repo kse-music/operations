@@ -574,6 +574,19 @@ async fn encrypted_and_plain_private_keys_authenticate_and_bad_passphrase_fails(
         let mut shell = open(&engine, host.clone(), auth);
         state(&mut shell, "connected").await;
         engine.close(&shell.info.id).await.expect("close");
+        let contents = key
+            .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+            .expect("key data");
+        let imported =
+            serverdeck_ssh::import_private_key(&contents, encrypted.then_some(passphrase.as_str()))
+                .expect("import");
+        // The imported authentication must succeed with no file path to open.
+        let mut imported_shell = open(&engine, host.clone(), Authentication::ImportedKey(imported));
+        state(&mut imported_shell, "connected").await;
+        engine
+            .close(&imported_shell.info.id)
+            .await
+            .expect("close imported");
         if encrypted {
             let mut bad = open(
                 &engine,

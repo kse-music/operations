@@ -1,5 +1,19 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-06 主机 JSON 导入导出下线
+
+移除主机标题栏 JSON 控件、App 文件读写、前端服务方法、Tauri 命令及其权限、应用用例和存储归档模块。SQLite 数据模型继续读取已有主机、文件夹及连接配置。已有主机缺少代理密码引用时可编辑配置，连接规划继续要求补绑凭据。OpenSSH Config 使用独立解析和提交链路。
+
+## 2026-11-06 私钥导入和模型上下文窗口
+
+主窗口通过已有 `credential_save` 传入选中的 `keyData` 与可选解锁口令。Rust 在阻塞任务中解析、校验算法并将密钥规范化为 OpenSSH 格式，使用不可变随机引用写入系统凭据库。`key_path` 为空的私钥凭据必须有 `secret_ref`，SSH 认证直接读取该秘密。导入失败保留旧版本，成功替换后由既有秘密清理队列删除旧引用。公开 DTO 仅返回状态，保留旧路径作为兼容元数据。
+
+模型 `Config` 增加 `contextWindowTokens`。旧注册表和单模型设置在读取时丢弃旧价格字段并补默认窗口。连接测试票据继续绑定完整配置。请求构建和发送边界按 UTF-8 JSON 字节数加 64 估算输入 Token，并加上本次请求的最大输出，与配置窗口比较。96 KiB 是独立硬上限。内置准备流程优先省略可选明细和较早的完整对话轮次，智能体和主机匹配同样在发送前校验。旧费用响应字段保留空值。
+
+## 2026-11-06 应用配置备份与恢复下线
+
+移除资产管理的备份恢复页面、全局搜索入口、备份 JSON 数据结构与存储实现，以及三条 Tauri 命令和对应权限。窗口几何持久化移入通用数据库实现，沿用原设置键和值格式。OpenSSH Config 导入和数据目录迁移使用独立调用链。本次移除无需数据库迁移。
+
 ## 2026-11-05：镜像删除的宿主单次确认
 
 ResourceView 对 image_remove 直接提交能力请求，由既有 Rust approval 阻止未批准执行，移除包内重复目标输入。Approval 增加可选 imageId，仅从已冻结的 SystemQuery/ImageRemove 生成，其他操作不序列化此字段；PluginApproval 前端类型同步。宿主 plugin-server 使用原生 imageId、真实主机目录和插件身份生成结构化确认，PluginDialogs 展示目标、完整 ID 和删除约束；取消按原协议拒绝批准，批准后仅重试原冻结载荷。
@@ -14,7 +28,7 @@ PluginsView 基于真实 installed 清单在本地组合来源、启用状态与
 
 ## 2026-11-05：本机目录定位与重启迁移
 
-application/storage_location 维护版本化本机定位文件 storage-location.json，保存在默认 app_config_dir；目录选择不进入 AppConfig/业务备份，无 SQLite schema 变化。Locations 明确 data/logs/webview，统一布局为根目录数据库和 plugins、logs、webview。已有安装沿用原分散位置，新安装使用统一布局。系统凭据服务和独立下载位置保持原契约。
+application/storage_location 维护版本化本机定位文件 storage-location.json，保存在默认 app_config_dir；目录选择不进入 AppConfig，无 SQLite schema 变化。Locations 明确 data/logs/webview，统一布局为根目录数据库和 plugins、logs、webview。已有安装沿用原分散位置，新安装使用统一布局。系统凭据服务和独立下载位置保持原契约。
 
 主窗口关闭自动创建，单实例及旧标识目录处理后，setup 在打开业务数据库/日志/WebView 前解析定位状态和执行待处理复制，再用已解析 webview 路径创建 main 窗口。启动故障使用原生对话框提示，不降级到空库。Bootstrap 增加可选 storage；app_storage_preview、app_storage_migrate、app_storage_ready 仅授权本地主窗口，后台文件操作放 spawn_blocking，Rust/TS 数据类型同步。
 
@@ -90,7 +104,7 @@ AssistantView 采用全宽对话，删除侧栏、读取范围、日志及脱敏
 
 ## 2026-11-05：SFTP 记录归属主机工作区
 
-移除 App 任务中心组件/弹窗、搜索事件和专用样式；设置与默认快捷键只保留 search/settings。ProductPreferences 反序列化 shortcuts 时仅移除历史 tasks 键，保留其他键的严格验证与原配置/备份兼容，无数据库迁移。
+移除 App 任务中心组件/弹窗、搜索事件和专用样式；设置与默认快捷键只保留 search/settings。ProductPreferences 反序列化 shortcuts 时仅移除历史 tasks 键，保留其他键的严格验证与原配置兼容，无数据库迁移。
 
 TransferPanel 按 hostId 筛选传输及未完成数量。Workspace.close 在主机关闭期间通过 files.closingHosts 阻止新连接和传输提交，Files Store 等待已经发出的连接请求，获取该主机全部文件租约和传输；存在活动传输时复用共享确认对话框，再调用现有 files_close 的取消/排空机制。未保存文档阻止关闭。终端或插件关闭失败保留设备与记录；成功关闭前调用仅限主窗口的 transfer_clear_host，后端持队列锁拒绝清理任何尚未结束的本主机传输，仅移除该 hostId 的内存记录，不操作文件。清理失败不移除工作区。
 
@@ -122,7 +136,7 @@ Host/Rust/Vue SDK 升至 2.1：只对 UI v4 扩展 operations.sections 为概览
 
 Repository 在反序列化 SDK 类型前，通过有界原始记录识别已移除身份/权限，原子移动 packages 记录至 retired，保留 payload、授权文件与 data。新包校验拒绝已移除身份和权限；旧记录不进入列表、资源加载或激活。故障继续传播，拒绝链接和越界路径。
 
-数据库版本维持 7，迁移序号 5 保留为空档：新数据库不再创建旧业务表，已有表及数据不改写，初始化不再构造或启动调度器。备份 v3 移除命令组/条目 DTO 与 SQL；v1/v2 只提取主机/偏好并明确警告跳过旧内容，不恢复或执行旧计划。Host API/Rust SDK/Vue SDK 2.0 声明接口移除；保留 v1.4 能力范围协商和 ABI/wire 1，旧保留能力的包仍可用。
+数据库版本维持 7，迁移序号 5 保留为空档：新数据库不再创建旧业务表，已有表及数据不改写，初始化不再构造或启动调度器。Host API/Rust SDK/Vue SDK 2.0 声明接口移除；保留 v1.4 能力范围协商和 ABI/wire 1，旧保留能力的包仍可用。
 
 七个系统包 1.1.3 保留用户启停与设置后升级。模型管理导航为已授权、无数据返回的本地界面动作，成功离开自身页面后只返回空回执；其他请求继续复核活动 owner 和上下文代。验证包括旧启用记录归档、数据保留、删除接口拒绝及七插件真实 SSH，见本轮插件验证记录。
 
@@ -236,7 +250,7 @@ AssistantMarkdown 使用已有 marked 14.0.0 词法分析，映射固定 Vue h �
 
 新增 `application → ai → core/reqwest/rustls/Tokio`。ai 不依赖 SSH、数据库、凭据库或 Tauri，仅处理脱敏、协议、预览与单条建议授权；ModelProvider 预留其他协议，当前实现 OpenAI 兼容 Chat Completions。应用层负责 OS Key、实际 SSH 运维连接及身份核验，复用 monitor/ops 采集。模型没有工具，固定 system 规则与包含问题/不可信远程上下文的 user JSON 分离，回答以纯文本渲染。
 
-2026-11-03 模型管理升级：已有 application_settings 的 ai_models 行以格式版本 1 保存最多 100 个注册模型，每项含 UUID、名称、config、随机 secret_ref 和 revision。首次访问在 IMMEDIATE 事务内转换旧 ai_config 为“默认模型”，保留配置与原 Key 引用，成功才移除旧行；失败回滚，损坏 AI 数据不进入应用启动路径。无需数据库 schema 迁移或版本变化，不加入 AppConfig 或备份。ModelInput 不实现 Debug/Serialize，复用 SecretStore、不可变秘密版本及 durable GC；更改地址须替换/清除 Key，删除单项需明确确认和版本匹配，失败清理返回警告。HTTP 客户端禁止重定向/环境代理/自动重试，HTTPS 保留系统证书验证，HTTP 需显式允许。日志只记录错误类别或状态码。
+2026-11-03 模型管理升级：已有 application_settings 的 ai_models 行以格式版本 1 保存最多 100 个注册模型，每项含 UUID、名称、config、随机 secret_ref 和 revision。首次访问在 IMMEDIATE 事务内转换旧 ai_config 为“默认模型”，保留配置与原 Key 引用，成功才移除旧行；失败回滚，损坏 AI 数据不进入应用启动路径。无需数据库 schema 迁移或版本变化，独立于 AppConfig。ModelInput 不实现 Debug/Serialize，复用 SecretStore、不可变秘密版本及 durable GC；更改地址须替换/清除 Key，删除单项需明确确认和版本匹配，失败清理返回警告。HTTP 客户端禁止重定向/环境代理/自动重试，HTTPS 保留系统证书验证，HTTP 需显式允许。日志只记录错误类别或状态码。
 
 上下文按 server/metrics/processes/docker/指定日志独立授权，默认全关闭。系统/指标仅复用同一实际 Transport、60 秒内样本；进程/Docker 使用既有固定查询；日志使用类型化 LogSource 的非 follow 快照，1–200 行/32 KiB。PrepareInput 明确传 modelId，后端仅加载对应配置/Key，并在预览中冻结模型 ID/版本和完整脱敏请求，按同一 Value 发送；发送时从预览解析模型 ID，不能改传其他模型。编辑/删除通过 revoke_model 撤销本模型预览、在途 HTTP 和未消费建议，其他模型不受影响；版本变化和删除均不能发送旧预览，5 分钟/8 个上限。
 
@@ -249,7 +263,7 @@ AssistantMarkdown 使用已有 marked 14.0.0 词法分析，映射固定 Vue h �
 | ai_model_test    | ModelInput（临时 Key 或读取当前模型的已有 Key）           | ModelTest：id、elapsedMs、expiresInSeconds |
 | ai_model_delete  | ID + expectedRevision + confirmed                         | Mutation<()> 与清理警告                    |
 | ai_resolve_hosts | 模型 ID、请求 UUID、问题、上次命中 ID、脱敏设置           | 已登记 hostIds、澄清信息、modelRevision    |
-| ai_prepare       | PrepareInput（单/多 Session、问题、授权、脱敏、模型版本） | 完整 Preview/Token/费用估算                |
+| ai_prepare       | PrepareInput（单/多 Session、问题、授权、脱敏、模型版本） | 完整 Preview 和输入 Token 估算             |
 | ai_send          | 预览 ID + confirmed                                       | Answer/Proposal/Usage                      |
 | ai_execute       | Proposal ID + confirmed + 独立变更确认                    | Execution（脱敏本地输出）                  |
 | ai_cancel        | 预览 ID                                                   | 撤销预览/建议或取消模型请求                |
@@ -270,7 +284,7 @@ AssistantMarkdown 使用已有 marked 14.0.0 词法分析，映射固定 Vue h �
 
 SQLite v7 追加 007_host_folders.sql，为 host_groups 增加 parent_id 自引用外键、禁止自身引用的 CHECK 及索引，保留旧表、ID、唯一名称和主机归属。group_save 在 IMMEDIATE 事务内校验父目录存在及祖先无环；group_delete 在同一事务内将主机和直接子文件夹提升至父目录后删除当前文件夹，不递归删除内容。HostGroup/GroupInput 与 TypeScript 同步 parentId，旧输入缺省为 null。
 
-备份导出升级 version=2 并携带 parentId，仍接收旧平面 v1 备份。恢复先校验父目录引用和循环，再拓扑合并文件夹及重映射主机归属；全局同名文件夹仅在父目录相同情况下合并，父目录不一致则整体回滚，避免静默扁平化。主机配置导出同样升级 v2 并包含文件夹 ID/parentId 和主机 groupId。旧应用拒绝 v7 数据库及 v2 备份，避免误降级。此项替代下文历史单层分组、禁止主机右键和顶部工具栏的约定。
+主机配置导出升级 v2，包含文件夹 ID/parentId 和主机 groupId。旧应用拒绝 v7 数据库，避免误降级。此项替代下文历史单层分组、禁止主机右键和顶部工具栏的约定。
 
 2026-11-03 根目录与多级主机文件夹：HostSidebar 删除顶部整条管理分组/刷新/新建工具栏，布局为固定本地设备、全部主机/导入导出、搜索框、可滚动树。新增 services/host-tree 的层级/祖先/路径计算；内置 null ID 根目录容纳旧未分组主机，旧分组的 parentId 默认 null，按真实父目录显示多级文件夹。选择深层主机展开祖先，搜索展示匹配祖先，有界主机加载不变。
 
@@ -278,14 +292,14 @@ SQLite v7 追加 007_host_folders.sql，为 host_groups 增加 parent_id 自引�
 
 SQLite v7 追加 007_host_folders.sql，为 host_groups 增加 parent_id 自引用外键、禁止自身引用的 CHECK 及索引，保留旧表、ID、唯一名称和主机归属。group_save 在 IMMEDIATE 事务内校验父目录存在及祖先无环；group_delete 在同一事务内将主机和直接子文件夹提升至父目录后删除当前文件夹，不递归删除内容。HostGroup/GroupInput 与 TypeScript 同步 parentId，旧输入缺省为 null。
 
-备份导出升级 version=2 并携带 parentId，仍接收旧平面 v1 备份。恢复先校验父目录引用和循环，再拓扑合并文件夹及重映射主机归属；全局同名文件夹仅在父目录相同情况下合并，父目录不一致则整体回滚，避免静默扁平化。主机配置导出同样升级 v2 并包含文件夹 ID/parentId 和主机 groupId。旧应用拒绝 v7 数据库及 v2 备份，避免误降级。此项替代下文历史单层分组、禁止主机右键和顶部工具栏的约定。
+主机配置导出升级 v2，包含文件夹 ID/parentId 和主机 groupId。旧应用拒绝 v7 数据库，避免误降级。此项替代下文历史单层分组、禁止主机右键和顶部工具栏的约定。
 
 2026-11-03 主机列表操作调整：移除 HostSidebar 的三点入口、toolsOpen 及折叠工具面板；hosts store 删除 HostSort/sort 及地址、修改时间排序分支，查询结果保持原默认名称和 ID 顺序。“全部主机”标题移到本地设备下方、远程列表正上方，右侧以两个独立图标按钮触发原 import/export 事件，沿用原 App 弹窗、API 和错误提示；标题及操作不参与列表滚动。保留未加载/操作中的禁用状态，清理面板专用样式和验收工具的旧入口定位。不增加 IPC、迁移、配置或依赖。此项替代下文历史布局中的主机树工具和排序设置描述。
 
 应用运行于本地，通过 SSH/SFTP 管理 Linux，不需要云账号、HTTP 后端或远端 Agent。
 当前实现应用壳、主机/分组 CRUD、搜索排序、安全凭据引用、OpenSSH 预览导入及非敏感 JSON 导出，保留第一阶段配置/日志/生命周期。
 
-2026-11-03 主机管理精简：HostDialog 移除标签、备注和收藏控件；HostSidebar 移除标签/收藏筛选及收藏图标，“全部主机”改为静态标题并保留总数。hosts store 删除 tag/favorites 状态，filterHosts 仅按名称、地址和用户名查询，保留排序、分组和有界加载。HostInput 的历史字段与 Rust IPC、SQLite、导出/备份格式保持兼容，hostInput 在编辑及移动分组时原样传回，避免清空用户数据；无需数据库迁移。下文历史布局中的标签/收藏筛选描述由本条替代。
+2026-11-03 主机管理精简：HostDialog 移除标签、备注和收藏控件；HostSidebar 移除标签/收藏筛选及收藏图标，“全部主机”改为静态标题并保留总数。hosts store 删除 tag/favorites 状态，filterHosts 仅按名称、地址和用户名查询，保留排序、分组和有界加载。HostInput 的历史字段与 Rust IPC、SQLite 和主机配置导出格式保持兼容，hostInput 在编辑及移动分组时原样传回，避免清空用户数据；无需数据库迁移。下文历史布局中的标签/收藏筛选描述由本条替代。
 生产 SSH 位于 `crates/ssh`，已链接桌面应用；终端使用真实 Linux PTY，无模拟数据，支持多标签、可调整分屏、代理/跳板和端口转发。SFTP 文件管理、后台传输和 Monaco 文本编辑已接入；原有探针独立保留，Agentless 监控和 Docker/日志/进程/端口/systemd 运维已接入。
 
 ## 工程与依赖
@@ -389,12 +403,12 @@ FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样�
 
 - 数据路径通过 `tauri::Manager::path().app_data_dir()` 获取；日志通过 `app_log_dir()` 获取。安装目录不参与数据写入。
 - SQLite 绑定 bundled SQLite，避免依赖用户预装数据库。
-- `PRAGMA user_version = 7`；001 设置、002 主机/分组/凭据/清理、003 SSH 信任记录、004 主机 SSH 选项、005 自动化库/计划/历史、006 主机名称可空、007 多级主机文件夹在 IMMEDIATE 事务内顺序迁移。v1–v6 数据保留，失败回滚，未来版本拒绝降级。
+- `PRAGMA user_version = 8`。001–007 保留既有迁移，008 在 IMMEDIATE 事务内重建凭据表并校验外键，支持系统凭据库中的导入私钥。旧凭据 ID、版本、路径和主机关联均保留，迁移失败回滚，未来版本拒绝降级。
 - `application_settings` 的 `app_config` 保存版本化偏好 JSON，是配置唯一真源；不维护第二份普通 JSON 配置。
 - hosts 使用 UUID、强类型字段、端口/超时 CHECK、分组和凭据外键。tags 为经过校验/去重的 JSON 数组。凭据类型在事务内与主机认证类型匹配；Agent 禁止附带 credential_id。
-- `HostInput.name` 仍为字符串，空字符串表示未填写；后端 trim 后只校验非空名称的 128 字符及控制字符限制，分组/凭据名称仍必填。006 重建 hosts 时保留 ID、时间、关联、SSH 选项和索引，仅放宽名称长度下界。前端 `hostDisplayName` 与 Rust `display_name` 优先使用名称，否则按地址及非 22 端口展示；树、标签、主机选项、自动化目标快照及备份预览保持一致。备份按非空名称或端点判重，空名称不互相冲突，恢复保留空值；复制主机以显示名称加“副本”生成名称。编辑继续读取原始 name，地址/端口变化可实时改变未命名主机的显示名。
+- `HostInput.name` 仍为字符串，空字符串表示未填写；后端 trim 后只校验非空名称的 128 字符及控制字符限制，分组/凭据名称仍必填。006 重建 hosts 时保留 ID、时间、关联、SSH 选项和索引，仅放宽名称长度下界。前端 `hostDisplayName` 与 Rust `display_name` 优先使用名称，否则按地址及非 22 端口展示；树、标签和主机选项保持一致。复制主机以显示名称加“副本”生成名称。编辑继续读取原始 name，地址/端口变化可实时改变未命名主机的显示名。
 - host_groups 没有 parent_id，只支持单层。删除分组将主机移到未分组；删除主机不删除共享凭据；复制只新建 HostId，并共享原凭据引用。
-- credentials 仅保存名称、类型、私钥路径、opaque secret_ref、revision。密码正文和私钥口令从不进入 SQLite。被引用的凭据删除默认拒绝，用户明确确认解除关联后才删除；主机保留并显示待配置凭据。
+- credentials 保存名称、类型、旧式私钥路径、opaque secret_ref 和 revision。密码、私钥正文和解锁口令存储边界在系统凭据库及临时内存。删除关联凭据须明确确认解除关联，主机保留并显示待配置凭据。
 - 配置 version=1；默认深色、侧栏 248px、字号 14、连接超时 15s、采样 3s、INFO。后端拒绝非法数值与未知字段。仅界面/运行偏好，不允许密码或密钥字段。
 - 小规模设置读写每次创建连接，5s busy timeout、foreign_keys=ON。当前使用默认事务日志，不引入连接池或 WAL；正式主机模块与实际并发需要时再评估。
 - SQLite 与 OS 凭据操作在 `spawn_blocking` 内；本地元数据单任务执行，最多接纳 16 个在途/等待请求，等待额度最长 3 秒，超限返回 BUSY。元数据写入与新窗格读取凭据可有界排队，避免普通分屏因瞬时竞争失败；SSH 输出完全独立。
@@ -406,7 +420,7 @@ FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样�
 
 keyring 4.2 的 v1 后端在 Windows 使用 Credential Manager、macOS 使用 Keychain、Linux 使用 Secret Service。没有内存或普通文件 fallback。当前已实际验证 Windows；其他平台尚未验收。
 秘密使用 UTF-8 bytes 写入系统服务，最大 2048 字节；服务名为 ServerDeck 专属命名空间，引用由后端生成随机 UUID。前端只看到 hasSecret 和关联主机数。
-private_key 可以仅保存路径引用，也可以将加密私钥口令存入 OS 库；不复制私钥文件，不读取或验证其正文。SSH Agent 认证复用用户已有的系统代理，不自动启动服务或添加身份；隔离 Agent 实际签名已测，用户系统服务仍待实机验证。
+新建 private_key 凭据通过选择文件导入，解锁口令仅用于导入。旧路径和 OpenSSH Config 导入凭据可继续引用源文件并保存其解锁口令，编辑时可选择文件原位迁移。SSH Agent 认证复用用户已有的系统代理。
 
 SQLite 与系统凭据库不能共享事务，因此采用小型意图记录及不可变秘密版本：
 
@@ -417,13 +431,12 @@ SQLite 与系统凭据库不能共享事务，因此采用小型意图记录及�
 
 服务不可用时秘密写入失败，原凭据引用保留，不创建明文替代；只修改非秘密元数据或无口令路径引用可以独立完成。带关联的凭据删除需要明确选择解除主机关联；OS 删除失败会明确显示尚有旧秘密待清理。
 
-### OpenSSH 导入与导出
+### OpenSSH Config 导入
 
 前端通过文件选择器读取或粘贴 UTF-8（最大 1MiB），Rust core 解析并预览。支持 Host、HostName、Port、User、IdentityFile、ConnectTimeout、ServerAliveInterval、ServerAliveCountMax 和受限 ProxyJump，大小写不敏感关键字、双引号、注释、等号、首次赋值规则，以及对明确别名匹配的 * / ? / ! 模式。
 解析限制为 10000 行、500 个明确别名及有界参数/警告，防止外部配置放大预览内存；导入路径与手动凭据遵循相同长度/字符边界。
 多个 IdentityFile、ProxyCommand、未知影响端点/认证/信任的选项阻止条目导入；Include/Match 无法安全确定影响时阻止文件条目。compression 等未实现项显示警告。ProxyJump 仅接受一个明确的受管 Host 别名或 none；逗号链、user@host:port 和 token 展开拒绝。受管主机可递归引用最多 4 个跳板，循环/缺失/重名或同名端点不一致阻止提交；选中条目按依赖在同一事务内导入。通配符不展开为资产，缺省用户取本地当前用户名；预览显示实际用户、认证方式和超时。
 导入提交重新解析原文并校验选中别名，SQLite 事务内再次检查同名或同 hostname+port+username，重复跳过，不覆盖。IdentityFile 只生成路径凭据引用，口令需另行设置。无 SSH Config 写回接口。
-导出为版本化、字段白名单的 JSON，包含主机、分组、标签与备注；排除 credential_id、secret_ref、私钥路径及秘密字段。用户仍需自行避免将秘密写入备注。当前不实现备份恢复或有损 OpenSSH 写回。
 
 ## 应用生命周期（当前实现）
 
@@ -649,7 +662,7 @@ SQLite schema 通过事务从 v4 迁移到 v5，新增 automation_groups、autom
 
 桌面退出、关机或休眠期间不能保证执行。启动时的过期计划、循环间隔超过 75 秒或迟到超过 60 秒按错过处理：skip 记录 Cancelled，ask 创建一条 Pending 待确认，再计算未来时间，不补跑全部错过次数。条目/目标执行配置变化会使计划失效并停用，必须重新预览授权。计划失败、Unknown 和待确认数量通过根级通知及导航徽标展示，在终端页也可见。状态轮询只传元数据，不自动持久化通知中的输出。
 
-## 产品整合：统一工作区、全局偏好与备份
+## 产品整合：统一工作区与全局偏好
 
 前端 workspace Pinia 状态以 `host:<HostId>` 保存每台主机唯一的一级工作区标签，本地设备使用 `host:`；全局工具仍以模块为键。主机标签保存当前工具及最近的服务器管理分类，`hostId` 是最近活动主机的上下文。`selectHost` 恢复该主机工作区，新主机默认进入终端；切换工具只更新该主机标签，激活其他主机不会改写已有标签的目标。主机树和一级标签可直接切换主机，原顶部主机选择器及独立主机管理页面移除。HostSidebar 提供树内新建、分组、搜索、标签筛选、排序和导入导出；每行的 HostTreeControls 提供编辑和确认删除，移除复制按钮及前端处理，复用 HostDialog、hostsApi 和 store.run。操作区默认透明并禁用鼠标命中，只在对应行 hover 或包含 focus-visible 时显示并允许点击，保留 Tab 顺序和键盘可访问性；选中或鼠标点击后的普通焦点不使按钮常驻，预留两个按钮的宽度，显隐不移动名称。管理操作通过 saved 事件定位树中主机，保持工作区及实际会话，不依赖右键菜单。`HostTools` 在主机工作区内提供 Shell、SFTP、服务器管理二级导航，本地设备仅展示 Shell。终端内部仍只展示当前主机的会话，切回时恢复最近会话；轮换及关闭所有会话保持当前主机边界。关闭一级设备工作区先关闭该 HostId 的全部终端会话及分屏，关闭失败保留工作区与失败会话；SFTP 和后台任务继续保留。关闭最后一个工作区后显示欢迎页。
 
@@ -674,10 +687,6 @@ OperationsView 的连接按自己的 chosen HostId 取值，不再借用会被�
 侧栏主机跨组移动使用 Pointer Events，不依赖 Windows WebView2 被 Tauri 原生拖放处理器替换的 HTML 拖放。鼠标移动达到阈值后显示主机预览，以当前指针命中的分组为目标，支持空组、折叠组及未分组；松手复用 `hosts.move → host_update` 保存，不在前端提前修改分组。取消、移出主机树及原组松手不写入；拖动后的 click 被拦截，避免误打开 SSH。保留 Tauri 原生外部文件拖放与既有连接生命周期。
 
 AppConfig 保持 version=1，新增 serde(default) product 偏好，旧数据可直接读取，不新增数据库表或重置配置。内容为当前支持的 zh-CN 语言标识、下载目录、新建主机默认 SshOptions（不设置全局跳板）、全局快捷键。语言字典先覆盖工作区/搜索导航，当前完整 UI 仍仅简体中文，不宣称已完成英文翻译。现有主题、终端字体/字号/快捷键、监控间隔、传输并发及日志等级继续真实生效。默认连接超时、认证超时、Keepalive、代理仅复制到新建主机，不改写已有主机或在途连接。默认下载目录用于新下载任务的预选目标，仍可选择其他目录。代理密码只引用原生凭据库；不存在/类型不匹配拒绝保存，删除仍被全局默认代理引用的凭据会被拒绝，要求先修改设置。
-
-备份导出为严格 `format=serverdeck-backup, version=2` JSON，仍可读取平面 v1 备份，最多 8 MiB、5000 主机、512 主机分组、256 条目、64 命令分组。导出在只读事务中取得一致快照：主机/分组/标签/说明/收藏/连接参数、命令/脚本定义及非敏感 AppConfig；不包含凭据 ID/秘密引用、私钥路径/正文、秘密参数值、信任、执行历史、调度计划或窗口位置。用户自己写进脚本、说明、普通默认值的秘密无法可靠识别，界面要求审查。
-
-恢复先用 Rust 校验格式/版本/类型/范围/ID/链接/跳板循环并生成逐项重复/阻止提示，再选择条目和 skip/copy 策略及是否替换非敏感偏好，最后明确确认。提交重新校验、在 IMMEDIATE 事务中按当前数据判断冲突：只新增或跳过，copy 使用新 UUID 和不冲突名称，不覆盖已有内容。分组按名称合并，跳板按依赖顺序重映射；缺失所选跳板则整笔回滚，不静默直连。未选/跳过跳板只允许复用同原 ID 且完整公开配置一致的本地记录。SSH 密码/私钥主机恢复后无凭据关联，需用户重新配置；认证代理主机在预览中明确阻止自动恢复，防止匿名降级。认证代理的全局默认值不导出，恢复偏好会明确替换当前默认设置。恢复不会创建连接或执行计划。
 
 窗口关闭和应用退出统一进入确认，包括普通 SSH 会话；后端继续实时检查传输、任务及 dirty 文档。关闭主机全部连接新增明确范围确认，涉及依赖跳板及所有模块，未保存文档先处理。危险操作、断线 Unknown、未保存文件和传输提交边界均保留原保护，不为简化 UI 绕过。
 

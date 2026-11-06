@@ -736,7 +736,7 @@ try {
     'host rows contain no inline action icons; context editing and confirmed deletion preserve sessions',
   );
   await showHostTree(page);
-  await page.getByRole('button', { name: '导入 OpenSSH', exact: true }).click();
+  await hostTreeAction(page, null, '导入 OpenSSH Config…');
   const importHosts = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
   await importHosts
     .getByLabel('OpenSSH Config 内容', { exact: true })
@@ -748,14 +748,10 @@ try {
   await importHosts.getByRole('button', { name: '导入 1 台主机', exact: true }).click();
   await importHosts.waitFor({ state: 'hidden' });
   await page.locator('.tree-host').filter({ hasText: 'tree-imported' }).waitFor();
-  await page.getByRole('button', { name: '导出配置', exact: true }).click();
-  const exportHosts = page.getByRole('dialog', { name: '导出非敏感主机配置', exact: true });
-  const exportText = await exportHosts.getByLabel('导出内容', { exact: true }).inputValue();
-  assert.equal(JSON.parse(exportText).hosts.length, 2);
+  assert.equal((await rpc('host_list')).hosts.length, 2);
   assert.equal((await page.locator('.host-count').textContent()).trim(), '2');
-  for (const forbidden of ['credentialId', 'secretRef', 'keyPath'])
-    assert(!exportText.includes(forbidden));
-  await exportHosts.getByRole('button', { name: '关闭', exact: true }).click();
+  assert.equal(await page.locator('.host-list-heading button').count(), 0);
+  assert.equal(await page.getByRole('dialog').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });
   for (const name of ['UI Created', 'tree-imported']) {
     await hoverHost(name);
@@ -767,7 +763,7 @@ try {
   assert.equal((await rpc('host_list')).hosts.length, 0);
   assert.equal((await page.locator('.host-count').textContent()).trim(), '0');
   passed.push(
-    'host tree OpenSSH preview/import and non-sensitive export remain available; isolated records cleaned via real IPC',
+    'host tree OpenSSH preview/import and host count work without JSON controls; isolated records cleaned via real IPC',
   );
   const unnamed = [];
   for (const port of [22, 2222]) {

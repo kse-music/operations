@@ -147,3 +147,27 @@ fn escaped_history_is_budgeted_and_omissions_are_explicit() {
             .any(|warning| warning.contains("历史对话"))
     );
 }
+
+#[test]
+fn small_model_window_drops_optional_history_and_keeps_host_summary() {
+    let mut input = prepared(
+        json!({"docker":{"summary":{"total":3},"records":[{"Names":"x".repeat(3500)}],"omittedRecords":2}}),
+        vec![
+            ChatMessage {
+                role: ChatRole::User,
+                content: "问题".into(),
+            },
+            ChatMessage {
+                role: ChatRole::Assistant,
+                content: "x".repeat(3500),
+            },
+        ],
+    );
+    input.config.context_window_tokens = 4096;
+    input.config.max_output_tokens = 1024;
+    super::fit_budget(&mut input).unwrap();
+    assert_eq!(input.context["docker"]["summary"]["total"], 3);
+    assert_eq!(input.context["docker"]["omittedRecords"], 3);
+    assert_eq!(input.context["omittedHistoryTurns"], 1);
+    assert!(serverdeck_ai::Assistant::default().prepare(input).is_ok());
+}

@@ -35,5 +35,4 @@ export const hostsApi = {
   preview: (text: string) => call<ImportPreview>('hosts_import_preview', { text }),
   import: (text: string, selected: string[], groupId: string | null) =>
     call<Mutation<Host[]>>('hosts_import', { text, selected, groupId }),
-  export: () => call<string>('hosts_export'),
 };

@@ -150,7 +150,7 @@ try {
         geometry.modules.bottom,
         `${name}: ${region} must start below the module header`,
       );
-    assert.equal(await page.locator('.module-navigation button').count(), 5);
+    assert.equal(await page.locator('.module-navigation button').count(), 4);
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
       '主机运维',
@@ -201,25 +201,12 @@ try {
     assert.equal(await page.getByRole('button', { name: '主机树工具', exact: true }).count(), 0);
     assert.equal(await page.getByLabel('主机排序', { exact: true }).count(), 0);
     assert.equal(await page.locator('#host-tree-tools').count(), 0);
-    const tools = page.getByRole('group', { name: '主机导入导出', exact: true });
-    await tools.waitFor();
-    assert.equal(
-      await tools.getByRole('button', { name: '导入 OpenSSH', exact: true }).isEnabled(),
-      true,
-    );
-    assert.equal(
-      await tools.getByRole('button', { name: '导出配置', exact: true }).isEnabled(),
-      true,
-    );
-    assert.equal(await tools.getByLabel('按标签筛选主机', { exact: true }).count(), 0);
+    const listHeading = page.locator('.host-list-heading');
+    assert.equal(await listHeading.getByRole('button').count(), 0);
+    assert.equal(await page.getByLabel('选择 ServerDeck 主机文件', { exact: true }).count(), 0);
+    assert.equal(await page.getByLabel('按标签筛选主机', { exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: '收藏', exact: true }).count(), 0);
     assert.equal(await page.getByLabel('已收藏', { exact: true }).count(), 0);
-    const toolsFit = await tools.evaluate((element) => element.scrollWidth <= element.clientWidth);
-    assert(toolsFit, `${name}: host import/export actions overflow`);
-    const listHeading = page.locator('.host-list-heading');
-    const toolsPosition = await tools.boundingBox(),
-      listHeadingPosition = await listHeading.boundingBox();
-    assert(toolsPosition.x > listHeadingPosition.x + listHeadingPosition.width / 2);
     assert.equal(
       await listHeading.evaluate(
         (element) =>
@@ -228,14 +215,25 @@ try {
       ),
       true,
     );
-    const importButton = tools.getByRole('button', { name: '导入 OpenSSH', exact: true });
-    const exportButton = tools.getByRole('button', { name: '导出配置', exact: true });
-    assert.equal(await importButton.getAttribute('title'), '导入 OpenSSH');
-    assert.equal(await exportButton.getAttribute('title'), '导出配置');
-    await importButton.focus();
-    await page.keyboard.press('Enter');
+    await hostTreeAction(page, null, '导入 OpenSSH Config…');
     const importDialog = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
     await importDialog.waitFor();
+    const importLayout = await importDialog.evaluate((dialog) => {
+      const box = dialog.getBoundingClientRect();
+      const body = dialog.querySelector('.import-body');
+      return {
+        width: box.width,
+        inViewport: box.top >= 0 && box.bottom <= innerHeight,
+        overflows: body.scrollWidth > body.clientWidth,
+      };
+    });
+    assert(importLayout.width <= Math.min(680, width - 32), `${name}: import dialog is too wide`);
+    assert(importLayout.inViewport && !importLayout.overflows, `${name}: import dialog overflows`);
+    assert(await importDialog.getByRole('button', { name: '选择文件', exact: true }).isVisible());
+    assert(
+      await importDialog.getByRole('button', { name: '生成导入预览', exact: true }).isDisabled(),
+    );
+    await importDialog.screenshot({ path: `${output}/${name}-openssh-import.png` });
     await importDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await importDialog.waitFor({ state: 'hidden' });
     const folder = page.locator('[data-group-id="staging"] > .group-toggle');
@@ -305,12 +303,10 @@ try {
       `${name}: management opened a terminal`,
     );
     await edit.getByRole('button', { name: '取消', exact: true }).click();
-    await page.screenshot({ path: `${output}/${name}-host-list-actions.png` });
-    const fixedActions = await tools.boundingBox();
+    await page.screenshot({ path: `${output}/${name}-host-list.png` });
     await page.locator('.host-tree-scroll').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
-    assert.deepEqual(await tools.boundingBox(), fixedActions);
     assert.deepEqual(await page.locator('.host-list-heading').boundingBox(), {
       x: geometry.header.x,
       y: geometry.header.y,

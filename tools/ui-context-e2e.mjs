@@ -235,14 +235,14 @@ try {
         throw new Error('close-all must close only the target host sessions');
     });
     await page.screenshot({ path: `${output}/${name}-closed-all.png` });
-    await nav('备份恢复');
+    await nav('模型管理');
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
       '资产管理',
     );
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['安全凭据', '模型管理', '备份恢复'],
+      ['安全凭据', '模型管理'],
     );
     await page.screenshot({ path: `${output}/${name}-assets-module.png` });
     await nav('关于');
@@ -252,9 +252,9 @@ try {
     );
     await page.locator('.module-navigation [data-module="assets"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'about');
-    await nav('备份恢复');
+    await nav('模型管理');
     await page.locator('.module-navigation [data-module="system"]').click();
-    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'backup');
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'models');
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();

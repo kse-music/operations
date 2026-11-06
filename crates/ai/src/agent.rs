@@ -182,16 +182,6 @@ impl Assistant {
         let mut usage: Option<Usage> = None;
         let mut complete_usage = true;
         for _ in 0..6 {
-            if serde_json::to_vec(&body)
-                .map_err(|e| Error::Worker(Box::new(e)))?
-                .len()
-                > REQUEST_LIMIT_BYTES
-            {
-                return Err(failure(
-                    "AI_CONTEXT_LIMIT",
-                    "智能体工具结果超过请求预算，请缩小问题范围",
-                ));
-            }
             let completion = OpenAiCompatible
                 .complete(&pending.config, key, &body)
                 .await?;
@@ -216,9 +206,6 @@ impl Assistant {
                 Err(_) => {
                     // Old compatible providers may still return the former suggestions schema.
                     let mut answer = self.finish_answer(root, pending, completion)?;
-                    answer.estimated_cost = usage
-                        .as_ref()
-                        .and_then(|u| cost(&pending.config, u.input_tokens, u.output_tokens));
                     answer.usage = usage;
                     answer.warnings.push(
                         "模型未使用智能体工具协议，本次仅显示原有分析与受控命令建议。".into(),
@@ -288,9 +275,7 @@ impl Assistant {
                     return Ok(Answer {
                         text: pending.redactor.text(&text),
                         proposals: vec![],
-                        estimated_cost: usage
-                            .as_ref()
-                            .and_then(|u| cost(&pending.config, u.input_tokens, u.output_tokens)),
+                        estimated_cost: None,
                         usage,
                         warnings: vec![],
                         agent: Some(AgentReport {
@@ -359,7 +344,7 @@ impl Assistant {
                     } else {
                         pending.redactor.text(&summary)
                     };
-                    return Ok(Answer{text,proposals,estimated_cost:usage.as_ref().and_then(|u|cost(&pending.config,u.input_tokens,u.output_tokens)),usage,warnings:vec!["计划需确认后执行；工具查询已脱敏发送给当前绑定模型，执行结果仅在本地复查展示。".into()],agent:Some(AgentReport{observations,steps:public_steps})});
+                    return Ok(Answer{text,proposals,estimated_cost:None,usage,warnings:vec!["计划需确认后执行；工具查询已脱敏发送给当前绑定模型，执行结果仅在本地复查展示。".into()],agent:Some(AgentReport{observations,steps:public_steps})});
                 }
             }
         }

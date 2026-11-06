@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '../composables/error-notifications';
 import { ref } from 'vue';
+import { KeyRound, ShieldCheck } from '@lucide/vue';
 import CredentialDialog from '../components/CredentialDialog.vue';
 import Modal from '../components/Modal.vue';
 import { useHostsStore } from '../stores/hosts';
@@ -34,68 +35,106 @@ useErrorNotifications(() =>
 );
 </script>
 <template>
-  <section class="credentials-view page-view">
+  <section class="credentials-view asset-view page-view" aria-labelledby="credentials-title">
     <div class="section-heading">
       <div>
-        <p class="eyebrow">SYSTEM CREDENTIAL STORE</p>
-        <h1>安全凭据</h1>
+        <h1 id="credentials-title">安全凭据</h1>
+        <p class="section-description">
+          集中管理主机认证使用的 SSH 密码与私钥。密码和导入的私钥保存在系统凭据库。
+        </p>
       </div>
       <button class="button primary" :disabled="store.busy || !store.catalog" @click="open()">
         ＋ 新建凭据
       </button>
     </div>
-    <p class="section-description">
-      密码和私钥口令保存在系统凭据库，主机仅引用凭据 ID。此界面不会显示已保存秘密。
-    </p>
-    <div class="toolbar">
-      <button class="button" :disabled="store.busy" @click="check">检查系统凭据库</button
-      ><button
-        class="button"
-        :disabled="store.busy"
-        @click="store.run(hostsApi.cleanup, '清理检查已完成。')"
-      >
-        重试清理旧秘密</button
-      ><span class="subtle">待清理 {{ store.catalog?.pendingSecretDeletions ?? '—' }} 项</span>
-    </div>
-    <p v-if="status?.available" class="banner success" role="status">
-      {{ status.message }}
-    </p>
-    <p v-if="store.catalog && !store.catalog.credentials.length" class="workspace-empty">
-      尚无安全凭据。系统 SSH Agent 不需要创建凭据。
-    </p>
-    <ul class="credential-list">
-      <li v-for="credential in store.catalog?.credentials" :key="credential.id">
-        <div>
-          <h2>{{ credential.name }}</h2>
-          <p class="subtle">
-            {{ credential.kind === 'password' ? 'SSH 密码' : 'SSH 私钥' }} ·
-            {{ credential.hostCount }} 台主机关联 ·
-            {{ credential.hasSecret ? '秘密已保存于系统凭据库' : '未保存口令' }}
+    <div class="asset-columns">
+      <section class="asset-panel" aria-labelledby="saved-credentials-title">
+        <h2 id="saved-credentials-title" class="asset-title">
+          已保存凭据
+          <span v-if="store.catalog" class="asset-count">{{
+            store.catalog.credentials.length
+          }}</span>
+        </h2>
+        <ul v-if="store.catalog?.credentials.length" class="credential-list">
+          <li v-for="credential in store.catalog.credentials" :key="credential.id">
+            <div class="asset-identity">
+              <span class="asset-icon"><KeyRound :size="17" aria-hidden="true" /></span>
+              <div>
+                <h3>{{ credential.name }}</h3>
+                <p class="subtle">
+                  {{ credential.kind === 'password' ? 'SSH 密码' : 'SSH 私钥' }} ·
+                  {{ credential.hostCount }} 台主机关联
+                </p>
+              </div>
+            </div>
+            <div class="toolbar credential-actions">
+              <button class="text-button" :disabled="store.busy" @click="open(credential)">
+                编辑
+              </button>
+              <button
+                class="text-button danger"
+                :disabled="store.busy"
+                @click="
+                  deleting = credential;
+                  detach = false;
+                "
+              >
+                删除
+              </button>
+            </div>
+            <div class="credential-details">
+              <p v-if="credential.keyPath" class="path">{{ credential.keyPath }}</p>
+              <p class="subtle">
+                {{
+                  credential.kind === 'private_key' && !credential.keyPath
+                    ? '私钥已导入系统凭据库'
+                    : credential.hasSecret
+                      ? '秘密已保存于系统凭据库'
+                      : '未保存口令'
+                }}
+              </p>
+            </div>
+          </li>
+        </ul>
+        <div v-else-if="store.catalog" class="asset-empty">
+          <span class="asset-icon"><KeyRound :size="18" aria-hidden="true" /></span>
+          <div>
+            <h3>尚无安全凭据</h3>
+            <p class="subtle">点击“新建凭据”添加主机认证所需的密码或私钥。</p>
+          </div>
+        </div>
+        <p v-else class="subtle" role="status">
+          {{ store.busy ? '正在读取凭据…' : '凭据列表暂不可用。' }}
+        </p>
+      </section>
+      <div class="asset-stack">
+        <section class="asset-panel" aria-labelledby="credential-store-title">
+          <h2 id="credential-store-title" class="asset-title">
+            <ShieldCheck :size="16" aria-hidden="true" />系统凭据库
+          </h2>
+          <p class="subtle">待清理 {{ store.catalog?.pendingSecretDeletions ?? '—' }} 项</p>
+          <div class="toolbar">
+            <button class="button" :disabled="store.busy" @click="check">检查系统凭据库</button>
+            <button
+              class="button"
+              :disabled="store.busy"
+              @click="store.run(hostsApi.cleanup, '清理检查已完成。')"
+            >
+              重试清理旧秘密
+            </button>
+          </div>
+          <p v-if="status?.available" class="asset-feedback success" role="status">
+            {{ status.message }}
           </p>
-          <p v-if="credential.keyPath" class="path">{{ credential.keyPath }}</p>
-        </div>
-        <div class="toolbar">
-          <button class="text-button" :disabled="store.busy" @click="open(credential)">编辑</button
-          ><button
-            class="text-button danger"
-            :disabled="store.busy"
-            @click="
-              deleting = credential;
-              detach = false;
-            "
-          >
-            删除
-          </button>
-        </div>
-      </li>
-    </ul>
-    <section class="system-panel">
-      <h2>系统 SSH Agent</h2>
-      <p class="subtle">
-        在主机表单选择“系统 SSH Agent”，无需保存密码。此阶段仅提供认证入口，不启动
-        Agent、不连接服务器。
-      </p>
-    </section>
+        </section>
+        <section class="asset-panel" aria-labelledby="ssh-agent-title">
+          <h2 id="ssh-agent-title">系统 SSH Agent</h2>
+          <p class="subtle">
+            在主机认证方式中选择“系统 SSH Agent”。连接前请启动 Agent 并加载密钥。
+          </p>
+        </section>
+      </div>
+    </div>
   </section>
   <CredentialDialog
     v-if="dialog"

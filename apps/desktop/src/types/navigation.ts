@@ -15,7 +15,6 @@ const viewModules: Record<WorkspaceView, NavigationModule> = {
   assistant: 'hosts',
   credentials: 'assets',
   models: 'assets',
-  backup: 'assets',
   settings: 'system',
   settingsTerminal: 'system',
   settingsShortcuts: 'system',

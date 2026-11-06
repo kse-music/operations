@@ -21,3 +21,4 @@ import './styles/product.css';
 import './styles/controls.css';
 import './styles/server.css';
 import './styles/settings.css';
+import './styles/assets.css';

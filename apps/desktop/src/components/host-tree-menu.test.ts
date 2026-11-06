@@ -87,7 +87,7 @@ it('keeps a root, removes toolbar operations, and places search directly below A
       ?.nextElementSibling?.querySelector('[aria-label="搜索主机"]'),
   ).not.toBeNull();
   await open(folder());
-  expect(labels()).toEqual(['新建主机', '新建文件夹']);
+  expect(labels()).toEqual(['新建主机', '新建文件夹', '导入 OpenSSH Config…']);
   const bounds = menu().getBoundingClientRect();
   expect(Number.parseFloat(menu().style.left) + bounds.width).toBeLessThanOrEqual(innerWidth);
   expect(Number.parseFloat(menu().style.top) + bounds.height).toBeLessThanOrEqual(innerHeight);

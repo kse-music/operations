@@ -251,7 +251,3 @@ pub async fn hosts_import(
         .await
         .map_err(Into::into)
 }
-#[tauri::command]
-pub async fn hosts_export(application: tauri::State<'_, Application>) -> Result<String, IpcError> {
-    application.export_hosts().await.map_err(Into::into)
-}

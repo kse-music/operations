@@ -1,5 +1,4 @@
 pub mod ai;
-pub mod backup;
 pub mod monitor;
 pub mod ops;
 pub mod product;
@@ -14,7 +13,7 @@ pub mod terminal;
 pub mod workspace;
 
 pub const CONFIG_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 7;
+pub const DATABASE_VERSION: u32 = 8;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

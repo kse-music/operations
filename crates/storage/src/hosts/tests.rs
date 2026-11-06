@@ -19,6 +19,30 @@ fn input() -> HostInput {
 }
 
 #[test]
+fn hosts_with_unbound_proxy_passwords_remain_editable_until_credentials_are_restored() {
+    use serverdeck_core::connection::{ProxyKind, ProxySettings};
+
+    let dir = tempfile::tempdir().expect("dir");
+    let db = Database::open(dir.path().join("hosts.sqlite3")).expect("db");
+    let mut config = input();
+    config.ssh.proxy = Some(ProxySettings {
+        kind: ProxyKind::Socks5,
+        hostname: "proxy.example".into(),
+        port: 1080,
+        username: Some("proxy-user".into()),
+        credential_id: None,
+    });
+    let host = db.host_create(config).expect("legacy host");
+    let mut saved = db.host(&host.id).expect("read host").config;
+    assert!(saved.ssh.require_proxy_credentials().is_err());
+    saved.name = "待补绑凭据".into();
+    db.host_update(&host.id, saved).expect("edit host");
+    let updated = db.host(&host.id).expect("read updated host");
+    assert_eq!(updated.config.name, "待补绑凭据");
+    assert!(updated.config.ssh.require_proxy_credentials().is_err());
+}
+
+#[test]
 fn unnamed_hosts_can_be_created_updated_copied_and_reopened() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");

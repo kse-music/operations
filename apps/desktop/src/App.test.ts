@@ -537,10 +537,12 @@ it('removes the task center from the footer, search and legacy shortcuts without
   await flush();
   const search = document.querySelector<HTMLInputElement>('[aria-label="全局搜索内容"]')!;
   expect(search).not.toBeNull();
-  search.value = '任务中心';
-  search.dispatchEvent(new Event('input', { bubbles: true }));
-  await flush();
-  expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+  for (const removed of ['任务中心', '备份恢复']) {
+    search.value = removed;
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    await flush();
+    expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
+  }
   expect(useWorkspaceStore().current?.view).toBe('terminals');
   expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
 });
@@ -658,35 +660,13 @@ it('merges navigation with the host tree and keeps the sidebar available on glob
   expect(root.querySelector('.workspace-tabs [aria-label="展开主机栏"]')).not.toBeNull();
 });
 
-it('opens import and exports the API result from the actions beside the host list', async () => {
+it('keeps the host count and search without JSON import or export controls', () => {
   const heading = root.querySelector('.host-list-heading')!;
-  expect(heading.nextElementSibling?.classList.contains('host-sidebar-controls')).toBe(true);
-  expect(root.querySelector('[aria-label="主机树工具"]')).toBeNull();
-  expect(root.querySelector('[aria-label="主机排序"]')).toBeNull();
-  heading.querySelector<HTMLButtonElement>('[aria-label="导入 OpenSSH"]')!.click();
-  await flush();
-  const importing = document.querySelector('[aria-label="导入 OpenSSH Config"]')!;
-  expect(importing).not.toBeNull();
-  importing.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
-  await flush();
-  expect(document.querySelector('[aria-label="导入 OpenSSH Config"]')).toBeNull();
-  const result = '{"format":"serverdeck-hosts","hosts":[]}';
-  const exporting = vi.spyOn(hostsApi, 'export').mockResolvedValue(result);
-  const exportButton = heading.querySelector<HTMLButtonElement>('[aria-label="导出配置"]')!;
-  exportButton.click();
-  await flush();
-  expect(exporting).toHaveBeenCalledOnce();
-  const dialog = document.querySelector('[aria-label="导出非敏感主机配置"]')!;
-  expect(dialog.querySelector<HTMLTextAreaElement>('[aria-label="导出内容"]')?.value).toBe(result);
-  dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
-  await flush();
-  expect(document.querySelector('[aria-label="导出非敏感主机配置"]')).toBeNull();
-  exporting.mockRejectedValueOnce(new Error('导出读取失败'));
-  exportButton.click();
-  await flush();
-  expect(useHostsStore().error).toBe('导出读取失败');
-  expect(document.querySelector('[aria-label="导出非敏感主机配置"]')).toBeNull();
-  expect(useTerminalsStore().panes).toHaveLength(0);
+  expect(heading.textContent).toContain('全部主机');
+  expect(heading.querySelector('.host-count')?.textContent?.trim()).toBe('2');
+  expect(heading.querySelector('button')).toBeNull();
+  expect(root.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
+  expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
 });
 
 it('uses the right-clicked folder when creating a host without a group selector', async () => {
@@ -830,9 +810,9 @@ it('keeps the current terminal visible across top module switches and navigates 
     ['插件管理'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
-  await sidebarMenu('assets', '备份恢复');
+  await sidebarMenu('assets', '模型管理');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['安全凭据', '模型管理', '备份恢复'],
+    ['安全凭据', '模型管理'],
   );
   await sidebarMenu('system', '关于');
   root.querySelector<HTMLButtonElement>('.module-navigation [data-module="assets"]')!.click();

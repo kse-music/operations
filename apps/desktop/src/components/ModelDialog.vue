@@ -96,46 +96,28 @@ function testConnection() {
           </p>
         </section>
         <details class="model-advanced">
-          <summary>输出与费用估算<span>可选配置</span></summary>
+          <summary>上下文与输出<span>Token 限制</span></summary>
           <div class="model-fields">
-            <label class="model-field-wide"
+            <label
+              >上下文窗口（Token）<input
+                v-model.number="config.contextWindowTokens"
+                type="number"
+                min="1024"
+                max="10000000"
+                required
+            /></label>
+            <label
               >最大输出 Token<input
                 v-model.number="config.maxOutputTokens"
                 type="number"
                 min="256"
-                max="8192"
+                :max="Math.min(8192, config.contextWindowTokens - 1)"
                 required
             /></label>
-            <label
-              >输入单价（USD/百万 Token）<input
-                :value="config.inputPricePerMillion ?? ''"
-                type="number"
-                min="0"
-                max="10000"
-                step="any"
-                @input="
-                  config.inputPricePerMillion =
-                    ($event.target as HTMLInputElement).value === ''
-                      ? null
-                      : Number(($event.target as HTMLInputElement).value)
-                "
-            /></label>
-            <label
-              >输出单价（USD/百万 Token）<input
-                :value="config.outputPricePerMillion ?? ''"
-                type="number"
-                min="0"
-                max="10000"
-                step="any"
-                @input="
-                  config.outputPricePerMillion =
-                    ($event.target as HTMLInputElement).value === ''
-                      ? null
-                      : Number(($event.target as HTMLInputElement).value)
-                "
-            /></label>
           </div>
-          <p class="muted">单价留空时显示费用未知，以服务商实际账单为准。</p>
+          <p class="muted">
+            填写模型支持的输入与输出 Token 总量。应用会为最大输出预留空间，再估算可发送的上下文。
+          </p>
         </details>
       </fieldset>
       <div

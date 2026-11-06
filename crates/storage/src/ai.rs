@@ -7,6 +7,7 @@ use serverdeck_core::ai::{Config, Model, validate_model_name};
 pub struct ModelRecord {
     pub id: String,
     pub name: String,
+    #[serde(deserialize_with = "saved_config")]
     pub config: Config,
     pub secret_ref: Option<String>,
     pub revision: String,
@@ -31,9 +32,19 @@ struct Registry {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Legacy {
+    #[serde(deserialize_with = "saved_config")]
     config: Config,
     secret_ref: Option<String>,
     revision: String,
+}
+
+fn saved_config<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Config, D::Error> {
+    let mut value = serde_json::Value::deserialize(deserializer)?;
+    if let Some(config) = value.as_object_mut() {
+        config.remove("inputPricePerMillion");
+        config.remove("outputPricePerMillion");
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 fn read(connection: &Connection) -> Result<Registry, Error> {

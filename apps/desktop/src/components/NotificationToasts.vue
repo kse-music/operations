@@ -28,7 +28,7 @@ function notifyInvalid(event: Event): void {
 async function reveal(): Promise<void> {
   await nextTick();
   const element = stack.value;
-  if (!element?.showPopover) return;
+  if (!element?.isConnected || !element.showPopover) return;
   // A popover inside the active dialog stays interactive above its native backdrop.
   element.hidePopover();
   if (notifications.items.length) element.showPopover();

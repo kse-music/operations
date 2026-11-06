@@ -52,6 +52,37 @@ pub struct PreparedContext {
     pub warnings: Vec<String>,
 }
 pub const REQUEST_LIMIT_BYTES: usize = 96 * 1024;
+const INPUT_TOKEN_MARGIN: u64 = 64;
+
+pub fn request_byte_limit(config: &Config) -> usize {
+    let input = u64::from(config.context_window_tokens)
+        .saturating_sub(u64::from(config.max_output_tokens) + INPUT_TOKEN_MARGIN);
+    (input as usize).min(REQUEST_LIMIT_BYTES)
+}
+
+fn check_request_budget(
+    config: &Config,
+    wire_bytes: usize,
+    output_tokens: u64,
+) -> Result<u64, Error> {
+    if wire_bytes > REQUEST_LIMIT_BYTES {
+        return Err(failure(
+            "AI_CONTEXT_LIMIT",
+            "问题、历史与上下文合计超过 96 KiB，请缩小问题或主机范围，或开启新对话",
+        ));
+    }
+    // Conservative UTF-8 byte estimate, independent of any specific provider tokenizer.
+    let estimated_input_tokens = wire_bytes as u64 + INPUT_TOKEN_MARGIN;
+    if estimated_input_tokens.saturating_add(output_tokens)
+        > u64::from(config.context_window_tokens)
+    {
+        return Err(failure(
+            "AI_CONTEXT_LIMIT",
+            "估算的输入加输出预留超过模型上下文窗口，请缩小问题范围或调整模型的 Token 限制",
+        ));
+    }
+    Ok(estimated_input_tokens)
+}
 
 // Shared by built-in context budgeting and the final send boundary. Count the
 // actual JSON wire representation, including escaped context and history.
@@ -180,14 +211,8 @@ impl Assistant {
             .len();
         let serialized =
             serde_json::to_string_pretty(&body).map_err(|e| Error::Worker(Box::new(e)))?;
-        if wire_bytes > REQUEST_LIMIT_BYTES {
-            return Err(failure(
-                "AI_CONTEXT_LIMIT",
-                "问题、历史与上下文合计超过 96 KiB，请缩小问题或主机范围，或开启新对话",
-            ));
-        }
-        // Conservative UTF-8 byte estimate, not a model tokenizer or a billing guarantee.
-        let estimated_input_tokens = wire_bytes as u64 + 64;
+        let estimated_input_tokens =
+            check_request_budget(&config, wire_bytes, u64::from(config.max_output_tokens))?;
         let id = uuid::Uuid::new_v4().to_string();
         warnings.push(
             "问题、历史和上下文已进行自动脱敏，仍可能遗漏敏感内容。执行输出不会作为对话历史发送。"
@@ -204,11 +229,7 @@ impl Assistant {
             body: serialized,
             estimated_input_tokens,
             max_output_tokens: config.max_output_tokens,
-            estimated_max_cost: cost(
-                &config,
-                estimated_input_tokens,
-                config.max_output_tokens as u64,
-            ),
+            estimated_max_cost: None,
             warnings,
         };
         let mut state = lock(&self.state)?;
@@ -401,15 +422,11 @@ impl Assistant {
             }
             proposals.push(proposal);
         }
-        let estimated_cost = completion
-            .usage
-            .as_ref()
-            .and_then(|u| cost(&pending.config, u.input_tokens, u.output_tokens));
         Ok(Answer {
             text: pending.redactor.text(&text),
             proposals,
             usage: completion.usage,
-            estimated_cost,
+            estimated_cost: None,
             warnings,
             agent: None,
         })
@@ -484,13 +501,6 @@ impl Assistant {
             );
         }
     }
-}
-pub fn cost(config: &Config, input: u64, output: u64) -> Option<f64> {
-    Some(
-        (config.input_price_per_million? * input as f64
-            + config.output_price_per_million? * output as f64)
-            / 1_000_000.0,
-    )
 }
 
 #[cfg(test)]

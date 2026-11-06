@@ -23,7 +23,6 @@ import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
 import { useHostsStore } from './stores/hosts';
-import { hostsApi } from './services/hosts';
 import { hostDisplayName, type Host } from './types/hosts';
 const TerminalsView = defineAsyncComponent(() => import('./views/TerminalsView.vue'));
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -53,7 +52,6 @@ const PluginsView = defineAsyncComponent(() => import('./views/PluginsView.vue')
 const PluginPage = defineAsyncComponent(() => import('./views/PluginPage.vue'));
 const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
 const plugins = usePluginsStore();
-const BackupView = defineAsyncComponent(() => import('./views/BackupView.vue'));
 const ModelsView = defineAsyncComponent(() => import('./views/ModelsView.vue'));
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
@@ -395,8 +393,7 @@ function fileTerminal(host: Host, action: import('./types/files').FileTerminalAc
 
 const hostDialog = ref(false);
 const hostFolderId = ref<string | null>(null);
-const importing = ref(false);
-const exportText = ref<string | null>(null);
+const importingOpenSsh = ref(false);
 function openHost(groupId: string | null = null): void {
   store.error = null;
   hostFolderId.value = groupId;
@@ -411,23 +408,6 @@ function revealHost(host: Host): void {
   void nextTick(() =>
     document.querySelector('.tree-host.selected')?.scrollIntoView({ block: 'nearest' }),
   );
-}
-async function exportHosts(): Promise<void> {
-  const result = await store.run(hostsApi.export);
-  if (result.ok) exportText.value = result.value;
-}
-function download(): void {
-  if (!exportText.value) return;
-  const url = URL.createObjectURL(
-    new Blob([exportText.value], { type: 'application/json;charset=utf-8' }),
-  );
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = 'serverdeck-hosts.json';
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 const theme = computed(() => application.state?.config.theme);
 useTheme(theme);
@@ -600,8 +580,7 @@ watch(
           @plugin="openPlugin"
           @local-terminal="navigate('terminals', '')"
           @create="openHost($event)"
-          @import="importing = true"
-          @export="exportHosts"
+          @import-openssh="importingOpenSsh = true"
           @select="setContext($event.id, true)"
           @saved="revealHost"
         />
@@ -748,7 +727,6 @@ watch(
           :host-id="currentHostId"
           @terminal="fileTerminal"
         />
-        <BackupView v-else-if="view === 'backup'" />
         <PluginsView v-else-if="view === 'plugins'" @settings="workspace.openPluginSettings" />
         <PluginPage
           v-else-if="view === 'pluginSettings' && workspace.current?.pluginId"
@@ -845,18 +823,7 @@ watch(
     @saved="revealHost"
     @close="hostDialog = false"
   />
-  <ImportDialog v-if="importing" @close="importing = false" />
-  <Modal v-if="exportText !== null" title="导出非敏感主机配置" @close="exportText = null"
-    ><p class="subtle">
-      JSON
-      格式，包含主机、分组和连接配置。排除凭据、凭据引用、私钥路径、密码和私钥口令。请检查导出内容中是否有自行填写的秘密。
-    </p>
-    <textarea class="export-text" :value="exportText" readonly aria-label="导出内容"></textarea>
-    <footer class="dialog-actions">
-      <button class="button" @click="exportText = null">关闭</button
-      ><button class="button primary" @click="download">下载 JSON</button>
-    </footer></Modal
-  >
+  <ImportDialog v-if="importingOpenSsh" @close="importingOpenSsh = false" />
   <Teleport to="body">
     <div
       v-if="tabMenu && tabMenuIndex >= 0"

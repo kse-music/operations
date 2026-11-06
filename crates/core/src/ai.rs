@@ -19,8 +19,11 @@ pub struct Config {
     pub model: String,
     pub allow_insecure_http: bool,
     pub max_output_tokens: u32,
-    pub input_price_per_million: Option<f64>,
-    pub output_price_per_million: Option<f64>,
+    #[serde(default = "default_context_window_tokens")]
+    pub context_window_tokens: u32,
+}
+fn default_context_window_tokens() -> u32 {
+    131_072
 }
 impl Default for Config {
     fn default() -> Self {
@@ -30,8 +33,7 @@ impl Default for Config {
             model: String::new(),
             allow_insecure_http: false,
             max_output_tokens: 2048,
-            input_price_per_million: None,
-            output_price_per_million: None,
+            context_window_tokens: default_context_window_tokens(),
         }
     }
 }
@@ -49,15 +51,12 @@ impl Config {
                 "请填写模型 ID，输出上限须为 256–8192 Token",
             ));
         }
-        for price in [self.input_price_per_million, self.output_price_per_million]
-            .into_iter()
-            .flatten()
+        if !(1024..=10_000_000).contains(&self.context_window_tokens)
+            || self.context_window_tokens <= self.max_output_tokens
         {
-            if !price.is_finite() || !(0.0..=10000.0).contains(&price) {
-                return Err(Error::Validation(
-                    "价格须为 0–10000 的有限数值（USD/百万 Token）",
-                ));
-            }
+            return Err(Error::Validation(
+                "上下文窗口须为 1024–10000000 Token，且大于最大输出 Token",
+            ));
         }
         Ok(())
     }

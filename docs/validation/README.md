@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[OpenSSH 导入弹窗布局验证](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗布局)。
+
+最新：[主机 JSON 导入导出下线及主机列表验证](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-主机-json-导入导出下线)。
+
+最新：[私钥导入、旧凭据迁移与模型上下文窗口验证](workspace/VALIDATION_PRODUCT.md#2026-11-06-私钥导入和模型上下文窗口)。
+
+最新：[应用配置备份与恢复下线](workspace/VALIDATION_PRODUCT.md#2026-11-06-应用配置备份与恢复下线)。
+
+最新：[资产管理三页布局与确认流程验证](workspace/VALIDATION_PRODUCT.md#2026-11-06-资产管理页面排版)。
+
 最新：[设置页面排版、响应式间距与终端命名验证](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-05设置页面排版与终端命名)。
 
 最新：[镜像删除单次确认、冻结目标与弹窗布局验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-05镜像删除单次确认与弹窗布局)。

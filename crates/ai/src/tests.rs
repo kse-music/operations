@@ -68,8 +68,6 @@ pub async fn http_fixture(
             base_url: format!("http://{address}/v1"),
             model: "fixture-model".into(),
             allow_insecure_http: true,
-            input_price_per_million: Some(1.0),
-            output_price_per_million: Some(2.0),
             ..Default::default()
         },
         task,
@@ -169,7 +167,7 @@ fn request_limit_counts_wire_bytes_and_preserves_the_hard_limit() {
 }
 
 #[test]
-fn endpoint_and_cost_validation() {
+fn endpoint_validation() {
     let mut config = Config {
         model: "fixture".into(),
         ..Default::default()
@@ -188,9 +186,34 @@ fn endpoint_and_cost_validation() {
         config.base_url = url.into();
         assert!(provider::endpoint(&config).is_err(), "{url}");
     }
-    assert!(cost(&config, 10, 20).is_none());
-    config.input_price_per_million = Some(f64::NAN);
-    assert!(config.validate().is_err());
+}
+
+#[tokio::test]
+async fn model_window_reserves_output_and_rejects_oversize_requests_before_http() {
+    let (mut config, server, _) = http_fixture("200 OK", reply("OK"), false).await;
+    config.context_window_tokens = 4096;
+    config.max_output_tokens = 1024;
+    let body = |size| {
+        provider::request(
+            &config,
+            "question",
+            serde_json::json!({"text":"x".repeat(size)}),
+        )
+    };
+    let overhead = serde_json::to_vec(&body(0)).unwrap().len();
+    let remaining = request_byte_limit(&config) - overhead;
+    let error = OpenAiCompatible
+        .complete(&config, b"test-key", &body(remaining + 1))
+        .await
+        .err()
+        .unwrap();
+    assert!(is_code(error, "AI_CONTEXT_LIMIT"));
+    let valid = body(remaining);
+    OpenAiCompatible
+        .complete(&config, b"test-key", &valid)
+        .await
+        .unwrap();
+    assert_eq!(server.await.unwrap(), valid);
 }
 
 #[tokio::test]
@@ -221,7 +244,7 @@ async fn sends_exact_redacted_preview_then_holds_commands_for_individual_approva
     assert_eq!(actual["messages"][1]["role"], "user");
     assert_eq!(actual["store"], false);
     assert_eq!(answer.usage.unwrap().input_tokens, 100);
-    assert_eq!(answer.estimated_cost, Some(0.00014));
+    assert_eq!(answer.estimated_cost, None);
     assert!(matches!(answer.proposals[0].risk, CommandRisk::ReadOnly));
     assert!(matches!(answer.proposals[1].risk, CommandRisk::Change));
     assert!(matches!(answer.proposals[2].risk, CommandRisk::ManualOnly));

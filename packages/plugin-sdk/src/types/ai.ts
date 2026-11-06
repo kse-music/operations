@@ -5,8 +5,7 @@ export interface AiConfig {
   model: string;
   allowInsecureHttp: boolean;
   maxOutputTokens: number;
-  inputPricePerMillion: number | null;
-  outputPricePerMillion: number | null;
+  contextWindowTokens: number;
 }
 export interface AiModel {
   id: string;
@@ -35,8 +34,7 @@ export const defaultAiConfig = (): AiConfig => ({
   model: '',
   allowInsecureHttp: false,
   maxOutputTokens: 2048,
-  inputPricePerMillion: null,
-  outputPricePerMillion: null,
+  contextWindowTokens: 131072,
 });
 export interface AiSelection {
   server: boolean;

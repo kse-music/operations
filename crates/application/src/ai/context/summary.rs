@@ -119,7 +119,8 @@ pub(super) fn has_omissions(value: &Value) -> bool {
 }
 
 pub(in crate::ai) fn fit_budget(input: &mut serverdeck_ai::PreparedContext) -> Result<(), Error> {
-    if serverdeck_ai::request_size(input)? <= serverdeck_ai::REQUEST_LIMIT_BYTES {
+    let limit = serverdeck_ai::request_byte_limit(&input.config);
+    if serverdeck_ai::request_size(input)? <= limit {
         return Ok(());
     }
     // Preserve summaries and failures for every host, dropping optional details.
@@ -129,9 +130,7 @@ pub(in crate::ai) fn fit_budget(input: &mut serverdeck_ai::PreparedContext) -> R
         .warnings
         .push("为控制请求大小，本轮已省略明细，保留各主机统计和读取失败原因。".into());
     let mut omitted_turns = 0;
-    while serverdeck_ai::request_size(input)? > serverdeck_ai::REQUEST_LIMIT_BYTES
-        && input.history.len() >= 2
-    {
+    while serverdeck_ai::request_size(input)? > limit && input.history.len() >= 2 {
         input.history.drain(..2);
         omitted_turns += 1;
         input.context["omittedHistoryTurns"] = json!(omitted_turns);

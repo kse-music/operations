@@ -114,12 +114,8 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   }
   for (const command of ['batch_start', 'automation_status'])
     await assert.rejects(() => invoke(command, {}));
-  const exported = JSON.parse(await invoke('backup_export'));
-  assert.equal(exported.version, 3);
-  assert.equal(exported.entries, undefined);
-  assert.equal(exported.commandGroups, undefined);
   passed.push(
-    'upgrade retires both enabled tools without deleting settings; removed IPC/activation are denied and backup omits the command library',
+    'upgrade retires both enabled tools without deleting settings; removed IPC/activation are denied',
   );
   const configurationRequests = {};
   for (const plugin of list) {
@@ -356,8 +352,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
         model: 'qa',
         allowInsecureHttp: true,
         maxOutputTokens: 512,
-        inputPricePerMillion: null,
-        outputPricePerMillion: null,
+        contextWindowTokens: 131072,
       },
       apiKey: randomUUID(),
       clearKey: false,

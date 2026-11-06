@@ -36,7 +36,7 @@ fn host_row(row: &Row<'_>) -> rusqlite::Result<Host> {
         updated_at: row.get(13)?,
     })
 }
-pub(crate) fn one_host(connection: &Connection, id: &str) -> Result<Host, Error> {
+fn one_host(connection: &Connection, id: &str) -> Result<Host, Error> {
     connection
         .query_row(
             &format!("SELECT {HOST_COLUMNS} FROM hosts WHERE id=?1"),
@@ -88,7 +88,7 @@ fn validate_links(connection: &Connection, input: &HostInput) -> Result<(), Erro
     }
     Ok(())
 }
-pub(crate) fn insert_host(connection: &Connection, input: &HostInput) -> Result<Host, Error> {
+fn insert_host(connection: &Connection, input: &HostInput) -> Result<Host, Error> {
     validate_links(connection, input)?;
     let id = Uuid::new_v4().to_string();
     validate_jump_chain(connection, &id, input)?;
@@ -112,6 +112,7 @@ pub struct CredentialRecord {
     pub public: Credential,
     pub secret_ref: Option<String>,
 }
+
 fn credential_record(connection: &Connection, id: &str) -> Result<CredentialRecord, Error> {
     connection.query_row("SELECT id,name,kind,key_path,secret_ref,revision,(SELECT count(*) FROM hosts WHERE credential_id=credentials.id OR json_extract(ssh_options,'$.proxy.credentialId')=credentials.id) FROM credentials WHERE id=?1", [id], |row| {
         let secret_ref: Option<String> = row.get(4)?;

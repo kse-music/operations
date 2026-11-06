@@ -72,6 +72,18 @@ node tools/tauri.mjs build --bundles nsis
 
 `cargo clean --release` 清理当前 target 目录的 Release 生成产物，包括旧安装包，下次构建会重新编译全部 Release 依赖；需要保留的旧包应先另存。它不清理 Debug 产物或应用数据目录，具体范围见 [Cargo clean 文档](https://doc.rust-lang.org/cargo/commands/cargo-clean.html)。不要用删除数据库、用户配置或 Cargo.lock 来排查这类编译错误。若错误仍存在，保留完整构建日志继续定位，不自动反复清理或掩盖错误。
 
+## NSIS 工具解压失败排查
+
+如果日志已经出现 `Built application at`，随后在 `extracting NSIS` 时报告 `PermissionDenied`，应检查 NSIS 工具解压时的文件创建权限。本机曾在创建 `Plugins/x86-ansi/TypeLib.dll` 时复现，切换缓存目录后同样失败。
+
+Tauri 默认使用 `%LOCALAPPDATA%\tauri\NSIS`，可复用与当前 CLI 匹配的完整缓存。缓存缺失且解压仍被拒绝时，保留完整日志并检查对应文件和安全软件的拦截记录。参见 [Tauri 的 NSIS 缓存检查逻辑](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.4/crates/tauri-bundler/src/bundle/windows/nsis/mod.rs#L75-L105)。
+
+已有当前版本的 Release 程序时，可从仓库根目录仅重跑安装包生成步骤：
+
+```powershell
+node tools/tauri.mjs bundle --bundles nsis
+```
+
 ## 原生验收
 
 常规编译、类型与单元测试入口见 [README](../../README.md#测试)。Windows 受限执行环境可能禁止 Vitest 缓存重命名或 loopback TCP；这些测试需要正常本地进程权限。

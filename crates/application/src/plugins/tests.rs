@@ -489,6 +489,7 @@ async fn linux_sdk_capability_roundtrip() {
                 name: format!("plugin-test-{}", uuid::Uuid::new_v4()),
                 kind: AuthType::Password,
                 key_path: None,
+                key_data: None,
                 secret: Some(password),
                 clear_secret: false,
             },

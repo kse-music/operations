@@ -23,8 +23,10 @@ fn approval_dtos_reject_extra_commands_and_model_claimed_permissions() {
     config.max_output_tokens = 0;
     assert!(config.validate().is_err());
     config.max_output_tokens = 1024;
-    config.output_price_per_million = Some(-1.0);
+    config.context_window_tokens = 1024;
     assert!(config.validate().is_err());
+    config.context_window_tokens = 8192;
+    assert!(config.validate().is_ok());
 }
 
 #[test]

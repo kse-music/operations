@@ -238,55 +238,6 @@ export async function productChecks(context) {
   passed(
     'native host-context switching and connection snapshots leave the original SSH session usable',
   );
-  for (let n = 0; n < 5; n++) {
-    const close = page.getByRole('button', { name: '关闭通知', exact: true });
-    if (!(await close.count())) break;
-    await close.first().click();
-  }
-  await nav('备份恢复');
-  await page.getByRole('button', { name: '导出非敏感备份', exact: true }).click();
-  const backup = await rpc('backup_export');
-  const parsed = JSON.parse(backup);
-  assert.equal(parsed.version, 3);
-  assert(!backup.includes(originalHost.credentialId));
-  assert(!parsed.credentials && !parsed.schedules && !parsed.runs);
-  assert(parsed.hosts.every((h) => h.config.credentialId === null));
-  await page.getByLabel('待恢复备份 JSON').fill(backup);
-  await page.getByRole('button', { name: '校验并预览备份', exact: true }).click();
-  await page.getByLabel(`恢复 ${originalHost.name}`, { exact: true }).check();
-  await page.getByLabel(`恢复 ${name}`, { exact: true }).check();
-  await page.getByLabel('确认备份恢复', { exact: true }).check();
-  await page.getByRole('button', { name: '确认恢复所选配置', exact: true }).click();
-  await page.getByRole('heading', { name: '恢复完成', exact: true }).waitFor();
-  assert.equal((await rpc('host_list')).hosts.length, 2);
-  await page.getByRole('button', { name: '校验并预览备份', exact: true }).click();
-  await page.getByLabel('备份冲突策略', { exact: true }).selectOption('copy');
-  await page.getByLabel(`恢复 ${originalHost.name}`, { exact: true }).check();
-  await page.getByLabel(`恢复 ${name}`, { exact: true }).check();
-  await page.getByLabel('确认备份恢复', { exact: true }).check();
-  await page.getByRole('button', { name: '确认恢复所选配置', exact: true }).click();
-  await page.getByRole('heading', { name: '恢复完成', exact: true }).waitFor();
-  const restored = (await rpc('host_list')).hosts.filter((h) => h.id !== hostId && h.id !== b.id);
-  assert.equal(restored.length, 1);
-  assert.equal(restored[0].credentialId, null);
-  scope.hosts.push(restored[0].id);
-  await remember();
-  await writeFile(
-    path.join(artifacts, 'product-backup-metadata.json'),
-    JSON.stringify(
-      {
-        version: parsed.version,
-        hosts: parsed.hosts.length,
-        restoredHostIds: restored.map((h) => h.id),
-        credentialsExported: false,
-      },
-      null,
-      2,
-    ),
-  );
-  passed(
-    'native versioned backup preview, duplicate skip and confirmed copy restore preserve originals and omit credentials/automatic plans',
-  );
   // Settings and logical panel/window persistence. Only manipulate this test process window.
   await nav('终端');
   await page.getByLabel('默认 Keepalive 间隔', { exact: true }).fill('33');
@@ -452,6 +403,6 @@ export async function productChecks(context) {
   await contains('__SD_PRODUCT_RESTART_SURVIVED__');
   await page.screenshot({ path: path.join(artifacts, 'product-dark.png') });
   passed(
-    'native exit review, no unattended reconnect after restart, owned backup/task cleanup and fresh real SSH shell',
+    'native exit review, no unattended reconnect after restart, owned host/task cleanup and fresh real SSH shell',
   );
 }

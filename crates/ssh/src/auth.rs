@@ -1,8 +1,100 @@
 use super::*;
 use russh::keys::{
-    PrivateKeyWithHashAlg,
+    PrivateKey, PrivateKeyWithHashAlg,
     agent::{AgentIdentity, client::AgentClient},
+    ssh_key::LineEnding,
 };
+use std::{io::Read, path::PathBuf};
+
+const KEY_FILE_LIMIT: usize = 1024 * 1024;
+
+fn decode_private_key(contents: &str, passphrase: Option<&str>) -> Result<PrivateKey, Error> {
+    let key = russh::keys::decode_secret_key(contents, passphrase).map_err(|error| {
+        Error::Connection {
+            code: "SSH_KEY_UNLOCK",
+            message: "私钥格式不支持或口令错误",
+            source: Some(Box::new(error)),
+        }
+    })?;
+    if key.algorithm().is_rsa() {
+        return Err(failure(
+            "SSH_RSA_BLOCKED",
+            "受上游安全通告影响，暂不允许本地 RSA 私钥签名；请使用 Ed25519/ECDSA 或系统 Agent",
+        ));
+    }
+    Ok(key)
+}
+
+/// Normalize a key for the OS credential store. The supplied passphrase is used only to unlock it.
+pub fn import_private_key(
+    contents: &str,
+    passphrase: Option<&str>,
+) -> Result<Zeroizing<String>, Error> {
+    if contents.is_empty() || contents.len() > KEY_FILE_LIMIT {
+        return Err(Error::Validation("私钥文件须为 1 字节至 1 MiB"));
+    }
+    let mut key = decode_private_key(contents, passphrase)?;
+    key.set_comment("");
+    key.to_openssh(LineEnding::LF)
+        .map_err(|error| Error::Connection {
+            code: "SSH_KEY_FORMAT",
+            message: "无法转换私钥格式，请选择 OpenSSH 支持的私钥文件",
+            source: Some(Box::new(error)),
+        })
+}
+
+fn read_legacy_key(path: &str) -> Result<Zeroizing<String>, Error> {
+    let path = if let Some(suffix) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(|home| PathBuf::from(home).join(suffix))
+            .ok_or_else(|| failure("SSH_KEY_FILE", "无法解析用户私钥路径"))?
+    } else {
+        PathBuf::from(path)
+    };
+    if !path.is_absolute() {
+        return Err(failure("SSH_KEY_FILE", "私钥路径必须是绝对路径或 ~/ 路径"));
+    }
+    let file = std::fs::File::open(path).map_err(|error| Error::Connection {
+        code: "SSH_KEY_FILE",
+        message: "无法读取私钥文件，请检查路径和权限",
+        source: Some(Box::new(error)),
+    })?;
+    let metadata = file.metadata().map_err(|error| Error::Connection {
+        code: "SSH_KEY_FILE",
+        message: "无法读取私钥文件信息",
+        source: Some(Box::new(error)),
+    })?;
+    if !metadata.is_file() || metadata.len() > KEY_FILE_LIMIT as u64 {
+        return Err(failure("SSH_KEY_FILE", "私钥文件无效或超过 1 MiB"));
+    }
+    let mut contents = Zeroizing::new(String::new());
+    file.take(KEY_FILE_LIMIT as u64 + 1)
+        .read_to_string(&mut contents)
+        .map_err(|error| Error::Connection {
+            code: "SSH_KEY_FILE",
+            message: "私钥文件读取失败或不是受支持的文本格式",
+            source: Some(Box::new(error)),
+        })?;
+    if contents.len() > KEY_FILE_LIMIT {
+        return Err(failure("SSH_KEY_FILE", "私钥文件超过 1 MiB"));
+    }
+    Ok(contents)
+}
+
+async fn authenticate_key(
+    handle: &mut client::Handle<trust::Verifier>,
+    username: &str,
+    decode: impl FnOnce() -> Result<PrivateKey, Error> + Send + 'static,
+) -> Result<bool, Error> {
+    let key = tokio::task::spawn_blocking(decode)
+        .await
+        .map_err(|error| Error::Worker(Box::new(error)))??;
+    Ok(handle
+        .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+        .await
+        .map_err(network)?
+        .success())
+}
 
 pub(crate) async fn authenticate(
     handle: &mut client::Handle<trust::Verifier>,
@@ -16,27 +108,19 @@ pub(crate) async fn authenticate(
             .map_err(network)?
             .success(),
         Authentication::PrivateKey { path, passphrase } => {
-            let key=tokio::task::spawn_blocking(move || {
-                let path = if let Some(suffix)=path.strip_prefix("~/").or_else(||path.strip_prefix("~\\")) {
-                    std::env::var_os(if cfg!(windows) {"USERPROFILE"} else {"HOME"}).map(|home|std::path::PathBuf::from(home).join(suffix)).ok_or_else(||failure("SSH_KEY_FILE","无法解析用户私钥路径"))?
-                } else { std::path::PathBuf::from(path) };
-                if !path.is_absolute() { return Err(failure("SSH_KEY_FILE","私钥路径必须是绝对路径或 ~/ 路径")); }
-                let file=std::fs::File::open(&path).map_err(|e|Error::Connection {code:"SSH_KEY_FILE",message:"无法读取私钥文件，请检查路径和权限",source:Some(Box::new(e))})?;
-                let metadata=file.metadata().map_err(|e|Error::Connection {code:"SSH_KEY_FILE",message:"无法读取私钥文件信息",source:Some(Box::new(e))})?;
-                if !metadata.is_file() || metadata.len()>1024*1024 { return Err(failure("SSH_KEY_FILE","私钥文件无效或超过 1 MiB")); }
-                use std::io::Read;
-                let mut contents=Zeroizing::new(String::new());
-                file.take(1024*1024+1).read_to_string(&mut contents).map_err(|e|Error::Connection {code:"SSH_KEY_FILE",message:"私钥文件读取失败或不是受支持的文本格式",source:Some(Box::new(e))})?;
-                if contents.len()>1024*1024 {return Err(failure("SSH_KEY_FILE","私钥文件超过 1 MiB"));}
-                let key=russh::keys::decode_secret_key(&contents,passphrase.as_deref().map(|v|v.as_str())).map_err(|e|Error::Connection {code:"SSH_KEY_UNLOCK",message:"私钥格式不支持或口令错误",source:Some(Box::new(e))})?;
-                if key.algorithm().is_rsa() { return Err(failure("SSH_RSA_BLOCKED","受上游安全通告影响，暂不允许本地 RSA 私钥签名；请使用 Ed25519/ECDSA 或系统 Agent")); }
-                Ok(key)
-            }).await.map_err(|e|Error::Worker(Box::new(e)))??;
-            handle
-                .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
-                .await
-                .map_err(network)?
-                .success()
+            authenticate_key(handle, username, move || {
+                decode_private_key(
+                    &read_legacy_key(&path)?,
+                    passphrase.as_deref().map(String::as_str),
+                )
+            })
+            .await?
+        }
+        Authentication::ImportedKey(contents) => {
+            authenticate_key(handle, username, move || {
+                decode_private_key(&contents, None)
+            })
+            .await?
         }
         Authentication::Agent => return authenticate_agent(handle, username).await,
     };

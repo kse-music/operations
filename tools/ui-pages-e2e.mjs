@@ -15,7 +15,6 @@ const pages = [
   ['SFTP 文件', 'files'],
   ['服务器管理', 'server'],
   ['安全凭据', 'credentials'],
-  ['备份恢复', 'backup'],
   ['关于', 'about'],
   ['通用', 'settings'],
   ['终端', 'settingsTerminal'],
@@ -232,22 +231,6 @@ async function fixtures(page, theme) {
         sendRate: 128,
       })),
     });
-    const { productApi } = await import('/src/services/product.ts');
-    productApi.preview = async () => ({
-      version: 1,
-      warnings: [],
-      items: [
-        {
-          id: 'restore-ui',
-          kind: 'host',
-          name: 'Restored host',
-          detail: '192.0.2.100',
-          duplicate: false,
-          blocked: false,
-          warnings: [],
-        },
-      ],
-    });
     const { useTerminalsStore } = await import('/src/stores/terminals.ts');
     const terminals = useTerminalsStore(pinia);
     terminals.open(host);
@@ -374,13 +357,6 @@ try {
           await inspect(page, `${variant}/${view}-tab-${n}`);
         }
         await page.screenshot({ path: `${output}/${variant}-${view}-last-tab.png` });
-      }
-      if (view === 'backup') {
-        await page.getByLabel('待恢复备份 JSON').fill('{}');
-        await page.getByRole('button', { name: '校验并预览备份', exact: true }).click();
-        await page.getByLabel('确认备份恢复').waitFor();
-        await inspect(page, `${variant}/restore-preview`);
-        await page.screenshot({ path: `${output}/${variant}-restore-preview.png` });
       }
       if (view === 'settingsTerminal') {
         await page.getByLabel('全局默认代理').selectOption('socks5');

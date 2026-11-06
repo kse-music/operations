@@ -2,7 +2,7 @@
 const hostTools = new Set(['SSH 终端', 'SFTP 文件']);
 const menuModules = {
   安全凭据: 'assets',
-  备份恢复: 'assets',
+  模型管理: 'assets',
   通用: 'system',
   终端: 'system',
   快捷键: 'system',

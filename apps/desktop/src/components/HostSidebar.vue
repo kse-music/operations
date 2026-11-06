@@ -5,11 +5,9 @@ import {
   ChevronRight,
   Folder,
   FolderOpen,
-  Download,
   Search,
   Server,
   SquareTerminal,
-  Upload,
 } from '@lucide/vue';
 const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
@@ -39,8 +37,7 @@ const hostState = (id: string) =>
 const emit = defineEmits<{
   localTerminal: [];
   create: [groupId: string | null];
-  import: [];
-  export: [];
+  importOpenssh: [];
   select: [host: Host];
   saved: [host: Host];
   plugin: [id: string, contribution: string, hostId: string];
@@ -199,6 +196,7 @@ type ContextTarget = { kind: 'folder'; id: string | null } | { kind: 'host'; id:
 type MenuAction =
   | 'newHost'
   | 'newFolder'
+  | 'importOpenssh'
   | 'rename'
   | 'deleteFolder'
   | 'connect'
@@ -234,7 +232,7 @@ const menuItems = computed<{ key: MenuAction; label: string; danger?: boolean }[
     { key: 'newHost', label: '新建主机' },
     { key: 'newFolder', label: '新建文件夹' },
     ...(target.id === null
-      ? []
+      ? [{ key: 'importOpenssh' as const, label: '导入 OpenSSH Config…' }]
       : [
           { key: 'rename' as const, label: '重命名文件夹' },
           { key: 'deleteFolder' as const, label: '删除文件夹', danger: true },
@@ -317,6 +315,7 @@ async function runContext(action: MenuAction): Promise<void> {
     }
     if (action === 'newHost') emit('create', target.id);
     else if (action === 'newFolder') folderEditor.value = { parentId: target.id };
+    else if (action === 'importOpenssh') emit('importOpenssh');
     else if (action === 'rename' && group)
       folderEditor.value = { parentId: group.parentId ?? null, group: { ...group } };
     else if (action === 'deleteFolder' && group) deletingFolder.value = { ...group };
@@ -394,29 +393,11 @@ onBeforeUnmount(() => {
       </nav>
     </div>
     <div class="host-list-heading">
-      全部主机<small v-if="store.catalog" class="host-count">{{
-        store.catalog.hosts.length
-      }}</small>
-      <div class="host-list-actions" role="group" aria-label="主机导入导出">
-        <button
-          class="shell-icon-button"
-          aria-label="导入 OpenSSH"
-          title="导入 OpenSSH"
-          :disabled="!store.catalog || store.busy"
-          @click="$emit('import')"
-        >
-          <Upload :size="15" aria-hidden="true" />
-        </button>
-        <button
-          class="shell-icon-button"
-          aria-label="导出配置"
-          title="导出配置"
-          :disabled="!store.catalog || store.busy"
-          @click="$emit('export')"
-        >
-          <Download :size="15" aria-hidden="true" />
-        </button>
-      </div>
+      <span class="host-list-title">
+        全部主机<small v-if="store.catalog" class="host-count">{{
+          store.catalog.hosts.length
+        }}</small>
+      </span>
     </div>
     <div class="host-sidebar-controls">
       <label class="host-search-field">

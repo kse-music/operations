@@ -5,12 +5,11 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub mod ai;
-pub mod backup;
 pub mod hosts;
 pub mod plugins;
 pub mod trust;
 pub mod workspace;
-use serverdeck_core::{AppConfig, DATABASE_VERSION, Error};
+use serverdeck_core::{AppConfig, DATABASE_VERSION, Error, product::WindowGeometry};
 
 #[derive(Clone)]
 pub struct Database {
@@ -87,6 +86,11 @@ impl Database {
             std::fs::set_permissions(&database.path, std::fs::Permissions::from_mode(0o600))
                 .map_err(storage_error)?;
         }
+        // Table rebuilds must not trigger ON DELETE SET NULL on referencing hosts.
+        // This connection is used only for migrations and checks the foreign keys before commit.
+        connection
+            .pragma_update(None, "foreign_keys", false)
+            .map_err(storage_error)?;
         // A write transaction serializes concurrent application startups/migrations.
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -126,6 +130,19 @@ impl Database {
             transaction
                 .execute_batch(include_str!("../migrations/007_host_folders.sql"))
                 .map_err(storage_error)?;
+        }
+        if version < 8 {
+            transaction
+                .execute_batch(include_str!("../migrations/008_imported_private_keys.sql"))
+                .map_err(storage_error)?;
+            if transaction
+                .query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
+                .optional()
+                .map_err(storage_error)?
+                .is_some()
+            {
+                return Err(Error::Validation("凭据迁移后的外键检查失败"));
+            }
         }
         transaction
             .pragma_update(None, "user_version", DATABASE_VERSION)
@@ -203,6 +220,36 @@ impl Database {
              ON CONFLICT(key) DO UPDATE SET value = excluded.value,
                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
                 params![json],
+            )
+            .map_err(storage_error)?;
+        Ok(())
+    }
+
+    pub fn window_geometry(&self) -> Result<Option<WindowGeometry>, Error> {
+        let json = self
+            .connect()?
+            .query_row(
+                "SELECT value FROM application_settings WHERE key='window_geometry'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(storage_error)?;
+        json.map(|json| {
+            let geometry: WindowGeometry = serde_json::from_str(&json).map_err(storage_error)?;
+            geometry.validate()?;
+            Ok(geometry)
+        })
+        .transpose()
+    }
+
+    pub fn save_window_geometry(&self, geometry: WindowGeometry) -> Result<(), Error> {
+        geometry.validate()?;
+        self.connect()?
+            .execute(
+                "INSERT INTO application_settings(key,value) VALUES('window_geometry',?1)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [serde_json::to_string(&geometry).map_err(storage_error)?],
             )
             .map_err(storage_error)?;
         Ok(())

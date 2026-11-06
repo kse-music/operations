@@ -1,7 +1,7 @@
-use crate::failure;
+use crate::{check_request_budget, failure};
 use reqwest::{
     Client, Url,
-    header::{AUTHORIZATION, HeaderValue},
+    header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue},
 };
 use serde_json::{Value, json};
 use serverdeck_core::{
@@ -77,6 +77,11 @@ impl ModelProvider for OpenAiCompatible {
         body: &Value,
     ) -> Result<Completion, Error> {
         let url = endpoint(config)?;
+        let wire = serde_json::to_vec(body).map_err(|error| Error::Worker(Box::new(error)))?;
+        let output_tokens = body["max_completion_tokens"]
+            .as_u64()
+            .ok_or(Error::Validation("模型请求缺少输出上限"))?;
+        check_request_budget(config, wire.len(), output_tokens)?;
         let mut authorization = Vec::with_capacity(key.len() + 7);
         authorization.extend_from_slice(b"Bearer ");
         authorization.extend_from_slice(key);
@@ -96,7 +101,8 @@ impl ModelProvider for OpenAiCompatible {
         let mut response = client
             .post(url)
             .header(AUTHORIZATION, header)
-            .json(body)
+            .header(CONTENT_TYPE, "application/json")
+            .body(wire)
             .send()
             .await
             .map_err(transport)?;

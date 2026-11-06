@@ -193,7 +193,9 @@ function credentialSaved(id: string): void {
                   v-model="draft.ssh.proxy.credentialId"
                   aria-label="代理密码凭据"
                 >
-                  <option :value="null">无代理认证</option>
+                  <option :value="null">
+                    {{ draft.ssh.proxy.username ? '请选择安全密码凭据' : '无代理认证' }}
+                  </option>
                   <option
                     v-for="credential in store.catalog?.credentials.filter(
                       (c) => c.kind === 'password',
@@ -205,6 +207,12 @@ function credentialSaved(id: string): void {
                   </option>
                 </select></label
               >
+              <p
+                v-if="draft.ssh.proxy.username && !draft.ssh.proxy.credentialId"
+                class="banner full-width"
+              >
+                请关联代理密码凭据后再连接此主机。
+              </p>
               <p class="subtle full-width">
                 网络代理用于连接第一个跳板或目标，密码引用系统安全凭据。当前代理链路不使用
                 TLS，SOCKS 用户名密码和 HTTP Basic 认证应仅用于可信代理网络。

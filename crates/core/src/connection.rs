@@ -39,6 +39,11 @@ impl Default for SshOptions {
 }
 impl SshOptions {
     pub fn normalize(&mut self) -> Result<(), Error> {
+        self.normalize_host()?;
+        self.require_proxy_credentials()
+    }
+
+    pub(crate) fn normalize_host(&mut self) -> Result<(), Error> {
         if !(1..=120).contains(&self.auth_timeout_secs)
             || !(1..=3600).contains(&self.keepalive_interval_secs)
             || !(1..=10).contains(&self.keepalive_count_max)
@@ -62,9 +67,22 @@ impl SshOptions {
             {
                 return Err(Error::Validation("代理用户名无效或超过 255 字节"));
             }
-            if proxy.username.is_some() != proxy.credential_id.is_some() {
-                return Err(Error::Validation("代理认证须同时配置用户名和安全密码凭据"));
+            if proxy.credential_id.is_some() && proxy.username.is_none() {
+                return Err(Error::Validation("代理认证须配置用户名"));
             }
+        }
+        Ok(())
+    }
+
+    pub fn require_proxy_credentials(&self) -> Result<(), Error> {
+        if self
+            .proxy
+            .as_ref()
+            .is_some_and(|proxy| proxy.username.is_some() && proxy.credential_id.is_none())
+        {
+            return Err(Error::Validation(
+                "代理认证缺少安全密码凭据，请编辑主机并关联凭据",
+            ));
         }
         Ok(())
     }

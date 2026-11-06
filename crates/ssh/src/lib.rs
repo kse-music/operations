@@ -1,4 +1,5 @@
 mod auth;
+pub use auth::import_private_key;
 mod connect;
 mod forward;
 mod monitor;
@@ -40,6 +41,7 @@ pub enum Authentication {
         path: String,
         passphrase: Option<Zeroizing<String>>,
     },
+    ImportedKey(Zeroizing<String>),
     Agent,
 }
 

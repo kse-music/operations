@@ -1,0 +1,126 @@
+.asset-view > .section-heading {
+  gap: 12px 20px;
+}
+.asset-view .section-description {
+  margin: 6px 0 0;
+  line-height: 1.65;
+}
+.asset-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.asset-count {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 22px;
+  white-space: nowrap;
+}
+.asset-columns,
+.asset-stack,
+.asset-panel {
+  display: grid;
+  min-width: 0;
+}
+.asset-columns,
+.asset-stack {
+  gap: 20px;
+  align-items: start;
+}
+.asset-columns {
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+}
+.asset-panel {
+  gap: 12px;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
+}
+.asset-panel :is(h2, h3, p) {
+  margin: 0;
+}
+.asset-identity,
+.asset-empty {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.asset-identity > div,
+.asset-empty > div {
+  min-width: 0;
+}
+.asset-empty p {
+  margin-top: 4px;
+}
+.asset-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.asset-feedback {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+.asset-feedback.success {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+.asset-feedback.error-text {
+  color: var(--error);
+  border-color: var(--error);
+}
+.credentials-view .credential-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.credentials-view .credential-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px 12px;
+  margin: 0;
+  padding: 12px 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  overflow-wrap: anywhere;
+}
+.credentials-view .credential-list > li:last-child {
+  padding-bottom: 0;
+}
+.credential-actions {
+  justify-content: flex-end;
+}
+.credential-details {
+  grid-column: 1 / -1;
+  margin-left: 46px;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 11px;
+}
+@container workspace (max-width: 740px) {
+  .asset-view .asset-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .asset-panel {
+    padding: 16px;
+  }
+}

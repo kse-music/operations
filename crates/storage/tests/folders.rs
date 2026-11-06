@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use serverdeck_core::{backup::*, hosts::*};
+use serverdeck_core::hosts::*;
 use serverdeck_storage::Database;
 
 fn folder(db: &Database, name: &str, parent: Option<&str>) -> HostGroup {
@@ -32,7 +32,7 @@ fn host(db: &Database, group: Option<&str>) -> Host {
 }
 
 #[test]
-fn v6_migration_keeps_host_membership_and_creates_no_synthetic_database_root() {
+fn v6_migration_keeps_host_membership_and_credential_links() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let c = Connection::open(&path).unwrap();
@@ -50,16 +50,29 @@ fn v6_migration_keeps_host_membership_and_creates_no_synthetic_database_root() {
         [],
     )
     .unwrap();
-    c.execute("INSERT INTO hosts(id,name,hostname,port,username,auth_type,group_id,connect_timeout_secs) VALUES('host','','192.0.2.1',22,'ops','agent','legacy',15)", []).unwrap();
+    c.execute("INSERT INTO credentials(id,name,kind,key_path,secret_ref,revision) VALUES('credential','Legacy key','private_key','~/.ssh/legacy-test-key','legacy-ref',3)", []).unwrap();
+    c.execute("INSERT INTO hosts(id,name,hostname,port,username,auth_type,credential_id,group_id,connect_timeout_secs) VALUES('host','','192.0.2.1',22,'ops','private_key','credential','legacy',15)", []).unwrap();
     c.pragma_update(None, "user_version", 6).unwrap();
     drop(c);
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.version().unwrap(), 7);
+    assert_eq!(db.version().unwrap(), serverdeck_core::DATABASE_VERSION);
     let data = db.catalog().unwrap();
     assert_eq!(data.groups.len(), 1);
     assert_eq!(data.groups[0].name, "上海");
     assert_eq!(data.groups[0].parent_id, None);
     assert_eq!(data.hosts[0].config.group_id.as_deref(), Some("legacy"));
+    assert_eq!(
+        data.hosts[0].config.credential_id.as_deref(),
+        Some("credential")
+    );
+    let credential = db.credential_record("credential").unwrap();
+    assert_eq!(
+        credential.public.key_path.as_deref(),
+        Some("~/.ssh/legacy-test-key")
+    );
+    assert_eq!(credential.secret_ref.as_deref(), Some("legacy-ref"));
+    assert_eq!(credential.public.revision, 3);
+    assert_eq!(credential.public.host_count, 1);
     assert!(data.hosts[0].config.name.is_empty());
     assert_eq!(
         Database::open(&path)
@@ -176,83 +189,4 @@ fn hierarchy_copy_delete_and_restart_preserve_contents_and_reject_invalid_parent
             .is_none()
     );
     assert!(db.group_delete("").is_err());
-}
-
-#[test]
-fn backup_restores_folder_ancestry_in_any_order_and_rejects_cycles_atomically() {
-    let dir = tempfile::tempdir().unwrap();
-    let source = Database::open(dir.path().join("source")).unwrap();
-    let a = folder(&source, "生产", None);
-    let b = folder(&source, "上海", Some(&a.id));
-    let h = host(&source, Some(&b.id));
-    let mut json: serde_json::Value =
-        serde_json::from_str(&source.backup_export().unwrap()).unwrap();
-    assert_eq!(json["version"], 3);
-    json["groups"].as_array_mut().unwrap().reverse();
-    let target = Database::open(dir.path().join("target")).unwrap();
-    target
-        .backup_restore(RestoreInput {
-            text: json.to_string(),
-            selected: vec![h.id.clone()],
-            conflict: ConflictPolicy::Copy,
-            restore_preferences: false,
-            confirmed: true,
-        })
-        .unwrap();
-    let data = target.catalog().unwrap();
-    let restored_a = data.groups.iter().find(|g| g.name == "生产").unwrap();
-    let restored_b = data.groups.iter().find(|g| g.name == "上海").unwrap();
-    assert_eq!(
-        restored_b.parent_id.as_deref(),
-        Some(restored_a.id.as_str())
-    );
-    assert_ne!(restored_b.id, b.id);
-    assert_eq!(
-        data.hosts[0].config.group_id.as_deref(),
-        Some(restored_b.id.as_str())
-    );
-    let index = json["groups"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .position(|g| g["id"] == a.id)
-        .unwrap();
-    json["groups"][index]["parentId"] = serde_json::json!(b.id);
-    assert!(target.backup_preview(&json.to_string()).is_err());
-    assert!(
-        target
-            .backup_restore(RestoreInput {
-                text: json.to_string(),
-                selected: vec![h.id],
-                conflict: ConflictPolicy::Copy,
-                restore_preferences: false,
-                confirmed: true
-            })
-            .is_err()
-    );
-    assert_eq!(target.catalog().unwrap().hosts.len(), 1);
-    // Old flat v1 backups remain readable without a parentId field.
-    let mut old: serde_json::Value =
-        serde_json::from_str(&source.backup_export().unwrap()).unwrap();
-    old["version"] = serde_json::json!(1);
-    for group in old["groups"].as_array_mut().unwrap() {
-        group.as_object_mut().unwrap().remove("parentId");
-    }
-    assert!(target.backup_preview(&old.to_string()).is_ok());
-    // A same-name folder in a different local parent must never silently flatten a restore.
-    let conflicting = Database::open(dir.path().join("conflict")).unwrap();
-    folder(&conflicting, "上海", None);
-    assert!(
-        conflicting
-            .backup_restore(RestoreInput {
-                text: source.backup_export().unwrap(),
-                selected: vec![],
-                conflict: ConflictPolicy::Copy,
-                restore_preferences: false,
-                confirmed: true
-            })
-            .is_err()
-    );
-    assert_eq!(conflicting.catalog().unwrap().groups.len(), 1);
-    assert!(conflicting.catalog().unwrap().hosts.is_empty());
 }

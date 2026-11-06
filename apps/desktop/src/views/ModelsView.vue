@@ -21,13 +21,13 @@ async function remove() {
 onMounted(() => void store.refresh());
 </script>
 <template>
-  <section class="page-view models-view" aria-label="模型管理">
+  <section class="asset-view page-view models-view" aria-label="模型管理">
     <div class="section-heading">
       <div>
-        <h1>
-          模型管理 <span class="model-count">{{ store.models.length }}</span>
+        <h1 class="asset-title">
+          模型管理 <span v-if="store.loaded" class="asset-count">{{ store.models.length }}</span>
         </h1>
-        <p class="muted">管理 AI 助手使用的模型服务与连接凭据。</p>
+        <p class="section-description">管理 AI 运维助手使用的模型服务和 API Key。</p>
       </div>
       <div class="toolbar">
         <button class="button" :disabled="store.loading || store.busy" @click="store.refresh">
@@ -45,25 +45,28 @@ onMounted(() => void store.refresh());
         </button>
       </div>
     </div>
-    <p v-if="store.loading" role="status">正在读取模型列表…</p>
-    <p v-if="store.error && !dialog && !deleting" class="error-text" role="alert">
+    <p v-if="store.loading" class="asset-feedback" role="status">正在读取模型列表…</p>
+    <p v-if="store.error && !dialog && !deleting" class="asset-feedback error-text" role="alert">
       {{ store.error }}
     </p>
-    <p v-if="store.message" class="model-notice" role="status">{{ store.message }}</p>
-    <div v-if="store.loaded && !store.loading && !store.models.length" class="model-empty">
-      <div class="model-empty-icon"><Boxes :size="28" aria-hidden="true" /></div>
-      <h2>尚未注册模型</h2>
-      <p>添加模型服务，开始使用 AI 辅助诊断。</p>
-      <p class="muted">点击“注册模型”填写 API 地址、模型 ID 和 Key，测试通过后即可添加。</p>
+    <p v-if="store.message" class="asset-feedback success" role="status">{{ store.message }}</p>
+    <div v-if="store.loaded && !store.loading && !store.models.length" class="asset-panel">
+      <div class="asset-empty">
+        <span class="asset-icon"><Boxes :size="18" aria-hidden="true" /></span>
+        <div>
+          <h2>尚未注册模型</h2>
+          <p class="subtle">点击“注册模型”填写 API 地址、模型 ID 和 Key，测试通过后即可添加。</p>
+        </div>
+      </div>
     </div>
     <div v-if="store.models.length" class="model-catalog">
       <div class="model-list-heading">
-        <span>模型 / 提供商</span><span>连接地址</span><span>输出上限</span><span>操作</span>
+        <span>模型 / 提供商</span><span>连接地址</span><span>Token 限制</span><span>操作</span>
       </div>
       <ul class="model-list">
         <li v-for="model in store.models" :key="model.id">
-          <div class="model-identity">
-            <div class="model-avatar"><Boxes :size="20" aria-hidden="true" /></div>
+          <div class="model-identity asset-identity">
+            <span class="asset-icon"><Boxes :size="18" aria-hidden="true" /></span>
             <div>
               <h2>{{ model.name }}</h2>
               <code class="model-id">{{ model.config.model }}</code>
@@ -85,8 +88,9 @@ onMounted(() => void store.refresh());
             </div>
           </div>
           <div class="model-limit">
-            <strong>{{ model.config.maxOutputTokens.toLocaleString() }}</strong
-            ><span>Token / 次</span>
+            <strong>{{ model.config.contextWindowTokens.toLocaleString() }}</strong>
+            <span>上下文窗口</span>
+            <span>输出 ≤ {{ model.config.maxOutputTokens.toLocaleString() }}</span>
           </div>
           <div class="model-row-actions">
             <button
@@ -113,9 +117,9 @@ onMounted(() => void store.refresh());
         </li>
       </ul>
     </div>
-    <p class="model-page-note">
-      <ShieldCheck :size="14" aria-hidden="true" />Key 安全存储于系统凭据库。注册后，在 AI
-      运维助手中选择模型即可使用。
+    <p class="asset-feedback model-page-note">
+      <ShieldCheck :size="14" aria-hidden="true" />Key 保存于系统凭据库。注册后，可在 AI
+      运维助手的插件设置中绑定模型。
     </p>
     <ModelDialog v-if="dialog" :model="editing" @close="dialog = false" @saved="dialog = false" />
     <Modal v-if="deleting" title="确认删除模型" :busy="store.busy" @close="deleting = null">

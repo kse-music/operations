@@ -45,9 +45,6 @@ fn main() {
             "ai_send",
             "ai_execute",
             "ai_cancel",
-            "backup_export",
-            "backup_preview",
-            "backup_restore",
             "background_tasks",
             "ops_open",
             "ops_connections",
@@ -113,7 +110,6 @@ fn main() {
             "credential_status",
             "hosts_import_preview",
             "hosts_import",
-            "hosts_export",
         ]),
     ))
     .expect("Tauri build configuration failed");

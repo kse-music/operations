@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  ArchiveRestore,
   Info,
   KeyRound,
   Boxes,
@@ -28,7 +27,6 @@ const groups = {
   assets: [
     { view: 'credentials', icon: KeyRound },
     { view: 'models', icon: Boxes },
-    { view: 'backup', icon: ArchiveRestore },
   ],
   plugins: [{ view: 'plugins', icon: Puzzle }],
   system: [

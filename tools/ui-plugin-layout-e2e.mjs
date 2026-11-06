@@ -151,8 +151,7 @@ try {
               model: i ? 'backup-model' : 'diagnostic-model',
               allowInsecureHttp: false,
               maxOutputTokens: 1024,
-              inputPricePerMillion: null,
-              outputPricePerMillion: null,
+              contextWindowTokens: 131072,
             },
           }));
           window.layoutModels = models;

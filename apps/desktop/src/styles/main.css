@@ -204,10 +204,6 @@
   font-weight: normal;
   letter-spacing: 0;
 }
-.system-panel {
-  border-top: 1px solid var(--border);
-  padding-top: 17px;
-}
 .system-heading {
   display: flex;
   justify-content: space-between;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '../composables/error-notifications';
-import { ref, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
+import { Eye, FileText, ShieldCheck } from '@lucide/vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
@@ -14,6 +15,8 @@ const selected = ref<string[]>([]);
 const group = ref<string | null>(null);
 const acknowledged = ref(false);
 const fileError = ref('');
+const fileInput = ref<HTMLInputElement | null>(null);
+const previewHeading = ref<HTMLHeadingElement | null>(null);
 watch(text, () => {
   preview.value = null;
   selected.value = [];
@@ -41,6 +44,9 @@ async function inspect(): Promise<void> {
       .filter((c) => !c.blocked && !c.duplicate)
       .map((c) => c.alias);
     acknowledged.value = false;
+    await nextTick();
+    previewHeading.value?.focus({ preventScroll: true });
+    previewHeading.value?.scrollIntoView({ block: 'start' });
   }
 }
 async function submit(): Promise<void> {
@@ -57,91 +63,115 @@ async function submit(): Promise<void> {
 useErrorNotifications(fileError);
 </script>
 <template>
-  <Modal title="导入 OpenSSH Config" :busy="store.busy" wide @close="emit('close')">
-    <p class="subtle">
-      只读取你选择或粘贴的配置，不执行任何命令，不修改原文件。支持明确 Host
-      别名及常见字段；未知选项会提示或阻止导入。
-    </p>
-
-    <label class="file-picker"
-      >选择配置文件<input type="file" :disabled="store.busy" @change="fileChange"
-    /></label>
-    <label class="editor-form"
-      >或粘贴配置<textarea
-        v-model="text"
-        :disabled="store.busy"
-        rows="8"
-        spellcheck="false"
-        aria-label="OpenSSH Config 内容"
-      ></textarea>
-    </label>
-    <div class="toolbar">
-      <button class="button" :disabled="!text.trim() || store.busy" @click="inspect">
-        {{ store.busy ? '解析中…' : '生成导入预览' }}</button
-      ><label
-        >导入到
-        <select v-model="group" :disabled="store.busy">
-          <option :value="null">根目录</option>
-          <option v-for="g in store.catalog?.groups" :key="g.id" :value="g.id">
-            {{ folderPath(store.catalog?.groups ?? [], g.id) }}
-          </option>
-        </select></label
-      >
-    </div>
-    <section v-if="preview" class="import-preview">
-      <p v-for="warning in preview.warnings" :key="warning" class="banner">{{ warning }}</p>
-      <p v-if="!preview.candidates.length" class="subtle">
-        没有明确的 Host 别名可导入。通配符规则不会扩展为新主机。
+  <Modal title="导入 OpenSSH Config" :busy="store.busy" @close="emit('close')">
+    <div class="import-body">
+      <p class="import-intro subtle">选择本机文件或粘贴配置，生成预览后勾选要导入的主机。</p>
+      <div class="import-file">
+        <FileText :size="20" aria-hidden="true" />
+        <div>
+          <strong>本机配置文件</strong>
+          <p class="subtle">UTF-8 文本，最大 1 MiB</p>
+        </div>
+        <input ref="fileInput" type="file" hidden :disabled="store.busy" @change="fileChange" />
+        <button class="button" :disabled="store.busy" @click="fileInput?.click()">选择文件</button>
+      </div>
+      <label class="import-editor">
+        <strong>配置内容</strong>
+        <textarea
+          v-model="text"
+          :disabled="store.busy"
+          rows="5"
+          spellcheck="false"
+          aria-label="OpenSSH Config 内容"
+          :placeholder="'Host web-prod\n  HostName 192.0.2.10\n  User deploy'"
+        ></textarea>
+      </label>
+      <div class="import-controls">
+        <div class="import-destination">
+          <label for="openssh-import-group">导入到</label>
+          <select id="openssh-import-group" v-model="group" :disabled="store.busy">
+            <option :value="null">根目录</option>
+            <option v-for="g in store.catalog?.groups" :key="g.id" :value="g.id">
+              {{ folderPath(store.catalog?.groups ?? [], g.id) }}
+            </option>
+          </select>
+        </div>
+        <button
+          class="button"
+          :class="{ primary: !preview }"
+          :disabled="!text.trim() || store.busy"
+          @click="inspect"
+        >
+          <Eye :size="14" aria-hidden="true" />
+          {{ store.busy ? '解析中…' : '生成导入预览' }}
+        </button>
+      </div>
+      <p class="import-safety subtle">
+        <ShieldCheck :size="15" aria-hidden="true" />
+        <span>仅读取配置。命令不会执行，原文件保持原样。未知选项会提示或阻止导入。</span>
       </p>
-      <ul class="management-list">
-        <li v-for="candidate in preview.candidates" :key="candidate.alias">
-          <div>
-            <label class="checkbox-label"
-              ><input
+      <section v-if="preview" class="import-preview" aria-labelledby="openssh-import-preview">
+        <div class="import-preview-heading">
+          <h3 id="openssh-import-preview" ref="previewHeading" tabindex="-1">导入预览</h3>
+          <span v-if="preview.candidates.length" class="subtle">
+            已选 {{ selected.length }} / {{ preview.candidates.length }}
+          </span>
+        </div>
+        <p v-for="warning in preview.warnings" :key="warning" class="banner">{{ warning }}</p>
+        <p v-if="!preview.candidates.length" class="subtle">
+          没有明确的 Host 别名可导入。通配符规则不会扩展为新主机。
+        </p>
+        <ul v-else class="import-candidates">
+          <li v-for="candidate in preview.candidates" :key="candidate.alias">
+            <label class="checkbox-label">
+              <input
                 v-model="selected"
                 type="checkbox"
                 :value="candidate.alias"
                 :disabled="candidate.blocked || candidate.duplicate || store.busy"
-              /><strong>{{ candidate.alias }}</strong
-              ><span
-                >{{ candidate.host.username }}@{{ candidate.host.hostname }}:{{
-                  candidate.host.port
-                }}</span
-              ></label
-            >
-            <p class="subtle">
-              认证：{{ authLabels[candidate.host.authType] }} · 超时
-              {{ candidate.host.connectTimeoutSecs }} 秒
-            </p>
-            <p v-if="candidate.duplicate" class="subtle">
-              已有同名或同端点/用户主机，将跳过，不覆盖。
-            </p>
-            <p v-if="candidate.identityFile" class="path">
-              IdentityFile：{{ candidate.identityFile }}（仅路径引用，口令需另行配置）
-            </p>
-            <p v-for="warning in candidate.warnings" :key="warning" class="import-warning">
-              {{ warning }}
-            </p>
-            <p v-if="candidate.blocked" class="danger">此条目已阻止导入。</p>
-          </div>
-        </li>
-      </ul>
-      <label class="checkbox-label"
-        ><input
-          v-model="acknowledged"
-          type="checkbox"
-          :disabled="store.busy"
-        />已检查预览、认证方式与警告，确认只导入选中的条目。</label
-      >
-    </section>
-    <footer class="dialog-actions">
-      <button class="button" :disabled="store.busy" @click="emit('close')">取消</button
-      ><button
-        class="button primary"
+              />
+              <span class="import-candidate-name">
+                <strong>{{ candidate.alias }}</strong>
+                <span class="import-endpoint"
+                  >{{ candidate.host.username }}@{{ candidate.host.hostname }}:{{
+                    candidate.host.port
+                  }}</span
+                >
+              </span>
+              <span v-if="candidate.blocked" class="import-status danger">已阻止</span>
+              <span v-else-if="candidate.duplicate" class="import-status">重复</span>
+            </label>
+            <div class="import-candidate-details subtle">
+              <p>
+                认证：{{ authLabels[candidate.host.authType] }} · 超时
+                {{ candidate.host.connectTimeoutSecs }} 秒
+              </p>
+              <p v-if="candidate.duplicate">已有同名或同端点/用户主机，将跳过，不覆盖。</p>
+              <p v-if="candidate.identityFile">
+                IdentityFile：{{ candidate.identityFile }}（仅路径引用，口令需另行配置）
+              </p>
+              <p v-for="warning in candidate.warnings" :key="warning">
+                {{ warning }}
+              </p>
+              <p v-if="candidate.blocked" class="danger">此条目已阻止导入。</p>
+            </div>
+          </li>
+        </ul>
+        <label v-if="preview.candidates.length" class="checkbox-label import-confirm">
+          <input v-model="acknowledged" type="checkbox" :disabled="store.busy" />
+          已检查预览、认证方式与警告，确认只导入选中的条目。
+        </label>
+      </section>
+    </div>
+    <footer class="dialog-actions import-footer">
+      <button class="button" :disabled="store.busy" @click="emit('close')">取消</button>
+      <button
+        class="button"
+        :class="{ primary: preview }"
         :disabled="!preview || !selected.length || !acknowledged || store.busy"
         @click="submit"
       >
-        导入 {{ selected.length }} 台主机
+        {{ selected.length ? `导入 ${selected.length} 台主机` : '导入主机' }}
       </button>
     </footer>
   </Modal>

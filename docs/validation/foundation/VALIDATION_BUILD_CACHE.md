@@ -34,3 +34,11 @@
 原始日志与清理记录均位于 `.local/build-cache-maintenance/`。Cargo 在受限环境中提示无法更新全局缓存的 last-use 数据（只读数据库），上述命令最终均正常退出；未修改全局 Rust 配置或权限。
 
 首次编译需重建依赖，关闭增量编译后修改 Rust 的重编译耗时可能增加；行号级信息不提供完整变量调试。尚未完成跨平台或真实 GUI/SSH 回归，本次不将缓存配置检查等同于业务功能验收。
+
+## 2026-11-06 NSIS 解压拒绝访问
+
+- Tauri CLI 2.12.4 完成前端和 Rust Release 构建，NSIS 3.13 ZIP 校验通过，随后在解压阶段报告 Windows 错误 5。临时使用项目内工具缓存后仍可复现。用 Windows 标准 ZIP 解压器独立复现，确定被拒绝的路径为 `nsis-3.13/Plugins/x86-ansi/TypeLib.dll`。Windows Defender、代码完整性和 AppLocker 在复现时段无对应事件，具体拦截来源未确认。
+- 逐文件以 SHA-256 比较已有默认 NSIS 缓存和官方 ZIP，441 个文件一致。另按 Tauri 的预期摘要验证 `nsis_tauri_utils.dll`，恢复默认工具缓存设置后复用该缓存。未改动安全软件设置或全局缓存。
+- `node tools/tauri.mjs bundle --bundles nsis` 成功，生成 9.35 MiB 的 Windows x64 安装包。此时 Release 程序已含正确的 NSIS 标记，重复补写标记的警告不影响本次产物。核对了安装包的 PE 和 NSIS 头、版本、SHA-256 及未签名状态。
+- 原始命令 `node tools/tauri.mjs build --bundles nsis` 在复用缓存时完整通过，生成 `target/release/bundle/nsis/ServerDeck_0.1.0-beta.1_x64-setup.exe`，大小为 9,796,441 字节，SHA-256 为 `D526771A9F0199489C5949210E86AD33DA6334DC404CF5DCB83B288A5AB7780C`，未签名。未运行安装、升级或卸载验收。
+- `npm run test:build` 共 7 项通过。日志和旧安装包备份位于 `.local/nsis-packaging-20261106-081718-1f55c1bd/`。首次解压仍依赖本机允许创建上述 DLL，本次范围为构建和生成安装包。

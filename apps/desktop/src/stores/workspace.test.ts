@@ -225,9 +225,9 @@ it('switches module menus without changing the active page or host context', asy
   workspace.navigate('assistant');
   workspace.navigate('credentials');
   workspace.selectModule('assets');
-  workspace.navigate('backup');
+  workspace.navigate('models');
   workspace.selectModule('system');
-  expect(workspace.current?.view).toBe('backup');
+  expect(workspace.current?.view).toBe('models');
   workspace.navigate('settings');
   expect(workspace.current?.view).toBe('settings');
   workspace.selectModule('hosts');

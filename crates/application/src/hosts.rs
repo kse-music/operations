@@ -1,6 +1,5 @@
 use super::Application;
 use serde::Serialize;
-use serde_json::json;
 use serverdeck_core::{
     Error,
     hosts::*,
@@ -80,7 +79,7 @@ impl Application {
                 },
                 Err(_) => SecureStatus {
                     available: false,
-                    message: "系统凭据库不可用，不能保存密码或私钥口令；不会退化到明文存储。",
+                    message: "系统凭据库不可用，无法保存密码或导入私钥。",
                 },
             })
         })
@@ -104,8 +103,39 @@ impl Application {
             } else if expected_revision.is_some() {
                 return Err(Error::Validation("新建凭据不能带有旧版本"));
             }
+            let was_imported = old.as_ref().is_some_and(|record| {
+                record.public.kind == AuthType::PrivateKey && record.public.key_path.is_none()
+            });
+            if was_imported
+                && input.key_data.is_none()
+                && (input.key_path.is_some() || input.secret.is_some() || input.clear_secret)
+            {
+                return Err(Error::Validation("更换已导入的私钥需要选择新的私钥文件"));
+            }
+            let key_path = if input.key_data.is_some() {
+                None
+            } else {
+                input.key_path.as_deref().map(str::trim).or_else(|| {
+                    old.as_ref()
+                        .and_then(|record| record.public.key_path.as_deref())
+                })
+            };
+            if input.kind == AuthType::PrivateKey
+                && key_path.is_none()
+                && input.key_data.is_none()
+                && !was_imported
+            {
+                return Err(Error::Validation("请选择要导入的私钥文件"));
+            }
+            let secret = match &input.key_data {
+                Some(key) => Some(serverdeck_ssh::import_private_key(
+                    key,
+                    input.secret.as_deref().map(String::as_str),
+                )?),
+                None => input.secret,
+            };
             let previous_reference = old.as_ref().and_then(|r| r.secret_ref.clone());
-            let reference = if input.secret.is_some() {
+            let reference = if secret.is_some() {
                 Some(Uuid::new_v4().to_string())
             } else if input.clear_secret {
                 None
@@ -117,7 +147,7 @@ impl Application {
             }
             let id = id.unwrap_or_else(|| Uuid::new_v4().to_string());
             // Immutable secret version: never overwrite the old entry before SQLite commits.
-            if let (Some(secret), Some(reference)) = (&input.secret, &reference) {
+            if let (Some(secret), Some(reference)) = (&secret, &reference) {
                 db.queue_secret_gc(reference)?;
                 secrets.write(reference, secret.as_bytes())?;
             }
@@ -126,7 +156,7 @@ impl Application {
                 expected_revision,
                 input.name.trim(),
                 input.kind,
-                input.key_path.as_deref().map(str::trim),
+                key_path,
                 reference.as_deref(),
             );
             match saved {
@@ -135,7 +165,7 @@ impl Application {
                     warnings: cleanup(&db, secrets.as_ref()),
                 }),
                 Err(error) => {
-                    if input.secret.is_some()
+                    if secret.is_some()
                         && let Some(reference) = reference
                         && secrets.delete(&reference).is_ok()
                     {
@@ -202,18 +232,6 @@ impl Application {
         })
         .await
     }
-    pub async fn export_hosts(&self) -> Result<String, Error> {
-        self.blocking(|db| {
-            let catalog = db.catalog()?;
-            let hosts: Vec<_> = catalog.hosts.into_iter().map(|host| {
-                let config = host.config;
-                json!({"name":config.name,"hostname":config.hostname,"port":config.port,"username":config.username,
-                    "authType":config.auth_type,"tags":config.tags,"description":config.description,"favorite":config.favorite,
-                    "connectTimeoutSecs":config.connect_timeout_secs,"groupId":config.group_id,"group":catalog.groups.iter().find(|g|Some(&g.id)==config.group_id.as_ref()).map(|g|&g.name)})
-            }).collect();
-            serde_json::to_string_pretty(&json!({"format":"serverdeck-hosts","version":2,"hosts":hosts,"groups":catalog.groups.into_iter().map(|g|json!({"id":g.id,"name":g.name,"sortOrder":g.sort_order,"parentId":g.parent_id})).collect::<Vec<_>>(),"notice":"不含凭据、凭据引用或私钥路径"})).map_err(|e|Error::Storage(Box::new(e)))
-        }).await
-    }
 }
 fn local_username() -> String {
     std::env::var(if cfg!(windows) { "USERNAME" } else { "USER" }).unwrap_or_default()
@@ -272,6 +290,7 @@ mod tests {
             name: "测试密码".into(),
             kind: AuthType::Password,
             key_path: None,
+            key_data: None,
             secret: secret.map(|s| Zeroizing::new(s.to_owned())),
             clear_secret: false,
         }
@@ -329,8 +348,10 @@ mod tests {
             .await,
             Err(Error::Conflict)
         ));
-        let export = app.export_hosts().await.expect("export");
-        assert!(!export.contains("credentialId") && !export.contains("test-only-secret"));
+        let catalog = serde_json::to_string(&app.catalog().await.expect("catalog")).expect("json");
+        for forbidden in ["secretRef", "test-only-secret", "replacement-test-secret"] {
+            assert!(!catalog.contains(forbidden));
+        }
         let bytes =
             std::fs::read(directory.path().join("data/serverdeck.sqlite3")).expect("database");
         assert!(
@@ -381,5 +402,120 @@ mod tests {
             Err(Error::SecureStore(_))
         ));
         assert!(app.catalog().await.expect("catalog").credentials.is_empty());
+    }
+
+    #[tokio::test]
+    async fn encrypted_key_import_replaces_legacy_path_without_persisting_file_or_passphrase() {
+        use russh::keys::{Algorithm, PrivateKey, ssh_key::LineEnding};
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = Application::initialize(dir.path().into(), dir.path().join("logs")).unwrap();
+        let secrets = Arc::new(TestStore::default());
+        app.secrets = secrets.clone();
+        let legacy = app
+            .credential_save(
+                None,
+                None,
+                CredentialInput {
+                    kind: AuthType::PrivateKey,
+                    key_path: Some("~/.ssh/legacy-test-key".into()),
+                    ..credential(Some("legacy-test-passphrase"))
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let encrypted = key
+            .encrypt(&mut rand::rng(), "import-test-passphrase")
+            .unwrap()
+            .to_openssh(LineEnding::LF)
+            .unwrap();
+        let input = |passphrase| CredentialInput {
+            kind: AuthType::PrivateKey,
+            key_data: Some(encrypted.clone()),
+            ..credential(Some(passphrase))
+        };
+        let failed = app
+            .credential_save(
+                Some(legacy.id.clone()),
+                Some(legacy.revision),
+                input("wrong-passphrase"),
+            )
+            .await;
+        assert!(matches!(
+            failed,
+            Err(Error::Connection {
+                code: "SSH_KEY_UNLOCK",
+                ..
+            })
+        ));
+        assert_eq!(
+            app.catalog().await.unwrap().credentials[0].revision,
+            legacy.revision
+        );
+        assert!(
+            app.catalog().await.unwrap().credentials[0]
+                .key_path
+                .is_some()
+        );
+        let saved = app
+            .credential_save(
+                Some(legacy.id.clone()),
+                Some(legacy.revision),
+                input("import-test-passphrase"),
+            )
+            .await
+            .unwrap()
+            .value;
+        assert_eq!(saved.id, legacy.id);
+        assert!(saved.key_path.is_none() && saved.has_secret);
+        let reference = app
+            .database
+            .credential_record(&saved.id)
+            .unwrap()
+            .secret_ref
+            .unwrap();
+        let stored = secrets.read(&reference).unwrap().unwrap();
+        let decoded =
+            russh::keys::decode_secret_key(std::str::from_utf8(&stored).unwrap(), None).unwrap();
+        assert_eq!(decoded.public_key(), key.public_key());
+        assert_eq!(secrets.values.lock().unwrap().len(), 1);
+        let bytes = std::fs::read(dir.path().join("serverdeck.sqlite3")).unwrap();
+        for secret in [
+            "PRIVATE KEY",
+            "import-test-passphrase",
+            "legacy-test-passphrase",
+        ] {
+            assert!(
+                !bytes
+                    .windows(secret.len())
+                    .any(|bytes| bytes == secret.as_bytes())
+            );
+        }
+        let renamed = app
+            .credential_save(
+                Some(saved.id.clone()),
+                Some(saved.revision),
+                CredentialInput {
+                    kind: AuthType::PrivateKey,
+                    name: "已导入密钥".into(),
+                    ..credential(None)
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        assert!(renamed.key_path.is_none() && renamed.has_secret);
+        assert_eq!(
+            app.database
+                .credential_record(&renamed.id)
+                .unwrap()
+                .secret_ref
+                .as_deref(),
+            Some(reference.as_str())
+        );
+        app.credential_delete(saved.id, false).await.unwrap();
+        assert!(secrets.read(&reference).unwrap().is_none());
     }
 }

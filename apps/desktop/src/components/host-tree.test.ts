@@ -194,16 +194,12 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
     pendingSecretDeletions: 0,
   };
   const select = vi.fn(),
-    create = vi.fn(),
-    importHosts = vi.fn(),
-    exportHosts = vi.fn();
+    create = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(HostSidebar, {
     onSelect: select,
     onCreate: create,
-    onImport: importHosts,
-    onExport: exportHosts,
   }).use(pinia);
   app.mount(root);
   await nextTick();
@@ -254,27 +250,6 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(heading.nextElementSibling?.classList.contains('host-sidebar-controls')).toBe(true);
   expect(heading.nextElementSibling?.nextElementSibling).toBe(scroll);
   expect(heading.previousElementSibling?.classList.contains('sidebar-local-device')).toBe(true);
-  const actions = heading.querySelector('[aria-label="主机导入导出"]')!;
-  const buttons = actions.querySelectorAll<HTMLButtonElement>('button');
-  expect(buttons).toHaveLength(2);
-  expect(buttons[0]!.getAttribute('aria-label')).toBe('导入 OpenSSH');
-  expect(buttons[1]!.getAttribute('aria-label')).toBe('导出配置');
-  for (const button of buttons) {
-    expect(button.disabled).toBe(false);
-    button.click();
-  }
-  expect(importHosts).toHaveBeenCalledOnce();
-  expect(exportHosts).toHaveBeenCalledOnce();
-  hosts.busy = true;
-  await nextTick();
-  for (const button of buttons) {
-    expect(button.disabled).toBe(true);
-    button.click();
-  }
-  expect(importHosts).toHaveBeenCalledOnce();
-  expect(exportHosts).toHaveBeenCalledOnce();
-  hosts.busy = false;
-  await nextTick();
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
   expect(root.querySelector('[aria-label="已收藏"]')).toBeNull();
@@ -303,18 +278,12 @@ it('renders loading, failure and empty states without inventing online hosts', a
   app = createApp(HostSidebar).use(pinia);
   app.mount(root);
   expect(root.textContent).toContain('正在读取主机');
-  for (const button of root.querySelectorAll<HTMLButtonElement>('.host-list-actions button'))
-    expect(button.disabled).toBe(true);
   hosts.busy = false;
   await nextTick();
   expect(root.textContent).toContain('未能读取主机');
-  for (const button of root.querySelectorAll<HTMLButtonElement>('.host-list-actions button'))
-    expect(button.disabled).toBe(true);
   hosts.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
   await nextTick();
   expect(root.textContent).toContain('尚未添加主机');
-  for (const button of root.querySelectorAll<HTMLButtonElement>('.host-list-actions button'))
-    expect(button.disabled).toBe(false);
   expect(root.textContent).toContain('0 已连接');
   useBackgroundStore().connections = [];
   hosts.catalog.hosts.push({
