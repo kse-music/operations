@@ -3,7 +3,7 @@
   "id": "cn.hiboot.plugins.docker",
   "name": "Docker 管理",
   "icon": "container",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "author": "ServerDeck",
   "description": "管理 Docker 容器与镜像，查看详情、日志并打开容器终端。",
   "apiVersion": "^4.0.0",

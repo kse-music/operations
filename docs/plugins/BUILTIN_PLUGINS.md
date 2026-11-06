@@ -9,7 +9,7 @@
 | `cn.hiboot.plugins.docker`    | `plugins/system/docker`    | Docker 管理 | `ui.contribute`, `system.read`, `system.manage`, `logs.read`        |
 | `cn.hiboot.plugins.assistant` | `plugins/system/assistant` | AI 运维助手 | `ui.contribute`, `assistant.use`, `settings.read`, `settings.write` |
 
-Docker 包为 1.5.3，助手包为 1.6.0，要求 Host API ^4.0.0，Rust SDK 与前端 SDK 均为 4.0.0。WASM ABI/wire/包格式/manifest schemaVersion 仍为 1，UI 为 v4。保留未使用被删界面合同的旧包，见[API 版本策略](PLUGIN_API_VERSIONING.md)。
+Docker 包为 1.5.4，助手包为 1.6.0，要求 Host API ^4.0.0，Rust SDK 与前端 SDK 均为 4.0.0。WASM ABI/wire/包格式/manifest schemaVersion 仍为 1，UI 为 v4。保留未使用被删界面合同的旧包，见[API 版本策略](PLUGIN_API_VERSIONING.md)。
 
 镜像删除统一在可信宿主弹窗核对主机、账号地址及冻结的完整镜像 ID，点击“确认删除”即可，无需输入完整目标。取消或关闭不执行，不强制删除、不删除卷；其他容器与系统操作继续保留原有确认规则。
 

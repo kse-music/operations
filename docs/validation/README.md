@@ -10,6 +10,8 @@
 
 最新：[主机树紧凑布局](workspace/VALIDATION_LAYOUT.md#2026-11-07-主机树紧凑布局)。
 
+最新：[Docker 工作区布局](plugins/PLUGIN_TEST_REPORT.md#2026-11-07-docker-工作区布局)。
+
 最新：[插件开发包下载与独立构建](plugins/PLUGIN_TEST_REPORT.md#2026-11-07-插件开发包下载)。
 
 最新：[通用设置界面字号](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-通用设置界面字号)。

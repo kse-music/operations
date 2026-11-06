@@ -292,9 +292,9 @@ try {
               case 'system_query': {
                 const data = {
                   capabilities: [{ dockerInstalled: true, dockerState: 'running' }],
-                  containers: Array.from({ length: 6 }, (_, n) => ({
-                    ID: `${n}`.repeat(64),
-                    Names: `app-service-${n + 1}`,
+                  containers: Array.from({ length: 40 }, (_, n) => ({
+                    ID: n.toString(16).padStart(64, '0'),
+                    Names: n < 6 ? `app-service-${n + 1}` : `worker-${n + 1}`,
                     Image: 'registry.example/application:stable',
                     State: n ? 'running' : 'exited',
                     Status: n ? 'Up 3 days' : 'Exited (1)',
@@ -454,13 +454,6 @@ try {
         modelId: 'layout-model-1',
         retained: true,
       });
-      // The additional short viewport targets the configuration dialog.
-      if (height === 460) {
-        assert.deepEqual(errors, []);
-        await page.close();
-        console.log(`Passed short-window settings: ${width} × ${height}, ${theme}`);
-        continue;
-      }
       const dockerDetails = await openPluginDetails(page, 'Docker 管理');
       const dockerConfiguration = page.getByRole('dialog', {
         name: 'Docker 管理 · 配置',
@@ -475,6 +468,76 @@ try {
       });
       await openPluginFunction(page, 'Docker 管理', 'layout-host');
       await content().getByText('app-service-1', { exact: true }).waitFor();
+      const verifyDockerTable = async (name, longList) => {
+        const geometry = await content()
+          .locator('.ops-table')
+          .evaluate((element) => {
+            const workbench = element.closest('.docker-workbench');
+            const table = element.getBoundingClientRect();
+            const footer = workbench.querySelector('.ops-footer').getBoundingClientRect();
+            const scrolls = element.scrollHeight > element.clientHeight;
+            element.scrollTop = element.scrollHeight;
+            const header = element.querySelector('th').getBoundingClientRect();
+            element.scrollTop = 0;
+            return {
+              viewportWidth: document.documentElement.clientWidth,
+              viewportHeight: innerHeight,
+              workbenchWidth: workbench.getBoundingClientRect().width,
+              contentWidth: workbench.clientWidth,
+              paddingBottom: parseFloat(getComputedStyle(workbench).paddingBottom),
+              tableLeft: table.left,
+              tableWidth: table.width,
+              footerBottom: footer.bottom,
+              scrolls,
+              headerOffset: header.top - table.top - element.clientTop,
+            };
+          });
+        assert(
+          Math.abs(geometry.workbenchWidth - geometry.viewportWidth) <= 1,
+          `${name}: full width`,
+        );
+        assert(Math.abs(geometry.tableLeft) <= 1, `${name}: left edge aligned`);
+        assert(Math.abs(geometry.tableWidth - geometry.contentWidth) <= 1, `${name}: table width`);
+        if (width >= 1440) {
+          assert(
+            Math.abs(geometry.viewportHeight - geometry.footerBottom - geometry.paddingBottom) <= 2,
+            `${name}: footer at bottom of workspace (${JSON.stringify(geometry)})`,
+          );
+        } else {
+          const feedback = content().getByRole('button', { name: '操作反馈', exact: true });
+          await feedback.scrollIntoViewIfNeeded();
+          const feedbackBounds = await feedback.evaluate((element) => {
+            const { top, bottom } = element.getBoundingClientRect();
+            return { top, bottom, viewportHeight: innerHeight };
+          });
+          assert(
+            feedbackBounds.top >= -1 && feedbackBounds.bottom <= feedbackBounds.viewportHeight + 1,
+            `${name}: footer reachable in a short window (${JSON.stringify(feedbackBounds)})`,
+          );
+          await content()
+            .locator('.docker-workbench')
+            .evaluate((element) => (element.scrollTop = 0));
+        }
+        if (longList) {
+          assert(geometry.scrolls, `${name}: long list scrolls inside the table`);
+          assert(Math.abs(geometry.headerOffset) <= 1, `${name}: table header stays visible`);
+        }
+      };
+      await verifyDockerTable('containers', true);
+      const openDockerImages = async () => {
+        await content().getByRole('tab', { name: '镜像', exact: true }).click();
+        await content().getByText('registry.example/application', { exact: true }).waitFor();
+        await verifyDockerTable('images', false);
+      };
+      if (height === 460) {
+        await openDockerImages();
+        assert.deepEqual(errors, []);
+        await page.close();
+        console.log(
+          `Passed short-window settings and Docker tables: ${width} × ${height}, ${theme}`,
+        );
+        continue;
+      }
       const stoppedRow = content().getByRole('row').filter({ hasText: 'app-service-1' });
       const runningRow = content().getByRole('row').filter({ hasText: 'app-service-2' });
       const actionLabels = async (row) =>
@@ -559,8 +622,7 @@ try {
         await page.evaluate(() => window.dialogLogEvents.filter((e) => e.kind === 'stop').length),
         1,
       );
-      await content().getByRole('tab', { name: '镜像', exact: true }).click();
-      await content().getByText('registry.example/application', { exact: true }).waitFor();
+      await openDockerImages();
       await capture('docker-images', '.plugin-workspace');
       await content().getByRole('button', { name: '删除', exact: true }).click();
       const imageReview = page.getByRole('dialog', { name: '删除镜像？', exact: true });
