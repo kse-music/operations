@@ -42,3 +42,25 @@
 - `node tools/tauri.mjs bundle --bundles nsis` 成功，生成 9.35 MiB 的 Windows x64 安装包。此时 Release 程序已含正确的 NSIS 标记，重复补写标记的警告不影响本次产物。核对了安装包的 PE 和 NSIS 头、版本、SHA-256 及未签名状态。
 - 原始命令 `node tools/tauri.mjs build --bundles nsis` 在复用缓存时完整通过，生成 `target/release/bundle/nsis/ServerDeck_0.1.0-beta.1_x64-setup.exe`，大小为 9,796,441 字节，SHA-256 为 `D526771A9F0199489C5949210E86AD33DA6334DC404CF5DCB83B288A5AB7780C`，未签名。未运行安装、升级或卸载验收。
 - `npm run test:build` 共 7 项通过。日志和旧安装包备份位于 `.local/nsis-packaging-20261106-081718-1f55c1bd/`。首次解压仍依赖本机允许创建上述 DLL，本次范围为构建和生成安装包。
+
+## 2026-11-06 内置插件包改为构建产物
+
+### 完成范围
+
+`plugins/system/packages/assistant.sdplugin` 和 `docker.sdplugin` 已从 Git 索引移除，本地文件保留；`.gitignore` 忽略该目录的 `.sdplugin` 及打包 `.sdplugin.tmp` 文件。提交内容以插件源码、清单与锁文件为准。现有构建脚本、产物路径、Rust 编译期嵌入与用户插件安装方式继续使用。
+
+桌面 `dev/build` 原本就会生成系统插件包，无需额外实现。候选 CI 在 Clippy/测试前安装 `wasm32-unknown-unknown`、分别下载两个插件的锁定依赖并执行 `npm run plugins:build`，成功打包后将插件包另存为 artifact。`tools/plugin-test-host/test.ps1` 的 SDK 模式在启动临时远端夹具前先生成内置包，失败时直接停止。README、内置插件说明、发布复建步骤及实施计划已同步。
+
+### 本次验证
+
+- 开始构建前确认项目所在磁盘约 810 GiB 可用；原生编译使用根目录 `target/`，WASM 沿用 `.local/plugin-build/<插件>/`，未调整 Cargo 缓存配置。
+- 将两份本地包移至 `.local/plugin-package-qa/2026-11-06T04-52-06.767Z/` 备份，确认目标文件缺失后执行 `npm run plugins:build`：成功重新生成。两份生成包分别与备份字节一致；四个包内文件的大小和 SHA-256 均与清单一致。
+- `cargo test -p serverdeck-plugin-core -p serverdeck-application --lib --offline --locked --no-run`：编译成功，验证生成包可被编译期嵌入。将测试程序复制至上述 QA 目录后运行：应用层 `plugins::` 筛选 20 项通过、1 项既有专用 Linux 测试主机依赖忽略；插件核心全部 26 项通过。覆盖真实内置 WASM 激活、升级、卸载选择、授权与包校验。
+- `npm run build`：完整插件生成、Vue 类型检查及 Vite 生产前端构建通过，保留既有大 chunk 提醒。
+- `npm run test:build` 成功；另以 `node --test --test-isolation=none tools/build-space.test.mjs` 显式运行 7 项构建磁盘保护测试，全部通过。
+- `git ls-files plugins/system/packages` 为空；`git check-ignore -v` 确认两份生成包命中规则，重新构建后没有包内容的新增修改，索引只保留本次取消跟踪的删除记录。
+- 修改的 YAML/Markdown 通过 Prettier 检查，已暂存及未暂存差异均通过 `git diff --check`。
+
+### 边界与依赖
+
+本机为 Linux，未执行 GitHub Actions、Windows PowerShell/WSL 原生验收或桌面安装器构建。未连接用户远程主机、修改用户配置或引入数据库迁移。全新克隆后直接运行相关 Cargo 命令仍须先生成插件包；首次构建和锁文件更新后须先按 README 下载依赖，实际插件编译保留 `--offline --locked`。当前无剩余实现依赖，跨平台 CI 和原生验收待相应环境执行。

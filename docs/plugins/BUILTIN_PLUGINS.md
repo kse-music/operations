@@ -31,7 +31,9 @@ Docker 采用容器/镜像分类、真实状态摘要、精简列和分组操作
 
 每个 `plugins/system/<name>` 拥有 frontend、backend、manifest、UI JSON、测试和独立 Cargo.lock。公开 TypeScript/Vue SDK 提供共享状态、能力客户端和公共 UI；宿主只保留原生基础服务、管理和权限桥。
 
-执行 `npm run plugins:build`，或 `node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin`，使用与上传包相同的编译和打包器生成 WASM/UI/JS/CSS 与摘要。标准发行资产位于 `plugins/system/packages/*.sdplugin`。宿主验证安装代、授权和摘要后将包内 JS/CSS 加载到不透明来源 iframe，禁止直接访问父 DOM、原生 IPC 和外部网络。
+执行 `npm run plugins:build`，或 `node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin`，使用与上传包相同的编译和打包器生成 WASM/UI/JS/CSS 与摘要。标准发行资产位于 `plugins/system/packages/*.sdplugin`，属于本地生成文件，不纳入 Git；提交插件源码、清单和锁文件。桌面 `dev/build`（包括 Tauri 入口）会自动生成两份内置包，CI 在 Rust 检查和测试前显式生成。独立运行相关 Cargo 命令或直接读取包的验收脚本前，先执行 `npm run plugins:build`，插件或 SDK 源码变化后同样需重新生成。
+
+首次构建需安装 `wasm32-unknown-unknown` 目标，并按[开发准备](../../README.md#开发)分别下载两个插件锁定的 Cargo 依赖；实际插件编译继续使用 `--offline --locked`，不在编译阶段隐式下载。包在 Rust 编译时通过 `include_bytes!` 嵌入应用，最终安装器携带生成的内置插件。独立分发包保存为 CI/Release 产物。宿主验证安装代、授权和摘要后将包内 JS/CSS 加载到不透明来源 iframe，禁止直接访问父 DOM、原生 IPC 和外部网络。
 
 AI ToolInvoke 经不可变单次票据、真实 WASM、Host 类型化能力与原有审批执行；Guest 不取得模型 Key、私有 SSH 租约或任意 IPC 名称。独立插件可使用 SDK 公共监控、系统查询、日志和容器终端能力；危险操作继续核对目标和确认。主机密钥、连接配置一致性、取消、速率、资源配额和失败诊断保持。
 

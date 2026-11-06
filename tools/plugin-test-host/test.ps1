@@ -8,7 +8,16 @@ $containerId = $null
 $taskPassword = [Guid]::NewGuid().ToString('N') + 'SdA1!'
 $keys = @('SERVERDECK_PLUGIN_TEST_PORT','SERVERDECK_PLUGIN_TEST_HTTP_PORT','SERVERDECK_PLUGIN_TEST_PASSWORD','SERVERDECK_PLUGIN_TEST_HOST_KEY','SERVERDECK_PLUGIN_TEST_CONTAINER_ID','SERVERDECK_PLUGIN_TEST_DISTRO','SERVERDECK_PLUGIN_SDK_WASM','TEMP','TMP')
 $savedEnvironment = @{}
-if ($Mode -ne 'sdk') { Push-Location $workspace; try { node tools/plugin-native-e2e.mjs --build; if ($LASTEXITCODE -ne 0) { throw 'Native QA build failed' } } finally { Pop-Location } }
+Push-Location $workspace
+try {
+    if ($Mode -eq 'sdk') {
+        node tools/build-system-plugins.mjs
+        if ($LASTEXITCODE -ne 0) { throw 'System plugin build failed' }
+    } else {
+        node tools/plugin-native-e2e.mjs --build
+        if ($LASTEXITCODE -ne 0) { throw 'Native QA build failed' }
+    }
+} finally { Pop-Location }
 foreach ($key in $keys) { $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process') }
 function Docker([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments) {
     $output = & wsl --distribution $Distro --exec docker @Arguments

@@ -1,5 +1,9 @@
 # 验证记录索引
 
+最新：[内置插件包改为构建产物](foundation/VALIDATION_BUILD_CACHE.md#2026-11-06-内置插件包改为构建产物)。
+
+最新：[Linux 通知高度修复](workspace/VALIDATION_ERROR_NOTIFICATIONS.md#2026-11-06-linux-通知高度修复)。
+
 最新：[插件配置弹窗验收](plugins/PLUGIN_TEST_REPORT.md#2026-11-06-插件配置弹窗)。
 
 最新：[OpenSSH 导入弹窗布局验证](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗布局)。
