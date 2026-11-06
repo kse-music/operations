@@ -107,7 +107,7 @@ async function start() {
     (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
       text.trim(),
     ),
-    ['本地设备'],
+    ['全部主机', '本地设备'],
   );
 }
 const active = () => page.locator('.terminal-pane:visible');
@@ -181,17 +181,22 @@ try {
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
   await page.locator('.module-navigation [data-module="hosts"]').click();
   assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
-  assert.equal(await page.locator('.sidebar-local-device .host-tools').count(), 1);
+  assert.equal(await page.locator('.sidebar-local-device').count(), 0);
   assert.equal(
     await page
-      .locator('.host-sidebar-controls + .sidebar-local-device + .host-tree-scroll')
+      .locator('.host-list-heading')
+      .getByRole('button', { name: '本地终端', exact: true })
       .count(),
+    1,
+  );
+  assert.equal(
+    await page.locator('.host-list-heading + .host-sidebar-controls + .host-tree-scroll').count(),
     1,
   );
   assert.equal(await page.locator('.module-navigation button').count(), 4);
   assert.equal(
     await page.locator('.module-navigation [aria-current="page"]').textContent(),
-    '主机运维',
+    '主机管理',
   );
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
   await page
@@ -200,7 +205,7 @@ try {
     .click();
   assert.equal(await page.locator('.sidebar').isVisible(), false);
   const expandHosts = page
-    .locator('.workspace-tabs')
+    .locator('.workspace-navigation')
     .getByRole('button', { name: '展开主机栏', exact: true });
   assert.equal(await expandHosts.evaluate((button) => document.activeElement === button), true);
   await expandHosts.press('Enter');
@@ -655,8 +660,12 @@ try {
     'host workspace tabs switch independently; local close preserves remote sessions; final close shows welcome',
   );
   await showHostTree(page);
-  assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 0);
+  assert.equal(
+    await page.locator('.sidebar').getByRole('button', { name: '主机管理', exact: true }).count(),
+    0,
+  );
   assert.equal((await page.locator('.sidebar-module-title').textContent()).trim(), '主机管理');
+  assert.equal(await page.locator('.workspace-group-tab').count(), 0);
   assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
   assert.equal(await page.locator('.hosts-view').count(), 0);
   await page.getByLabel('搜索主机', { exact: true }).fill('UI Host');
@@ -750,7 +759,12 @@ try {
   await page.locator('.tree-host').filter({ hasText: 'tree-imported' }).waitFor();
   assert.equal((await rpc('host_list')).hosts.length, 2);
   assert.equal((await page.locator('.host-count').textContent()).trim(), '2');
-  assert.equal(await page.locator('.host-list-heading button').count(), 0);
+  assert.deepEqual(
+    await page
+      .locator('.host-list-heading button')
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
+    ['本地终端'],
+  );
   assert.equal(await page.getByRole('dialog').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });
   for (const name of ['UI Created', 'tree-imported']) {

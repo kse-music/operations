@@ -46,9 +46,7 @@ const moduleLabel = computed(
 <template>
   <nav class="activity-rail" aria-label="主导航">
     <div class="sidebar-workspace-heading">
-      <strong class="sidebar-module-title">{{
-        module === 'hosts' ? '主机管理' : moduleLabel
-      }}</strong>
+      <strong class="sidebar-module-title">{{ moduleLabel }}</strong>
       <button
         class="shell-icon-button"
         aria-label="收起主机栏"
@@ -65,19 +63,9 @@ const moduleLabel = computed(
       <button
         v-for="item in groups[module]"
         :key="item.view"
-        :class="[
-          'nav-item',
-          {
-            active:
-              active === item.view || (item.view === 'plugins' && active === 'pluginSettings'),
-          },
-        ]"
+        :class="['nav-item', { active: active === item.view }]"
         :aria-label="messages['zh-CN'][item.view]"
-        :aria-current="
-          active === item.view || (item.view === 'plugins' && active === 'pluginSettings')
-            ? 'page'
-            : undefined
-        "
+        :aria-current="active === item.view ? 'page' : undefined"
         :data-tooltip="messages['zh-CN'][item.view]"
         @click="$emit('navigate', item.view)"
       >

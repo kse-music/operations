@@ -46,12 +46,13 @@ async function sidebarMenu(module: NavigationModule, label: string): Promise<voi
   root.querySelector<HTMLButtonElement>(`.activity-rail [aria-label="${label}"]`)!.click();
   await flush();
 }
-async function openPluginSettings(name: string): Promise<void> {
+async function openPluginModal(name: string): Promise<HTMLDialogElement> {
   await sidebarMenu('plugins', '插件管理');
   [...root.querySelectorAll<HTMLButtonElement>('.plugin-name-button')]
     .find((button) => button.textContent?.trim() === name)!
     .click();
   await flush();
+  return document.querySelector<HTMLDialogElement>(`dialog[aria-label="${name} · 配置"]`)!;
 }
 async function sessionAction(index: number, label: string): Promise<void> {
   root
@@ -483,7 +484,7 @@ it('opens host context menus without connecting and keeps terminal tab menus wor
 it('removes the host management page and keeps creation available in the workspace', async () => {
   expect(root.querySelector('.topbar [aria-label="当前主机上下文"]')).toBeNull();
   expect(root.querySelector('.topbar [aria-label="打开全局搜索"]')).toBeNull();
-  expect(root.querySelector('.sidebar-module-title')?.textContent?.trim()).toBe('主机管理');
+  expect(root.querySelector('.workspace-group-tab')).toBeNull();
   expect(root.querySelector('[aria-label="主机管理"]')).toBeNull();
   expect(root.querySelector('.activity-rail [aria-label="主机工作区"]')).toBeNull();
   expect(root.querySelector('.hosts-view')).toBeNull();
@@ -625,7 +626,9 @@ it('merges navigation with the host tree and keeps the sidebar available on glob
   expect(root.querySelector('.topbar')).toBeNull();
   const title = root.querySelector('.sidebar-workspace-heading')!;
   const collapse = title.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!;
+  const tabList = root.querySelector<HTMLElement>('.workspace-tabs')!;
   expect(collapse).not.toBeNull();
+  expect(tabList.style.display).toBe('none');
   expect(root.querySelector('.host-sidebar-heading')).toBeNull();
   expect(title.textContent).toContain('主机管理');
   expect(root.querySelector('.sidebar .activity-rail .host-tree-section')).not.toBeNull();
@@ -636,9 +639,8 @@ it('merges navigation with the host tree and keeps the sidebar available on glob
   collapse.click();
   await flush();
   expect(root.querySelector<HTMLElement>('.sidebar')!.style.display).toBe('none');
-  const expand = root.querySelector<HTMLButtonElement>(
-    '.workspace-tabs [aria-label="展开主机栏"]',
-  )!;
+  const expandSelector = '.workspace-navigation [aria-label="展开主机栏"]';
+  const expand = root.querySelector<HTMLButtonElement>(expandSelector)!;
   expect(expand).not.toBeNull();
   expect(expand.getAttribute('aria-expanded')).toBe('false');
   expect(document.activeElement).toBe(expand);
@@ -649,22 +651,26 @@ it('merges navigation with the host tree and keeps the sidebar available on glob
   expect(hosts.search).toBe('Host a');
   expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
   expect(useTerminalsStore().panes).toHaveLength(0);
-  expect(root.querySelector('.workspace-tabs [aria-label="展开主机栏"]')).toBeNull();
+  expect(root.querySelector(expandSelector)).toBeNull();
   await useWorkspaceStore().navigate('credentials');
   await flush();
   expect(root.querySelector<HTMLElement>('.sidebar')!.style.display).not.toBe('none');
   expect(root.querySelector<HTMLElement>('.host-tree-section')!.style.display).toBe('none');
-  expect(root.querySelector('.workspace-tabs [aria-label="展开主机栏"]')).toBeNull();
+  expect(root.querySelector('.workspace-group-tab')).toBeNull();
+  expect(tabList.style.display).not.toBe('none');
+  expect(root.querySelector(expandSelector)).toBeNull();
   collapse.click();
   await flush();
-  expect(root.querySelector('.workspace-tabs [aria-label="展开主机栏"]')).not.toBeNull();
+  expect(root.querySelector(expandSelector)).not.toBeNull();
 });
 
 it('keeps the host count and search without JSON import or export controls', () => {
   const heading = root.querySelector('.host-list-heading')!;
   expect(heading.textContent).toContain('全部主机');
   expect(heading.querySelector('.host-count')?.textContent?.trim()).toBe('2');
-  expect(heading.querySelector('button')).toBeNull();
+  expect([...heading.querySelectorAll('button')].map((button) => button.ariaLabel)).toEqual([
+    '本地终端',
+  ]);
   expect(root.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
   expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
 });
@@ -718,34 +724,40 @@ it('uses the right-clicked folder when creating a host without a group selector'
 });
 
 it.each([null, '', 'a'])(
-  'always pins the local device above the remote host list, including in context "%s"',
+  'opens or reuses the local terminal from the All Hosts heading in context "%s"',
   async (hostId) => {
-    if (hostId !== null) useWorkspaceStore().navigate('terminals', hostId);
+    const workspace = useWorkspaceStore();
+    if (hostId !== null) workspace.navigate('terminals', hostId);
     await flush();
     const section = root.querySelector('.host-tree-section')!;
-    const filters = section.querySelector('.host-sidebar-controls')!;
-    const tools = root.querySelector('.sidebar-local-device')!;
-    const list = section.querySelector('.host-tree-scroll')!;
-    expect(tools.parentElement).toBe(section);
-    expect(filters.nextElementSibling).toBe(list);
-    expect(tools.nextElementSibling?.classList.contains('host-list-heading')).toBe(true);
-    expect(tools.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(list.contains(tools)).toBe(false);
-    expect(tools.querySelector('.sidebar-context-name')?.textContent?.trim()).toBe('本地设备');
+    const local = section.querySelector<HTMLButtonElement>(
+      '.host-list-heading > [aria-label="本地终端"]',
+    )!;
+    expect(local).toBe(section.querySelector('.host-list-heading')?.lastElementChild);
+    expect(local.querySelector('svg')).not.toBeNull();
+    expect(local.textContent?.trim()).toBe('');
+    expect(section.querySelector('.sidebar-local-device')).toBeNull();
     const hosts = useHostsStore();
     hosts.search = 'no matching host';
     await flush();
     expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
-    expect(root.querySelector('.sidebar-local-device')).toBe(tools);
-    const local = tools.querySelector<HTMLButtonElement>('[aria-label="本地终端"]')!;
     local.click();
     await flush();
-    expect(useWorkspaceStore().current?.hostId).toBe('');
+    expect(workspace.current?.hostId).toBe('');
     expect(useTerminalsStore().panes.at(-1)?.host).toBeNull();
     expect(local.getAttribute('aria-current')).toBe('page');
     local.click();
     await flush();
     expect(useTerminalsStore().hostTabs('')).toHaveLength(1);
+    if (hostId) {
+      await workspace.close(`host:${hostId}`);
+      await flush();
+    }
+    expect(root.querySelector('.workspace-group-tab')?.textContent?.trim()).toBe('全部主机');
+    await workspace.close('host:');
+    await flush();
+    expect(root.querySelector('.workspace-group-tab')).toBeNull();
+    expect(root.querySelector('[aria-label="欢迎页面"]')).not.toBeNull();
   },
 );
 
@@ -787,6 +799,8 @@ it('keeps the current terminal visible across top module switches and navigates 
   });
   await flush();
   const terminalElement = root.querySelector('.terminal-tab')!;
+  const allHosts = root.querySelector<HTMLButtonElement>('.workspace-group-tab')!;
+  const hostTabRow = root.querySelector<HTMLElement>('.workspace-host-tabs')!;
   const open = vi.spyOn(terminals, 'open');
   const close = vi.spyOn(terminalApi, 'close');
   for (const module of ['assets', 'plugins', 'system', 'hosts'] as const) {
@@ -794,6 +808,8 @@ it('keeps the current terminal visible across top module switches and navigates 
     await flush();
     expect(workspace.module).toBe(module);
     expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
+    expect(allHosts.getAttribute('aria-selected')).toBe('true');
+    expect(hostTabRow.style.display).not.toBe('none');
     expect(root.querySelector<HTMLElement>('.terminal-workspace')!.style.display).not.toBe('none');
     expect(root.querySelector('.terminal-tab')).toBe(terminalElement);
     expect(pane).toMatchObject({
@@ -804,13 +820,23 @@ it('keeps the current terminal visible across top module switches and navigates 
     expect(root.querySelector('[aria-label="欢迎页面"]')).toBeNull();
     expect(root.textContent).not.toContain('请选择功能');
   }
-  await openPluginSettings('AI 运维助手');
+  const pluginModal = await openPluginModal('AI 运维助手');
+  expect(pluginModal.open).toBe(true);
+  expect(workspace.current?.view).toBe('plugins');
+  expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant')).toBe(false);
+  pluginModal.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await flush();
   expect(workspace.module).toBe('plugins');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
     ['插件管理'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
   await sidebarMenu('assets', '模型管理');
+  expect(allHosts.getAttribute('aria-selected')).toBe('false');
+  expect(allHosts.parentElement).toBe(
+    root.querySelector('.workspace-tab[data-view="models"]')?.parentElement,
+  );
+  expect(hostTabRow.style.display).toBe('none');
   expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
     ['安全凭据', '模型管理'],
   );
@@ -819,9 +845,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   await flush();
   expect(workspace.current?.view).toBe('about');
   root
-    .querySelector<HTMLButtonElement>(
-      '.workspace-tab[data-plugin-id="cn.hiboot.plugins.assistant"] [role="tab"]',
-    )!
+    .querySelector<HTMLButtonElement>('.workspace-tab[data-view="plugins"] [role="tab"]')!
     .click();
   await flush();
   expect(root.querySelector('.module-navigation [aria-current="page"]')?.textContent?.trim()).toBe(
@@ -832,11 +856,8 @@ it('keeps the current terminal visible across top module switches and navigates 
   ).not.toBeNull();
   root.querySelector<HTMLButtonElement>('.module-navigation [data-module="hosts"]')!.click();
   await flush();
-  expect(workspace.current).toMatchObject({
-    view: 'pluginSettings',
-    pluginId: 'cn.hiboot.plugins.assistant',
-  });
-  root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!.click();
+  expect(workspace.current?.view).toBe('plugins');
+  allHosts.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
   expect(root.querySelector('.workspace-header .host-tools')).not.toBeNull();
@@ -1209,7 +1230,7 @@ it('shows welcome after the last terminal closes and opens a new local terminal 
     [...root.querySelectorAll('.workspace-tabs [role="tab"]')].map((tab) =>
       tab.textContent?.trim(),
     ),
-  ).toEqual(['本地设备']);
+  ).toEqual(['全部主机', '本地设备']);
   root.querySelector<HTMLButtonElement>('.terminal-tab [aria-label="关闭标签 会话 1"]')!.click();
   await flush();
   expect(terminals.panes).toHaveLength(0);
@@ -1560,18 +1581,21 @@ it('restores each host tool, file connection and terminal session through primar
   expect((root.querySelector('.sidebar') as HTMLElement).style.display).not.toBe('none');
   expect((root.querySelector('.host-tree-section') as HTMLElement).style.display).toBe('none');
   expect(root.querySelector('.workspace-header .host-tools')).toBeNull();
+  root.querySelector<HTMLButtonElement>('.workspace-group-tab')!.click();
+  await flush();
+  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'b' });
   await selectHost('a');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
   expect(root.querySelector('[aria-label="当前工作区主机"]')).toBeNull();
   expect(
     [...root.querySelectorAll('.workspace-tabs [role="tab"]')].map((t) => t.textContent?.trim()),
-  ).toEqual(['Host a', 'Host b', '通用']);
+  ).toEqual(['全部主机', '通用', 'Host a', 'Host b']);
   workspace.close(workspace.active, 'all');
   await flush();
   root.querySelector<HTMLButtonElement>('[aria-label="欢迎页面"] .primary')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: '' });
-  expect(root.querySelectorAll('.host-tools button')).toHaveLength(1);
+  expect(root.querySelector('.workspace-header .host-tools')).toBeNull();
   expect(files.connections.a).toBeUndefined();
   expect(files.connections.b).toBeUndefined();
   expect(filesApi.close).toHaveBeenCalledWith('files-a', false);
@@ -1579,12 +1603,12 @@ it('restores each host tool, file connection and terminal session through primar
 });
 
 it.each([
+  ['关闭', ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'], 'host:'],
   [
-    '关闭',
+    '关闭右侧',
     ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
-    'credentials:',
+    'host:',
   ],
-  ['关闭右侧', ['host:', 'host:a'], 'host:a'],
   ['关闭其它', ['host:a'], 'host:a'],
   ['关闭所有', [], ''],
 ])(
@@ -1605,6 +1629,7 @@ it.each([
     workspace.navigate('files', 'a');
     workspace.navigate('assistant');
     workspace.navigate('credentials');
+    workspace.activate('host:');
     files.connections.a = {
       host: useHostsStore().catalog!.hosts[0]!,
       id: 'existing-files',
@@ -1616,7 +1641,8 @@ it.each([
       listing: null,
     };
     await flush();
-    root.querySelector('.workspace-tab[data-host-id="a"]')!.dispatchEvent(
+    const hostId = label === '关闭右侧' ? '' : 'a';
+    root.querySelector(`.workspace-tab[data-host-id="${hostId}"]`)!.dispatchEvent(
       new MouseEvent('contextmenu', {
         bubbles: true,
         cancelable: true,
@@ -1625,7 +1651,7 @@ it.each([
       }),
     );
     await nextTick();
-    expect(workspace.active).toBe('credentials:');
+    expect(workspace.active).toBe('host:');
     const menu = document.querySelector('[role="menu"][aria-label="工作区标签操作"]')!;
     const buttons = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([
@@ -1697,9 +1723,11 @@ it('disables empty workspace close ranges and dismisses the menu outside', async
 it('supports keyboard opening, navigation and Escape without activating the target tab', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
-  workspace.navigate('settings');
+  workspace.navigate('files', 'b');
   await flush();
-  const tab = root.querySelector<HTMLButtonElement>('.workspace-tab [role="tab"]')!;
+  const tab = root.querySelector<HTMLButtonElement>(
+    '.workspace-tab[data-host-id="a"] [role="tab"]',
+  )!;
   tab.focus();
   tab.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }),
@@ -1722,7 +1750,7 @@ it('supports keyboard opening, navigation and Escape without activating the targ
   await nextTick();
   expect(document.querySelector('[aria-label="工作区标签操作"]')).toBeNull();
   expect(document.activeElement).toBe(tab);
-  expect(workspace.active).toBe('settings:');
+  expect(workspace.active).toBe('host:b');
 });
 
 it('activating an empty host workspace does not silently create a replacement Shell', async () => {
@@ -1760,7 +1788,10 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
     name: '主机草稿工具',
     permissions: ['ui.contribute'],
     entry: { backend: null, ui: 'ui.json' },
-    contributions: [{ id: 'draft', kind: 'workspace', label: '主机草稿工具' }],
+    contributions: [
+      { id: 'draft', kind: 'workspace', label: '主机草稿工具' },
+      { id: 'settings', kind: 'settings', label: '草稿工具配置' },
+    ],
   };
   plugins.installed.push(plugin);
   plugins.grants[plugin.manifest.id] = {
@@ -1781,6 +1812,14 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
       uiVersion: 1,
       title: '主机草稿工具',
       pages: [
+        {
+          id: 'settings',
+          title: '草稿工具配置',
+          initialAction: null,
+          fields: [],
+          actions: [],
+          log: null,
+        },
         {
           id: 'draft',
           title: '草稿',
@@ -1841,11 +1880,13 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
     )!
     .click();
   await flush();
-  expect(workspace.current?.view).toBe('pluginSettings');
-  expect(workspace.module).toBe('plugins');
-  expect(root.querySelector('.plugin-page [aria-label="插件设置"]')).not.toBeNull();
-  workspace.selectHost('a');
+  expect(workspace.current).toMatchObject({ view: 'extension', hostId: 'a' });
+  expect(workspace.module).toBe('hosts');
+  const configuration = document.querySelector('[aria-label="主机草稿工具 · 配置"]')!;
+  expect(configuration.querySelector('.plugin-settings-workspace')).not.toBeNull();
+  configuration.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await flush();
+  expect(document.querySelector('[aria-label="主机草稿工具 · 配置"]')).toBeNull();
   expect(root.querySelector('.plugin-workspace[data-host-id="a"] textarea')).toBe(editorA);
   root.querySelector<HTMLButtonElement>('.host-tools [aria-label="SSH 终端"]')!.click();
   await flush();
@@ -1857,7 +1898,7 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   expect(plugins.drafts['extension:dev.host-draft:draft:b']?.values.content).toBe('draft for b');
 });
 
-it('opens disabled, ungranted and UI-less plugin configurations through plugin management without connecting a host', async () => {
+it('opens disabled, ungranted and UI-less plugins in a modal without creating individual tabs', async () => {
   const workspace = useWorkspaceStore(),
     plugins = usePluginsStore();
   plugins.installed = systemPluginFixtures();
@@ -1886,18 +1927,22 @@ it('opens disabled, ungranted and UI-less plugin configurations through plugin m
   const activate = vi.mocked(pluginsApi.activate);
   activate.mockClear();
   for (const plugin of plugins.installed) {
-    await openPluginSettings(plugin.manifest.name);
-    expect(workspace.current).toMatchObject({
-      view: 'pluginSettings',
+    const modal = await openPluginModal(plugin.manifest.name);
+    expect(workspace.current?.view).toBe('plugins');
+    expect(workspace.pluginConfiguration).toEqual({
       pluginId: plugin.manifest.id,
-      hostId: '',
+      contributionId: null,
     });
     expect(workspace.module).toBe('plugins');
     expect(root.querySelector('.activity-rail [aria-current="page"]')?.textContent).toContain(
       '插件管理',
     );
     expect(document.querySelector('[aria-label="选择使用工具的主机"]')).toBeNull();
-    expect(root.querySelector('.plugin-page [aria-label="插件设置"]')).not.toBeNull();
+    expect(modal.querySelector('[aria-label="插件设置"]')).not.toBeNull();
+    expect(workspace.tabs.every((tab) => !tab.pluginId)).toBe(true);
+    modal.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+    await flush();
+    expect(workspace.pluginConfiguration).toBeUndefined();
   }
   expect(schema).not.toHaveBeenCalled();
   expect(activate).not.toHaveBeenCalled();

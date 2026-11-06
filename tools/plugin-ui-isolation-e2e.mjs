@@ -7,7 +7,12 @@ import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace, setPluginEnabled } from './ui-navigation.mjs';
+import {
+  closePluginSettings,
+  navigateWorkspace,
+  selectHostWorkspace,
+  setPluginEnabled,
+} from './ui-navigation.mjs';
 import { closeNativeWindow } from './native-window-close.mjs';
 import { checkWorkspaceTools } from './plugin-workspace-checks.mjs';
 import { checkPluginComponents } from './plugin-components-checks.mjs';
@@ -202,7 +207,12 @@ try {
     await scope().locator('.ai-view').waitFor();
     await scope().getByLabel('问题', { exact: true }).fill('retained draft');
     await page.getByRole('button', { name: '插件设置', exact: true }).click();
-    await open('AI 运维助手');
+    const settings = page.getByRole('dialog', { name: 'AI 运维助手 · 配置', exact: true });
+    await settings
+      .frameLocator('iframe')
+      .getByRole('button', { name: '取消', exact: true })
+      .click();
+    await settings.waitFor({ state: 'hidden' });
     assert.equal(await scope().getByLabel('问题', { exact: true }).inputValue(), 'retained draft');
     passed.push('own settings retain the assistant iframe and draft');
     const frame = page
@@ -321,12 +331,12 @@ try {
     const draftFrameA = page.frames().find((frame) => frame.url().includes('dev.qa.custom-ui'));
     assert(draftFrameA);
     await page.getByRole('button', { name: '插件设置', exact: true }).click();
-    await page.locator('.plugin-page [aria-label="插件设置"]').waitFor();
+    await page.locator('dialog[open] [aria-label="插件设置"]').waitFor();
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').innerText(),
-      '设置',
+      '主机管理',
     );
-    await page.locator(`.workspace-tab[data-host-id="${draftHosts[0].id}"] [role=tab]`).click();
+    await closePluginSettings(page);
     assert.equal(await scope().getByLabel('姓名', { exact: true }).inputValue(), '独立插件');
     await open('AI 运维助手');
     await page.evaluate(
@@ -340,13 +350,13 @@ try {
     await navigateWorkspace(page, 'Custom UI QA');
     assert.equal(await scope().getByLabel('姓名', { exact: true }).inputValue(), '');
     await scope().getByLabel('姓名', { exact: true }).fill('B 的草稿');
-    await page.locator(`.workspace-tab[data-host-id="${draftHosts[0].id}"] [role=tab]`).click();
+    await selectHostWorkspace(page, draftHosts[0].id);
     assert.equal(await scope().getByLabel('姓名', { exact: true }).inputValue(), '独立插件');
     assert.equal(await scope().getByRole('status').innerText(), '来自独立 WASM 的问候：独立插件');
     assert(page.frames().includes(draftFrameA), 'host A frame was unnecessarily replaced');
     await scope().getByRole('button', { name: '调用自己的 WASM', exact: true }).click();
     await scope().getByText('来自独立 WASM 的问候：独立插件', { exact: true }).waitFor();
-    await page.locator(`.workspace-tab[data-host-id="${draftHosts[1].id}"] [role=tab]`).click();
+    await selectHostWorkspace(page, draftHosts[1].id);
     assert.equal(await scope().getByLabel('姓名', { exact: true }).inputValue(), 'B 的草稿');
     await scope().getByRole('button', { name: '调用自己的 WASM', exact: true }).click();
     await scope().getByText('来自独立 WASM 的问候：B 的草稿', { exact: true }).waitFor();
@@ -427,7 +437,7 @@ try {
     }
     await checkWorkspaceTools({ page, invoke, run, passed });
     await open('AI 运维助手');
-    await page.locator(`.workspace-tab[data-host-id="${draftHosts[0].id}"] [role=tab]`).click();
+    await selectHostWorkspace(page, draftHosts[0].id);
     await scope().getByLabel('姓名', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(run, 'host-workspace-draft.png'), fullPage: true });
     const unexpected = errors.filter(

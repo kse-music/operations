@@ -352,8 +352,10 @@ try {
           .contextVersion(id),
       pluginId,
     );
-    await openPluginSettings(page, 'AI 运维助手');
+    const settings = await openPluginSettings(page, 'AI 运维助手');
     assert(!heldCancelled, 'settings navigation must not cancel the model request');
+    await settings.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await settings.waitFor({ state: 'hidden' });
     secondHostId = (
       await invoke('host_create', {
         input: {
@@ -463,7 +465,12 @@ try {
     await ask();
     await until(() => held);
     const callsBeforeClose = modelCalls;
-    await openPluginSettings(page, 'AI 运维助手');
+    const settings = await openPluginSettings(page, 'AI 运维助手');
+    await settings
+      .frameLocator('iframe')
+      .getByText('Agent QA model', { exact: true })
+      .first()
+      .waitFor();
     const versionBeforeClose = await page.evaluate(
       (id) =>
         document
@@ -495,8 +502,8 @@ try {
       versionBeforeClose,
       'closing this host must not revoke the settings owner generation',
     );
-    await page
-      .frameLocator('.plugin-frame-container:visible iframe')
+    await settings
+      .frameLocator('iframe')
       .getByText('Agent QA model', { exact: true })
       .first()
       .waitFor();

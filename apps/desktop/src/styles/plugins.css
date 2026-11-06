@@ -1,5 +1,4 @@
 .plugin-manager,
-.plugin-page,
 .plugin-workspace {
   width: 100%;
   min-width: 0;
@@ -84,8 +83,7 @@
   font-size: 12px;
   line-height: 1.7;
 }
-.plugin-row-icon,
-.plugin-page-icon {
+.plugin-row-icon {
   display: grid;
   place-items: center;
   flex-shrink: 0;
@@ -369,59 +367,75 @@
   margin-top: 5px;
   flex-shrink: 0;
 }
-.plugin-page {
-  gap: 18px;
-  max-width: 1280px;
-  margin-inline: auto;
-  container: plugin-settings / inline-size;
-}
-.plugin-page-layout {
+.modal:has(> .plugin-config-body)[open] {
   display: grid;
-  gap: 18px;
-  align-items: start;
-  min-width: 0;
-}
-.plugin-page-layout.has-configuration {
-  grid-template-columns: minmax(0, 1fr) 300px;
-}
-.plugin-configuration {
-  min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
   overflow: hidden;
-  background: var(--panel);
+  padding: 0;
 }
-.plugin-configuration > .plugin-contribution-select {
+.modal:has(> .plugin-config-body > .plugin-settings-workspace)[open] {
+  height: min(570px, calc(100dvh - 32px));
+}
+.modal:has(> .plugin-config-body) > .modal-heading {
+  margin: 0;
+  padding: 12px clamp(12px, 4vw, 20px);
+  border-bottom: 1px solid var(--border);
+}
+.modal:has(> .plugin-config-body) > .modal-heading h2 {
+  overflow-wrap: anywhere;
+}
+.plugin-config-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.plugin-config-nav {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.plugin-config-nav .button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.plugin-config-body > .plugin-contribution-select {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
-.plugin-configuration .plugin-settings-workspace {
-  min-height: 460px;
-  height: 480px;
-  padding: 0;
+.plugin-config-body > .plugin-settings-workspace {
+  flex: 1;
   gap: 12px;
-}
-.plugin-configuration .plugin-settings-workspace > .plugin-form {
   padding: 16px;
+}
+.plugin-config-body > .plugin-settings-workspace:has(.plugin-frame-container) {
+  padding: 0;
+  gap: 0;
+}
+.dialog-actions.plugin-config-footer {
+  margin: 0;
+  padding: 12px 16px;
+  background: var(--panel);
+}
+.plugin-management-panel {
+  min-height: 0;
   overflow: auto;
+  padding: 16px;
 }
-.plugin-configuration .plugin-settings-workspace > .plugin-output {
-  margin: 0 16px 16px;
-}
-.plugin-page-identity {
+.plugin-management-header {
   display: flex;
   gap: 13px;
   align-items: center;
+  margin-bottom: 16px;
+  overflow-wrap: anywhere;
 }
-.plugin-page-heading h1 {
-  font-size: 19px;
-  margin: 0 0 6px;
-}
-.plugin-page-heading {
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
-}
-.plugin-page-heading .subtle {
+.plugin-management-meta {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -429,8 +443,8 @@
   font-size: 12px;
   margin: 0;
 }
-.plugin-page-description {
-  margin: 8px 0 0;
+.plugin-management-header .subtle {
+  margin: 4px 0 0;
   font-size: 12px;
   line-height: 1.65;
   color: var(--muted);
@@ -619,20 +633,6 @@
 .plugin-package-details dt {
   color: var(--muted);
 }
-@container plugin-settings (max-width: 880px) {
-  .plugin-page-layout.has-configuration {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .has-configuration > .plugin-settings {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
-  }
-}
-@container plugin-settings (max-width: 540px) {
-  .has-configuration > .plugin-settings {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 .plugin-contribution-select {
   display: flex;
   gap: 12px;
@@ -642,11 +642,6 @@
 .plugin-contribution-select select {
   width: auto;
   max-width: 280px;
-}
-.plugin-page .plugin-workspace.plugin-embedded {
-  padding: 0;
-  margin: 0;
-  max-width: none;
 }
 .plugin-heading p {
   margin: 0;
@@ -794,9 +789,6 @@
   .plugin-grant-grid {
     grid-template-columns: 1fr;
   }
-  .plugin-page {
-    padding: 0;
-  }
   .plugin-version {
     font-size: 10px;
   }
@@ -808,9 +800,6 @@
   }
   .plugin-state-section {
     align-items: flex-start;
-    flex-wrap: wrap;
-  }
-  .plugin-page-heading {
     flex-wrap: wrap;
   }
 }

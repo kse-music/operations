@@ -27,7 +27,6 @@ export const messages = {
     about: '关于',
     plugins: '插件管理',
     extension: '插件工作区',
-    pluginSettings: '插件设置',
   },
 } as const;
 export type WorkspaceView = keyof (typeof messages)['zh-CN'];

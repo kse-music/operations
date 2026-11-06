@@ -21,7 +21,7 @@ afterEach(() => {
   disposePinia(pinia);
   vi.restoreAllMocks();
 });
-it('lists system and uploaded server contributions and sends unavailable plugins to management', async () => {
+it('lists system and uploaded server contributions and opens settings for unavailable plugins', async () => {
   const plugins = usePluginsStore();
   const items = systemPluginFixtures();
   items.push({
@@ -33,8 +33,14 @@ it('lists system and uploaded server contributions and sends unavailable plugins
   plugins.loaded = true;
   vi.spyOn(plugins, 'refresh').mockResolvedValue();
   const manage = vi.fn(),
-    open = vi.fn();
-  app = createApp(ServerView, { hostId: 'a', onManage: manage, onPlugin: open }).use(pinia);
+    open = vi.fn(),
+    settings = vi.fn();
+  app = createApp(ServerView, {
+    hostId: 'a',
+    onManage: manage,
+    onPlugin: open,
+    onSettings: settings,
+  }).use(pinia);
   app.mount(root);
   await flush();
   expect(root.querySelectorAll('.plugin-card')).toHaveLength(2);
@@ -42,6 +48,7 @@ it('lists system and uploaded server contributions and sends unavailable plugins
   expect(root.querySelector('.monitor-view, .operations-view')).toBeNull();
   root.querySelector<HTMLButtonElement>('.plugin-card button')!.click();
   await flush();
-  expect(open).toHaveBeenCalledWith(items[0]!.manifest.id, 'server', 'a');
+  expect(settings).toHaveBeenCalledWith(items[0]!.manifest.id);
+  expect(open).not.toHaveBeenCalled();
   expect(manage).not.toHaveBeenCalled();
 });

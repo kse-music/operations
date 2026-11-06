@@ -379,25 +379,22 @@ onBeforeUnmount(() => {
     @keydown="keys"
     @click.capture="ignoreDragClick"
   >
-    <div class="sidebar-local-device">
-      <p class="sidebar-context-name">本地设备</p>
-      <nav class="host-tools" aria-label="本地设备工具">
-        <button
-          :class="['host-tool', { active: localActive }]"
-          aria-label="本地终端"
-          :aria-current="localActive ? 'page' : undefined"
-          @click="$emit('localTerminal')"
-        >
-          <SquareTerminal :size="16" aria-hidden="true" />本地终端
-        </button>
-      </nav>
-    </div>
     <div class="host-list-heading">
       <span class="host-list-title">
         全部主机<small v-if="store.catalog" class="host-count">{{
           store.catalog.hosts.length
         }}</small>
       </span>
+      <button
+        type="button"
+        class="shell-icon-button"
+        aria-label="本地终端"
+        title="本地终端"
+        :aria-current="localActive ? 'page' : undefined"
+        @click="$emit('localTerminal')"
+      >
+        <SquareTerminal :size="16" aria-hidden="true" />
+      </button>
     </div>
     <div class="host-sidebar-controls">
       <label class="host-search-field">

@@ -58,6 +58,7 @@ export function useModelBinding() {
       settings = value;
       modelId.value = id;
       message.value = id ? '模型绑定已保存' : '已解除模型绑定';
+      return true;
     } catch (cause) {
       if (current === version) error.value = errorMessage(cause);
     } finally {

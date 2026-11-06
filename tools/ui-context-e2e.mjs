@@ -24,6 +24,43 @@ try {
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(process.env.SERVERDECK_CONTEXT_URL ?? 'http://127.0.0.1:1421');
     await page.getByText('后端未连接', { exact: true }).waitFor();
+    const workspaceTitle = page.getByRole('tab', { name: '全部主机', exact: true });
+    const hostTabs = page.getByRole('tablist', { name: '主机工作区', exact: true });
+    const welcome = page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true });
+    await welcome.waitFor();
+    assert.equal(await workspaceTitle.count(), 0);
+    const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
+    if (width <= 720) await expand.click();
+    const listHeading = page.locator('.host-list-heading');
+    const localTerminal = listHeading.getByRole('button', { name: '本地终端', exact: true });
+    const listHeadingBox = await listHeading.boundingBox();
+    const localButtonBox = await localTerminal.boundingBox();
+    assert(
+      listHeadingBox &&
+        localButtonBox &&
+        localButtonBox.x + localButtonBox.width === listHeadingBox.x + listHeadingBox.width,
+      `${name}: the local terminal icon must be at the right edge of All Hosts`,
+    );
+    await localTerminal.click();
+    await page.locator('.terminal-pane:visible[data-host-id=""]').waitFor();
+    assert.equal(await localTerminal.getAttribute('aria-current'), 'page');
+    if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+    const localTitleBox = await workspaceTitle.boundingBox();
+    const localTabBox = await page
+      .getByRole('tab', { name: '本地设备', exact: true })
+      .boundingBox();
+    assert(
+      localTitleBox && localTabBox && localTitleBox.y + localTitleBox.height <= localTabBox.y,
+      `${name}: the All Hosts title must be above the local terminal workspace tab`,
+    );
+    if (name === 'desktop-dark')
+      await page.screenshot({
+        path: `${output}/${name}-local-only.png`,
+        clip: { x: 0, y: 0, width, height: 230 },
+      });
+    await page.locator('.workspace-tab[data-host-id=""] .tab-close').click();
+    await welcome.waitFor();
+    assert.equal(await workspaceTitle.count(), 0);
     await page.evaluate(async (theme) => {
       const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
       const { useHostsStore } = await import('/src/stores/hosts.ts');
@@ -83,6 +120,8 @@ try {
       await page.locator(`.module-navigation [data-module="${module}"]`).click();
       assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
       await assertHost('a', 'terminals');
+      assert.equal(await workspaceTitle.getAttribute('aria-selected'), 'true');
+      assert.equal(await hostTabs.isVisible(), true);
       assert.equal(await page.locator('.terminal-pane:visible[data-host-id="a"]').count(), 1);
       assert.equal(await page.locator('.workspace-tab').count(), existingTabs);
       assert.equal(await page.locator('.workspace-tab.active').count(), 1);
@@ -146,7 +185,7 @@ try {
       const host = box('.workspace-header'),
         sessions = box('.terminal-session-header'),
         area = box('.split-area'),
-        workspace = box('.workspace-tabs'),
+        workspace = box('.workspace-host-tabs'),
         tools = box('.workspace-header .host-tools'),
         add = box('[aria-label="新建终端会话"]');
       return {
@@ -179,6 +218,24 @@ try {
     await assertHost('b', 'terminals');
     assert.equal(await page.locator('.terminal-tab').count(), 1);
     assert.equal(await page.locator('.workspace-tab').count(), 2);
+    const titleBox = await page.locator('.workspace-page-tabs').boundingBox();
+    const tabsBox = await hostTabs.boundingBox();
+    const toolbarBox = await page.locator('.workspace-header').boundingBox();
+    assert(
+      titleBox &&
+        tabsBox &&
+        toolbarBox &&
+        titleBox.y + titleBox.height <= tabsBox.y &&
+        tabsBox.y + tabsBox.height <= toolbarBox.y,
+      `${name}: the title, host tabs and session toolbar must occupy separate rows in order`,
+    );
+    if (width > 720) {
+      const sidebarHeading = await page.locator('.sidebar-workspace-heading').boundingBox();
+      const allHostsRow = await listHeading.boundingBox();
+      assert.equal(titleBox.y + titleBox.height, sidebarHeading.y + sidebarHeading.height);
+      assert.equal(tabsBox.y, allHostsRow.y);
+      assert.equal(tabsBox.height, allHostsRow.height);
+    }
     await nav('SFTP 文件');
     await page.getByLabel('远程路径', { exact: true }).waitFor();
     await assertHost('b', 'files');
@@ -195,13 +252,30 @@ try {
     await assertHost('b', 'files');
     assert.equal(await page.getByLabel('远程路径', { exact: true }).inputValue(), '/b');
     await nav('通用');
+    assert.equal(await workspaceTitle.getAttribute('aria-selected'), 'false');
+    const pageTabs = page.getByRole('tablist', { name: '工作区页面', exact: true });
+    assert.deepEqual(
+      (await pageTabs.getByRole('tab').allTextContents()).map((text) => text.trim()),
+      ['全部主机', '通用'],
+    );
+    assert.equal(await hostTabs.isVisible(), false);
     assert.equal(await page.locator('.host-tree-section').isVisible(), false);
     assert.equal(await page.getByRole('navigation', { name: '当前主机工具' }).count(), 0);
+    await workspaceTitle.click();
+    await assertHost('b', 'files');
+    assert.equal(await page.getByLabel('远程路径', { exact: true }).inputValue(), '/b');
+    await workspaceTitle.press('ArrowRight');
+    const settingsTab = pageTabs.getByRole('tab', { name: '通用', exact: true });
+    assert.equal(await settingsTab.getAttribute('aria-selected'), 'true');
+    await settingsTab.press('ArrowLeft');
+    await assertHost('b', 'files');
     await selectHostWorkspace(page, 'a');
     await assertHost('a', 'files');
+    await workspaceTitle.waitFor();
     await selectHostWorkspace(page, '');
     await assertHost('', 'terminals');
-    assert.equal(await page.locator('.host-tools button').count(), 1);
+    assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
+    await workspaceTitle.waitFor();
     assert.equal(await page.getByLabel('当前工作区主机', { exact: true }).count(), 0);
     await selectHostWorkspace(page, 'b');
     await nav('SSH 终端');
@@ -259,7 +333,7 @@ try {
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();
     assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
-      '主机运维',
+      '主机管理',
       '资产管理',
       '插件',
       '设置',

@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
-import { openPluginFunction, openPluginSettings, navigateWorkspace } from './ui-navigation.mjs';
+import {
+  openPluginDetails,
+  openPluginFunction,
+  openPluginSettings,
+  navigateWorkspace,
+} from './ui-navigation.mjs';
 
 const output = process.env.SERVERDECK_PLUGIN_LAYOUT_OUTPUT ?? '.local/plugin-layout-qa';
 const server = process.env.SERVERDECK_PLUGIN_LAYOUT_URL
@@ -38,6 +43,7 @@ try {
     [1440, 900],
     [900, 600],
     [390, 844],
+    [390, 460],
   ]) {
     for (const theme of ['dark', 'light']) {
       const page = await browser.newPage({ viewport: { width, height } });
@@ -66,7 +72,6 @@ try {
       await page.evaluate(
         async ({ packages, theme }) => {
           const { usePluginsStore } = await import('/src/stores/plugins.ts');
-          const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
           const { useHostsStore } = await import('/src/stores/hosts.ts');
           const { useOpsStore } = await import('/src/stores/ops.ts');
           const { useFilesStore } = await import('/src/stores/files.ts');
@@ -236,6 +241,10 @@ try {
                 result = window.layoutSettings;
                 break;
               case 'settings_write':
+                if (window.holdLayoutSave)
+                  await new Promise((resolve) => (window.releaseLayoutSave = resolve));
+                if (window.layoutSaveError)
+                  return { result: null, error: { code: 'IO', message: '模型绑定写入失败' } };
                 window.layoutSettings = operation.value;
                 result = null;
                 break;
@@ -316,7 +325,6 @@ try {
             return { result, error: null };
           };
           useNotificationsStore().items = [];
-          useWorkspaceStore().openPluginSettings('cn.hiboot.plugins.assistant');
           document.documentElement.dataset.theme = theme;
         },
         { packages: packages.map(({ manifest, ui }) => ({ manifest, ui })), theme },
@@ -335,14 +343,15 @@ try {
         await page.screenshot({ path: `${output}/${name}-${width}-${theme}.png` });
         results.push({ name, width, height, theme, ...geometry });
       };
-      await content().getByRole('group', { name: '使用模型' }).waitFor();
-      await content()
+      const configuration = await openPluginSettings(page, 'AI 运维助手');
+      assert.equal(await page.locator('.workspace-tab').count(), 1);
+      const settings = configuration.frameLocator('iframe');
+      await settings.getByRole('group', { name: '使用模型' }).waitFor();
+      await settings
         .locator('.binding-current strong')
         .getByText('默认模型', { exact: true })
         .waitFor();
-      assert(
-        await content().getByRole('button', { name: '保存模型绑定', exact: true }).isVisible(),
-      );
+      assert(await settings.getByRole('button', { name: '保存模型绑定', exact: true }).isVisible());
       const settingsFrame = page.frames().find((f) => f.url().includes('/settings/index.html'));
       const settingsGeometry = await settingsFrame.evaluate(() => ({
         height: innerHeight,
@@ -359,7 +368,13 @@ try {
         settingsGeometry.contentHeight <= settingsGeometry.height + 1,
         `Nested settings scroll: ${JSON.stringify(settingsGeometry)}`,
       );
-      await capture('assistant-settings', '.plugin-page');
+      await capture('assistant-settings', 'dialog:has(.plugin-config-body)');
+      const geometry = await configuration.boundingBox();
+      assert(geometry.width <= Math.min(width - 32, 720));
+      assert(geometry.y >= 16 && geometry.y + geometry.height <= height - 16);
+      await configuration.screenshot({
+        path: `${output}/config-dialog-${width}x${height}-${theme}.png`,
+      });
       await page.evaluate(async () => {
         const { useModelsStore } = await import('/src/stores/models.ts');
         window.layoutModels = [
@@ -372,14 +387,14 @@ try {
         ];
         await useModelsStore().refresh();
       });
-      await content().getByText('100 个已注册', { exact: true }).waitFor();
+      await settings.getByText('100 个已注册', { exact: true }).waitFor();
       const crowdedGeometry = await settingsFrame.evaluate(() => ({
         footerBottom: document.querySelector('footer').getBoundingClientRect().bottom,
         height: innerHeight,
         contentHeight: document.documentElement.scrollHeight,
         listScrollable:
-          document.querySelector('.binding-options').scrollHeight >
-          document.querySelector('.binding-options').clientHeight,
+          document.querySelector('.binding-content').scrollHeight >
+          document.querySelector('.binding-content').clientHeight,
       }));
       assert(crowdedGeometry.listScrollable);
       assert(crowdedGeometry.footerBottom <= crowdedGeometry.height + 1);
@@ -389,15 +404,44 @@ try {
         window.layoutModels = window.layoutModels.slice(0, 2);
         await useModelsStore().refresh();
       });
-      await content().locator('input[value="layout-model-1"]').check();
-      await content().getByRole('button', { name: '保存模型绑定', exact: true }).click();
-      await content().getByText('模型绑定已保存', { exact: true }).waitFor();
+      await settings.locator('input[value="layout-model-1"]').check();
+      const holdSave = width === 2400 && theme === 'dark';
+      if (holdSave) await page.evaluate(() => (window.holdLayoutSave = true));
+      await settings.getByRole('button', { name: '保存模型绑定', exact: true }).click();
+      if (holdSave) {
+        await page.waitForFunction(() => typeof window.releaseLayoutSave === 'function');
+        assert(
+          await configuration.getByRole('button', { name: '关闭对话框', exact: true }).isDisabled(),
+        );
+        await page.evaluate(() => {
+          window.holdLayoutSave = false;
+          window.releaseLayoutSave();
+        });
+      }
+      await configuration.waitFor({ state: 'hidden' });
       assert.deepEqual(await page.evaluate(() => window.layoutSettings), {
         modelId: 'layout-model-1',
         retained: true,
       });
-      await openPluginSettings(page, 'Docker 管理');
-      await capture('docker-settings', '.plugin-page');
+      // The additional short viewport targets the configuration dialog.
+      if (height === 460) {
+        assert.deepEqual(errors, []);
+        await page.close();
+        console.log(`Passed short-window settings: ${width} × ${height}, ${theme}`);
+        continue;
+      }
+      const dockerDetails = await openPluginDetails(page, 'Docker 管理');
+      const dockerConfiguration = page.getByRole('dialog', {
+        name: 'Docker 管理 · 配置',
+        exact: true,
+      });
+      assert.equal(await page.locator('.workspace-tab').count(), 1);
+      await dockerDetails.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
+      assert(await dockerDetails.getByLabel('ui.contribute', { exact: true }).isDisabled());
+      await capture('docker-settings', 'dialog:has(.plugin-config-body)');
+      await dockerConfiguration.screenshot({
+        path: `${output}/docker-config-${width}x${height}-${theme}.png`,
+      });
       await openPluginFunction(page, 'Docker 管理', 'layout-host');
       await content().getByText('app-service-1', { exact: true }).waitFor();
       await capture('docker-containers', '.plugin-workspace');
@@ -477,8 +521,47 @@ try {
       assert.deepEqual(await page.evaluate(() => window.imageDeleteDecisions), [false, true]);
       await openPluginFunction(page, 'AI 运维助手', 'layout-host');
       await content().getByRole('button', { name: '容器排查', exact: true }).click();
-      assert((await content().getByLabel('问题', { exact: true }).inputValue()).includes('Docker'));
+      const chat = page.frameLocator(
+        '.plugin-workspace[data-host-id="layout-host"]:visible iframe',
+      );
+      const question = chat.getByLabel('问题', { exact: true });
+      const draft = await question.inputValue();
+      assert(draft.includes('Docker'));
+      const gear = page
+        .locator('.plugin-workspace[data-plugin-id="cn.hiboot.plugins.assistant"]:visible')
+        .getByRole('button', { name: '插件设置', exact: true });
+      const tabsBefore = await page.locator('.workspace-tab').count();
+      await chat.getByText('绑定模型未配置 Key，请在模型管理中补充', { exact: true }).waitFor();
+      await gear.click();
+      await configuration.getByRole('button', { name: '权限与详情', exact: true }).click();
+      await configuration.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
+      assert.equal(await configuration.locator('iframe').count(), 0);
+      await configuration.getByRole('button', { name: '插件配置', exact: true }).click();
+      await settings.locator('input[value="layout-model-0"]').check();
+      assert.equal(await page.locator('.workspace-tab').count(), tabsBefore);
+      await settings.getByRole('button', { name: '取消', exact: true }).click();
+      await configuration.waitFor({ state: 'hidden' });
+      assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-1');
+      assert.equal(await question.inputValue(), draft);
+      assert(await gear.evaluate((button) => document.activeElement === button));
+      await gear.click();
+      await settings.locator('input[value="layout-model-0"]').check();
+      const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
+      await page.evaluate(() => (window.layoutSaveError = true));
+      await save.click();
+      await settings.getByText('模型绑定写入失败', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-1');
+      await page.evaluate(() => (window.layoutSaveError = false));
+      await save.click();
+      await configuration.waitFor({ state: 'hidden' });
+      assert.equal(await question.inputValue(), draft);
+      assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-0');
+      await chat.locator('.ai-chat-composer button[type="submit"]:enabled').waitFor();
       await capture('assistant-chat', '.plugin-workspace');
+      await gear.click();
+      await settings.getByRole('button', { name: '管理模型', exact: true }).click();
+      await configuration.waitFor({ state: 'hidden' });
+      await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
       await navigateWorkspace(page, '插件管理');
       const manager = page.locator('.plugin-manager');
       await manager.waitFor();
@@ -500,6 +583,20 @@ try {
         });
       });
       assert.equal(await page.locator('.plugin-installed-row').count(), 3);
+      const upload = manager.locator('.plugin-installed-row').last();
+      const uploadTabs = await page.locator('.workspace-tab').count();
+      await upload.locator('.plugin-name-button').click();
+      const uploadDialog = page.locator('dialog[open]:has(> .plugin-config-body)');
+      await uploadDialog.getByText('用户上传', { exact: true }).waitFor();
+      assert.equal(await page.locator('.workspace-tab').count(), uploadTabs);
+      assert.equal(await uploadDialog.locator('iframe').count(), 0);
+      await uploadDialog.getByRole('button', { name: '启用插件', exact: true }).waitFor();
+      assert.equal(
+        await uploadDialog.getByLabel('ui.contribute', { exact: true }).isEnabled(),
+        true,
+      );
+      await uploadDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+      await uploadDialog.waitFor({ state: 'hidden' });
       assert.equal(
         await page.locator('.module-navigation [aria-current="page"]').textContent(),
         '插件',

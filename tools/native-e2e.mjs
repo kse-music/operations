@@ -277,7 +277,12 @@ try {
     await form.waitFor({ state: 'hidden' });
     await row('imported-new').waitFor();
     results.push('native OpenSSH preview + duplicates + unsafe option blocking + selective import');
-    assert.equal(await page.locator('.host-list-heading button').count(), 0);
+    assert.deepEqual(
+      await page
+        .locator('.host-list-heading button')
+        .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
+      ['本地终端'],
+    );
     assert.equal(await page.getByLabel('选择 ServerDeck 主机文件', { exact: true }).count(), 0);
     for (const command of ['hosts_export', 'hosts_import_archive']) {
       await assert.rejects(invoke(command, { text: '{}' }), /not allowed|not found/);

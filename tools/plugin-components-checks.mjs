@@ -126,13 +126,13 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
       ),
     );
     assert.equal(plugin.manifest.version, expectedPackage.manifest.version);
-    await openPluginSettings(page, plugin.manifest.name);
-    await page.locator('.plugin-page:visible [aria-label="插件设置"]').waitFor();
+    const dialog = await openPluginSettings(page, plugin.manifest.name);
     assert.equal(
       await page.getByRole('dialog', { name: '选择使用工具的主机', exact: true }).count(),
       0,
     );
     const hasSettings = plugin.manifest.contributions.some((entry) => entry.kind === 'settings');
+    if (!hasSettings) await dialog.getByLabel('插件设置', { exact: true }).waitFor();
     if (hasSettings) await page.locator('.plugin-frame-container:visible').waitFor();
     assert.equal(
       await page.locator('.plugin-frame-container:visible').count(),
@@ -151,7 +151,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     );
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').innerText(),
-      '设置',
+      '插件',
     );
   }
   assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) > 0);

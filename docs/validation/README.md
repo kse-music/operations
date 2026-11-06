@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[插件配置弹窗验收](plugins/PLUGIN_TEST_REPORT.md#2026-11-06-插件配置弹窗)。
+
 最新：[OpenSSH 导入弹窗布局验证](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗布局)。
 
 最新：[主机 JSON 导入导出下线及主机列表验证](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-主机-json-导入导出下线)。
@@ -62,7 +64,7 @@
 - [顶栏精简与主机树收缩入口验收](hosts/VALIDATION_HOST_SIDEBAR_TOGGLE.md)
 - [工作区主机树 CRUD 验收](hosts/VALIDATION_HOST_TREE_CRUD.md)
 - [根目录、多级文件夹和主机右键菜单验收](hosts/VALIDATION_HOST_TREE_FOLDERS.md)
-- [主机工作区布局验收](hosts/VALIDATION_HOST_WORKSPACES.md)
+- [主机工作区布局验收](hosts/VALIDATION_HOST_WORKSPACES.md)（[全部主机与其他二级页面并列](hosts/VALIDATION_HOST_WORKSPACES.md#全部主机与其他二级页面并列)）
 - [主机名称可选验收](hosts/VALIDATION_OPTIONAL_HOST_NAME.md)
 - [移除主机栏标题文字验收](hosts/VALIDATION_REMOVE_HOST_HEADING.md)
 - [主机管理移除标签、备注和收藏验收](hosts/VALIDATION_REMOVE_HOST_METADATA.md)

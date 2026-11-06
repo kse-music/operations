@@ -49,7 +49,9 @@ import GlobalSearch from './components/GlobalSearch.vue';
 import { usePluginsStore } from './stores/plugins';
 import PluginDialogs from './components/PluginDialogs.vue';
 const PluginsView = defineAsyncComponent(() => import('./views/PluginsView.vue'));
-const PluginPage = defineAsyncComponent(() => import('./views/PluginPage.vue'));
+const PluginSettingsDialog = defineAsyncComponent(
+  () => import('./components/PluginSettingsDialog.vue'),
+);
 const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
 const plugins = usePluginsStore();
 const ModelsView = defineAsyncComponent(() => import('./views/ModelsView.vue'));
@@ -119,11 +121,10 @@ const view = computed<View | null>({
     if (value) navigate(value);
   },
 });
-const isHostWorkspace = computed(
-  () =>
-    view.value !== null &&
-    (hostViews.has(view.value) || (view.value === 'extension' && !!workspace.current?.hostId)),
-);
+const isHostWorkspace = computed(() => {
+  const tab = workspace.current;
+  return !!tab && isHostTab(tab);
+});
 const settingsCategory = computed(() =>
   settingsCategories.find((item) => item.view === view.value),
 );
@@ -132,6 +133,21 @@ const settingsOpen = computed(() =>
 );
 const showSidebar = computed(() => sidebarOpen.value);
 const showHostTree = computed(() => workspace.module === 'hosts');
+const hostWorkspaceTabs = computed(() => workspace.tabs.filter(isHostTab));
+const workspaceRows = computed(() => [
+  {
+    id: 'pages',
+    label: '工作区页面',
+    tabs: workspace.tabs.filter((tab) => !isHostTab(tab)),
+    visible: workspace.tabs.length > 0,
+  },
+  {
+    id: 'hosts',
+    label: '主机工作区',
+    tabs: hostWorkspaceTabs.value,
+    visible: isHostWorkspace.value,
+  },
+]);
 const cachedPluginPages = computed(() => workspace.pluginPages);
 function navigate(
   value: View,
@@ -164,7 +180,7 @@ function tabName(tab: WorkspaceTab) {
   if (isHostTab(tab))
     return tab.hostId ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机' : '本地设备';
   if (tab.pluginId)
-    return `${plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件'}${tab.view === 'pluginSettings' ? ' · 设置' : ''}`;
+    return plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件';
   return hostViews.has(tab.view)
     ? tab.hostId
       ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机'
@@ -178,10 +194,16 @@ function activate(tab: WorkspaceTab) {
 function selectModule(module: NavigationModule): void {
   workspace.selectModule(module);
 }
+function activateAllHosts(): void {
+  const tabs = hostWorkspaceTabs.value;
+  const tab = tabs.find((item) => item.hostId === workspace.hostId) ?? tabs.at(-1);
+  if (tab) workspace.activate(tab.key);
+}
 function revealActiveTab() {
-  document
-    .querySelector('.workspace-tab.active')
-    ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  for (const tab of document.querySelectorAll(
+    '.workspace-group-tab[aria-selected=true], .workspace-tab.active',
+  ))
+    tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 const tabMenu = ref<{ key: string; x: number; y: number } | null>(null);
 const tabMenuElement = ref<HTMLElement>();
@@ -189,6 +211,15 @@ let tabMenuTrigger: HTMLButtonElement | null = null;
 const tabMenuIndex = computed(() =>
   workspace.tabs.findIndex((tab) => tab.key === tabMenu.value?.key),
 );
+const hasTabsToRight = computed(() => {
+  const tab = workspace.tabs[tabMenuIndex.value];
+  return (
+    !!tab &&
+    workspace.tabs
+      .slice(tabMenuIndex.value + 1)
+      .some((candidate) => isHostTab(candidate) === isHostTab(tab))
+  );
+});
 const tabCloseActions: { scope: WorkspaceCloseScope; label: string }[] = [
   { scope: 'current', label: '关闭' },
   { scope: 'right', label: '关闭右侧' },
@@ -201,7 +232,7 @@ function dismissTabMenu(event?: Event) {
 }
 function restoreTabFocus() {
   if (tabMenuTrigger?.isConnected) tabMenuTrigger.focus({ preventScroll: true });
-  else document.querySelector<HTMLButtonElement>('.workspace-tabs [aria-selected=true]')?.focus();
+  else document.querySelector<HTMLButtonElement>('.workspace-tab.active [role=tab]')?.focus();
 }
 async function openTabMenu(tab: WorkspaceTab, event: MouseEvent | KeyboardEvent) {
   const target = event.currentTarget as HTMLElement;
@@ -257,24 +288,26 @@ function tabMenuKeys(event: KeyboardEvent) {
         : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
   items[next]?.focus();
 }
-async function workspaceKeys(event: KeyboardEvent) {
+function workspaceKeys(event: KeyboardEvent) {
+  const target = event.target as HTMLButtonElement;
   if (
-    !(event.target as HTMLElement).matches('[role=tab]') ||
+    !target.matches('[role=tab]') ||
     !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
   )
     return;
   event.preventDefault();
-  const tabs = workspace.tabs,
-    n = tabs.findIndex((t) => t.key === workspace.active),
+  const tabs = [
+      ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role=tab]'),
+    ],
+    n = tabs.indexOf(target),
     i =
       event.key === 'Home'
         ? 0
         : event.key === 'End'
           ? tabs.length - 1
           : (n + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-  activate(tabs[i]!);
-  await nextTick();
-  document.querySelector<HTMLButtonElement>('.workspace-tabs [aria-selected=true]')?.focus();
+  tabs[i]?.click();
+  tabs[i]?.focus();
 }
 
 const defaultShortcuts = defaultProductPreferences().shortcuts;
@@ -308,7 +341,7 @@ async function toggleSidebar(): Promise<void> {
     .querySelector<HTMLButtonElement>(
       sidebarOpen.value
         ? '.sidebar-workspace-heading [aria-label="收起主机栏"]'
-        : '.workspace-tabs [aria-label="展开主机栏"]',
+        : '.workspace-navigation [aria-label="展开主机栏"]',
     )
     ?.focus({ preventScroll: true });
   revealActiveTab();
@@ -600,12 +633,7 @@ watch(
       @keydown="sidebarKey"
     />
     <main class="main-content">
-      <div
-        class="tabbar workspace-tabs"
-        role="tablist"
-        aria-label="工作区标签"
-        @keydown="workspaceKeys"
-      >
+      <div class="workspace-navigation">
         <button
           v-if="!sidebarOpen"
           class="workspace-sidebar-button"
@@ -618,40 +646,62 @@ watch(
           <PanelLeftOpen :size="18" aria-hidden="true" />
         </button>
         <div
-          v-for="tab in workspace.tabs"
-          :key="tab.key"
-          :data-host-id="isHostTab(tab) ? tab.hostId : undefined"
-          :data-view="tab.view"
-          :data-plugin-id="tab.pluginId"
-          class="workspace-tab"
-          :class="{
-            active: workspace.active === tab.key,
-            'global-workspace-tab': !isHostTab(tab),
-          }"
-          @mousedown.middle.prevent
-          @auxclick.middle.prevent="workspace.close(tab.key)"
-          @contextmenu.prevent.stop="openTabMenu(tab, $event)"
-          @keydown="tabContextKeys(tab, $event)"
+          v-for="row in workspaceRows"
+          v-show="row.visible"
+          :key="row.id"
+          class="tabbar workspace-tabs"
+          :class="row.id === 'hosts' ? 'workspace-host-tabs' : 'workspace-page-tabs'"
+          role="tablist"
+          :aria-label="row.label"
+          @keydown="workspaceKeys"
         >
           <button
+            v-if="row.id === 'pages' && hostWorkspaceTabs.length"
+            type="button"
+            class="workspace-group-tab"
             role="tab"
-            :aria-selected="workspace.active === tab.key"
-            :tabindex="workspace.active === tab.key ? 0 : -1"
-            :title="tabName(tab)"
-            @click="activate(tab)"
+            :aria-selected="isHostWorkspace"
+            :tabindex="isHostWorkspace ? 0 : -1"
+            @click="activateAllHosts"
           >
-            <Server v-if="isHostTab(tab) && tab.hostId" :size="14" aria-hidden="true" />
-            <Monitor v-else-if="isHostTab(tab)" :size="14" aria-hidden="true" />
-            {{ tabName(tab) }}</button
-          ><button
-            class="tab-close"
-            :disabled="workspace.closing.includes(tab.key)"
-            :aria-label="`关闭工作区标签 ${tabName(tab)}`"
-            :title="isHostTab(tab) ? '关闭该设备的连接和临时传输记录' : '关闭此页面'"
-            @click="workspace.close(tab.key)"
-          >
-            <X :size="14" aria-hidden="true" />
+            全部主机
           </button>
+          <div
+            v-for="tab in row.tabs"
+            :key="tab.key"
+            :data-host-id="isHostTab(tab) ? tab.hostId : undefined"
+            :data-view="tab.view"
+            :data-plugin-id="tab.pluginId"
+            class="workspace-tab"
+            :class="{
+              active: workspace.active === tab.key,
+              'global-workspace-tab': !isHostTab(tab),
+            }"
+            @mousedown.middle.prevent
+            @auxclick.middle.prevent="workspace.close(tab.key)"
+            @contextmenu.prevent.stop="openTabMenu(tab, $event)"
+            @keydown="tabContextKeys(tab, $event)"
+          >
+            <button
+              role="tab"
+              :aria-selected="workspace.active === tab.key"
+              :tabindex="workspace.active === tab.key ? 0 : -1"
+              :title="tabName(tab)"
+              @click="activate(tab)"
+            >
+              <Server v-if="isHostTab(tab) && tab.hostId" :size="14" aria-hidden="true" />
+              <Monitor v-else-if="isHostTab(tab)" :size="14" aria-hidden="true" />
+              {{ tabName(tab) }}</button
+            ><button
+              class="tab-close"
+              :disabled="workspace.closing.includes(tab.key)"
+              :aria-label="`关闭工作区标签 ${tabName(tab)}`"
+              :title="isHostTab(tab) ? '关闭该设备的连接和临时传输记录' : '关闭此页面'"
+              @click="workspace.close(tab.key)"
+            >
+              <X :size="14" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </div>
       <div
@@ -695,6 +745,8 @@ watch(
           :key="page.key"
           :active="
             workspace.activePluginKey === page.key &&
+            (!workspace.pluginConfiguration?.contributionId ||
+              workspace.pluginConfiguration.pluginId !== page.pluginId) &&
             !workspace.closing.includes(page.hostId ? `host:${page.hostId}` : page.key)
           "
           :plugin-id="page.pluginId!"
@@ -719,6 +771,7 @@ watch(
           :host-id="currentHostId"
           :initial-section="workspace.current?.section"
           @plugin="openPlugin"
+          @settings="workspace.openPluginSettings"
           @manage="navigate('plugins')"
         />
         <FilesView
@@ -728,11 +781,6 @@ watch(
           @terminal="fileTerminal"
         />
         <PluginsView v-else-if="view === 'plugins'" @settings="workspace.openPluginSettings" />
-        <PluginPage
-          v-else-if="view === 'pluginSettings' && workspace.current?.pluginId"
-          :key="workspace.current.pluginId"
-          :plugin-id="workspace.current.pluginId"
-        />
         <ModelsView v-else-if="view === 'models'" />
         <AboutView v-else-if="view === 'about'" />
         <CredentialsView v-else-if="view === 'credentials'" />
@@ -791,6 +839,11 @@ watch(
       <p v-if="!store.catalog?.hosts.length">暂无主机，请先在主机管理中添加。</p>
     </div>
   </Modal>
+  <PluginSettingsDialog
+    v-if="workspace.pluginConfiguration"
+    :key="workspace.pluginConfiguration.pluginId"
+    :plugin-id="workspace.pluginConfiguration.pluginId"
+  />
   <PluginDialogs />
   <GlobalSearch
     v-if="searching"
@@ -840,7 +893,7 @@ watch(
         role="menuitem"
         tabindex="-1"
         :disabled="
-          (action.scope === 'right' && tabMenuIndex === workspace.tabs.length - 1) ||
+          (action.scope === 'right' && !hasTabsToRight) ||
           (action.scope === 'others' && workspace.tabs.length < 2)
         "
         @click="closeFromTabMenu(action.scope)"

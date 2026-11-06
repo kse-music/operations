@@ -1,33 +1,48 @@
-import { afterEach, expect, it, vi } from 'vitest';
-import { createApp, nextTick, type App } from 'vue';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { createApp, h, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
-import PluginPage from './PluginPage.vue';
+import PluginSettingsDialog from '../components/PluginSettingsDialog.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useHostsStore } from '../stores/hosts';
 import { useWorkspaceStore } from '../stores/workspace';
 import { pluginsApi } from '../services/plugins';
 import { systemPluginFixtures } from '../services/system-plugins.fixture';
-let app: App, root: HTMLElement, pinia: Pinia;
-function mount(pluginId: string) {
-  root = document.createElement('div');
-  document.body.append(root);
-  app = createApp(PluginPage, {
-    pluginId,
+let app: App, container: HTMLElement, root: HTMLDialogElement, pinia: Pinia;
+const showModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+async function mount(pluginId: string) {
+  const workspace = useWorkspaceStore();
+  container = document.createElement('div');
+  document.body.append(container);
+  app = createApp({
+    render: () => (workspace.pluginConfiguration ? h(PluginSettingsDialog, { pluginId }) : null),
   }).use(pinia);
-  app.mount(root);
+  app.mount(container);
+  workspace.openPluginSettings(pluginId);
+  await settle();
+  root = document.querySelector<HTMLDialogElement>('dialog[open]')!;
 }
 const settle = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
   await nextTick();
 };
+beforeEach(() => {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+});
 afterEach(() => {
   app?.unmount();
-  root?.remove();
+  container?.remove();
+  if (showModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', showModal);
+  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   if (pinia) disposePinia(pinia);
   vi.restoreAllMocks();
 });
 it.each(['system', 'user'] as const)(
-  'opens disabled %s plugins and keeps permission/source details inside their own page',
+  'opens permission and source controls in a dialog for disabled %s plugins',
   async (source) => {
     pinia = createPinia();
     setActivePinia(pinia);
@@ -51,15 +66,12 @@ it.each(['system', 'user'] as const)(
     const ui = vi.spyOn(pluginsApi, 'ui');
     const grant = vi.spyOn(pluginsApi, 'grant').mockResolvedValue({} as never);
     vi.spyOn(plugins, 'refresh').mockResolvedValue();
-    useWorkspaceStore().openPluginSettings(plugin.manifest.id);
-    expect(useWorkspaceStore().module).toBe('plugins');
-    expect(useWorkspaceStore().current?.pluginId).toBe(plugin.manifest.id);
     useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
-    mount(plugin.manifest.id);
-    await settle();
+    await mount(plugin.manifest.id);
+    expect(useWorkspaceStore().tabs).toEqual([]);
     expect(root.textContent).toContain(source === 'system' ? '系统内置' : '用户上传');
     expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
-    expect(root.querySelector('.plugin-page-icon svg.lucide-container')).not.toBeNull();
+    expect(root.querySelector('.plugin-management-header svg.lucide-container')).not.toBeNull();
     expect(ui).not.toHaveBeenCalled();
     expect(root.querySelector('.plugin-workspace')).toBeNull();
     expect(root.textContent).not.toContain('允许访问的主机');
@@ -108,8 +120,7 @@ it('does not overwrite permission edits when the installed list refreshes with u
   const plugin = { ...systemPluginFixtures()[0]!, source: 'user' as const };
   plugins.installed = [plugin];
   plugins.grants[plugin.manifest.id] = null;
-  mount(plugin.manifest.id);
-  await settle();
+  await mount(plugin.manifest.id);
   const check = root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!;
   check.checked = true;
   check.dispatchEvent(new Event('change'));
@@ -120,7 +131,7 @@ it('does not overwrite permission edits when the installed list refreshes with u
   expect(root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!.checked).toBe(true);
 });
 
-it('keeps plugin-provided settings pages available under plugins without a host selector', async () => {
+it('opens a declared settings form in a hostless dialog and discards its draft on cancel', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const plugins = usePluginsStore(),
@@ -171,18 +182,19 @@ it('keeps plugin-provided settings pages available under plugins without a host 
   };
   vi.spyOn(pluginsApi, 'context').mockResolvedValue();
   vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
-  useWorkspaceStore().openPluginSettings(plugin.manifest.id);
-  mount(plugin.manifest.id);
-  await settle();
-  expect(useWorkspaceStore().module).toBe('plugins');
-  expect(root.querySelector<HTMLInputElement>('.plugin-form input')?.value).toBe('配置草稿');
-  // Configuration must remain the first usable section, ahead of lifecycle/permission controls.
-  const configuration = root.querySelector('.plugin-configuration')!;
-  const management = root.querySelector('[aria-label="插件设置"]')!;
-  expect(configuration.contains(root.querySelector('.plugin-form'))).toBe(true);
-  expect(
-    configuration.compareDocumentPosition(management) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
-  expect(root.querySelector('[aria-label="插件目标主机"]')).toBeNull();
+  const workspace = useWorkspaceStore();
+  workspace.navigate('plugins');
+  await mount(plugin.manifest.id);
+  const input = root.querySelector<HTMLInputElement>('.plugin-form input')!;
+  expect(input.value).toBe('配置草稿');
+  expect(root.querySelector<HTMLElement>('.plugin-management-panel')!.style.display).toBe('none');
+  expect(workspace.current?.view).toBe('plugins');
+  expect(workspace.tabs).toHaveLength(1);
   expect(pluginsApi.context).toHaveBeenCalledWith(plugin.manifest.id, null);
+  input.value = '临时草稿';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  root.querySelector<HTMLButtonElement>('.plugin-config-footer button')!.click();
+  await settle();
+  expect(document.querySelector('dialog[open]')).toBeNull();
+  expect(plugins.drafts[`plugin-settings:${plugin.manifest.id}:settings`]).toBeUndefined();
 });

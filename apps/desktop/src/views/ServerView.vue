@@ -11,6 +11,7 @@ import { useErrorNotifications } from '../composables/error-notifications';
 const props = defineProps<{ hostId: string; initialSection?: ServerSection }>();
 const emit = defineEmits<{
   plugin: [id: string, contribution: string, hostId: string, section?: ServerSection];
+  settings: [id: string];
   manage: [];
 }>();
 const plugins = usePluginsStore(),
@@ -75,7 +76,7 @@ onMounted(() => void load());
         >
           打开 {{ entry.label }}
         </button>
-        <button v-else class="button" @click="emit('plugin', plugin.manifest.id, entry.id, hostId)">
+        <button v-else class="button" @click="emit('settings', plugin.manifest.id)">
           {{ plugin.enabled ? '插件设置' : '启用并设置' }}
         </button>
       </article>

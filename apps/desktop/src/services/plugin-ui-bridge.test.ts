@@ -95,6 +95,37 @@ it('lets an assistant settings page list public model metadata only with assista
   expect(ui.snapshot()).toMatchObject({ models });
   expect(list).toHaveBeenCalledOnce();
 });
+it('lets only the active builtin assistant settings surface request dialog close', async () => {
+  const plugins = usePluginsStore();
+  const assistant = 'cn.hiboot.plugins.assistant';
+  const plugin = plugins.installed[0]!;
+  plugin.manifest.id = assistant;
+  plugins.grants[assistant] = { ...plugins.grants[id]!, pluginId: assistant };
+  const settingsAction = vi.fn();
+  let active = true;
+  const options = {
+    id: assistant,
+    revision: plugin.revision,
+    page: { ...page, id: 'settings' },
+    hostId: '',
+    isActive: () => active,
+    settingsAction,
+    stream: vi.fn(),
+  };
+  const ui = createPluginUiBridge(options);
+  await expect(ui.call('settings.close', {})).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  plugin.source = 'system';
+  active = false;
+  await expect(ui.call('settings.close', {})).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  expect(settingsAction).not.toHaveBeenCalled();
+  active = true;
+  await expect(ui.call('settings.close', {})).resolves.toBeNull();
+  expect(settingsAction).toHaveBeenCalledExactlyOnceWith('close');
+});
 it('rejects hidden frame requests and late results before a different host can receive them', async () => {
   let active = true;
   const ui = createPluginUiBridge({

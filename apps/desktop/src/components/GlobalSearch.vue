@@ -21,7 +21,7 @@ const results = computed(() => {
   const q = query.value.trim().toLowerCase();
   return [
     ...Object.entries(messages['zh-CN'])
-      .filter(([view]) => !['extension', 'pluginSettings'].includes(view))
+      .filter(([view]) => view !== 'extension')
       .map(([view, name]) => ({
         key: view,
         kind: 'view',

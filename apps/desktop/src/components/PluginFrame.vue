@@ -30,11 +30,13 @@ const props = withDefaults(
     active?: boolean;
     contextKey?: string;
     retainRequests?: boolean;
+    settingsPage?: boolean;
   }>(),
   {
     active: true,
     contextKey: '',
     retainRequests: false,
+    settingsPage: false,
     initialSection: undefined,
   },
 );
@@ -42,6 +44,8 @@ const emit = defineEmits<{
   navigate: [section: ServerSection];
   section: [section: ServerSection];
   retry: [];
+  settingsAction: [action: 'close' | 'models'];
+  saving: [value: boolean];
 }>();
 const frame = ref<HTMLIFrameElement>(),
   ready = ref(false),
@@ -65,8 +69,9 @@ const active = computed(
     props.active &&
     (!props.contextKey ||
       ((workspace.activePluginKey === props.contextKey ||
-        (workspace.current?.view === 'pluginSettings' &&
-          workspace.current.pluginId === props.pluginId)) &&
+        (props.settingsPage &&
+          workspace.pluginConfiguration?.pluginId === props.pluginId &&
+          workspace.pluginConfiguration.contributionId === props.page.id)) &&
         plugins.owns(props.pluginId, props.contextKey))),
 );
 const path = computed(() => `/${props.pluginId}/${props.revision}/${props.page.id}/index.html`);
@@ -78,6 +83,7 @@ const source = computed(() =>
 let port: MessagePort | undefined,
   disposed = false,
   inFlight = 0,
+  settingsWrites = 0,
   lastEvent = 0,
   lastRequest = 0;
 let rateAt = Date.now(),
@@ -89,6 +95,7 @@ const bridge = createPluginUiBridge({
   hostId: props.hostId,
   isActive: () => active.value,
   canRetain: () => props.retainRequests,
+  settingsAction: props.settingsPage ? (action) => emit('settingsAction', action) : undefined,
   stream: (id, event) => {
     const listener = logListeners.get(id);
     if (listener) listener(event as LogEvent);
@@ -150,6 +157,7 @@ function context() {
             initialSection: props.initialSection,
             initialTab: props.initialSection,
             page: props.page,
+            settingsDialog: props.settingsPage,
             keepRunning: props.retainRequests,
           },
         }),
@@ -250,6 +258,11 @@ function connect(event: MessageEvent) {
       return;
     }
     inFlight++;
+    const saving =
+      props.settingsPage &&
+      (data.method === 'invoke' ||
+        (data.method === 'capability' && data.args.operation?.kind === 'settings_write'));
+    if (saving && ++settingsWrites === 1) emit('saving', true);
     try {
       const result = await bridge.call(data.method, data.args);
       if (!disposed) port?.postMessage({ kind: 'response', id, result });
@@ -268,6 +281,7 @@ function connect(event: MessageEvent) {
         });
     } finally {
       inFlight--;
+      if (saving && --settingsWrites === 0 && !disposed) emit('saving', false);
       context();
     }
   };

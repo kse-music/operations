@@ -6,7 +6,7 @@ import { usePluginsStore } from '../stores/plugins';
 import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
 import type { InstalledPlugin, PluginManifest } from '../types/plugins';
-import { systemPluginFixtures } from '../services/system-plugins.fixture';
+import { systemPluginFixtures, toolPluginState } from '../services/system-plugins.fixture';
 const native = vi.hoisted(() => ({
   enabled: false,
   listener: null as
@@ -136,7 +136,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
   );
 });
 
-it('keeps only uninstall actions in the list and opens individual settings from the name', async () => {
+it('opens settings by name or gear for every installed plugin', async () => {
   const items = systemPluginFixtures();
   items.push({
     ...items[1]!,
@@ -144,8 +144,10 @@ it('keeps only uninstall actions in the list and opens individual settings from 
     manifest: { ...items[1]!.manifest, id: 'dev.upload', name: 'Uploaded Docker' },
   });
   items[0]!.enabled = true;
+  items[1]!.enabled = true;
   vi.spyOn(pluginsApi, 'list').mockImplementation(async () => items.map((item) => ({ ...item })));
-  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  const { grants } = toolPluginState();
+  vi.spyOn(pluginsApi, 'permissions').mockImplementation(async (id) => grants[id] ?? null);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   const change = vi.spyOn(pluginsApi, 'setEnabled');
   pinia = createPinia();
@@ -155,10 +157,7 @@ it('keeps only uninstall actions in the list and opens individual settings from 
   const cards = root.querySelectorAll('[data-plugin-id]');
   expect(cards).toHaveLength(3);
   for (const card of cards) {
-    expect(card.querySelectorAll('.plugin-row-actions button')).toHaveLength(1);
-    expect(card.querySelector('.plugin-row-actions button')?.getAttribute('aria-label')).toMatch(
-      /^卸载 /,
-    );
+    expect(card.querySelector('.plugin-row-actions button[aria-label^="卸载 "]')).not.toBeNull();
     expect(card.textContent).not.toContain('权限');
     expect(card.querySelector('.plugin-source')?.textContent).toBe(
       card.getAttribute('data-plugin-id') === 'dev.upload' ? '用户上传' : '系统内置',
@@ -175,6 +174,12 @@ it('keeps only uninstall actions in the list and opens individual settings from 
   expect(docker.textContent).toContain('已启用');
   docker.querySelector<HTMLButtonElement>('.plugin-name-button')!.click();
   expect(settings).toHaveBeenCalledWith('cn.hiboot.plugins.docker');
+  const configuration = root.querySelectorAll<HTMLButtonElement>('button[aria-label^="配置 "]');
+  expect(configuration).toHaveLength(3);
+  for (const [index, button] of configuration.entries()) {
+    button.click();
+    expect(settings).toHaveBeenLastCalledWith(items[index]!.manifest.id);
+  }
 });
 
 it('accepts one native dropped package, previews it and requires acknowledgement before installing', async () => {

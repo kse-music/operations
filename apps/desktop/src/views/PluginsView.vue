@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
-import { Puzzle, PackagePlus, RefreshCw, Search, Trash2, Upload } from '@lucide/vue';
+import { Puzzle, PackagePlus, RefreshCw, Search, Settings2, Trash2, Upload } from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -162,7 +162,7 @@ onBeforeUnmount(() => {
             plugins.installed.length
           }}</span>
         </div>
-        <p class="subtle">管理已安装的插件，点击名称查看详情与配置。</p>
+        <p class="subtle">点击插件名称或齿轮，打开插件配置与权限。</p>
       </div>
       <div class="plugin-heading-actions">
         <button
@@ -263,9 +263,17 @@ onBeforeUnmount(() => {
                   {{ plugin.manifest.name }}</button
                 ><span class="plugin-version">v{{ plugin.manifest.version }}</span>
               </div>
-              <p>{{ plugin.manifest.description || '点击插件名称查看详情和设置' }}</p>
+              <p>{{ plugin.manifest.description || '点击插件名称打开设置' }}</p>
             </div>
             <div class="plugin-row-actions">
+              <button
+                class="tool-button"
+                :aria-label="`配置 ${plugin.manifest.name}`"
+                title="插件配置"
+                @click="emit('settings', plugin.manifest.id)"
+              >
+                <Settings2 :size="16" aria-hidden="true" />
+              </button>
               <button
                 class="plugin-remove-button"
                 :disabled="plugins.busy"

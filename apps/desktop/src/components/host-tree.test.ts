@@ -249,11 +249,11 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   const heading = root.querySelector('.host-list-heading')!;
   expect(heading.nextElementSibling?.classList.contains('host-sidebar-controls')).toBe(true);
   expect(heading.nextElementSibling?.nextElementSibling).toBe(scroll);
-  expect(heading.previousElementSibling?.classList.contains('sidebar-local-device')).toBe(true);
+  expect(heading.previousElementSibling).toBeNull();
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
   expect(root.querySelector('[aria-label="已收藏"]')).toBeNull();
-  expect(root.querySelector('.host-list-heading > button')).toBeNull();
+  expect(heading.querySelector('button')?.getAttribute('aria-label')).toBe('本地终端');
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',
   );

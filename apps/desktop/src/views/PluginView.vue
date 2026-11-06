@@ -36,6 +36,8 @@ const props = withDefaults(
 );
 const emit = defineEmits<{
   settings: [];
+  settingsAction: [action: 'close' | 'models'];
+  busy: [value: boolean];
   contribution: [id: string];
   surfaceNavigate: [section: ServerSection];
   section: [section: ServerSection];
@@ -93,6 +95,9 @@ const needsConnection = computed(
 );
 const frameReload = ref(0);
 const frameOpened = ref(false);
+const frameSaving = ref(false);
+if (props.settingsPage)
+  watch([busy, frameSaving], ([invoking, saving]) => emit('busy', invoking || saving));
 const generationKey = computed(() => JSON.stringify([plugin.value?.revision, grant.value]));
 const connectionChanged = computed(
   () =>
@@ -339,6 +344,7 @@ watch(
     if (previous && value[2] !== previous[2]) {
       schema.value = null;
       frameOpened.value = false;
+      frameSaving.value = false;
     }
     try {
       if (!props.active || !available.value) {
@@ -438,6 +444,7 @@ useErrorNotifications(error);
           :key="`${generationKey}:${frameReload}`"
           :active="active && contextReady"
           :retain-requests="retainRequests"
+          :settings-page="settingsPage"
           :context-key="tabKey"
           :plugin-id="pluginId"
           :revision="plugin.revision"
@@ -446,6 +453,8 @@ useErrorNotifications(error);
           :initial-section="initialSection"
           @navigate="(section) => emit('surfaceNavigate', section)"
           @section="emit('section', $event)"
+          @settings-action="emit('settingsAction', $event)"
+          @saving="frameSaving = $event"
           @retry="restart"
         />
         <p v-if="!frameOpened || !contextReady" class="host-empty" role="status">

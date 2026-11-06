@@ -32,6 +32,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     module = ref<NavigationModule>('hosts');
   const current = computed(() => tabs.value.find((t) => t.key === active.value));
   const pluginPages = ref<WorkspaceTab[]>([]);
+  const pluginConfiguration = ref<{ pluginId: string; contributionId: string | null }>();
   const activePluginKey = computed(() =>
     current.value?.view === 'extension' ? pluginPageKey(current.value) : '',
   );
@@ -50,15 +51,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     module.value = isHostTab(tab) ? 'hosts' : moduleForView(tab.view);
     if (isHostTab(tab)) hostId.value = tab.hostId;
   }
-  function openPluginSettings(pluginId: string): void {
-    if (!usePluginsStore().installed.some((plugin) => plugin.manifest.id === pluginId)) return;
-    const key = `plugin-settings:${pluginId}`;
-    let tab = tabs.value.find((tab) => tab.key === key);
-    if (!tab) {
-      tab = { key, view: 'pluginSettings', hostId: '', pluginId };
-      tabs.value.push(tab);
-    }
-    activate(key);
+  function openPluginSettings(pluginId: string, contributionId?: string): void {
+    const plugins = usePluginsStore();
+    if (pluginConfiguration.value || !plugins.installed.some((p) => p.manifest.id === pluginId))
+      return;
+    const settings = plugins.extensions.find(
+      (entry) =>
+        entry.pluginId === pluginId &&
+        entry.kind === 'settings' &&
+        (!contributionId || entry.id === contributionId),
+    );
+    pluginConfiguration.value = { pluginId, contributionId: settings?.id ?? null };
   }
   async function openPlugin(
     pluginId: string,
@@ -74,7 +77,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const contribution = installed.manifest.contributions.find(
       (entry) => entry.id === contributionId,
     );
-    if (!contribution || contribution.kind === 'settings') return openPluginSettings(pluginId);
+    if (!contribution) return openPluginSettings(pluginId);
+    if (contribution.kind === 'settings') return openPluginSettings(pluginId, contribution.id);
     if (!target && contribution.kind !== 'tool') {
       plugins.error = '请先选择主机，再打开此工具。';
       return;
@@ -137,12 +141,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
     const index = tabs.value.findIndex((t) => t.key === key);
     if (index < 0) return;
+    const targetIsHost = isHostTab(tabs.value[index]!);
     const targets = tabs.value.filter((tab, i) => {
       switch (scope) {
         case 'current':
           return tab.key === key;
         case 'right':
-          return i > index;
+          return i > index && isHostTab(tab) === targetIsHost;
         case 'others':
           return tab.key !== key;
         case 'all':
@@ -160,11 +165,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const pages = pluginPages.value.filter((page) =>
           isHostTab(tab) ? page.hostId === tab.hostId : page.key === tab.key,
         );
-        const settingsKeys =
-          tab.view === 'pluginSettings'
-            ? Object.keys(usePluginsStore().drafts).filter((key) => key.startsWith(`${tab.key}:`))
-            : [];
-        const draftKeys = [...pages.map((page) => page.key), ...settingsKeys];
+        const draftKeys = pages.map((page) => page.key);
         if (draftKeys.length) {
           const plugins = usePluginsStore();
           let accepted = true;
@@ -196,7 +197,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
             }
           }
         }
-        for (const key of settingsKeys) await usePluginsStore().release(tab.pluginId!, key);
         if (isHostTab(tab) && tab.hostId && !(await files.clearHostTransfers(tab.hostId))) continue;
         for (const key of draftKeys) usePluginsStore().forget(key);
         pluginPages.value = pluginPages.value.filter((page) => !pages.includes(page));
@@ -230,6 +230,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     close,
     openPlugin,
     openPluginSettings,
+    pluginConfiguration,
     pluginPages,
     activePluginKey,
   };

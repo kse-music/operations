@@ -129,16 +129,32 @@ export async function previewPluginPackage(page, packagePath) {
   return preview;
 }
 
-export async function openPluginSettings(page, name) {
-  await navigateWorkspace(page, '插件管理');
-  await page.locator('.plugin-installed-row').getByRole('button', { name, exact: true }).click();
-  const settings = page.locator('.plugin-page:visible [aria-label="插件设置"]');
+export async function openPluginDetails(page, name) {
+  const dialog = await openPluginSettings(page, name);
+  const details = dialog.getByRole('button', { name: '权限与详情', exact: true });
+  if (await details.isVisible()) await details.click();
+  const settings = dialog.getByLabel('插件设置', { exact: true });
   await settings.waitFor();
   return settings;
 }
 
+export async function openPluginSettings(page, name) {
+  await navigateWorkspace(page, '插件管理');
+  await page.getByRole('button', { name: `配置 ${name}`, exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: `${name} · 配置`, exact: true });
+  await dialog.waitFor();
+  return dialog;
+}
+
+export async function closePluginSettings(page) {
+  const dialog = page.locator('dialog[open]:has(> .plugin-config-body)');
+  if (!(await dialog.count())) return;
+  await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+}
+
 export async function setPluginEnabled(page, name, enabled) {
-  const settings = await openPluginSettings(page, name);
+  const settings = await openPluginDetails(page, name);
   const action = settings.getByRole('button', {
     name: enabled ? '启用插件' : '禁用插件',
     exact: true,
@@ -158,6 +174,7 @@ export async function setPluginEnabled(page, name, enabled) {
 }
 
 export async function navigateWorkspace(page, name) {
+  await closePluginSettings(page);
   const module = hostTools.has(name) ? 'hosts' : menuModules[name];
   if (!module) {
     if (name === 'AI 运维助手') {
@@ -206,19 +223,20 @@ export async function navigateWorkspace(page, name) {
 
 // Model choice belongs to the assistant's persisted plugin settings.
 export async function bindAssistantModel(page, modelId) {
-  await openPluginSettings(page, 'AI 运维助手');
-  const settings = page.frameLocator('.plugin-frame-container:visible iframe');
+  const dialog = await openPluginSettings(page, 'AI 运维助手');
+  const settings = dialog.frameLocator('iframe');
   await settings.locator(`input[type="radio"][value=${JSON.stringify(modelId)}]`).check();
   const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
   if (await save.isEnabled()) {
     await save.click();
-    await settings
-      .getByText(modelId ? '模型绑定已保存' : '已解除模型绑定', { exact: true })
-      .waitFor();
+  } else {
+    await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
   }
+  await dialog.waitFor({ state: 'hidden' });
 }
 
 export async function openPluginFunction(page, name, hostId) {
+  await closePluginSettings(page);
   const id =
     hostId ??
     (await page.evaluate(() => {
@@ -242,6 +260,8 @@ export async function selectHostWorkspace(page, id) {
   }
   const tab = page.locator(`.workspace-tab[data-host-id=${JSON.stringify(id)}] [role=tab]`);
   if (await tab.count()) {
+    if (!(await tab.isVisible()))
+      await page.getByRole('tab', { name: '全部主机', exact: true }).click();
     await tab.click();
   } else if (!id) {
     await showHostTree(page);

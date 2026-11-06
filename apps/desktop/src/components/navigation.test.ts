@@ -74,9 +74,9 @@ it.each(['hosts', 'assets', 'plugins', 'system'] as const)(
   },
 );
 
-it('highlights plugin management while an individual plugin settings tab is active', () => {
+it('highlights the plugin management page', () => {
   pinia = createPinia();
-  mountNavigation({ active: 'pluginSettings', module: moduleForView('pluginSettings') });
+  mountNavigation({ active: 'plugins', module: moduleForView('plugins') });
   expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe('插件管理');
   expect(root.querySelector('.nav-item.active')?.getAttribute('aria-label')).toBe('插件管理');
 });

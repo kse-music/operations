@@ -26,7 +26,8 @@ try {
     await page.goto(url);
     await page.getByText('后端未连接', { exact: true }).waitFor();
     await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
-    assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 0);
+    assert.equal(await page.locator('.workspace-group-tab').count(), 0);
+    assert.equal(await page.locator('.workspace-tabs:visible').count(), 0);
     assert.equal(await page.locator('.terminal-pane').count(), 0);
     await page.evaluate(
       async ({ theme }) => {
@@ -110,12 +111,12 @@ try {
       collapsePosition.text.includes('主机管理') &&
         collapsePosition.atRight &&
         collapsePosition.sameRow,
-      `${name}: combined sidebar must have a workspace entry and a collapse action`,
+      `${name}: sidebar must have a host management title and a collapse action`,
     );
     await collapseButton.click();
     assert.equal(await page.locator('.sidebar').isVisible(), false);
     const expandButton = page
-      .locator('.workspace-tabs')
+      .locator('.workspace-navigation')
       .getByRole('button', { name: '展开主机栏', exact: true });
     assert.equal(await expandButton.evaluate((button) => document.activeElement === button), true);
     await expandButton.press('Enter');
@@ -153,9 +154,12 @@ try {
     assert.equal(await page.locator('.module-navigation button').count(), 4);
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '主机运维',
+      '主机管理',
     );
-    assert.equal(await page.getByRole('button', { name: '主机管理', exact: true }).count(), 0);
+    assert.equal(
+      await page.locator('.sidebar').getByRole('button', { name: '主机管理', exact: true }).count(),
+      0,
+    );
     assert.equal((await page.locator('.sidebar-module-title').textContent()).trim(), '主机管理');
     assert.equal(await page.locator('.sidebar-module-title svg').count(), 0);
     await page.locator('.sidebar-module-title').click();
@@ -202,7 +206,8 @@ try {
     assert.equal(await page.getByLabel('主机排序', { exact: true }).count(), 0);
     assert.equal(await page.locator('#host-tree-tools').count(), 0);
     const listHeading = page.locator('.host-list-heading');
-    assert.equal(await listHeading.getByRole('button').count(), 0);
+    assert.equal(await listHeading.getByRole('button').count(), 1);
+    const localTerminal = listHeading.getByRole('button', { name: '本地终端', exact: true });
     assert.equal(await page.getByLabel('选择 ServerDeck 主机文件', { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('按标签筛选主机', { exact: true }).count(), 0);
     assert.equal(await page.getByRole('button', { name: '收藏', exact: true }).count(), 0);
@@ -389,30 +394,31 @@ try {
     await page.screenshot({ path: `${output}/${name}-workspace.png` });
     if (!(await page.locator('.sidebar').isVisible()))
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
-    const device = page.locator('.sidebar-local-device');
-    await device.waitFor();
-    assert.equal((await device.locator('.sidebar-context-name').textContent()).trim(), '本地设备');
-    assert.equal((await device.locator('.host-tool').textContent()).trim(), '本地终端');
-    const pinned = await device.boundingBox();
+    await localTerminal.waitFor();
+    const pinned = await localTerminal.boundingBox();
     const heading = await page.locator('.host-list-heading').boundingBox();
     const list = await page.locator('.host-tree-scroll').boundingBox();
-    assert(heading.y >= pinned.y + pinned.height, `${name}: All Hosts must follow the device`);
+    assert.equal(pinned.x + pinned.width, heading.x + heading.width);
     const searchBox = await page.getByLabel('搜索主机', { exact: true }).boundingBox();
     assert(searchBox.y >= heading.y + heading.height, `${name}: search must follow All Hosts`);
     assert(list.y >= searchBox.y + searchBox.height, `${name}: list must follow search`);
-    assert.equal(await page.locator('.host-tree-scroll .sidebar-local-device').count(), 0);
+    assert.equal(await page.locator('.sidebar-local-device').count(), 0);
     const scrollTop = await page.locator('.host-tree-scroll').evaluate((element) => {
       element.scrollTop = element.scrollHeight;
       return element.scrollTop;
     });
     assert(scrollTop > 0, `${name}: test must actually scroll the host list`);
-    assert.deepEqual(await device.boundingBox(), pinned, `${name}: device scrolled with hosts`);
+    assert.deepEqual(
+      await localTerminal.boundingBox(),
+      pinned,
+      `${name}: terminal icon scrolled with hosts`,
+    );
     await page.getByLabel('搜索主机', { exact: true }).fill('no-matching-layout-host');
     await page.getByText('没有匹配的主机', { exact: true }).waitFor();
-    assert.equal(await device.isVisible(), true);
+    assert.equal(await localTerminal.isVisible(), true);
     await page.getByLabel('搜索主机', { exact: true }).fill('');
-    assert.equal(await device.isVisible(), true);
-    await device.getByRole('button', { name: '本地终端', exact: true }).click();
+    assert.equal(await localTerminal.isVisible(), true);
+    await localTerminal.click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
     await page.locator('.terminal-pane:visible[data-host-id=""]').waitFor();
     await page.locator('.host-tree-scroll').evaluate((element) => (element.scrollTop = 0));

@@ -8,7 +8,7 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { checkWorkspaceTools } from './plugin-workspace-checks.mjs';
-import { navigateWorkspace, openPluginSettings, deliverPluginDrop } from './ui-navigation.mjs';
+import { navigateWorkspace, openPluginDetails, deliverPluginDrop } from './ui-navigation.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, '.local/ops-plugin-migration');
 const run = path.join(output, 'native', `run-${randomUUID()}`);
@@ -129,8 +129,12 @@ try {
   }
   passed.push('two cn.hiboot standard packages installed under the owned system directory');
   assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
-  const settings = await openPluginSettings(page, 'Docker 管理');
-  assert((await page.locator('.plugin-page > header').textContent()).includes('系统内置'));
+  const settings = await openPluginDetails(page, 'Docker 管理');
+  assert(
+    (await page.locator('dialog[open] .plugin-management-header').textContent()).includes(
+      '系统内置',
+    ),
+  );
   assert(await settings.getByLabel('ui.contribute', { exact: true }).isChecked());
   assert(await settings.getByLabel('ui.contribute', { exact: true }).isDisabled());
   assert.equal(await settings.getByRole('button', { name: '保存并授权', exact: true }).count(), 0);
@@ -178,14 +182,18 @@ try {
   await access(path.join(data, 'plugins/upload', id, 'versions', upload.revision, 'readme.txt'));
   const row = manager.locator(`[data-plugin-id="${id}"]`);
   await row.waitFor();
-  assert.equal(await row.locator('.plugin-row-actions button').count(), 1);
+  assert.equal(await row.locator('.plugin-row-actions button').count(), 2);
   assert.equal(await row.locator('.plugin-source').count(), 0);
   passed.push(
     'native WebView drop previews a real package; acknowledgement installs it under plugins/upload',
   );
   await row.getByRole('button', { name: upload.manifest.name, exact: true }).click();
   await page.locator('[aria-label="插件设置"]').waitFor();
-  assert((await page.locator('.plugin-page > header').textContent()).includes('用户上传'));
+  assert(
+    (await page.locator('dialog[open] .plugin-management-header').textContent()).includes(
+      '用户上传',
+    ),
+  );
   await page.screenshot({ path: path.join(run, 'uploaded-plugin-settings.png') });
   await navigateWorkspace(page, '插件管理');
   await row.getByRole('button', { name: `卸载 ${upload.manifest.name}`, exact: true }).click();

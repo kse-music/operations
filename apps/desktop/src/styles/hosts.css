@@ -37,8 +37,14 @@
   display: flex;
   flex-shrink: 0;
   align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
   margin: 0 12px;
   padding: 4px 0;
+}
+.host-list-heading [aria-current='page'] {
+  color: var(--accent);
+  background: var(--accent-bg);
 }
 .host-list-title {
   display: inline-flex;

@@ -39,6 +39,7 @@ export function createPluginUiBridge(input: {
   hostId: string;
   isActive?: () => boolean;
   canRetain?: () => boolean;
+  settingsAction?: (action: 'close' | 'models') => void;
   stream: (id: string, event: unknown) => void;
 }) {
   const hosts = useHostsStore(),
@@ -409,7 +410,17 @@ export function createPluginUiBridge(input: {
         return clipboardApi.writeText(args.text);
       case 'workspace.navigate':
         if (args.view !== 'models') throw denied();
-        workspace.navigate('models');
+        if (input.settingsAction) input.settingsAction('models');
+        else workspace.navigate('models');
+        return;
+      case 'settings.close':
+        if (
+          !input.settingsAction ||
+          input.page.id !== 'settings' ||
+          !isBuiltinAssistant(plugins.installed.find((plugin) => plugin.manifest.id === input.id))
+        )
+          throw denied();
+        input.settingsAction('close');
         return;
       case 'ui.notify':
         if (typeof args.message !== 'string' || args.message.length > 2048) throw denied();
@@ -571,7 +582,7 @@ export function createPluginUiBridge(input: {
       const version = plugins.contextVersion(input.id);
       const value = await call(method, args);
       // Authorized navigation hides its own caller and returns no data or resource.
-      if (method === 'workspace.navigate') return null;
+      if (method === 'workspace.navigate' || method === 'settings.close') return null;
       check(!background(method, true));
       if (plugins.contextVersion(input.id) !== version) throw denied();
       return value === undefined ? null : publicValue(value);

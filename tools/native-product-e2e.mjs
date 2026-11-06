@@ -349,8 +349,9 @@ export async function productChecks(context) {
   const actualDensity = await page.evaluate(() => devicePixelRatio);
   assert(
     await page.evaluate(() => {
-      const a = document.querySelector('.workspace-tab.active').getBoundingClientRect(),
-        b = document.querySelector('.workspace-tabs').getBoundingClientRect();
+      const tab = document.querySelector('.workspace-tab.active'),
+        a = tab.getBoundingClientRect(),
+        b = tab.closest('.workspace-tabs').getBoundingClientRect();
       return a.left >= b.left - 1 && a.right <= b.right + 1;
     }),
     'active workspace tab must remain visible after viewport resize',

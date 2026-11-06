@@ -28,6 +28,13 @@ try {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
         const { useWorkspaceStore } = await import('/src/stores/workspace.ts');
         const { useNotificationsStore } = await import('/src/stores/notifications.ts');
+        const { filesApi } = await import('/src/services/files.ts');
+        // Supply empty file-connection metadata for these in-memory workspace fixtures.
+        Object.assign(filesApi, {
+          tasks: async () => [],
+          connections: async () => [],
+          clearTransfers: async () => {},
+        });
         const workspace = useWorkspaceStore(pinia);
         workspace.tabs = [];
         workspace.active = '';
@@ -35,13 +42,15 @@ try {
         workspace.navigate('terminals', 'a');
         workspace.navigate('settings');
         workspace.navigate('credentials');
+        workspace.activate('host:');
         useNotificationsStore(pinia).items = [];
         document.documentElement.dataset.theme = theme;
       }, theme);
-      await page.locator('.workspace-tab[data-view="credentials"].active').waitFor();
+      await page.locator('.workspace-tab[data-host-id=""].active').waitFor();
     };
     const menu = page.getByRole('menu', { name: '工作区标签操作', exact: true });
     const target = page.locator('.workspace-tab[data-host-id="a"]');
+    const local = page.locator('.workspace-tab[data-host-id=""]');
     const keys = () =>
       page.evaluate(async () => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
@@ -50,14 +59,14 @@ try {
       });
     for (const [action, expected] of [
       ['关闭', ['host:', 'settings:', 'credentials:']],
-      ['关闭右侧', ['host:', 'host:a']],
+      ['关闭右侧', ['host:', 'settings:', 'credentials:']],
       ['关闭其它', ['host:a']],
       ['关闭所有', []],
     ]) {
       await seed();
-      await target.click({ button: 'right' });
+      await (action === '关闭右侧' ? local : target).click({ button: 'right' });
       await menu.waitFor();
-      assert.equal(await page.locator('.workspace-tab[data-view="credentials"].active').count(), 1);
+      assert.equal(await local.getByRole('tab').getAttribute('aria-selected'), 'true');
       assert.deepEqual(
         (await menu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
         ['关闭', '关闭右侧', '关闭其它', '关闭所有'],
@@ -65,6 +74,10 @@ try {
       if (action === '关闭') await page.screenshot({ path: `${output}/${name}.png` });
       await menu.getByRole('menuitem', { name: action, exact: true }).click();
       await menu.waitFor({ state: 'hidden' });
+      await page.waitForFunction(
+        (count) => document.querySelectorAll('.workspace-tab').length === count,
+        expected.length,
+      );
       assert.deepEqual(await keys(), expected);
       if (!expected.length) await page.getByRole('region', { name: '欢迎页面' }).waitFor();
     }
@@ -76,6 +89,7 @@ try {
       true,
     );
     await menu.getByRole('menuitem', { name: '关闭其它', exact: true }).click();
+    await page.waitForFunction(() => document.querySelectorAll('.workspace-tab').length === 1);
     await page.locator('.workspace-tab').click({ button: 'right' });
     assert.equal(
       await menu.getByRole('menuitem', { name: '关闭其它', exact: true }).isDisabled(),

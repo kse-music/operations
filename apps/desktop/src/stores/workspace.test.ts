@@ -163,7 +163,11 @@ it.each([
     ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
     'credentials:',
   ],
-  ['right', ['host:', 'host:a'], 'host:a'],
+  [
+    'right',
+    ['host:', 'host:a', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    'credentials:',
+  ],
   ['others', ['host:a'], 'host:a'],
   ['all', [], ''],
 ] as const)('closes %s relative to the requested inactive tab', async (scope, keys, active) => {
@@ -175,13 +179,17 @@ it.each([
   if (active === 'host:a') expect(workspace.hostId).toBe('a');
 });
 
-it('preserves an active tab to the left of the closed range', async () => {
+it('closes only tabs in the same row to the right and preserves the active tab', async () => {
   const workspace = openTabs();
   workspace.activate('host:');
-  await workspace.close('host:a', 'right');
+  await workspace.close('host:', 'right');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
-  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:', 'host:a']);
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual([
+    'host:',
+    'extension:cn.hiboot.plugins.assistant:assistant:',
+    'credentials:',
+  ]);
 });
 
 it('keeps adjacent-tab selection for closing the current tab', async () => {
@@ -277,21 +285,35 @@ it.each(['hosts', 'assets', 'plugins', 'system'] as const)(
   },
 );
 
-it('reuses plugin settings under the plugins module when reactivating from other modules', () => {
+it('shows the host controls for a plugin without a settings contribution in the existing workspace', () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
-  workspace.openPluginSettings('cn.hiboot.plugins.assistant');
-  const settings = workspace.current;
-  expect(workspace.module).toBe('plugins');
-  expect(settings).toMatchObject({ view: 'pluginSettings', hostId: '' });
-  workspace.selectModule('assets');
-  workspace.openPluginSettings('cn.hiboot.plugins.assistant');
-  expect(workspace.current).toBe(settings);
-  workspace.activate('host:a');
-  workspace.activate(settings!.key);
-  expect(workspace.module).toBe('plugins');
+  workspace.openPluginSettings('cn.hiboot.plugins.docker');
+  workspace.openPluginSettings('cn.hiboot.plugins.docker');
+  expect(workspace.pluginConfiguration).toEqual({
+    pluginId: 'cn.hiboot.plugins.docker',
+    contributionId: null,
+  });
+  expect(workspace.current?.view).toBe('files');
+  expect(workspace.module).toBe('hosts');
   expect(workspace.hostId).toBe('a');
-  expect(workspace.tabs.filter((tab) => tab.view === 'pluginSettings')).toHaveLength(1);
+  expect(workspace.tabs).toHaveLength(1);
+});
+
+it('opens an authorized settings contribution without navigating or creating a workspace tab', async () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('files', 'a');
+  const active = workspace.current;
+  await workspace.openPlugin('cn.hiboot.plugins.assistant', 'settings', 'a');
+  expect(workspace.pluginConfiguration).toEqual({
+    pluginId: 'cn.hiboot.plugins.assistant',
+    contributionId: 'settings',
+  });
+  expect(workspace.current).toBe(active);
+  expect(workspace.module).toBe('hosts');
+  expect(workspace.hostId).toBe('a');
+  expect(workspace.tabs).toEqual([active]);
+  expect(workspace.pluginPages).toEqual([]);
 });
 
 it('keeps the current page and selected module when an unrelated inactive tab is closed', async () => {

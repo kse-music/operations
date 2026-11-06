@@ -12,6 +12,7 @@ import {
   showHostTree,
   hostContextAction,
   previewPluginPackage,
+  openPluginDetails,
   openPluginSettings,
   setPluginEnabled,
 } from './ui-navigation.mjs';
@@ -166,7 +167,7 @@ try {
   const card = manager.locator('.plugin-installed-row[data-plugin-id="dev.serverdeck.host-info"]');
   await card.waitFor();
   passed.push('UI package preview, unverified warning, digest-bound install');
-  const grant = await openPluginSettings(page, 'Host Info');
+  const grant = await openPluginDetails(page, 'Host Info');
   for (const label of [
     'hosts.read',
     'ssh.execute',
@@ -235,18 +236,18 @@ try {
     'Host Info',
   );
   await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
-  await openPluginSettings(page, 'Host Info');
-  await view
+  const configuration = await openPluginSettings(page, 'Host Info');
+  const form = configuration.locator('.plugin-workspace');
+  await form
     .getByLabel('备注（仅保存于本插件）', { exact: true })
     .fill('<img src=x onerror=alert(1)>');
-  await view.getByRole('button', { name: '保存设置', exact: true }).click();
-  await page.waitForFunction(() => !document.querySelector('.plugin-workspace button:disabled'));
-  await view.getByRole('button', { name: '读取设置', exact: true }).click();
-  await view
+  await form.getByRole('button', { name: '保存设置', exact: true }).click();
+  await form.getByRole('button', { name: '读取设置', exact: true }).click();
+  await form
     .locator('.plugin-output')
     .filter({ hasText: '<img src=x onerror=alert(1)>' })
     .waitFor();
-  assert.equal(await view.locator('img,iframe,script').count(), 0);
+  assert.equal(await form.locator('img,iframe,script').count(), 0);
   passed.push(
     'all five extension surfaces and isolated settings render hostile strings as inert text',
   );
