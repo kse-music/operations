@@ -7,26 +7,30 @@ import { useTerminalsStore } from '../stores/terminals';
 import { useNotificationsStore } from '../stores/notifications';
 import * as ipc from '../services/ipc';
 import { defaultTerminalPreferences } from '../types/preferences';
+import { resolveTerminalFontFamily } from '../services/terminal-font';
 import { defaultProductPreferences } from '../types/product';
 import type { AppConfig } from '../types/ipc';
 
 const xterm = vi.hoisted(() => ({
   instances: [] as {
-    options: { fontSize: number };
+    options: { fontSize: number; fontFamily: string };
     keyHandler: (event: KeyboardEvent) => boolean;
   }[],
   fit: vi.fn(),
+  open: vi.fn(),
+  observers: [] as (() => void)[],
   wheel: vi.fn(),
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     keyHandler: (event: KeyboardEvent) => boolean = () => true;
     parser = { registerOscHandler: vi.fn() };
-    constructor(public options: { fontSize: number }) {
+    constructor(public options: { fontSize: number; fontFamily: string }) {
       xterm.instances.push(this);
     }
     loadAddon() {}
     open(container: HTMLElement) {
+      xterm.open(container);
       const screen = document.createElement('div');
       screen.className = 'test-terminal-screen';
       screen.addEventListener('wheel', xterm.wheel);
@@ -55,15 +59,20 @@ const visible = ref(true);
 beforeEach(async () => {
   vi.clearAllMocks();
   xterm.instances.length = 0;
+  xterm.observers.length = 0;
   visible.value = true;
   vi.stubGlobal(
     'ResizeObserver',
     class {
+      constructor(callback: () => void) {
+        xterm.observers.push(callback);
+      }
       observe() {}
       disconnect() {}
     },
   );
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(800);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
   vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
   pinia = createPinia();
   setActivePinia(pinia);
@@ -157,6 +166,47 @@ it('does not zoom hidden panes or act behind a modal', async () => {
   document.body.append(dialog);
   expect(wheel({ ctrlKey: true, deltaY: -120 }).defaultPrevented).toBe(false);
   expect(ipc.saveConfig).not.toHaveBeenCalled();
+});
+
+it('defers opening a hidden terminal until its container has both dimensions', async () => {
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(0);
+  const terminals = useTerminalsStore();
+  terminals.split(terminals.focused, 'rows');
+  terminals.update(terminals.focused, { connectRequested: false, state: 'idle' });
+  await nextTick();
+  expect(xterm.open).toHaveBeenCalledTimes(2);
+  const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(0);
+  height.mockReturnValue(600);
+  xterm.observers.forEach((callback) => callback());
+  expect(xterm.open).toHaveBeenCalledTimes(2);
+  width.mockReturnValue(800);
+  xterm.observers.forEach((callback) => callback());
+  expect(xterm.open).toHaveBeenCalledTimes(3);
+  xterm.observers.forEach((callback) => callback());
+  expect(xterm.open).toHaveBeenCalledTimes(3);
+});
+
+it('applies font changes after hidden panes become visible', async () => {
+  visible.value = false;
+  await nextTick();
+  const config = useApplicationStore().state!.config;
+  config.terminalFontSize = 18;
+  config.terminal.fontFamily = 'monospace';
+  await nextTick();
+  expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([14, 14]);
+  expect(xterm.instances.map((terminal) => terminal.options.fontFamily)).toEqual([
+    resolveTerminalFontFamily(defaultTerminalPreferences().fontFamily),
+    resolveTerminalFontFamily(defaultTerminalPreferences().fontFamily),
+  ]);
+  visible.value = true;
+  await vi.waitFor(() => {
+    expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([18, 18]);
+    expect(xterm.instances.map((terminal) => terminal.options.fontFamily)).toEqual([
+      'monospace',
+      'monospace',
+    ]);
+  });
+  expect(xterm.open).toHaveBeenCalledTimes(2);
 });
 
 it.each([10, 32])('enforces the %i font boundary without redundant saves', async (size) => {

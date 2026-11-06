@@ -491,6 +491,10 @@ SSH 输出在 xterm 前经过 services/zmodem.ts 的有界握手识别器，保�
 
 ### 终端布局、偏好与生命周期
 
+2026-11-06 字距修复：TerminalPane 可先建立 xterm 缓冲及输入输出监听，只有窗格活动且容器宽高均非零时才调用一次 `open`。隐藏期间的显示偏好和字号更新延迟到再次可测量时应用，再执行 fit；避免 xterm DOM 渲染器将隐藏元素的零字宽缓存成额外字距。切页不重建 xterm 或 Shell，后台输出及 ACK 继续处理。
+
+Linux 默认字体回退：`services/terminal-font.ts` 在 Linux 将旧默认字体栈 `Cascadia Mono, Consolas, monospace` 解析为系统 `monospace`，避免 WebKit/Fontconfig 将缺失的首选字体替换成比例字体，导致 xterm 为窄字符逐个补入明显间距。仅在渲染时解析，不改写已保存配置；用户自定义字体和其他平台的既有解析保持原样。
+
 用户追加的本地交互终端由 application 内的 `LocalTerminals` 管理，通过 portable-pty 0.9 使用 Windows ConPTY / Unix PTY；Windows 固定启动系统 Windows PowerShell（`-NoLogo -NoProfile`），Linux 固定 `/bin/sh -i`，初始目录为当前用户目录。`terminal_local_open(size, events)` 仅接受尺寸和事件 Channel，不接受可执行文件或启动命令，返回 `{id, shell}`；现有 input/resize/ack/close 根据 `local:` 会话 ID 分派。仅本地 main 窗口授权，不增加通用 shell 插件权限。输入和输出均不记录到日志。
 
 本地最多 16 个会话，每会话 64 条有界输入/尺寸消息，单次输入最多 16 KiB；输出每帧最多 8 KiB，解析 ACK 前不发送下一帧，30 秒未确认取消会话。阻塞 PTY 操作位于专用阻塞任务/输出线程，不占用 Tokio 异步执行线程。关闭会话、页面重新加载及应用退出均取消并回收本地 Shell 和 PTY；关闭超时明确失败。ConPTY 清理期间继续排空输出，避免关闭伪终端时管道阻塞。启动仅显示欢迎页，终端列表为空，不创建本地 Shell、恢复旧标签、自动登录或重放命令。本地 Shell 中主动脱离终端运行的进程不承诺随页签结束。

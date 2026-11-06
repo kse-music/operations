@@ -21,6 +21,7 @@ import {
 } from '../types/terminal';
 import { useTerminalsStore, type TerminalPaneModel } from '../stores/terminals';
 import { defaultTerminalPreferences, terminalThemes, shortcutKey } from '../types/preferences';
+import { resolveTerminalFontFamily } from '../services/terminal-font';
 import { TerminalInputQueue } from '../services/terminal-input';
 import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
 import ForwardDialog from './ForwardDialog.vue';
@@ -79,6 +80,9 @@ let terminal: Terminal;
 let fit: FitAddon;
 let search: SearchAddon;
 let observer: ResizeObserver;
+let opened = false;
+let pendingDisplayOptions = false;
+let pendingFontSize: number | undefined;
 let session: TerminalSession | LocalTerminalSession | undefined;
 let generation = 0;
 let disposed = false;
@@ -90,12 +94,29 @@ let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 const encoder = new TextEncoder();
 
 function fitTerminal(): void {
-  if (!props.active || !container.value?.clientWidth || !terminal) return;
+  if (!props.active || !container.value?.clientWidth || !container.value.clientHeight || !terminal)
+    return;
+  // Hidden DOM measurements poison xterm's character spacing cache.
+  if (pendingDisplayOptions) {
+    Object.assign(terminal.options, terminalOptions());
+    pendingDisplayOptions = false;
+  }
+  if (pendingFontSize !== undefined) {
+    terminal.options.fontSize = pendingFontSize;
+    pendingFontSize = undefined;
+  }
+  const firstOpen = !opened;
+  if (firstOpen) {
+    terminal.open(container.value);
+    opened = true;
+  }
   fit.fit();
+  if (firstOpen) focusTerminal();
 }
 function focusTerminal(): void {
   if (
     props.active &&
+    opened &&
     (props.standalone || store.focused === props.tab.key) &&
     container.value?.clientWidth &&
     !dialogBlocksTerminal()
@@ -454,7 +475,7 @@ function exportText(): void {
 function terminalOptions() {
   const p = preferences.value;
   return {
-    fontFamily: p.fontFamily,
+    fontFamily: resolveTerminalFontFamily(p.fontFamily),
     lineHeight: p.lineHeight / 100,
     scrollback: p.scrollback,
     theme: terminalThemes[p.theme],
@@ -479,7 +500,6 @@ onMounted(() => {
   search = new SearchAddon();
   terminal.loadAddon(fit);
   terminal.loadAddon(search);
-  terminal.open(container.value!);
   terminal.parser.registerOscHandler(7, (data) => {
     const cwd = osc7Path(data);
     if (cwd) update({ cwd });
@@ -534,6 +554,7 @@ onMounted(() => {
   observer = new ResizeObserver(fitTerminal);
   observer.observe(container.value!);
   window.addEventListener('resize', closeMenu);
+  fitTerminal();
   if (props.tab.connectRequested) void connect();
 });
 watch(
@@ -546,7 +567,7 @@ watch(
   preferences,
   () => {
     if (terminal) {
-      Object.assign(terminal.options, terminalOptions());
+      pendingDisplayOptions = true;
       fitTerminal();
     }
   },
@@ -569,7 +590,7 @@ watch(
   () => application.state?.config.terminalFontSize,
   (size) => {
     if (terminal && size) {
-      terminal.options.fontSize = size;
+      pendingFontSize = size;
       fitTerminal();
     }
   },

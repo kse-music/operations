@@ -1,5 +1,41 @@
 # SSH 日常使用增强验收
 
+## 2026-11-06 Linux 默认字体回退修复
+
+用户再次通过 `npm run tauri -- dev` 启动后，普通 `ls` 仍呈现明显字距。核对实际进程位于当前仓库 `target/debug/`，1420 开发服务提供的终端组件包含隐藏初始化修复，因此不能将本次现象归因于旧 Release。通过临时模板热更新读取用户实际窗口的字体与几何指标，没有读取终端文本或重建 SSH 会话；原始指标保存在 `.local/terminal-font-qa/actual/before.json`。
+
+实际窗口 DPR 1、14px、旧默认 `Cascadia Mono, Consolas, monospace` 下，Canvas/OffscreenCanvas 的 W 为 12.291946px、i 为 3.849991px，DOM 的 W 为 12.291992px。字体实际为比例字体，xterm 按 W 的 12.29px 固定列宽为其他字符逐个补间距，文本 span 出现约 3.76–9.16px 的补偿。仅检查行容器的 `letter-spacing`（当时约 0.00625px）无法发现这类异常。此前独立测试环境的 W/i 均为 8.4287px，未覆盖用户原配置环境中的这条字体回退路径；隐藏初始化缺陷仍有效，但不是此次截图问题的完整解释。
+
+新增 `services/terminal-font.ts`，仅在 Linux 将旧默认栈解析为系统 `monospace`，由 `TerminalPane.vue` 在初始渲染及偏好更新时统一使用；保留已保存配置、用户自定义字体及其他平台原行为。新增五项回归覆盖 Linux x86_64/aarch64 的旧默认配置、Windows/macOS 原配置和 Linux 自定义字体，既有隐藏字体更新断言同步使用实际解析结果。没有 Rust、IPC、权限或数据库结构变更。
+
+用户明确正常退出后，运行 `.local/terminal-font-qa/actual-profile-qa.mjs`：将根目录正常开发构建复制到 QA 目录，使用原有应用配置、WebView 目录和正常 1420 Vite 页面，实际连接既有 `192.168.4.64` 主机，仅执行只读 `ls`。修复后的渲染字体为 `monospace`，14px 的 W/i 均为 8.4287109375px，行补偿 -0.0125px，文本片段最大补偿绝对值 0.007036px；切到设置再返回仍通过，保留同一 xterm DOM 节点、SSH Session ID 及已连接状态。`actual/after.json` 和 `actual/after.png` 已生成并查看，实际 `ls` 字符紧凑、列布局正常。测试程序通过原应用退出 IPC 正常关闭 SSH 和进程；临时模板诊断代码撤回，临时本地存储诊断键已清除，不改写字体设置或重置用户数据。
+
+`npm test` 54 个文件、406 项通过；`npm run typecheck`、`npm run lint`、修改文件 Prettier 与 `git diff --check` 通过；`npm run build` 通过，保留既有 Monaco 大包提示。输出盘空闲 812 GiB。原生脚本先后遇到早于 Vue 启动读取状态、WebKit 自动移除空本地存储表两项脚本前置条件问题，补齐启动等待与表存在检查后重跑通过，未据失败结果宣称成功。
+
+本轮未重新编译桌面 Rust、未生成安装包或进行 Windows/macOS 实机回归。自定义字体仍由用户配置决定；本修复针对 Linux 旧默认栈，无新增依赖或配置迁移。用户可正常运行原 `npm run tauri -- dev` 命令，无下一阶段实现依赖；本阶段结束。
+
+## 2026-11-06 终端隐藏初始化字距修复
+
+用户反馈 Windows 与本机 Linux 终端字符间距不同。隔离测量确认本机默认字体的 Canvas、OffscreenCanvas 与可见 DOM 字宽均为 8.4287109375px，并确认一条可触发异常字距的路径：xterm 6 的 DOM 渲染器在隐藏容器中打开时，将隐藏宽度缓存元素的零宽度用于字距补偿；显示后仅 resize 不会刷新默认补偿。本机 WebKitGTK 与 Chromium 均复现额外 8.425px 字距，替换 Linux 字体仍可触发。这证明存在渲染初始化缺陷，但尚未在用户原 SSH 会话中复现，不能据此认定截图差异的唯一原因。
+
+修改 `TerminalPane.vue`：保留 xterm 缓冲和原有输入输出生命周期，只有活动容器宽高均非零时才打开渲染器；隐藏期间记录显示偏好和字号更新，显示后应用并适配尺寸。首次可见打开恢复正常聚焦；重复切页不重新创建终端或 Shell。`terminal-zoom.test.ts` 增加零宽/零高延迟打开、可见后只打开一次及后台字体更新回归。
+
+本机验证脚本和证据位于 `.local/terminal-font-qa/`：`probe.mjs` 对比字体测量与隐藏打开路径；`verify.mjs` 使用实际 Vue TerminalPane、xterm、样式及仅内存中的隔离配置，在 WebKitGTK 2.52.6 和 Chromium 156.0.8078.79 中分别验证 1440×900、390×844。覆盖隐藏挂载后显示、隐藏期间改变字体/字号、反复切页保持同一实例和输出、终端宽度不越界，并在同页复现未保护的上游路径。四组均通过，修复后字距误差绝对值小于 0.013px；`results.json` 与四张截图已生成并查看 WebKit 宽窄截图。内容为明确的渲染测试文本，未连接远程主机、替换产品 IPC 或修改用户配置。
+
+`npm test`：53 个文件、401 项通过（含相关 26 项）；`npm run typecheck`、`npm run lint`、修改文件的 Prettier 检查及 `git diff --check` 通过。`npm run build` 完成内置插件生成、类型检查和生产前端构建，保留既有 Monaco 大包提示。构建前输出盘空闲 813 GiB。没有 Rust、接口、权限或数据库变更。
+
+### 原生开发模式复测
+
+用户反馈仍无变化，并确认使用 `npm run tauri -- dev`。补测使用 Linux 原生 Tauri 开发构建加载 Vite 页面，测试副本从根目录 `target/` 复制到 QA 目录运行；通过临时独立应用标识和数据目录隔离，未修改正式配置。开发页面使用空闲的 1421 端口，不占用正常开发入口 1420。终端通过实际 Tauri IPC 创建本地 PTY 并执行只读 `top`，没有替换产品 IPC。补充验证了原生开发模式 DPR 1、DPR 2，以及内嵌前端的 Debug 构建 DPR 2。
+
+默认字体 `Cascadia Mono, Consolas, monospace`、14px 下，原生开发窗口 Canvas、OffscreenCanvas 和 DOM 的 W/i 字宽均为 8.4287109375px，行字距为 -0.0125px，实际文本 span 字距为 -0.010671px。DPR 2 下切到设置保存 18px、恢复 14px，再返回原终端，以及 Ctrl+滚轮 14→15→14px 均通过；字距绝对值小于 0.013px，xterm DOM 节点和后端 Session ID 始终相同。已查看实际 `top` 截图，字符没有异常拉开。脚本为 `.local/terminal-font-qa/native-probe.mjs`、`native-check.mjs`，最新测量、循环结果及截图位于同目录 `native/metrics.json`、`native/cycles.json`、`native/native-dev.png`。
+
+`node tools/tauri.mjs build --debug --no-bundle` 通过。首次链接因既有 `tauri-utils` 缓存归档损坏失败；核实根目录输出路径和构建锁后，仅清理该包的 dev 缓存再重建成功。测试完成后通过 `cargo build -p serverdeck-desktop --offline --locked` 恢复常规开发构建，未将 QA 标识或配置写入产品源码。构建前空闲空间超过 800 GiB。
+
+原生开发模式的以上场景未复现用户图 2，因此不能宣称用户原会话已验收通过。未连接用户 SSH 主机，未复测 Windows/macOS，未生成安装包；两平台字体外观是否一致也未经对照实测。当前无新增实现依赖，进一步定位依赖用户原会话的实际渲染测量；桌面发行仍依赖正常打包及对应平台验收。本阶段不开始其他终端功能。
+
+## 早期阶段记录
+
 2026-11-01。Windows x64、Rust 1.97.1、Tauri 2、Vue 3/TypeScript、russh 0.65.0、xterm.js 6。基于现有仓库直接扩展，未修改 PRD；目录没有 Git 元数据，未初始化或提交 Git。没有产品 SFTP、Docker 或监控实现。
 
 ## 已实现行为
