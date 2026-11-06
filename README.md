@@ -39,6 +39,7 @@ Windows x64 安装与运行已验证，远端验收环境为 Ubuntu 24.04；macO
 在项目根目录运行，先安装以下依赖：
 
 - Rust stable，项目声明最低版本为 1.94。
+- Rust WASM 目标：`rustup target add wasm32-unknown-unknown`。
 - Node.js 22.13+ 和 npm。
 - Windows：MSVC C++ Build Tools、Windows SDK 和 WebView2。
 - macOS/Linux：对应的 [Tauri 系统依赖](https://v2.tauri.app/start/prerequisites/)，这些客户端平台尚未验收。
@@ -47,10 +48,15 @@ Windows x64 安装与运行已验证，远端验收环境为 Ubuntu 24.04；macO
 
 ```powershell
 npm ci
+rustup target add wasm32-unknown-unknown
+cargo fetch --manifest-path plugins/system/docker/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+cargo fetch --manifest-path plugins/system/assistant/backend/Cargo.toml --target wasm32-unknown-unknown --locked
 npm run tauri -- dev
 ```
 
 `npm run dev` 仅启动浏览器前端，完整功能需要 Tauri/Rust 后端。
+
+内置插件包 `plugins/system/packages/*.sdplugin` 由源码生成，不纳入 Git。`dev/build`（包括 Tauri 入口）会先构建插件；插件编译使用 `--offline --locked`，首次构建需先执行上述依赖下载，插件锁文件更新后也需重新下载。
 
 构建 Windows NSIS 测试安装包：
 
@@ -67,6 +73,7 @@ node tools/tauri.mjs build --bundles nsis
 ## 测试
 
 ```powershell
+npm run plugins:build
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
@@ -77,6 +84,8 @@ npm run typecheck
 npm test
 npm run build
 ```
+
+直接执行依赖内置包的 Cargo 检查、测试或编译前，先运行 `npm run plugins:build`；全新克隆需先完成开发章节的依赖安装。插件或公开 SDK 源码变化后也需重新生成，Rust 的 `include_bytes!` 不会自动构建插件。
 
 以上命令用于本地检查，不代表所有平台均已通过。需要系统凭据库、桌面应用或授权 SSH 服务器的测试，另见[原生验收说明](docs/release/RELEASE_CHECKLIST.md#原生验收)；已执行结果见[测试报告](docs/validation/TEST_REPORT.md)。
 

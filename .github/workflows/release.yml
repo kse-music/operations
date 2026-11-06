@@ -39,7 +39,12 @@ jobs:
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
       - run: rustup default 1.97.1
       - run: rustup target add ${{ matrix.target }}
+      - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
+      - run: cargo fetch --manifest-path plugins/system/docker/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+      - run: cargo fetch --manifest-path plugins/system/assistant/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+      - name: Generate bundled plugins before Rust checks and tests
+        run: npm run plugins:build
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -54,6 +59,12 @@ jobs:
       - run: npm audit --audit-level=moderate
       - name: Build unsigned candidate
         run: node tools/tauri.mjs build --target ${{ matrix.target }} --config ${{ matrix.config }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ServerDeck-system-plugins-${{ matrix.target }}
+          path: plugins/system/packages/*.sdplugin
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ServerDeck-unsigned-${{ matrix.target }}

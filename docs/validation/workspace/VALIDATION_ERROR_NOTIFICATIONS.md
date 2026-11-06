@@ -21,3 +21,17 @@
 Vitest 默认临时目录在沙箱中发生 EPERM，设置当前命令的 TEMP/TMP 为工作区 `.local/notification-test-tmp` 后通过，没有改动系统环境。沙箱内 Edge 无法启动，沙箱外无法访问沙箱内预览；界面脚本现会启动并关闭自己的本机临时 Vite 服务，在获批环境中完成验证。
 
 浏览器检查使用独立前端故障夹具，不连接远程主机、不写入持久用户配置，不代表本轮重新验证了真实 SSH/SFTP 或 Rust 后端。未运行原生 Tauri 全链路、其他平台或旧 WebView 兼容检查；原始终端/日志/命令输出属于业务数据，继续保留。不存在数据库迁移或新依赖；后续发布依赖正常的原生打包与平台验收，本阶段不启动下一阶段。
+
+## 2026-11-06 Linux 通知高度修复
+
+主机保存后的单条通知在 Linux WebKitGTK 中被拉至接近整个窗口高度。通知容器使用固定定位、manual popover 和 Grid，未覆盖 popover 默认内在高度，触发 WebKit 的高度计算问题。`apps/desktop/src/styles/product.css` 中为 `.toast-stack` 显式设置 `height: auto`，保留右下角定位、内容换行、高度上限及滚动。
+
+### 本次验证
+
+- 本机 WebKitGTK 2.52.6 使用仓库真实 foundation、theme 和 product 样式及通知 DOM 夹具验证。1440×900 中恢复默认 `fit-content` 时通知高度为 832px，采用修复后为 54px；390×844 中分别约为 776px 和 54px。两种尺寸均验证三条通知按内容排布、长中文换行、超长内容滚动、原生 modal 中右下角定位、关闭按钮不被 backdrop 遮挡，以及关闭通知后弹窗仍打开。脚本、结果和宽窄截图位于 `.local/notification-height-qa/`，已查看截图。
+- `npm test -- --run src/components/notification-toasts.test.ts src/composables/error-notifications.test.ts`：2 文件、4 项通过，覆盖真实 Vue 组件的去重、关闭、嵌套弹窗迁移及无效表单聚焦。
+- `npm run typecheck`、`npm run lint`：通过。
+- 在 `apps/desktop` 执行 `npx vite build`：生产前端构建通过，保留既有的大 chunk 提醒。本次未执行系统插件重建。
+- 修改文件的 Prettier 检查及 `git diff --check`：通过。
+
+原生布局夹具首次保存截图因缺少 Cairo foreign struct converter 失败，改用现有 GTK 截图接口后通过；最初内联夹具未解析 SDK 主题导入，改为加载实际主题后完成上述最终复验。夹具只验证通知布局，不读写主机或用户配置。未重建桌面二进制和安装包，未重验真实主机保存全链路、Windows WebView2 或其他平台。无新增依赖、数据库或通知业务逻辑变化，未发现本次新增风险；当前修复无后续功能依赖，分发给已安装应用仍需常规桌面构建。

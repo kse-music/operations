@@ -330,6 +330,8 @@ kbd {
   background: transparent;
   color: var(--text);
   width: min(420px, calc(100vw - 40px));
+  /* Override the popover intrinsic height to avoid stretched grid rows in WebKit. */
+  height: auto;
   max-height: calc(100vh - 68px);
   overflow-y: auto;
   display: grid;
