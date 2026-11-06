@@ -2,6 +2,8 @@
 
 最新：[Linux 默认终端字体回退修复与真实 SSH 验证](terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-linux-默认字体回退修复)。
 
+最新：[OpenSSH 导入弹窗高度修复](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗高度修复)。
+
 最新：[终端隐藏初始化字距修复](terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-终端隐藏初始化字距修复)。
 
 最新：[内置插件包改为构建产物](foundation/VALIDATION_BUILD_CACHE.md#2026-11-06-内置插件包改为构建产物)。

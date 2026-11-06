@@ -200,19 +200,21 @@
 }
 .modal:has(> .import-body)[open] {
   --import-inset: clamp(16px, 4vw, 24px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   width: min(680px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
   padding: 0;
   overflow: hidden;
 }
 .modal:has(> .import-body) > .modal-heading {
+  flex-shrink: 0;
   margin: 0;
   padding: 16px var(--import-inset) 8px;
 }
 .import-body {
   display: grid;
+  min-height: 0;
   align-content: start;
   gap: 16px;
   padding: 0 var(--import-inset) 16px;
@@ -364,6 +366,7 @@
   background: var(--panel);
 }
 .dialog-actions.import-footer {
+  flex-shrink: 0;
   margin: 0;
   padding: 12px var(--import-inset);
   background: var(--panel);

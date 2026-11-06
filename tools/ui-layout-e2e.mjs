@@ -226,14 +226,23 @@ try {
     const importLayout = await importDialog.evaluate((dialog) => {
       const box = dialog.getBoundingClientRect();
       const body = dialog.querySelector('.import-body');
+      const content = body.lastElementChild.getBoundingClientRect();
+      const footer = dialog.querySelector('.import-footer').getBoundingClientRect();
       return {
         width: box.width,
         inViewport: box.top >= 0 && box.bottom <= innerHeight,
         overflows: body.scrollWidth > body.clientWidth,
+        unusedHeight:
+          body.getBoundingClientRect().bottom -
+          content.bottom -
+          parseFloat(getComputedStyle(body).paddingBottom),
+        footerVisible: footer.top >= box.top && footer.bottom <= box.bottom,
       };
     });
     assert(importLayout.width <= Math.min(680, width - 32), `${name}: import dialog is too wide`);
     assert(importLayout.inViewport && !importLayout.overflows, `${name}: import dialog overflows`);
+    assert(importLayout.unusedHeight <= 1, `${name}: import dialog has unused vertical space`);
+    assert(importLayout.footerVisible, `${name}: import dialog footer is clipped`);
     assert(await importDialog.getByRole('button', { name: '选择文件', exact: true }).isVisible());
     assert(
       await importDialog.getByRole('button', { name: '生成导入预览', exact: true }).isDisabled(),
