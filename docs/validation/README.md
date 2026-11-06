@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[平台版本更新为 0.2.0](foundation/VALIDATION_BUILD_CACHE.md#2026-11-06-平台版本更新为-020)。
+
 最新：[本地终端默认 Shell 修复](workspace/VALIDATION_INTERACTIONS.md#2026-11-06-本地终端默认-shell-修复)。
 
 最新：[Linux 默认终端字体回退修复与真实 SSH 验证](terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-linux-默认字体回退修复)。

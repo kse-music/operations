@@ -64,3 +64,25 @@
 ### 边界与依赖
 
 本机为 Linux，未执行 GitHub Actions、Windows PowerShell/WSL 原生验收或桌面安装器构建。未连接用户远程主机、修改用户配置或引入数据库迁移。全新克隆后直接运行相关 Cargo 命令仍须先生成插件包；首次构建和锁文件更新后须先按 README 下载依赖，实际插件编译保留 `--offline --locked`。当前无剩余实现依赖，跨平台 CI 和原生验收待相应环境执行。
+
+## 2026-11-06 平台版本更新为 0.2.0
+
+### 完成范围
+
+平台从 0.1.0-beta.1 更新为 0.2.0，统一根目录和桌面的 npm 清单、Cargo 工作区、Tauri 配置及对应锁文件。关于页继续读取后端 `CARGO_PKG_VERSION`，现有 App 测试与浏览器页面验证数据同步更新；README、变更记录、当前架构说明和随包第三方声明同步。插件及 Rust/Vue SDK 沿用独立版本。
+
+发布清单取消必须包含 beta 的旧命名约束，版本一致性、应用身份、权限、图标和摘要检查继续保留。旧安装包名称、测试及安全报告保持历史版本，发布条件仍由原发布检查表记录。
+
+### 本次验证
+
+- 构建前项目磁盘约 812 GiB 可用，沿用根目录 `target/` 和既有 WASM 插件输出目录。
+- 通过 `cargo metadata --no-deps --format-version 1 --offline --locked` 及 JSON 结构化断言，确认 14 个平台 Cargo 包、6 处 npm/Tauri 清单与锁文件版本均为 0.2.0，Rust/Vue SDK 均仍为 4.0.0。
+- `npm test -- --run src/App.test.ts`：1 个测试文件、68 项通过，包括关于页显示 `v0.2.0` 及原有启动、错误和工作区流程。
+- `npm run typecheck`：桌面及 Vue SDK 类型检查通过。
+- `cargo check -p serverdeck-application --offline --locked -j 2`、`cargo check -p serverdeck-desktop --offline --locked -j 2`：均通过，桌面配置与 Rust 应用层使用 0.2.0。
+- `npm run plugins:build`：两个内置插件生成通过，无插件源码、清单或已跟踪生成资源变化。
+- `cargo fmt --all -- --check`、修改的 App 测试 ESLint、修改文件 Prettier、两个修改脚本的 `node --check` 与 `git diff --check`：通过。
+
+### 边界与依赖
+
+仅执行编译检查，未生成或替换桌面可执行文件、Release 安装器及发布摘要，未运行页面 E2E 脚本、完整发布清单脚本、全量业务单测、原生 GUI 或跨平台验收。现有可执行文件和安装包仍可能显示旧版本，需重新构建并启动后生效；版本号变化不表示既有发布条件已满足。当前无剩余实现依赖，本阶段完成后停止。

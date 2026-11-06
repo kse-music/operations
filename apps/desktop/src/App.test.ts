@@ -278,7 +278,7 @@ it.each(['.activity-rail', '.sidebar', '.content-scroll', '.sidebar input'])(
 
 it('opens About as a single system workspace page and preserves the existing terminal', async () => {
   loadSidebarConfig();
-  useApplicationStore().state!.appVersion = '0.1.0-beta.1';
+  useApplicationStore().state!.appVersion = '0.2.0';
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   terminals.open(useHostsStore().catalog!.hosts[0]!);
@@ -292,7 +292,7 @@ it('opens About as a single system workspace page and preserves the existing ter
   const page = root.querySelector('.about-view')!;
   expect(page).not.toBeNull();
   expect(page.querySelector('h1')?.textContent).toBe('关于 ServerDeck');
-  expect(page.textContent).toContain('v0.1.0-beta.1');
+  expect(page.textContent).toContain('v0.2.0');
   expect(page.textContent).toContain('SSH 终端、SFTP 文件管理和服务器监控');
   expect(page.textContent).toContain('Rust · Tauri 2 · Vue 3');
   expect(page.textContent).toContain('本地环境');
