@@ -1,5 +1,26 @@
 # 主机交互与本地终端验收
 
+## 2026-11-06 本地终端默认 Shell 修复
+
+用户反馈本地终端仅显示 `$`，而系统终端显示 `dh@dh:~$`。代码核对确认原实现固定启动 `/bin/sh -i`；本机 `/bin/sh` 指向 dash，账户登录 Shell 为 `/bin/bash`。
+
+`crates/application/src/local_terminal.rs` 现复用 portable-pty 0.9 的 `get_shell()`：优先使用可执行的 `$SHELL`，缺失或无效时查询系统账户配置，最终回退 `/bin/sh`。解析结果作为完整可执行路径加独立 `-i` 参数启动，不解析命令文本；采用非登录交互模式使 Bash 读取 `~/.bashrc`，并将子进程 `SHELL` 与返回的程序名同步。Windows PowerShell 启动参数不变，未新增依赖、IPC 参数或数据库迁移。
+
+执行环境为 Linux、Rust stable 1.99.1。构建前根目录输出盘空闲约 812 GiB，沿用 `.cargo/config.toml` 和根目录 `target/`，未新建 Cargo 缓存。已检查无运行中的 ServerDeck 桌面进程，未强杀用户程序。测试二进制编译后复制至 `.local/local-shell-qa/application-tests` 执行。
+
+| 检查                                                                                     | 实际结果                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo test -p serverdeck-application --lib --no-run --locked --offline`                 | 编译通过                                                                                                                                                                                                                      |
+| `.local/local-shell-qa/application-tests local_terminal::tests --nocapture`              | 5 项通过：包含空格和引号的 Shell 路径不拆分；未设、空值、不存在、不可执行和命令文本形式的 `SHELL` 回退；真实 Bash PTY 加载隔离 HOME 的自定义提示符及别名；原有输入输出、resize、非零退出、独立关闭、未 ACK 取消和非法参数保护 |
+| `cargo build -p serverdeck-desktop --locked --offline`                                   | Linux 桌面开发构建通过，更新 `target/debug/serverdeck-desktop`                                                                                                                                                                |
+| `cargo clippy -p serverdeck-application --all-targets --locked --offline -- -D warnings` | 既有 `crates/core/src/openssh.rs:290` 的 `single_element_loop` 告警阻止通过                                                                                                                                                   |
+| 同一 Clippy 命令增加 `-A clippy::single_element_loop`                                    | 通过，未修改既有 OpenSSH 代码或全局 lint 配置                                                                                                                                                                                 |
+| `cargo fmt --all -- --check`、修改文档 Prettier、`git diff --check`                      | 通过                                                                                                                                                                                                                          |
+
+本轮未运行原生 GUI 验收、前端测试、Windows/macOS 实机或安装包构建；没有前端修改。Bash 提示符与交互行为仍由用户自身配置决定，已有会话不会自动更换 Shell。当前无剩余实现依赖；用户重启 `npm run tauri -- dev` 后新建本地会话即可使用修改。后续发行需对应平台构建和验收，本阶段不自动推进。
+
+## 早期阶段记录
+
 日期：2026-11-02。范围为本轮用户提出的八项调整。
 
 ## 完成标准与实现

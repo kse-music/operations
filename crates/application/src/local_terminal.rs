@@ -68,7 +68,20 @@ fn dimensions(size: TerminalSize) -> PtySize {
         pixel_height: 0,
     }
 }
-fn shell() -> Result<(CommandBuilder, &'static str), Error> {
+#[cfg(unix)]
+fn unix_shell(mut command: CommandBuilder) -> (CommandBuilder, String) {
+    let path = command.get_shell();
+    let name = std::path::Path::new(&path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("sh")
+        .to_owned();
+    // Select the user's shell, but keep it non-login so Bash reads .bashrc.
+    *command.get_argv_mut() = vec![path.clone().into(), "-i".into()];
+    command.env("SHELL", path);
+    (command, name)
+}
+fn shell() -> Result<(CommandBuilder, String), Error> {
     #[cfg(windows)]
     let (mut command, name) = {
         let root = std::env::var_os("SystemRoot")
@@ -77,14 +90,10 @@ fn shell() -> Result<(CommandBuilder, &'static str), Error> {
             std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
         let mut command = CommandBuilder::new(path);
         command.args(["-NoLogo", "-NoProfile"]);
-        (command, "PowerShell")
+        (command, "PowerShell".to_owned())
     };
-    #[cfg(not(windows))]
-    let (mut command, name) = {
-        let mut command = CommandBuilder::new("/bin/sh");
-        command.arg("-i");
-        (command, "sh")
-    };
+    #[cfg(unix)]
+    let (mut command, name) = unix_shell(CommandBuilder::new_default_prog());
     // Start in the user's own directory; never interpolate a path into shell text.
     let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     if let Some(path) = std::env::var_os(home) {
@@ -367,7 +376,7 @@ fn run(
     if ready
         .send(Ok(LocalTerminalSession {
             id: id.into(),
-            shell: name.into(),
+            shell: name,
         }))
         .is_err()
     {
@@ -438,6 +447,93 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    #[test]
+    fn user_shell_path_is_a_single_executable_argument() {
+        let root = tempfile::tempdir().expect("shell directory");
+        let path = root.path().join("user shell '$");
+        std::os::unix::fs::symlink("/bin/sh", &path).expect("shell symlink");
+        let mut defaults = CommandBuilder::new_default_prog();
+        defaults.env("SHELL", &path);
+        let (command, name) = unix_shell(defaults);
+        assert_eq!(name, "user shell '$");
+        assert_eq!(command.get_argv(), &[path.as_os_str(), "-i".as_ref()]);
+        assert_eq!(command.get_env("SHELL"), Some(path.as_os_str()));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn missing_or_invalid_shell_falls_back_to_account_shell() {
+        let mut defaults = CommandBuilder::new_default_prog();
+        defaults.env_remove("SHELL");
+        let account_shell = defaults.get_shell();
+        let (command, _) = unix_shell(defaults);
+        assert_eq!(command.get_argv()[0], account_shell.as_str());
+        let root = tempfile::tempdir().expect("shell directory");
+        let not_executable = root.path().join("not-executable");
+        std::fs::write(&not_executable, "exit 1\n").expect("non executable file");
+        for value in [
+            std::ffi::OsStr::new(""),
+            root.path().join("missing-shell").as_os_str(),
+            not_executable.as_os_str(),
+            std::ffi::OsStr::new("/bin/sh -c 'exit 1'"),
+        ] {
+            let mut defaults = CommandBuilder::new_default_prog();
+            defaults.env("SHELL", value);
+            let (command, _) = unix_shell(defaults);
+            assert_eq!(command.get_argv()[0], account_shell.as_str());
+            assert_eq!(command.get_env("SHELL"), Some(account_shell.as_ref()));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn interactive_bash_loads_user_prompt_and_aliases() {
+        let home = tempfile::tempdir().expect("isolated home");
+        std::fs::write(
+            home.path().join(".bashrc"),
+            "PS1='__SD_USER_PROMPT__ '; alias sd_rc_probe='printf SD_RC_%s 741'\n",
+        )
+        .expect("user bashrc");
+        let mut defaults = CommandBuilder::new_default_prog();
+        defaults.env("SHELL", "/bin/bash");
+        defaults.env("HOME", home.path());
+        let (mut command, name) = unix_shell(defaults);
+        command.cwd(home.path());
+        command.env("TERM", "xterm-256color");
+        assert_eq!(name, "bash");
+        let pair = native_pty_system()
+            .openpty(dimensions(TerminalSize { cols: 90, rows: 25 }))
+            .expect("PTY");
+        let reader = pair.master.try_clone_reader().expect("reader");
+        let mut writer = pair.master.take_writer().expect("writer");
+        let mut child = pair.slave.spawn_command(command).expect("Bash");
+        drop(pair.slave);
+        let (send, receive) = mpsc::sync_channel(1);
+        let reading = std::thread::spawn(move || {
+            let mut output = Vec::new();
+            let result = reader.take(64 * 1024).read_to_end(&mut output);
+            send.send((result, output)).expect("read result");
+        });
+        writer
+            .write_all(b"sd_rc_probe; printf '\\n'; exit 7\r")
+            .expect("input");
+        writer.flush().expect("flush");
+        let output = receive.recv_timeout(Duration::from_secs(15));
+        if output.is_err() {
+            child.kill().expect("stop timed out shell");
+        }
+        let status = child.wait().expect("reap Bash");
+        drop(writer);
+        drop(pair.master);
+        reading.join().expect("PTY reader");
+        let (read_result, output) = output.expect("Bash output timeout");
+        if let Err(error) = read_result {
+            assert_eq!(error.raw_os_error(), Some(5), "PTY EOF: {error}");
+        }
+        assert_eq!(status.exit_code(), 7);
+        let output = String::from_utf8(output).expect("UTF-8 output");
+        assert!(output.contains("__SD_USER_PROMPT__"), "{output}");
+        assert!(output.contains("SD_RC_741"), "{output}");
+    }
     async fn next(events: &mut tokio::sync::mpsc::Receiver<TerminalEvent>) -> TerminalEvent {
         tokio::time::timeout(Duration::from_secs(15), events.recv())
             .await
@@ -487,7 +583,7 @@ mod tests {
             .open(TerminalSize { cols: 90, rows: 25 }, sink)
             .await
             .expect("first PTY");
-        assert_eq!(first.shell, if cfg!(windows) { "PowerShell" } else { "sh" });
+        assert_eq!(first.shell, shell().expect("default shell").1);
         let (sink, mut second_events) = events();
         let second = engine
             .open(TerminalSize { cols: 90, rows: 25 }, sink)

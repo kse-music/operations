@@ -1,5 +1,9 @@
 # ServerDeck v0.1 实施计划
 
+## 2026-11-06 本地终端默认 Shell 修复
+
+已将 Unix 本地终端从固定 `/bin/sh -i` 改为解析用户默认 Shell 后以 `-i` 启动，Bash 正常加载 `~/.bashrc`；返回实际程序名并同步子进程 `SHELL`。5 项本地终端测试、Linux 桌面开发构建、Rustfmt、文档格式和差异检查通过；严格 Clippy 被既有 OpenSSH `single_element_loop` 告警阻止，仅在检查命令中允许该项后通过。未进行原生 GUI、Windows/macOS 或安装包验收。无剩余实现依赖，使用修复需重启开发应用并新开本地会话；自定义 Shell 配置仍决定实际提示符。详见[验证记录](../validation/workspace/VALIDATION_INTERACTIONS.md#2026-11-06-本地终端默认-shell-修复)。本阶段完成后停止。
+
 ## 2026-11-06 OpenSSH 导入弹窗高度修复
 
 已将导入弹窗外层改为纵向 Flex，修复 WebKitGTK 初始状态撑满视口的问题，保留长预览独立滚动和固定底部操作区。WebKitGTK/Chromium 五组尺寸与主题的 40 项布局/状态检查、77 项相关前端测试、类型、ESLint、修改文件格式和生产前端构建通过。未重建桌面二进制或安装包，原生 Tauri/WebView2 及 macOS 未复验；当前无剩余实现依赖。详见[验证记录](../validation/hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-openssh-导入弹窗高度修复)。
