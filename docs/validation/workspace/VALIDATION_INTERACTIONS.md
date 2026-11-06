@@ -1,5 +1,31 @@
 # 主机交互与本地终端验收
 
+## 2026-11-06 AppImage 本地终端 Python 环境修复
+
+用户在本地终端执行项目虚拟环境 Python 时出现 `No module named 'encodings'`。日志中的 `PYTHONHOME`、`PYTHONPATH` 指向 `/tmp/.mount_Server…/usr/`。核对现有 0.2.0 AppImage 的 `AppRun.wrapped`，确认启动器无条件设置 `PYTHONHOME`，并向 `PYTHONPATH`、`PATH` 和 `LD_LIBRARY_PATH` 注入包内路径；原本地终端直接继承这些值。
+
+`crates/application/src/local_terminal.rs` 现仅在 Linux 本地终端子进程上清理上述四个变量：`APPDIR` 必须是绝对非根目录，路径按组件比较，列表通过标准库拆分和拼接。移除包内条目，保留包外路径、顺序及混合列表中的空条目；清理后没有非空条目则移除变量。相似前缀目录不受影响，无有效 `APPDIR` 时原样保留环境。不修改应用全局环境、用户 Shell 配置、项目文件或已有会话，无新增依赖或接口。
+
+执行环境为 Linux、Rust stable 1.99.1、Node 24.15.0。构建前输出盘空闲约 811 GiB，沿用根目录 `target/` 及 `.cargo/config.toml`；没有清理缓存、改变调试信息或强杀应用。测试程序复制到 `.local/appimage-environment-qa/terminal-tests` 后运行。原 AppImage 另存于该目录，现有发行包未被成功更新。
+
+| 检查                                                                                                         | 实际结果                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cargo test -p serverdeck-application --lib --no-run --locked --offline`                                     | 未通过：首次 rustc SIGSEGV，重试在既有 `ssh_key::private::PrivateKey` 的类型归一化中触发编译器内部 panic；没有执行整个应用层测试                                                                                                                |
+| 独立 Rust 测试入口直接包含实际 `local_terminal.rs`，链接 Cargo 已有依赖，输出仍放根目录 `target/debug/deps/` | 编译通过，隔离其他应用模块的测试编译故障；入口位于 `.local/appimage-environment-qa/terminal_harness.rs`                                                                                                                                         |
+| `.local/appimage-environment-qa/terminal-tests local_terminal::tests --include-ignored --nocapture`          | 8 项通过：新增包内路径移除、包外路径与相似前缀保留、无效 APPDIR 保留、真实虚拟环境 Python 启动；既有 Shell 解析、Bash 提示符/别名、PTY 输入输出、resize、退出码、独立关闭和取消继续通过                                                         |
+| 复制现有真实 `AppRun.wrapped`，以 QA 专用 `.desktop` 指向上述测试程序，运行同组测试                          | 8 项通过，覆盖实际启动器向进程注入环境后的终端行为；不是新版 GUI 或安装包验收                                                                                                                                                                   |
+| 真实 Python 集成项                                                                                           | 使用 `/usr/bin/python3 -m venv --without-pip` 创建含空格路径的隔离虚拟环境；真实 Bash PTY 中，未清理配置复现 `encodings` 错误，清理后成功导入 `encodings` 并返回正确虚拟环境前缀。此项默认 ignored，以上命令已通过 `--include-ignored` 显式执行 |
+| 独立终端源码和测试的 `clippy-driver --test --emit=metadata -D warnings`                                      | 通过                                                                                                                                                                                                                                            |
+| `cargo clippy -p serverdeck-application --lib --locked --offline -- -D warnings`                             | 既有 `crates/core/src/openssh.rs:290` 的 `single_element_loop` 阻止通过；仅本次命令允许该 lint 后，编译 `serverdeck-ai` 时 SIGILL，整体检查仍未通过                                                                                             |
+| `npx vue-tsc --noEmit -p apps/desktop/tsconfig.json`                                                         | 单独执行通过                                                                                                                                                                                                                                    |
+| `CARGO_NET_OFFLINE=true npm run tauri -- build --bundles appimage`                                           | 内置插件生成完成，随后前端类型检查进程段错误；设置单并发重试仍失败，未生成新包                                                                                                                                                                  |
+| 单独 Vite 生产构建                                                                                           | 未通过：先在 Monaco worker 生成文件、后在未修改的 Vue 依赖报告解析错误，单线程重试未解决；未修改依赖或锁文件                                                                                                                                    |
+| 桌面 Release 编译，含 `--features tauri/custom-protocol` 的重试                                              | 未通过：分别在 Tauri 和应用库的 rustc/LLVM 中 SIGSEGV；未产出可交付的修复版桌面程序                                                                                                                                                             |
+
+格式和差异检查结果在本节最终记录：Rustfmt、修改文档 Prettier、`git diff --check` 均通过。
+
+未执行用户原项目的 worker、原生 GUI、真实 SSH/SFTP 或 Windows/macOS 验收。当前 workaround 是在原脚本目录执行 `env -u PYTHONHOME -u PYTHONPATH ./start-worker.sh`；这只解决日志显示的 Python 初始化污染，不代表 worker 业务流程已验证。已有终端仍含旧环境，源码修复正式生效依赖构建工具恢复、重建应用并新建本地会话。其他 AppImage 工具包变量不在本次清理范围。本阶段停止，不修改工具链或扩展修复构建系统。
+
 ## 2026-11-06 本地终端默认 Shell 修复
 
 用户反馈本地终端仅显示 `$`，而系统终端显示 `dh@dh:~$`。代码核对确认原实现固定启动 `/bin/sh -i`；本机 `/bin/sh` 指向 dash，账户登录 Shell 为 `/bin/bash`。

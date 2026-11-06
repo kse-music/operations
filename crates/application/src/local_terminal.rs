@@ -68,6 +68,37 @@ fn dimensions(size: TerminalSize) -> PtySize {
         pixel_height: 0,
     }
 }
+#[cfg(target_os = "linux")]
+fn clean_appimage_environment(command: &mut CommandBuilder) -> Result<(), Error> {
+    let Some(appdir) = command.get_env("APPDIR").map(std::path::PathBuf::from) else {
+        return Ok(());
+    };
+    if !appdir.is_absolute() || appdir.parent().is_none() {
+        return Ok(());
+    }
+    // AppRun's bundled Python and libraries belong to the app, not the user's shell.
+    for key in ["PYTHONHOME", "PYTHONPATH", "PATH", "LD_LIBRARY_PATH"] {
+        let Some(value) = command.get_env(key) else {
+            continue;
+        };
+        let original = std::env::split_paths(value).collect::<Vec<_>>();
+        let retained = original
+            .iter()
+            .filter(|path| !path.starts_with(&appdir))
+            .collect::<Vec<_>>();
+        if retained.len() == original.len() {
+            continue;
+        }
+        if retained.iter().all(|path| path.as_os_str().is_empty()) {
+            command.env_remove(key);
+        } else {
+            let value = std::env::join_paths(retained)
+                .map_err(|error| failed("无法准备本地终端环境", error))?;
+            command.env(key, value);
+        }
+    }
+    Ok(())
+}
 #[cfg(unix)]
 fn unix_shell(mut command: CommandBuilder) -> (CommandBuilder, String) {
     let path = command.get_shell();
@@ -94,6 +125,8 @@ fn shell() -> Result<(CommandBuilder, String), Error> {
     };
     #[cfg(unix)]
     let (mut command, name) = unix_shell(CommandBuilder::new_default_prog());
+    #[cfg(target_os = "linux")]
+    clean_appimage_environment(&mut command)?;
     // Start in the user's own directory; never interpolate a path into shell text.
     let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
     if let Some(path) = std::env::var_os(home) {
@@ -486,6 +519,144 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     #[test]
+    fn appimage_paths_are_removed_without_discarding_user_environment() {
+        let mut command = CommandBuilder::new("/bin/bash");
+        command.env("APPDIR", "/tmp/.mount_ServerDeck");
+        command.env("PYTHONHOME", "/tmp/.mount_ServerDeck/usr/");
+        command.env("PYTHONPATH", "/tmp/.mount_ServerDeck/usr/share/pyshared/:");
+        command.env(
+            "PATH",
+            "/tmp/.mount_ServerDeck/usr/bin/:/home/user/.local/bin:/usr/bin",
+        );
+        command.env(
+            "LD_LIBRARY_PATH",
+            "/opt/user/lib:/tmp/.mount_ServerDeck/usr/lib/:/tmp/.mount_ServerDeck-other/lib",
+        );
+        command.env("HOME", "/home/user");
+        command.env("VIRTUAL_ENV", "/home/user/project/.venv");
+        command.env("SSH_AUTH_SOCK", "/run/user/1000/agent");
+        clean_appimage_environment(&mut command).expect("clean environment");
+        assert_eq!(command.get_env("PYTHONHOME"), None);
+        assert_eq!(command.get_env("PYTHONPATH"), None);
+        assert_eq!(
+            command.get_env("PATH"),
+            Some("/home/user/.local/bin:/usr/bin".as_ref())
+        );
+        assert_eq!(
+            command.get_env("LD_LIBRARY_PATH"),
+            Some("/opt/user/lib:/tmp/.mount_ServerDeck-other/lib".as_ref())
+        );
+        assert_eq!(command.get_env("HOME"), Some("/home/user".as_ref()));
+        assert_eq!(
+            command.get_env("VIRTUAL_ENV"),
+            Some("/home/user/project/.venv".as_ref())
+        );
+        assert_eq!(
+            command.get_env("SSH_AUTH_SOCK"),
+            Some("/run/user/1000/agent".as_ref())
+        );
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn appimage_cleanup_preserves_custom_paths_and_requires_a_valid_bundle_root() {
+        let mut command = CommandBuilder::new("/bin/bash");
+        command.env("APPDIR", "/tmp/Server Deck.AppDir");
+        command.env("PYTHONHOME", "/opt/python:/opt/python-exec");
+        command.env(
+            "PYTHONPATH",
+            "/opt/custom modules::/tmp/Server Deck.AppDir/usr/share/pyshared:/opt/extra:",
+        );
+        command.env("PATH", "/usr/bin");
+        command.env("LD_LIBRARY_PATH", "/opt/custom/lib");
+        clean_appimage_environment(&mut command).expect("clean mixed environment");
+        assert_eq!(
+            command.get_env("PYTHONHOME"),
+            Some("/opt/python:/opt/python-exec".as_ref())
+        );
+        assert_eq!(
+            command.get_env("PYTHONPATH"),
+            Some("/opt/custom modules::/opt/extra:".as_ref())
+        );
+        assert_eq!(command.get_env("PATH"), Some("/usr/bin".as_ref()));
+        assert_eq!(
+            command.get_env("LD_LIBRARY_PATH"),
+            Some("/opt/custom/lib".as_ref())
+        );
+        for appdir in [None, Some(""), Some("/"), Some("relative/dir")] {
+            match appdir {
+                Some(value) => command.env("APPDIR", value),
+                None => command.env_remove("APPDIR"),
+            }
+            let original = command.clone();
+            clean_appimage_environment(&mut command).expect("non AppImage environment");
+            assert_eq!(command, original);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires /usr/bin/python3 with venv support"]
+    fn real_venv_python_starts_in_a_cleaned_appimage_pty() {
+        let root = tempfile::tempdir().expect("Python test directory");
+        let venv = root.path().join("project with spaces/.venv");
+        let creation = std::process::Command::new("/usr/bin/python3")
+            .args(["-m", "venv", "--without-pip"])
+            .arg(&venv)
+            .env_remove("PYTHONHOME")
+            .env_remove("PYTHONPATH")
+            .output()
+            .expect("system Python for real venv");
+        assert!(
+            creation.status.success(),
+            "venv creation: {}",
+            String::from_utf8_lossy(&creation.stderr)
+        );
+        std::fs::write(root.path().join(".bashrc"), "").expect("isolated bashrc");
+        let mut defaults = CommandBuilder::new_default_prog();
+        defaults.env("SHELL", "/bin/bash");
+        defaults.env("HOME", root.path());
+        defaults.env("APPDIR", root.path().join("ServerDeck.AppDir"));
+        defaults.env("PYTHONHOME", root.path().join("ServerDeck.AppDir/usr/"));
+        defaults.env(
+            "PYTHONPATH",
+            std::env::join_paths([
+                root.path().join("ServerDeck.AppDir/usr/share/pyshared"),
+                "".into(),
+            ])
+            .expect("Python paths"),
+        );
+        defaults.env(
+            "PATH",
+            std::env::join_paths([
+                root.path().join("ServerDeck.AppDir/usr/bin"),
+                venv.join("bin"),
+                "/usr/bin".into(),
+            ])
+            .expect("executable paths"),
+        );
+        defaults.env(
+            "LD_LIBRARY_PATH",
+            root.path().join("ServerDeck.AppDir/usr/lib"),
+        );
+        let (mut command, _) = unix_shell(defaults);
+        command.cwd(root.path());
+        command.args([
+            "-c",
+            "exec python3 -c 'import encodings, sys; print(\"SD_VENV_READY\"); print(sys.prefix)'",
+        ]);
+        let (status, output) = run_pty(command.clone(), b"");
+        assert_ne!(status.exit_code(), 0, "unclean Python must fail: {output}");
+        assert!(output.contains("No module named 'encodings'"), "{output}");
+        clean_appimage_environment(&mut command).expect("clean Python environment");
+        let (status, output) = run_pty(command, b"");
+        assert_eq!(status.exit_code(), 0, "{output}");
+        assert!(output.contains("SD_VENV_READY"), "{output}");
+        assert!(
+            output.contains(venv.to_str().expect("venv path")),
+            "{output}"
+        );
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
     fn interactive_bash_loads_user_prompt_and_aliases() {
         let home = tempfile::tempdir().expect("isolated home");
         std::fs::write(
@@ -500,6 +671,13 @@ mod tests {
         command.cwd(home.path());
         command.env("TERM", "xterm-256color");
         assert_eq!(name, "bash");
+        let (status, output) = run_pty(command, b"sd_rc_probe; printf '\\n'; exit 7\r");
+        assert_eq!(status.exit_code(), 7);
+        assert!(output.contains("__SD_USER_PROMPT__"), "{output}");
+        assert!(output.contains("SD_RC_741"), "{output}");
+    }
+    #[cfg(target_os = "linux")]
+    fn run_pty(command: CommandBuilder, input: &[u8]) -> (portable_pty::ExitStatus, String) {
         let pair = native_pty_system()
             .openpty(dimensions(TerminalSize { cols: 90, rows: 25 }))
             .expect("PTY");
@@ -513,9 +691,7 @@ mod tests {
             let result = reader.take(64 * 1024).read_to_end(&mut output);
             send.send((result, output)).expect("read result");
         });
-        writer
-            .write_all(b"sd_rc_probe; printf '\\n'; exit 7\r")
-            .expect("input");
+        writer.write_all(input).expect("input");
         writer.flush().expect("flush");
         let output = receive.recv_timeout(Duration::from_secs(15));
         if output.is_err() {
@@ -529,10 +705,8 @@ mod tests {
         if let Err(error) = read_result {
             assert_eq!(error.raw_os_error(), Some(5), "PTY EOF: {error}");
         }
-        assert_eq!(status.exit_code(), 7);
         let output = String::from_utf8(output).expect("UTF-8 output");
-        assert!(output.contains("__SD_USER_PROMPT__"), "{output}");
-        assert!(output.contains("SD_RC_741"), "{output}");
+        (status, output)
     }
     async fn next(events: &mut tokio::sync::mpsc::Receiver<TerminalEvent>) -> TerminalEvent {
         tokio::time::timeout(Duration::from_secs(15), events.recv())

@@ -1,5 +1,9 @@
 # ServerDeck 产品功能需求说明书（PRD）
 
+## 2026-11-06 AppImage 本地终端 Python 环境
+
+Linux AppImage 创建本地终端时，从子进程的 `PYTHONHOME`、`PYTHONPATH`、`PATH` 和 `LD_LIBRARY_PATH` 中移除当前 `APPDIR` 下的路径，避免包内 Python 配置污染系统解释器和项目虚拟环境。保留用户的其他路径与 Shell 配置，不修改应用自身环境、用户文件或已有会话；更新应用后新建本地终端生效。
+
 ## 2026-11-06 Linux 终端下划线完整显示
 
 Linux 终端须完整显示 `knowledge_base` 等文本中的下划线。渲染时的有效行高最低为 110%，避免 WebKitGTK 在紧凑行盒中裁掉字形下沿；用户设置更大行高时沿用该值，不改写已保存的字体或行高。字号缩放、切页恢复、选择及复制继续保留原始字符，Windows/macOS 沿用既有行高。

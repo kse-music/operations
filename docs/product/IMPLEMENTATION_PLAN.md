@@ -1,5 +1,9 @@
 # ServerDeck v0.1 实施计划
 
+## 2026-11-06 AppImage 本地终端 Python 环境修复
+
+已在 Linux 本地 PTY 创建时移除当前 AppImage 注入的 Python、可执行文件及动态库搜索路径，保留用户其他配置。终端源码独立编译、8 项真实 PTY/虚拟环境测试、真实 AppRun 启动器下的同组测试及模块严格 Clippy 通过。应用层 Cargo 测试、整体 Clippy、桌面 Release 和 AppImage 构建未通过，分别遇到编译器内部崩溃、既有 OpenSSH lint、前端类型检查进程段错误及未修改依赖的打包解析错误。原 AppImage 未更新，当前可用 `env -u PYTHONHOME -u PYTHONPATH ./start-worker.sh` 临时恢复 Python 启动；正式使用源码修复仍依赖成功重建应用并新开终端。未执行用户 worker、原生 GUI 或跨平台验收。详见[验证记录](../validation/workspace/VALIDATION_INTERACTIONS.md#2026-11-06-appimage-本地终端-python-环境修复)。本阶段停止，不扩展处理构建工具故障。
+
 ## 2026-11-06 Linux 终端下划线裁切修复
 
 已复现本机 WebKitGTK 在 14px、100% 行高时缓冲含下划线但绘制像素为零的问题，Linux 渲染时增加 110% 行高下限，保留已存配置、其他平台行高和会话。19 项字体/缩放测试、112 项真实组件渲染与像素检查、前端类型、修改文件 ESLint/格式及生产前端构建通过。未重建桌面程序或安装包，未复验用户原 SSH 会话及 Windows/macOS；有效行高增加会略减可见行数。无剩余实现依赖，开发应用重新加载前端后生效，发行版需重新构建。详见[验证记录](../validation/terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-linux-终端下划线裁切修复)。本阶段完成后停止。
