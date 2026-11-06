@@ -137,9 +137,6 @@ onBeforeUnmount(() => {
   endDrag();
   clearTimeout(clickTimer);
 });
-const connectedCount = computed(
-  () => (store.catalog?.hosts ?? []).filter((host) => hostState(host.id) === '已连接').length,
-);
 const limit = ref(200);
 watch(
   () => store.search,
@@ -488,17 +485,6 @@ onBeforeUnmount(() => {
         显示更多主机（{{ limit }} / {{ store.visible.length }}）
       </button>
     </div>
-    <footer class="host-sidebar-footer">
-      <span>{{
-        store.catalog
-          ? `${store.visible.length} / ${store.catalog.hosts.length} 台主机`
-          : '主机列表未加载'
-      }}</span>
-      <span v-if="store.catalog" class="host-online-count"
-        ><span :class="['status-dot', { offline: !connectedCount }]"></span
-        >{{ connectedCount }} 已连接</span
-      >
-    </footer>
     <div
       v-if="dragged"
       class="host-drag-preview"

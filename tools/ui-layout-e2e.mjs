@@ -132,7 +132,6 @@ try {
         sidebar: box('.sidebar'),
         list: box('.host-tree-scroll'),
         header: box('.host-list-heading'),
-        footer: box('.host-sidebar-footer'),
         main: box('main'),
         rail: box('.activity-rail'),
         modules: box('.module-header'),

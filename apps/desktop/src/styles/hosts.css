@@ -74,25 +74,6 @@
   scrollbar-width: thin;
   padding: 4px 6px 12px;
 }
-.host-sidebar-footer {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 10px 12px;
-  border-top: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 10px;
-  flex-shrink: 0;
-}
-.host-online-count {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  white-space: nowrap;
-}
-.host-online-count .status-dot {
-  margin: 0;
-}
 .host-load-more {
   width: 100%;
   margin-top: 10px;
