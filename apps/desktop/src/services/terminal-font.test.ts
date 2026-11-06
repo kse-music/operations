@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { defaultTerminalPreferences } from '../types/preferences';
-import { resolveTerminalFontFamily } from './terminal-font';
+import { resolveTerminalFontFamily, resolveTerminalLineHeight } from './terminal-font';
 
 it.each(['Linux x86_64', 'Linux aarch64'])(
   'uses the generic monospace family for the saved default on %s',
@@ -19,4 +19,21 @@ it.each(['Win32', 'MacIntel'])('preserves the existing default on %s', (platform
 it('preserves a custom font family on Linux', () => {
   const fontFamily = 'JetBrains Mono, monospace';
   expect(resolveTerminalFontFamily(fontFamily, 'Linux x86_64')).toBe(fontFamily);
+});
+
+it.each(['Linux x86_64', 'Linux aarch64'])(
+  'keeps low glyphs inside Linux terminal rows on %s',
+  (platform) => {
+    expect(resolveTerminalLineHeight(100, platform)).toBe(1.1);
+    expect(resolveTerminalLineHeight(105, platform)).toBe(1.1);
+    expect(resolveTerminalLineHeight(110, platform)).toBe(1.1);
+    expect(resolveTerminalLineHeight(150, platform)).toBe(1.5);
+    expect(resolveTerminalLineHeight(200, platform)).toBe(2);
+  },
+);
+
+it.each(['Win32', 'MacIntel'])('preserves the configured line height on %s', (platform) => {
+  expect(resolveTerminalLineHeight(100, platform)).toBe(1);
+  expect(resolveTerminalLineHeight(105, platform)).toBe(1.05);
+  expect(resolveTerminalLineHeight(150, platform)).toBe(1.5);
 });

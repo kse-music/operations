@@ -1,5 +1,26 @@
 # SSH 日常使用增强验收
 
+## 2026-11-06 Linux 终端下划线裁切修复
+
+### 复现与实现
+
+用户截图显示 Windows 中 `knowledge_base` 的下划线可见，本机 Linux 同一文本下划线消失。本机 WebKitGTK 2.52.6、系统 `monospace`（DejaVu Sans Mono）、14px 下，xterm 6 DOM 行高为 16px 并逐行裁切，缓冲中的 `_` 保留，但三个下划线对应区域的可见像素为零。提高有效行高到 110% 后行高为 17px，相同区域有 25 个前景像素，复现了字形下沿被裁切的原因。
+
+`services/terminal-font.ts` 增加 `resolveTerminalLineHeight`，Linux 渲染时采用至少 110% 行高，Windows/macOS 保持配置百分比。`TerminalPane.vue` 在初始化和显示偏好变化时统一调用；保留既有隐藏更新延迟、字体回退、xterm 实例和缓冲，不修改已保存配置。相关测试覆盖 Linux 两种平台标识、低行高保护、较大行高、Windows/macOS 原值，以及隐藏期间修改行高后恢复显示。
+
+### 本次验证
+
+- `npm run test -w @serverdeck/desktop -- src/services/terminal-font.test.ts src/views/terminal-zoom.test.ts`：2 个文件、19 项通过。
+- `.local/terminal-font-qa/glyph-verify.mjs` 使用实际 Vue TerminalPane、xterm、应用样式及仅内存中的独立测试配置。WebKitGTK 宽窄窗口、DPR 1/2 四组各验证 10–32px 全部 23 种字号及 150% 行高，96 项通过；Chromium 156.0.8078.79 同样四组验证 10/14/18/32px，16 项通过，共 112 项。
+- 每项检查截图中下划线区域的前景像素、缓冲和选择文本中的 `knowledge_base/`、等宽测量及更新后仍为同一 xterm 实例。包含隐藏后改变字号/行高再显示；WebKit 最少 18 个下划线像素，DPR 2 最少 36 个，均非空。保存的 150% 行高仍得到 1.5 的有效值。
+- 证据位于 `.local/terminal-font-qa/glyphs/verification.json` 及 `fixed-webkit-*.png`、`fixed-chromium-*.png`，已查看 WebKit 常规与高 DPI 窄窗口截图；复现脚本为同目录上一级的 `glyph-probe.mjs`。
+- `npm run typecheck`、四个修改源码/测试文件 ESLint 及 Prettier、文档格式、`git diff --check`：通过。
+- `npm run build`：内置插件生成、Vue 类型检查和 Vite 生产前端构建通过，保留既有大 chunk 提醒。构建前磁盘约 811 GiB 可用，WASM 沿用已有输出目录，无 Rust 代码修改。
+
+### 边界、风险与依赖
+
+以上为本机真实渲染引擎及组件测试，测试文本未连接远程主机、调用替代产品 IPC 或改写用户配置。未复验用户原 SSH 会话、原生 Tauri 窗口、Windows/macOS 实机、全量业务单测或安装包；未重建桌面可执行文件。Linux 紧凑配置的有效行高变大会略减窗口内可见行数，用户自定义字体仍取决于本机字形度量。当前无剩余实现依赖，开发应用重新加载前端后生效，发行版需重新构建；本阶段完成后停止。
+
 ## 2026-11-06 Linux 默认字体回退修复
 
 用户再次通过 `npm run tauri -- dev` 启动后，普通 `ls` 仍呈现明显字距。核对实际进程位于当前仓库 `target/debug/`，1420 开发服务提供的终端组件包含隐藏初始化修复，因此不能将本次现象归因于旧 Release。通过临时模板热更新读取用户实际窗口的字体与几何指标，没有读取终端文本或重建 SSH 会话；原始指标保存在 `.local/terminal-font-qa/actual/before.json`。

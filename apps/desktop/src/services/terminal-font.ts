@@ -11,3 +11,11 @@ export function resolveTerminalFontFamily(
     ? 'monospace'
     : fontFamily;
 }
+
+export function resolveTerminalLineHeight(
+  lineHeight: number,
+  platform: string = navigator.platform,
+): number {
+  // WebKitGTK clips low glyphs in xterm's DOM rows at the tightest line heights.
+  return Math.max(platform.startsWith('Linux') ? 110 : 100, lineHeight) / 100;
+}

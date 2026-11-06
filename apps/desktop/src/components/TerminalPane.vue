@@ -21,7 +21,7 @@ import {
 } from '../types/terminal';
 import { useTerminalsStore, type TerminalPaneModel } from '../stores/terminals';
 import { defaultTerminalPreferences, terminalThemes, shortcutKey } from '../types/preferences';
-import { resolveTerminalFontFamily } from '../services/terminal-font';
+import { resolveTerminalFontFamily, resolveTerminalLineHeight } from '../services/terminal-font';
 import { TerminalInputQueue } from '../services/terminal-input';
 import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
 import ForwardDialog from './ForwardDialog.vue';
@@ -476,7 +476,7 @@ function terminalOptions() {
   const p = preferences.value;
   return {
     fontFamily: resolveTerminalFontFamily(p.fontFamily),
-    lineHeight: p.lineHeight / 100,
+    lineHeight: resolveTerminalLineHeight(p.lineHeight),
     scrollback: p.scrollback,
     theme: terminalThemes[p.theme],
     cursorBlink: p.cursorBlink,

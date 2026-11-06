@@ -7,13 +7,13 @@ import { useTerminalsStore } from '../stores/terminals';
 import { useNotificationsStore } from '../stores/notifications';
 import * as ipc from '../services/ipc';
 import { defaultTerminalPreferences } from '../types/preferences';
-import { resolveTerminalFontFamily } from '../services/terminal-font';
+import { resolveTerminalFontFamily, resolveTerminalLineHeight } from '../services/terminal-font';
 import { defaultProductPreferences } from '../types/product';
 import type { AppConfig } from '../types/ipc';
 
 const xterm = vi.hoisted(() => ({
   instances: [] as {
-    options: { fontSize: number; fontFamily: string };
+    options: { fontSize: number; fontFamily: string; lineHeight: number };
     keyHandler: (event: KeyboardEvent) => boolean;
   }[],
   fit: vi.fn(),
@@ -25,7 +25,7 @@ vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     keyHandler: (event: KeyboardEvent) => boolean = () => true;
     parser = { registerOscHandler: vi.fn() };
-    constructor(public options: { fontSize: number; fontFamily: string }) {
+    constructor(public options: { fontSize: number; fontFamily: string; lineHeight: number }) {
       xterm.instances.push(this);
     }
     loadAddon() {}
@@ -192,11 +192,16 @@ it('applies font changes after hidden panes become visible', async () => {
   const config = useApplicationStore().state!.config;
   config.terminalFontSize = 18;
   config.terminal.fontFamily = 'monospace';
+  config.terminal.lineHeight = 150;
   await nextTick();
   expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([14, 14]);
   expect(xterm.instances.map((terminal) => terminal.options.fontFamily)).toEqual([
     resolveTerminalFontFamily(defaultTerminalPreferences().fontFamily),
     resolveTerminalFontFamily(defaultTerminalPreferences().fontFamily),
+  ]);
+  expect(xterm.instances.map((terminal) => terminal.options.lineHeight)).toEqual([
+    resolveTerminalLineHeight(100),
+    resolveTerminalLineHeight(100),
   ]);
   visible.value = true;
   await vi.waitFor(() => {
@@ -205,6 +210,7 @@ it('applies font changes after hidden panes become visible', async () => {
       'monospace',
       'monospace',
     ]);
+    expect(xterm.instances.map((terminal) => terminal.options.lineHeight)).toEqual([1.5, 1.5]);
   });
   expect(xterm.open).toHaveBeenCalledTimes(2);
 });
