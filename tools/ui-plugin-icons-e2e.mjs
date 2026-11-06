@@ -90,7 +90,6 @@ try {
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
     assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
       '主机管理',
-      '资产管理',
       '插件',
       '设置',
     ]);

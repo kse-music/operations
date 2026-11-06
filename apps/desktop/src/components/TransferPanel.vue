@@ -5,9 +5,10 @@ import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 import { bytes, taskLabels, unfinished, type TransferInfo } from '../types/files';
 const store = useFilesStore();
-const props = defineProps<{ hostId: string }>();
-const tasks = computed(() => store.tasks.filter((task) => task.hostId === props.hostId));
-const pending = computed(() => tasks.value.filter(unfinished).length);
+const props = defineProps<{ hostId: string; history?: boolean }>();
+const tasks = computed(() =>
+  store.tasks.filter((task) => task.hostId === props.hostId && unfinished(task) !== props.history),
+);
 defineEmits<{ retry: [task: TransferInfo] }>();
 async function cancel(id: string): Promise<void> {
   try {
@@ -19,14 +20,16 @@ async function cancel(id: string): Promise<void> {
 }
 </script>
 <template>
-  <section v-if="tasks.length" class="transfer-panel" aria-label="传输任务">
-    <div class="section-heading">
+  <section
+    v-if="tasks.length"
+    class="transfer-panel"
+    :aria-label="history ? '已结束的传输' : '传输任务'"
+  >
+    <div v-if="!history" class="section-heading">
       <h2>传输任务</h2>
-      <span>{{ pending }} 个未完成 · 关闭此主机后清除记录</span>
+      <span>{{ tasks.length }} 个未完成</span>
     </div>
-    <p class="subtle">
-      失败后从头重新传输；不支持断点续传。取消保留已完成文件，提交中的单文件会等待结果。
-    </p>
+    <p v-else class="subtle">关闭此主机后清除记录。重试会从头传输。</p>
     <div
       v-for="task in [...tasks].reverse()"
       :key="task.id"
@@ -40,8 +43,8 @@ async function cancel(id: string): Promise<void> {
         ><span class="subtle"
           >{{ task.filesDone }} / {{ task.filesTotal }} 文件 · 跳过 {{ task.skipped }}</span
         >
-        <p class="transfer-path" :title="task.destination">
-          {{ task.sources.length }} 项 → {{ task.destination }}
+        <p class="transfer-path" :title="[...task.sources, '→ ' + task.destination].join('\n')">
+          {{ task.sources.join('、') }} → {{ task.destination }}
         </p>
         <progress
           :max="Math.max(task.totalBytes, 1)"
@@ -60,6 +63,7 @@ async function cancel(id: string): Promise<void> {
         v-if="unfinished(task)"
         class="button"
         :disabled="task.state === 'cancelling'"
+        title="取消保留已完成文件，提交中的单文件会等待结果"
         @click="cancel(task.id)"
       >
         取消传输</button

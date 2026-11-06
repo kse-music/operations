@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   Info,
-  KeyRound,
   Boxes,
   PanelLeftClose,
   Settings2,
@@ -24,16 +23,13 @@ defineEmits<{
 }>();
 const groups = {
   hosts: [],
-  assets: [
-    { view: 'credentials', icon: KeyRound },
-    { view: 'models', icon: Boxes },
-  ],
   plugins: [{ view: 'plugins', icon: Puzzle }],
   system: [
     { view: 'settings', icon: Settings2 },
     { view: 'settingsTerminal', icon: Terminal },
     { view: 'settingsShortcuts', icon: Keyboard },
     { view: 'settingsStorage', icon: PanelsTopLeft },
+    { view: 'models', icon: Boxes },
     { view: 'about', icon: Info },
   ],
 } as const;

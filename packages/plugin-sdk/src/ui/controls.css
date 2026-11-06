@@ -10,18 +10,18 @@
   border-bottom: 1px solid var(--border);
 }
 .page-view h1 {
-  font-size: 21px;
+  font-size: calc(21px * var(--interface-font-scale, 1));
   line-height: 28px;
 }
 .page-view h2,
 .modal h3 {
-  font-size: 14px;
+  font-size: calc(14px * var(--interface-font-scale, 1));
   font-weight: 600;
   line-height: 22px;
   margin: 0 0 12px;
 }
 .page-view h3 {
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   line-height: 22px;
   margin: 0 0 8px;
 }
@@ -91,7 +91,7 @@
   background: var(--panel);
   color: var(--text);
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 20px;
 }
 :is(.content-scroll, .modal) textarea {
@@ -100,7 +100,7 @@
 }
 :is(.content-scroll, .modal) input[type='file'] {
   max-width: 100%;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 input[type='file']::file-selector-button {
   min-height: var(--control-height);
@@ -125,7 +125,7 @@ input[type='file']::file-selector-button {
   align-items: stretch;
   justify-content: flex-start;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   min-width: 0;
 }
 :is(.page-view, .modal) label:has(input[type='checkbox']) {
@@ -135,7 +135,7 @@ input[type='file']::file-selector-button {
   flex-direction: row;
   gap: 8px;
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 20px;
 }
 .ops-toolbar:has(> label > select, > label > input:not([type='checkbox'])) {
@@ -265,12 +265,12 @@ input[type='file']::file-selector-button {
 .page-view details > summary {
   cursor: pointer;
   line-height: 22px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .ops-log-output,
 .export-text {
   font:
-    12px/1.7 Consolas,
+    calc(12px * var(--interface-font-scale, 1))/1.7 Consolas,
     monospace;
 }
 .settings-form {
@@ -286,7 +286,7 @@ input[type='file']::file-selector-button {
   align-items: end;
 }
 .settings-form legend {
-  font-size: 14px;
+  font-size: calc(14px * var(--interface-font-scale, 1));
   font-weight: 600;
   padding: 0 0 16px;
 }
@@ -336,7 +336,7 @@ input[type='file']::file-selector-button {
 }
 .ops-table th .text-button {
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   justify-content: flex-start;
   padding-inline: 0;
 }
@@ -355,10 +355,6 @@ input[type='file']::file-selector-button {
   width: 32px;
   height: 32px;
   flex-basis: 32px;
-}
-.file-list-tools select {
-  min-height: 28px;
-  padding-block: 3px;
 }
 .icon-button {
   display: inline-flex;
@@ -383,7 +379,7 @@ input[type='file']::file-selector-button {
   padding: 14px 0;
   margin: 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .system-details dt {
   width: 100px;

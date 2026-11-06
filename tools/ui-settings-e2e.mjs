@@ -51,6 +51,7 @@ try {
         config: {
           version: 1,
           theme,
+          interfaceFontSize: 'standard',
           sidebarWidth: 260,
           terminalFontSize: 14,
           connectTimeoutSecs: 10,
@@ -75,15 +76,31 @@ try {
         await close.click();
     };
     assert.equal(await settings.getByRole('tablist').count(), 0);
+    assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
+      '主机管理',
+      '插件',
+      '设置',
+    ]);
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      [...categories, '关于'],
+      [...categories, '模型管理', '关于'],
     );
     for (let index = 0; index < categories.length; index++) {
       await select(index);
       assert.equal(await settings.locator('.settings-category:visible').count(), 1);
       assert.equal(await activeMenu().getAttribute('aria-label'), categories[index]);
       assert.equal(await settings.locator('h1').textContent(), categories[index]);
+      const restore = settings.getByRole('button', { name: '恢复默认', exact: true });
+      const save = settings.getByRole('button', { name: '保存设置', exact: true });
+      const restoreBox = await restore.boundingBox();
+      const saveBox = await save.boundingBox();
+      assert(
+        restoreBox &&
+          saveBox &&
+          restoreBox.y === saveBox.y &&
+          restoreBox.x + restoreBox.width < saveBox.x,
+        `${name}: ${categories[index]} must place restore defaults to the left of save`,
+      );
       const layout = await settings.locator('.settings-category:visible').evaluate((panel) => {
         const rect = (el) => el.getBoundingClientRect();
         const groups = [...panel.querySelectorAll(':scope > fieldset')];
@@ -92,11 +109,13 @@ try {
           shortcuts: panel.classList.contains('settings-shortcuts'),
           overflows: panel.scrollWidth > panel.clientWidth,
           groupGaps: groups.slice(1).map((group, i) => rect(group).top - rect(groups[i]).bottom),
-          headingGaps: groups.map(
-            (group) =>
-              rect(group.querySelector('.settings-fields')).top -
-              rect(group.querySelector('legend')).bottom,
-          ),
+          headingGaps: groups
+            .filter((group) => group.querySelector('.settings-fields'))
+            .map(
+              (group) =>
+                rect(group.querySelector('.settings-fields')).top -
+                rect(group.querySelector('legend')).bottom,
+            ),
           fields: [...panel.querySelectorAll('.settings-fields > label:not(.checkbox-label)')].map(
             (label) => {
               const control = label.querySelector('input, select');
@@ -255,6 +274,14 @@ try {
     await navigateWorkspace(page, '关于');
     assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 1);
     await page.screenshot({ path: `${output}/${name}-about.png` });
+    await navigateWorkspace(page, '模型管理');
+    await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').getAttribute('data-module'),
+      'system',
+    );
+    assert.equal(await activeMenu().getAttribute('aria-label'), '模型管理');
+    assert.equal(await page.locator('.workspace-tab[data-view="models"]').count(), 1);
     await select(1);
     assert.equal(await quickCopyPaste.isChecked(), true);
     assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '120');

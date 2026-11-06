@@ -34,7 +34,10 @@ impl Engine {
                 connect::establish(
                     self.database.clone(),
                     plan,
-                    self.control(&control.info.id)?,
+                    trust::Trust::Interactive {
+                        control: self.control(&control.info.id)?,
+                        sink: sink.clone(),
+                    },
                     sink,
                 )
                 .await?,

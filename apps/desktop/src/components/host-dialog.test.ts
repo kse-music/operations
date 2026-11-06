@@ -45,6 +45,7 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   const auth = form.querySelector<HTMLSelectElement>('[aria-label="认证方式"]')!;
   expect(Array.from(auth.options, ({ value }) => value)).toEqual(['password', 'private_key']);
   expect(auth.value).toBe('password');
+  expect(auth.options[1]!.textContent).toBe('公钥认证（PublicKey）');
   const fields = form.querySelectorAll<HTMLInputElement>('.form-grid > label input');
   expect(fields[0]!.required).toBe(false);
   expect(fields[0]!.value).toBe('');
@@ -59,7 +60,22 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
     fields[index]!.dispatchEvent(new Event('input', { bubbles: true }));
   }
   await nextTick();
-  expect(form.checkValidity()).toBe(true);
+  expect(form.checkValidity()).toBe(false);
+  const password = form.querySelector<HTMLInputElement>('input[type="password"]')!;
+  expect(password.value).toBe('');
+  password.value = 'fixture-only-password';
+  password.dispatchEvent(new Event('input', { bubbles: true }));
+  const fingerprint = {
+    hostname: '192.0.2.10',
+    port,
+    algorithm: 'ssh-ed25519',
+    fingerprint: 'SHA256:fixture',
+  };
+  const test = vi
+    .spyOn(hostsApi, 'test')
+    .mockRejectedValueOnce(new Error('SSH 认证失败'))
+    .mockResolvedValueOnce({ status: 'trust_required', key: fingerprint })
+    .mockResolvedValue({ status: 'connected', testId: 'fixture-receipt', expiresInSeconds: 300 });
   const create = vi.spyOn(hostsApi, 'create').mockImplementation(async (input) => ({
     ...input,
     id: 'new-host',
@@ -70,7 +86,38 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
     ...store.catalog!,
     hosts: [await create.mock.results[0]!.value],
   }));
-  form.querySelector<HTMLButtonElement>('[type="submit"]')!.click();
+  const button = (label: string) =>
+    [...form.querySelectorAll('button')].find((el) => el.textContent?.trim() === label)!;
+  const save = button('保存主机');
+  expect(button('取消')).toBeUndefined();
+  expect(save.disabled).toBe(true);
+  form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  expect(create).not.toHaveBeenCalled();
+  button('测试连接').click();
+  await vi.waitFor(() =>
+    expect(form.querySelector('[role="alert"]')?.textContent).toContain('SSH 认证失败'),
+  );
+  expect(save.disabled).toBe(true);
+  button('测试连接').click();
+  await vi.waitFor(() => expect(form.textContent).toContain(fingerprint.fingerprint));
+  expect(save.disabled).toBe(true);
+  button('信任并继续测试').click();
+  await vi.waitFor(() => expect(save.disabled).toBe(false));
+  expect(test).toHaveBeenLastCalledWith(
+    expect.objectContaining({ port }),
+    { kind: 'password', password: 'fixture-only-password' },
+    fingerprint,
+    undefined,
+  );
+  password.value = 'changed';
+  password.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  expect(save.disabled).toBe(true);
+  password.value = 'fixture-only-password';
+  password.dispatchEvent(new Event('input', { bubbles: true }));
+  button('测试连接').click();
+  await vi.waitFor(() => expect(save.disabled).toBe(false));
+  save.click();
   await vi.waitFor(() => expect(store.busy).toBe(false));
   expect(create).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({
@@ -84,9 +131,12 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
       description: '',
       favorite: false,
     }),
+    { kind: 'password', password: 'fixture-only-password' },
+    'fixture-receipt',
   );
   expect(saved).toHaveBeenCalledWith(expect.objectContaining({ name: '', id: 'new-host' }));
   expect(close).toHaveBeenCalledOnce();
+  expect(password.value).toBe('');
   expect(store.catalog?.hosts).toHaveLength(1);
 });
 
@@ -113,17 +163,7 @@ it.each(['agent', 'private_key'] as const)(
     store.catalog = {
       hosts: [host],
       groups: [],
-      credentials: [
-        {
-          id: 'ssh-key',
-          name: 'SSH key',
-          kind: 'private_key',
-          keyPath: null,
-          hasSecret: true,
-          hostCount: 0,
-          revision: 1,
-        },
-      ],
+      credentials: [],
       pendingSecretDeletions: 0,
     };
     const { saved, close } = mountDialog(host);
@@ -145,15 +185,19 @@ it.each(['agent', 'private_key'] as const)(
       auth.dispatchEvent(new Event('change', { bubbles: true }));
       await nextTick();
       expect(form.textContent).not.toContain('当前主机使用系统 SSH Agent');
-      const credential = form.querySelector<HTMLSelectElement>('[aria-label="安全凭据引用"]')!;
-      credential.value = 'ssh-key';
-      credential.dispatchEvent(new Event('change', { bubbles: true }));
+      const key = form.querySelector<HTMLTextAreaElement>('textarea')!;
+      key.value = 'fixture-only-key';
+      key.dispatchEvent(new Event('input', { bubbles: true }));
+      await nextTick();
+      const passphrase = form.querySelector<HTMLInputElement>('input[type="password"]')!;
+      passphrase.value = 'fixture-only-passphrase';
+      passphrase.dispatchEvent(new Event('input', { bubbles: true }));
     }
     const name = form.querySelector<HTMLInputElement>('input')!;
     name.value = 'Updated';
     name.dispatchEvent(new Event('input', { bubbles: true }));
     await nextTick();
-    const update = vi.spyOn(hostsApi, 'update').mockImplementation(async (_id, input) => ({
+    const update = vi.spyOn(hostsApi, 'updateTested').mockImplementation(async (_id, input) => ({
       ...host,
       ...input,
     }));
@@ -161,15 +205,55 @@ it.each(['agent', 'private_key'] as const)(
       ...store.catalog!,
       hosts: [await update.mock.results[0]!.value],
     }));
-    form.querySelector<HTMLButtonElement>('[type="submit"]')!.click();
+    const buttons = [...form.querySelectorAll<HTMLButtonElement>('footer button')];
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['测试连接', '保存主机']);
+    const [testButton, saveButton] = buttons;
+    expect(saveButton?.disabled).toBe(true);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(update).not.toHaveBeenCalled();
+    const test = vi
+      .spyOn(hostsApi, 'test')
+      .mockRejectedValueOnce(new Error('SSH 认证失败'))
+      .mockResolvedValue({ status: 'connected', testId: 'verified-edit', expiresInSeconds: 300 });
+    testButton!.click();
+    await vi.waitFor(() =>
+      expect(form.querySelector('[role="alert"]')?.textContent).toContain('SSH 认证失败'),
+    );
+    expect(saveButton?.disabled).toBe(true);
+    testButton!.click();
+    await vi.waitFor(() => expect(saveButton?.disabled).toBe(false));
+    const authentication =
+      authType === 'private_key'
+        ? {
+            kind: 'private_key',
+            keyData: 'fixture-only-key',
+            passphrase: 'fixture-only-passphrase',
+          }
+        : undefined;
+    expect(test).toHaveBeenLastCalledWith(
+      { ...hostInput(host), name: 'Updated', authType },
+      authentication,
+      undefined,
+      host.id,
+    );
+    expect(update).not.toHaveBeenCalled();
+    name.value = 'Updated after test';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+    expect(saveButton?.disabled).toBe(true);
+    name.value = 'Updated';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    testButton!.click();
+    await vi.waitFor(() => expect(saveButton?.disabled).toBe(false));
+    saveButton!.click();
     await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(store.busy).toBe(false));
-    expect(update).toHaveBeenCalledExactlyOnceWith(host.id, {
-      ...hostInput(host),
-      name: 'Updated',
-      authType,
-      credentialId: authType === 'private_key' ? 'ssh-key' : null,
-    });
+    expect(update).toHaveBeenCalledExactlyOnceWith(
+      host.id,
+      { ...hostInput(host), name: 'Updated', authType },
+      authentication,
+      'verified-edit',
+    );
     expect(store.catalog?.hosts[0]).toMatchObject({
       name: 'Updated',
       tags: ['legacy-tag'],

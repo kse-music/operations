@@ -97,7 +97,7 @@ watch(
 .image-removal-details dt,
 .image-removal-source {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .image-removal-details dd {
   display: grid;
@@ -108,10 +108,10 @@ watch(
 }
 .image-removal-details dd > span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .image-removal-details code {
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   user-select: text;
 }
 .image-removal-note {
@@ -119,7 +119,7 @@ watch(
   border-radius: 6px;
   background: var(--hover);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.7;
 }
 .image-removal-source {

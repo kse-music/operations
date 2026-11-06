@@ -22,10 +22,7 @@ function confirmDelete() {
 async function remove() {
   const host = deleting.value;
   if (!host) return;
-  const result = await store.run(
-    () => hostsApi.remove(host.id),
-    '主机已删除，安全凭据保留供其他主机使用。',
-  );
+  const result = await store.run(() => hostsApi.remove(host.id), '主机已删除。');
   if (result.ok) deleting.value = undefined;
 }
 defineExpose({ edit, confirmDelete });
@@ -44,7 +41,7 @@ defineExpose({ edit, confirmDelete });
         deleting.port
       }}）？
     </p>
-    <p class="subtle">仅删除主机配置，安全凭据与已建立的连接保留。</p>
+    <p class="subtle">在主机表单中保存且没有其他引用的密码或私钥会一并清理。已建立的连接会保留。</p>
 
     <footer class="dialog-actions">
       <button class="button" :disabled="store.busy" @click="deleting = undefined">取消</button>

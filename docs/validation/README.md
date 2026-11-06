@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[通用设置界面字号](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-通用设置界面字号)。
+
+最新：[模型管理移至设置](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-模型管理移至设置)。
+
+最新：[SFTP 列表高度与传输面板](files/VALIDATION_STAGE4.md#2026-11-07-sftp-列表高度与传输面板)。
+
+最新：[SFTP 本地路径显示与表头排序](files/VALIDATION_STAGE4.md#2026-11-06-sftp-本地路径显示与表头排序)。
+
+最新：[设置按分类恢复默认](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-06-设置按分类恢复默认)。
+
 最新：[AppImage 本地终端 Python 环境修复](workspace/VALIDATION_INTERACTIONS.md#2026-11-06-appimage-本地终端-python-环境修复)。
 
 最新：[主机表单移除 SSH Agent 选项](hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-主机表单移除-ssh-agent-选项)。
@@ -24,7 +34,7 @@
 
 最新：[终端隐藏初始化字距修复](terminal/VALIDATION_SSH_USABILITY.md#2026-11-06-终端隐藏初始化字距修复)。
 
-最新：[内置插件包改为构建产物](foundation/VALIDATION_BUILD_CACHE.md#2026-11-06-内置插件包改为构建产物)。
+最新：[调试、打包与测试产物的 Git 审计](foundation/VALIDATION_BUILD_CACHE.md#2026-11-06-调试打包与测试产物的-git-审计)。
 
 最新：[Linux 通知高度修复](workspace/VALIDATION_ERROR_NOTIFICATIONS.md#2026-11-06-linux-通知高度修复)。
 
@@ -85,6 +95,10 @@
 - [主机总数徽标位置验收](hosts/VALIDATION_HOST_COUNT.md)
 - [侧栏主机跨组拖动验收](hosts/VALIDATION_HOST_DRAG.md)
 - [主机优先布局验证（2026-11-03）](hosts/VALIDATION_HOST_FIRST_LAYOUT.md)
+- [编辑主机保存门槛验证](hosts/VALIDATION_HOST_INVENTORY.md#2026-11-06-编辑主机保存门槛)
+- [编辑主机连接测试验证](hosts/VALIDATION_HOST_INVENTORY.md#2026-11-06-编辑主机连接测试)
+- [新建主机连接测试验证](hosts/VALIDATION_HOST_INVENTORY.md#2026-11-06-新建主机连接测试)
+- [主机表单 SSH 认证验证](hosts/VALIDATION_HOST_INVENTORY.md#2026-11-06-主机表单直接填写-ssh-认证)
 - [主机管理列表精简验收](hosts/VALIDATION_HOST_INVENTORY.md)
 - [主机列表操作入口调整验收](hosts/VALIDATION_HOST_LIST_ACTIONS.md)
 - [主机行操作精简与悬停显示验收](hosts/VALIDATION_HOST_ROW_ACTIONS.md)

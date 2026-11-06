@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import ProductSettings from './ProductSettings.vue';
 import Modal from './Modal.vue';
 import { useStorageMigration } from '../composables/storage-migration';
@@ -9,10 +9,25 @@ import {
   type SettingsCategory,
 } from '../types/product';
 import { useApplicationStore } from '../stores/application';
+import { useHostsStore } from '../stores/hosts';
+import { hostsApi } from '../services/hosts';
+import type { SecureStatus } from '../types/hosts';
 import type { AppConfig } from '../types/ipc';
-import { shortcutLabels, shortcutKey, defaultTerminalPreferences } from '../types/preferences';
+import {
+  defaultInterfaceFontSize,
+  defaultTerminalPreferences,
+  interfaceFontSizes,
+  shortcutKey,
+  shortcutLabels,
+} from '../types/preferences';
 
 const application = useApplicationStore();
+const hosts = useHostsStore();
+const secureStatus = ref<SecureStatus>();
+async function checkSecureStore(): Promise<void> {
+  const result = await hosts.run(hostsApi.status);
+  if (result.ok) secureStatus.value = result.value;
+}
 const migration = useStorageMigration();
 const { target, preview, discardDocuments, busy, changed } = migration;
 const props = withDefaults(defineProps<{ category?: SettingsCategory }>(), { category: 'general' });
@@ -32,11 +47,34 @@ watch(
       return;
     }
     draft.value = config ? (JSON.parse(JSON.stringify(config)) as AppConfig) : null;
-    if (draft.value) draft.value.product ??= defaultProductPreferences();
+    if (draft.value) {
+      draft.value.product ??= defaultProductPreferences();
+      draft.value.interfaceFontSize ??= defaultInterfaceFontSize;
+    }
     baseline = JSON.stringify(draft.value);
   },
   { immediate: true },
 );
+
+const fontSizeStep = computed({
+  get: () =>
+    interfaceFontSizes.findIndex(
+      (size) => size.value === (draft.value?.interfaceFontSize ?? defaultInterfaceFontSize),
+    ),
+  set: (step: number) => {
+    const size = interfaceFontSizes[step];
+    if (draft.value && size) draft.value.interfaceFontSize = size.value;
+  },
+});
+watch(
+  () =>
+    draft.value?.interfaceFontSize === application.state?.config.interfaceFontSize
+      ? undefined
+      : draft.value?.interfaceFontSize,
+  (preview) => (application.interfaceFontSizePreview = preview),
+  { immediate: true },
+);
+onBeforeUnmount(() => (application.interfaceFontSizePreview = undefined));
 
 async function submit(event: Event): Promise<void> {
   const form = event.currentTarget as HTMLFormElement;
@@ -68,6 +106,38 @@ function capture(action: string, event: KeyboardEvent): void {
   const key = shortcutKey(event);
   if (key && draft.value) draft.value.terminal.shortcuts[action] = key;
 }
+
+function restoreDefaults(): void {
+  const config = draft.value;
+  if (!config) return;
+  const product = defaultProductPreferences();
+  // Scalar defaults mirror serverdeck_core::AppConfig::default().
+  switch (props.category) {
+    case 'general':
+      config.theme = 'dark';
+      config.interfaceFontSize = defaultInterfaceFontSize;
+      config.sidebarWidth = 248;
+      config.monitorIntervalSecs = 3;
+      config.product.language = product.language;
+      break;
+    case 'terminal':
+      config.terminalFontSize = 14;
+      config.terminal = { ...defaultTerminalPreferences(), shortcuts: config.terminal.shortcuts };
+      config.connectTimeoutSecs = 15;
+      config.product.sshDefaults = product.sshDefaults;
+      break;
+    case 'shortcuts':
+      config.terminal.shortcuts = defaultTerminalPreferences().shortcuts;
+      config.product.shortcuts = product.shortcuts;
+      break;
+    case 'storage':
+      config.product.downloadDirectory = product.downloadDirectory;
+      config.transferConcurrency = 3;
+      config.logLevel = 'info';
+      target.value = application.state?.storage?.rootDirectory ?? '';
+      break;
+  }
+}
 </script>
 
 <template>
@@ -75,7 +145,7 @@ function capture(action: string, event: KeyboardEvent): void {
     <div class="section-heading">
       <div>
         <h1 id="settings-title">{{ categoryLabel }}</h1>
-        <p class="section-description">保存后应用界面和终端偏好，连接参数在新建连接时生效。</p>
+        <p class="section-description">界面字号可即时预览，连接参数在新建连接时生效。</p>
       </div>
       <span class="subtle">仅保存在此设备</span>
     </div>
@@ -94,6 +164,33 @@ function capture(action: string, event: KeyboardEvent): void {
               <option value="system">跟随系统</option>
             </select>
           </label>
+          <div class="settings-field interface-font-size">
+            <label for="interface-font-size">界面字号</label>
+            <div class="interface-font-ticks">
+              <button
+                v-for="(size, step) in interfaceFontSizes"
+                :key="size.value"
+                type="button"
+                :aria-pressed="fontSizeStep === step"
+                @click="fontSizeStep = step"
+              >
+                {{ size.label }}
+              </button>
+            </div>
+            <input
+              id="interface-font-size"
+              v-model.number="fontSizeStep"
+              type="range"
+              min="0"
+              :max="interfaceFontSizes.length - 1"
+              step="1"
+              :aria-valuetext="interfaceFontSizes[fontSizeStep]?.label"
+              aria-describedby="interface-font-size-help"
+            />
+            <p id="interface-font-size-help" class="subtle">
+              即时预览，保存后记住。终端字号单独设置。
+            </p>
+          </div>
           <label
             ><span class="settings-label"
               >侧边栏宽度 <span class="subtle">{{ draft.sidebarWidth }} px</span></span
@@ -236,15 +333,6 @@ function capture(action: string, event: KeyboardEvent): void {
                 @keydown="capture(action, $event)"
             /></label>
           </div>
-          <div class="settings-group-actions">
-            <button
-              type="button"
-              class="button"
-              @click="draft.terminal.shortcuts = defaultTerminalPreferences().shortcuts"
-            >
-              恢复默认快捷键
-            </button>
-          </div>
         </fieldset>
         <ProductSettings
           v-model="draft.product"
@@ -294,6 +382,21 @@ function capture(action: string, event: KeyboardEvent): void {
           section="storage"
           :disabled="application.saving || busy"
         />
+        <fieldset :disabled="application.saving || busy || hosts.busy">
+          <legend>系统凭据库</legend>
+          <p class="subtle">待清理旧秘密 {{ hosts.catalog?.pendingSecretDeletions ?? '—' }} 项</p>
+          <div class="toolbar">
+            <button type="button" class="button" @click="checkSecureStore">检查系统凭据库</button>
+            <button
+              type="button"
+              class="button"
+              @click="hosts.run(hostsApi.cleanup, '清理检查已完成。')"
+            >
+              重试清理旧秘密
+            </button>
+          </div>
+          <p v-if="secureStatus" class="subtle" role="status">{{ secureStatus.message }}</p>
+        </fieldset>
         <fieldset :disabled="application.saving || busy">
           <legend>传输与日志</legend>
           <div class="settings-fields">
@@ -320,9 +423,19 @@ function capture(action: string, event: KeyboardEvent): void {
       </div>
       <div class="form-footer">
         <p class="subtle">统一保存所有分类。配置不包含密码、私钥或私钥口令。</p>
-        <button class="button primary" type="submit" :disabled="application.saving || busy">
-          {{ application.saving || busy ? '处理中…' : changed ? '保存、迁移并重启' : '保存设置' }}
-        </button>
+        <div class="action-row">
+          <button
+            class="button"
+            type="button"
+            :disabled="application.saving || busy"
+            @click="restoreDefaults"
+          >
+            恢复默认
+          </button>
+          <button class="button primary" type="submit" :disabled="application.saving || busy">
+            {{ application.saving || busy ? '处理中…' : changed ? '保存、迁移并重启' : '保存设置' }}
+          </button>
+        </div>
       </div>
     </form>
     <p v-else class="subtle">连接本地后端后即可读取和修改设置。</p>

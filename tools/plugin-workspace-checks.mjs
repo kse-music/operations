@@ -21,7 +21,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     await page
       .locator('.module-navigation [data-module]')
       .evaluateAll((nodes) => nodes.map((n) => n.textContent.trim())),
-    ['主机管理', '资产管理', '设置'],
+    ['主机管理', '插件', '设置'],
   );
   await navigateWorkspace(page, 'AI 运维助手');
   await content().locator('.ai-view').waitFor();

@@ -1,4 +1,10 @@
-import { hostTreeAction, navigateWorkspace, reloadHosts, showHostTree } from './ui-navigation.mjs';
+import {
+  hostContextAction,
+  hostTreeAction,
+  navigateWorkspace,
+  reloadHosts,
+  showHostTree,
+} from './ui-navigation.mjs';
 // Real packaged WebView2 + Rust IPC + SQLite + OS credential store. No IPC mocking.
 // Test config and browser debugging apply only to a copied, isolated test executable.
 import { spawn, spawnSync } from 'node:child_process';
@@ -136,41 +142,6 @@ async function updateTestHost(name, changes) {
 async function showHosts() {
   await showHostTree(page);
 }
-async function showCredentials() {
-  await navigateWorkspace(page, '安全凭据');
-}
-async function saveHost(title) {
-  const form = dialog(title);
-  await form.getByRole('button', { name: '保存主机', exact: true }).click();
-  await form.waitFor({ state: 'hidden' });
-}
-async function newCredential(name, kind, secret) {
-  await showCredentials();
-  await page.getByRole('button', { name: '＋ 新建凭据', exact: true }).click();
-  const form = dialog('新建凭据');
-  await form.getByLabel('凭据名称', { exact: true }).fill(name);
-  await form.getByLabel('凭据类型', { exact: true }).selectOption(kind);
-  if (kind === 'private_key') {
-    const { privateKey } = generateKeyPairSync('ed25519');
-    await form.getByLabel('选择私钥文件', { exact: true }).setInputFiles({
-      name: 'e2e-ed25519.key',
-      mimeType: 'application/octet-stream',
-      buffer: Buffer.from(
-        privateKey.export({
-          type: 'pkcs8',
-          format: 'pem',
-          cipher: 'aes-256-cbc',
-          passphrase: secret,
-        }),
-      ),
-    });
-  }
-  await form
-    .getByLabel(kind === 'password' ? 'SSH 密码' : '加密私钥口令（可选）', { exact: true })
-    .fill(secret);
-  await form.getByRole('button', { name: '保存凭据', exact: true }).click();
-  await form.waitFor({ state: 'hidden' });
-}
 const secret = `e2e-only-${randomUUID()}`;
 const passphrase = `e2e-passphrase-${randomUUID()}`;
 const results = [];
@@ -184,22 +155,45 @@ try {
     await form.getByLabel('文件夹名称', { exact: true }).fill('验收分组');
     await form.getByRole('button', { name: '新建文件夹', exact: true }).click();
     await form.waitFor({ state: 'hidden' });
-    await hostTreeAction(
-      page,
-      (await invoke('host_list')).groups.find((g) => g.name === '验收分组').id,
-      '新建主机',
-    );
+    const groupId = (await invoke('host_list')).groups.find((g) => g.name === '验收分组').id;
+    await hostTreeAction(page, groupId, '新建主机');
     form = dialog('新建主机');
     await form.getByLabel('主机名称（可选）', { exact: true }).fill('E2E-Host');
-    await form.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.25');
+    await form.getByLabel('地址（IP / 域名）', { exact: true }).fill('127.0.0.1');
+    await form.getByLabel('SSH 端口', { exact: true }).fill(String(await freePort()));
     await form.getByLabel('用户名', { exact: true }).fill('ops');
+    await form.getByLabel('SSH 密码', { exact: true }).fill(secret);
     assert.equal(await form.getByLabel('分组', { exact: true }).count(), 0);
     assert.equal(await form.getByLabel('标签（逗号分隔）', { exact: true }).count(), 0);
     assert.equal(await form.getByLabel('备注', { exact: true }).count(), 0);
     assert.equal(await form.getByLabel('收藏此主机', { exact: true }).count(), 0);
-    await saveHost('新建主机');
+    const save = form.getByRole('button', { name: '保存主机', exact: true });
+    assert(await save.isDisabled());
+    assert.equal(await form.getByRole('button', { name: '取消', exact: true }).count(), 0);
+    await form.getByRole('button', { name: '测试连接', exact: true }).click();
+    await form.getByRole('alert').waitFor();
+    assert(await save.isDisabled());
+    assert.equal((await invoke('host_list')).hosts.length, 0);
+    await form.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await invoke('host_create', {
+      input: {
+        name: 'E2E-Host',
+        hostname: '192.0.2.25',
+        port: 22,
+        username: 'ops',
+        authType: 'password',
+        credentialId: null,
+        groupId,
+        tags: [],
+        description: '',
+        favorite: false,
+        connectTimeoutSecs: 15,
+      },
+      authentication: { kind: 'password', password: secret },
+    });
+    await reloadHosts(page);
     await row('E2E-Host').waitFor();
-    results.push('native host + group create');
+    results.push('native new-host form blocks saving after real loopback connection refusal');
     await updateTestHost('E2E-Host', {
       hostname: 'updated.example.com',
       description: '端到端修改与重启验证',
@@ -219,30 +213,83 @@ try {
     await reloadHosts(page);
     await row('E2E-Host 副本').waitFor();
     results.push('native host copy via real IPC, without a host menu UI');
-    await newCredential('E2E 密码', 'password', secret);
-    await newCredential('E2E 私钥', 'private_key', passphrase);
-    const cards = page.locator('.credential-list li');
-    assert.equal(await cards.count(), 2);
-    await cards
-      .filter({ hasText: 'E2E 私钥' })
-      .getByText('私钥已导入系统凭据库', { exact: true })
-      .waitFor();
-    await cards
-      .filter({ hasText: 'E2E 密码' })
-      .getByRole('button', { name: '编辑', exact: true })
-      .click();
-    form = dialog('编辑凭据');
+    assert(original.credentialId, 'inline password must be attached to its host');
+    await hostContextAction(page, row('E2E-Host 副本').locator('.tree-host'), '编辑主机');
+    form = dialog('编辑主机');
     assert.equal(
       await form.getByLabel('SSH 密码', { exact: true }).inputValue(),
       '',
       'saved secrets must not be sent back to the UI',
     );
-    await form.getByRole('button', { name: '取消', exact: true }).click();
-    await showHosts();
-    const credential = (await invoke('host_list')).credentials.find(
-      (item) => item.name === 'E2E 密码',
+    assert.equal(await form.getByRole('button', { name: '取消', exact: true }).count(), 0);
+    const address = form.getByLabel('地址（IP / 域名）', { exact: true });
+    const port = form.getByLabel('SSH 端口', { exact: true });
+    const previousAddress = await address.inputValue();
+    await address.fill('127.0.0.1');
+    await port.fill(String(await freePort()));
+    const saveEdit = form.getByRole('button', { name: '保存主机', exact: true });
+    assert(await saveEdit.isDisabled());
+    await form.getByRole('button', { name: '测试连接', exact: true }).click();
+    await form
+      .getByRole('alert')
+      .filter({ hasText: /连接|SSH/ })
+      .waitFor();
+    assert(await saveEdit.isDisabled());
+    assert.equal(
+      (await invoke('host_list')).hosts.find((host) => host.name === 'E2E-Host 副本').hostname,
+      previousAddress,
     );
-    await updateTestHost('E2E-Host', { authType: 'password', credentialId: credential.id });
+    results.push(
+      'native host edit with saved authentication blocks saving after a refused SSH connection',
+    );
+    await form
+      .getByLabel('认证方式', { exact: true })
+      .selectOption({ label: '公钥认证（PublicKey）' });
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const keyData = privateKey.export({
+      type: 'pkcs8',
+      format: 'pem',
+      cipher: 'aes-256-cbc',
+      passphrase,
+    });
+    await form.getByLabel('选择私钥文件', { exact: true }).setInputFiles({
+      name: 'e2e-ed25519.key',
+      mimeType: 'application/octet-stream',
+      buffer: Buffer.from(keyData),
+    });
+    await form.getByLabel('加密私钥口令（可选）', { exact: true }).fill(passphrase);
+    assert(await saveEdit.isDisabled());
+    await form.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    const {
+      id: copyId,
+      createdAt: _createdAt,
+      updatedAt: _updatedAt,
+      ...copyInput
+    } = (await invoke('host_list')).hosts.find((host) => host.name === 'E2E-Host 副本');
+    // Offline persistence fixture. The real form is gated even for this test host.
+    await invoke('host_update', {
+      id: copyId,
+      input: { ...copyInput, authType: 'private_key', credentialId: null },
+      authentication: { kind: 'private_key', keyData, passphrase },
+    });
+    await reloadHosts(page);
+    const saved = await invoke('host_list');
+    const edited = saved.hosts.find((host) => host.name === 'E2E-Host 副本');
+    assert.equal(edited.authType, 'private_key');
+    assert(edited.credentialId && edited.credentialId !== original.credentialId);
+    assert.equal(
+      saved.hosts.find((host) => host.id === original.id).credentialId,
+      original.credentialId,
+    );
+    assert.deepEqual(saved.credentials, []);
+    await navigateWorkspace(page, '模型管理');
+    assert.deepEqual(
+      await page
+        .locator('.module-menu [aria-label]')
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label'))),
+      ['通用', '终端', '快捷键', '数据与存储', '模型管理', '关于'],
+    );
+    await showHosts();
     const database = await readFile(path.join(artifacts, 'serverdeck.sqlite3'));
     assert(
       !database.includes(Buffer.from(secret)) && !database.includes(Buffer.from(passphrase)),
@@ -250,7 +297,9 @@ try {
     );
     const log = await readFile(path.join(artifacts, 'logs', 'serverdeck.log'), 'utf8');
     assert(!log.includes(secret) && !log.includes(passphrase), 'secret found in logs');
-    results.push('native password and private key import + host link + no secret readback/leak');
+    results.push(
+      'native PublicKey form selection, IPC fixture import, copy isolation and no secret readback or leak',
+    );
     await stop();
     await start();
     await row('E2E-Host').waitFor();
@@ -294,18 +343,9 @@ try {
     await reloadHosts(page);
     await page.getByText('尚未添加主机', { exact: true }).waitFor();
     results.push('host JSON controls and commands are unavailable');
-    await showCredentials();
-    for (const name of ['E2E 密码', 'E2E 私钥']) {
-      await page
-        .locator('.credential-list li')
-        .filter({ hasText: name })
-        .getByRole('button', { name: '删除', exact: true })
-        .click();
-      form = dialog('确认删除凭据');
-      await form.getByRole('button', { name: '确认删除凭据', exact: true }).click();
-      await form.waitFor({ state: 'hidden' });
-    }
-    assert.equal(await page.locator('.credential-list li').count(), 0);
+    await navigateWorkspace(page, '数据与存储');
+    await page.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
+    await page.getByText(/^系统凭据库可读取/).waitFor();
     const afterDeletion = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('host_list'));
     assert.equal(afterDeletion.pendingSecretDeletions, 0);
     results.push('native OS secret deletion');

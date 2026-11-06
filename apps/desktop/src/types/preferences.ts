@@ -1,3 +1,14 @@
+export const interfaceFontSizes = [
+  { value: 'small', label: '小', scale: 0.95 },
+  { value: 'standard', label: '标准', scale: 1 },
+  { value: 'large', label: '大', scale: 1.15 },
+  { value: 'extraLarge', label: '特大', scale: 1.3 },
+  { value: 'ultraLarge', label: '超大', scale: 1.45 },
+] as const;
+
+export type InterfaceFontSize = (typeof interfaceFontSizes)[number]['value'];
+export const defaultInterfaceFontSize: InterfaceFontSize = 'standard';
+
 export interface TerminalPreferences {
   fontFamily: string;
   lineHeight: number;

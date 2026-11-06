@@ -5,7 +5,7 @@
 }
 kbd {
   font:
-    11px Consolas,
+    calc(11px * var(--interface-font-scale, 1)) Consolas,
     monospace;
   color: var(--muted);
   margin-left: 7px;
@@ -37,7 +37,7 @@ kbd {
   flex-shrink: 0;
 }
 .module-brand strong {
-  font-size: 17px;
+  font-size: calc(17px * var(--interface-font-scale, 1));
   font-weight: 500;
 }
 .module-navigation {
@@ -50,7 +50,7 @@ kbd {
   border-bottom: 2px solid transparent;
   background: transparent;
   color: var(--muted);
-  font-size: 14px;
+  font-size: calc(14px * var(--interface-font-scale, 1));
   font-weight: 500;
   white-space: nowrap;
 }
@@ -108,7 +108,7 @@ kbd {
 .sidebar-module-title {
   flex: 1;
   padding: 5px 8px;
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   font-weight: 500;
 }
 .activity-group {
@@ -131,7 +131,7 @@ kbd {
   border-radius: 5px;
 }
 .nav-label {
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   white-space: nowrap;
 }
 .activity-rail .nav-item > svg {
@@ -145,7 +145,7 @@ kbd {
   border-radius: 4px;
   background: var(--accent);
   color: var(--accent-contrast);
-  font-size: 10px;
+  font-size: calc(10px * var(--interface-font-scale, 1));
   line-height: 14px;
   text-align: center;
 }
@@ -212,7 +212,7 @@ kbd {
   text-overflow: ellipsis;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .workspace-group-tab {
   flex-shrink: 0;
@@ -268,7 +268,7 @@ kbd {
   gap: 6px;
   min-height: 30px;
   padding: 5px 9px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -444,7 +444,7 @@ kbd {
 .exit-review-note {
   margin: 3px 0 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.55;
 }
 .exit-review-note {
@@ -535,7 +535,7 @@ textarea:focus-visible,
   .module-navigation button {
     flex: 1;
     padding: 0 6px;
-    font-size: 12px;
+    font-size: calc(12px * var(--interface-font-scale, 1));
   }
   #terminal-session-tools {
     flex: 1 1 150px;

@@ -32,6 +32,7 @@ beforeEach(() => {
     config: {
       version: 1,
       theme: 'dark',
+      interfaceFontSize: 'standard',
       sidebarWidth: 260,
       terminalFontSize: 14,
       connectTimeoutSecs: 10,
@@ -86,6 +87,14 @@ async function submit() {
   await nextTick();
 }
 
+async function restoreDefaults() {
+  const button = root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!;
+  expect(button.textContent?.trim()).toBe('恢复默认');
+  expect(button.nextElementSibling).toBe(root.querySelector('.form-footer [type="submit"]'));
+  button.click();
+  await nextTick();
+}
+
 it('shows the selected menu category and saves drafts from all four categories together', async () => {
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
   expect(root.querySelector('[role="tablist"]')).toBeNull();
@@ -123,6 +132,63 @@ it('shows the selected menu category and saves drafts from all four categories t
     }),
   );
   expect(useApplicationStore().notice).toContain('设置已保存');
+});
+
+it('restores general, terminal and shortcut defaults independently in the shared draft', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  const theme = await input('[data-testid="theme-select"]', 'light', 'change');
+  const width = await input('[aria-label="侧边栏宽度"]', '320');
+  const interfaceSize = await input('#interface-font-size', '4');
+  const font = await input('[aria-label="终端字体"]', 'Consolas');
+  const proxy = await input('[aria-label="全局默认代理"]', 'socks5', 'change');
+  const download = await input('[aria-label="默认下载目录"]', 'D:\\Downloads');
+  await select(2);
+  const copy = root.querySelector<HTMLInputElement>('[aria-label="复制快捷键"]')!;
+  const openSettings = root.querySelector<HTMLInputElement>('[aria-label="打开设置全局快捷键"]')!;
+  copy.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', ctrlKey: true, shiftKey: true }));
+  openSettings.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true }));
+
+  await select(0);
+  await restoreDefaults();
+  expect(theme.value).toBe('dark');
+  expect(width.value).toBe('248');
+  expect(interfaceSize.getAttribute('aria-valuetext')).toBe('标准');
+  expect(font.value).toBe('Consolas');
+  expect(proxy.value).toBe('socks5');
+
+  await select(1);
+  await restoreDefaults();
+  expect(font.value).toBe(defaultTerminalPreferences().fontFamily);
+  expect(proxy.value).toBe('direct');
+  expect(copy.value).toBe('Ctrl+Shift+X');
+  expect(openSettings.value).toBe('Ctrl+J');
+
+  await input('[aria-label="终端字体"]', 'Consolas');
+  await select(2);
+  const resetButtons = [
+    ...root.querySelectorAll('#settings-panel-shortcuts button, .form-footer button'),
+  ].filter((button) => button.textContent?.trim().startsWith('恢复默认'));
+  expect(resetButtons).toHaveLength(1);
+  await restoreDefaults();
+  expect(copy.value).toBe('Ctrl+Shift+C');
+  expect(openSettings.value).toBe('Ctrl+,');
+  expect(font.value).toBe('Consolas');
+  expect(download.value).toBe('D:\\Downloads');
+  expect(useApplicationStore().state!.config.sidebarWidth).toBe(260);
+  expect(save).not.toHaveBeenCalled();
+
+  await submit();
+  expect(save).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      theme: 'dark',
+      interfaceFontSize: 'standard',
+      sidebarWidth: 248,
+      monitorIntervalSecs: 3,
+      connectTimeoutSecs: 15,
+      terminal: { ...defaultTerminalPreferences(), fontFamily: 'Consolas' },
+      product: { ...defaultProductPreferences(), downloadDirectory: 'D:\\Downloads' },
+    }),
+  );
 });
 
 it('keeps quick copy and paste off by default and saves it only after enabling and submitting', async () => {
@@ -205,6 +271,36 @@ async function storageDraft() {
   await select(3);
   await input('[aria-label="数据根目录"]', 'D:\\ServerDeck');
 }
+
+it('restores storage preferences and clears a pending directory change without migrating', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  const preview = vi.spyOn(ipc, 'storagePreview');
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await storageDraft();
+  const download = await input('[aria-label="默认下载目录"]', 'D:\\Downloads');
+  const concurrency = await input('[aria-label="每主机并发传输数"]', '6');
+  const logLevel = await input('[aria-label="日志级别"]', 'debug', 'change');
+
+  await restoreDefaults();
+  expect(download.value).toBe('');
+  expect(concurrency.value).toBe('3');
+  expect(logLevel.value).toBe('info');
+  expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
+    'C:\\ServerDeck',
+  );
+  expect(root.querySelector('[type="submit"]')?.textContent?.trim()).toBe('保存设置');
+  expect(save).not.toHaveBeenCalled();
+  await submit();
+  expect(preview).not.toHaveBeenCalled();
+  expect(save).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      theme: 'light',
+      transferConcurrency: 3,
+      logLevel: 'info',
+      product: expect.objectContaining({ downloadDirectory: null }),
+    }),
+  );
+});
 
 it('groups language, SSH defaults, shortcuts and storage under their corresponding categories', async () => {
   const panel = (selector: string) =>

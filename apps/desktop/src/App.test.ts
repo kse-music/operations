@@ -73,6 +73,7 @@ function loadSidebarConfig(): void {
     config: {
       version: 1,
       theme: 'dark',
+      interfaceFontSize: 'standard',
       sidebarWidth: 248,
       terminalFontSize: 14,
       connectTimeoutSecs: 15,
@@ -327,7 +328,7 @@ it('opens About as a single system workspace page and preserves the existing ter
   expect(close).not.toHaveBeenCalled();
 });
 
-it('opens plugin management under settings, keeps language in settings and preserves the terminal', async () => {
+it('opens plugin management under Plugins, keeps language in Settings and preserves the terminal', async () => {
   loadSidebarConfig();
   vi.spyOn(pluginsApi, 'list').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
@@ -340,11 +341,11 @@ it('opens plugin management under settings, keeps language in settings and prese
   const original = JSON.stringify(terminals.tabs);
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
   expect(root.querySelector('[data-module="plugins"]')?.textContent?.trim()).toBe('插件');
-  root.querySelector<HTMLButtonElement>('[data-module="assets"]')!.click();
+  root.querySelector<HTMLButtonElement>('[data-module="system"]')!.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
   expect(root.querySelector('.module-menu [aria-label="插件管理"]')).toBeNull();
-  expect(root.querySelector('.module-menu [aria-label="通用"]')).toBeNull();
+  expect(root.querySelector('.module-menu [aria-label="通用"]')).not.toBeNull();
   await sidebarMenu('plugins', '插件管理');
   expect(workspace.module).toBe('plugins');
   expect(root.querySelector('.plugin-manager h1')?.textContent).toBe('插件管理');
@@ -427,6 +428,53 @@ it('keeps settings drafts across menus and workspace tabs, and navigates to inva
     await workspace.close(`${view}:`);
   await flush();
   expect(root.querySelector('.settings-panel')).toBeNull();
+});
+
+it('previews interface size across tabs and retains only the last successful save', async () => {
+  loadSidebarConfig();
+  const save = vi
+    .spyOn(ipc, 'saveConfig')
+    .mockRejectedValueOnce({ code: 'STORAGE', message: '无法保存设置' })
+    .mockImplementation(async (config) => config);
+  const application = useApplicationStore();
+  const workspace = useWorkspaceStore();
+  const scale = () => document.documentElement.style.getPropertyValue('--interface-font-scale');
+  await sidebarMenu('system', '通用');
+  const slider = root.querySelector<HTMLInputElement>('#interface-font-size')!;
+  const choose = async (step: string) => {
+    slider.value = step;
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
+  };
+  const submit = async () => {
+    root.querySelector('.settings-form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+    await flush();
+  };
+
+  expect(slider.getAttribute('aria-valuetext')).toBe('标准');
+  await choose('4');
+  expect(scale()).toBe('1.45');
+  expect(save).not.toHaveBeenCalled();
+  await sidebarMenu('system', '关于');
+  expect(scale()).toBe('1.45');
+  await sidebarMenu('system', '通用');
+  await submit();
+  expect(application.error).toBe('无法保存设置');
+  expect(application.state?.config.interfaceFontSize).toBe('standard');
+  expect(scale()).toBe('1.45');
+
+  await submit();
+  expect(save).toHaveBeenLastCalledWith(
+    expect.objectContaining({ interfaceFontSize: 'ultraLarge', terminalFontSize: 14 }),
+  );
+  expect(application.state?.config.interfaceFontSize).toBe('ultraLarge');
+  await choose('0');
+  expect(scale()).toBe('0.95');
+  await workspace.close('settings:');
+  await flush();
+  expect(scale()).toBe('1.45');
+  await sidebarMenu('system', '通用');
+  expect(root.querySelector('#interface-font-size')?.getAttribute('aria-valuetext')).toBe('超大');
 });
 
 it('covers body-level inputs and stops the native menu before a child stops propagation', () => {
@@ -534,7 +582,7 @@ it('removes the task center from the footer, search and legacy shortcuts without
   await flush();
   const search = document.querySelector<HTMLInputElement>('[aria-label="全局搜索内容"]')!;
   expect(search).not.toBeNull();
-  for (const removed of ['任务中心', '备份恢复']) {
+  for (const removed of ['任务中心', '备份恢复', '资产管理']) {
     search.value = removed;
     search.dispatchEvent(new Event('input', { bubbles: true }));
     await flush();
@@ -542,6 +590,36 @@ it('removes the task center from the footer, search and legacy shortcuts without
   }
   expect(useWorkspaceStore().current?.view).toBe('terminals');
   expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
+});
+
+it('reopens model management in Settings from global search and reuses the existing tab', async () => {
+  app!.unmount();
+  loadSidebarConfig();
+  vi.spyOn(useHostsStore(), 'load').mockResolvedValue();
+  vi.spyOn(useBackgroundStore(), 'start').mockImplementation(() => {});
+  vi.spyOn(useFilesStore(), 'poll').mockResolvedValue();
+  app = createApp(AppShell).use(pinia);
+  app.mount(root);
+  await flush();
+  await sidebarMenu('system', '模型管理');
+  await sidebarMenu('system', '关于');
+  root.querySelector<HTMLButtonElement>('[data-module="plugins"]')!.click();
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
+  await flush();
+  const search = document.querySelector<HTMLInputElement>('[aria-label="全局搜索内容"]')!;
+  search.value = '模型管理';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  const result = document.querySelector<HTMLButtonElement>('[role="option"]')!;
+  expect(result.textContent?.trim()).toBe('工作区 · 模型管理');
+  result.click();
+  await flush();
+  expect(useWorkspaceStore().current?.key).toBe('models:');
+  expect(useWorkspaceStore().module).toBe('system');
+  expect(root.querySelectorAll('.workspace-tab[data-view="models"]')).toHaveLength(1);
+  expect(root.querySelector('.module-menu [aria-current="page"]')?.getAttribute('aria-label')).toBe(
+    '模型管理',
+  );
 });
 
 it('confirms active transfer cancellation before closing a host and preserves the adjacent host', async () => {
@@ -648,7 +726,7 @@ it('merges navigation with the host tree and keeps the sidebar available on glob
   expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
   expect(useTerminalsStore().panes).toHaveLength(0);
   expect(root.querySelector(expandSelector)).toBeNull();
-  await useWorkspaceStore().navigate('credentials');
+  await useWorkspaceStore().navigate('models');
   await flush();
   expect(root.querySelector<HTMLElement>('.sidebar')!.style.display).not.toBe('none');
   expect(root.querySelector<HTMLElement>('.host-tree-section')!.style.display).toBe('none');
@@ -692,6 +770,7 @@ it('uses the right-clicked folder when creating a host without a group selector'
   for (const [index, value] of [
     [1, 'server.example'],
     [3, 'ops'],
+    [5, 'fixture-password'],
   ] as const) {
     fields[index]!.value = value;
     fields[index]!.dispatchEvent(new Event('input', { bubbles: true }));
@@ -706,12 +785,25 @@ it('uses the right-clicked folder when creating a host without a group selector'
     ...store.catalog!,
     hosts: [await create.mock.results[0]!.value],
   }));
+  vi.spyOn(hostsApi, 'test').mockResolvedValue({
+    status: 'connected',
+    testId: 'fixture-test',
+    expiresInSeconds: 300,
+  });
+  [...dialog.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '测试连接')!
+    .click();
+  await vi.waitFor(() =>
+    expect(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(false),
+  );
   dialog
     .querySelector('form')!
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() =>
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({ groupId: 'child', hostname: 'server.example', username: 'ops' }),
+      { kind: 'password', password: 'fixture-password' },
+      'fixture-test',
     ),
   );
   await vi.waitFor(() => expect(document.querySelector('[aria-label="新建主机"]')).toBeNull());
@@ -761,7 +853,7 @@ it('preserves welcome when switching unused module menus without opening a page 
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   const open = vi.spyOn(terminals, 'open');
-  for (const module of ['assets', 'plugins', 'system'] as const) {
+  for (const module of ['plugins', 'system'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -799,7 +891,7 @@ it('keeps the current terminal visible across top module switches and navigates 
   const hostTabRow = root.querySelector<HTMLElement>('.workspace-host-tabs')!;
   const open = vi.spyOn(terminals, 'open');
   const close = vi.spyOn(terminalApi, 'close');
-  for (const module of ['assets', 'plugins', 'system', 'hosts'] as const) {
+  for (const module of ['plugins', 'system', 'hosts'] as const) {
     root.querySelector<HTMLButtonElement>(`.module-navigation [data-module="${module}"]`)!.click();
     await flush();
     expect(workspace.module).toBe(module);
@@ -827,19 +919,26 @@ it('keeps the current terminal visible across top module switches and navigates 
     ['插件管理'],
   );
   expect(root.querySelector('.activity-rail [aria-label="通用"]')).toBeNull();
-  await sidebarMenu('assets', '模型管理');
+  await sidebarMenu('system', '模型管理');
+  expect(workspace.module).toBe('system');
+  expect(root.querySelector('.module-menu [aria-current="page"]')?.getAttribute('aria-label')).toBe(
+    '模型管理',
+  );
   expect(allHosts.getAttribute('aria-selected')).toBe('false');
   expect(allHosts.parentElement).toBe(
     root.querySelector('.workspace-tab[data-view="models"]')?.parentElement,
   );
   expect(hostTabRow.style.display).toBe('none');
-  expect([...root.querySelectorAll('.module-menu .nav-label')].map((el) => el.textContent)).toEqual(
-    ['安全凭据', '模型管理'],
-  );
   await sidebarMenu('system', '关于');
-  root.querySelector<HTMLButtonElement>('.module-navigation [data-module="assets"]')!.click();
+  root.querySelector<HTMLButtonElement>('.module-navigation [data-module="plugins"]')!.click();
   await flush();
   expect(workspace.current?.view).toBe('about');
+  root.querySelector<HTMLButtonElement>('.workspace-tab[data-view="models"] [role="tab"]')!.click();
+  await flush();
+  expect(workspace.module).toBe('system');
+  expect(root.querySelector('.module-menu [aria-current="page"]')?.getAttribute('aria-label')).toBe(
+    '模型管理',
+  );
   root
     .querySelector<HTMLButtonElement>('.workspace-tab[data-view="plugins"] [role="tab"]')!
     .click();
@@ -1635,13 +1734,13 @@ it.each([
   [
     '主机',
     '关闭',
-    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'models:'],
     'host:',
   ],
   [
     '主机',
     '关闭右侧',
-    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'models:'],
     'host:',
   ],
   ['主机', '关闭其它', ['host:a'], 'host:a'],
@@ -1649,7 +1748,7 @@ it.each([
   [
     '全部主机',
     '关闭',
-    ['extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
+    ['extension:cn.hiboot.plugins.assistant:assistant:', 'models:'],
     'extension:cn.hiboot.plugins.assistant:assistant:',
   ],
   ['全部主机', '关闭右侧', ['host:', 'host:a'], 'host:a'],
@@ -1672,10 +1771,10 @@ it.each([
     workspace.navigate('terminals', '');
     workspace.navigate('files', 'a');
     workspace.navigate('assistant');
-    workspace.navigate('credentials');
+    workspace.navigate('models');
     const peerPageActive = target === '全部主机' && ['关闭右侧', '关闭其它'].includes(label);
     if (peerPageActive) workspace.activate('host:a');
-    const beforeMenu = peerPageActive ? 'credentials:' : 'host:';
+    const beforeMenu = peerPageActive ? 'models:' : 'host:';
     workspace.activate(beforeMenu);
     files.connections.a = {
       host: useHostsStore().catalog!.hosts[0]!,

@@ -72,7 +72,7 @@ export interface ImportPreview {
 }
 export const authLabels: Record<AuthType, string> = {
   password: 'SSH 密码',
-  private_key: 'SSH 私钥',
+  private_key: '公钥认证（PublicKey）',
   agent: '系统 SSH Agent',
 };
 export function hostDisplayName(

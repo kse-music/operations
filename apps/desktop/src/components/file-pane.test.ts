@@ -43,7 +43,7 @@ it.each(['remote', 'local'] as const)(
       onOpen: open,
     });
     app.mount(root);
-    const headers = [...root.querySelectorAll('th')].map((th) => th.textContent);
+    const headers = [...root.querySelectorAll('th')].map((th) => th.textContent?.trim());
     expect(headers.includes('权限')).toBe(side === 'remote');
     expect(headers.includes('拥有者')).toBe(side === 'remote');
     const rows = [...root.querySelectorAll('tbody tr')];

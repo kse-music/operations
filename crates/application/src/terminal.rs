@@ -80,9 +80,22 @@ pub(crate) fn connection_plan(
     id: &str,
 ) -> Result<(Host, ConnectionPlan), Error> {
     let target = db.host(id)?;
-    let mut hosts = vec![];
-    let mut current = Some(id.to_owned());
-    let mut seen = std::collections::HashSet::new();
+    let plan = plan_for_target(db, secrets, target.clone(), None)?;
+    Ok((target, plan))
+}
+pub(crate) fn plan_for_target(
+    db: &Database,
+    secrets: &dyn SecretStore,
+    mut target: Host,
+    mut target_auth: Option<Authentication>,
+) -> Result<ConnectionPlan, Error> {
+    target.config = target.config.normalize()?;
+    target.config.ssh.require_proxy_credentials()?;
+    let target_id = target.id.clone();
+    let mut proxy_settings = target.config.ssh.proxy.clone();
+    let mut current = target.config.ssh.jump_host_id.clone();
+    let mut seen = std::collections::HashSet::from([target_id.clone()]);
+    let mut hosts = vec![target];
     while let Some(id) = current {
         if hosts.len() >= 5 || !seen.insert(id.clone()) {
             return Err(Error::Validation("跳板链循环或超过 4 个跳板"));
@@ -94,7 +107,6 @@ pub(crate) fn connection_plan(
         hosts.push(host);
     }
     hosts.reverse();
-    let mut proxy_settings = target.config.ssh.proxy.clone();
     if let Some(first) = hosts.first()
         && let Some(proxy) = &first.config.ssh.proxy
     {
@@ -139,7 +151,11 @@ pub(crate) fn connection_plan(
     let hops = hosts
         .into_iter()
         .map(|host| {
-            let (revision, auth) = authentication(db, secrets, &host)?;
+            let override_auth = (host.id == target_id).then(|| target_auth.take()).flatten();
+            let (revision, auth) = match override_auth {
+                Some(auth) => (0, auth),
+                None => authentication(db, secrets, &host)?,
+            };
             Ok(Hop {
                 host,
                 revision,
@@ -147,7 +163,7 @@ pub(crate) fn connection_plan(
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    Ok((target, ConnectionPlan { hops, proxy }))
+    Ok(ConnectionPlan { hops, proxy })
 }
 
 impl Application {

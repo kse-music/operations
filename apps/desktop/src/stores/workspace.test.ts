@@ -153,20 +153,16 @@ function openTabs() {
   workspace.navigate('terminals', '');
   workspace.navigate('files', 'a');
   workspace.navigate('assistant');
-  workspace.navigate('credentials');
+  workspace.navigate('models');
   return workspace;
 }
 
 it.each([
-  [
-    'current',
-    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
-    'credentials:',
-  ],
+  ['current', ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'models:'], 'models:'],
   [
     'right',
-    ['host:', 'host:a', 'extension:cn.hiboot.plugins.assistant:assistant:', 'credentials:'],
-    'credentials:',
+    ['host:', 'host:a', 'extension:cn.hiboot.plugins.assistant:assistant:', 'models:'],
+    'models:',
   ],
   ['others', ['host:a'], 'host:a'],
   ['all', [], ''],
@@ -188,7 +184,7 @@ it('closes only tabs in the same row to the right and preserves the active tab',
   expect(workspace.tabs.map((tab) => tab.key)).toEqual([
     'host:',
     'extension:cn.hiboot.plugins.assistant:assistant:',
-    'credentials:',
+    'models:',
   ]);
 });
 
@@ -197,7 +193,7 @@ it('keeps adjacent-tab selection for closing the current tab', async () => {
   workspace.activate('host:a');
   await workspace.close('host:a');
   expect(workspace.active).toBe('extension:cn.hiboot.plugins.assistant:assistant:');
-  await workspace.close('credentials:');
+  await workspace.close('models:');
   await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
@@ -231,10 +227,10 @@ it('switches module menus without changing the active page or host context', asy
   workspace.selectModule('system');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
   workspace.navigate('assistant');
-  workspace.navigate('credentials');
-  workspace.selectModule('assets');
+  workspace.selectModule('plugins');
   workspace.navigate('models');
-  workspace.selectModule('system');
+  expect(workspace.module).toBe('system');
+  workspace.selectModule('plugins');
   expect(workspace.current?.view).toBe('models');
   workspace.navigate('settings');
   expect(workspace.current?.view).toBe('settings');
@@ -244,7 +240,7 @@ it('switches module menus without changing the active page or host context', asy
   expect(workspace.current?.view).toBe('settings');
   expect(workspace.module).toBe('system');
   expect(workspace.hostId).toBe('a');
-  workspace.selectModule('assets');
+  workspace.selectModule('plugins');
   expect(workspace.current?.view).toBe('settings');
   workspace.activate('host:a');
   expect(workspace.module).toBe('hosts');
@@ -254,25 +250,26 @@ it('switches module menus without changing the active page or host context', asy
 it('does not choose another page or create a default when selecting a module after a tab closes', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('assistant');
-  workspace.navigate('credentials');
+  workspace.navigate('models');
   workspace.navigate('settings');
   await workspace.close('settings:');
   workspace.selectModule('system');
   expect(workspace.module).toBe('system');
-  expect(workspace.current?.view).toBe('credentials');
+  expect(workspace.current?.view).toBe('models');
   expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant')).toBe(true);
   await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
   workspace.selectModule('system');
-  expect(workspace.current?.view).toBe('credentials');
+  expect(workspace.current?.view).toBe('models');
   workspace.selectModule('system');
   expect(
     workspace.tabs.filter((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant'),
   ).toHaveLength(0);
-  workspace.activate('credentials:');
-  expect(workspace.module).toBe('assets');
+  workspace.selectModule('plugins');
+  workspace.activate('models:');
+  expect(workspace.module).toBe('system');
 });
 
-it.each(['hosts', 'assets', 'plugins', 'system'] as const)(
+it.each(['hosts', 'plugins', 'system'] as const)(
   'selects the %s module without opening or selecting any page',
   (id) => {
     const workspace = useWorkspaceStore();
@@ -320,9 +317,9 @@ it('keeps the current page and selected module when an unrelated inactive tab is
   const workspace = useWorkspaceStore();
   workspace.navigate('terminals', 'a');
   workspace.navigate('files', 'b');
-  workspace.selectModule('assets');
+  workspace.selectModule('system');
   await workspace.close('host:a');
-  expect(workspace.module).toBe('assets');
+  expect(workspace.module).toBe('system');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'b' });
   expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:b']);
 });

@@ -8,6 +8,7 @@ import type { TransferInfo } from '../types/files';
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const chosen = ref('a'),
+  history = ref(false),
   retry = vi.fn();
 const task = (id: string, hostId: string, state: string): TransferInfo => ({
   id,
@@ -30,13 +31,14 @@ const task = (id: string, hostId: string, state: string): TransferInfo => ({
 beforeEach(() => {
   pinia = createPinia();
   chosen.value = 'a';
+  history.value = false;
   retry.mockClear();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp({
     components: { TransferPanel },
-    setup: () => ({ chosen, retry }),
-    template: '<TransferPanel :host-id="chosen" @retry="retry" />',
+    setup: () => ({ chosen, history, retry }),
+    template: '<TransferPanel :host-id="chosen" :history="history" @retry="retry" />',
   }).use(pinia);
   app.mount(root);
 });
@@ -46,18 +48,18 @@ afterEach(() => {
   root.remove();
   vi.restoreAllMocks();
 });
-it('shows only this host records and pending count, preserves them on switching and hides an empty list', async () => {
+it('shows active transfers for the chosen host and keeps finished records in history', async () => {
   const files = useFilesStore(pinia);
   files.tasks = [task('a-ended', 'a', 'completed'), task('b-running', 'b', 'running')];
   await nextTick();
-  expect(root.textContent).toContain('0 个未完成');
-  expect(root.querySelector('[data-task-id="a-ended"]')).not.toBeNull();
-  expect(root.querySelector('[data-task-id="b-running"]')).toBeNull();
+  expect(root.querySelector('.transfer-panel')).toBeNull();
   chosen.value = 'b';
   await nextTick();
   expect(root.textContent).toContain('1 个未完成');
+  expect(root.querySelector('[data-task-id="b-running"]')?.textContent).toContain('/source');
   expect(root.querySelector('[data-task-id="a-ended"]')).toBeNull();
   chosen.value = 'a';
+  history.value = true;
   await nextTick();
   expect(root.querySelector('[data-task-id="a-ended"]')).not.toBeNull();
   files.tasks = files.tasks.filter((t) => t.hostId !== 'a');
@@ -76,6 +78,9 @@ it('keeps cancellation and retry bound to their original transfer and host', asy
   expect(cancel).toHaveBeenCalledExactlyOnceWith('a-task');
   expect(poll).toHaveBeenCalledOnce();
   useFilesStore(pinia).tasks = [{ ...transfer, state: 'failed' }];
+  await nextTick();
+  expect(root.querySelector('.transfer-panel')).toBeNull();
+  history.value = true;
   await nextTick();
   root.querySelector<HTMLButtonElement>('button')!.click();
   expect(retry).toHaveBeenCalledWith(expect.objectContaining({ id: 'a-task', hostId: 'a' }));

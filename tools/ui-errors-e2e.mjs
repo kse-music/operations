@@ -94,7 +94,6 @@ try {
     'terminals',
     'files',
     'server',
-    'credentials',
     'settings',
     'settingsTerminal',
     'settingsShortcuts',
@@ -189,8 +188,6 @@ try {
       },
       { view, message },
     );
-    if (view === 'credentials')
-      await page.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
     if (view.startsWith('settings')) {
       // Real browser preview has no Tauri IPC; saving must surface the safe desktop error.
       await page.getByRole('button', { name: '保存设置', exact: true }).click();

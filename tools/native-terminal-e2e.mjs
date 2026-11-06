@@ -226,6 +226,7 @@ try {
   const setup = await page.evaluate(
     async ({ hostname, username, secret, product }) => {
       const invoke = window.__TAURI_INTERNALS__.invoke;
+      if (product) return { hostId: null, credentialId: null };
       const credential = await invoke('credential_save', {
         id: null,
         expectedRevision: null,
@@ -237,32 +238,30 @@ try {
           clearSecret: false,
         },
       });
-      const host = product
-        ? null
-        : await invoke('host_create', {
-            input: {
-              name: 'Linux SSH verification',
-              hostname,
-              port: 22,
-              username,
-              authType: 'password',
-              credentialId: credential.value.id,
-              groupId: null,
-              tags: [],
-              description: 'Temporary authorized validation',
-              favorite: false,
-              connectTimeoutSecs: 15,
-            },
-          });
-      return { hostId: host?.id, credentialId: credential.value.id };
+      const host = await invoke('host_create', {
+        input: {
+          name: 'Linux SSH verification',
+          hostname,
+          port: 22,
+          username,
+          authType: 'password',
+          credentialId: credential.value.id,
+          groupId: null,
+          tags: [],
+          description: 'Temporary authorized validation',
+          favorite: false,
+          connectTimeoutSecs: 15,
+        },
+      });
+      return { hostId: host.id, credentialId: credential.value.id };
     },
     { ...target, product: productMode || !!installedExecutable },
   );
   credentialId = setup.credentialId;
   const productDescription = `Product integration ${path.basename(artifacts)}`;
   if (productMode || installedExecutable) {
-    setup.hostId = await createProductHost(page, target, setup.credentialId);
-    passed('native host creation through UI with a single existing secure credential reference');
+    setup.hostId = await createProductHost(page, target);
+    passed('native host creation with an inline SSH password after a real connection test');
   }
   hostId = setup.hostId;
   credentialId = setup.credentialId;
@@ -287,7 +286,7 @@ try {
   }
   await openTerminal();
   const trust = page.getByRole('dialog', { name: '确认 SSH 主机指纹', exact: true });
-  if (!reuse || (await trust.isVisible())) {
+  if ((!reuse && !productMode && !installedExecutable) || (await trust.isVisible())) {
     await trust.waitFor();
     assert(
       (await trust.innerText()).includes(target.pin),

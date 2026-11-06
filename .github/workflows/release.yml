@@ -43,7 +43,8 @@ jobs:
       - run: npm ci
       - run: cargo fetch --manifest-path plugins/system/docker/backend/Cargo.toml --target wasm32-unknown-unknown --locked
       - run: cargo fetch --manifest-path plugins/system/assistant/backend/Cargo.toml --target wasm32-unknown-unknown --locked
-      - name: Generate bundled plugins before Rust checks and tests
+      - run: cargo fetch --manifest-path tests/fixtures/plugins/server-capabilities/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+      - name: Generate bundled plugins and test fixture before Rust checks and tests
         run: npm run plugins:build
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings

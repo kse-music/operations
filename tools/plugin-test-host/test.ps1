@@ -11,8 +11,8 @@ $savedEnvironment = @{}
 Push-Location $workspace
 try {
     if ($Mode -eq 'sdk') {
-        node tools/build-system-plugins.mjs
-        if ($LASTEXITCODE -ne 0) { throw 'System plugin build failed' }
+        npm run plugins:build
+        if ($LASTEXITCODE -ne 0) { throw 'Plugin and test fixture build failed' }
     } else {
         node tools/plugin-native-e2e.mjs --build
         if ($LASTEXITCODE -ne 0) { throw 'Native QA build failed' }

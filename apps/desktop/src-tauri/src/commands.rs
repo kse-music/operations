@@ -157,16 +157,73 @@ pub async fn host_list(application: tauri::State<'_, Application>) -> Result<Cat
 pub async fn host_create(
     application: tauri::State<'_, Application>,
     input: HostInput,
+    authentication: Option<HostAuthenticationInput>,
 ) -> Result<Host, IpcError> {
-    application.host_create(input).await.map_err(Into::into)
+    application
+        .host_save(None, input, authentication)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn host_test(
+    application: tauri::State<'_, Application>,
+    host_id: Option<String>,
+    input: HostInput,
+    authentication: Option<HostAuthenticationInput>,
+    confirmed: Option<HostKeyFingerprint>,
+) -> Result<serverdeck_application::HostTestResult, IpcError> {
+    application
+        .host_test(host_id, input, authentication, confirmed)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn host_create_tested(
+    application: tauri::State<'_, Application>,
+    input: HostInput,
+    authentication: Option<HostAuthenticationInput>,
+    test_id: String,
+) -> Result<Host, IpcError> {
+    save_tested_host(&application, None, input, authentication, test_id).await
+}
+#[tauri::command]
+pub async fn host_update_tested(
+    application: tauri::State<'_, Application>,
+    id: String,
+    input: HostInput,
+    authentication: Option<HostAuthenticationInput>,
+    test_id: String,
+) -> Result<Host, IpcError> {
+    save_tested_host(&application, Some(id), input, authentication, test_id).await
+}
+async fn save_tested_host(
+    application: &Application,
+    id: Option<String>,
+    input: HostInput,
+    authentication: Option<HostAuthenticationInput>,
+    test_id: String,
+) -> Result<Host, IpcError> {
+    let test_id = test_id.parse().map_err(|_| {
+        IpcError::from(serverdeck_core::Error::Validation(
+            "SSH 测试结果无效，请重新测试",
+        ))
+    })?;
+    application
+        .host_save_tested(id, input, authentication, test_id)
+        .await
+        .map_err(Into::into)
 }
 #[tauri::command]
 pub async fn host_update(
     application: tauri::State<'_, Application>,
     id: String,
     input: HostInput,
+    authentication: Option<HostAuthenticationInput>,
 ) -> Result<Host, IpcError> {
-    application.host_update(id, input).await.map_err(Into::into)
+    application
+        .host_save(Some(id), input, authentication)
+        .await
+        .map_err(Into::into)
 }
 #[tauri::command]
 pub async fn host_delete(

@@ -2,12 +2,13 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  height: 100%;
 }
 .files-view h1 {
   margin: 0;
 }
 .files-view h2 {
-  font-size: 15px;
+  font-size: calc(15px * var(--interface-font-scale, 1));
   margin: 10px 0;
 }
 .files-status {
@@ -18,10 +19,18 @@
 }
 .file-columns {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  flex: 1 0 0;
+  /* Leave room for file names alongside the remote metadata at larger sizes. */
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(100%, calc(340px + (var(--interface-font-scale, 1) - 1) * 480px)), 1fr)
+  );
+  grid-auto-rows: minmax(min-content, 1fr);
   gap: 16px;
 }
 .file-side {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -40,8 +49,7 @@
   flex: 1;
   min-width: 50px;
 }
-.path-bar input,
-.file-list-tools select {
+.path-bar input {
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: 5px;
@@ -57,30 +65,27 @@
 .file-side .button {
   min-height: var(--compact-height);
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
+}
+.file-side .toolbar .tool-button[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-bg);
 }
 .file-list-tools {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   margin: 8px 0;
-  flex-wrap: wrap;
-}
-.file-list-tools label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 .file-table {
-  height: clamp(240px, 42vh, 420px);
+  flex: 1;
+  min-height: 96px;
+  contain: size;
   overflow: auto;
 }
 .file-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .file-table th {
   position: sticky;
@@ -95,11 +100,33 @@
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
 }
+.file-table th.file-sort-column {
+  padding: 0;
+}
+.file-sort-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 7px 5px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  outline-offset: -2px;
+}
+.file-sort-button:hover,
+.file-sort-column[aria-sort] .file-sort-button {
+  color: var(--accent);
+}
 .file-table tr.selected {
   background: var(--accent-bg);
 }
 .file-table td:nth-child(2) {
-  max-width: 220px;
+  width: 100%;
+  max-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -127,13 +154,21 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+.files-view > .transfer-panel {
+  flex: none;
+  max-height: min(220px, 35%);
+  overflow: auto;
+}
+.files-view .transfer-panel h2 {
+  margin: 0;
+}
 .transfer-row {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .transfer-row > div {
   flex: 1;
@@ -186,10 +221,10 @@
   overflow-wrap: anywhere;
 }
 .files-status {
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .files-status .checkbox-label {
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .files-view .context-menu {
   z-index: 30;
@@ -200,9 +235,6 @@
   }
   .file-side {
     padding: 8px;
-  }
-  .file-table td:nth-child(2) {
-    max-width: 140px;
   }
 }
 
@@ -216,7 +248,7 @@
   justify-content: flex-end;
   gap: 10px;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .file-metadata {
   font-family: Consolas, monospace;

@@ -75,7 +75,9 @@ describe('host search and mutation boundary', () => {
     });
     const store = useHostsStore();
     await store.load();
-    expect((await store.run(() => hostsApi.create(hostInput()))).ok).toBe(false);
+    expect(
+      (await store.run(() => hostsApi.create(hostInput(), undefined, 'fixture-test'))).ok,
+    ).toBe(false);
     expect(store.catalog?.hosts).toHaveLength(0);
     expect(store.error).toBe('地址无效');
     expect(store.busy).toBe(false);

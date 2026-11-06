@@ -40,7 +40,7 @@
   background: none;
   color: inherit;
   padding: 5px 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 18px;
   white-space: nowrap;
   cursor: pointer;
@@ -65,7 +65,7 @@
 .terminal-menu-heading {
   margin: 4px 6px 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   overflow-wrap: anywhere;
 }
 .xterm-container {
@@ -79,7 +79,7 @@
   height: 100%;
 }
 .terminal-footnote {
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   color: var(--muted);
   padding: 5px 12px;
 }
@@ -146,7 +146,7 @@
   cursor: row-resize;
 }
 .split-pane .terminal-footnote {
-  font-size: 10px;
+  font-size: calc(10px * var(--interface-font-scale, 1));
   white-space: nowrap;
   overflow: hidden;
 }
@@ -168,7 +168,7 @@
   gap: 12px;
   padding: 6px 10px;
   border-top: 1px solid var(--border);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   flex-wrap: wrap;
 }
 .terminal-upload > span:first-child {

@@ -163,6 +163,15 @@ pub struct Host {
     pub updated_at: String,
 }
 
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HostKeyFingerprint {
+    pub hostname: String,
+    pub port: u16,
+    pub algorithm: String,
+    pub fingerprint: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GroupInput {
@@ -191,6 +200,29 @@ pub struct Credential {
     pub has_secret: bool,
     pub host_count: u32,
     pub revision: u32,
+}
+
+// Input-only. No Debug or Serialize: secrets must never be returned or logged.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HostAuthenticationInput {
+    Password {
+        password: Zeroizing<String>,
+    },
+    PrivateKey {
+        #[serde(rename = "keyData")]
+        key_data: Zeroizing<String>,
+        passphrase: Option<Zeroizing<String>>,
+    },
+}
+
+impl HostAuthenticationInput {
+    pub fn validate_secret(secret: &str) -> Result<(), Error> {
+        if secret.is_empty() || secret.len() > 2048 {
+            return Err(Error::Validation("密码或口令须为 1–2048 字节"));
+        }
+        Ok(())
+    }
 }
 
 // Input-only. No Debug or Serialize: secrets must never be returned or logged.

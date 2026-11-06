@@ -1,4 +1,5 @@
 use super::*;
+use serverdeck_core::hosts::HostKeyFingerprint;
 use std::ops::Deref;
 pub struct Hop {
     pub host: Host,
@@ -10,7 +11,7 @@ pub struct ConnectionPlan {
     pub proxy: Option<proxy::ProxyConnection>,
 }
 impl ConnectionPlan {
-    pub(crate) fn signature(&self) -> Result<String, Error> {
+    pub fn signature(&self) -> Result<String, Error> {
         let hops: Vec<_> = self
             .hops
             .iter()
@@ -23,6 +24,7 @@ impl ConnectionPlan {
                     h.host.config.auth_type.as_str(),
                     &h.host.config.credential_id,
                     h.revision,
+                    h.host.config.connect_timeout_secs,
                     &h.host.config.ssh,
                 )
             })
@@ -65,10 +67,45 @@ impl Connection {
         Ok(())
     }
 }
+
+impl Engine {
+    /// Use the normal SSH handshake and authentication without opening a session channel.
+    pub async fn test_connection(
+        &self,
+        plan: ConnectionPlan,
+        confirmed: Option<HostKeyFingerprint>,
+    ) -> Result<Option<HostKeyFingerprint>, Error> {
+        let challenge = Arc::new(Mutex::new(None));
+        let sink: Sink = Arc::new(|_| true);
+        match establish(
+            self.database.clone(),
+            plan,
+            trust::Trust::Test {
+                confirmed,
+                challenge: challenge.clone(),
+            },
+            &sink,
+        )
+        .await
+        {
+            Ok(connection) => {
+                // Dropping the fresh transport also releases its jump connections.
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(1),
+                    connection.disconnect(russh::Disconnect::ByApplication, "", "en"),
+                )
+                .await;
+                Ok(None)
+            }
+            Err(error) => locked(&challenge)?.take().map(Some).ok_or(error),
+        }
+    }
+}
+
 pub(crate) async fn establish(
     database: Database,
     plan: ConnectionPlan,
-    control: Arc<Control>,
+    trust: trust::Trust,
     sink: &Sink,
 ) -> Result<Connection, Error> {
     if plan.hops.is_empty() || plan.hops.len() > 5 {
@@ -114,8 +151,7 @@ pub(crate) async fn establish(
             database: database.clone(),
             hostname: hop.host.config.hostname.clone(),
             port: hop.host.config.port,
-            control: control.clone(),
-            sink: sink.clone(),
+            trust: trust.clone(),
             reason: reason.clone(),
             confirming,
             alive: alive.clone(),

@@ -514,11 +514,15 @@ async fn linux_sdk_capability_roundtrip() {
             .secret_ref,
     );
     let host = app
-        .host_create(HostInput {
-            auth_type: AuthType::Password,
-            credential_id: Some(credential.id.clone()),
-            ..host_input(port)
-        })
+        .host_save(
+            None,
+            HostInput {
+                auth_type: AuthType::Password,
+                credential_id: Some(credential.id.clone()),
+                ..host_input(port)
+            },
+            None,
+        )
         .await
         .unwrap();
     let states = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));

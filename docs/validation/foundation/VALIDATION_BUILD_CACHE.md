@@ -65,6 +65,18 @@
 
 本机为 Linux，未执行 GitHub Actions、Windows PowerShell/WSL 原生验收或桌面安装器构建。未连接用户远程主机、修改用户配置或引入数据库迁移。全新克隆后直接运行相关 Cargo 命令仍须先生成插件包；首次构建和锁文件更新后须先按 README 下载依赖，实际插件编译保留 `--offline --locked`。当前无剩余实现依赖，跨平台 CI 和原生验收待相应环境执行。
 
+## 2026-11-06 兼容界面和测试插件包改为构建产物
+
+- Git 忽略兼容界面的 `frontend.css`、`frontend.js` 和 `server-capabilities.sdplugin` 测试包。桌面 `dev/build` 生成兼容界面和内置插件包，`npm run plugins:build` 还生成测试包，供 CI、Rust 测试和原生运维验收使用。
+- Windows 上将现有插件产物移入 `.local/` 下的 QA 备份后，`npm run build` 重建了兼容界面和两个内置包，确认测试包仍缺失。`npm run plugins:build` 随后生成了测试包。校验了兼容界面 CSS 与 JS 的作用域 ID、三个插件包的身份、WASM 文件头、文件大小和 SHA-256 摘要。
+- `npm run test:build` 通过 7 项。`cargo test -p serverdeck-application --lib --no-run --offline --locked` 编译通过，复制测试 EXE 至 QA 目录后执行 `plugins::`，21 项通过，1 项依赖 Linux SSH 测试环境的用例保持忽略。未执行 GitHub Actions 或原生远程运维验收。
+
+## 2026-11-06 调试、打包与测试产物的 Git 审计
+
+- 从 Git 索引移除 `apps/desktop/.local/model-management/tmp/node-compile-cache/` 下的 606 个 Node.js 编译缓存文件，保留本地副本。`.gitignore` 现在覆盖各级 `.local/`、任意位置的 `*.sdplugin` 及其 `.tmp` 文件。
+- 对照 Git 索引和 17 个输出路径，核对 Rust 缓存与安装包、Vite 前端与依赖缓存、Tauri 生成权限与 schema、插件包、兼容界面及 QA 输出。确认依赖锁文件、图标、权限配置和插件清单仍作为构建输入跟踪。用 `cargo metadata` 验证桌面、两个内置插件和测试夹具从各自目录解析到根 `target/`。
+- Windows 上 `npm run test:build` 的 7 项测试通过。使用嵌套 `.local/` 作为 Node.js 编译缓存位置，实测新生成的 235 个缓存文件均被忽略。`npm run build` 通过。本次对安装包路径执行 Git 忽略检查，未重打安装包或执行跨平台验收。
+
 ## 2026-11-06 平台版本更新为 0.2.0
 
 ### 完成范围

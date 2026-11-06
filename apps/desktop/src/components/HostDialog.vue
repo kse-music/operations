@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
 import Modal from './Modal.vue';
-import CredentialDialog from './CredentialDialog.vue';
+import ProxyPasswordDialog from './ProxyPasswordDialog.vue';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
-import { hostDisplayName, hostInput, type Host } from '../types/hosts';
+import { errorMessage } from '../services/ipc';
+import {
+  authLabels,
+  hostDisplayName,
+  hostInput,
+  type Host,
+  type HostAuthenticationInput,
+  type HostKeyFingerprint,
+} from '../types/hosts';
 const props = defineProps<{ host?: Host; groupId?: string | null }>();
 const emit = defineEmits<{ close: []; saved: [host: Host] }>();
 const store = useHostsStore();
@@ -19,7 +27,20 @@ if (!props.host && application.state?.config.product)
   draft.ssh = JSON.parse(
     JSON.stringify(application.state.config.product.sshDefaults),
   ) as typeof draft.ssh;
-const newCredential = ref(false);
+const newProxyPassword = ref(false);
+const secret = ref('');
+const keyData = ref('');
+const keyFile = shallowRef<File | null>(null);
+const keyFileInput = ref<HTMLInputElement | null>(null);
+const form = ref<HTMLFormElement | null>(null);
+const testing = ref(false);
+const testId = ref('');
+const testMessage = ref('');
+const testError = ref('');
+const trust = ref<HostKeyFingerprint>();
+const busy = computed(() => store.busy || testing.value);
+let expiry: ReturnType<typeof setTimeout> | undefined;
+let disposed = false;
 const authSelection = computed({
   get: () => (draft.authType === 'agent' ? '' : draft.authType),
   set: (authType: '' | 'password' | 'private_key') => {
@@ -41,36 +62,121 @@ const proxyMode = computed({
           };
   },
 });
-const credentials = computed(
-  () => store.catalog?.credentials.filter((c) => c.kind === draft.authType) ?? [],
+const legacyKey = computed(
+  () => store.catalog?.credentials.find((c) => c.id === draft.credentialId)?.keyPath,
 );
+function clearKeyFile(): void {
+  if (keyFileInput.value) {
+    keyFileInput.value.value = '';
+    keyFileInput.value.setCustomValidity('');
+  }
+  keyFile.value = null;
+  secret.value = '';
+}
+function clearAuthentication(): void {
+  keyData.value = '';
+  clearKeyFile();
+}
+function selectKey(event: Event): void {
+  const field = event.target as HTMLInputElement;
+  const file = field.files?.[0] ?? null;
+  field.setCustomValidity(
+    file && (file.size === 0 || file.size > 1024 * 1024) ? '私钥文件须为 1 字节至 1 MiB' : '',
+  );
+  keyFile.value = file;
+  keyData.value = '';
+  secret.value = '';
+}
+function invalidateTest(): void {
+  testId.value = '';
+  testMessage.value = '';
+  testError.value = '';
+  trust.value = undefined;
+  clearTimeout(expiry);
+}
+watch([draft, secret, keyData, keyFile], invalidateTest, { deep: true, flush: 'sync' });
+onBeforeUnmount(() => {
+  disposed = true;
+  invalidateTest();
+  clearAuthentication();
+});
 watch(
   () => draft.authType,
-  () => {
-    draft.credentialId = null;
+  (type) => {
+    clearAuthentication();
+    draft.credentialId = type === props.host?.authType ? props.host.credentialId : null;
   },
 );
+async function authenticationInput(): Promise<HostAuthenticationInput | undefined> {
+  if (draft.authType === 'password' && secret.value) {
+    return { kind: 'password', password: secret.value };
+  }
+  if (draft.authType === 'private_key' && (keyFile.value || keyData.value)) {
+    return {
+      kind: 'private_key',
+      passphrase: secret.value || null,
+      keyData: keyFile.value ? await keyFile.value.text() : keyData.value,
+    };
+  }
+}
+async function testConnection(confirmed?: HostKeyFingerprint): Promise<void> {
+  if (busy.value || !form.value?.reportValidity()) return;
+  invalidateTest();
+  testing.value = true;
+  try {
+    const result = await hostsApi.test(
+      { ...draft },
+      await authenticationInput(),
+      confirmed,
+      props.host?.id,
+    );
+    if (disposed) return;
+    if (result.status === 'trust_required') {
+      trust.value = result.key;
+      return;
+    }
+    testId.value = result.testId;
+    testMessage.value = 'SSH 连接和认证成功，可以保存主机。';
+    expiry = setTimeout(() => {
+      invalidateTest();
+      testMessage.value = '测试结果已过期，请重新测试连接。';
+    }, result.expiresInSeconds * 1000);
+  } catch (error) {
+    if (!disposed) testError.value = errorMessage(error);
+  } finally {
+    testing.value = false;
+  }
+}
 async function submit(): Promise<void> {
-  const input = { ...draft };
+  if (busy.value || !testId.value) return;
   const result = await store.run(
-    () => (props.host ? hostsApi.update(props.host.id, input) : hostsApi.create(input)),
+    async () => {
+      const input = { ...draft };
+      const authentication = await authenticationInput();
+      const receipt = testId.value;
+      invalidateTest();
+      return props.host
+        ? hostsApi.updateTested(props.host.id, input, authentication, receipt)
+        : hostsApi.create(input, authentication, receipt);
+    },
     props.host ? '主机已更新。' : '主机已创建。',
   );
   if (result.ok) {
+    clearAuthentication();
     store.selectedId = result.value.id;
     emit('saved', result.value);
     emit('close');
   }
 }
-function credentialSaved(id: string): void {
-  draft.credentialId = id;
-  newCredential.value = false;
+function proxyPasswordSaved(id: string): void {
+  if (draft.ssh.proxy) draft.ssh.proxy.credentialId = id;
+  newProxyPassword.value = false;
 }
 </script>
 <template>
-  <Modal :title="host ? '编辑主机' : '新建主机'" :busy="store.busy" @close="emit('close')">
-    <form class="editor-form" @submit.prevent="submit">
-      <fieldset class="form-grid" :disabled="store.busy">
+  <Modal :title="host ? '编辑主机' : '新建主机'" :busy="busy" @close="emit('close')">
+    <form ref="form" class="editor-form" @submit.prevent="submit">
+      <fieldset class="form-grid" :disabled="busy">
         <label
           >主机名称（可选）<input
             v-model="draft.name"
@@ -100,8 +206,8 @@ function credentialSaved(id: string): void {
         <label
           >认证方式<select v-model="authSelection" aria-label="认证方式">
             <option v-if="draft.authType === 'agent'" value="" disabled hidden>沿用当前认证</option>
-            <option value="password">SSH 密码</option>
-            <option value="private_key">SSH 私钥</option>
+            <option value="password">{{ authLabels.password }}</option>
+            <option value="private_key">{{ authLabels.private_key }}</option>
           </select></label
         >
         <label
@@ -113,21 +219,59 @@ function credentialSaved(id: string): void {
             step="1"
             required
         /></label>
-        <div v-if="draft.authType !== 'agent'" class="full-width">
-          <label
-            >安全凭据引用<select v-model="draft.credentialId" aria-label="安全凭据引用">
-              <option :value="null">暂不关联（后续连接前需补充）</option>
-              <option v-for="credential in credentials" :key="credential.id" :value="credential.id">
-                {{ credential.name }}
-              </option>
-            </select></label
-          >
-          <button type="button" class="text-button" @click="newCredential = true">
-            ＋ 新建安全凭据
-          </button>
-        </div>
+        <label v-if="draft.authType === 'password'" class="full-width">
+          SSH 密码
+          <input
+            v-model="secret"
+            type="password"
+            autocomplete="new-password"
+            maxlength="2048"
+            :required="!host"
+            :placeholder="draft.credentialId ? '已保存，留空沿用原密码' : '输入 SSH 登录密码'"
+          />
+        </label>
+        <template v-else-if="draft.authType === 'private_key'">
+          <p class="subtle full-width">
+            服务器授权公钥，本机使用对应的私钥签名。请粘贴私钥内容或选择本机私钥文件。
+          </p>
+          <label v-if="!keyFile" class="full-width">
+            私钥内容
+            <textarea
+              v-model="keyData"
+              class="private-key-input"
+              rows="3"
+              maxlength="1048576"
+              :required="!host"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="粘贴完整私钥内容"
+            />
+          </label>
+          <div class="full-width">
+            <label>
+              私钥文件
+              <input ref="keyFileInput" type="file" aria-label="选择私钥文件" @change="selectKey" />
+            </label>
+            <button v-if="keyFile" type="button" class="text-button" @click="clearKeyFile">
+              清除文件选择
+            </button>
+          </div>
+          <label v-if="keyData || keyFile" class="full-width">
+            加密私钥口令（可选）
+            <input v-model="secret" type="password" autocomplete="new-password" maxlength="2048" />
+          </label>
+          <p v-else class="subtle full-width">
+            {{
+              legacyKey
+                ? '当前使用已有的私钥文件路径。留空沿用，选择或粘贴私钥可重新导入。'
+                : draft.credentialId
+                  ? '已保存私钥，留空沿用。'
+                  : '请先填写私钥，再测试连接。'
+            }}
+          </p>
+        </template>
         <p v-else class="subtle full-width">
-          当前主机使用系统 SSH Agent。可改用 SSH 密码或 SSH 私钥。
+          当前主机使用系统 SSH Agent。可改用 SSH 密码或公钥认证。
         </p>
         <details class="full-width">
           <summary>SSH 高级连接设置</summary>
@@ -215,6 +359,14 @@ function credentialSaved(id: string): void {
                   </option>
                 </select></label
               >
+              <button
+                v-if="draft.ssh.proxy.username"
+                class="text-button"
+                type="button"
+                @click="newProxyPassword = true"
+              >
+                ＋ 新建代理密码
+              </button>
               <p
                 v-if="draft.ssh.proxy.username && !draft.ssh.proxy.credentialId"
                 class="banner full-width"
@@ -233,14 +385,41 @@ function credentialSaved(id: string): void {
           </div>
         </details>
       </fieldset>
+      <section v-if="trust" class="banner" aria-label="核对 SSH 主机指纹">
+        <p>首次连接 {{ trust.hostname }}:{{ trust.port }}。请通过可信渠道核对指纹。</p>
+        <p>
+          {{ trust.algorithm }} <code class="fingerprint">{{ trust.fingerprint }}</code>
+        </p>
+        <div class="toolbar">
+          <button class="button" type="button" @click="invalidateTest">拒绝指纹</button>
+          <button class="button" type="button" @click="testConnection(trust)">
+            信任并继续测试
+          </button>
+        </div>
+      </section>
+      <p v-if="testError" class="banner" role="alert">{{ testError }}</p>
+      <p class="subtle" role="status">
+        {{ testMessage || (testing ? '正在连接并验证 SSH 登录…' : '测试连接成功后即可保存。') }}
+      </p>
       <footer class="dialog-actions">
-        <button class="button" type="button" :disabled="store.busy" @click="emit('close')">
-          取消</button
-        ><button type="submit" class="button primary" :disabled="store.busy">
+        <button class="button" type="button" :disabled="busy" @click="testConnection()">
+          {{ testing ? '测试中…' : '测试连接' }}
+        </button>
+        <button type="submit" class="button primary" :disabled="busy || !testId">
           {{ store.busy ? '保存中…' : '保存主机' }}
         </button>
       </footer>
     </form>
   </Modal>
-  <CredentialDialog v-if="newCredential" @close="newCredential = false" @saved="credentialSaved" />
+  <ProxyPasswordDialog
+    v-if="newProxyPassword"
+    @close="newProxyPassword = false"
+    @saved="proxyPasswordSaved"
+  />
 </template>
+
+<style scoped>
+.private-key-input {
+  -webkit-text-security: disc;
+}
+</style>

@@ -14,13 +14,13 @@ const pages = [
   ['SSH 终端', 'terminals'],
   ['SFTP 文件', 'files'],
   ['服务器管理', 'server'],
-  ['安全凭据', 'credentials'],
   ['关于', 'about'],
   ['通用', 'settings'],
   ['终端', 'settingsTerminal'],
   ['快捷键', 'settingsShortcuts'],
   ['数据与存储', 'settingsStorage'],
 ];
+const fontSizeOnly = process.argv.includes('--font-size');
 
 // Browser-only rendering fixtures; no production fallback, disk changes, or remote commands.
 async function fixtures(page, theme) {
@@ -70,6 +70,7 @@ async function fixtures(page, theme) {
       config: {
         version: 1,
         theme,
+        interfaceFontSize: 'standard',
         sidebarWidth: 248,
         terminalFontSize: 14,
         connectTimeoutSecs: 15,
@@ -126,7 +127,13 @@ async function fixtures(page, theme) {
     const listing = {
       path: '/srv/application',
       parent: '/srv',
-      entries: ['config', 'application.log', 'compose.yaml'].map((name, n) => ({
+      entries: [
+        'config',
+        'application.log',
+        'compose.yaml',
+        '跨环境发布与数据库迁移记录-2026-11-07.md',
+        ...Array.from({ length: 60 }, (_, n) => `fixture-${n + 1}.txt`),
+      ].map((name, n) => ({
         name,
         path: `/srv/application/${name}`,
         kind: n ? 'file' : 'directory',
@@ -273,9 +280,190 @@ async function inspect(page, name) {
 }
 
 const results = [];
+
+async function verifyInterfaceFontSize(page, variant, width) {
+  const columns = page.locator('.file-columns');
+  const measure = () =>
+    columns.evaluate((element) => ({
+      columns: getComputedStyle(element)
+        .gridTemplateColumns.split(' ')
+        .filter((track) => parseFloat(track) > 0).length,
+      fontSizes: [...element.querySelectorAll('table, .path-bar input, .toolbar .button')].map(
+        (item) => parseFloat(getComputedStyle(item).fontSize),
+      ),
+      tables: [...element.querySelectorAll('.file-table')].map((table) => ({
+        top: table.getBoundingClientRect().top,
+        width: table.clientWidth,
+        scrollWidth: table.scrollWidth,
+        scrolls: table.scrollHeight > table.clientHeight,
+      })),
+    }));
+  const standard = await measure();
+  await navigateWorkspace(page, '通用');
+  const slider = page.getByRole('slider', { name: '界面字号', exact: true });
+  assert.equal(await slider.getAttribute('aria-valuetext'), '标准');
+  assert.deepEqual(
+    (await page.locator('.interface-font-ticks button').allTextContents()).map((text) =>
+      text.trim(),
+    ),
+    ['小', '标准', '大', '特大', '超大'],
+  );
+  await page.getByRole('button', { name: '小', exact: true }).click();
+  assert.equal(await slider.inputValue(), '0');
+  await slider.press('ArrowRight');
+  assert.equal(await slider.getAttribute('aria-valuetext'), '标准');
+  await slider.press('Home');
+  const track = await slider.boundingBox();
+  assert(track);
+  const center = track.y + track.height / 2;
+  await page.mouse.move(track.x + 7, center);
+  await page.mouse.down();
+  await page.mouse.move(track.x + track.width - 7, center, { steps: 8 });
+  assert.equal(await slider.getAttribute('aria-valuetext'), '超大');
+  assert.equal(
+    await page.evaluate(() =>
+      document.documentElement.style.getPropertyValue('--interface-font-scale'),
+    ),
+    '1.45',
+  );
+  await page.mouse.up();
+  await page.screenshot({ path: `${output}/${variant}-font-size-settings.png` });
+  await navigateWorkspace(page, 'SFTP 文件');
+  const largest = await measure();
+  assert.equal(largest.fontSizes.length, 6);
+  for (const [index, size] of largest.fontSizes.entries())
+    assert(Math.abs(size - standard.fontSizes[index] * 1.45) < 0.01);
+  assert.equal(largest.columns, width >= 1440 ? 2 : 1);
+  if (width === 1366 || width === 1240) assert.equal(standard.columns, 2);
+  if (largest.columns === 2) assert.equal(largest.tables[0].top, largest.tables[1].top);
+  for (const table of largest.tables) {
+    assert(table.scrolls, `${variant}: file list lost vertical scrolling`);
+    if (width >= 900) {
+      assert(
+        table.scrollWidth <= table.width + 1,
+        `${variant}: file table overflows (${table.scrollWidth} > ${table.width})`,
+      );
+    }
+  }
+  await inspect(page, `${variant}/files-ultra-large`);
+  await page.screenshot({ path: `${output}/${variant}-files-ultra-large.png` });
+  await navigateWorkspace(page, '通用');
+  await slider.press('Home');
+  await slider.press('ArrowRight');
+  assert.equal(await slider.getAttribute('aria-valuetext'), '标准');
+  await navigateWorkspace(page, 'SFTP 文件');
+  return largest;
+}
+
+async function verifyTransferLayout(page, variant) {
+  const measure = () =>
+    page.evaluate(() => {
+      const content = document.querySelector('.content-scroll');
+      const columns = document.querySelector('.file-columns');
+      const panel = document.querySelector('.files-view > .transfer-panel');
+      const bottom =
+        content.getBoundingClientRect().bottom -
+        Number.parseFloat(getComputedStyle(content).paddingBottom);
+      return {
+        columnCount: getComputedStyle(columns)
+          .gridTemplateColumns.split(' ')
+          .filter((track) => parseFloat(track) > 0).length,
+        gap: bottom - columns.getBoundingClientRect().bottom,
+        columnsBottom: columns.getBoundingClientRect().bottom,
+        panelTop: panel?.getBoundingClientRect().top,
+        panelGap: panel ? bottom - panel.getBoundingClientRect().bottom : null,
+        tables: [...columns.querySelectorAll('.file-table')].map((table) => ({
+          height: table.clientHeight,
+          scrolls: table.scrollHeight > table.clientHeight,
+        })),
+      };
+    });
+  const setTransfer = (state) =>
+    page.evaluate(async (state) => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+      const { filesApi } = await import('/src/services/files.ts');
+      const files = pinia._s.get('files');
+      const task = {
+        id: 'fixture-upload',
+        hostId: 'ui-0',
+        sessionId: 'ui-session',
+        state,
+        direction: 'upload',
+        sources: ['D:/fixtures/upload-report.txt'],
+        destination: '/srv/application',
+        totalBytes: 1024,
+        transferredBytes: 512,
+        remainingBytes: 512,
+        bytesPerSecond: 128,
+        filesTotal: 1,
+        filesDone: 0,
+        skipped: 0,
+        message: null,
+        recoveryPaths: [],
+      };
+      const tasks = [task, { ...task, id: 'other-host-upload', hostId: 'ui-1', state: 'running' }];
+      filesApi.tasks = async () => tasks;
+      files.tasks = tasks;
+    }, state);
+  const idle = await measure();
+  assert(
+    (idle.columnCount === 2 ? Math.abs(idle.gap) : idle.gap) <= 1,
+    `${variant}: idle file lists do not fill the workspace: ${idle.gap}px`,
+  );
+  assert(
+    idle.tables.every((table) => table.height >= 96 && table.scrolls),
+    `${variant}: tables must scroll independently`,
+  );
+
+  const panel = page.getByRole('region', { name: '传输任务', exact: true });
+  await setTransfer('running');
+  await panel.getByText(/upload-report\.txt/).waitFor();
+  assert.equal(await panel.locator('.transfer-row').count(), 1);
+  const active = await measure();
+  assert(active.panelTop >= active.columnsBottom, `${variant}: transfer overlaps file lists`);
+  if (idle.columnCount === 2) {
+    assert(
+      Math.abs(active.panelGap) <= 1,
+      `${variant}: transfer panel must end at workspace bottom`,
+    );
+  } else {
+    await panel.scrollIntoViewIfNeeded();
+    await page.evaluate(() => (document.querySelector('.content-scroll').scrollTop = 0));
+  }
+  if (idle.tables.every((table) => table.height > 96)) {
+    assert(
+      active.tables.every((table, index) => table.height < idle.tables[index].height),
+      `${variant}: file lists must yield space`,
+    );
+  }
+  assert(
+    active.tables.every((table) => table.height >= 96),
+    `${variant}: file lists stay usable during transfer`,
+  );
+
+  await setTransfer('completed');
+  await panel.waitFor({ state: 'hidden' });
+  assert.deepEqual(
+    (await measure()).tables,
+    idle.tables,
+    `${variant}: file lists must reclaim space`,
+  );
+  await page.getByRole('button', { name: '传输记录', exact: true }).click();
+  const history = page.getByRole('dialog', { name: '传输记录', exact: true });
+  await history.getByText(/已完成/).waitFor();
+  assert.equal(await history.getByText(/upload-report\.txt/).count(), 1);
+  await history.getByRole('button', { name: '关闭对话框', exact: true }).click();
+}
+
 try {
   for (const [variant, width, height, theme] of [
     ['desktop', 1440, 1000, 'dark'],
+    ...(fontSizeOnly
+      ? [
+          ['compact-desktop', 1366, 800, 'dark'],
+          ['stacking-desktop', 1240, 800, 'dark'],
+        ]
+      : []),
     ['small', 900, 700, 'light'],
     ['mobile', 390, 844, 'light'],
   ]) {
@@ -285,7 +473,9 @@ try {
     await page.goto(process.env.SERVERDECK_LAYOUT_URL ?? 'http://127.0.0.1:1421');
     await page.getByText('后端未连接', { exact: true }).waitFor();
     await fixtures(page, theme);
-    for (const [label, view] of pages) {
+    for (const [label, view] of fontSizeOnly
+      ? pages.filter(([, view]) => view === 'files')
+      : pages) {
       await navigateWorkspace(page, label);
       await page.waitForFunction((view) => {
         const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
@@ -322,34 +512,29 @@ try {
           .first()
           .waitFor();
         await inspect(page, `${variant}/files-native-unavailable`);
-        await page.getByRole('button', { name: '关闭提示', exact: true }).click();
         await page.evaluate(async () => {
           const { useNotificationsStore } = await import('/src/stores/notifications.ts');
           useNotificationsStore().items = [];
         });
-        const columns = await page
-          .locator('.file-columns')
-          .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+        const columns = await page.locator('.file-columns').evaluate(
+          (el) =>
+            getComputedStyle(el)
+              .gridTemplateColumns.split(' ')
+              .filter((track) => parseFloat(track) > 0).length,
+        );
         if (columns === 2) {
           const tops = await page
             .locator('.file-table')
             .evaluateAll((tables) => tables.map((table) => table.getBoundingClientRect().top));
           assert.equal(tops[0], tops[1], `${variant}: file lists aligned`);
         }
+        if (!fontSizeOnly || variant === 'desktop') await verifyTransferLayout(page, variant);
+        const largest = await verifyInterfaceFontSize(page, variant, width);
+        results.push({ variant, view: 'files-ultra-large', ...largest });
       }
       await page.mouse.move(width - 8, height - 8);
       await inspect(page, `${variant}/${view}`);
       await page.screenshot({ path: `${output}/${variant}-${view}.png` });
-      if (view === 'credentials') {
-        await page
-          .locator('.page-view')
-          .getByRole('button', { name: /新建凭据/ })
-          .click();
-        await page.getByRole('dialog').waitFor();
-        await inspect(page, `${variant}/${view}-dialog`);
-        await page.screenshot({ path: `${output}/${variant}-${view}-dialog.png` });
-        await page.getByRole('button', { name: '关闭对话框', exact: true }).click();
-      }
       if (view === 'server') {
         const tabs = page.locator('.page-view [role=tablist]').getByRole('tab');
         for (let n = 0; n < (await tabs.count()); n++) {

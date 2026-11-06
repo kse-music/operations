@@ -41,7 +41,7 @@ try {
         workspace.navigate('terminals', '');
         workspace.navigate('terminals', 'a');
         workspace.navigate('settings');
-        workspace.navigate('credentials');
+        workspace.navigate('models');
         workspace.activate('host:');
         useNotificationsStore(pinia).items = [];
         document.documentElement.dataset.theme = theme;
@@ -61,11 +61,11 @@ try {
         return useWorkspaceStore(pinia).tabs.map((tab) => tab.key);
       });
     for (const [tab, action, expected] of [
-      [target, '关闭', ['host:', 'settings:', 'credentials:']],
-      [local, '关闭右侧', ['host:', 'settings:', 'credentials:']],
+      [target, '关闭', ['host:', 'settings:', 'models:']],
+      [local, '关闭右侧', ['host:', 'settings:', 'models:']],
       [target, '关闭其它', ['host:a']],
       [target, '关闭所有', []],
-      [allHosts, '关闭', ['settings:', 'credentials:']],
+      [allHosts, '关闭', ['settings:', 'models:']],
       [allHosts, '关闭右侧', ['host:', 'host:a']],
       [allHosts, '关闭其它', ['host:', 'host:a']],
       [allHosts, '关闭所有', []],
@@ -102,7 +102,7 @@ try {
     }
     // The rightmost tab has no right range; an only tab also has no other range.
     await seed();
-    await page.locator('.workspace-tab[data-view="credentials"]').click({ button: 'right' });
+    await page.locator('.workspace-tab[data-view="models"]').click({ button: 'right' });
     assert.equal(
       await menu.getByRole('menuitem', { name: '关闭右侧', exact: true }).isDisabled(),
       true,

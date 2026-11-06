@@ -646,7 +646,9 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
             .any(|entry| entry["name"] == "actual local.txt")
     );
     let mut config = response["config"].clone();
+    assert_eq!(config["interfaceFontSize"], "standard");
     config["theme"] = json!("light");
+    config["interfaceFontSize"] = json!("ultraLarge");
     let saved = get_ipc_response(
         &main,
         request("config_save", json!({ "config": config }), origin),
@@ -655,6 +657,11 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     .deserialize::<Value>()
     .expect("json");
     assert_eq!(saved["theme"], "light");
+    assert_eq!(saved["interfaceFontSize"], "ultraLarge");
+    assert_eq!(
+        saved["terminalFontSize"],
+        response["config"]["terminalFontSize"]
+    );
     let mut invalid = saved.clone();
     invalid["sidebarWidth"] = json!(0);
     let error = get_ipc_response(
@@ -829,8 +836,41 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
     assert_eq!(child["parentId"], group["id"]);
     assert!(get_ipc_response(&main, request("group_save", json!({"id":group["id"],"input":{"name":"IPC 分组","sortOrder":1,"parentId":child["id"]}}), origin)).is_err());
     let mut input = json!({"name":"IPC 主机","hostname":"example.com","port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":child["id"],"tags":["linux"],"description":"原备注","favorite":false,"connectTimeoutSecs":15});
+    let test_error = get_ipc_response(&main, request("host_test", json!({"input":input}), origin))
+        .expect_err("host test requires authentication");
+    assert_eq!(test_error["code"], "VALIDATION");
+    let save_error = get_ipc_response(
+        &main,
+        request(
+            "host_create_tested",
+            json!({"input":input,"testId":"1ab96783-093d-4d83-9baf-4c694d6da65a"}),
+            origin,
+        ),
+    )
+    .expect_err("tested creation requires an issued receipt");
+    assert_eq!(save_error["code"], "VALIDATION");
+    assert!(
+        invoke("host_list", json!({}))["hosts"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let host = invoke("host_create", json!({"input":input}));
     input["description"] = json!("新备注");
+    let error = get_ipc_response(
+        &main,
+        request(
+            "host_update_tested",
+            json!({"id":host["id"],"input":input,"testId":"1ab96783-093d-4d83-9baf-4c694d6da65a"}),
+            origin,
+        ),
+    )
+    .expect_err("tested edit requires an issued receipt");
+    assert_eq!(error["code"], "VALIDATION");
+    assert_eq!(
+        invoke("host_list", json!({}))["hosts"][0]["description"],
+        "原备注"
+    );
     invoke("host_update", json!({"id":host["id"],"input":input}));
     let copy = invoke("host_copy", json!({"id":host["id"]}));
     assert_ne!(copy["id"], host["id"]);

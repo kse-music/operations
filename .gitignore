@@ -3,9 +3,10 @@
 **/node_modules/
 **/dist/
 **/src-tauri/gen/
-/.local/
-/plugins/system/packages/*.sdplugin
-/plugins/system/packages/*.sdplugin.tmp
+.local/
+/plugins/compat/server/assets/
+*.sdplugin
+*.sdplugin.tmp
 *.log
 *.sqlite3
 *.sqlite3-shm

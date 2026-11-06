@@ -144,6 +144,11 @@ impl Database {
                 return Err(Error::Validation("凭据迁移后的外键检查失败"));
             }
         }
+        if version < 9 {
+            transaction
+                .execute_batch(include_str!("../migrations/009_host_credentials.sql"))
+                .map_err(storage_error)?;
+        }
         transaction
             .pragma_update(None, "user_version", DATABASE_VERSION)
             .map_err(storage_error)?;
@@ -268,6 +273,7 @@ mod tests {
         assert_eq!(database.version().expect("version"), DATABASE_VERSION);
         let config = AppConfig {
             theme: serverdeck_core::Theme::Light,
+            interface_font_size: serverdeck_core::InterfaceFontSize::UltraLarge,
             ..Default::default()
         };
         database.save_config(&config).expect("save");

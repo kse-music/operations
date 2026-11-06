@@ -11,7 +11,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "plugins:build": "node tools/build-system-plugins.mjs",
+    "plugins:build": "node tools/build-system-plugins.mjs --with-test-fixtures",
     "dev": "npm run dev -w @serverdeck/desktop",
     "build": "npm run build -w @serverdeck/desktop",
     "typecheck": "npm run typecheck -w @serverdeck/desktop && npm run typecheck -w @serverdeck/plugin-sdk",

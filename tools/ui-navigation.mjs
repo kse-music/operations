@@ -1,12 +1,11 @@
 // UI navigation shared by browser fixtures and isolated native WebView2 checks.
 const hostTools = new Set(['SSH 终端', 'SFTP 文件']);
 const menuModules = {
-  安全凭据: 'assets',
-  模型管理: 'assets',
   通用: 'system',
   终端: 'system',
   快捷键: 'system',
   数据与存储: 'system',
+  模型管理: 'system',
   关于: 'system',
   插件管理: 'plugins',
 };

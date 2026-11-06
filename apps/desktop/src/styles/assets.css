@@ -15,20 +15,14 @@
   border-radius: 6px;
   padding: 0 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   font-weight: 500;
   line-height: 22px;
   white-space: nowrap;
 }
-.asset-columns,
 .asset-panel {
   display: grid;
   min-width: 0;
-}
-.asset-columns {
-  gap: 20px;
-  align-items: start;
-  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
 }
 .asset-panel {
   gap: 12px;
@@ -71,7 +65,7 @@
   border-radius: 6px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .asset-feedback.success {
   color: var(--accent);
@@ -81,41 +75,7 @@
   color: var(--error);
   border-color: var(--error);
 }
-.credentials-view .credential-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.credentials-view .credential-list > li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 6px 12px;
-  margin: 0;
-  padding: 12px 0;
-  border: 0;
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-  overflow-wrap: anywhere;
-}
-.credentials-view .credential-list > li:last-child {
-  padding-bottom: 0;
-}
-.credential-actions {
-  justify-content: flex-end;
-}
-.credential-details {
-  grid-column: 1 / -1;
-  margin-left: 46px;
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  font-size: 11px;
-}
 @container workspace (max-width: 740px) {
-  .asset-view .asset-columns {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .asset-panel {
     padding: 16px;
   }

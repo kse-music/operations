@@ -21,6 +21,7 @@ const bootstrap = (): Bootstrap => ({
   config: {
     version: 1,
     theme: 'dark',
+    interfaceFontSize: 'standard',
     sidebarWidth: 248,
     terminalFontSize: 14,
     connectTimeoutSecs: 15,

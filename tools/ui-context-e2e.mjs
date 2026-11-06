@@ -125,7 +125,7 @@ try {
     await page.getByRole('tab', { name: /会话 1/ }).waitFor();
     await assertHost('a', 'terminals');
     const existingTabs = await page.locator('.workspace-tab').count();
-    for (const module of ['assets', 'plugins', 'system']) {
+    for (const module of ['plugins', 'system']) {
       await page.locator(`.module-navigation [data-module="${module}"]`).click();
       assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
       await assertHost('a', 'terminals');
@@ -339,29 +339,27 @@ try {
     await nav('模型管理');
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '资产管理',
+      '设置',
     );
-    assert.deepEqual(
-      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['安全凭据', '模型管理'],
+    assert.equal(
+      await page.locator('.module-menu [aria-current="page"]').getAttribute('aria-label'),
+      '模型管理',
     );
-    await page.screenshot({ path: `${output}/${name}-assets-module.png` });
+    await page.screenshot({ path: `${output}/${name}-models-settings.png` });
     await nav('关于');
-    assert.deepEqual(
-      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['通用', '终端', '快捷键', '数据与存储', '关于'],
-    );
-    await page.locator('.module-navigation [data-module="assets"]').click();
+    await page.locator('.module-navigation [data-module="plugins"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'about');
-    await nav('模型管理');
-    await page.locator('.module-navigation [data-module="system"]').click();
+    await page.locator('.workspace-tab[data-view="models"] [role="tab"]').click();
     assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'models');
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').getAttribute('data-module'),
+      'system',
+    );
     await selectHostWorkspace(page, 'b');
     await assertHost('b', 'terminals');
     await page.locator('.terminal-pane:visible[data-host-id="b"]').waitFor();
     assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
       '主机管理',
-      '资产管理',
       '插件',
       '设置',
     ]);

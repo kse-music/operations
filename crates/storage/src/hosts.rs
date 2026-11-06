@@ -96,6 +96,44 @@ fn insert_host(connection: &Connection, input: &HostInput) -> Result<Host, Error
         params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,serde_json::to_string(&input.tags).map_err(storage_error)?,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
     one_host(connection, &id)
 }
+fn update_host(connection: &Connection, id: &str, input: &HostInput) -> Result<Host, Error> {
+    let previous = one_host(connection, id)?;
+    validate_links(connection, input)?;
+    validate_jump_chain(connection, id, input)?;
+    connection.execute("UPDATE hosts SET name=?2,hostname=?3,port=?4,username=?5,auth_type=?6,credential_id=?7,group_id=?8,tags=?9,description=?10,favorite=?11,connect_timeout_secs=?12,ssh_options=?13,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,serde_json::to_string(&input.tags).map_err(storage_error)?,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
+    if previous.config.credential_id != input.credential_id {
+        retire_host_credential(connection, previous.config.credential_id.as_deref())?;
+    }
+    one_host(connection, id)
+}
+
+fn retire_host_credential(connection: &Connection, id: Option<&str>) -> Result<(), Error> {
+    let Some(id) = id else { return Ok(()) };
+    let reference: Option<String> = connection
+        .query_row(
+            "DELETE FROM credentials WHERE id=?1 AND host_managed=1
+             AND NOT EXISTS (SELECT 1 FROM hosts WHERE credential_id=?1
+                 OR json_extract(ssh_options,'$.proxy.credentialId')=?1)
+             AND NOT EXISTS (SELECT 1 FROM application_settings WHERE key='app_config'
+                 AND json_extract(value,'$.product.sshDefaults.proxy.credentialId')=?1)
+             RETURNING secret_ref",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(storage_error)?
+        .flatten();
+    if let Some(reference) = reference {
+        connection
+            .execute(
+                "INSERT OR IGNORE INTO secret_gc(reference) VALUES(?1)",
+                [reference],
+            )
+            .map_err(storage_error)?;
+    }
+    Ok(())
+}
+
 fn validate_jump_chain(connection: &Connection, id: &str, input: &HostInput) -> Result<(), Error> {
     let mut seen = std::collections::HashSet::from([id.to_owned()]);
     let mut next = input.ssh.jump_host_id.clone();
@@ -139,7 +177,9 @@ impl Database {
         let groups = tx.prepare("SELECT id,name,sort_order,parent_id FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id").map_err(storage_error)?
             .query_map([], |r| Ok(HostGroup{id:r.get(0)?,name:r.get(1)?,sort_order:r.get(2)?,parent_id:r.get(3)?})).map_err(storage_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?;
         let ids = tx
-            .prepare("SELECT id FROM credentials ORDER BY name COLLATE NOCASE,id")
+            .prepare(
+                "SELECT id FROM credentials WHERE host_managed=0 ORDER BY name COLLATE NOCASE,id",
+            )
             .map_err(storage_error)?
             .query_map([], |r| r.get::<_, String>(0))
             .map_err(storage_error)?
@@ -161,28 +201,37 @@ impl Database {
         })
     }
     pub fn host_create(&self, input: HostInput) -> Result<Host, Error> {
-        let input = input.normalize()?;
-        let mut connection = self.connect()?;
-        let tx = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(storage_error)?;
-        let host = insert_host(&tx, &input)?;
-        tx.commit().map_err(storage_error)?;
-        Ok(host)
+        self.host_save(None, input, None)
     }
     pub fn host_update(&self, id: &str, input: HostInput) -> Result<Host, Error> {
-        let input = input.normalize()?;
+        self.host_save(Some(id), input, None)
+    }
+    pub fn host_save(
+        &self,
+        id: Option<&str>,
+        input: HostInput,
+        secret_reference: Option<&str>,
+    ) -> Result<Host, Error> {
+        let mut input = input.normalize()?;
         let mut connection = self.connect()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
-        validate_links(&tx, &input)?;
-        validate_jump_chain(&tx, id, &input)?;
-        let count = tx.execute("UPDATE hosts SET name=?2,hostname=?3,port=?4,username=?5,auth_type=?6,credential_id=?7,group_id=?8,tags=?9,description=?10,favorite=?11,connect_timeout_secs=?12,ssh_options=?13,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,serde_json::to_string(&input.tags).map_err(storage_error)?,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
-        if count == 0 {
-            return Err(Error::NotFound);
+        if let Some(reference) = secret_reference {
+            let credential_id = Uuid::new_v4().to_string();
+            tx.execute(
+                "INSERT INTO credentials(id,name,kind,secret_ref,host_managed) VALUES(?1,?2,?3,?4,1)",
+                params![credential_id, "主机 SSH 认证", input.auth_type.as_str(), reference],
+            )
+            .map_err(storage_error)?;
+            tx.execute("DELETE FROM secret_gc WHERE reference=?1", [reference])
+                .map_err(storage_error)?;
+            input.credential_id = Some(credential_id);
         }
-        let host = one_host(&tx, id)?;
+        let host = match id {
+            Some(id) => update_host(&tx, id, &input)?,
+            None => insert_host(&tx, &input)?,
+        };
         tx.commit().map_err(storage_error)?;
         Ok(host)
     }
@@ -192,13 +241,10 @@ impl Database {
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
         if tx.query_row("SELECT EXISTS(SELECT 1 FROM hosts WHERE json_extract(ssh_options,'$.jumpHostId')=?1)",[id],|r|r.get::<_,bool>(0)).map_err(storage_error)?{return Err(Error::Validation("此主机仍被用作跳板，请先修改关联主机的跳板设置"));}
-        if tx
-            .execute("DELETE FROM hosts WHERE id=?1", [id])
-            .map_err(storage_error)?
-            == 0
-        {
-            return Err(Error::NotFound);
-        }
+        let previous = one_host(&tx, id)?;
+        tx.execute("DELETE FROM hosts WHERE id=?1", [id])
+            .map_err(storage_error)?;
+        retire_host_credential(&tx, previous.config.credential_id.as_deref())?;
         tx.commit().map_err(storage_error)?;
         Ok(())
     }

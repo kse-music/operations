@@ -5,6 +5,8 @@ import {
   ArrowUp,
   ArrowRight,
   Copy,
+  Eye,
+  EyeOff,
   FolderOpen,
   FolderPlus,
   FileUp,
@@ -28,6 +30,7 @@ import { errorMessage } from '../services/ipc';
 import {
   bytes,
   remoteJoin,
+  unfinished,
   type FileEntry,
   type ConflictPolicy,
   type Direction,
@@ -49,10 +52,15 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   remotePath = ref(''),
   localSelection = ref<string[]>([]),
   remoteSelection = ref<string[]>([]),
+  showRemoteHidden = ref(false),
   busy = ref(false),
   over = ref(false),
   following = ref(false),
+  transferHistory = ref(false),
   remoteArea = ref<HTMLElement>();
+const hasTransferHistory = computed(() =>
+  store.tasks.some((task) => task.hostId === chosen.value && !unfinished(task)),
+);
 const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: number } | null>(null),
   operation = ref<{
     kind: 'mkdir' | 'rename' | 'delete';
@@ -75,11 +83,19 @@ const transfer = ref<{
   confirmed: boolean;
   retry?: string;
 } | null>(null);
+
+function displayLocalPath(path: string): string {
+  // Keep other Windows namespaces intact. Only drive and UNC paths have this display form.
+  if (/^\\\\\?\\[a-z]:\\/i.test(path)) return path.slice(4);
+  if (/^\\\\\?\\UNC\\[^\\]+\\[^\\]+(?:\\|$)/i.test(path)) return '\\\\' + path.slice(8);
+  return path;
+}
+
 watch(
   () => store.local?.path,
   (value) => {
     if (value) {
-      localPath.value = value;
+      localPath.value = displayLocalPath(value);
       localSelection.value = [];
     }
   },
@@ -98,6 +114,7 @@ watch(
   () => {
     remoteSelection.value = [];
     following.value = false;
+    transferHistory.value = false;
   },
 );
 const cwd = computed(() => terminals.panes.find((p) => p.key === store.current?.followPane)?.cwd);
@@ -120,6 +137,16 @@ async function copy(path: string): Promise<void> {
     store.notice = '绝对路径已复制。';
   } catch {
     store.error = '无法写入剪贴板。';
+  }
+}
+async function navigateLocal(): Promise<void> {
+  const input = localPath.value;
+  const previous = store.local;
+  await store.localLoad(
+    previous && input === displayLocalPath(previous.path) ? previous.path : input,
+  );
+  if (store.local && store.local !== previous && localPath.value === input) {
+    localPath.value = displayLocalPath(store.local.path);
   }
 }
 async function browseLocal(): Promise<void> {
@@ -197,6 +224,7 @@ async function startTransfer(): Promise<void> {
   }
 }
 async function retry(task: TransferInfo): Promise<void> {
+  transferHistory.value = false;
   const host = hosts.catalog?.hosts.find((h) => h.id === task.hostId);
   if (!host) return;
   if (store.active !== host.id || store.current?.state !== 'connected') {
@@ -362,6 +390,9 @@ onBeforeUnmount(() => {
         <h1>文件管理</h1>
       </div>
       <div class="toolbar">
+        <button v-if="hasTransferHistory" class="button" @click="transferHistory = true">
+          传输记录
+        </button>
         <button
           class="button primary"
           :disabled="
@@ -398,7 +429,7 @@ onBeforeUnmount(() => {
     <div class="file-columns">
       <section class="file-side">
         <h2>本地文件</h2>
-        <form class="path-bar" @submit.prevent="store.localLoad(localPath)">
+        <form class="path-bar" @submit.prevent="navigateLocal">
           <button
             class="tool-button"
             aria-label="本地上级"
@@ -436,7 +467,7 @@ onBeforeUnmount(() => {
             aria-label="复制本地路径"
             title="复制本地路径"
             :disabled="!store.local"
-            @click="store.local && copy(store.local.path)"
+            @click="store.local && copy(displayLocalPath(store.local.path))"
           >
             <Copy :size="14" aria-hidden="true" /></button
           ><button
@@ -548,7 +579,19 @@ onBeforeUnmount(() => {
             :disabled="!remoteSelection.length"
             @click="mutate('delete')"
           >
-            <Trash2 :size="14" aria-hidden="true" />
+            <Trash2 :size="14" aria-hidden="true" /></button
+          ><button
+            class="tool-button"
+            type="button"
+            aria-label="显示隐藏项"
+            title="显示隐藏项"
+            :aria-pressed="showRemoteHidden"
+            @click="
+              showRemoteHidden = !showRemoteHidden;
+              menu = null;
+            "
+          >
+            <component :is="showRemoteHidden ? Eye : EyeOff" :size="14" aria-hidden="true" />
           </button>
         </div>
         <FilePane
@@ -556,14 +599,22 @@ onBeforeUnmount(() => {
           :listing="store.current?.listing ?? null"
           :loading="store.current?.loading ?? false"
           :selected="remoteSelection"
+          :hide-dotfiles="!showRemoteHidden"
           @select="remoteSelection = $event"
           @open="openEntry('remote', $event)"
           @menu="(entry, event) => context('remote', entry, event)"
         />
       </section>
     </div>
-    <TransferPanel :host-id="chosen" @retry="retry" />
+    <TransferPanel :host-id="chosen" />
   </section>
+  <Modal
+    v-if="transferHistory && hasTransferHistory"
+    title="传输记录"
+    @close="transferHistory = false"
+  >
+    <TransferPanel :host-id="chosen" history @retry="retry" />
+  </Modal>
   <template v-if="menu"
     ><button class="context-backdrop" aria-label="关闭文件菜单" @click="menu = null"></button>
     <div class="context-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
@@ -663,7 +714,12 @@ onBeforeUnmount(() => {
       {{ transfer.sources.length }} 个源项目
     </p>
 
-    <pre class="file-path-preview">{{ transfer.sources.join('\n') }}</pre>
+    <pre class="file-path-preview">{{
+      (transfer.direction === 'upload'
+        ? transfer.sources.map(displayLocalPath)
+        : transfer.sources
+      ).join('\n')
+    }}</pre>
     <form class="editor-form" @submit.prevent="startTransfer">
       <label
         >目标目录<input
@@ -682,7 +738,6 @@ onBeforeUnmount(() => {
         >同名文件<select v-model="transfer.conflict" aria-label="冲突处理">
           <option value="fail">停止并提示冲突</option>
           <option value="skip">跳过</option>
-          <option value="rename">自动重命名</option>
           <option value="overwrite">覆盖</option>
         </select></label
       ><label v-if="transfer.conflict === 'overwrite'" class="checkbox-label"

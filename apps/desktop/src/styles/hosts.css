@@ -26,7 +26,7 @@
   color: var(--text);
   border: 0;
   padding: 8px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   min-width: 0;
   width: 100%;
 }
@@ -51,7 +51,7 @@
   align-items: center;
   gap: 4px;
   color: var(--text);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -61,7 +61,7 @@
   border-radius: 4px;
   background: var(--accent-bg);
   color: var(--accent);
-  font-size: 10px;
+  font-size: calc(10px * var(--interface-font-scale, 1));
   font-weight: 600;
   line-height: 16px;
   text-align: center;
@@ -77,7 +77,7 @@
 .host-load-more {
   width: 100%;
   margin-top: 10px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .sidebar-tools,
 .toolbar {
@@ -102,7 +102,7 @@
   color: var(--muted);
   border: 0;
   padding: 8px 6px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   text-align: left;
 }
 .group-toggle .group-name {
@@ -112,7 +112,7 @@
 }
 .group-toggle .group-count {
   margin-left: auto;
-  font-size: 10px;
+  font-size: calc(10px * var(--interface-font-scale, 1));
   flex-shrink: 0;
 }
 .group-toggle > svg {
@@ -155,7 +155,7 @@
 .host-address {
   color: var(--muted);
   font:
-    10px Consolas,
+    calc(10px * var(--interface-font-scale, 1)) Consolas,
     monospace;
   white-space: nowrap;
   overflow: hidden;
@@ -177,7 +177,7 @@
   width: auto;
 }
 .host-name {
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
 }
 .modal:has(> .import-body)[open] {
   --import-inset: clamp(16px, 4vw, 24px);
@@ -208,7 +208,7 @@
 }
 .import-intro,
 .import-safety {
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.6;
 }
 .import-file {
@@ -241,7 +241,7 @@
   padding: 10px 12px;
   border-radius: 6px;
   font:
-    12px / 1.6 Consolas,
+    calc(12px * var(--interface-font-scale, 1)) / 1.6 Consolas,
     monospace;
 }
 .import-editor textarea::placeholder {
@@ -271,7 +271,7 @@
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .import-destination label {
   flex: none;
@@ -296,7 +296,7 @@
 }
 .modal .import-preview-heading h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: calc(14px * var(--interface-font-scale, 1));
 }
 .import-candidates {
   margin: 0;
@@ -331,7 +331,7 @@
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--raised);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .import-status.danger {
   background: var(--error-bg);
@@ -434,5 +434,5 @@
 }
 .host-drag-preview span {
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }

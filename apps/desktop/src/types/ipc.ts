@@ -7,6 +7,7 @@ export interface AppConfig {
   terminal: import('./preferences').TerminalPreferences;
   version: number;
   theme: Theme;
+  interfaceFontSize: import('./preferences').InterfaceFontSize;
   sidebarWidth: number;
   terminalFontSize: number;
   connectTimeoutSecs: number;

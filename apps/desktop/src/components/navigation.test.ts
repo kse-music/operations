@@ -21,12 +21,11 @@ afterEach(() => {
 
 it.each([
   ['terminals', ['收起主机栏'], []],
-  ['credentials', ['收起主机栏', '安全凭据', '模型管理'], ['credentials', 'models']],
   ['plugins', ['收起主机栏', '插件管理'], ['plugins']],
   [
     'settings',
-    ['收起主机栏', '通用', '终端', '快捷键', '数据与存储', '关于'],
-    ['settings', 'settingsTerminal', 'settingsShortcuts', 'settingsStorage', 'about'],
+    ['收起主机栏', '通用', '终端', '快捷键', '数据与存储', '模型管理', '关于'],
+    ['settings', 'settingsTerminal', 'settingsShortcuts', 'settingsStorage', 'models', 'about'],
   ],
 ] as const)('shows only menus belonging to the module containing %s', (active, labels, views) => {
   const navigate = vi.fn(),
@@ -61,7 +60,7 @@ it.each([
     expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(labels[1]);
 });
 
-it.each(['hosts', 'assets', 'plugins', 'system'] as const)(
+it.each(['hosts', 'plugins', 'system'] as const)(
   'keeps installed plugins out of the %s sidebar',
   (module) => {
     pinia = createPinia();

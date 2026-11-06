@@ -5,6 +5,9 @@ import type {
   Credential,
   CredentialInput,
   Host,
+  HostAuthenticationInput,
+  HostKeyFingerprint,
+  HostTestResult,
   HostGroup,
   HostInput,
   ImportPreview,
@@ -17,8 +20,22 @@ function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
 }
 export const hostsApi = {
   list: () => call<Catalog>('host_list'),
-  create: (input: HostInput) => call<Host>('host_create', { input }),
-  update: (id: string, input: HostInput) => call<Host>('host_update', { id, input }),
+  test: (
+    input: HostInput,
+    authentication?: HostAuthenticationInput,
+    confirmed?: HostKeyFingerprint,
+    hostId?: string,
+  ) => call<HostTestResult>('host_test', { input, authentication, confirmed, hostId }),
+  create: (input: HostInput, authentication: HostAuthenticationInput | undefined, testId: string) =>
+    call<Host>('host_create_tested', { input, authentication, testId }),
+  update: (id: string, input: HostInput, authentication?: HostAuthenticationInput) =>
+    call<Host>('host_update', { id, input, authentication }),
+  updateTested: (
+    id: string,
+    input: HostInput,
+    authentication: HostAuthenticationInput | undefined,
+    testId: string,
+  ) => call<Host>('host_update_tested', { id, input, authentication, testId }),
   remove: (id: string) => call<void>('host_delete', { id }),
   copy: (id: string) => call<Host>('host_copy', { id }),
   groupSave: (
@@ -28,8 +45,6 @@ export const hostsApi = {
   groupRemove: (id: string) => call<void>('group_delete', { id }),
   credentialSave: (id: string | null, expectedRevision: number | null, input: CredentialInput) =>
     call<Mutation<Credential>>('credential_save', { id, expectedRevision, input }),
-  credentialRemove: (id: string, detachHosts: boolean) =>
-    call<Mutation<void>>('credential_delete', { id, detachHosts }),
   cleanup: () => call<Mutation<void>>('credential_cleanup'),
   status: () => call<SecureStatus>('credential_status'),
   preview: (text: string) => call<ImportPreview>('hosts_import_preview', { text }),

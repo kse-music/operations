@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
+import ProxyPasswordDialog from './ProxyPasswordDialog.vue';
 import { useHostsStore } from '../stores/hosts';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
@@ -9,6 +10,11 @@ const model = defineModel<ProductPreferences>({ required: true });
 defineProps<{ section: 'general' | 'connection' | 'shortcuts' | 'storage'; disabled?: boolean }>();
 const hosts = useHostsStore(),
   error = ref('');
+const newProxyPassword = ref(false);
+function proxyPasswordSaved(id: string): void {
+  if (model.value.sshDefaults.proxy) model.value.sshDefaults.proxy.credentialId = id;
+  newProxyPassword.value = false;
+}
 const mode = computed({
   get: () => model.value.sshDefaults.proxy?.kind ?? 'direct',
   set: (kind: 'direct' | 'socks5' | 'http_connect') => {
@@ -156,8 +162,11 @@ useErrorNotifications(error);
                     {{ c.name }}
                   </option>
                 </select></label
-              ></template
-            ></template
+              >
+              <button type="button" class="text-button" @click="newProxyPassword = true">
+                ＋ 新建代理密码
+              </button>
+            </template></template
           >
         </div>
         <p class="subtle full-width">
@@ -182,4 +191,9 @@ useErrorNotifications(error);
       </template>
     </div>
   </fieldset>
+  <ProxyPasswordDialog
+    v-if="newProxyPassword"
+    @close="newProxyPassword = false"
+    @saved="proxyPasswordSaved"
+  />
 </template>

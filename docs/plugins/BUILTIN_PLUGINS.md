@@ -23,7 +23,7 @@ Docker 采用容器/镜像分类、真实状态摘要和精简列。容器详情
 
 ## 使用入口
 
-顶部提供主机运维、资产管理、插件和设置，不再提供独立运维工具模块。插件菜单中的插件管理统一提供安装、升级、卸载及全部安装身份的详情、启停、权限和配置，包含禁用、未授权或无功能页面的包。插件功能从当前主机工作区 SSH/SFTP 右侧平铺的工具按钮进入，仅列启用且有功能页面的插件，固定当前主机，不重复选择主机；功能页“插件设置”打开同一设置标签，返回设备标签保留功能及草稿。全局搜索可打开 AI，相关工作区归属主机运维；内置 AI 助手以全资产目录参与匹配，匹配/发送直接进行；宿主仅按问题采集命中主机的相关来源，先统计后限量发送明细，并在聊天提示中说明省略；自动脱敏固定开启，无右侧配置面板。
+顶部提供主机管理、插件和设置。插件菜单中的插件管理统一提供安装、升级、卸载及全部安装身份的详情、启停、权限和配置，包含禁用、未授权或无功能页面的包。插件功能从当前主机工作区 SSH/SFTP 右侧平铺的工具按钮进入，仅列启用且有功能页面的插件，固定当前主机，不重复选择主机；功能页“插件设置”打开同一设置标签，返回设备标签保留功能及草稿。全局搜索可打开 AI，相关工作区归属主机管理；内置 AI 助手以全资产目录参与匹配，匹配/发送直接进行；宿主仅按问题采集命中主机的相关来源，先统计后限量发送明细，并在聊天提示中说明省略；自动脱敏固定开启，无右侧配置面板。
 
 每台主机保留一个设备标签，按插件/贡献/主机缓存页面、草稿与结果。隐藏时停止交互及日志、释放 WASM VM，返回时重新绑定并激活，准备完成后才开放界面。草稿仅保留在当前运行内；旧资源句柄须重新获取，停用插件不关闭共享终端或停止远端服务。
 
@@ -31,7 +31,7 @@ Docker 采用容器/镜像分类、真实状态摘要和精简列。容器详情
 
 每个 `plugins/system/<name>` 拥有 frontend、backend、manifest、UI JSON、测试和独立 Cargo.lock。公开 TypeScript/Vue SDK 提供共享状态、能力客户端和公共 UI；宿主只保留原生基础服务、管理和权限桥。
 
-执行 `npm run plugins:build`，或 `node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin`，使用与上传包相同的编译和打包器生成 WASM/UI/JS/CSS 与摘要。标准发行资产位于 `plugins/system/packages/*.sdplugin`，属于本地生成文件，不纳入 Git；提交插件源码、清单和锁文件。桌面 `dev/build`（包括 Tauri 入口）会自动生成两份内置包，CI 在 Rust 检查和测试前显式生成。独立运行相关 Cargo 命令或直接读取包的验收脚本前，先执行 `npm run plugins:build`，插件或 SDK 源码变化后同样需重新生成。
+执行 `npm run plugins:build`，或 `node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin`，使用与上传包相同的编译和打包器生成 WASM/UI/JS/CSS 与摘要。桌面 `dev/build`（包括 Tauri 入口）会生成两份内置包 `plugins/system/packages/*.sdplugin` 和兼容界面资源 `plugins/compat/server/assets/`。`npm run plugins:build` 还会生成 `server-capabilities.sdplugin` 测试夹具，CI 在 Rust 检查和测试前执行此命令。Git 忽略这些生成文件，提交插件源码、清单和锁文件。独立运行相关 Cargo 命令或直接读取包的验收脚本前，先执行 `npm run plugins:build`。插件、兼容界面、夹具或 SDK 源码变化后同样需重新生成。
 
 首次构建需安装 `wasm32-unknown-unknown` 目标，并按[开发准备](../../README.md#开发)分别下载两个插件锁定的 Cargo 依赖；实际插件编译继续使用 `--offline --locked`，不在编译阶段隐式下载。包在 Rust 编译时通过 `include_bytes!` 嵌入应用，最终安装器携带生成的内置插件。独立分发包保存为 CI/Release 产物。宿主验证安装代、授权和摘要后将包内 JS/CSS 加载到不透明来源 iframe，禁止直接访问父 DOM、原生 IPC 和外部网络。
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ArrowDown, ArrowUp } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import type { DirectoryListing, FileEntry } from '../types/files';
 import { bytes, permissionText } from '../types/files';
@@ -7,27 +8,52 @@ const props = defineProps<{
   listing: DirectoryListing | null;
   loading: boolean;
   selected: string[];
+  hideDotfiles?: boolean;
 }>();
 const emit = defineEmits<{
   select: [paths: string[]];
   open: [entry: FileEntry];
   menu: [entry: FileEntry, event: MouseEvent];
 }>();
-const sort = ref<'name' | 'size' | 'modified' | 'kind'>('name'),
+const localColumns = [
+  ['name', '名称'],
+  ['size', '大小'],
+  ['kind', '类型'],
+  ['modified', '修改时间'],
+] as const;
+const remoteColumns = [...localColumns, ['permissions', '权限'], ['owner', '拥有者']] as const;
+type SortKey = (typeof remoteColumns)[number][0];
+const columns = computed(() => (props.side === 'local' ? localColumns : remoteColumns));
+const sort = ref<SortKey>('name'),
   descending = ref(false);
-const entries = computed(() =>
-  [...(props.listing?.entries ?? [])].sort((a, b) => {
+
+function sortBy(key: SortKey): void {
+  descending.value = sort.value === key && !descending.value;
+  sort.value = key;
+}
+
+function sortText(entry: FileEntry, key: 'name' | 'kind' | 'owner'): string {
+  return key === 'owner' ? String(entry.owner ?? entry.uid ?? '') : entry[key];
+}
+
+const entries = computed(() => {
+  const rows = props.listing?.entries ?? [];
+  const displayed = props.hideDotfiles
+    ? rows.filter((entry) => !entry.name.startsWith('.'))
+    : [...rows];
+  return displayed.sort((a, b) => {
     const dir = (a.kind === 'directory' ? 0 : 1) - (b.kind === 'directory' ? 0 : 1);
     if (dir) return dir;
+    const key = sort.value;
     const value =
-      sort.value === 'size'
-        ? (a.size ?? -1) - (b.size ?? -1)
-        : sort.value === 'modified'
+      key === 'size' || key === 'permissions'
+        ? (a[key] ?? -1) - (b[key] ?? -1)
+        : key === 'modified'
           ? (a.modified ?? 0) - (b.modified ?? 0)
-          : String(a[sort.value]).localeCompare(String(b[sort.value]), 'zh-CN', { numeric: true });
+          : sortText(a, key).localeCompare(sortText(b, key), 'zh-CN', { numeric: true });
     return descending.value ? -value : value;
-  }),
-);
+  });
+});
 const page = ref(1);
 const pages = computed(() => Math.max(1, Math.ceil(entries.value.length / 200)));
 const visibleEntries = computed(() =>
@@ -36,6 +62,18 @@ const visibleEntries = computed(() =>
 watch([() => props.listing?.path, sort, descending], () => {
   page.value = 1;
 });
+watch(
+  () => props.hideDotfiles,
+  (hidden) => {
+    page.value = 1;
+    if (!hidden || !props.selected.length) return;
+    const displayed = new Set(entries.value.map((entry) => entry.path));
+    emit(
+      'select',
+      props.selected.filter((path) => displayed.has(path)),
+    );
+  },
+);
 watch(pages, (value) => {
   page.value = Math.min(page.value, value);
 });
@@ -59,17 +97,7 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
 </script>
 <template>
   <div class="file-list-tools">
-    <span>{{ listing?.entries.length ?? 0 }} 项 · {{ selected.length }} 已选</span
-    ><label
-      >排序<select v-model="sort" :aria-label="`${side === 'local' ? '本地' : '远程'}排序`">
-        <option value="name">名称</option>
-        <option value="size">大小</option>
-        <option value="modified">修改时间</option>
-        <option value="kind">类型</option>
-      </select></label
-    ><button class="text-button" @click="descending = !descending">
-      {{ descending ? '↓ 降序' : '↑ 升序' }}
-    </button>
+    <span>{{ entries.length }} 项 · {{ selected.length }} 已选</span>
   </div>
   <div class="file-table" :aria-busy="loading">
     <p v-if="loading" role="status">正在读取目录…</p>
@@ -94,14 +122,23 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
               "
             />
           </th>
-          <th>名称</th>
-          <th>大小</th>
-          <th>修改时间</th>
-          <th>类型</th>
-          <template v-if="side === 'remote'">
-            <th>权限</th>
-            <th>拥有者</th>
-          </template>
+          <th
+            v-for="[key, label] in columns"
+            :key="key"
+            class="file-sort-column"
+            scope="col"
+            :aria-sort="sort === key ? (descending ? 'descending' : 'ascending') : undefined"
+          >
+            <button type="button" class="file-sort-button" @click="sortBy(key)">
+              {{ label }}
+              <component
+                :is="descending ? ArrowDown : ArrowUp"
+                v-if="sort === key"
+                :size="12"
+                aria-hidden="true"
+              />
+            </button>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -133,10 +170,10 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
             </button>
           </td>
           <td>{{ entry.kind === 'directory' ? '—' : bytes(entry.size) }}</td>
+          <td>{{ kinds[entry.kind] }}</td>
           <td>
             {{ entry.modified === null ? '—' : new Date(entry.modified * 1000).toLocaleString() }}
           </td>
-          <td>{{ kinds[entry.kind] }}</td>
           <template v-if="side === 'remote'">
             <td class="file-metadata">
               {{ permissionText(entry.permissions) }}
@@ -148,7 +185,9 @@ const kinds = { file: '文件', directory: '目录', symlink: '链接', other: '
         </tr>
       </tbody>
     </table>
-    <p v-if="listing && !loading && !entries.length" class="host-empty">空目录</p>
+    <p v-if="listing && !loading && !entries.length" class="host-empty">
+      {{ listing.entries.length ? '当前目录只有隐藏项' : '空目录' }}
+    </p>
   </div>
   <div v-if="pages > 1" class="file-pagination">
     <button class="button" :disabled="page === 1" @click="page--">上一页</button

@@ -1,5 +1,9 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-07 模型管理导航
+
+`types/navigation.ts` 将 `models` 归入 `system`。设置侧栏、全局搜索、助手的模型管理入口和标签激活继续通过工作区导航复用 `models:` 标签。模型管理沿用 `ModelsView` 和自己的表单保存流程，四个偏好分类仍由 `SettingsPanel` 统一保存。
+
 ## 2026-11-06 AppImage 本地终端环境隔离
 
 `application/local_terminal.rs` 在 Linux 的 PTY CommandBuilder 上清理 AppRun 注入的 Python、可执行文件和动态库搜索路径。仅接受绝对且非根目录的 `APPDIR`，通过系统路径列表 API 和路径组件比较移除其内部条目，保留其他条目及顺序；清理后只剩空条目的变量直接移除。处理仅作用于子进程，不改写多线程应用的全局环境，不关闭 AppImage 自身的运行库配置。Shell、HOME、认证代理、项目虚拟环境及用户启动文件继续使用既有链路，无新增依赖、IPC 或数据迁移。
@@ -19,6 +23,18 @@ Rust 的插件审批策略仅为实际 system 来源的 `cn.hiboot.plugins.docke
 ## 2026-11-06 主机 JSON 导入导出下线
 
 移除主机标题栏 JSON 控件、App 文件读写、前端服务方法、Tauri 命令及其权限、应用用例和存储归档模块。SQLite 数据模型继续读取已有主机、文件夹及连接配置。已有主机缺少代理密码引用时可编辑配置，连接规划继续要求补绑凭据。OpenSSH Config 使用独立解析和提交链路。
+
+## 2026-11-06 新建和编辑主机的 SSH 测试与保存
+
+`host_test` 使用待保存的主机草稿构建连接计划，复用普通 SSH 的代理、跳板、主机密钥及认证逻辑。编辑时传入可选的 `hostId`，用现有主机身份验证跳板路径，并按当前认证草稿使用新输入、已有凭据或 Agent。遇到新指纹时返回端点、算法和指纹，用户确认后重新握手并复核所确认的指纹。确认的密钥写入现有信任表。测试最多运行 60 秒，认证后立即断开。测试期间草稿和登录秘密只在内存中处理。
+
+新建和编辑表单分别用 `host_create_tested` 和 `host_update_tested` 保存。后端要求五分钟有效、单次使用的测试结果，并重新校验主机身份、规范化草稿、SSH 路径、凭据版本及新输入秘密的摘要。`host_update` 继续用于文件夹移动等原有调用方，验收夹具可用原有的创建和更新接口。新增 IPC 限定在主窗口，数据库结构沿用原版本。
+
+## 2026-11-06 主机与 SSH 认证一并保存
+
+`host_create` 和 `host_update` 接受可选的 `authentication`，与既有非敏感 `HostInput` 分开。Rust 使用仅反序列化的 `HostAuthenticationInput`，按 `kind` 接收 `password` 或 `keyData` 与可选 `passphrase`，校验其与主机认证类型匹配。响应仍为 `Host`。私钥沿用阻塞线程解析、算法检查和格式规范化。
+
+迁移 009 标记通过主机表单创建的凭据。应用先登记回收意图，再写入随机引用对应的系统凭据，最后在同一 SQLite 事务提交主机和凭据关联。写入或提交失败时保留原主机和认证，尝试回收新引用。替换或删除时只有失去最后引用的主机凭据才进入回收队列。旧数据和独立代理凭据沿用原引用，主机专用凭据不出现在可复用的代理密码列表。
 
 ## 2026-11-06 私钥导入和模型上下文窗口
 
@@ -125,6 +141,8 @@ AssistantView 采用全宽对话，删除侧栏、读取范围、日志及脱敏
 系统服务页面缓存上限为四类。Host/SDK 3.0 与系统包 1.3 协商接口移除，保留 ^1.x/^2.x 的其他能力和 ABI/wire 1。仓库先保留原始记录：已知 system 服务的旧权限收窄后由启动标准升级保留 enabled/设置，旧授权按安装代和版本先判失效，避免反序列化已删除枚举；诊断上传包归档停用，旧 payload/data 保留。废弃 backup 指针退出活动反序列化，原始记录已归档。所有迁移故障继续传播，目录链接与范围校验保持。
 
 ## 2026-11-05：SFTP 记录归属主机工作区
+
+当前文件页按工作区高度布局。两个 FilePane 独立滚动，活动 TransferPanel 在底部占用有限高度，结束后由文件列表收回空间。页头的“传输记录”复用同一组件查看当前主机的已结束任务，并保留重试入口。
 
 移除 App 任务中心组件/弹窗、搜索事件和专用样式；设置与默认快捷键只保留 search/settings。ProductPreferences 反序列化 shortcuts 时仅移除历史 tasks 键，保留其他键的严格验证与原配置兼容，无数据库迁移。
 
@@ -333,7 +351,6 @@ apps/desktop/
   src/
     components/SettingsPanel.vue   settings form
     views/HostsView.vue            real host inventory and details
-    views/CredentialsView.vue      secret reference management (no readback)
     views/AboutView.vue            product information and real backend diagnostics
     stores/                       Pinia: application + host catalog/loading/error
     services/                     typed IPC boundaries
@@ -395,7 +412,7 @@ Vue mounted → Pinia.initialize → invoke(app_bootstrap)
 | app_bootstrap | 无                    | appVersion、databaseVersion、dataDirectory、logDirectory、config | IpcError |
 | config_save   | `{config: AppConfig}` | 已持久化的 AppConfig                                             | IpcError |
 
-主机/凭据新增命令：`host_list`（返回 Catalog：主机、分组、凭据元数据、待清理数量）、`host_create`、`host_update`、`host_delete`、`host_copy`、`group_save`、`group_delete`、`credential_save`、`credential_delete`、`credential_status`、`credential_cleanup`、`hosts_import_preview`、`hosts_import`、`hosts_export`。
+主机与凭据命令包括 `host_list`（返回主机、分组、可复用凭据元数据和待清理数量）、`host_create`、`host_update`、`host_delete`、`host_copy`、`group_save`、`group_delete`、`credential_save`、`credential_delete`、`credential_status`、`credential_cleanup`、`hosts_import_preview` 和 `hosts_import`。
 所有命令使用同一 AppManifest 和 main capability 白名单。没有读取秘密的 IPC、任意本地文件或 Shell API。
 CredentialInput 只反序列化、不实现 Debug/Serialize，秘密在 Rust 使用 Zeroizing；前端仅在临时表单中持有输入，提交/卸载清空。JS 内存无法保证清零，不作此承诺。
 普通 mutation 成功后重新读取 SQLite；失败不会在 Pinia 中生成假主机。已提交但旧秘密清理失败通过 Mutation.warnings 提示，避免把已保存的操作误报为完全失败。
@@ -425,13 +442,14 @@ FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样�
 
 - 数据路径通过 `tauri::Manager::path().app_data_dir()` 获取；日志通过 `app_log_dir()` 获取。安装目录不参与数据写入。
 - SQLite 绑定 bundled SQLite，避免依赖用户预装数据库。
-- `PRAGMA user_version = 8`。001–007 保留既有迁移，008 在 IMMEDIATE 事务内重建凭据表并校验外键，支持系统凭据库中的导入私钥。旧凭据 ID、版本、路径和主机关联均保留，迁移失败回滚，未来版本拒绝降级。
+- `PRAGMA user_version = 9`。008 重建凭据表以支持导入私钥，009 增加主机凭据归属标记。迁移在 IMMEDIATE 事务中执行，保留旧凭据 ID、版本、路径和主机关联。迁移失败回滚，未来版本拒绝降级。
 - `application_settings` 的 `app_config` 保存版本化偏好 JSON，是配置唯一真源；不维护第二份普通 JSON 配置。
 - hosts 使用 UUID、强类型字段、端口/超时 CHECK、分组和凭据外键。tags 为经过校验/去重的 JSON 数组。凭据类型在事务内与主机认证类型匹配；Agent 禁止附带 credential_id。
 - `HostInput.name` 仍为字符串，空字符串表示未填写；后端 trim 后只校验非空名称的 128 字符及控制字符限制，分组/凭据名称仍必填。006 重建 hosts 时保留 ID、时间、关联、SSH 选项和索引，仅放宽名称长度下界。前端 `hostDisplayName` 与 Rust `display_name` 优先使用名称，否则按地址及非 22 端口展示；树、标签和主机选项保持一致。复制主机以显示名称加“副本”生成名称。编辑继续读取原始 name，地址/端口变化可实时改变未命名主机的显示名。
 - host_groups 没有 parent_id，只支持单层。删除分组将主机移到未分组；删除主机不删除共享凭据；复制只新建 HostId，并共享原凭据引用。
 - credentials 保存名称、类型、旧式私钥路径、opaque secret_ref 和 revision。密码、私钥正文和解锁口令存储边界在系统凭据库及临时内存。删除关联凭据须明确确认解除关联，主机保留并显示待配置凭据。
-- 配置 version=1；默认深色、侧栏 248px、字号 14、连接超时 15s、采样 3s、INFO。后端拒绝非法数值与未知字段。仅界面/运行偏好，不允许密码或密钥字段。
+- 配置 version=1；默认深色、界面字号标准、侧栏 248px、终端字号 14、连接超时 15s、采样 3s、INFO。后端拒绝非法数值与未知字段。仅界面/运行偏好，不允许密码或密钥字段。
+- `AppConfig.interfaceFontSize` 使用五档枚举。缺失字段读为标准，旧值 `extraSmall` 读为小并在下次保存时写为 `small`。设置草稿经独立预览状态给主文档的界面样式提供缩放比例，关闭最后一个设置标签后清除预览。保存复用原配置 IPC 与 SQLite，终端渲染仍读取 `terminalFontSize`。SFTP 面板的最小并排宽度随字号增大，表格以名称列吸收剩余宽度。
 - 小规模设置读写每次创建连接，5s busy timeout、foreign_keys=ON。当前使用默认事务日志，不引入连接池或 WAL；正式主机模块与实际并发需要时再评估。
 - SQLite 与 OS 凭据操作在 `spawn_blocking` 内；本地元数据单任务执行，最多接纳 16 个在途/等待请求，等待额度最长 3 秒，超限返回 BUSY。元数据写入与新窗格读取凭据可有界排队，避免普通分屏因瞬时竞争失败；SSH 输出完全独立。
 - tracing 仅记录固定操作名称/结果，不记录 DTO、终端内容、文件正文、凭据、私钥或任意错误对象。依赖库日志默认关闭，RUST_LOG 不覆盖本策略。

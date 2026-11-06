@@ -84,6 +84,7 @@ beforeEach(async () => {
     config: {
       version: 1,
       theme: 'dark',
+      interfaceFontSize: 'standard',
       sidebarWidth: 260,
       terminalFontSize: 14,
       connectTimeoutSecs: 10,
@@ -136,6 +137,17 @@ it('zooms all terminal fonts with Ctrl+wheel, saves the setting and refits the p
   expect(wheel({ ctrlKey: true, deltaY: 120 }).defaultPrevented).toBe(true);
   await savedSize(14);
   expect(xterm.wheel).not.toHaveBeenCalled();
+});
+
+it('keeps xterm content at the terminal font size during interface preview and save', async () => {
+  const application = useApplicationStore();
+  application.interfaceFontSizePreview = 'ultraLarge';
+  await nextTick();
+  expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([14, 14]);
+  await application.save({ ...application.state!.config, interfaceFontSize: 'ultraLarge' });
+  application.interfaceFontSizePreview = undefined;
+  await nextTick();
+  expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([14, 14]);
 });
 
 it('leaves ordinary, horizontal and non-terminal wheel events untouched', () => {

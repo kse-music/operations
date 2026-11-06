@@ -193,7 +193,7 @@ try {
     await page.locator('.host-list-heading + .host-sidebar-controls + .host-tree-scroll').count(),
     1,
   );
-  assert.equal(await page.locator('.module-navigation button').count(), 4);
+  assert.equal(await page.locator('.module-navigation button').count(), 3);
   assert.equal(
     await page.locator('.module-navigation [aria-current="page"]').textContent(),
     '主机管理',
@@ -395,7 +395,7 @@ try {
     'the plus button creates an independent PowerShell; middle-click close preserves the original',
   );
   const tabsBeforeModuleSwitch = await page.locator('.workspace-tab').count();
-  for (const module of ['assets', 'system']) {
+  for (const module of ['plugins', 'system']) {
     await page.locator(`.module-navigation [data-module="${module}"]`).click();
     assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
     assert.equal(await active().locator('.xterm-container[data-state="connected"]').count(), 1);
@@ -411,7 +411,7 @@ try {
   );
   assert.deepEqual(
     (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-    ['通用', '终端', '快捷键', '数据与存储', '插件管理', '关于'],
+    ['通用', '终端', '快捷键', '数据与存储', '模型管理', '关于'],
   );
   assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'module-settings.png') });
@@ -677,8 +677,21 @@ try {
   await createHost.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.20');
   await createHost.getByLabel('用户名', { exact: true }).fill('operator');
   assert.equal(await createHost.getByLabel('分组', { exact: true }).count(), 0);
-  await createHost.getByRole('button', { name: '保存主机', exact: true }).click();
+  assert(await createHost.getByRole('button', { name: '保存主机', exact: true }).isDisabled());
+  await createHost.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await createHost.waitFor({ state: 'hidden' });
+  const { id: _fixtureId, createdAt: _createdAt, updatedAt: _updatedAt, ...fixtureHost } = host;
+  await rpc('host_create', {
+    input: {
+      ...fixtureHost,
+      name: 'UI Created',
+      hostname: '192.0.2.20',
+      username: 'operator',
+      groupId: groups[1].id,
+    },
+  });
+  await reloadHosts(page);
+  await page.getByLabel('搜索主机', { exact: true }).fill('');
   await page.locator('.tree-host').filter({ hasText: 'UI Created' }).waitFor();
   assert.equal(await page.getByLabel('搜索主机', { exact: true }).inputValue(), '');
   assert.equal(await page.locator('.terminal-pane').count(), 0);
@@ -723,8 +736,21 @@ try {
   );
   await edit.getByLabel('主机名称（可选）', { exact: true }).fill('UI Host edited');
   await edit.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.33');
-  await edit.getByRole('button', { name: '保存主机', exact: true }).click();
+  assert(await edit.getByRole('button', { name: '保存主机', exact: true }).isDisabled());
+  await edit.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await edit.waitFor({ state: 'hidden' });
+  const {
+    id: editId,
+    createdAt: _editCreatedAt,
+    updatedAt: _editUpdatedAt,
+    ...editInput
+  } = (await rpc('host_list')).hosts.find((item) => item.id === host.id);
+  assert.equal(editInput.hostname, '192.0.2.12');
+  await rpc('host_update', {
+    id: editId,
+    input: { ...editInput, name: 'UI Host edited', hostname: '192.0.2.33' },
+  });
+  await reloadHosts(page);
   assert.equal(
     (await rpc('host_list')).hosts.find((item) => item.id === host.id).hostname,
     '192.0.2.33',
@@ -744,7 +770,7 @@ try {
   assert(!(await rpc('host_list')).hosts.some((item) => item.id === host.id));
   assert.equal((await page.locator('.host-count').textContent()).trim(), '1');
   passed.push(
-    'host rows contain no inline action icons; context editing and confirmed deletion preserve sessions',
+    'host rows contain no inline action icons; untested context edits are blocked and confirmed deletion preserves sessions',
   );
   await showHostTree(page);
   await hostTreeAction(page, null, '导入 OpenSSH Config…');
@@ -791,8 +817,13 @@ try {
     await dialog.getByLabel('地址（IP / 域名）', { exact: true }).fill('192.0.2.40');
     await dialog.getByLabel('SSH 端口', { exact: true }).fill(String(port));
     await dialog.getByLabel('用户名', { exact: true }).fill('operator');
-    await dialog.getByRole('button', { name: '保存主机', exact: true }).click();
+    assert(await dialog.getByRole('button', { name: '保存主机', exact: true }).isDisabled());
+    await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await dialog.waitFor({ state: 'hidden' });
+    await rpc('host_create', {
+      input: { ...fixtureHost, name: '', hostname: '192.0.2.40', port, groupId: null },
+    });
+    await reloadHosts(page);
     const saved = (await rpc('host_list')).hosts.find(
       (h) => h.hostname === '192.0.2.40' && h.port === port,
     );

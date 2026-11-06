@@ -1,12 +1,24 @@
 use super::*;
 use russh::keys::{HashAlg, PublicKeyOrCertificate};
+use serverdeck_core::hosts::HostKeyFingerprint;
+
+#[derive(Clone)]
+pub(crate) enum Trust {
+    Interactive {
+        control: Arc<Control>,
+        sink: Sink,
+    },
+    Test {
+        confirmed: Option<HostKeyFingerprint>,
+        challenge: Arc<Mutex<Option<HostKeyFingerprint>>>,
+    },
+}
 
 pub(crate) struct Verifier {
     pub database: Database,
     pub hostname: String,
     pub port: u16,
-    pub control: Arc<Control>,
-    pub sink: Sink,
+    pub trust: Trust,
     pub reason: Arc<Mutex<Option<(&'static str, &'static str)>>>,
     pub confirming: watch::Sender<bool>,
     pub alive: CancellationToken,
@@ -99,15 +111,52 @@ impl Verifier {
                 Err(failure("SSH_HOST_KEY_CHANGED", "主机密钥已变化"))
             };
         }
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.confirming.send_replace(true);
-        *locked(&self.control.confirmation)? = Some(sender);
-        state(&self.sink, "awaiting_trust", None);
-        if !(self.sink)(TerminalEvent::Trust {
+        let presented = HostKeyFingerprint {
             hostname: self.hostname.clone(),
             port: self.port,
             algorithm: presented.public_key().algorithm().to_string(),
             fingerprint: fingerprint.clone(),
+        };
+        match &self.trust {
+            Trust::Interactive { control, sink } => self.confirm(control, sink, presented).await?,
+            Trust::Test {
+                confirmed,
+                challenge,
+            } => {
+                if let Some(confirmed) = confirmed.as_ref().filter(|confirmed| {
+                    confirmed.hostname == self.hostname && confirmed.port == self.port
+                }) {
+                    if confirmed != &presented {
+                        return Err(failure("SSH_HOST_KEY_CHANGED", "待确认的主机密钥已变化"));
+                    }
+                } else {
+                    *locked(challenge)? = Some(presented);
+                    return Err(failure("SSH_TRUST_REQUIRED", "请先核对主机指纹"));
+                }
+            }
+        }
+        let db = self.database.clone();
+        let hostname = self.hostname.clone();
+        tokio::task::spawn_blocking(move || db.trust_key(&hostname, port, &key, &fingerprint))
+            .await
+            .map_err(|e| Error::Worker(Box::new(e)))?
+    }
+
+    async fn confirm(
+        &self,
+        control: &Control,
+        sink: &Sink,
+        key: HostKeyFingerprint,
+    ) -> Result<(), Error> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.confirming.send_replace(true);
+        *locked(&control.confirmation)? = Some(sender);
+        state(sink, "awaiting_trust", None);
+        if !sink(TerminalEvent::Trust {
+            hostname: key.hostname,
+            port: key.port,
+            algorithm: key.algorithm,
+            fingerprint: key.fingerprint,
         }) {
             return Err(failure("SSH_VIEW_CLOSED", "终端视图已关闭"));
         }
@@ -117,14 +166,10 @@ impl Verifier {
             .and_then(Result::ok)
             .unwrap_or(false);
         self.confirming.send_replace(false);
-        locked(&self.control.confirmation)?.take();
+        locked(&control.confirmation)?.take();
         if !accepted {
             return Err(failure("SSH_TRUST_REJECTED", "未确认主机指纹"));
         }
-        let db = self.database.clone();
-        let hostname = self.hostname.clone();
-        tokio::task::spawn_blocking(move || db.trust_key(&hostname, port, &key, &fingerprint))
-            .await
-            .map_err(|e| Error::Worker(Box::new(e)))?
+        Ok(())
     }
 }

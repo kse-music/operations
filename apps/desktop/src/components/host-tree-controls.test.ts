@@ -29,6 +29,7 @@ async function mount() {
       id,
       name: `Host ${id}`,
       hostname: `${id}.example`,
+      username: 'ops',
       createdAt: '',
       updatedAt: '',
     })),
@@ -75,20 +76,27 @@ it('reads and edits the exact host while leaving the active host and terminal in
   fields[0]!.value = 'Renamed B';
   fields[0]!.dispatchEvent(new Event('input', { bubbles: true }));
   const updated = { ...hosts.catalog!.hosts[1]!, name: 'Renamed B' };
-  const update = vi.spyOn(hostsApi, 'update').mockResolvedValue(updated);
+  const update = vi.spyOn(hostsApi, 'updateTested').mockResolvedValue(updated);
+  vi.spyOn(hostsApi, 'test').mockResolvedValue({
+    status: 'connected',
+    testId: 'verified-edit',
+    expiresInSeconds: 300,
+  });
   vi.spyOn(hostsApi, 'list').mockResolvedValue({
     ...hosts.catalog!,
     hosts: [hosts.catalog!.hosts[0]!, updated],
   });
   await nextTick();
-  dialog
-    .querySelector('form')!
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  button('测试连接', dialog).click();
+  await vi.waitFor(() => expect(button('保存主机', dialog).disabled).toBe(false));
+  button('保存主机', dialog).click();
   await vi.waitFor(() => expect(hosts.busy).toBe(false));
   await nextTick();
   expect(update).toHaveBeenCalledWith(
     'b',
     expect.objectContaining({ name: 'Renamed B', hostname: 'b.example' }),
+    undefined,
+    'verified-edit',
   );
   expect(saved).toHaveBeenCalledWith(updated);
   expect(document.querySelector('dialog')).toBeNull();

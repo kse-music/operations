@@ -56,7 +56,7 @@ npm run tauri -- dev
 
 `npm run dev` 仅启动浏览器前端，完整功能需要 Tauri/Rust 后端。
 
-内置插件包 `plugins/system/packages/*.sdplugin` 由源码生成，不纳入 Git。`dev/build`（包括 Tauri 入口）会先构建插件；插件编译使用 `--offline --locked`，首次构建需先执行上述依赖下载，插件锁文件更新后也需重新下载。
+`dev/build`（包括 Tauri 入口）会先生成内置插件包 `plugins/system/packages/*.sdplugin` 和旧版插件兼容界面的 `plugins/compat/server/assets/`。这些产物由 Git 忽略。插件编译使用 `--offline --locked`，首次构建或锁文件更新后须先按上述命令下载依赖。
 
 构建 Windows NSIS 测试安装包：
 
@@ -66,13 +66,18 @@ node tools/tauri.mjs build --bundles nsis
 
 独立调试二进制、原生验收和发布复验步骤见[发布检查表](docs/release/RELEASE_CHECKLIST.md)。
 
+Git 忽略调试、打包和测试生成的文件，包括各级 `.local/` 下的缓存和验收输出，以及手动打包生成的 `*.sdplugin`。源码、构建配置、依赖锁文件和 Tauri 图标等打包输入随仓库分发。
+
 本地构建使用 `.cargo/config.toml`：关闭增量编译，开发/测试只保留行号级调试信息；桌面和原生验收统一复用 `target/`，WASM 插件继续使用 `.local/plugin-build/<插件>/`。原生测试运行 QA 目录中的 EXE 副本，避免占用编译输出。清缓存后的首次构建会重新编译依赖，速度会慢一些；需要变量级断点调试时应在确认空间充足后临时覆盖配置。
 
 桌面 `build/dev` 和插件构建入口在项目磁盘空闲不足 10 GiB 时拒绝启动，不自动删除文件。该检查仅发生在启动前，不是硬配额；直接执行 Cargo 或其他程序写盘仍需留意可用空间。清理缓存前须确认没有构建在运行，不能整删 `.local/` 或应用数据目录。详见[本地构建缓存验证](docs/validation/foundation/VALIDATION_BUILD_CACHE.md)。
 
 ## 测试
 
+完成开发准备后，首次运行测试或测试夹具锁文件更新时，先下载夹具的锁定依赖。
+
 ```powershell
+cargo fetch --manifest-path tests/fixtures/plugins/server-capabilities/backend/Cargo.toml --target wasm32-unknown-unknown --locked
 npm run plugins:build
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -85,7 +90,7 @@ npm test
 npm run build
 ```
 
-直接执行依赖内置包的 Cargo 检查、测试或编译前，先运行 `npm run plugins:build`；全新克隆需先完成开发章节的依赖安装。插件或公开 SDK 源码变化后也需重新生成，Rust 的 `include_bytes!` 不会自动构建插件。
+直接执行依赖插件资源的 Cargo 检查、测试或编译前，先运行 `npm run plugins:build`。该命令还会生成 Git 忽略的 `server-capabilities.sdplugin` 测试夹具。插件、兼容界面、夹具或公开 SDK 源码变化后也需重新生成，Rust 的 `include_bytes!` 在编译时读取这些产物。
 
 以上命令用于本地检查，不代表所有平台均已通过。需要系统凭据库、桌面应用或授权 SSH 服务器的测试，另见[原生验收说明](docs/release/RELEASE_CHECKLIST.md#原生验收)；已执行结果见[测试报告](docs/validation/TEST_REPORT.md)。
 

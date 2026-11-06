@@ -3,9 +3,11 @@ import { defineStore } from 'pinia';
 import { computed, ref } from 'vue';
 import * as ipc from '../services/ipc';
 import type { AppConfig, Bootstrap } from '../types/ipc';
+import type { InterfaceFontSize } from '../types/preferences';
 
 export const useApplicationStore = defineStore('application', () => {
   const state = ref<Bootstrap | null>(null);
+  const interfaceFontSizePreview = ref<InterfaceFontSize>();
   const loading = ref(false);
   const saving = ref(false);
   const error = ref<string | null>(null);
@@ -53,5 +55,16 @@ export const useApplicationStore = defineStore('application', () => {
   }
 
   useErrorNotifications(error);
-  return { state, loading, saving, error, notice, ready, initialize, save, reportUnexpectedError };
+  return {
+    state,
+    interfaceFontSizePreview,
+    loading,
+    saving,
+    error,
+    notice,
+    ready,
+    initialize,
+    save,
+    reportUnexpectedError,
+  };
 });

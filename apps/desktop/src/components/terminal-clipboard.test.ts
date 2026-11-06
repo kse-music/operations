@@ -119,6 +119,7 @@ beforeEach(async () => {
     config: {
       version: 1,
       theme: 'dark',
+      interfaceFontSize: 'standard',
       sidebarWidth: 260,
       terminalFontSize: 14,
       connectTimeoutSecs: 10,

@@ -10,6 +10,7 @@ import {
 } from 'vue';
 import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
+import { interfaceFontSizes } from './types/preferences';
 import AboutView from './views/AboutView.vue';
 import SettingsPanel from './components/SettingsPanel.vue';
 import HostSidebar from './components/HostSidebar.vue';
@@ -27,7 +28,6 @@ import {
   Unplug,
   X,
 } from '@lucide/vue';
-import CredentialsView from './views/CredentialsView.vue';
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
@@ -466,6 +466,15 @@ function revealHost(host: Host): void {
 }
 const theme = computed(() => application.state?.config.theme);
 useTheme(theme);
+watch(
+  () => application.interfaceFontSizePreview ?? application.state?.config.interfaceFontSize,
+  (value) => {
+    const scale = interfaceFontSizes.find((size) => size.value === value)?.scale ?? 1;
+    document.documentElement.style.setProperty('--interface-font-scale', String(scale));
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => document.documentElement.style.removeProperty('--interface-font-scale'));
 const layoutStyle = computed(() => ({
   '--sidebar-width': `${sidebarDraft.value ?? application.state?.config.sidebarWidth ?? 248}px`,
 }));
@@ -807,7 +816,6 @@ watch(
         <PluginsView v-else-if="view === 'plugins'" @settings="workspace.openPluginSettings" />
         <ModelsView v-else-if="view === 'models'" />
         <AboutView v-else-if="view === 'about'" />
-        <CredentialsView v-else-if="view === 'credentials'" />
         <SettingsPanel
           v-if="settingsOpen"
           v-show="settingsCategory"

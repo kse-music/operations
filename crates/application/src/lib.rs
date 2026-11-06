@@ -12,7 +12,7 @@ mod product;
 pub mod storage_location;
 mod terminal;
 mod terminal_upload;
-pub use hosts::SecureStatus;
+pub use hosts::{HostTestResult, SecureStatus};
 pub use plugins::{
     Approval as PluginApproval, ContextInput as PluginContextInput, Event as PluginEvent,
     ToolInput, ToolTicket,
@@ -46,6 +46,7 @@ pub struct Application {
     tasks: serverdeck_tasks::Tasks,
     database: Database,
     secrets: Arc<dyn SecretStore>,
+    host_tests: Arc<hosts::HostTests>,
     data_directory: PathBuf,
     log_directory: PathBuf,
     // Reject excess calls instead of accumulating an unbounded work queue.
@@ -83,6 +84,7 @@ impl Application {
             files,
             database,
             secrets: Arc::new(NativeStore),
+            host_tests: Arc::default(),
             data_directory,
             log_directory,
             operations: Arc::new(Semaphore::new(1)),
@@ -164,6 +166,7 @@ impl Application {
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        self.host_tests.stop.cancel();
         match self.plugin_host.ids() {
             Ok(ids) => {
                 for id in ids {

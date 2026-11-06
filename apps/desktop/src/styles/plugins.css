@@ -37,7 +37,7 @@
 }
 .plugin-manager .plugin-manager-title h1 {
   margin: 0;
-  font-size: 20px;
+  font-size: calc(20px * var(--interface-font-scale, 1));
 }
 .plugin-heading-actions {
   flex-shrink: 0;
@@ -46,12 +46,12 @@
   margin: 8px 0 0;
 }
 .plugin-heading h1 {
-  font-size: 23px;
+  font-size: calc(23px * var(--interface-font-scale, 1));
 }
 .plugin-heading .eyebrow {
   margin: 0 0 7px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .plugin-heading > div > .subtle {
   margin-top: 7px;
@@ -80,7 +80,7 @@
 .plugin-dropzone p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.7;
 }
 .plugin-row-icon {
@@ -98,14 +98,14 @@
   align-items: center;
   gap: 9px;
   margin: 0;
-  font-size: 16px;
+  font-size: calc(16px * var(--interface-font-scale, 1));
 }
 .plugin-count {
   padding: 1px 7px;
   border-radius: 5px;
   background: var(--hover);
   color: var(--muted);
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .plugin-installed {
   display: grid;
@@ -144,7 +144,7 @@
   border-top: 1px solid var(--border);
   background: var(--hover);
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .plugin-identifier {
   min-width: 0;
@@ -187,7 +187,7 @@
 }
 .plugin-filter-summary {
   margin: 0 0 0 auto;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
 }
 .plugin-row-main {
   min-width: 0;
@@ -203,7 +203,7 @@
   background: transparent;
   padding: 0;
   color: var(--text);
-  font-size: 14px;
+  font-size: calc(14px * var(--interface-font-scale, 1));
   font-weight: 600;
   text-align: left;
   overflow-wrap: anywhere;
@@ -216,12 +216,12 @@
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   white-space: nowrap;
 }
 .plugin-row-main > p {
   margin: 7px 0 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.65;
   color: var(--muted);
   display: -webkit-box;
@@ -233,7 +233,7 @@
 .plugin-status {
   white-space: nowrap;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   padding: 3px 7px;
   border: 1px solid var(--border);
   border-radius: 5px;
@@ -322,7 +322,7 @@
 }
 .plugin-preview-heading h2 {
   margin: 0 0 6px;
-  font-size: 20px;
+  font-size: calc(20px * var(--interface-font-scale, 1));
 }
 .plugin-preview-heading p {
   margin: 0 0 6px;
@@ -337,7 +337,7 @@
   line-height: 1.7;
 }
 .plugin-preview h3 {
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   margin: 0 0 10px;
 }
 .plugin-permission-tags {
@@ -350,7 +350,7 @@
   background: var(--hover);
   border-radius: 4px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .plugin-preview-details {
   border-top: 1px solid var(--border);
@@ -440,12 +440,12 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   margin: 0;
 }
 .plugin-management-header .subtle {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.65;
   color: var(--muted);
 }
@@ -481,12 +481,12 @@
   line-height: 1.6;
 }
 .plugin-settings h2 {
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   gap: 7px;
 }
 .plugin-state-section .button {
   min-height: 28px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   padding: 3px 9px;
 }
 .plugin-permissions-summary {
@@ -495,7 +495,7 @@
   justify-content: space-between;
   gap: 8px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   font-weight: 500;
   list-style: none;
 }
@@ -550,7 +550,7 @@
   flex-shrink: 0;
 }
 .plugin-permission-option strong {
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   font-weight: 500;
 }
 .plugin-permission-option small {
@@ -591,7 +591,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 13px;
+  font-size: calc(13px * var(--interface-font-scale, 1));
   margin: 0;
 }
 .plugin-path-scopes label {
@@ -626,7 +626,7 @@
 }
 .plugin-package-details .plugin-details {
   grid-template-columns: 75px minmax(0, 1fr);
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   gap: 9px;
   margin-bottom: 0;
 }
@@ -651,7 +651,7 @@
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 1px 5px;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   color: var(--muted);
   white-space: nowrap;
 }
@@ -708,7 +708,7 @@
 .plugin-digest {
   display: block;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   color: var(--muted);
 }
 .plugin-grant-grid {
@@ -790,7 +790,7 @@
     grid-template-columns: 1fr;
   }
   .plugin-version {
-    font-size: 10px;
+    font-size: calc(10px * var(--interface-font-scale, 1));
   }
   .plugin-permission-list {
     grid-template-columns: 1fr;
@@ -841,13 +841,13 @@
   border-bottom: 1px solid var(--border);
 }
 .plugin-workspace.plugin-embedded > .plugin-heading h1 {
-  font-size: 15px;
+  font-size: calc(15px * var(--interface-font-scale, 1));
   line-height: 24px;
   font-weight: 550;
   letter-spacing: -0.2px;
 }
 .plugin-workspace.plugin-embedded > .plugin-heading > .button {
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
   min-height: 29px;
   background: transparent;
   color: var(--muted);

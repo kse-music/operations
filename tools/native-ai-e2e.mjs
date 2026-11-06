@@ -157,8 +157,7 @@ try {
   assert.equal(path.resolve(bootstrap.dataDirectory), output);
   safe = true;
   assert.equal((await rpc('ai_models')).length, 0, 'isolated empty model registry');
-  await page.locator('[data-module=assets]').click();
-  await page.getByRole('button', { name: '模型管理', exact: true }).click();
+  await navigateWorkspace(page, '模型管理');
   await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
   async function register(name, modelId, secret) {
     await page.getByRole('button', { name: '注册模型', exact: true }).click();
@@ -359,7 +358,7 @@ db.close()`,
   await captureAssistant('error');
   assert.equal((await rpc('host_list')).hosts.length, 0);
   assert((await rpc('files_local', { path: output })).entries.length > 0);
-  assert.equal((await rpc('app_bootstrap')).databaseVersion, 7);
+  assert.equal((await rpc('app_bootstrap')).databaseVersion, 9);
   // All SSH endpoints below are test-owned loopback fixtures; no user server is contacted.
   const unavailable = net.createServer();
   await new Promise((resolve) => unavailable.listen(0, '127.0.0.1', resolve));
@@ -423,8 +422,7 @@ db.close()`,
       redactValues: [],
     },
   });
-  await page.locator('[data-module=assets]').click();
-  await page.getByRole('button', { name: '模型管理', exact: true }).click();
+  await navigateWorkspace(page, '模型管理');
   await page.getByRole('button', { name: '编辑模型 模型 A', exact: true }).click();
   assert.equal(
     await page.getByLabel('API Key（留空保留已有 Key）', { exact: true }).inputValue(),

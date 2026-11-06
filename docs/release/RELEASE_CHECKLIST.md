@@ -34,6 +34,7 @@ npm ci
 rustup target add wasm32-unknown-unknown
 cargo fetch --manifest-path plugins/system/docker/backend/Cargo.toml --target wasm32-unknown-unknown --locked
 cargo fetch --manifest-path plugins/system/assistant/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+cargo fetch --manifest-path tests/fixtures/plugins/server-capabilities/backend/Cargo.toml --target wasm32-unknown-unknown --locked
 npm run plugins:build
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -102,6 +103,8 @@ cargo test -p serverdeck-security native_store_roundtrip_update_and_delete -- --
 原生 E2E 使用 `.local/native-e2e` 下独立数据库、复制的测试 EXE 和仅测试进程的 loopback CDP；结束后清理随机凭据并恢复正常构建，保留诊断产物。普通应用构建不开放调试端口。测试流程和证据见[主机/凭据验收](../validation/foundation/VALIDATION_STAGE2.md)。
 
 SSH 模块验收需要已授权测试账号、带外核对的主机指纹，以及仅本次进程使用的密码；不要把秘密写入命令历史或文件。设置 `SERVERDECK_TEST_HOST`、`SERVERDECK_TEST_USER`、`SERVERDECK_TEST_PIN` 并按 [SSH 增强验收](../validation/terminal/VALIDATION_SSH_USABILITY.md#复现与边界)或[网络/批量验收](../validation/operations/VALIDATION_NETWORK_BATCH.md#复现)的隐藏密码方式启动。依赖 Docker 的套件还需要已授权 Docker 环境。
+
+运行 `--ops`、`--ops-probe` 或 `--product` 验收前，按上面的复建步骤执行 `npm run plugins:build`，生成运维验收使用的 `server-capabilities.sdplugin`。
 
 | 验收范围                       | 入口                                       | 详细记录                                                              |
 | ------------------------------ | ------------------------------------------ | --------------------------------------------------------------------- |

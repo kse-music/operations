@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { navigateWorkspace } from './ui-navigation.mjs';
+import { hostContextAction, hostTreeAction, navigateWorkspace } from './ui-navigation.mjs';
 
 const url = process.env.SERVERDECK_ASSETS_URL ?? 'http://127.0.0.1:1421';
 const output = process.env.SERVERDECK_ASSETS_OUTPUT ?? '.local/assets-layout-qa/ui';
@@ -44,55 +44,48 @@ async function fixtures(page, theme) {
       },
     };
     application.error = null;
-    let catalog = {
+    const catalog = {
       hosts: [],
       groups: [],
       pendingSecretDeletions: 2,
-      credentials: [
-        {
-          id: 'password',
-          name: '运维登录密码',
-          kind: 'password',
-          keyPath: null,
-          hasSecret: true,
-          hostCount: 2,
-          revision: 1,
-        },
-        {
-          id: 'key',
-          name: '发布服务私钥',
-          kind: 'private_key',
-          keyPath: 'D:\\SSH\\' + 'deployment-key-directory-'.repeat(9) + 'id_ed25519',
-          hasSecret: false,
-          hostCount: 0,
-          revision: 1,
-        },
-      ],
+      credentials: [],
     };
     useHostsStore(pinia).catalog = catalog;
     hostsApi.status = async () => ({ available: true, message: '系统凭据库可用。' });
-    hostsApi.list = async () => catalog;
-    hostsApi.credentialSave = async (id, revision, input) => {
-      if (
-        id !== null ||
-        revision !== null ||
-        input.kind !== 'private_key' ||
-        input.keyPath !== null ||
-        input.keyData !== 'fixture-file-content'
-      ) {
-        throw new Error('私钥文件导入参数无效');
+    hostsApi.list = async () => ({ ...catalog, hosts: [...catalog.hosts] });
+    hostsApi.test = async (input, authentication, _confirmed, hostId) => {
+      if (hostId === 'fixture-host') {
+        if (input.credentialId !== 'fixture-key' || authentication !== undefined)
+          throw new Error('编辑测试应沿用已有私钥');
+        return { status: 'connected', testId: 'fixture-edit-test', expiresInSeconds: 300 };
       }
-      const credential = {
-        id: 'imported-key',
-        name: input.name,
-        kind: input.kind,
-        keyPath: null,
-        hasSecret: true,
-        hostCount: 0,
-        revision: 1,
+      if (
+        input.authType !== 'private_key' ||
+        authentication?.kind !== 'private_key' ||
+        authentication.keyData !== 'fixture-file-content'
+      ) {
+        throw new Error('主机私钥文件导入参数无效');
+      }
+      return { status: 'connected', testId: 'fixture-host-test', expiresInSeconds: 300 };
+    };
+    hostsApi.create = async (input, _authentication, testId) => {
+      if (testId !== 'fixture-host-test') throw new Error('缺少主机连接测试结果');
+      const host = {
+        ...input,
+        id: 'fixture-host',
+        credentialId: 'fixture-key',
+        createdAt: '',
+        updatedAt: '',
       };
-      catalog = { ...catalog, credentials: [...catalog.credentials, credential] };
-      return { value: credential, warnings: [] };
+      catalog.hosts.push(host);
+      return host;
+    };
+    hostsApi.updateTested = async (id, input, _authentication, testId) => {
+      if (id !== 'fixture-host' || testId !== 'fixture-edit-test')
+        throw new Error('缺少当前主机的编辑测试结果');
+      const host = { ...catalog.hosts[0], ...input };
+      catalog.hosts[0] = host;
+      return host;
     };
     let models = [
       {
@@ -150,7 +143,7 @@ async function inspect(page, label) {
   const overflow = await page.evaluate(() =>
     [
       ...document.querySelectorAll(
-        '.content-scroll, .asset-view, .asset-panel, .model-catalog, .credential-list li, dialog[open]',
+        '.content-scroll, .asset-view, .asset-panel, .model-catalog, dialog[open]',
       ),
     ]
       .filter((el) => el.getClientRects().length && el.scrollWidth > el.clientWidth + 1)
@@ -189,43 +182,58 @@ try {
     const expectedColumns = width >= 1440 ? 2 : 1;
     const screenshot = (view) => page.screenshot({ path: `${output}/${name}-${view}.png` });
 
-    const credentials = await openAsset(page, '安全凭据');
-    const credentialColumns = await credentials
-      .locator('.asset-columns')
-      .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
-    assert.equal(credentialColumns, expectedColumns, `${name}: credentials columns`);
-    await credentials.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
-    await credentials.getByText('系统凭据库可用。', { exact: true }).waitFor();
-    await inspect(page, `${name}: credentials`);
-    await screenshot('credentials');
-    const row = credentials.getByRole('listitem').filter({ hasText: '运维登录密码' });
-    await row.getByRole('button', { name: '删除', exact: true }).click();
-    const deletion = page.getByRole('dialog', { name: '确认删除凭据', exact: true });
-    assert(await deletion.getByRole('button', { name: '确认删除凭据', exact: true }).isDisabled());
-    await deletion.getByRole('checkbox').check();
-    assert(await deletion.getByRole('button', { name: '确认删除凭据', exact: true }).isEnabled());
-    await inspect(page, `${name}: credential confirmation`);
-    await deletion.getByRole('button', { name: '取消', exact: true }).click();
-    await credentials.getByRole('button', { name: /新建凭据/ }).click();
-    const create = page.getByRole('dialog', { name: '新建凭据', exact: true });
-    await create.getByLabel('凭据名称', { exact: true }).fill('导入私钥');
-    await create.getByLabel('凭据类型', { exact: true }).selectOption('private_key');
-    const keyFile = create.getByLabel('选择私钥文件', { exact: true });
-    assert(await keyFile.evaluate((input) => input.validity.valueMissing));
-    assert.equal(await create.getByLabel('本地私钥路径', { exact: true }).count(), 0);
-    await keyFile.setInputFiles({
+    await navigateWorkspace(page, '数据与存储');
+    const vault = page.getByRole('group', { name: '系统凭据库', exact: true });
+    await vault.getByRole('button', { name: '检查系统凭据库', exact: true }).click();
+    await vault.getByText('系统凭据库可用。', { exact: true }).waitFor();
+    await inspect(page, `${name}: credential store maintenance`);
+
+    await hostTreeAction(page, null, '新建主机');
+    const hostDialog = page.getByRole('dialog', { name: '新建主机', exact: true });
+    await hostDialog.getByLabel('地址（IP / 域名）', { exact: true }).fill('host.example.test');
+    await hostDialog.getByLabel('用户名', { exact: true }).fill('ops');
+    await hostDialog
+      .getByLabel('认证方式', { exact: true })
+      .selectOption({ label: '公钥认证（PublicKey）' });
+    await hostDialog.getByLabel('私钥内容', { exact: true }).waitFor();
+    await inspect(page, `${name}: pasted private key form`);
+    await screenshot('host-key');
+    await hostDialog.getByLabel('选择私钥文件', { exact: true }).setInputFiles({
       name: 'fixture.key',
       mimeType: 'application/octet-stream',
       buffer: Buffer.from('fixture-file-content'),
     });
-    await create.getByLabel('加密私钥口令（可选）', { exact: true }).waitFor();
-    await inspect(page, `${name}: key import dialog`);
-    await screenshot('credential-import');
-    await create.getByRole('button', { name: '保存凭据', exact: true }).click();
-    await create.waitFor({ state: 'hidden' });
-    await credentials.getByText('私钥已导入系统凭据库', { exact: true }).waitFor();
+    await hostDialog.getByLabel('加密私钥口令（可选）', { exact: true }).waitFor();
+    const saveHost = hostDialog.getByRole('button', { name: '保存主机', exact: true });
+    assert(await saveHost.isDisabled());
+    await hostDialog.getByRole('button', { name: '测试连接', exact: true }).click();
+    await hostDialog.getByText('SSH 连接和认证成功，可以保存主机。', { exact: true }).waitFor();
+    await saveHost.click();
+    await hostDialog.waitFor({ state: 'hidden' });
+
+    await hostContextAction(
+      page,
+      page.locator('.tree-host[data-host-id="fixture-host"]'),
+      '编辑主机',
+    );
+    const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
+    const saveEdit = edit.getByRole('button', { name: '保存主机', exact: true });
+    const nameField = edit.getByLabel('主机名称（可选）', { exact: true });
+    assert(await saveEdit.isDisabled());
+    await edit.getByRole('button', { name: '测试连接', exact: true }).click();
+    await edit.getByText('SSH 连接和认证成功，可以保存主机。', { exact: true }).waitFor();
+    await nameField.fill('编辑后需重测');
+    assert(await saveEdit.isDisabled());
+    await edit.getByRole('button', { name: '测试连接', exact: true }).click();
+    await saveEdit.click();
+    await edit.waitFor({ state: 'hidden' });
+    await page.getByText('编辑后需重测', { exact: true }).waitFor();
 
     const models = await openAsset(page, '模型管理');
+    assert.equal(
+      await page.locator('.module-navigation [aria-current="page"]').getAttribute('data-module'),
+      'system',
+    );
     await models.getByRole('heading', { name: '内网诊断模型', exact: true }).waitFor();
     assert.equal(await models.locator('.model-list-heading').isVisible(), expectedColumns === 2);
     await inspect(page, `${name}: models`);
@@ -260,7 +268,9 @@ try {
     await page.close();
   }
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
-  console.log(`Passed credentials and models checks in ${results.length} window/theme variants.`);
+  console.log(
+    `Passed host authentication, credential store and model checks in ${results.length} window/theme variants.`,
+  );
 } finally {
   await browser.close();
 }

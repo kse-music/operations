@@ -13,7 +13,7 @@ pub mod terminal;
 pub mod workspace;
 
 pub const CONFIG_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 8;
+pub const DATABASE_VERSION: u32 = 9;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -76,12 +76,26 @@ impl LogLevel {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InterfaceFontSize {
+    #[serde(alias = "extraSmall")]
+    Small,
+    #[default]
+    Standard,
+    Large,
+    ExtraLarge,
+    UltraLarge,
+}
+
 /// Versioned, non-sensitive preferences. Never add credentials to this DTO.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppConfig {
     pub version: u32,
     pub theme: Theme,
+    #[serde(default)]
+    pub interface_font_size: InterfaceFontSize,
     pub sidebar_width: u16,
     pub terminal_font_size: u8,
     #[serde(default)]
@@ -100,6 +114,7 @@ impl Default for AppConfig {
         Self {
             version: CONFIG_VERSION,
             theme: Theme::Dark,
+            interface_font_size: InterfaceFontSize::Standard,
             sidebar_width: 248,
             terminal_font_size: 14,
             terminal: Default::default(),
@@ -236,6 +251,35 @@ mod tests {
     fn config_contract_rejects_unknown_fields() {
         let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
         json["password"] = "must not be accepted".into();
+        assert!(serde_json::from_value::<AppConfig>(json).is_err());
+    }
+
+    #[test]
+    fn interface_font_size_defaults_for_legacy_configs_and_rejects_unknown_values() {
+        let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
+        assert_eq!(json["interfaceFontSize"], "standard");
+        json.as_object_mut()
+            .expect("config object")
+            .remove("interfaceFontSize");
+        let legacy: AppConfig = serde_json::from_value(json.clone()).expect("read legacy config");
+        assert_eq!(legacy.interface_font_size, InterfaceFontSize::Standard);
+        assert_eq!(legacy.terminal_font_size, 14);
+
+        json["interfaceFontSize"] = "extraSmall".into();
+        let former: AppConfig = serde_json::from_value(json.clone()).expect("read former level");
+        assert_eq!(former.interface_font_size, InterfaceFontSize::Small);
+        assert_eq!(
+            serde_json::to_value(former).expect("serialize migrated level")["interfaceFontSize"],
+            "small"
+        );
+
+        json["interfaceFontSize"] = "extraLarge".into();
+        let large: AppConfig = serde_json::from_value(json.clone()).expect("read extra large");
+        assert_eq!(large.interface_font_size, InterfaceFontSize::ExtraLarge);
+        json["interfaceFontSize"] = "ultraLarge".into();
+        let largest: AppConfig = serde_json::from_value(json.clone()).expect("read ultra large");
+        assert_eq!(largest.interface_font_size, InterfaceFontSize::UltraLarge);
+        json["interfaceFontSize"] = "huge".into();
         assert!(serde_json::from_value::<AppConfig>(json).is_err());
     }
 

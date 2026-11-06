@@ -35,7 +35,7 @@
   width: 100%;
   padding: 0;
   margin: 0 0 16px;
-  font-size: 14px;
+  font-size: calc(14px * var(--interface-font-scale, 1));
   line-height: 22px;
   font-weight: 600;
 }
@@ -58,7 +58,7 @@
   align-items: stretch;
   justify-content: flex-start;
   gap: 8px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 20px;
 }
 .settings-label {
@@ -78,6 +78,31 @@
 .settings-panel .settings-form input[type='range'] {
   padding: 0;
   margin: 0;
+}
+.interface-font-ticks {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.interface-font-ticks > button {
+  padding: 2px 0;
+  border: 0;
+  border-radius: var(--control-radius);
+  background: transparent;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.interface-font-ticks > button:hover {
+  background: var(--hover);
+}
+.interface-font-ticks > button[aria-pressed='true'] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-panel .settings-form .interface-font-size input[type='range'] {
+  align-self: center;
+  width: calc(80% + 14px);
+  height: 24px;
+  accent-color: var(--accent);
 }
 .settings-panel .settings-form .checkbox-label {
   flex-direction: row;
@@ -99,13 +124,9 @@
 .settings-panel .settings-field .settings-help {
   padding-left: 22px;
 }
-.settings-subsection,
-.settings-group-actions {
+.settings-subsection {
   padding-top: 16px;
   border-top: 1px solid var(--border);
-}
-.settings-group-actions {
-  margin-top: 18px;
 }
 .settings-panel .settings-shortcuts .settings-fields > label {
   display: grid;
@@ -137,7 +158,7 @@
   gap: 8px 20px;
   margin: 0;
   padding: 10px 0;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   line-height: 1.7;
 }
 .settings-panel .storage-paths > div + div,
@@ -157,7 +178,7 @@
 }
 .settings-panel .storage-paths dd {
   font-family: Consolas, 'Microsoft YaHei', monospace;
-  font-size: 11px;
+  font-size: calc(11px * var(--interface-font-scale, 1));
 }
 .settings-panel .form-footer {
   margin: 0;
@@ -168,13 +189,13 @@
 .settings-panel .form-footer p {
   margin: 0;
 }
-.settings-panel .form-footer .button {
+.settings-panel .form-footer .action-row {
   margin-left: auto;
-  flex-shrink: 0;
+  justify-content: flex-end;
 }
 .about-view > .work-section > p {
   margin: 0 0 12px;
-  font-size: 12px;
+  font-size: calc(12px * var(--interface-font-scale, 1));
   color: var(--muted);
 }
 .about-view .status-dot {

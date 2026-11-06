@@ -75,7 +75,7 @@ try {
     await page.locator('.module-navigation [data-module="system"]').click();
     assert.deepEqual(
       (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      ['通用', '终端', '快捷键', '数据与存储', '关于'],
+      ['通用', '终端', '快捷键', '数据与存储', '模型管理', '关于'],
     );
     const about = page.getByRole('button', { name: '关于', exact: true });
     await about.click();
@@ -150,7 +150,7 @@ try {
         geometry.modules.bottom,
         `${name}: ${region} must start below the module header`,
       );
-    assert.equal(await page.locator('.module-navigation button').count(), 4);
+    assert.equal(await page.locator('.module-navigation button').count(), 3);
     assert.equal(
       await page.locator('.module-navigation [aria-current="page"]').textContent(),
       '主机管理',

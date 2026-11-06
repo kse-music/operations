@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { closeNativeWindow } from './native-window-close.mjs';
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-export async function createProductHost(page, target, credentialId) {
+export async function createProductHost(page, target) {
   const name = `Linux SSH verification ${randomUUID()}`;
   await showHostTree(page);
   await reloadHosts(page);
@@ -18,8 +18,17 @@ export async function createProductHost(page, target, credentialId) {
   await dialog.getByLabel('地址（IP / 域名）', { exact: true }).fill(target.hostname);
   await dialog.getByLabel('用户名', { exact: true }).fill(target.username);
   await dialog.getByLabel('认证方式', { exact: true }).selectOption('password');
-  await dialog.getByLabel('安全凭据引用', { exact: true }).selectOption(credentialId);
+  await dialog.getByLabel('SSH 密码', { exact: true }).fill(target.secret);
   assert.equal(await dialog.getByLabel('备注', { exact: true }).count(), 0);
+  await dialog.getByRole('button', { name: '测试连接', exact: true }).click();
+  const fingerprint = dialog.getByRole('region', { name: '核对 SSH 主机指纹', exact: true });
+  const connected = dialog.getByText('SSH 连接和认证成功，可以保存主机。', { exact: true });
+  await fingerprint.or(connected).waitFor({ timeout: 65000 });
+  if (await fingerprint.isVisible()) {
+    assert.equal(await fingerprint.locator('code').textContent(), target.pin);
+    await fingerprint.getByRole('button', { name: '信任并继续测试', exact: true }).click();
+  }
+  await connected.waitFor({ timeout: 65000 });
   await dialog.getByRole('button', { name: '保存主机', exact: true }).click();
   await dialog.waitFor({ state: 'hidden' });
   return page.evaluate(async (name) => {
