@@ -64,7 +64,7 @@
 - [顶栏精简与主机树收缩入口验收](hosts/VALIDATION_HOST_SIDEBAR_TOGGLE.md)
 - [工作区主机树 CRUD 验收](hosts/VALIDATION_HOST_TREE_CRUD.md)
 - [根目录、多级文件夹和主机右键菜单验收](hosts/VALIDATION_HOST_TREE_FOLDERS.md)
-- [主机工作区布局验收](hosts/VALIDATION_HOST_WORKSPACES.md)（[全部主机与其他二级页面并列](hosts/VALIDATION_HOST_WORKSPACES.md#全部主机与其他二级页面并列)）
+- [主机工作区布局验收](hosts/VALIDATION_HOST_WORKSPACES.md)（[全部主机与其他二级页面并列](hosts/VALIDATION_HOST_WORKSPACES.md#全部主机与其他二级页面并列)、[移除主机树底部统计](hosts/VALIDATION_HOST_WORKSPACES.md#移除主机树底部统计)）
 - [主机名称可选验收](hosts/VALIDATION_OPTIONAL_HOST_NAME.md)
 - [移除主机栏标题文字验收](hosts/VALIDATION_REMOVE_HOST_HEADING.md)
 - [主机管理移除标签、备注和收藏验收](hosts/VALIDATION_REMOVE_HOST_METADATA.md)

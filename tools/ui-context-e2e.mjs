@@ -31,6 +31,15 @@ try {
     assert.equal(await workspaceTitle.count(), 0);
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
     if (width <= 720) await expand.click();
+    const tree = page.getByRole('region', { name: '主机树', exact: true });
+    assert.equal(await tree.locator('.host-sidebar-footer').count(), 0);
+    const listFillsTree = await tree.evaluate((element) => {
+      const list = element.querySelector('.host-tree-scroll');
+      return (
+        Math.abs(element.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom) < 1
+      );
+    });
+    assert(listFillsTree, `${name}: the host list must fill the tree to its bottom edge`);
     const listHeading = page.locator('.host-list-heading');
     const localTerminal = listHeading.getByRole('button', { name: '本地终端', exact: true });
     const listHeadingBox = await listHeading.boundingBox();

@@ -268,7 +268,7 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(group.getAttribute('aria-expanded')).toBe('false');
 });
 
-it('renders loading, failure and empty states without inventing online hosts', async () => {
+it('shows loading, failure and per-host status with the total in the heading', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const hosts = useHostsStore();
@@ -284,7 +284,7 @@ it('renders loading, failure and empty states without inventing online hosts', a
   hosts.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
   await nextTick();
   expect(root.textContent).toContain('尚未添加主机');
-  expect(root.textContent).toContain('0 已连接');
+  expect(root.querySelector('.host-count')?.textContent?.trim()).toBe('0');
   useBackgroundStore().connections = [];
   hosts.catalog.hosts.push({
     ...hostInput(),
@@ -296,7 +296,8 @@ it('renders loading, failure and empty states without inventing online hosts', a
   });
   await nextTick();
   expect(root.querySelector('.disconnected-dot')?.getAttribute('aria-label')).toBe('未连接');
-  expect(root.textContent).toContain('0 已连接');
+  expect(root.querySelector('.host-count')?.textContent?.trim()).toBe('1');
+  expect(root.querySelector('.host-sidebar-footer')).toBeNull();
 });
 
 async function mountDragTree() {
