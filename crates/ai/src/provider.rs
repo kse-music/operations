@@ -36,8 +36,29 @@ pub trait ModelProvider: Send + Sync {
 }
 
 pub struct OpenAiCompatible;
+pub async fn complete(config: &Config, key: &[u8], body: &Value) -> Result<Completion, Error> {
+    match config.provider {
+        serverdeck_core::ai::Provider::LocalCodex => {
+            crate::codex::complete(config, key, body).await
+        }
+        serverdeck_core::ai::Provider::LocalClaudeCode => {
+            crate::claude::complete(config, key, body).await
+        }
+        serverdeck_core::ai::Provider::OpenaiCompatible => {
+            OpenAiCompatible.complete(config, key, body).await
+        }
+    }
+}
 pub fn endpoint(config: &Config) -> Result<Url, Error> {
     config.validate()?;
+    if config.provider.is_local() {
+        let url = if config.provider == serverdeck_core::ai::Provider::LocalCodex {
+            "codex://local"
+        } else {
+            "claude-code://local"
+        };
+        return Url::parse(url).map_err(|error| Error::Worker(Box::new(error)));
+    }
     let mut url = Url::parse(&config.base_url)
         .map_err(|_| Error::Validation("AI Base URL 必须为完整 HTTP(S) 地址"))?;
     if url.host_str().is_none()

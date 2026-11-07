@@ -608,6 +608,14 @@ impl Application {
         input: &ToolInput,
     ) -> Result<(), Error> {
         if !super::review::builtin_assistant(plugin) {
+            let local = match input {
+                ToolInput::AiResolveHosts { input } => ai::is_local_model(&input.model_id),
+                ToolInput::AiPrepare { input } => ai::is_local_model(&input.model_id),
+                _ => false,
+            };
+            if local {
+                return Err(denied());
+            }
             return Ok(());
         }
         let requested = match input {
@@ -623,6 +631,12 @@ impl Application {
                 let value = repository.settings_read(&id)?;
                 let model = assistant_model_id(&value)?
                     .ok_or(Error::Validation("请先在插件设置中绑定模型"))?;
+                if let Some(provider) = ai::local_provider(model) {
+                    if !db.ai_local_consent(provider)?.authorized {
+                        return Err(Error::Validation("请先授权使用所选本地智能体"));
+                    }
+                    return Ok(model.to_owned());
+                }
                 match db.ai_model(model) {
                     Ok(model) => Ok(model.id),
                     Err(Error::NotFound) => {
@@ -892,7 +906,7 @@ impl Application {
             .retain(|_, r| r.plugin != id || r.root != root);
         Ok(())
     }
-    pub(super) fn plugin_cancel_tool_requests(&self, id: &str) -> Result<(), Error> {
+    pub(crate) fn plugin_cancel_tool_requests(&self, id: &str) -> Result<(), Error> {
         let roots = self
             .plugin_host
             .lock()?
@@ -917,12 +931,12 @@ impl Application {
     ) -> Result<T, Error> {
         tokio::pin!(work);
         tokio::select! {
-            value = &mut work => value,
+            biased;
             _ = call.cancel.cancelled() => {
                 self.ai_cancel(id)?;
-                let result = work.await;
-                Err(Error::Connection {code: "PLUGIN_CANCELLED", message: "插件请求已取消", source: result.err().map(|e| Box::new(e) as _)})
+                Err(failure("PLUGIN_CANCELLED", "插件请求已取消"))
             }
+            value = &mut work => value,
         }
     }
     async fn plugin_tool_execute(&self, call: &Call, input: ToolInput) -> Result<Value, Error> {

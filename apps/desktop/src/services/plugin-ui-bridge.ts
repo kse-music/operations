@@ -13,6 +13,8 @@ import { clipboardApi } from './clipboard';
 import { terminalApi } from './terminal';
 import { downloadResult } from './download';
 import { isBuiltinAssistant } from './plugin-pages';
+import { aiApi } from './ai';
+import { isLocalModel } from '../types/ai';
 import type {
   PluginUiPage,
   PluginToolOperation,
@@ -53,6 +55,7 @@ export function createPluginUiBridge(input: {
   let disposed = false,
     monitor = '';
   const requests = new Set<AbortController>();
+  const installations = new Set<string>();
   const aiRoots = new Set<string>();
   let continuing = false;
   const retained = () =>
@@ -312,6 +315,96 @@ export function createPluginUiBridge(input: {
         await models.refresh();
         if (models.error) throw new Error(models.error);
         return models.models;
+      case 'ai_local_tool_install':
+      case 'ai_local_tool_install_cancel': {
+        check(true);
+        if (
+          !hasAny('assistant.use') ||
+          !isBuiltinAssistant(
+            plugins.installed.find((plugin) => plugin.manifest.id === input.id),
+          ) ||
+          typeof args.requestId !== 'string'
+        )
+          throw denied();
+        const id = args.requestId;
+        if (method.endsWith('_cancel')) {
+          if (!installations.has(id)) throw denied();
+          await aiApi.localToolInstallCancel(id);
+          return;
+        }
+        if (typeof args.modelId !== 'string' || !isLocalModel(args.modelId) || installations.size)
+          throw denied();
+        const controller = new AbortController();
+        requests.add(controller);
+        installations.add(id);
+        const cancel = () => {
+          void aiApi.localToolInstallCancel(id).catch(() => console.warn('本地工具下载取消失败'));
+        };
+        controller.signal.addEventListener('abort', cancel, { once: true });
+        try {
+          await aiApi.localToolInstall(args.modelId, id);
+          check(true);
+        } finally {
+          installations.delete(id);
+          requests.delete(controller);
+          controller.signal.removeEventListener('abort', cancel);
+        }
+        return;
+      }
+      case 'ai_local_codex_status':
+      case 'ai_local_codex_authorize':
+      case 'ai_local_claude_code_status':
+      case 'ai_local_claude_code_authorize': {
+        if (
+          !hasAny('assistant.use') ||
+          !isBuiltinAssistant(plugins.installed.find((plugin) => plugin.manifest.id === input.id))
+        )
+          throw denied();
+        const claude = method.startsWith('ai_local_claude_code_');
+        const provider = claude
+          ? {
+              name: '本地 Claude Code',
+              status: aiApi.localClaudeCodeStatus,
+              authorize: aiApi.localClaudeCodeAuthorize,
+            }
+          : {
+              name: '本地 Codex',
+              status: aiApi.localCodexStatus,
+              authorize: aiApi.localCodexAuthorize,
+            };
+        if (method.endsWith('_status')) return provider.status();
+        if (typeof args.authorized !== 'boolean') throw denied();
+        if (args.authorized) {
+          check(true);
+          const controller = new AbortController();
+          requests.add(controller);
+          const answer = plugins.ask(
+            `使用${provider.name}`,
+            `允许 ServerDeck 启动${provider.name} CLI，使用其现有模型配置和登录状态发送脱敏后的问题、历史及主机上下文。请求发送到该 CLI 当前配置的服务，并按该账号或服务的规则计费。`,
+          );
+          const prompt = plugins.prompt;
+          const cancel = () => {
+            if (prompt && plugins.prompt === prompt) plugins.decide(false);
+          };
+          controller.signal.addEventListener('abort', cancel, { once: true });
+          let approved: boolean;
+          try {
+            approved = await answer;
+          } finally {
+            requests.delete(controller);
+            controller.signal.removeEventListener('abort', cancel);
+          }
+          check(true);
+          if (!approved || controller.signal.aborted)
+            throw {
+              code: claude ? 'AI_CLAUDE_CONSENT' : 'AI_CODEX_CONSENT',
+              message: `已取消${provider.name}授权`,
+            };
+        }
+        check(true);
+        await provider.authorize(args.authorized);
+        return;
+      }
       case 'ops_open': {
         if (typeof args.events === 'string' && (args.events.length > 80 || listeners.size >= 32))
           throw { code: 'PLUGIN_LIMIT', message: '插件连接事件流超过限制' };

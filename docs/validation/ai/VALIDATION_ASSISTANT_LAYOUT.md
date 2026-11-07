@@ -1,5 +1,22 @@
 # AI 运维助手布局验证
 
+## 2026-11-07 模型绑定弹窗
+
+助手包 1.8.1。按本地服务与模型管理分组，Codex/Claude Code 并排卡片显示连接状态；选中来源的模型与授权操作合并为紧凑状态行，注册模型采用列表。未绑定为轻量行，底栏固定当前绑定、未保存/操作提示与取消/保存。助手设置页签使用下划线，内容仅一个滚动容器，外层及 iframe 页面不滚动。
+
+主要文件：`plugins/system/assistant/frontend/SettingsView.vue`、`apps/desktop/src/components/PluginSettingsDialog.vue`、`apps/desktop/src/styles/plugins.css`、助手 manifest；PRD、实施计划及内置插件版本文档同步。无后端、IPC、认证或数据库行为变化，无新依赖。
+
+- Vitest 3 个相关文件共 55 项通过：助手绑定/发送门禁、两种本地授权与撤销、宿主桥及配置弹窗开关；取消不保存，保存后重开保留选择。jsdom 对 canvas 的既有提示未导致断言失败。
+- TypeScript、ESLint、相关源文件 Prettier 与 diff whitespace 通过。前端生产、助手 WASM 与 Windows Tauri debug 无安装包构建通过，默认程序为 `target/debug/serverdeck-desktop.exe`。构建入口磁盘检查通过，复用根 target 和现有插件 WASM 缓存。Vite 保留已有 Monaco chunk 体积提醒，链接器保留库生成提示。
+- 真实 Windows WebView2、打包 iframe/WASM 和 Rust IPC 验收通过：1280×820 深/浅主题、900×600 深色标准字号及浅色 145% 字号。核对本地卡片并排、状态不重叠、无横向溢出、外层及 iframe 页面无滚动、仅内容区最多一个滚动条、底部操作始终可见。截图已人工复查。
+- 隔离应用中通过真实 ai_model_test/save 创建两项本机 HTTP 测试模型，CLI 状态使用本机 Claude Code；没有发送推理问题或连接用户服务器。验证键盘方向键选择、保存 Claude 绑定重开保留、取消选择不改变绑定、切换并保存注册模型、权限页签切回，以及撤销本地授权。测试模型及其系统凭据经正常删除接口清理，QA 程序退出，未修改正式应用绑定或授权。
+
+最初脚本重开弹窗后立即检查 radio，先于异步配置读取完成而失败；改为等待 fieldset 就绪后，全流程及最终构建复验通过。使用者按项目要求正常退出正在占用 target 的程序后再构建，未强制关闭正式程序。
+
+证据：`.local/qa/assistant-settings-layout/result.json`，同目录的 `desktop-dark.png`、`desktop-light.png`、`small-dark.png`、`small-large-font.png`、`unauthorized.png` 与 `build.log`。截图中的注册模型仅为本次 QA 数据。
+
+范围限制：本轮为样式与布局，没有重跑 Rust 单元测试、真实推理或远端变更；已完成真实桌面/插件/IPC 交互验收。安装包、其他平台和屏幕阅读器尚未验收；长列表/大字号仍需在唯一内容区滚动。无新增阻断风险或依赖，其他平台验收属于后续发布工作。
+
 日期：2026-11-03。范围：AI 助手页面布局与状态呈现，保留已有真实模型请求、授权、脱敏、发送审核和逐条命令批准契约。
 
 ## 完成内容与主要文件

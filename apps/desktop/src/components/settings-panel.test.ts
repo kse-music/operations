@@ -217,7 +217,7 @@ it('restores general, terminal and shortcut defaults independently in the shared
       theme: 'dark',
       interfaceFontSize: 'standard',
       sidebarWidth: 248,
-      monitorIntervalSecs: 3,
+      monitorIntervalSecs: 5,
       connectTimeoutSecs: 15,
       terminal: { ...defaultTerminalPreferences(), fontFamily: 'Consolas' },
       product: { ...defaultProductPreferences(), downloadDirectory: 'D:\\Downloads' },

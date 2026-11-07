@@ -1,5 +1,52 @@
 # AI 运维助手验证记录
 
+## 2026-11-07 本地工具下载安装
+
+助手包 1.9.0。完成标准：缺失与未授权/未登录分开显示；设置页和已绑定本地来源的聊天页均提供安装提示；点击下载后可取消、失败可重试；完整校验后才发布运行时；重新检测保留当前草稿；安装不自动授权或覆盖用户安装。Windows 内置下载使用应用数据目录，其他平台显示手动安装命令。
+
+- 相关 Vitest 3 文件 64 项通过，覆盖两种来源的缺失提示、下载中禁止保存、成功后检测、未自动授权、网络错误重试、取消、手动安装重检、未保存选择保留、聊天提示，以及第三方/上传同 ID 插件禁止安装和关闭页面取消自己的请求。TypeScript、ESLint、相关源文件 Prettier 与 diff whitespace 通过。
+- Core 18、AI 35、Application 80、桌面 IPC 6，共 139 项默认测试通过，5 项按既有规则默认忽略。原生测试通过 Cargo --no-run 构建后复制到 QA 运行。Rust fmt 和 AI/Application all-targets 严格 Clippy 通过。下载测试覆盖固定 HTTPS 域名、路径与元数据验证、已有安装优先、缺失文件可重装、拒绝覆盖、文件大小/散列错误、提前取消、关闭取消及取消记录有界；登录命令覆盖单引号与 UNC 引用。
+- 实机 Windows x64：在子进程中屏蔽 CLI PATH，常用原生目录也确认没有两种 CLI；使用独立应用数据目录。界面从“未安装”开始，先验证取消没有发布运行时或残留下载目录，再从官方源下载 Codex 0.167.0（369062704 字节）及 Claude Code 2.1.319（344807072 字节），完整 SHA-256 校验、--version 启动检查、安装后状态和独立宿主授权均通过。未依赖 Node/npm 执行下载的 CLI，未修改系统 PATH 或已有安装。
+- 下载后的两个原生二进制分别复用已有配置和登录，完成固定普通问题 OK 对话，无用户服务器连接。停止隔离程序后将其自身 Codex 运行时暂存到同一 QA 目录，重启保留来源但真实缺失，聊天区显示安装提示；恢复文件后点击重新检测，提示消失。所有目录移动先校验绝对路径、所有权与非链接，未操作用户运行时。
+- 另外以空的隔离 CODEX_HOME 验证未登录提示包含应用内 codex.exe 的完整 PowerShell 登录命令，无需全局 PATH；撤销授权成功。最终 QA 构建再次通过该验证。下载完成仍未自动授予本地访问权，原注册模型和系统 CLI 优先级保持。
+- 前端生产、助手 WASM、Windows Tauri debug 无安装包构建通过。默认交付为 target/debug/serverdeck-desktop.exe；复用根 target，构建入口磁盘余量检查通过（首次约 251 GiB）。用户按 AGENTS 要求退出占用构建输出的正式程序后才重建，仅关闭本任务 QA 副本。无新增依赖、数据库迁移、凭据复制或生产环境写入。
+
+本机访问 GitHub 网页发行下载入口超时，改用已验证可达的官方发行资产 API，仍按官方元数据散列验证。首次 QA 试图用空 USERPROFILE 模拟缺失导致 WebView2 不启动；修正为保留系统用户目录、仅屏蔽 CLI PATH 后全流程通过。Clippy 初次指出条件、测试模块位置与测试读取量检查问题，修正后严格检查通过。沙箱单独运行已下载 Codex 的 --version 会提示其自身临时目录访问受限，正常权限原生验收已成功，无安装假成功。
+
+证据：`.local/qa/local-tool-install/native-result.json`、`login-hint-result.json`、`missing-codex.png`、`chat-missing-codex.png`、`codex-installed.png`、`claude-installed.png`、`installed-small.png`、`managed-login-hint.png` 与 `deliver-build.log`。已审阅缺失提示的设置页与聊天页截图。
+
+范围限制：Windows ARM64 仅实现架构选择，尚未实机验收；macOS/Linux 为手动安装引导，未验收本轮界面。未构建安装包或测试真实生产主机变更。下载仍取决于官方源与用户网络，失败保留重试；供应商后续版本的协议兼容性需继续验收。当前无新增阻断风险；后续发布依赖安装包、ARM64/其他平台及目标发行场景的供应商认证条件确认。
+
+## 2026-11-07 本地 Claude Code
+
+完成标准：三种来源可选；本地 Claude Code 经宿主授权后复用已有配置和登录；取消授权不写入；保存/重启保留；撤销停止对应来源，原 Codex 与注册模型不受影响；沿用原 SSH 审批流程。助手包 1.8.0。
+
+- 相关 Vitest 3 文件 64 项通过，包含两种本地来源的绑定/重挂载/未授权阻止/撤销、原注册模型、上传同 ID 插件拒绝和宿主取消/确认。TypeScript、ESLint、相关 TS/Vue/JS 的 Prettier 检查通过。
+- Core 18、AI 31、Application 79、Storage AI 6、桌面 IPC 6 项默认测试共 140 项通过。默认忽略 5 项；本轮另显式执行两种来源的适配与应用层真实联调 4 项，均成功。Rust fmt、AI/Application/Storage all-targets 严格 Clippy 通过。所有原生测试从根 target 构建后复制至 QA 运行。
+- 进程夹具验证正常成功、用量与缓存 token、未登录、工具/MCP 泄漏、tool_use、权限拒绝、重复/缺失 result、缺失 init、无效 JSON、崩溃、输出超限及取消后进程结束。配置/账户变化使快照失效，凭据文件刷新不复制 token 或改变账户身份。
+- Windows Claude Code 2.1.270 实际使用本机既有配置与登录完成固定 OK 请求；应用层完成授权、状态、prepare/send、无注册模型回答、撤销后拒绝。Codex 0.167.0-alpha.3.2 也在本轮应用层与原生切换中实测成功。无生产服务器连接。
+- 真实 WebView2 + iframe/WASM + Rust + SQLite：先授权 Codex，取消 Claude 授权后确认仍未授权，再明确授权 Claude、保存并回答；重启保留所选来源和授权，撤销 Claude 后 Codex 授权仍有效，切回 Codex 保存后继续回答。使用独立应用数据目录和 QA EXE，结果与截图在 `.local/qa/local-claude-code/native-result.json`、`native-consent.png`、`native-settings.png`、`native-settings-small.png`、`native-answer.png`。检查 1280×820 与 900×600 逻辑窗口，没有选项与状态重叠。
+- 前端生产构建、助手 WASM 和 Windows Tauri debug 无安装包构建通过。默认输出 `target/debug/serverdeck-desktop.exe`，构建前 D 盘余量超过 251 GiB，复用根 target，无新增 Cargo 缓存。
+
+最初沙箱内 Claude 推理超时，正常用户权限下 5.6 秒完成；loopback 网络测试在沙箱受限后改用正常本机权限运行隔离 QA 副本通过。未关闭正式应用或修改正式应用授权。
+
+尚未验收其他 Claude Code 版本、macOS/Linux、安装包或真实生产主机运维变更。未知/不兼容 CLI 参数或协议按错误处理；发布仍需确认两家供应商对目标发行场景的认证适用条件。
+
+## 2026-11-07 本地 Codex
+
+已实现内置助手选择本地 Codex、可信宿主授权、复用用户级配置和登录、授权持久化及撤销；原注册模型绑定和 HTTP Provider 继续可用。助手包 1.7.0，来源通过 `local-codex` 保留 ID 进入原主机匹配、上下文脱敏、受控查询、冻结计划和 SSH 执行链路。
+
+- 相关前端 3 个测试文件共 60 项通过，覆盖授权拒绝/确认、绑定持久化、撤销、未就绪禁止发送、原注册模型及上传同 ID 插件拒绝；样式修正后助手 33 项再次通过。TypeScript、ESLint、相关文件 Prettier、Rust fmt 和 AI/Application/Storage all-targets 严格 Clippy 通过。
+- Core、Storage、AI、Application 和桌面 IPC 共 162 项默认测试通过；3 项默认忽略，其中本地 Codex 的两个真实账号测试已显式执行通过，已有的 Linux SDK roundtrip 忽略测试未在 Windows 运行。通过 Cargo `--no-run` 构建后，将 EXE 复制到 `.local/qa/local-codex` 再运行，复用根 `target/`。
+- Windows 原生 Codex `0.167.0-alpha.3.2` 实际使用本机已有配置和登录，完成固定 OK 请求；独立临时应用数据库完成授权 → 状态 → prepare/send → 回答 → 撤销 → 再次拒绝，注册模型表保持为空。请求不连接用户服务器。
+- 真实 WebView2、iframe/WASM、Rust、SQLite 与本机 Codex 完成取消授权、明确授权、保存来源、固定普通问题回答、重启保留和撤销。结果见 `.local/qa/local-codex/native-result.json`，授权、设置和回答截图在同目录。使用隔离应用目录与 QA EXE，没有修改正式应用绑定或授权。
+- RPC 子进程夹具覆盖未登录、工具审批请求、仍启用 MCP、响应超限、失败回合、回答后提前退出，以及停止后子进程终止。额外回归确认丢弃主机匹配 future 会清理活动状态和模型并发槽。配置/账户变化使摘要失效，ChatGPT token 刷新保持账户身份。
+- 前端生产构建、助手 WASM 包和 Windows Tauri debug 无安装包构建通过，默认桌面输出为 `target/debug/serverdeck-desktop.exe`。构建前磁盘空闲超过 250 GiB，未启用增量编译或新增 Cargo 缓存。
+
+初次原生回归的 loopback HTTP/SSH 被沙箱限制，失败后停止本任务 QA 测试进程，以正常本机权限复验通过。Codex 初次启动也被沙箱拒绝写入自身状态库，真实联调在正常用户权限下完成。CLI 的 MCP 配置覆盖方式经实测修正为逐项禁用，并在推理前核对线程状态。一次直接覆盖已有插件包被打包器 EEXIST 保护拒绝，随后使用正常生产构建的暂存/原子替换入口成功。原生 QA 窗口配置漏掉 `create:false` 导致重复建窗空白页，修正隔离验收配置后全流程通过。截图复查发现模型列表与新增状态重叠，已修正 fieldset 高度与状态分组，并补做宽窄窗口检查。
+
+尚未验证 macOS/Linux、其他 CLI 版本、真实生产服务器上的 Codex 运维变更或安装包；本轮真实模型仅发送固定测试文本。MCP 名称中的特殊字符无法安全覆盖时停止。供应商对商业发行使用订阅认证的适用条件需在发布前确认，应用本地授权不代表供应商对发行场景的许可。
+
 日期：2026-11-03。范围为本次追加授权的 AI 辅助诊断，生产功能均连接实际 Rust/HTTP/SSH 能力，测试夹具只出现在测试和验收工具中。
 
 ## 完成标准与实现

@@ -9,6 +9,7 @@ import {
   FileSymlink,
   FileTerminal,
   Folder,
+  LoaderCircle,
 } from '@lucide/vue';
 import { computed, ref, watch } from 'vue';
 import type { DirectoryListing, FileEntry } from '../types/files';
@@ -68,7 +69,7 @@ const entries = computed(() => {
 const page = ref(1);
 const pages = computed(() => Math.max(1, Math.ceil(entries.value.length / 200)));
 const visibleEntries = computed(() =>
-  entries.value.slice((page.value - 1) * 200, page.value * 200),
+  props.loading ? [] : entries.value.slice((page.value - 1) * 200, page.value * 200),
 );
 watch([() => props.listing?.path, sort, descending], () => {
   page.value = 1;
@@ -185,17 +186,16 @@ function entryIcon(entry: FileEntry) {
 </script>
 <template>
   <div class="file-list-tools">
-    <span>{{ entries.length }} 项 · {{ selected.length }} 已选</span>
+    <span>{{ loading ? '—' : entries.length }} 项 · {{ loading ? 0 : selected.length }} 已选</span>
   </div>
   <div class="file-table" :aria-busy="loading">
-    <p v-if="loading" role="status">正在读取目录…</p>
-    <p v-else-if="!listing" class="host-empty">尚未读取目录。</p>
-    <table v-if="listing" :aria-label="side === 'local' ? '本地文件' : '远程文件'">
+    <table :aria-label="side === 'local' ? '本地文件' : '远程文件'">
       <thead>
         <tr>
           <th>
             <input
               type="checkbox"
+              :disabled="loading || !visibleEntries.length"
               :aria-label="`全选当前页${side === 'local' ? '本地' : '远程'}文件`"
               :checked="
                 visibleEntries.length > 0 && visibleEntries.every((e) => selected.includes(e.path))
@@ -280,11 +280,16 @@ function entryIcon(entry: FileEntry) {
         </tr>
       </tbody>
     </table>
+    <p v-if="!loading && !listing" class="host-empty">尚未读取目录。</p>
     <p v-if="listing && !loading && !entries.length" class="host-empty">
       {{ listing.entries.length ? '当前目录只有隐藏项' : '空目录' }}
     </p>
+    <div v-if="loading" class="file-list-loading" role="status">
+      <LoaderCircle class="file-list-spinner" :size="20" aria-hidden="true" />
+      <span>正在读取目录…</span>
+    </div>
   </div>
-  <div v-if="pages > 1" class="file-pagination">
+  <div v-if="!loading && pages > 1" class="file-pagination">
     <button class="button" :disabled="page === 1" @click="page--">上一页</button
     ><span>第 {{ page }} / {{ pages }} 页，每页 200 项</span
     ><button class="button" :disabled="page === pages" @click="page++">下一页</button>

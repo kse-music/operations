@@ -58,9 +58,12 @@ impl Application {
         }
         self.ai_verify_binding(&plan.binding)?;
         let id = plan.model_id.clone();
-        let revision = self
-            .blocking(move |db| Ok(db.ai_model(&id)?.revision))
-            .await?;
+        let revision = if is_local_model(&id) {
+            self.ai_credentials(id).await?.0.revision
+        } else {
+            self.blocking(move |db| Ok(db.ai_model(&id)?.revision))
+                .await?
+        };
         if revision != plan.revision {
             return Err(Error::Conflict);
         }

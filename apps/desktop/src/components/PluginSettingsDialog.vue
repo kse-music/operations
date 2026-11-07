@@ -26,8 +26,9 @@ const contribution = computed(() =>
 const draftKey = computed(
   () => `plugin-settings:${props.pluginId}:${workspace.pluginConfiguration?.contributionId}`,
 );
+const builtinAssistant = computed(() => isBuiltinAssistant(plugin.value));
 const assistantSettings = computed(
-  () => isBuiltinAssistant(plugin.value) && contribution.value?.id === 'settings',
+  () => builtinAssistant.value && contribution.value?.id === 'settings',
 );
 const saving = ref(false);
 const deciding = ref(false);
@@ -79,7 +80,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
 
 <template>
   <Modal :title="`${plugin?.manifest.name ?? '插件'} · 配置`" :busy="busy" @close="finish()">
-    <div class="plugin-config-body">
+    <div class="plugin-config-body" :class="{ 'assistant-config-body': builtinAssistant }">
       <div v-if="pages.length" class="plugin-config-nav" role="group" aria-label="插件设置分类">
         <button
           class="button"

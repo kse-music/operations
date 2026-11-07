@@ -4,6 +4,12 @@ import { createApp, nextTick, ref, type App } from 'vue';
 import { createPinia, setActivePinia, type Pinia, disposePinia } from 'pinia';
 const api = vi.hoisted(() => ({
   models: vi.fn(),
+  localCodexStatus: vi.fn(),
+  localCodexAuthorize: vi.fn(),
+  localClaudeCodeStatus: vi.fn(),
+  localClaudeCodeAuthorize: vi.fn(),
+  localToolInstall: vi.fn(),
+  localToolInstallCancel: vi.fn(),
   settings: vi.fn(),
   prepare: vi.fn(),
   send: vi.fn(),
@@ -158,6 +164,18 @@ beforeEach(() => {
     },
   ]);
   api.settings.mockResolvedValue({ modelId: 'model-a' });
+  api.localCodexStatus.mockResolvedValue({
+    authorized: false,
+    model: null,
+    message: '请先授权使用本地 Codex',
+  });
+  api.localCodexAuthorize.mockResolvedValue(undefined);
+  api.localClaudeCodeStatus.mockResolvedValue({
+    authorized: false,
+    model: null,
+    message: '请先授权使用本地 Claude Code',
+  });
+  api.localClaudeCodeAuthorize.mockResolvedValue(undefined);
   api.prepare.mockResolvedValue(preview);
   api.resolveHosts.mockResolvedValue({ hostIds: [], message: '', modelRevision: 'r1' });
   api.hostList.mockResolvedValue({
@@ -932,6 +950,254 @@ it('binds a model from plugin settings, persists it across remounts and preserve
   expect(api.prepare.mock.lastCall![0].modelId).toBe('model-a');
   expect(root.querySelector('select')).toBeNull();
 });
+
+const localProviders = [
+  {
+    id: 'local-codex',
+    name: '本地 Codex',
+    provider: 'local_codex',
+    baseUrl: 'codex://local',
+    status: api.localCodexStatus,
+    authorize: api.localCodexAuthorize,
+  },
+  {
+    id: 'local-claude-code',
+    name: '本地 Claude Code',
+    provider: 'local_claude_code',
+    baseUrl: 'claude-code://local',
+    status: api.localClaudeCodeStatus,
+    authorize: api.localClaudeCodeAuthorize,
+  },
+] as const;
+
+it.each(localProviders)(
+  'keeps the unsaved $name choice when rechecking a manual installation',
+  async (source) => {
+    source.status.mockResolvedValue({
+      installed: false,
+      authorized: false,
+      model: null,
+      message: '尚未安装',
+    });
+    await mountSettings();
+    root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.click();
+    await settle();
+    source.status.mockResolvedValue({
+      installed: true,
+      authorized: false,
+      model: null,
+      message: '请先授权',
+    });
+    button('重新检测').click();
+    await settle();
+    expect(root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.checked).toBe(true);
+    expect(root.querySelector('.binding-current')!.textContent).toContain('模型 A');
+    expect(button(`授权使用${source.name}`)).toBeDefined();
+    expect(api.localToolInstall).not.toHaveBeenCalled();
+  },
+);
+it.each(localProviders)(
+  'offers installation for missing $name and checks it again without granting access',
+  async (source) => {
+    source.status.mockResolvedValue({
+      installed: false,
+      installSupported: true,
+      authorized: false,
+      model: null,
+      message: '尚未安装',
+    });
+    await mountSettings();
+    root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.click();
+    await settle();
+    expect(root.textContent).toContain(`需要安装${source.name}`);
+    expect(button(`授权使用${source.name}`)).toBeUndefined();
+    let finish!: () => void;
+    api.localToolInstall.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    button('下载并安装').click();
+    await settle();
+    expect(api.localToolInstall).toHaveBeenCalledWith(source.id, expect.any(String));
+    expect(root.textContent).toContain('正在从官方源下载并校验');
+    expect(button('保存模型绑定').disabled).toBe(true);
+    source.status.mockResolvedValue({
+      installed: true,
+      authorized: false,
+      model: null,
+      message: '请先授权',
+    });
+    finish();
+    await settle();
+    expect(button(`授权使用${source.name}`)).toBeDefined();
+    expect(source.authorize).not.toHaveBeenCalled();
+    expect(
+      api.settings.mock.calls.some(([, operation]) => operation.kind === 'settings_write'),
+    ).toBe(false);
+  },
+);
+
+it.each(localProviders)(
+  'shows download failures for $name and allows retry and cancellation',
+  async (source) => {
+    source.status.mockResolvedValue({
+      installed: false,
+      authorized: true,
+      model: null,
+      message: '尚未安装',
+    });
+    api.settings.mockResolvedValue({ modelId: source.id });
+    await mountSettings();
+    api.localToolInstall.mockRejectedValueOnce({ message: '官方源网络不可用' });
+    button('下载并安装').click();
+    await settle();
+    expect(root.textContent).toContain('官方源网络不可用');
+    let fail!: (value: unknown) => void;
+    api.localToolInstall.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          fail = reject;
+        }),
+    );
+    api.localToolInstallCancel.mockImplementationOnce(async () => {
+      fail({ code: 'AI_INSTALL_CANCELLED' });
+    });
+    button('下载并安装').click();
+    await settle();
+    button('取消下载').click();
+    await settle();
+    expect(api.localToolInstallCancel).toHaveBeenCalledWith(api.localToolInstall.mock.lastCall![1]);
+    expect(root.textContent).toContain('已取消下载');
+    expect(button('下载并安装')).toBeDefined();
+  },
+);
+
+it.each(localProviders)(
+  'shows a missing $name download notice in the conversation and can detect a manual installation',
+  async (source) => {
+    api.settings.mockResolvedValue({ modelId: source.id });
+    source.status.mockResolvedValue({
+      installed: false,
+      authorized: true,
+      model: null,
+      message: '尚未安装',
+    });
+    await mount();
+    expect(root.querySelector('[aria-label="安装本地工具"]')).not.toBeNull();
+    expect(button('下载并安装')).toBeDefined();
+    const model = {
+      id: source.id,
+      name: source.name,
+      revision: 'r1',
+      hasKey: true,
+      config: {
+        ...defaultAiConfig(),
+        provider: source.provider,
+        baseUrl: source.baseUrl,
+        model: 'fixture',
+      },
+    };
+    source.status.mockResolvedValue({
+      installed: true,
+      authorized: true,
+      model,
+      message: '已连接',
+    });
+    button('重新检测').click();
+    await settle();
+    expect(root.querySelector('[aria-label="安装本地工具"]')).toBeNull();
+    expect(api.localToolInstall).not.toHaveBeenCalled();
+  },
+);
+it.each(localProviders)(
+  'authorizes and binds $name without registering a model or API key',
+  async (source) => {
+    const config = {
+      ...defaultAiConfig(),
+      provider: source.provider,
+      model: 'local-configured-model',
+      baseUrl: source.baseUrl,
+    };
+    const model = {
+      id: source.id,
+      name: source.name,
+      revision: 'local-r1',
+      hasKey: true,
+      config,
+    };
+    let value: Record<string, unknown> = { modelId: 'model-a', keep: true };
+    api.settings.mockImplementation(
+      async (_id: string, operation: { kind: string; value?: Record<string, unknown> }) => {
+        if (operation.kind === 'settings_write') {
+          value = operation.value!;
+          return null;
+        }
+        return value;
+      },
+    );
+    await mountSettings();
+    expect(root.textContent).toContain('本地 Codex');
+    expect(root.textContent).toContain('本地 Claude Code');
+    expect(root.querySelector('input[value="model-a"]')).not.toBeNull();
+    root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.click();
+    await settle();
+    expect(button('保存模型绑定').disabled).toBe(true);
+    source.status.mockResolvedValue({ authorized: true, model, message: `已连接${source.name}` });
+    button(`授权使用${source.name}`).click();
+    await settle();
+    expect(source.authorize).toHaveBeenCalledWith(true);
+    expect(root.textContent).toContain('local-configured-model');
+    button('保存模型绑定').click();
+    await settle();
+    expect(value).toEqual({ modelId: source.id, keep: true });
+    app.unmount();
+    root.remove();
+    await mount();
+    await send();
+    expect(api.prepare.mock.lastCall![0].modelId).toBe(source.id);
+  },
+);
+
+it.each(localProviders)(
+  'blocks sending when a saved $name binding has lost authorization',
+  async (source) => {
+    api.settings.mockResolvedValue({ modelId: source.id });
+    source.status.mockResolvedValue({
+      authorized: false,
+      model: null,
+      message: `请先授权使用${source.name}`,
+    });
+    await mount();
+    const input = root.querySelector<HTMLTextAreaElement>('textarea')!;
+    input.value = '检查当前主机';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(root.textContent).toContain(`请先授权使用${source.name}`);
+    expect(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
+    expect(api.prepare).not.toHaveBeenCalled();
+  },
+);
+
+it.each(localProviders)(
+  'revokes $name access from settings and shows the resulting state',
+  async (source) => {
+    api.settings.mockResolvedValue({ modelId: source.id });
+    source.status.mockResolvedValue({ authorized: true, model: null, message: 'CLI 不可用' });
+    await mountSettings();
+    source.status.mockResolvedValue({
+      authorized: false,
+      model: null,
+      message: `请先授权使用${source.name}`,
+    });
+    button('撤销本地授权').click();
+    await settle();
+    expect(source.authorize).toHaveBeenCalledWith(false);
+    expect(root.textContent).toContain(`已撤销${source.name} 授权`);
+    expect(button('保存模型绑定').disabled).toBe(true);
+  },
+);
 it('keeps the previous model binding visible when saving fails and allows retry', async () => {
   await mountSettings();
   root.querySelector<HTMLInputElement>('input[value=""]')!.click();

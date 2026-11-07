@@ -1,6 +1,55 @@
 use super::*;
 use serde::{Deserialize, Serialize};
-use serverdeck_core::ai::{Config, Model, validate_model_name};
+use serverdeck_core::ai::{Config, Model, Provider, validate_model_name};
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalAiConsent {
+    pub authorized: bool,
+    pub revision: String,
+}
+pub type LocalCodexConsent = LocalAiConsent;
+
+fn local_consent_key(provider: Provider) -> Result<&'static str, Error> {
+    match provider {
+        Provider::LocalCodex => Ok("ai_local_codex"),
+        Provider::LocalClaudeCode => Ok("ai_local_claude_code"),
+        _ => Err(Error::Validation("本地智能体来源无效")),
+    }
+}
+
+impl Database {
+    pub fn ai_local_codex_consent(&self) -> Result<LocalCodexConsent, Error> {
+        self.ai_local_consent(Provider::LocalCodex)
+    }
+    pub fn ai_local_codex_authorize(&self, authorized: bool) -> Result<(), Error> {
+        self.ai_local_authorize(Provider::LocalCodex, authorized)
+    }
+    pub fn ai_local_consent(&self, provider: Provider) -> Result<LocalAiConsent, Error> {
+        let value: Option<String> = self
+            .connect()?
+            .query_row(
+                "SELECT value FROM application_settings WHERE key=?1",
+                [local_consent_key(provider)?],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage_error)?;
+        value
+            .map(|value| serde_json::from_str(&value).map_err(storage_error))
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+    pub fn ai_local_authorize(&self, provider: Provider, authorized: bool) -> Result<(), Error> {
+        let value = serde_json::to_string(&LocalAiConsent {
+            authorized,
+            revision: uuid::Uuid::new_v4().to_string(),
+        })
+        .map_err(storage_error)?;
+        self.connect()?.execute("INSERT INTO application_settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [local_consent_key(provider)?, &value]).map_err(storage_error)?;
+        Ok(())
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

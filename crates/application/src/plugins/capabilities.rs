@@ -354,8 +354,17 @@ impl Application {
                         .await?;
                     let model_id = super::tools::assistant_model_id(&value)?.map(str::to_owned);
                     if let Some(model_id) = model_id {
-                        self.blocking(move |db| db.ai_model(&model_id).map(|_| ()))
-                            .await?;
+                        self.blocking(move |db| {
+                            if let Some(provider) = serverdeck_core::ai::local_provider(&model_id) {
+                                if !db.ai_local_consent(provider)?.authorized {
+                                    return Err(Error::Validation("请先授权使用所选本地智能体"));
+                                }
+                                Ok(())
+                            } else {
+                                db.ai_model(&model_id).map(|_| ())
+                            }
+                        })
+                        .await?;
                     }
                     if previous.get("modelId") != value.get("modelId") {
                         self.plugin_cancel_tool_requests(&id)?;

@@ -22,7 +22,9 @@ import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
 import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
 import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
 import { useModelBinding } from './model-binding';
+import { isLocalModel } from '@serverdeck/plugin-sdk/types/ai';
 import AssistantTargets from './AssistantTargets.vue';
+import LocalToolInstallNotice from './LocalToolInstallNotice.vue';
 import AssistantMarkdown from './AssistantMarkdown';
 import AssistantAgent from './AssistantAgent.vue';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
@@ -52,7 +54,7 @@ const ops = useOpsStore();
 const hosts = useHostsStore();
 const ai = useAssistant(computed(() => props.keepRunning ?? false));
 const binding = useModelBinding();
-const { models, modelId, selected, loaded, loading, error: bindingError } = binding;
+const { models, modelId, selected, loaded, loading, error: bindingError, localSelected } = binding;
 onMounted(() => {
   if (!hosts.catalog) void hosts.load();
 });
@@ -78,9 +80,9 @@ const ready = computed(
     loaded.value &&
     !loading.value &&
     !bindingError.value &&
-    models.loaded &&
+    (isLocalModel(modelId.value) || models.loaded) &&
     !models.loading &&
-    !models.error &&
+    (isLocalModel(modelId.value) || !models.error) &&
     !!selected.value?.hasKey &&
     (!hosts.busy || hosts.catalog !== null) &&
     !!question.value.trim(),
@@ -127,6 +129,10 @@ function enter(event: KeyboardEvent) {
 }
 const readinessHint = computed(() => {
   if (loading.value || models.loading) return '正在读取模型配置…';
+  if (localSelected.value)
+    return localSelected.value.status.model
+      ? `${localSelected.value.name} · Enter 发送 · Shift + Enter 换行`
+      : localSelected.value.status.message;
   if (bindingError.value || models.error) return '模型配置读取失败，请在插件设置中重试';
   if (modelId.value && !selected.value) return '绑定模型已删除，请在插件设置中重新绑定';
   if (!selected.value) return '请先在插件设置中绑定模型';
@@ -161,7 +167,22 @@ const readinessHint = computed(() => {
           aria-label="对话消息"
           aria-live="polite"
         >
-          <p v-if="bindingError || models.error" class="error-text" role="alert">
+          <LocalToolInstallNotice
+            v-if="localSelected?.status.installed === false"
+            :name="localSelected.name"
+            :model-id="localSelected.id"
+            :installing="!!binding.installing.value"
+            :supported="localSelected.status.installSupported !== false"
+            :disabled="loading"
+            @install="binding.installLocal(modelId)"
+            @cancel="binding.cancelInstall"
+            @refresh="binding.refreshLocal(modelId)"
+          />
+          <p
+            v-if="bindingError || (!isLocalModel(modelId) && models.error)"
+            class="error-text"
+            role="alert"
+          >
             {{ bindingError || models.error }}
           </p>
           <p v-if="hosts.error" class="error-text" role="alert">{{ hosts.error }}</p>

@@ -59,6 +59,164 @@ pub(super) fn input(id: &str, question: &str) -> PrepareInput {
         expected_model_revision: None,
     }
 }
+
+#[test]
+fn managed_tool_login_hint_uses_a_quoted_native_executable_without_requiring_path() {
+    let message = local_login_hint(
+        Provider::LocalCodex,
+        std::path::Path::new(r"\\?\C:\Tools\O'Brien\codex.exe"),
+    );
+    assert!(message.contains(r"& 'C:\Tools\O''Brien\codex.exe' login"));
+    let message = local_login_hint(
+        Provider::LocalClaudeCode,
+        std::path::Path::new(r"\\?\UNC\server\tools\claude.exe"),
+    );
+    assert!(message.contains(r"& '\\server\tools\claude.exe' auth login"));
+}
+
+#[tokio::test]
+async fn local_codex_cannot_be_used_before_consent_or_after_revocation() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+        .unwrap();
+    let status = app.ai_local_codex_status().await.unwrap();
+    assert!(!status.authorized);
+    assert!(status.model.is_none());
+    let error = app
+        .ai_prepare(input(LOCAL_CODEX_MODEL_ID, "test"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        serverdeck_core::IpcError::from(error).code,
+        "AI_CODEX_CONSENT"
+    );
+    app.ai_local_codex_authorize(true).await.unwrap();
+    assert!(app.database.ai_local_codex_consent().unwrap().authorized);
+    let preview = app
+        .assistant
+        .prepare(serverdeck_ai::PreparedContext {
+            related_bindings: vec![],
+            history: vec![],
+            model_id: LOCAL_CODEX_MODEL_ID.into(),
+            revision: "test-consent".into(),
+            config: Config {
+                provider: Provider::LocalCodex,
+                model: "fixture".into(),
+                ..Config::default()
+            },
+            question: "test".into(),
+            context: json!({}),
+            binding: None,
+            redactor: Redactor::new(true, vec![]).unwrap(),
+            warnings: vec![],
+        })
+        .unwrap();
+    app.ai_local_codex_authorize(false).await.unwrap();
+    assert!(app.assistant.preview_model_id(&preview.id).is_err());
+    assert!(!app.ai_local_codex_status().await.unwrap().authorized);
+    assert!(
+        app.ai_prepare(input(LOCAL_CODEX_MODEL_ID, "test"))
+            .await
+            .is_err()
+    );
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn claude_revocation_blocks_new_requests_and_keeps_codex_previews_and_consent() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+        .unwrap();
+    assert!(!app.ai_local_claude_code_status().await.unwrap().authorized);
+    let error = app
+        .ai_prepare(input(LOCAL_CLAUDE_CODE_MODEL_ID, "test"))
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(
+        serverdeck_core::IpcError::from(error).code,
+        "AI_CLAUDE_CONSENT"
+    );
+    let mut previews = vec![];
+    for (id, provider) in [
+        (LOCAL_CODEX_MODEL_ID, Provider::LocalCodex),
+        (LOCAL_CLAUDE_CODE_MODEL_ID, Provider::LocalClaudeCode),
+    ] {
+        app.ai_local_authorize(id, true).await.unwrap();
+        let preview = app
+            .assistant
+            .prepare(serverdeck_ai::PreparedContext {
+                related_bindings: vec![],
+                history: vec![],
+                model_id: id.into(),
+                revision: "fixture-consent".into(),
+                config: Config {
+                    provider,
+                    model: "fixture".into(),
+                    ..Config::default()
+                },
+                question: "test".into(),
+                context: json!({}),
+                binding: None,
+                redactor: Redactor::new(true, vec![]).unwrap(),
+                warnings: vec![],
+            })
+            .unwrap();
+        previews.push(preview);
+    }
+    app.ai_local_claude_code_authorize(false).await.unwrap();
+    assert!(!app.ai_local_claude_code_status().await.unwrap().authorized);
+    assert!(app.assistant.preview_model_id(&previews[1].id).is_err());
+    assert_eq!(
+        app.assistant.preview_model_id(&previews[0].id).unwrap(),
+        LOCAL_CODEX_MODEL_ID
+    );
+    assert!(app.database.ai_local_codex_consent().unwrap().authorized);
+    assert!(
+        app.ai_prepare(input(LOCAL_CLAUDE_CODE_MODEL_ID, "test"))
+            .await
+            .is_err()
+    );
+    assert!(app.ai_models().await.unwrap().is_empty());
+    app.shutdown().await;
+}
+
+#[tokio::test]
+#[ignore = "uses the user's installed Claude Code and may consume a small amount of account usage"]
+async fn local_claude_live_application_flow() {
+    live_local_application_flow(LOCAL_CLAUDE_CODE_MODEL_ID).await;
+}
+
+#[tokio::test]
+#[ignore = "uses the user's installed Codex and may consume a small amount of account usage"]
+async fn local_codex_live_application_flow() {
+    live_local_application_flow(LOCAL_CODEX_MODEL_ID).await;
+}
+
+async fn live_local_application_flow(id: &'static str) {
+    let directory = tempfile::tempdir().unwrap();
+    let app = Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+        .unwrap();
+    app.ai_local_authorize(id, true).await.unwrap();
+    let status = app.ai_local_status(id).await.unwrap();
+    assert!(status.authorized);
+    assert!(status.model.is_some(), "{}", status.message);
+    let preview = app
+        .ai_prepare(input(
+            id,
+            "请严格按要求返回 JSON，answer 为 OK，commands 为空数组。",
+        ))
+        .await
+        .unwrap();
+    let answer = app.ai_send(preview.id, true).await.unwrap();
+    assert_eq!(answer.text, "OK");
+    assert!(answer.proposals.is_empty());
+    assert!(app.ai_models().await.unwrap().is_empty());
+    app.ai_local_authorize(id, false).await.unwrap();
+    assert!(app.ai_prepare(input(id, "test")).await.is_err());
+    app.shutdown().await;
+}
 fn edit(model: &Model) -> ModelInput {
     ModelInput {
         id: Some(model.id.clone()),

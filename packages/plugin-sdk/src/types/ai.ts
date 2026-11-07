@@ -1,6 +1,6 @@
 import type { LogSource } from './ops';
 export interface AiConfig {
-  provider: 'openai_compatible';
+  provider: 'openai_compatible' | 'local_codex' | 'local_claude_code';
   baseUrl: string;
   model: string;
   allowInsecureHttp: boolean;
@@ -14,6 +14,18 @@ export interface AiModel {
   config: AiConfig;
   hasKey: boolean;
 }
+export const LOCAL_CODEX_MODEL_ID = 'local-codex';
+export const LOCAL_CLAUDE_CODE_MODEL_ID = 'local-claude-code';
+export const isLocalModel = (id: string) =>
+  id === LOCAL_CODEX_MODEL_ID || id === LOCAL_CLAUDE_CODE_MODEL_ID;
+export interface LocalCodexStatus {
+  installed?: boolean;
+  installSupported?: boolean;
+  authorized: boolean;
+  model: AiModel | null;
+  message: string;
+}
+export type LocalClaudeCodeStatus = LocalCodexStatus;
 export interface AiModelInput {
   id: string | null;
   expectedRevision: string | null;

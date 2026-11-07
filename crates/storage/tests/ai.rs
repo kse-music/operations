@@ -1,4 +1,7 @@
-use serverdeck_core::{Error, ai::Config};
+use serverdeck_core::{
+    Error,
+    ai::{Config, Provider},
+};
 use serverdeck_storage::{Database, ai::ModelRecord};
 fn record(id: &str, name: &str) -> ModelRecord {
     ModelRecord {
@@ -11,6 +14,61 @@ fn record(id: &str, name: &str) -> ModelRecord {
         secret_ref: Some(format!("ref-{id}")),
         revision: format!("r-{id}"),
     }
+}
+
+#[test]
+fn local_codex_consent_is_opt_in_persistent_and_revocable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    assert!(!db.ai_local_codex_consent().unwrap().authorized);
+    db.ai_model_save(record("existing", "Existing"), None)
+        .unwrap();
+    db.ai_local_codex_authorize(true).unwrap();
+    let approved = Database::open(&path)
+        .unwrap()
+        .ai_local_codex_consent()
+        .unwrap();
+    assert!(approved.authorized);
+    db.ai_local_codex_authorize(false).unwrap();
+    let revoked = db.ai_local_codex_consent().unwrap();
+    assert!(!revoked.authorized);
+    assert_ne!(approved.revision, revoked.revision);
+    assert_eq!(db.ai_models().unwrap()[0].id, "existing");
+}
+
+#[test]
+fn local_provider_consents_are_independent_and_keep_registered_models() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    assert!(
+        !db.ai_local_consent(Provider::LocalClaudeCode)
+            .unwrap()
+            .authorized
+    );
+    db.ai_model_save(record("existing", "Existing"), None)
+        .unwrap();
+    db.ai_local_codex_authorize(true).unwrap();
+    let codex = db.ai_local_codex_consent().unwrap();
+    db.ai_local_authorize(Provider::LocalClaudeCode, true)
+        .unwrap();
+    let reopened = Database::open(&path).unwrap();
+    let claude = reopened
+        .ai_local_consent(Provider::LocalClaudeCode)
+        .unwrap();
+    assert!(claude.authorized);
+    db.ai_local_authorize(Provider::LocalClaudeCode, false)
+        .unwrap();
+    let revoked = db.ai_local_consent(Provider::LocalClaudeCode).unwrap();
+    assert!(!revoked.authorized);
+    assert_ne!(claude.revision, revoked.revision);
+    assert_eq!(
+        db.ai_local_codex_consent().unwrap().revision,
+        codex.revision
+    );
+    assert!(db.ai_local_codex_consent().unwrap().authorized);
+    assert_eq!(db.ai_models().unwrap()[0].id, "existing");
 }
 
 #[test]

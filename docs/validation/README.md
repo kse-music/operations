@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[SFTP 目录加载状态](files/VALIDATION_STAGE4.md#2026-11-07-sftp-目录加载状态)。
+
+最新：[本地 Codex/Claude Code 缺失提示、官方下载安装及重检](ai/VALIDATION_AI_ASSISTANT.md#2026-11-07-本地工具下载安装)。
+
+最新：[AI 助手模型绑定弹窗布局、主题/字号与保存交互](ai/VALIDATION_ASSISTANT_LAYOUT.md#2026-11-07-模型绑定弹窗)。
+
+最新：[AI 运维助手本地 Claude Code 配置复用、独立授权和来源切换](ai/VALIDATION_AI_ASSISTANT.md#2026-11-07-本地-claude-code)。
+
+最新：[AI 运维助手本地 Codex 授权、配置复用及原生对话](ai/VALIDATION_AI_ASSISTANT.md#2026-11-07-本地-codex)。
+
 最新：[平台版本更新为 0.3.0](foundation/VALIDATION_BUILD_CACHE.md#2026-11-07-平台版本更新为-030)。
 
 最新：[界面标准基数 14px](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-界面标准基数-14px)。

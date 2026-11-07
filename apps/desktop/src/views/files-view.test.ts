@@ -7,7 +7,7 @@ import { useHostsStore } from '../stores/hosts';
 import { clipboardApi } from '../services/clipboard';
 import { filesApi } from '../services/files';
 import { hostInput } from '../types/hosts';
-import type { FileEntry } from '../types/files';
+import type { DirectoryListing, FileEntry } from '../types/files';
 
 const release = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/webview', () => ({
@@ -76,6 +76,82 @@ afterEach(() => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
+
+it.each(['local', 'remote'] as const)(
+  'keeps the latest %s target and spinner when an older read finishes first',
+  async (side) => {
+    const files = useFilesStore(pinia);
+    const finishes: ((listing: DirectoryListing) => void)[] = [];
+    vi.spyOn(filesApi, side === 'local' ? 'local' : 'list').mockImplementation(
+      () => new Promise<DirectoryListing>((resolve) => finishes.push(resolve)),
+    );
+    const navigate = (path: string) =>
+      side === 'local' ? files.localLoad(path) : files.navigate(path);
+    const label = side === 'local' ? '本地' : '远程';
+    const input = root.querySelector<HTMLInputElement>(`[aria-label="${label}路径"]`)!;
+    const pane = input.closest('.file-side')!;
+    const old = navigate('/slow');
+    const latest = navigate('/target');
+    await nextTick();
+    expect(input.value).toBe('/target');
+    finishes[0]!({ path: '/slow', parent: '/', entries: [] });
+    await old;
+    await nextTick();
+    expect(input.value).toBe('/target');
+    expect(pane.querySelector('.file-list-loading')).not.toBeNull();
+    expect(pane.querySelectorAll('tbody tr')).toHaveLength(0);
+    finishes[1]!({ path: '/canonical/target', parent: '/canonical', entries: [entry] });
+    await latest;
+    await nextTick();
+    expect(input.value).toBe('/canonical/target');
+    expect(pane.querySelector('.file-list-loading')).toBeNull();
+    expect(pane.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(pane.querySelector('.file-table')?.getAttribute('aria-busy')).toBe('false');
+  },
+);
+
+it.each(['local', 'remote'] as const)(
+  'shows the target path immediately and restores the %s directory after a failed read',
+  async (side) => {
+    const files = useFilesStore(pinia);
+    if (side === 'local') files.local!.entries = [entry];
+    await nextTick();
+    const label = side === 'local' ? '本地' : '远程';
+    const input = root.querySelector<HTMLInputElement>(`[aria-label="${label}路径"]`)!;
+    const originalPath = input.value;
+    const table = root.querySelector<HTMLTableElement>(`[aria-label="${label}文件"]`)!;
+    const header = table.tHead;
+    table.querySelector<HTMLInputElement>('tbody input')!.click();
+    await nextTick();
+    const toolbar = table.closest('.file-side')!.querySelector('.toolbar')!;
+    const transfer = [...toolbar.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes(side === 'local' ? '上传选中' : '下载选中'),
+    )!;
+    expect(transfer.disabled).toBe(false);
+    let reject!: (cause: unknown) => void;
+    const read = vi.spyOn(filesApi, side === 'local' ? 'local' : 'list');
+    read.mockImplementationOnce(
+      () =>
+        new Promise<DirectoryListing>((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    table.querySelector('.file-name')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    await nextTick();
+    expect(input.value).toBe(entry.path);
+    expect(table.tHead).toBe(header);
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(table.closest('.file-side')!.querySelector('[role="status"]')?.textContent).toContain(
+      '正在读取目录',
+    );
+    expect(transfer.disabled).toBe(true);
+    reject({ message: 'directory unavailable' });
+    await vi.waitFor(() => expect(input.value).toBe(originalPath));
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(table.closest('.file-side')!.querySelector('.file-list-loading')).toBeNull();
+    expect(side === 'local' ? files.error : files.current?.error).toBe('directory unavailable');
+  },
+);
 
 it.each([
   { names: ['config'], recursive: true },

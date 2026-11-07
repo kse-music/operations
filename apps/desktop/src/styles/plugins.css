@@ -411,6 +411,37 @@
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
+.modal:has(> .assistant-config-body > .plugin-settings-workspace)[open] {
+  height: min(640px, calc(100dvh - 32px));
+}
+.assistant-config-body:has(> .plugin-settings-workspace) {
+  overflow: hidden;
+}
+.assistant-config-body .plugin-config-nav {
+  gap: 20px;
+  padding: 0 24px;
+}
+.assistant-config-body .plugin-config-nav .button {
+  position: relative;
+  padding: 10px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.assistant-config-body .plugin-config-nav .button[aria-pressed='true'] {
+  color: var(--accent);
+}
+.assistant-config-body .plugin-config-nav .button[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
 .plugin-config-body > .plugin-settings-workspace {
   flex: 1;
   gap: 12px;

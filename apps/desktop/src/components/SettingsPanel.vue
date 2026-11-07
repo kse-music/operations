@@ -141,7 +141,6 @@ function restoreDefaults(): void {
       config.theme = 'dark';
       config.interfaceFontSize = defaultInterfaceFontSize;
       config.sidebarWidth = 248;
-      config.monitorIntervalSecs = 3;
       config.product.language = product.language;
       break;
     case 'terminal':
@@ -209,14 +208,7 @@ function restoreDefaults(): void {
               :max="interfaceFontSizes.length - 1"
               step="1"
               :aria-valuetext="interfaceFontSizes[fontSizeStep]?.label"
-              aria-describedby="interface-font-size-help"
             />
-            <p id="interface-font-size-help" class="subtle">
-              标准基数 14px，当前
-              {{
-                Math.round((interfaceFontSizes[fontSizeStep]?.scale ?? 1) * 100)
-              }}%。即时预览，保存后记住。终端字号单独设置。
-            </p>
           </div>
           <label
             ><span class="settings-label"
@@ -230,14 +222,6 @@ function restoreDefaults(): void {
               max="400"
             />
           </label>
-          <label
-            >监控采样间隔<select v-model.number="draft.monitorIntervalSecs">
-              <option :value="3">3 秒</option>
-              <option :value="5">5 秒</option>
-              <option :value="10">10 秒</option>
-              <option :value="30">30 秒</option>
-            </select></label
-          >
         </ProductSettings>
       </div>
       <div v-show="category === 'terminal'" id="settings-panel-terminal" class="settings-category">

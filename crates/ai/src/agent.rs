@@ -66,9 +66,9 @@ impl StoredPlan {
         self.steps.iter().map(|s| s.public.clone()).collect()
     }
 }
-struct ActiveRun {
-    state: Arc<Mutex<State>>,
-    id: String,
+pub(super) struct ActiveRun {
+    pub(super) state: Arc<Mutex<State>>,
+    pub(super) id: String,
 }
 impl Drop for ActiveRun {
     fn drop(&mut self) {
@@ -182,9 +182,7 @@ impl Assistant {
         let mut usage: Option<Usage> = None;
         let mut complete_usage = true;
         for _ in 0..6 {
-            let completion = OpenAiCompatible
-                .complete(&pending.config, key, &body)
-                .await?;
+            let completion = provider::complete(&pending.config, key, &body).await?;
             if completion.incomplete {
                 return Err(failure("AI_PROTOCOL", "智能体计划响应被截断，未执行变更"));
             }

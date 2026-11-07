@@ -19,6 +19,7 @@ export interface FileConnection {
   error: string | null;
   trust: Extract<TerminalEvent, { type: 'trust' }> | null;
   path: string;
+  pendingPath?: string;
   listing: DirectoryListing | null;
   loading: boolean;
   followPane?: string;
@@ -50,6 +51,7 @@ export const useFilesStore = defineStore('files', () => {
     active = ref(''),
     local = ref<DirectoryListing | null>(null),
     localLoading = ref(false),
+    localPendingPath = ref<string | null>(null),
     error = ref<string | null>(null),
     notice = ref<string | null>(null),
     tasks = ref<TransferInfo[]>([]),
@@ -71,6 +73,7 @@ export const useFilesStore = defineStore('files', () => {
     direction?: HistoryDirection,
   ): Promise<void> {
     const generation = ++localGeneration;
+    localPendingPath.value = path;
     localLoading.value = true;
     try {
       const value = await filesApi.local(path);
@@ -81,7 +84,10 @@ export const useFilesStore = defineStore('files', () => {
     } catch (cause) {
       if (generation === localGeneration) error.value = errorMessage(cause);
     } finally {
-      if (generation === localGeneration) localLoading.value = false;
+      if (generation === localGeneration) {
+        localLoading.value = false;
+        localPendingPath.value = null;
+      }
     }
   }
   async function navigate(
@@ -98,6 +104,7 @@ export const useFilesStore = defineStore('files', () => {
       connections.value[host.id] === connection &&
       connection.id === id;
     connection.loading = true;
+    connection.pendingPath = path;
     connection.error = null;
     try {
       const value = await filesApi.list(id, path);
@@ -124,7 +131,10 @@ export const useFilesStore = defineStore('files', () => {
       )
         connection.state = 'failed';
     } finally {
-      if (generation === generations.get(host.id)) connection.loading = false;
+      if (isCurrentRequest()) {
+        connection.loading = false;
+        connection.pendingPath = undefined;
+      }
     }
   }
   function stepHistory(side: 'local' | 'remote', direction: HistoryDirection): boolean {
@@ -368,6 +378,7 @@ export const useFilesStore = defineStore('files', () => {
     current,
     local,
     localLoading,
+    localPendingPath,
     error,
     notice,
     tasks,

@@ -4,11 +4,43 @@ use zeroize::Zeroizing;
 mod agent;
 pub use agent::*;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Provider {
     OpenaiCompatible,
+    LocalCodex,
+    LocalClaudeCode,
 }
+impl Provider {
+    pub fn is_local(self) -> bool {
+        matches!(self, Self::LocalCodex | Self::LocalClaudeCode)
+    }
+}
+
+pub const LOCAL_CODEX_MODEL_ID: &str = "local-codex";
+pub const LOCAL_CLAUDE_CODE_MODEL_ID: &str = "local-claude-code";
+
+pub fn local_provider(id: &str) -> Option<Provider> {
+    match id {
+        LOCAL_CODEX_MODEL_ID => Some(Provider::LocalCodex),
+        LOCAL_CLAUDE_CODE_MODEL_ID => Some(Provider::LocalClaudeCode),
+        _ => None,
+    }
+}
+pub fn is_local_model(id: &str) -> bool {
+    local_provider(id).is_some()
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalCodexStatus {
+    pub installed: bool,
+    pub install_supported: bool,
+    pub authorized: bool,
+    pub model: Option<Model>,
+    pub message: String,
+}
+pub type LocalClaudeCodeStatus = LocalCodexStatus;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -85,6 +117,9 @@ pub struct ModelTest {
 impl ModelInput {
     pub fn validate(&self) -> Result<(), Error> {
         self.config.validate()?;
+        if self.config.provider.is_local() {
+            return Err(Error::Validation("本地智能体请在 AI 运维助手中授权使用"));
+        }
         validate_model_name(&self.name)?;
         if self.id.is_some() != self.expected_revision.is_some() {
             return Err(Error::Validation(

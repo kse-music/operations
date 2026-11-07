@@ -1,5 +1,23 @@
 # ServerDeck 技术决策
 
+## 2026-11-07 应用内下载本地 AI 工具
+
+缺失提示与安装是模型来源选择流程的一部分，在设置和聊天页复用同一组件。按需获取官方原生可执行文件，安装到应用独立目录；优先使用已有用户安装。避免依赖 npm、执行远程安装脚本或改写全局 PATH。安装只获得程序，不代表授权读取已有登录；后者继续使用可信宿主确认。
+
+采用现有 reqwest、SHA-256、Tokio 和 tempfile，无新依赖。Codex 通过 GitHub 官方资产 API 下载；本机网页发行下载入口实测超时，而该 API 可达。版本跟随官方发行清单，若清单、散列、平台或启动验证不通过则拒绝安装。官方来源见 [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) 与 [Claude Code 安装](https://code.claude.com/docs/en/setup)。
+
+## 2026-11-07 复用用户本地 Claude Code
+
+沿用本地 Codex 的选择和独立访问授权交互，使用用户已安装的 Claude Code 原生 CLI，让其读取配置及维护认证。采用 print 流式协议，无需新增 SDK 依赖、复制订阅 token 或改写用户配置。用 safe-mode 与进程级参数限制自带工具；不用会跳过 OAuth/钥匙串的 bare 模式。注册模型继续走已有 HTTP Provider，CLI 仅替换推理入口。
+
+当前实机基线为 Windows Claude Code 2.1.270。其他版本或平台需分别验收；不兼容选项、额外工具和异常流按失败处理。商业发行使用订阅认证的条件需按 [Anthropic 官方认证说明](https://code.claude.com/docs/en/authentication)及[法律与合规说明](https://code.claude.com/docs/en/legal-and-compliance)确认。本地授权仅表示用户允许 ServerDeck 调用其 CLI。
+
+## 2026-11-07 复用用户本地 Codex 运行时
+
+按用户确认的 CC GUI 方式，使用本地 CLI 的 App Server 接口复用已有配置与登录。ServerDeck 保存独立的本地访问授权，凭据和刷新由 CLI 管理，不将 token 转换为注册模型的 API Key。HTTP 注册模型和本地来源共用原有请求、查询、计划与执行链路，通过保留来源 ID 兼容已有插件绑定。专属桥方法只允许内置 system 助手，未给上传插件扩展秘密或进程能力。
+
+为保持运维审批边界，本地 Codex 仅承担推理，使用临时目录、ephemeral 会话和进程级工具限制。每次模型轮次独立启动 CLI，停止时终止本次进程，避免在所有主机间维护共享外部会话或令牌副本。用户目录配置变化和账户切换使旧计划失效。Windows 原生 Codex 0.167.0-alpha.3.2 已完成固定文本真实请求验证；其他版本和平台需分别验收。App Server 协议及供应商对第三方订阅认证的发行限制仍由发布流程确认，参考 [OpenAI 官方说明](https://learn.chatgpt.com/docs/app-server#auth-endpoints)。
+
 ## 2026-11-07 以 14px 为界面标准字号
 
 主要文字统一使用 14px，辅助信息 12px、分组标题 16px、弹窗标题 20px、页面标题 24px，避免只修改 body 而保留列表与表单中的 11/12px 覆盖。公共 SDK 提供包含缩放比例的语义字号变量，内置插件复用；行高使用相对值，普通控件最低 36px，允许随文字增高。

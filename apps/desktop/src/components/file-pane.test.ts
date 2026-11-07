@@ -27,7 +27,11 @@ const listing: DirectoryListing = {
     gid: null,
   })),
 };
-function mountPane(side: 'local' | 'remote', directory = listing) {
+function mountPane(
+  side: 'local' | 'remote',
+  directory: DirectoryListing | null = listing,
+  loading = false,
+) {
   const select = vi.fn();
   const open = vi.fn();
   root = document.createElement('div');
@@ -35,7 +39,7 @@ function mountPane(side: 'local' | 'remote', directory = listing) {
   app = createApp(FilePane, {
     side,
     listing: directory,
-    loading: false,
+    loading,
     selected: [],
     onSelect: select,
     onOpen: open,
@@ -43,6 +47,30 @@ function mountPane(side: 'local' | 'remote', directory = listing) {
   app.mount(root);
   return { select, open };
 }
+
+it.each(['local', 'remote'] as const)(
+  'keeps the %s table header above a loading indicator without showing stale entries',
+  (side) => {
+    mountPane(side, listing, true);
+    const table = root.querySelector('table')!;
+    expect(table).not.toBeNull();
+    expect(table.querySelector('thead')).not.toBeNull();
+    expect(table.querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(table.querySelector<HTMLInputElement>('thead input')!.disabled).toBe(true);
+    const status = root.querySelector('[role="status"]')!;
+    expect(status.textContent).toContain('正在读取目录');
+    expect(status.classList.contains('file-list-loading')).toBe(true);
+    expect(root.querySelector('.file-table')?.getAttribute('aria-busy')).toBe('true');
+    expect(root.textContent).not.toContain('空目录');
+  },
+);
+
+it('shows the table header and loading indicator while reading the first directory', () => {
+  mountPane('remote', null, true);
+  expect(root.querySelector('thead')).not.toBeNull();
+  expect(root.querySelector('[role="status"]')?.textContent).toContain('正在读取目录');
+  expect(root.textContent).not.toContain('尚未读取目录');
+});
 
 it.each(['remote', 'local'] as const)(
   'renders symbolic permissions and server owner names only in the remote pane (%s)',

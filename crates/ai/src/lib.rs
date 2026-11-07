@@ -1,5 +1,9 @@
 pub mod agent;
+pub mod claude;
+pub mod codex;
 pub mod commands;
+mod local_cli;
+pub mod local_tools;
 mod model_test;
 pub mod provider;
 pub mod redact;
@@ -322,11 +326,14 @@ impl Assistant {
                 .insert(id.to_owned(), (pending.model_id.clone(), cancel.clone()));
             pending
         };
+        let _active = agent::ActiveRun {
+            state: self.state.clone(),
+            id: id.into(),
+        };
         let result = tokio::select! {
-            r = OpenAiCompatible.complete(&pending.config, key, &pending.body) => r,
+            r = provider::complete(&pending.config, key, &pending.body) => r,
             _ = cancel.cancelled() => Err(failure("AI_CANCELLED", "AI 请求已取消；服务端仍可能计费")),
         };
-        lock(&self.state)?.active.remove(id);
         let completion = result?;
         if cancel.is_cancelled() {
             return Err(failure("AI_CANCELLED", "AI 请求已取消"));

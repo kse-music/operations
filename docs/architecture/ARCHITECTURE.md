@@ -1,5 +1,27 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-07 本地工具安装
+
+本地来源状态新增 installed / installSupported。未授权时只查可执行文件，不读取配置或启动 CLI。先检测用户 PATH、常用原生目录，再回退应用数据目录 local-tools/{local-codex|local-claude-code}。新增主窗口专属 ai_local_tool_install(modelId, requestId) 与 ai_local_tool_install_cancel(requestId)，只接受固定两种来源；iframe 桥仅可信内置助手可调用，取消绑定本页面持有的请求，关闭页面取消下载。
+
+Installer 单并发、600 秒总超时、15 秒连接/30 秒读超时，取消令牌及有界提前取消记录处理 IPC 到达次序。下载元数据上限 2 MiB，二进制上限 512 MiB；只允许 HTTPS 和官方固定域名，受限重定向。Codex 从官方 GitHub release 清单读取资产 ID、大小和 SHA-256，通过发行资产 API 下载；Claude Code 使用 downloads.claude.ai 清单和二进制。流式写入独立临时目录，精确校验大小及 SHA-256，--version 成功后原子提交程序文件；可修复目录仍在但程序文件缺失的情况，已有文件不覆盖。取消、失败不发布半成品；退出取消安装。无 Shell 安装脚本、全局 PATH 修改、凭据复制或自动授权。当前内置下载覆盖 Windows x64/ARM64，其他平台保留手动安装引导。
+
+## 2026-11-07 本地 Claude Code 模型来源
+
+增加保留来源 ID `local-claude-code`、Provider `local_claude_code` 和主窗口专属 IPC `ai_local_claude_code_status` / `ai_local_claude_code_authorize`。`application_settings.ai_local_claude_code` 独立保存授权布尔值与版本，不改变 schema。两种本地来源共用模型绑定、授权状态处理、有界进程管道、取消及原运维流程，上传同 ID 插件仍无本地访问权。撤销只失效对应来源的请求和计划。
+
+Claude 适配通过原生 CLI 的 auth status 和 print/stream-json 运行；支持 PATH 中原生安装和 npm 安装的官方原生二进制，沿用绝对路径 CLAUDE_CONFIG_DIR 或用户 .claude。授权后读取用户配置生成摘要；账户身份、相关进程环境或 settings.json 变化使旧快照冲突，认证刷新由 CLI 自行处理。运行快照只含路径和摘要，无 token 副本。
+
+每轮在临时目录运行，safe-mode、仅 user 设置、无持久会话，禁用内置工具、MCP、用户 hooks、slash commands、浏览器和 Claude.ai connectors；受管策略继续由 CLI 执行。系统规则经临时文件、对话经 stdin 传入，命令参数不含上下文。工具 init 或 tool_use 校验失败立即停止，只接受成功 result 且正常退出；输出有界、60 秒超时或取消销毁本次子进程。SSH 查询与操作仍由 ServerDeck 控制。
+
+## 2026-11-07 本地 Codex 模型来源
+
+内置助手使用保留 ID `local-codex` 表示本地来源，其他模型仍走现有注册表。`application_settings.ai_local_codex` 单独保存授权布尔值与授权代，无数据库 schema 变化或凭据复制。新原生 IPC `ai_local_codex_status`、`ai_local_codex_authorize` 只开放给本地主窗口；iframe 桥再核验 system 来源、内置助手 ID、启用状态、授权代、可见页面与 `assistant.use`。启用须经过可信宿主确认，第三方插件及上传同 ID 插件无法访问。授权撤销取消该来源请求和未执行计划。
+
+`ai/codex` 通过参数数组启动本机 `codex app-server --listen stdio://`，沿用 `CODEX_HOME` 或用户 `.codex`，由 CLI 处理认证与刷新。读取账户和有效模型配置后生成仅含路径与摘要的运行快照。授权代、配置文件摘要与账户身份共同绑定预览、请求和计划；ChatGPT token 刷新本身不改变账户身份。CLI 每次调用在独立临时目录创建 ephemeral 会话，沿用现有六轮 query/plan/answer 编排。15 秒状态超时、60 秒单次推理超时、1 MiB 单行/4 MiB RPC 总量、256 KiB 回答上限与原有输入预算共同生效。停止或丢弃 future 会终止本次子进程。stderr 仅在有界内存中保留诊断，日志只记录错误类别与退出码。
+
+进程级覆盖关闭 Shell、hooks、apps、plugins、子智能体、浏览器和联网搜索，逐项禁用用户 MCP，并在发送前核对线程 MCP 状态；不改写用户配置。配置中 MCP 名称需符合 CLI 可安全覆盖的字母、数字、下划线和短横线规则。SSH 工具和变更确认仍归宿主，模型调用经 `provider::complete` 分派，原 HTTP Provider 合同保持。助手包为 1.7.0。
+
 ## 2026-11-07 插件开发包资源
 
 `apps/desktop/plugin-development-kit.ts` 从公开 SDK、插件文档、独立样例和现有打包脚本生成 ZIP，由 Vite 加入客户端前端资源。开发模式启动时生成同一资源供 Tauri 的资源解析器读取。插件管理通过仅限本地主窗口的 `plugin_save_development_kit` 打开系统保存对话框，将固定的 ZIP 写入用户选择的位置并返回路径。原子写入失败时返回错误。样例在解压目录中使用随包提供的 Rust 路径依赖和 npm workspace，依赖锁文件一起发布。生成的 `.sdplugin` 沿用宿主的包校验、授权和 WASM 运行时。

@@ -92,7 +92,7 @@ function displayLocalPath(path: string): string {
 }
 
 watch(
-  () => store.local?.path,
+  () => store.localPendingPath ?? store.local?.path,
   (value) => {
     if (value) {
       localPath.value = displayLocalPath(value);
@@ -102,7 +102,7 @@ watch(
   { immediate: true },
 );
 watch(
-  () => store.current?.path,
+  () => store.current?.pendingPath ?? store.current?.path,
   (value) => {
     remotePath.value = value ?? '';
     remoteSelection.value = [];
@@ -619,9 +619,7 @@ onBeforeUnmount(() => {
             title="远程上级"
             type="button"
             :disabled="!store.current?.listing?.parent"
-            @click="
-              store.current?.listing?.parent && store.navigate(store.current.listing.parent)
-            "
+            @click="store.current?.listing?.parent && store.navigate(store.current.listing.parent)"
           >
             <ArrowUp :size="15" aria-hidden="true" /></button
           ><input
@@ -750,8 +748,8 @@ onBeforeUnmount(() => {
           role="menuitem"
           @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
         >
-          在新终端中打开</button
-        ></template
+          在新终端中打开
+        </button></template
       >
     </div></template
   >
@@ -906,9 +904,7 @@ onBeforeUnmount(() => {
   <Modal v-if="terminalAction" title="确认打开文件终端" @close="terminalAction = null"
     ><p>
       {{ hostDisplayName(store.current?.host) }} ·
-      {{
-        terminalAction.kind === 'view' ? '运行 less' : '进入目录并打开交互式 Shell'
-      }}
+      {{ terminalAction.kind === 'view' ? '运行 less' : '进入目录并打开交互式 Shell' }}
     </p>
     <pre class="file-path-preview">{{ terminalAction.path }}</pre>
     <p>将新建独立 PTY，路径通过后端固定命令和 POSIX 单引号转义处理，不向已有 Shell 注入输入。</p>

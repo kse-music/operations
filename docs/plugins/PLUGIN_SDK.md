@@ -1,5 +1,19 @@
 # Plugin SDK：Rust / TypeScript 4.0.0
 
+## 本地工具安装（2026-11-07）
+
+本地状态增加可选 installed / installSupported 字段。TypeScript 的 localToolInstall(modelId, requestId) 与 localToolInstallCancel(requestId) 为内置助手受限桥扩展，只接受固定本地来源，不允许 Guest 传下载 URL、路径、命令或安装脚本。取消仅可操作本页发起的请求，关闭页面同步撤销；上传同 ID 插件无此能力。SDK 版本仍为 4.0.0。
+
+## 本地 Claude Code（2026-11-07）
+
+TypeScript 增加 `LOCAL_CLAUDE_CODE_MODEL_ID`、`LocalClaudeCodeStatus`、`localClaudeCodeStatus()` / `localClaudeCodeAuthorize(authorized)`，Provider 扩展为 `local_claude_code`。状态只返回授权、公开模型元数据和安全提示；接口与本地 Codex 一样，仅可信内置 system 助手可通过 Host 桥使用，上传同 ID 包不得访问。授权 true 必须经过宿主确认，两个来源的授权记录独立；原注册模型接口保持。属于内置助手受限扩展，无新增通用插件权限，SDK 版本仍为 4.0.0。
+
+## 2026-11-07 内置助手本地 Codex 接口
+
+AI DTO 增加 `LocalCodexStatus { authorized, model, message }`，`AiConfig.provider` 增加 `local_codex`。SDK 的 `aiApi.localCodexStatus()` 返回安全状态与模型元数据，`aiApi.localCodexAuthorize(boolean)` 申请或撤销本地访问。两者经宿主桥仅允许 system 来源的内置 AI 助手，上传同 ID 或其他插件得到权限错误；授权启用通过宿主弹窗，iframe 无法提交自述确认。
+
+来源 ID `local-codex` 由宿主解析，不写入模型注册表，也不能通过模型管理注册成本地提供者。其余 `ai_resolve_hosts`、`ai_prepare`、`ai_send`、`ai_execute` 和历史模型绑定参数保持一致。新原生命令仅在本地主窗口 ACL 内开放，插件 WASM 没有新增能力或权限。
+
 ## 当前公开 SDK 与源码边界
 
 内置助手的可选 keepRunning 属性由宿主按来源和打开的工作区注入；AI 客户端可选 begin/end 仅通过现有 UI MessageChannel 标记本页在途流程，旧宿主未注入时不调用。它们不是原生 IPC 或执行授权；隐藏页的新问题/执行审批不开放，上传包不取得后台例外。关闭页面仍撤销根请求，其他页面不重绑共享原生上下文。

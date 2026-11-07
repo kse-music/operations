@@ -708,6 +708,12 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     }
     for command in [
         "ai_models",
+        "ai_local_codex_status",
+        "ai_local_codex_authorize",
+        "ai_local_tool_install",
+        "ai_local_tool_install_cancel",
+        "ai_local_claude_code_status",
+        "ai_local_claude_code_authorize",
         "ai_model_save",
         "ai_model_test",
         "ai_model_delete",

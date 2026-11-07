@@ -37,6 +37,7 @@ pub struct Application {
     plugin_runtime: serverdeck_plugin_runtime::Runtime,
     plugin_host: plugins::state::Host,
     assistant: serverdeck_ai::Assistant,
+    local_tool_installer: Arc<serverdeck_ai::local_tools::Installer>,
     terminal_uploads: terminal_upload::TerminalUploads,
     local_terminals: local_terminal::LocalTerminals,
     terminals: serverdeck_ssh::Engine,
@@ -75,6 +76,7 @@ impl Application {
             plugin_host: plugins::state::Host::default(),
             plugins,
             assistant: serverdeck_ai::Assistant::default(),
+            local_tool_installer: Arc::default(),
             terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
             tasks,
@@ -166,6 +168,7 @@ impl Application {
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        self.local_tool_installer.shutdown();
         self.host_tests.stop.cancel();
         match self.plugin_host.ids() {
             Ok(ids) => {

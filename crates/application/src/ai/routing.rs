@@ -31,27 +31,35 @@ impl Application {
         {
             return Err(Error::Validation("主机匹配输入无效"));
         }
-        let (assets, record) = self
-            .blocking(move |db| Ok((assets(&db.catalog()?), db.ai_model(&input.model_id)?)))
-            .await?;
+        let assets = self.blocking(|db| Ok(assets(&db.catalog()?))).await?;
+        let (record, local_key) = if is_local_model(&input.model_id) {
+            let (record, key) = self.ai_credentials(input.model_id).await?;
+            (record, Some(key))
+        } else {
+            let id = input.model_id;
+            (self.blocking(move |db| db.ai_model(&id)).await?, None)
+        };
         let choice = if let Some(choice) =
             local_choice(&input.question, &assets, &input.previous_host_ids)
         {
             choice
         } else {
-            let reference = record
-                .secret_ref
-                .as_ref()
-                .ok_or(Error::Validation("所选模型尚未设置 API Key"))?
-                .clone();
-            let secrets = self.secrets.clone();
-            let key = self
-                .blocking(move |_| {
-                    secrets
-                        .read(&reference)?
-                        .ok_or(Error::Validation("系统凭据库中没有 AI Key"))
-                })
-                .await?;
+            let key = match local_key {
+                Some(key) => key,
+                None => {
+                    let reference = record
+                        .secret_ref
+                        .clone()
+                        .ok_or(Error::Validation("所选模型尚未设置 API Key"))?;
+                    let secrets = self.secrets.clone();
+                    self.blocking(move |_| {
+                        secrets
+                            .read(&reference)?
+                            .ok_or(Error::Validation("系统凭据库中没有 AI Key"))
+                    })
+                    .await?
+                }
+            };
             let mut values = input.redact_values;
             if let Ok(value) = std::str::from_utf8(&key) {
                 values.push(Zeroizing::new(value.into()));

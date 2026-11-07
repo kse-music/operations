@@ -108,6 +108,50 @@ it('lets an assistant settings page list public model metadata only with assista
   expect(ui.snapshot()).toMatchObject({ models });
   expect(list).toHaveBeenCalledOnce();
 });
+
+it.each([
+  { method: 'ai_local_codex_authorize', api: 'localCodexAuthorize', code: 'AI_CODEX_CONSENT' },
+  {
+    method: 'ai_local_claude_code_authorize',
+    api: 'localClaudeCodeAuthorize',
+    code: 'AI_CLAUDE_CONSENT',
+  },
+] as const)(
+  'restricts $method to the system assistant and requires host confirmation',
+  async (source) => {
+    const { aiApi } = await import('./ai');
+    const authorize = vi.spyOn(aiApi, source.api).mockResolvedValue(undefined);
+    const plugins = usePluginsStore();
+    grant('ui.contribute', 'assistant.use');
+    const assistant = 'cn.hiboot.plugins.assistant';
+    const plugin = plugins.installed[0]!;
+    plugin.manifest.id = assistant;
+    plugins.grants[assistant] = { ...plugins.grants[id]!, pluginId: assistant };
+    const client = createPluginUiBridge({
+      id: assistant,
+      revision: 'revision',
+      page,
+      hostId: '',
+      stream: vi.fn(),
+    });
+    await expect(client.call(source.method, { authorized: true })).rejects.toMatchObject({
+      code: 'PLUGIN_PERMISSION_DENIED',
+    });
+    plugin.source = 'system';
+    const ask = vi.spyOn(plugins, 'ask').mockResolvedValue(false);
+    await expect(client.call(source.method, { authorized: true })).rejects.toMatchObject({
+      code: source.code,
+    });
+    expect(authorize).not.toHaveBeenCalled();
+    ask.mockResolvedValue(true);
+    await client.call(source.method, { authorized: true });
+    expect(authorize).toHaveBeenCalledWith(true);
+    await client.call(source.method, { authorized: false });
+    expect(authorize).toHaveBeenLastCalledWith(false);
+    expect(ask).toHaveBeenCalledTimes(2);
+    client.dispose();
+  },
+);
 it('lets only the active builtin assistant settings surface request dialog close', async () => {
   const plugins = usePluginsStore();
   const assistant = 'cn.hiboot.plugins.assistant';
@@ -138,6 +182,45 @@ it('lets only the active builtin assistant settings surface request dialog close
   active = true;
   await expect(ui.call('settings.close', {})).resolves.toBeNull();
   expect(settingsAction).toHaveBeenCalledExactlyOnceWith('close');
+});
+
+it('only lets the builtin assistant install fixed tools and cancels its own download on close', async () => {
+  const { aiApi } = await import('./ai');
+  const fixture = retainedAssistant('user');
+  const install = vi.spyOn(aiApi, 'localToolInstall');
+  const cancel = vi.spyOn(aiApi, 'localToolInstallCancel').mockResolvedValue();
+  const ui = createPluginUiBridge({
+    ...fixture,
+    revision: 'revision',
+    hostId: '',
+    stream: vi.fn(),
+  });
+  const requestId = crypto.randomUUID();
+  await expect(
+    ui.call('ai_local_tool_install', { modelId: 'local-codex', requestId }),
+  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  usePluginsStore().installed[0]!.source = 'system';
+  await expect(
+    ui.call('ai_local_tool_install', { modelId: 'https://evil.test/cli', requestId }),
+  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  expect(install).not.toHaveBeenCalled();
+  let finish!: () => void;
+  install.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = ui.call('ai_local_tool_install', { modelId: 'local-codex', requestId });
+  await expect(
+    ui.call('ai_local_tool_install_cancel', { requestId: crypto.randomUUID() }),
+  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  await ui.call('ai_local_tool_install_cancel', { requestId });
+  expect(cancel).toHaveBeenCalledWith(requestId);
+  await ui.dispose();
+  expect(cancel).toHaveBeenCalledTimes(2);
+  finish();
+  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
 });
 it('rejects hidden frame requests and late results before a different host can receive them', async () => {
   let active = true;

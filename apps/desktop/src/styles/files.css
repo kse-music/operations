@@ -71,10 +71,35 @@
   margin: 8px 0;
 }
 .file-table {
+  position: relative;
   flex: 1;
   min-height: 96px;
   contain: size;
   overflow: auto;
+}
+.file-list-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.file-list-spinner {
+  flex: none;
+  animation: file-list-spin 0.8s linear infinite;
+}
+@keyframes file-list-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .file-list-spinner {
+    animation: none;
+  }
 }
 .file-table table {
   width: 100%;
