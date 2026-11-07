@@ -87,7 +87,7 @@ it('keeps a root, removes toolbar operations, and places search directly below A
       ?.nextElementSibling?.querySelector('[aria-label="搜索主机"]'),
   ).not.toBeNull();
   await open(folder());
-  expect(labels()).toEqual(['新建主机', '新建文件夹', '导入 OpenSSH Config…']);
+  expect(labels()).toEqual(['新建主机', '新建文件夹', '导入 SSH 配置…']);
   const bounds = menu().getBoundingClientRect();
   expect(Number.parseFloat(menu().style.left) + bounds.width).toBeLessThanOrEqual(innerWidth);
   expect(Number.parseFloat(menu().style.top) + bounds.height).toBeLessThanOrEqual(innerHeight);
@@ -101,10 +101,10 @@ it('creates hosts in the right-clicked folder while host menus exclude folder cr
   await action('新建主机');
   expect(create).toHaveBeenCalledExactlyOnceWith('child');
   await open(root.querySelector<HTMLElement>('[data-host-id="h1"]')!);
-  expect(labels()).toEqual(['连接主机', '编辑主机', '复制主机', '删除主机']);
+  expect(labels()).toEqual(['连接', '编辑', '复制', '删除']);
   expect(store.selectedId).toBe('h0');
   expect(select).not.toHaveBeenCalled();
-  await action('编辑主机');
+  await action('编辑');
   expect(document.querySelector('[aria-label="编辑主机"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="分组"]')).toBeNull();
 });
@@ -162,7 +162,7 @@ it.each([true, false])(
       hosts: [...store.catalog!.hosts, copied],
     });
     await open(root.querySelector<HTMLElement>('[data-host-id="h1"]')!);
-    await action('复制主机');
+    await action('复制');
     await vi.waitFor(() => expect(copy).toHaveBeenCalledExactlyOnceWith('h1'));
     await vi.waitFor(() => expect(store.busy).toBe(false));
     expect(select).not.toHaveBeenCalled();

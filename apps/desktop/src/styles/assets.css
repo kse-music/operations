@@ -15,9 +15,9 @@
   border-radius: 6px;
   padding: 0 8px;
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   font-weight: 500;
-  line-height: 22px;
+  line-height: 1.5;
   white-space: nowrap;
 }
 .asset-panel {
@@ -65,7 +65,7 @@
   border-radius: 6px;
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .asset-feedback.success {
   color: var(--accent);

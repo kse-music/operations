@@ -26,7 +26,6 @@ import Modal from '../components/Modal.vue';
 import { useFilesStore } from '../stores/files';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
-import { useTerminalsStore } from '../stores/terminals';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 import {
@@ -40,15 +39,13 @@ import {
   type FileTerminalAction,
 } from '../types/files';
 import { hostDisplayName, type Host } from '../types/hosts';
-import { stateLabels } from '../types/terminal';
 const props = defineProps<{ hostId?: string }>();
 const application = useApplicationStore();
 const emit = defineEmits<{
   terminal: [host: Host, action: FileTerminalAction];
 }>();
 const store = useFilesStore(),
-  hosts = useHostsStore(),
-  terminals = useTerminalsStore();
+  hosts = useHostsStore();
 const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   localPath = ref(''),
   remotePath = ref(''),
@@ -58,7 +55,6 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   busy = ref(false),
   over = ref(false),
   overLocal = ref(false),
-  following = ref(false),
   transferHistory = ref(false),
   localArea = ref<HTMLElement>(),
   remoteArea = ref<HTMLElement>();
@@ -76,7 +72,6 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
     hasDirectory: boolean;
   } | null>(null),
   properties = ref<FileEntry | null>(null),
-  disconnecting = ref(false),
   terminalAction = ref<FileTerminalAction | null>(null);
 const transfer = ref<{
   id: string;
@@ -118,20 +113,9 @@ watch(
   () => store.active,
   () => {
     remoteSelection.value = [];
-    following.value = false;
     transferHistory.value = false;
   },
 );
-const cwd = computed(() => terminals.panes.find((p) => p.key === store.current?.followPane)?.cwd);
-watch(cwd, (value) => {
-  if (
-    value &&
-    following.value &&
-    store.current?.state === 'connected' &&
-    value !== store.current.path
-  )
-    void store.navigate(value);
-});
 async function connect(): Promise<void> {
   const host = hosts.catalog?.hosts.find((h) => h.id === chosen.value);
   if (host) await store.open(host);
@@ -161,7 +145,6 @@ function navigateWithMouse(side: 'local' | 'remote', event: MouseEvent): void {
   if (store.closingHosts.includes(chosen.value)) return;
   if (store.stepHistory(side, event.button === 3 ? 'back' : 'forward')) {
     menu.value = null;
-    if (side === 'remote') following.value = false;
   }
 }
 async function browseLocal(): Promise<void> {
@@ -458,35 +441,16 @@ async function showProperties(): Promise<void> {
     store.error = errorMessage(cause);
   }
 }
-function requestTerminal(kind: 'directory' | 'view' | 'tail'): void {
+function requestTerminal(kind: 'directory' | 'view'): void {
   const entry = menu.value?.entry;
   if (!entry) return;
   terminalAction.value = { kind, path: entry.path };
   menu.value = null;
 }
-async function disconnect(): Promise<void> {
-  if (!store.current?.id) return;
-  busy.value = true;
-  try {
-    await filesApi.close(store.current.id, true);
-    store.current.state = 'closed';
-    store.current.id = undefined;
-    store.current.listing = null;
-    disconnecting.value = false;
-    await store.poll();
-  } catch (cause) {
-    store.error = errorMessage(cause);
-  } finally {
-    busy.value = false;
-  }
-}
 async function openEntry(side: 'local' | 'remote', entry: FileEntry): Promise<void> {
   if (entry.kind === 'directory' || entry.kind === 'symlink') {
     if (side === 'local') await store.localLoad(entry.path);
-    else {
-      following.value = false;
-      await store.navigate(entry.path);
-    }
+    else await store.navigate(entry.path);
   } else if (side === 'remote') await store.edit(entry.path);
 }
 let unlisten: UnlistenFn | undefined,
@@ -555,20 +519,6 @@ onBeforeUnmount(() => {
     <p v-if="!chosen" class="banner" role="status">
       请在主机管理中打开远程主机后使用 SFTP 文件管理。
     </p>
-    <div v-if="store.current" class="files-status">
-      <strong>{{ hostDisplayName(store.current.host) }}</strong
-      ><span>{{ stateLabels[store.current.state] ?? store.current.state }}</span
-      ><button class="text-button" @click="disconnecting = true">断开文件连接</button
-      ><label class="checkbox-label"
-        ><input
-          v-model="following"
-          type="checkbox"
-          :disabled="!cwd"
-          @change="following && cwd && store.navigate(cwd)"
-        />跟随来源终端的 OSC 7 目录</label
-      ><span class="subtle">{{ cwd ?? '来源终端未报告目录；不从屏幕文本猜测 pwd' }}</span>
-    </div>
-
     <div class="file-columns">
       <section
         ref="localArea"
@@ -619,7 +569,7 @@ onBeforeUnmount(() => {
             <Copy :size="14" aria-hidden="true" /></button
           ><button
             class="button"
-            :disabled="store.current?.state !== 'connected'"
+            :disabled="store.current?.state !== 'connected' || !localSelection.length"
             @click="prepareTransfer('upload', localSelection)"
           >
             <Upload :size="14" aria-hidden="true" />上传选中
@@ -662,13 +612,7 @@ onBeforeUnmount(() => {
         @mouseup="navigateWithMouse('remote', $event)"
       >
         <h2>远程文件 <span v-if="over">松开后选择上传策略</span></h2>
-        <form
-          class="path-bar"
-          @submit.prevent="
-            following = false;
-            store.navigate(remotePath);
-          "
-        >
+        <form class="path-bar" @submit.prevent="store.navigate(remotePath)">
           <button
             class="tool-button"
             aria-label="远程上级"
@@ -676,8 +620,7 @@ onBeforeUnmount(() => {
             type="button"
             :disabled="!store.current?.listing?.parent"
             @click="
-              following = false;
-              store.current?.listing?.parent && store.navigate(store.current.listing.parent);
+              store.current?.listing?.parent && store.navigate(store.current.listing.parent)
             "
           >
             <ArrowUp :size="15" aria-hidden="true" /></button
@@ -808,9 +751,7 @@ onBeforeUnmount(() => {
           @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
         >
           在新终端中打开</button
-        ><button v-if="menu.entry.kind === 'file'" role="menuitem" @click="requestTerminal('tail')">
-          在新终端执行 tail -f
-        </button></template
+        ></template
       >
     </div></template
   >
@@ -838,7 +779,7 @@ onBeforeUnmount(() => {
         <button class="button" type="button" autofocus :disabled="busy" @click="operation = null">
           取消
         </button>
-        <button class="button danger" type="submit" :disabled="busy">确认删除</button>
+        <button class="button danger" type="submit" :disabled="busy">确认</button>
       </footer>
     </form>
   </Modal>
@@ -962,23 +903,11 @@ onBeforeUnmount(() => {
       ><button class="button primary" @click="store.trust(true)">已核对，信任并连接</button>
     </footer></Modal
   >
-  <Modal v-if="disconnecting" title="断开 SFTP 连接" :busy="busy" @close="disconnecting = false"
-    ><p>此主机的未完成传输将被取消，已完成文件保留。仅离开文件页面可继续后台任务。</p>
-
-    <footer class="dialog-actions">
-      <button class="button" @click="disconnecting = false">继续后台传输</button
-      ><button class="button danger" :disabled="busy" @click="disconnect">取消传输并断开</button>
-    </footer></Modal
-  >
   <Modal v-if="terminalAction" title="确认打开文件终端" @close="terminalAction = null"
     ><p>
       {{ hostDisplayName(store.current?.host) }} ·
       {{
-        terminalAction.kind === 'tail'
-          ? '运行 tail -f'
-          : terminalAction.kind === 'view'
-            ? '运行 less'
-            : '进入目录并打开交互式 Shell'
+        terminalAction.kind === 'view' ? '运行 less' : '进入目录并打开交互式 Shell'
       }}
     </p>
     <pre class="file-path-preview">{{ terminalAction.path }}</pre>

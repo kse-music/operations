@@ -1,5 +1,9 @@
 # 插件 UI v1 / v2 / v3 / v4
 
+## 界面字号（2026-11-07）
+
+宿主上下文在 `state` 中提供可选 `interfaceFontScale` 数值（0.95、1、1.15、1.3、1.45）。SDK 运行时在首次连接及后续预览/保存/还原时更新 iframe 根节点的 `--interface-font-scale`，不重新挂载界面；旧宿主缺失该值时使用 1。独立前端使用 `ui/base.css` 的 `--font-size-body`（14px）、`--font-size-caption`（12px）、`--font-size-section`（16px）、`--font-size-title`（20px）、`--font-size-page-title`（24px），变量已包含缩放比例。内置插件已接入；已安装的第三方旧包须用更新后的 SDK 重新构建，自有硬编码字号不会被宿主强制替换。
+
 ## 当前标准界面范围（Host/SDK 4.0.0）
 
 系统服务及宿主提供的监控、进程、端口、systemd 和日志分类已经删除；Monitor surface 不再接受，operations.sections 仅允许 containers/images。旧 Docker 兼容界面复用当前 Docker 页面并只显示声明的分类。独立前端 frontend surface 仍可使用授权的通用系统/指标/日志能力。旧系统界面声明需升级，安装时提示；已有安装或失效备份按[版本策略](PLUGIN_API_VERSIONING.md)保留数据并归档。下文涉及旧分类的段落为历史约定。

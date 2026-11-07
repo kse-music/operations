@@ -141,13 +141,13 @@ h2 {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 15px;
+  font-size: var(--font-size-section);
   margin: 0;
 }
 header p {
   color: var(--muted);
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   line-height: 1.6;
 }
 form {
@@ -177,7 +177,7 @@ form {
   padding: 10px 12px;
   border-radius: 6px;
   background: var(--hover);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
   flex-shrink: 0;
 }
 .binding-current > span {
@@ -189,7 +189,7 @@ form {
 }
 .binding-model-id {
   font:
-    11px/1.5 Consolas,
+    var(--font-size-caption)/1.5 Consolas,
     monospace;
   overflow-wrap: anywhere;
 }
@@ -206,13 +206,13 @@ fieldset {
 legend {
   padding: 0;
   margin-bottom: 9px;
-  font-size: 12px;
+  font-size: var(--font-size-section);
   font-weight: 500;
 }
 legend span {
   margin-left: 8px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-size-caption);
   font-weight: 400;
 }
 .binding-options {
@@ -258,16 +258,16 @@ legend span {
   overflow-wrap: anywhere;
 }
 .binding-option-label strong {
-  font-size: 12px;
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 .binding-option-label small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-size-caption);
 }
 .binding-key {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-size-caption);
   white-space: nowrap;
 }
 .binding-key.missing,
@@ -284,7 +284,7 @@ legend span {
 }
 .binding-content > p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--font-size-body);
   line-height: 1.6;
 }
 .binding-saved {

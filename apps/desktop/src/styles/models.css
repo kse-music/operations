@@ -16,7 +16,7 @@
 .model-list-heading {
   background: var(--panel-soft);
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   padding-top: 12px;
   padding-bottom: 12px;
 }
@@ -34,24 +34,24 @@
 }
 .model-identity h2 {
   margin: 0 0 3px;
-  font-size: calc(14px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-section);
   overflow-wrap: anywhere;
 }
 .model-id {
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   overflow-wrap: anywhere;
 }
 .model-provider {
   margin: 4px 0 0;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .model-connection {
   min-width: 0;
 }
 .model-endpoint {
   margin: 0 0 6px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   overflow-wrap: anywhere;
 }
 .model-badges {
@@ -68,8 +68,8 @@
   background: var(--raised);
   padding: 2px 7px;
   border-radius: 5px;
-  font-size: calc(10px * var(--interface-font-scale, 1));
-  line-height: 18px;
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
 }
 .model-badge.ready {
   color: var(--accent);
@@ -81,13 +81,13 @@
   gap: 5px;
 }
 .model-limit strong {
-  font-size: calc(14px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 .model-limit span {
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .model-row-actions {
   display: flex;
@@ -98,7 +98,7 @@
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   color: var(--muted);
 }
 .model-page-note svg {
@@ -119,7 +119,7 @@
 .model-form-intro {
   margin: 8px 26px 20px;
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .model-form fieldset {
   padding: 0;
@@ -143,11 +143,11 @@
 .model-section-title h3 {
   margin: 0;
   color: var(--text);
-  font-size: calc(13px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-section);
 }
 .model-section-title > span {
   margin-left: auto;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   color: var(--muted);
 }
 .model-fields {
@@ -160,7 +160,7 @@
   display: flex;
   flex-direction: column;
   gap: 7px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   min-width: 0;
 }
 .model-fields input,
@@ -175,8 +175,8 @@
   display: flex;
   gap: 6px;
   margin: 9px 0 15px;
-  font-size: calc(11px * var(--interface-font-scale, 1));
-  line-height: 18px;
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
   color: var(--muted);
 }
 .model-key-note svg {
@@ -188,7 +188,7 @@
 }
 .model-http-note {
   margin: 6px 0 0;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .model-advanced {
   margin-top: 14px;
@@ -199,19 +199,19 @@
 .model-advanced summary {
   padding: 13px 18px;
   cursor: pointer;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .model-advanced summary span {
   float: right;
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .model-advanced .model-fields {
   padding: 4px 18px 0;
 }
 .model-advanced p {
   margin: 12px 18px 16px;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .model-test-panel {
   margin: 16px 26px 20px;
@@ -237,25 +237,25 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .model-test-panel.success .model-test-heading > div {
   color: var(--accent);
 }
 .model-test-panel p {
   margin: 10px 0 5px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .model-test-panel small {
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   color: var(--muted);
-  line-height: 18px;
+  line-height: 1.5;
 }
 .model-save-error {
   margin: 0 26px 18px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .model-form-footer {
   display: flex;
@@ -270,7 +270,7 @@
   z-index: 1;
 }
 .model-form-footer > span {
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   color: var(--muted);
 }
 .model-form-footer > div {

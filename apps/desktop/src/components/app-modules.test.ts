@@ -19,6 +19,13 @@ it('switches major modules from the header and indicates the module of the activ
       button.textContent?.trim(),
     ),
   ).toEqual(['主机管理', '插件', '设置']);
+  const icons = root.querySelectorAll('.module-navigation button > svg');
+  expect(icons).toHaveLength(3);
+  for (const icon of icons) {
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect(icon.getAttribute('width')).toBe('16');
+    expect(icon.getAttribute('height')).toBe('16');
+  }
   expect(root.querySelector('[aria-current="page"]')?.textContent?.trim()).toBe('设置');
   for (const button of root.querySelectorAll<HTMLButtonElement>('button')) button.click();
   expect(select.mock.calls.map((call) => call[0])).toEqual(['hosts', 'plugins', 'system']);

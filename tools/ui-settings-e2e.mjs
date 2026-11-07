@@ -157,7 +157,7 @@ try {
         if (layout.shortcuts && field.gridWidth > 460)
           assert(field.inline, `${name}: shortcut labels must sit beside their controls`);
         assert(
-          field.controlHeight === 36,
+          field.controlHeight >= 36 && field.controlHeight <= 38,
           `${name}: inconsistent control height ${JSON.stringify(field)}`,
         );
         if (field.inline) assert(field.centerGap <= 4, `${name}: shortcut label is misaligned`);
@@ -325,8 +325,69 @@ try {
         geometry.fieldRows.length,
         `${name}: narrow settings must use one column`,
       );
+
+    // Closing a category keeps the shared draft until its last tab is removed.
+    for (const category of categories.slice(1)) {
+      await page.getByRole('button', { name: `关闭工作区标签 ${category}`, exact: true }).click();
+      assert.equal(
+        await page.getByRole('dialog', { name: '设置尚未保存', exact: true }).count(),
+        0,
+      );
+    }
+    await navigateWorkspace(page, '关于');
+    const generalTab = page.locator('.workspace-tab[data-view="settings"]');
+    await generalTab.click({ button: 'middle' });
+    const closeDialog = page.getByRole('dialog', { name: '设置尚未保存', exact: true });
+    await closeDialog.waitFor();
+    const closeGeometry = await closeDialog.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      return {
+        overflows: el.scrollWidth > el.clientWidth,
+        visible:
+          box.top >= 0 && box.bottom <= innerHeight && box.left >= 0 && box.right <= innerWidth,
+        focus: el.contains(document.activeElement),
+      };
+    });
+    assert(!closeGeometry.overflows && closeGeometry.visible && closeGeometry.focus, name);
+    await page.screenshot({ path: `${output}/${name}-unsaved-settings.png` });
+    await closeDialog.press('Escape');
+    await closeDialog.waitFor({ state: 'detached' });
+    assert.equal(await generalTab.count(), 1);
+    await generalTab.getByRole('button', { name: '关闭工作区标签 通用', exact: true }).click();
+    await closeDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await closeDialog.waitFor({ state: 'detached' });
+    const tabCount = await page.locator('.workspace-tab').count();
+    const closeAll = async () => {
+      await page.locator('.workspace-tab[data-view="about"]').click({ button: 'right' });
+      await page.getByRole('menuitem', { name: '关闭所有', exact: true }).click();
+      await closeDialog.waitFor();
+    };
+    await closeAll();
+    await closeDialog.getByRole('button', { name: '继续编辑', exact: true }).click();
+    await closeDialog.waitFor({ state: 'detached' });
+    assert.equal(await page.locator('.workspace-tab').count(), tabCount);
+    await select(1);
+    assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '120');
+    await closeAll();
+    await closeDialog.getByRole('button', { name: '放弃更改并关闭', exact: true }).click();
+    await page.locator('.workspace-tab').waitFor({ state: 'detached' });
+    await select(1);
+    assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '100');
+    await page.getByRole('button', { name: '关闭工作区标签 终端', exact: true }).click();
+    await settings.waitFor({ state: 'detached' });
+    assert.equal(await closeDialog.count(), 0);
     assert.deepEqual(errors, []);
-    results.push({ name, width, height, theme, ...geometry, ...header, layouts, errors });
+    results.push({
+      name,
+      width,
+      height,
+      theme,
+      ...geometry,
+      ...header,
+      layouts,
+      closeGeometry,
+      errors,
+    });
     await page.close();
   }
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));

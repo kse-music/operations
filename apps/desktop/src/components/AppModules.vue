@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { PanelsTopLeft } from '@lucide/vue';
+import { PanelsTopLeft, Puzzle, Server, Settings } from '@lucide/vue';
 import { navigationModules, type NavigationModule } from '../types/navigation';
 
 defineProps<{ active: NavigationModule }>();
 defineEmits<{ select: [module: NavigationModule] }>();
+const moduleIcons = { hosts: Server, plugins: Puzzle, system: Settings };
 </script>
 
 <template>
@@ -19,7 +20,8 @@ defineEmits<{ select: [module: NavigationModule] }>();
         :aria-current="active === module.id ? 'page' : undefined"
         @click="$emit('select', module.id)"
       >
-        {{ module.label }}
+        <component :is="moduleIcons[module.id]" :size="16" :stroke-width="1.6" aria-hidden="true" />
+        <span>{{ module.label }}</span>
       </button>
     </nav>
   </header>

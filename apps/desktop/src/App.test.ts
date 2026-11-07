@@ -460,6 +460,49 @@ it('keeps settings drafts across menus and workspace tabs, and navigates to inva
   expect(root.querySelector('.settings-panel')).toBeNull();
 });
 
+it.each([
+  ['通用', 'settings', '[aria-label="侧边栏宽度"]', '300'],
+  ['终端', 'settingsTerminal', '[aria-label="终端行高"]', '125'],
+  ['快捷键', 'settingsShortcuts', '[aria-label="复制快捷键"]', ''],
+  ['数据与存储', 'settingsStorage', '[aria-label="默认下载目录"]', 'D:\\Downloads'],
+])('warns before closing the last dirty %s settings tab', async (label, view, selector, value) => {
+  loadSidebarConfig();
+  const save = vi.spyOn(ipc, 'saveConfig');
+  const workspace = useWorkspaceStore();
+  await sidebarMenu('system', label);
+  const field = root.querySelector<HTMLInputElement>(selector)!;
+  if (value) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  } else {
+    field.dispatchEvent(
+      new KeyboardEvent('keydown', { code: 'KeyX', ctrlKey: true, shiftKey: true }),
+    );
+  }
+  await flush();
+  root.querySelector<HTMLButtonElement>(`[aria-label="关闭工作区标签 ${label}"]`)!.click();
+  await flush();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="设置尚未保存"]')!;
+  expect(dialog).not.toBeNull();
+  expect(workspace.tabs.some((tab) => tab.view === view)).toBe(true);
+  [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '继续编辑')!
+    .click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).toBeNull();
+  expect(root.querySelector<HTMLInputElement>(selector)!.value).toBe(value || 'Ctrl+Shift+X');
+  const closing = workspace.close(`${view}:`);
+  await flush();
+  [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find((button) => button.textContent?.trim() === '放弃更改并关闭')!
+    .click();
+  await closing;
+  await flush();
+  expect(workspace.tabs).toHaveLength(0);
+  expect(root.querySelector('.settings-panel')).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+});
+
 it('previews interface size across tabs and retains only the last successful save', async () => {
   loadSidebarConfig();
   const save = vi
@@ -500,7 +543,12 @@ it('previews interface size across tabs and retains only the last successful sav
   expect(application.state?.config.interfaceFontSize).toBe('ultraLarge');
   await choose('0');
   expect(scale()).toBe('0.95');
-  await workspace.close('settings:');
+  const closing = workspace.close('settings:');
+  await flush();
+  [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find((button) => button.textContent?.trim() === '放弃更改并关闭')!
+    .click();
+  await closing;
   await flush();
   expect(scale()).toBe('1.45');
   await sidebarMenu('system', '通用');

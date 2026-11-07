@@ -18,7 +18,7 @@
   margin: 0;
   padding: 0 0 14px;
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   border-bottom: 1px solid var(--border);
 }
 .ops-toolbar,
@@ -55,13 +55,13 @@
   z-index: 1;
   background: var(--panel);
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   font-weight: 500;
 }
 .ops-table table {
   border-collapse: collapse;
   width: 100%;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .ops-table td,
 .ops-table th {
@@ -106,7 +106,7 @@
   padding: 14px;
   background: var(--bg);
   font:
-    calc(12px * var(--interface-font-scale, 1))/1.6 Consolas,
+    var(--font-size-body)/1.6 Consolas,
     monospace;
 }
 .ops-tabs [aria-selected='true'],
@@ -117,7 +117,7 @@
 .ops-capabilities {
   padding: 0 0 12px;
   border-bottom: 1px solid var(--border);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .ops-log-tabs {
   margin: 12px 0;
@@ -139,7 +139,7 @@
   }
   .ops-tabs .button {
     padding: 9px 10px;
-    font-size: calc(12px * var(--interface-font-scale, 1));
+    font-size: var(--font-size-body);
   }
 }
 
@@ -185,12 +185,12 @@
 }
 .ops-table th .text-button {
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .ops-table td {
   padding: 10px 12px;
   vertical-align: middle;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .ops-table tbody tr:last-child td {
   border-bottom: 0;
@@ -203,7 +203,7 @@
   min-width: 140px;
 }
 .ops-row-actions .text-button {
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   white-space: nowrap;
 }
 .ops-footer {
@@ -226,7 +226,7 @@
   display: block;
   color: var(--muted);
   font:
-    calc(10px * var(--interface-font-scale, 1))/1.8 Consolas,
+    var(--font-size-caption)/1.8 Consolas,
     monospace;
   margin-top: 2px;
 }
@@ -234,7 +234,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: calc(10px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -258,7 +258,7 @@
 .row-action-menu > summary {
   list-style: none;
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   cursor: pointer;
   padding: 5px 7px;
   border: 1px solid var(--border);

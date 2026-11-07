@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
-import { hostViews, type WorkspaceView } from '../types/product';
+import { computed, ref, shallowRef } from 'vue';
+import { hostViews, settingsCategories, type WorkspaceView } from '../types/product';
 import { moduleForView, type NavigationModule } from '../types/navigation';
 import { useTerminalsStore } from './terminals';
 import { useFilesStore } from './files';
@@ -139,6 +139,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activate(key);
   }
   const closing = ref<string[]>([]);
+  const settingsCloseGuard = shallowRef<() => Promise<boolean>>();
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
     const hostGroup = key === allHostsTabKey;
     const index = hostGroup
@@ -159,6 +160,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           return true;
       }
     });
+    const settingsTabs = tabs.value.filter((tab) =>
+      settingsCategories.some((category) => category.view === tab.view),
+    );
+    if (
+      settingsTabs.length &&
+      settingsTabs.every((tab) => targets.includes(tab)) &&
+      settingsCloseGuard.value &&
+      !(await settingsCloseGuard.value())
+    )
+      return;
     const removed = new Set<WorkspaceTab>();
     const terminals = useTerminalsStore();
     const files = useFilesStore();
@@ -233,6 +244,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     current,
     module,
     closing,
+    settingsCloseGuard,
     selectModule,
     selectHost,
     activate,

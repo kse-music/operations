@@ -200,7 +200,7 @@ onBeforeUnmount(() => {
 }
 .ops-toolbar > span {
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   margin-right: auto;
 }
 .ops-toolbar input {
@@ -225,7 +225,7 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
   user-select: text;
   font:
-    calc(12px * var(--interface-font-scale, 1))/1.8 Consolas,
+    var(--font-size-body)/1.8 Consolas,
     monospace;
 }
 .resource-log-dialog > p {

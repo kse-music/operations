@@ -11,9 +11,12 @@
   flex: 1;
   min-height: 0;
 }
+.docker-workbench > .operations-view > :not(.ops-table) {
+  flex-shrink: 0;
+}
 .docker-workbench > .operations-view > .ops-table {
   flex: 1;
-  min-height: 120px;
+  min-height: calc(220px * var(--interface-font-scale, 1));
   max-height: none;
 }
 .docker-workbench > .server-tabs {
@@ -31,7 +34,7 @@
   border-bottom: 2px solid transparent;
   padding: 4px 2px 10px;
   background: none;
-  font-size: 13px;
+  font-size: var(--font-size-body);
 }
 .docker-workbench > .server-tabs [aria-selected='true'] {
   border-bottom-color: var(--accent);
@@ -78,12 +81,12 @@
   gap: 4px;
 }
 .docker-summary article span:not(.docker-stat-icon) {
-  font-size: 11px;
+  font-size: var(--font-size-caption);
   color: var(--muted);
 }
 .docker-summary strong {
   font-weight: 550;
-  font-size: 23px;
+  font-size: var(--font-size-page-title);
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
 }
@@ -91,7 +94,7 @@
   padding: 0;
   border: 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--font-size-caption);
 }
 .docker-workbench .ops-row-actions {
   min-width: 175px;
@@ -112,7 +115,7 @@
 }
 .docker-detail-tabs button {
   padding: 7px 4px;
-  font-size: 12px;
+  font-size: var(--font-size-body);
   white-space: nowrap;
 }
 .docker-detail-row,
@@ -128,7 +131,7 @@
 .docker-detail-row dt,
 .docker-env-values dt {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--font-size-caption);
 }
 .docker-detail-row dd,
 .docker-env-values dd {
@@ -179,7 +182,7 @@
   max-width: 220px;
 }
 .docker-image {
-  font-size: 11px;
+  font-size: var(--font-size-caption);
   font-family: Consolas, monospace;
   overflow-wrap: anywhere;
   color: var(--muted);
@@ -197,7 +200,7 @@
     height: 30px;
   }
   .docker-summary strong {
-    font-size: 22px;
+    font-size: var(--font-size-page-title);
   }
 }
 @container (max-width:420px) {

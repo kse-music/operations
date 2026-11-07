@@ -186,6 +186,9 @@ export function createPluginUiBridge(input: {
     );
     return publicValue({
       theme: document.documentElement.dataset.theme ?? 'dark',
+      interfaceFontScale: Number(
+        document.documentElement.style.getPropertyValue('--interface-font-scale') || 1,
+      ),
       hostId: input.hostId,
       catalog: canRead && hosts.catalog ? snapshotCatalog() : null,
       operations: canRead

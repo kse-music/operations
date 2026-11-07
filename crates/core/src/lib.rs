@@ -116,7 +116,7 @@ impl Default for AppConfig {
             theme: Theme::Dark,
             interface_font_size: InterfaceFontSize::Standard,
             sidebar_width: 248,
-            terminal_font_size: 14,
+            terminal_font_size: 16,
             terminal: Default::default(),
             connect_timeout_secs: 15,
             monitor_interval_secs: 3,
@@ -263,7 +263,7 @@ mod tests {
             .remove("interfaceFontSize");
         let legacy: AppConfig = serde_json::from_value(json.clone()).expect("read legacy config");
         assert_eq!(legacy.interface_font_size, InterfaceFontSize::Standard);
-        assert_eq!(legacy.terminal_font_size, 14);
+        assert_eq!(legacy.terminal_font_size, 16);
 
         json["interfaceFontSize"] = "extraSmall".into();
         let former: AppConfig = serde_json::from_value(json.clone()).expect("read former level");

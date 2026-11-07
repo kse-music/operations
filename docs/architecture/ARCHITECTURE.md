@@ -438,7 +438,9 @@ Rust 与 TS 都显式定义 DTO；Rust IPC 测试验证实际序列化、命令�
 
 主机运维侧栏使用 HostSidebar，其他模块隐藏主机树并保留其状态。HostTools 移至中央 workspace-header 右侧，在三个远程主机页面显示并沿用 navigate 和 HostId；本地及全局页面不显示这组菜单。终端会话和新建按钮仍由 TerminalsView Teleport 到稳定容器，PTY 组件、Pane key 和连接所有权不变。移除 WorkspaceTab.filesOpen、文件面板入口及挂载逻辑，窄窗口通过工具栏换行和菜单内部滚动适配。
 
-AppNavigation 在 system（设置）模块依次展示通用、终端、快捷键、工作区与连接、关于；顶栏 system 按钮用 margin-left: auto 贴齐最右侧。types/product.ts 中 settingsCategories 统一分类 ID、WorkspaceView 和标签，原 settings: 保留为通用入口，新增 settingsTerminal:/settingsShortcuts:/settingsWorkspace:，移除未持久化的 overview: 页面。各分类仍复用一个 SettingsPanel，App 只要存在设置分类标签就保持实例挂载，按当前分类控制显示；关闭全部设置分类标签销毁草稿。校验通过 category 事件请求 App 导航后聚焦字段，侧栏、顶栏与工作区标签同步。about: 继续是唯一全局标签，AboutView 合并产品信息和原 WorkspaceView 的后端诊断及重新检查，删除旧页面组件；加载、保存时禁用重新检查，保留版本/诊断读取中及未就绪状态。全局搜索沿消息字典自动覆盖新分类。配置、IPC、数据库及连接所有权不变。
+AppNavigation 在 system（设置）模块依次展示通用、终端、快捷键、工作区与连接、关于；顶栏 system 按钮用 margin-left: auto 贴齐最右侧。types/product.ts 中 settingsCategories 统一分类 ID、WorkspaceView 和标签，原 settings: 保留为通用入口，新增 settingsTerminal:/settingsShortcuts:/settingsWorkspace:，移除未持久化的 overview: 页面。各分类仍复用一个 SettingsPanel，App 只要存在设置分类标签就保持实例挂载，按当前分类控制显示；关闭全部设置分类标签前检查未保存修改，确认放弃后销毁草稿。校验通过 category 事件请求 App 导航后聚焦字段，侧栏、顶栏与工作区标签同步。about: 继续是唯一全局标签，AboutView 合并产品信息和原 WorkspaceView 的后端诊断及重新检查，删除旧页面组件；加载、保存时禁用重新检查，保留版本/诊断读取中及未就绪状态。全局搜索沿消息字典自动覆盖新分类。配置、IPC、数据库及连接所有权不变。
+
+2026-11-07 设置关闭保护：SettingsPanel 将草稿与保存基线比较，并纳入独立的数据目录变更，在挂载期间注册 workspace.settingsCloseGuard，卸载时释放。workspace.close 在会移除全部设置分类标签的批次开始前调用保护，取消时保留整批标签。确认弹窗复用 Modal，重复关闭请求共用同一次决定；Esc、关闭按钮或继续编辑均取消关闭。保存失败不更新基线，保存和迁移处理中拒绝关闭最后一个设置标签。切换页面及只关闭部分设置分类标签继续保留原实例，无新增持久配置、IPC 或依赖。
 
 FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样式。终端文件事件经原 currentConfiguration 校验后 navigate 到 files，继续向 files.open 传递路径与来源窗格。切换主机前同步 files.active，沿用每主机 FileConnection 的实际连接快照、路径及传输/编辑/安全确认流程；卸载页面仅清理拖放监听，不关闭 SFTP、终端或传输。无新增 IPC、数据库迁移或依赖。
 
@@ -452,8 +454,9 @@ FilesView 仅保留完整文件页，移除 compact 属性、专用布局和样�
 - `HostInput.name` 仍为字符串，空字符串表示未填写；后端 trim 后只校验非空名称的 128 字符及控制字符限制，分组/凭据名称仍必填。006 重建 hosts 时保留 ID、时间、关联、SSH 选项和索引，仅放宽名称长度下界。前端 `hostDisplayName` 与 Rust `display_name` 优先使用名称，否则按地址及非 22 端口展示；树、标签和主机选项保持一致。复制主机以显示名称加“副本”生成名称。编辑继续读取原始 name，地址/端口变化可实时改变未命名主机的显示名。
 - host_groups 没有 parent_id，只支持单层。删除分组将主机移到未分组；删除主机不删除共享凭据；复制只新建 HostId，并共享原凭据引用。
 - credentials 保存名称、类型、旧式私钥路径、opaque secret_ref 和 revision。密码、私钥正文和解锁口令存储边界在系统凭据库及临时内存。删除关联凭据须明确确认解除关联，主机保留并显示待配置凭据。
-- 配置 version=1；默认深色、界面字号标准、侧栏 248px、终端字号 14、连接超时 15s、采样 3s、INFO。后端拒绝非法数值与未知字段。仅界面/运行偏好，不允许密码或密钥字段。
+- 配置 version=1；默认深色、界面字号标准、侧栏 248px、终端字号 16、连接超时 15s、采样 3s、INFO。后端拒绝非法数值与未知字段。仅界面/运行偏好，不允许密码或密钥字段。
 - `AppConfig.interfaceFontSize` 使用五档枚举。缺失字段读为标准，旧值 `extraSmall` 读为小并在下次保存时写为 `small`。设置草稿经独立预览状态给主文档的界面样式提供缩放比例，关闭最后一个设置标签后清除预览。保存复用原配置 IPC 与 SQLite，终端渲染仍读取 `terminalFontSize`。SFTP 面板的最小并排宽度随字号增大，表格以名称列吸收剩余宽度。
+- 共用 `foundation.css` 定义 12/14/16/20/24px 五级字号变量，分别用于辅助信息、主要文字、分组标题、弹窗标题和页面标题，统一乘以五档比例 0.95/1/1.15/1.3/1.45。组件引用语义字号，使用随文字增大的行高与控件高度。插件上下文增加可选 `interfaceFontScale`，宿主监听主题及根样式变更推送，SDK 更新 iframe 根样式并兼容缺失字段为 1；不重新挂载插件。旧插件须使用更新后的 SDK/样式重新打包才能采用该层级。
 - SFTP 本地目录历史保存在文件 Store，远程历史绑定连接实例。每栏最多保留 100 个历史项，成功返回的实际路径才更新历史，旧请求、同路径刷新和失败请求不新增记录。鼠标侧键在各栏拦截默认的页面历史动作并复用目录列表请求。
 - 小规模设置读写每次创建连接，5s busy timeout、foreign_keys=ON。当前使用默认事务日志，不引入连接池或 WAL；正式主机模块与实际并发需要时再评估。
 - SQLite 与 OS 凭据操作在 `spawn_blocking` 内；本地元数据单任务执行，最多接纳 16 个在途/等待请求，等待额度最长 3 秒，超限返回 BUSY。元数据写入与新窗格读取凭据可有界排队，避免普通分屏因瞬时竞争失败；SSH 输出完全独立。
@@ -600,7 +603,7 @@ Windows 上的指针拖动离开视口时调用 `files_drag_download`，仅本�
 
 ### 终端联动及退出顺序
 
-TerminalPane 的 SFTP 按钮携带同一 HostId 和来源 PaneKey。目录只接收经过 URI/长度/NUL 校验的 OSC 7 file:// 报告，不解析任意 Shell 输出猜 pwd。用户勾选跟随后，SFTP 按报告的绝对路径导航；未集成 OSC 7 的 Shell 显示未报告并保留手动导航，不修改远端启动文件。远端应用可以报告任意路径，这不是权限依据或命令授权。
+TerminalPane 的 SFTP 按钮携带同一 HostId 和来源 PaneKey。目录只接收经过 URI/长度/NUL 校验的 OSC 7 file:// 报告，不解析任意 Shell 输出猜 pwd。从终端打开 SFTP 时使用报告的目录，进入后由文件页手动导航。页面移除连接信息条、手动断开入口和持续跟随选项，关闭主机工作区时释放文件连接。远端应用可以报告任意路径，这不是权限依据或命令授权。
 
 文件右键打开目录/less/tail 前显示主机与绝对路径并确认，后端只生成固定命令并做 POSIX 单引号转义，在新的 PTY exec Channel 执行，不向已有 Shell 注入输入。FileTerminalAction 仅保留在本次运行内，手动重连才重新执行已确认动作。退出信号（如 tail 的 Ctrl+C）是正常 Channel 结束，和 SSH Transport 断线分开处理。
 

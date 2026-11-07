@@ -136,6 +136,14 @@ export function mountPlugin(component: Component): void {
         const state = data.state;
         if (!state) return;
         document.documentElement.dataset.theme = state.theme;
+        document.documentElement.style.setProperty(
+          '--interface-font-scale',
+          String(
+            Number.isFinite(state.interfaceFontScale) && state.interfaceFontScale > 0
+              ? state.interfaceFontScale
+              : 1,
+          ),
+        );
         const hosts = useHostsStore(pinia);
         if (JSON.stringify(hosts.catalog) !== JSON.stringify(state.catalog))
           hosts.catalog = state.catalog;

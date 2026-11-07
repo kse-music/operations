@@ -177,7 +177,7 @@ async function menuAction(label: string): Promise<void> {
   await nextTick();
   const button = [
     ...document.querySelectorAll<HTMLButtonElement>('[aria-label="终端操作"] [role="menuitem"]'),
-  ].find((item) => item.textContent?.trim() === label);
+  ].find((item) => item.getAttribute('aria-label') === label);
   expect(button).toBeDefined();
   button!.click();
   await nextTick();
@@ -227,18 +227,17 @@ it('keeps quick right-click paste and opens the menu with Shift+right-click or S
   expect(document.querySelector('[aria-label="终端操作"]')).not.toBeNull();
 });
 
-it('retains export confirmation and emits close only when selected from the menu', async () => {
-  expect(document.querySelector('dialog')).toBeNull();
-  await menuAction('导出内容');
-  expect(document.querySelector('dialog[aria-label="导出终端内容"]')).not.toBeNull();
-  expect(events.close).not.toHaveBeenCalled();
-  document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭对话框"]')!.click();
+it('limits the local context menu to copy and paste', async () => {
+  rightClick();
   await nextTick();
-  await menuAction('关闭终端');
-  expect(events.close).toHaveBeenCalledOnce();
+  const menu = document.querySelector('[aria-label="终端操作"]')!;
+  expect(
+    [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.getAttribute('aria-label')),
+  ).toEqual(['复制', '粘贴']);
+  expect(menu.querySelector('.terminal-menu-heading')).toBeNull();
 });
 
-it('routes remote menu actions to the same host, working directory and pane', async () => {
+it('limits the remote context menu to copy and paste without connection metadata', async () => {
   app.unmount();
   const store = useTerminalsStore();
   store.tabs = [];
@@ -261,26 +260,14 @@ it('routes remote menu actions to the same host, working directory and pane', as
   app = createApp(PaneHarness).use(pinia);
   app.mount(root);
   await vi.waitFor(() => expect(tab.sessionId).toBe('remote:menu'));
-  await menuAction('SFTP 文件');
-  expect(events.files).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({ id: host.id }),
-    '/srv/project',
-    tab.key,
-  );
-  for (const [label, event] of [['服务器管理', events.server]] as const) {
-    await menuAction(label);
-    expect(event).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: host.id }));
-  }
-  const forwards = vi.spyOn(terminalApi, 'forwardList').mockResolvedValue([]);
-  await menuAction('端口转发');
-  expect(forwards).toHaveBeenCalledWith('remote:menu');
-  const forwardDialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="端口转发"]')!;
-  expect(forwardDialog.textContent).toContain('Menu Host');
-  forwardDialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  rightClick();
   await nextTick();
-  tab.state = 'failed';
-  await nextTick();
-  expect(root.textContent).not.toContain('诊断连接异常');
+  const menu = document.querySelector('[aria-label="终端操作"]')!;
+  expect(
+    [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.getAttribute('aria-label')),
+  ).toEqual(['复制', '粘贴']);
+  expect(menu.textContent).not.toContain(host.hostname);
+  expect(menu.textContent).not.toContain(host.username);
 });
 
 it('opens an idle SSH pane once after an explicit connection request and keeps trust confirmation', async () => {

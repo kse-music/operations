@@ -8,14 +8,8 @@
   margin: 0;
 }
 .files-view h2 {
-  font-size: calc(15px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-section);
   margin: 10px 0;
-}
-.files-status {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
 }
 .file-columns {
   display: grid;
@@ -23,7 +17,7 @@
   /* Leave room for file names alongside the remote metadata at larger sizes. */
   grid-template-columns: repeat(
     auto-fit,
-    minmax(min(100%, calc(340px + (var(--interface-font-scale, 1) - 1) * 480px)), 1fr)
+    minmax(min(100%, calc(420px + (var(--interface-font-scale, 1) - 1) * 600px)), 1fr)
   );
   grid-auto-rows: minmax(min-content, 1fr);
   gap: 16px;
@@ -65,7 +59,7 @@
 .file-side .button {
   min-height: var(--compact-height);
   padding: 3px 10px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .file-side .toolbar .tool-button[aria-pressed='true'] {
   color: var(--accent);
@@ -73,7 +67,7 @@
   background: var(--accent-bg);
 }
 .file-list-tools {
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   margin: 8px 0;
 }
 .file-table {
@@ -85,7 +79,7 @@
 .file-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .file-table th {
   position: sticky;
@@ -192,7 +186,7 @@
 }
 .file-delete-question {
   margin: 0;
-  font-size: calc(14px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   font-weight: 600;
   line-height: 1.45;
 }
@@ -222,7 +216,7 @@
   gap: 12px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .transfer-row > div {
   flex: 1;
@@ -274,12 +268,6 @@
   min-width: 100px;
   overflow-wrap: anywhere;
 }
-.files-status {
-  font-size: calc(12px * var(--interface-font-scale, 1));
-}
-.files-status .checkbox-label {
-  font-size: calc(11px * var(--interface-font-scale, 1));
-}
 .files-view .context-menu {
   z-index: 30;
 }
@@ -302,7 +290,7 @@
   justify-content: flex-end;
   gap: 10px;
   margin-top: 8px;
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .file-metadata {
   font-family: Consolas, monospace;

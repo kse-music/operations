@@ -214,7 +214,7 @@ try {
     await row('E2E-Host 副本').waitFor();
     results.push('native host copy via real IPC, without a host menu UI');
     assert(original.credentialId, 'inline password must be attached to its host');
-    await hostContextAction(page, row('E2E-Host 副本').locator('.tree-host'), '编辑主机');
+    await hostContextAction(page, row('E2E-Host 副本').locator('.tree-host'), '编辑');
     form = dialog('编辑主机');
     assert.equal(
       await form.getByLabel('SSH 密码', { exact: true }).inputValue(),
@@ -310,7 +310,7 @@ try {
     );
     results.push('native process restart restores SQLite data');
     await showHostTree(page);
-    await hostTreeAction(page, null, '导入 OpenSSH Config…');
+    await hostTreeAction(page, null, '导入 SSH 配置…');
     form = dialog('导入 OpenSSH Config');
     await form
       .getByLabel('OpenSSH Config 内容', { exact: true })

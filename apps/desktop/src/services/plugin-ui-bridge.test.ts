@@ -77,6 +77,19 @@ function grant(...permissions: PluginPermission[]) {
 function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
+it('shares the previewed interface font scale with plugin pages and resets to standard', () => {
+  const client = bridge();
+  try {
+    document.documentElement.style.setProperty('--interface-font-scale', '1.45');
+    expect(client.snapshot()).toMatchObject({ interfaceFontScale: 1.45 });
+    document.documentElement.style.setProperty('--interface-font-scale', '1');
+    expect(client.snapshot()).toMatchObject({ interfaceFontScale: 1 });
+    document.documentElement.style.removeProperty('--interface-font-scale');
+    expect(client.snapshot()).toMatchObject({ interfaceFontScale: 1 });
+  } finally {
+    document.documentElement.style.removeProperty('--interface-font-scale');
+  }
+});
 it('lets an assistant settings page list public model metadata only with assistant permission', async () => {
   const { useModelsStore } = await import('../stores/models');
   const { aiApi } = await import('./ai');

@@ -728,7 +728,7 @@ try {
     0,
   );
   await page.screenshot({ path: path.join(artifacts, 'host-row-no-icons.png') });
-  await hostContextAction(page, hostRow.locator('.tree-host'), '编辑主机');
+  await hostContextAction(page, hostRow.locator('.tree-host'), '编辑');
   const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
   assert.equal(
     await edit.getByLabel('地址（IP / 域名）', { exact: true }).inputValue(),
@@ -758,13 +758,13 @@ try {
   assert.equal(await page.locator('.terminal-pane').count(), 0);
   assert.equal(await page.locator('.workspace-tab').count(), currentTabs);
   await hoverHost('UI Host edited');
-  await hostContextAction(page, hostRow.locator('.tree-host'), '删除主机');
+  await hostContextAction(page, hostRow.locator('.tree-host'), '删除');
   const deletion = page.getByRole('dialog', { name: '确认删除主机', exact: true });
   await deletion.getByText(/UI Host edited.*192\.0\.2\.33/).waitFor();
   await deletion.getByRole('button', { name: '取消', exact: true }).click();
   assert.equal((await rpc('host_list')).hosts.length, 2);
   await hoverHost('UI Host edited');
-  await hostContextAction(page, hostRow.locator('.tree-host'), '删除主机');
+  await hostContextAction(page, hostRow.locator('.tree-host'), '删除');
   await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
   await deletion.waitFor({ state: 'hidden' });
   assert(!(await rpc('host_list')).hosts.some((item) => item.id === host.id));
@@ -773,7 +773,7 @@ try {
     'host rows contain no inline action icons; untested context edits are blocked and confirmed deletion preserves sessions',
   );
   await showHostTree(page);
-  await hostTreeAction(page, null, '导入 OpenSSH Config…');
+  await hostTreeAction(page, null, '导入 SSH 配置…');
   const importHosts = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
   await importHosts
     .getByLabel('OpenSSH Config 内容', { exact: true })
@@ -797,7 +797,7 @@ try {
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });
   for (const name of ['UI Created', 'tree-imported']) {
     await hoverHost(name);
-    await hostContextAction(page, page.locator('.tree-host').filter({ hasText: name }), '删除主机');
+    await hostContextAction(page, page.locator('.tree-host').filter({ hasText: name }), '删除');
     await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
     await deletion.waitFor({ state: 'hidden' });
   }
@@ -848,7 +848,7 @@ try {
     await hostContextAction(
       page,
       page.locator('.tree-host').filter({ hasText: display }),
-      '删除主机',
+      '删除',
     );
     await unnamedDeletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
     await unnamedDeletion.waitFor({ state: 'hidden' });

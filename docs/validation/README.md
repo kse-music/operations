@@ -1,5 +1,11 @@
 # 验证记录索引
 
+最新：[界面标准基数 14px](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-界面标准基数-14px)。
+
+最新：[顶部导航图标](workspace/VALIDATION_LAYOUT.md#2026-11-07-顶部导航图标)。
+
+最新：[设置关闭前提醒保存](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-设置关闭前提醒保存)。
+
 最新：[SFTP 拖到 Windows 桌面和文件夹](files/VALIDATION_STAGE4.md#2026-11-07-sftp-拖到-windows-桌面和文件夹)。
 
 最新：[SFTP 文件链接下载、拖放与删除确认](files/VALIDATION_STAGE4.md#2026-11-07-sftp-文件链接下载拖放与删除确认)。

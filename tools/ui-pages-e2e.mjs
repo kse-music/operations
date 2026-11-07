@@ -262,8 +262,13 @@ async function inspect(page, name) {
       if (!visible(el)) continue;
       const r = el.getBoundingClientRect();
       const label = el.getAttribute('aria-label') ?? el.textContent.trim();
-      if (r.height < 27 || r.height > 39) issues.push(`button height ${r.height}: ${label}`);
+      const scale = Number(
+        document.documentElement.style.getPropertyValue('--interface-font-scale') || 1,
+      );
+      if (r.height < 27 || r.height > Math.max(39, 39 * scale) + 1)
+        issues.push(`button height ${r.height}: ${label}`);
       if (el.scrollWidth > el.clientWidth + 2) issues.push(`clipped button: ${label}`);
+      if (el.scrollHeight > el.clientHeight + 2) issues.push(`vertically clipped button: ${label}`);
       const next = el.nextElementSibling;
       if (
         next?.matches('button') &&
@@ -359,7 +364,7 @@ async function verifyDownloadDragAndDelete(page) {
   assert.equal(await deleteDialog.getByRole('checkbox').count(), 0);
   assert.equal(await deleteDialog.getByRole('button', { name: '帮助' }).count(), 0);
   const cancel = deleteDialog.getByRole('button', { name: '取消', exact: true });
-  const confirm = deleteDialog.getByRole('button', { name: '确认删除', exact: true });
+  const confirm = deleteDialog.getByRole('button', { name: '确认', exact: true });
   assert(await cancel.evaluate((element) => document.activeElement === element));
   await deleteDialog.screenshot({ path: `${output}/delete-remote-directory.png` });
   await cancel.click();
@@ -491,6 +496,10 @@ async function verifyInterfaceFontSize(page, variant, width) {
       }),
     }));
   const standard = await measure();
+  assert(
+    standard.fontSizes.every((size) => size === 14),
+    `${variant}: primary text is 14px`,
+  );
   await navigateWorkspace(page, '通用');
   const slider = page.getByRole('slider', { name: '界面字号', exact: true });
   assert.equal(await slider.getAttribute('aria-valuetext'), '标准');
@@ -500,6 +509,37 @@ async function verifyInterfaceFontSize(page, variant, width) {
     ),
     ['小', '标准', '大', '特大', '超大'],
   );
+  for (const [label, scale] of [
+    ['小', 0.95],
+    ['标准', 1],
+    ['大', 1.15],
+    ['特大', 1.3],
+    ['超大', 1.45],
+  ]) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+    const typography = await page.evaluate(() => {
+      const size = (selector) =>
+        parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
+      return {
+        body: size('body'),
+        field: size('#interface-font-size'),
+        navigation: size('.nav-label'),
+        caption: size('#interface-font-size-help'),
+        section: size('.settings-panel legend'),
+        title: size('.settings-panel h1'),
+      };
+    });
+    for (const [key, base] of Object.entries({
+      body: 14,
+      field: 14,
+      navigation: 14,
+      caption: 12,
+      section: 16,
+      title: 24,
+    }))
+      assert(Math.abs(typography[key] - base * scale) < 0.01, `${variant}/${label}: ${key}`);
+    await inspect(page, `${variant}/settings-${label}`);
+  }
   await page.getByRole('button', { name: '小', exact: true }).click();
   assert.equal(await slider.inputValue(), '0');
   await slider.press('ArrowRight');
@@ -525,7 +565,7 @@ async function verifyInterfaceFontSize(page, variant, width) {
   assert.equal(largest.fontSizes.length, 6);
   for (const [index, size] of largest.fontSizes.entries())
     assert(Math.abs(size - standard.fontSizes[index] * 1.45) < 0.01);
-  assert.equal(largest.columns, width >= 1440 ? 2 : 1);
+  assert.equal(largest.columns, width >= 1800 ? 2 : 1);
   if (width === 1366 || width === 1240) assert.equal(standard.columns, 2);
   if (largest.columns === 2) assert.equal(largest.tables[0].top, largest.tables[1].top);
   for (const [index, table] of largest.tables.entries()) {
@@ -562,6 +602,26 @@ async function verifyInterfaceFontSize(page, variant, width) {
     );
     await dialog.screenshot({ path: `${output}/delete-remote-directory-ultra-large.png` });
     await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  }
+  if (fontSizeOnly) {
+    for (const category of ['终端', '快捷键', '数据与存储', '关于', '模型管理']) {
+      await navigateWorkspace(page, category);
+      await inspect(page, `${variant}/${category}-ultra-large`);
+      const clippedControls = await page
+        .locator('.settings-category:visible')
+        .evaluateAll((panels) =>
+          panels
+            .flatMap((panel) => [...panel.querySelectorAll('input, select')])
+            .filter(
+              (element) =>
+                element.getClientRects().length && element.scrollHeight > element.clientHeight + 2,
+            )
+            .map((element) => element.getAttribute('aria-label') ?? element.id),
+        );
+      assert.deepEqual(clippedControls, [], `${variant}/${category}: clipped form controls`);
+      if (category === '快捷键' || category === '数据与存储')
+        await page.screenshot({ path: `${output}/${variant}-${category}-ultra-large.png` });
+    }
   }
   await navigateWorkspace(page, '通用');
   await slider.press('Home');
@@ -678,6 +738,7 @@ try {
       ? [
           ['compact-desktop', 1366, 800, 'dark'],
           ['stacking-desktop', 1240, 800, 'dark'],
+          ['wide-desktop', 1920, 1000, 'light'],
         ]
       : []),
     ['small', 900, 700, 'light'],

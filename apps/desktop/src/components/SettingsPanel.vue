@@ -9,6 +9,7 @@ import {
   type SettingsCategory,
 } from '../types/product';
 import { useApplicationStore } from '../stores/application';
+import { useWorkspaceStore } from '../stores/workspace';
 import type { AppConfig } from '../types/ipc';
 import {
   defaultInterfaceFontSize,
@@ -19,6 +20,7 @@ import {
 } from '../types/preferences';
 
 const application = useApplicationStore();
+const workspace = useWorkspaceStore();
 const migration = useStorageMigration();
 const { target, preview, discardDocuments, busy, changed } = migration;
 const props = withDefaults(defineProps<{ category?: SettingsCategory }>(), { category: 'general' });
@@ -27,14 +29,19 @@ const categoryLabel = computed(
   () => settingsCategories.find((item) => item.id === props.category)!.label,
 );
 const draft = ref<AppConfig | null>(null);
-let baseline = '';
+const baseline = ref('');
 const submitting = ref(false);
 watch(
   () => application.state?.config,
   (config) => {
-    if (config && draft.value && !submitting.value && JSON.stringify(draft.value) !== baseline) {
+    if (
+      config &&
+      draft.value &&
+      !submitting.value &&
+      JSON.stringify(draft.value) !== baseline.value
+    ) {
       draft.value.sidebarWidth = config.sidebarWidth;
-      baseline = JSON.stringify(config);
+      baseline.value = JSON.stringify(config);
       return;
     }
     draft.value = config ? (JSON.parse(JSON.stringify(config)) as AppConfig) : null;
@@ -42,7 +49,7 @@ watch(
       draft.value.product ??= defaultProductPreferences();
       draft.value.interfaceFontSize ??= defaultInterfaceFontSize;
     }
-    baseline = JSON.stringify(draft.value);
+    baseline.value = JSON.stringify(draft.value);
   },
   { immediate: true },
 );
@@ -65,7 +72,33 @@ watch(
   (preview) => (application.interfaceFontSizePreview = preview),
   { immediate: true },
 );
-onBeforeUnmount(() => (application.interfaceFontSizePreview = undefined));
+const unsaved = computed(
+  () => changed.value || (!!draft.value && JSON.stringify(draft.value) !== baseline.value),
+);
+const closePrompt = ref(false);
+let closeDecision: Promise<boolean> | null = null;
+let resolveClose: ((discard: boolean) => void) | undefined;
+function confirmClose(): Promise<boolean> {
+  if (application.saving || busy.value) return Promise.resolve(false);
+  if (!unsaved.value) return Promise.resolve(true);
+  if (!closeDecision) {
+    closePrompt.value = true;
+    closeDecision = new Promise((resolve) => (resolveClose = resolve));
+  }
+  return closeDecision;
+}
+function finishClose(discard: boolean): void {
+  closePrompt.value = false;
+  resolveClose?.(discard);
+  resolveClose = undefined;
+  closeDecision = null;
+}
+workspace.settingsCloseGuard = confirmClose;
+onBeforeUnmount(() => {
+  application.interfaceFontSizePreview = undefined;
+  if (workspace.settingsCloseGuard === confirmClose) workspace.settingsCloseGuard = undefined;
+  finishClose(false);
+});
 
 async function submit(event: Event): Promise<void> {
   const form = event.currentTarget as HTMLFormElement;
@@ -112,7 +145,7 @@ function restoreDefaults(): void {
       config.product.language = product.language;
       break;
     case 'terminal':
-      config.terminalFontSize = 14;
+      config.terminalFontSize = 16;
       config.terminal = { ...defaultTerminalPreferences(), shortcuts: config.terminal.shortcuts };
       config.connectTimeoutSecs = 15;
       config.product.sshDefaults = product.sshDefaults;
@@ -179,7 +212,10 @@ function restoreDefaults(): void {
               aria-describedby="interface-font-size-help"
             />
             <p id="interface-font-size-help" class="subtle">
-              即时预览，保存后记住。终端字号单独设置。
+              标准基数 14px，当前
+              {{
+                Math.round((interfaceFontSizes[fontSizeStep]?.scale ?? 1) * 100)
+              }}%。即时预览，保存后记住。终端字号单独设置。
             </p>
           </div>
           <label
@@ -415,6 +451,15 @@ function restoreDefaults(): void {
       </div>
     </form>
     <p v-else class="subtle">连接本地后端后即可读取和修改设置。</p>
+    <Modal v-if="closePrompt" title="设置尚未保存" @close="finishClose(false)">
+      <p>通用、终端、快捷键或数据与存储中有未保存的更改。关闭后将放弃这些更改。</p>
+      <div class="dialog-actions">
+        <button type="button" class="button" @click="finishClose(false)">继续编辑</button>
+        <button type="button" class="button danger" @click="finishClose(true)">
+          放弃更改并关闭
+        </button>
+      </div>
+    </Modal>
     <Modal v-if="preview" title="迁移数据并重启" :busy="busy" @close="preview = null">
       <p class="storage-path">当前目录：{{ application.state?.storage?.rootDirectory }}</p>
       <p class="storage-path">目标目录：{{ preview.targetDirectory }}</p>

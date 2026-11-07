@@ -11,11 +11,11 @@
 }
 .server-heading h1 {
   margin: 0;
-  font-size: calc(20px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-page-title);
 }
 .server-heading p {
   margin: 6px 0 0;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .server-emblem {
   display: grid;
@@ -97,7 +97,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .ops-detail-content {
   display: grid;
@@ -121,7 +121,7 @@
 }
 .ops-detail-fields dt {
   color: var(--muted);
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   margin-bottom: 6px;
 }
 .ops-detail-fields dd {
@@ -134,7 +134,7 @@
 }
 .ops-detail-fields pre {
   font:
-    calc(12px * var(--interface-font-scale, 1))/1.6 Consolas,
+    var(--font-size-body)/1.6 Consolas,
     monospace;
   margin: 0;
   white-space: pre-wrap;
@@ -192,10 +192,10 @@
     padding: 12px;
   }
   .server-panel .monitor-cards strong {
-    font-size: calc(20px * var(--interface-font-scale, 1));
+    font-size: var(--font-size-title);
   }
   .server-panel .monitor-cards .load-value {
-    font-size: calc(16px * var(--interface-font-scale, 1));
+    font-size: var(--font-size-section);
   }
   .server-panel .monitor-cards h2 {
     margin-bottom: 6px;
@@ -230,10 +230,10 @@
     padding: 12px;
   }
   .monitor-cards strong {
-    font-size: calc(22px * var(--interface-font-scale, 1));
+    font-size: var(--font-size-page-title);
   }
   .monitor-cards .load-value {
-    font-size: calc(16px * var(--interface-font-scale, 1));
+    font-size: var(--font-size-section);
   }
   .ops-detail-fields {
     grid-template-columns: 1fr;

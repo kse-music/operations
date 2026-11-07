@@ -269,7 +269,7 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
   passed(
     'native rename/properties/Monaco UTF-8 save, unsaved-close confirmation, external conflict and real Linux permission denial',
   );
-  // Follow a protocol report from the authenticated source terminal; never inspect arbitrary pwd text.
+  // Open the protocol-reported directory from the authenticated source terminal.
   await page
     .getByRole('navigation')
     .getByRole('button', { name: /SSH 终端/ })
@@ -281,15 +281,13 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     .locator('.terminal-pane:visible .xterm-rows')
     .filter({ hasText: '__SFTP_CWD_CHANGED__' })
     .waitFor();
-  await navFiles();
-  await page.getByRole('checkbox', { name: '跟随来源终端的 OSC 7 目录' }).check();
+  await terminalAction(page, page.locator('.terminal-pane:visible'), 'SFTP 文件');
   await page.waitForFunction(
     (value) => document.querySelector('input[aria-label="远程路径"]')?.value === value,
     `${root}/子目录`,
   );
-  await page.getByRole('checkbox', { name: '跟随来源终端的 OSC 7 目录' }).uncheck();
   await remotePath(root);
-  await context(renamed, '在新终端执行 tail -f');
+  await context(renamed, '在新终端中打开');
   dialog = page.getByRole('dialog', { name: '确认打开文件终端', exact: true });
   await dialog.getByRole('button', { name: '确认打开新终端', exact: true }).click();
   await page
@@ -297,10 +295,10 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     .filter({ hasText: '__SFTP_LOG_EXTERNAL__' })
     .waitFor();
   await page.locator('.terminal-pane:visible .xterm-helper-textarea').focus();
-  await page.keyboard.press('Control+c');
+  await page.keyboard.press('q');
   await page.locator('.terminal-pane:visible .xterm-container[data-state="closed"]').waitFor();
   await navFiles();
-  passed('native OSC 7 working-directory link and safely quoted independent tail -f PTY');
+  passed('native OSC 7 working-directory link and safely quoted independent less PTY');
   // A sparse local file is a real large file, cancelled while bytes are in flight.
   const cancelFile = await open(path.join(source, 'cancel-large.bin'), 'w');
   await cancelFile.truncate(128 * 1024 * 1024);

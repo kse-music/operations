@@ -69,7 +69,7 @@ async function openAction(label: string): Promise<void> {
 it('reads and edits the exact host while leaving the active host and terminal intact', async () => {
   const { hosts, saved } = await mount();
   const focused = useTerminalsStore().focused;
-  await openAction('编辑主机');
+  await openAction('编辑');
   const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="编辑主机"]')!;
   const fields = dialog.querySelectorAll<HTMLInputElement>('.form-grid > label input');
   expect(fields[1]!.value).toBe('b.example');
@@ -129,7 +129,7 @@ it.each([true, false])(
       ...hosts.catalog!,
       hosts: [hosts.catalog!.hosts[0]!],
     });
-    await openAction('删除主机');
+    await openAction('删除');
     let dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
     expect(dialog.open).toBe(true);
     expect(dialog.textContent).toContain('b.example');
@@ -137,7 +137,7 @@ it.each([true, false])(
     button('取消', dialog).click();
     await nextTick();
     expect(document.querySelector('dialog')).toBeNull();
-    await openAction('删除主机');
+    await openAction('删除');
     dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
     button('确认删除主机', dialog).click();
     await vi.waitFor(() => expect(hosts.busy).toBe(false));

@@ -19,6 +19,7 @@ afterEach(() => {
   app?.unmount();
   if (pinia) disposePinia(pinia);
   root?.remove();
+  document.documentElement.style.removeProperty('--interface-font-scale');
   vi.unstubAllGlobals();
 });
 
@@ -116,4 +117,10 @@ it('keeps nested reactive context cloneable across the frame boundary and reject
   expect(messages.at(-1)).toMatchObject({ props: { page: { title: 'Updated' } } });
   expect(root.textContent).not.toContain('could not be cloned');
   expect(port.close).not.toHaveBeenCalled();
+  const beforeScaleChange = messages.length;
+  document.documentElement.style.setProperty('--interface-font-scale', '1.45');
+  await nextTick();
+  expect(messages.length).toBeGreaterThan(beforeScaleChange);
+  expect(messages.at(-1)).toMatchObject({ kind: 'context' });
+  expect(port.start).toHaveBeenCalledOnce();
 });

@@ -221,6 +221,58 @@ it('handles empty ranges and closing the last tab without creating replacements'
   expect(workspace.current).toBeUndefined();
 });
 
+it('keeps the shared settings draft mounted when only some category tabs close', async () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('settings');
+  workspace.navigate('settingsTerminal');
+  workspace.navigate('about');
+  const guard = vi.fn(async () => false);
+  workspace.settingsCloseGuard = guard;
+  await workspace.close('settings:');
+  await workspace.close('about:');
+  expect(guard).not.toHaveBeenCalled();
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['settingsTerminal:']);
+  await workspace.close('settingsTerminal:');
+  expect(guard).toHaveBeenCalledOnce();
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['settingsTerminal:']);
+});
+
+it.each(['right', 'others', 'all'] as const)(
+  'reviews settings before any tab closes in a %s batch',
+  async (scope) => {
+    const workspace = useWorkspaceStore();
+    workspace.navigate('about');
+    workspace.navigate('terminals', 'a');
+    workspace.navigate('settings');
+    workspace.navigate('settingsTerminal');
+    const before = workspace.tabs.map((tab) => tab.key);
+    const close = vi.spyOn(useTerminalsStore(), 'closeAll');
+    const guard = vi.fn(async () => false);
+    workspace.settingsCloseGuard = guard;
+    await workspace.close('about:', scope);
+    expect(workspace.tabs.map((tab) => tab.key)).toEqual(before);
+    expect(workspace.current?.key).toBe('settingsTerminal:');
+    expect(close).not.toHaveBeenCalled();
+    guard.mockResolvedValue(true);
+    await workspace.close('about:', scope);
+    expect(guard).toHaveBeenCalledTimes(2);
+    expect(workspace.tabs.map((tab) => tab.key)).toEqual(
+      scope === 'all' ? [] : scope === 'right' ? ['host:a', 'about:'] : ['about:'],
+    );
+  },
+);
+
+it('also guards settings closed from the all-hosts group menu', async () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('terminals', 'a');
+  workspace.navigate('settings');
+  const guard = vi.fn(async () => false);
+  workspace.settingsCloseGuard = guard;
+  await workspace.close('all-hosts', 'right');
+  expect(guard).toHaveBeenCalledOnce();
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:a', 'settings:']);
+});
+
 it('switches module menus without changing the active page or host context', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');

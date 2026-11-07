@@ -24,7 +24,6 @@ import { defaultTerminalPreferences, terminalThemes, shortcutKey } from '../type
 import { resolveTerminalFontFamily, resolveTerminalLineHeight } from '../services/terminal-font';
 import { TerminalInputQueue } from '../services/terminal-input';
 import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
-import ForwardDialog from './ForwardDialog.vue';
 import { useApplicationStore } from '../stores/application';
 import Modal from './Modal.vue';
 import '@xterm/xterm/css/xterm.css';
@@ -46,9 +45,7 @@ const message = ref<string | null>(null);
 const trust = ref<Extract<TerminalEvent, { type: 'trust' }> | null>(null);
 const query = ref('');
 const finding = ref(false);
-const pendingPaste = ref<string | null>(null),
-  exporting = ref(false),
-  forwards = ref(false);
+const pendingPaste = ref<string | null>(null);
 const preferences = computed(
   () => application.state?.config.terminal ?? defaultTerminalPreferences(),
 );
@@ -58,23 +55,8 @@ let upload: ZmodemUpload | undefined;
 const menu = ref<{ x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuActions = computed(() => [
-  {
-    key: 'connect',
-    label: props.tab.state === 'idle' ? '连接' : '重新连接',
-    disabled: working.value || !['closed', 'failed', 'idle'].includes(props.tab.state),
-  },
   { key: 'copy', label: '复制', disabled: false },
   { key: 'paste', label: '粘贴', disabled: props.tab.state !== 'connected' },
-  { key: 'find', label: '查找', disabled: false },
-  ...(props.tab.host && !props.standalone
-    ? [
-        { key: 'server', label: '服务器管理', disabled: false },
-        { key: 'files', label: 'SFTP 文件', disabled: false },
-        { key: 'forwards', label: '端口转发', disabled: props.tab.state !== 'connected' },
-      ]
-    : []),
-  { key: 'export', label: '导出内容', disabled: false },
-  { key: 'close', label: '关闭终端', disabled: false },
 ]);
 let terminal: Terminal;
 let fit: FitAddon;
@@ -134,7 +116,7 @@ function update(values: Partial<Omit<TerminalPaneModel, 'key' | 'host'>>): void 
 }
 function terminalAction(name: string): void {
   if (props.standalone && ['zoomIn', 'zoomOut', 'zoomReset'].includes(name)) {
-    const base = application.state?.config.terminalFontSize ?? 14;
+    const base = application.state?.config.terminalFontSize ?? 16;
     const current = terminal.options.fontSize ?? base;
     terminal.options.fontSize =
       name === 'zoomReset'
@@ -365,35 +347,8 @@ function menuKey(event: KeyboardEvent): void {
 }
 function runMenuAction(key: string): void {
   closeMenu();
-  switch (key) {
-    case 'connect':
-      void connect();
-      break;
-    case 'copy':
-      void copy();
-      break;
-    case 'paste':
-      void paste();
-      break;
-    case 'find':
-      void toggleFind();
-      break;
-    case 'server':
-      if (props.tab.host) emit('server', props.tab.host);
-      break;
-    case 'files':
-      if (props.tab.host) emit('files', props.tab.host, props.tab.cwd, props.tab.key);
-      break;
-    case 'forwards':
-      forwards.value = true;
-      break;
-    case 'export':
-      exporting.value = true;
-      break;
-    case 'close':
-      emit('close');
-      break;
-  }
+  if (key === 'copy') void copy();
+  else if (key === 'paste') void paste();
 }
 async function paste(): Promise<void> {
   if (props.tab.state !== 'connected') {
@@ -455,23 +410,6 @@ function nativePaste(event: ClipboardEvent): void {
     requestPaste(text);
   }
 }
-function exportText(): void {
-  const buffer = terminal.buffer.normal;
-  const lines: string[] = [];
-  for (let index = 0; index < buffer.length; index++)
-    lines.push(buffer.getLine(index)?.translateToString(true) ?? '');
-  const url = URL.createObjectURL(
-    new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' }),
-  );
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `serverdeck-terminal-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-  exporting.value = false;
-}
 function terminalOptions() {
   const p = preferences.value;
   return {
@@ -491,7 +429,7 @@ function find(backward = false): void {
 onMounted(() => {
   terminal = new Terminal({
     ...terminalOptions(),
-    fontSize: application.state?.config.terminalFontSize ?? 14,
+    fontSize: application.state?.config.terminalFontSize ?? 16,
     allowProposedApi: false,
     allowTransparency: false,
     ignoreBracketedPasteMode: false,
@@ -698,23 +636,6 @@ useErrorNotifications(message);
         ><button class="button primary" @click="approvePaste">确认粘贴</button>
       </footer></Modal
     >
-    <Modal v-if="exporting" title="导出终端内容" @close="exporting = false"
-      ><p>
-        导出当前终端普通屏幕及滚动历史的 UTF-8
-        纯文本。内容可能包含命令、口令或其他秘密，请确认保存位置和用途。
-      </p>
-      <p class="subtle">不会自动录制会话；仅在本次点击后生成本地下载。</p>
-      <footer class="dialog-actions">
-        <button class="button" @click="exporting = false">取消</button
-        ><button class="button primary" @click="exportText">确认导出文本</button>
-      </footer></Modal
-    >
-    <ForwardDialog
-      v-if="forwards && session && tab.host"
-      :session-id="session.id"
-      :host-name="hostDisplayName(tab.host)"
-      @close="forwards = false"
-    />
     <Teleport :to="standalone ? (container?.closest('dialog') ?? 'body') : 'body'">
       <template v-if="menu">
         <button
@@ -732,20 +653,16 @@ useErrorNotifications(message);
           :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
           @keydown="menuKey"
         >
-          <p class="terminal-menu-heading">
-            {{ name }} · {{ stateLabels[tab.state] ?? tab.state }}
-          </p>
-          <p v-if="tab.host" class="terminal-menu-heading">
-            {{ tab.host.username }}@{{ tab.host.hostname }}:{{ tab.host.port }}
-          </p>
           <button
             v-for="item in menuActions"
             :key="item.key"
             role="menuitem"
+            :aria-label="item.label"
             :disabled="item.disabled"
             @click="runMenuAction(item.key)"
           >
-            {{ item.label }}
+            <span>{{ item.label }}</span>
+            <kbd v-if="preferences.shortcuts[item.key]">{{ preferences.shortcuts[item.key] }}</kbd>
           </button>
         </div>
       </template>

@@ -224,19 +224,19 @@ const menuItems = computed<{ key: MenuAction; label: string; danger?: boolean }[
   if (!target) return [];
   if (target.kind === 'host')
     return [
-      { key: 'connect', label: '连接主机' },
-      { key: 'edit', label: '编辑主机' },
-      { key: 'copy', label: '复制主机' },
+      { key: 'connect', label: '连接' },
+      { key: 'edit', label: '编辑' },
+      { key: 'copy', label: '复制' },
       ...plugins.extensions
         .filter((e) => e.kind === 'host_menu')
         .map((e) => ({ key: `plugin:${e.pluginId}:${e.id}` as MenuAction, label: e.label })),
-      { key: 'deleteHost', label: '删除主机', danger: true },
+      { key: 'deleteHost', label: '删除', danger: true },
     ];
   return [
     { key: 'newHost', label: '新建主机' },
     { key: 'newFolder', label: '新建文件夹' },
     ...(target.id === null
-      ? [{ key: 'importOpenssh' as const, label: '导入 OpenSSH Config…' }]
+      ? [{ key: 'importOpenssh' as const, label: '导入 SSH 配置…' }]
       : [
           { key: 'rename' as const, label: '重命名文件夹' },
           { key: 'deleteFolder' as const, label: '删除文件夹', danger: true },
@@ -552,16 +552,17 @@ onBeforeUnmount(() => {
           @keydown="menuKeys"
           @contextmenu.prevent
         >
-          <button
-            v-for="item in menuItems"
-            :key="item.key"
-            role="menuitem"
-            :class="{ danger: item.danger }"
-            :disabled="store.busy"
-            @click="runContext(item.key)"
-          >
-            {{ item.label }}
-          </button>
+          <template v-for="item in menuItems" :key="item.key">
+            <div v-if="item.key === 'importOpenssh'" role="separator"></div>
+            <button
+              role="menuitem"
+              :class="{ danger: item.danger }"
+              :disabled="store.busy"
+              @click="runContext(item.key)"
+            >
+              {{ item.label }}
+            </button>
+          </template>
         </div>
       </template>
     </Teleport>

@@ -212,7 +212,7 @@ try {
     await hostContextAction(
       page,
       page.locator('.tree-host[data-host-id="fixture-host"]'),
-      '编辑主机',
+      '编辑',
     );
     const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
     const saveEdit = edit.getByRole('button', { name: '保存主机', exact: true });

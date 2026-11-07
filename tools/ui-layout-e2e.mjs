@@ -219,7 +219,7 @@ try {
       ),
       true,
     );
-    await hostTreeAction(page, null, '导入 OpenSSH Config…');
+    await hostTreeAction(page, null, '导入 SSH 配置…');
     const importDialog = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
     await importDialog.waitFor();
     const importLayout = await importDialog.evaluate((dialog) => {
@@ -300,7 +300,7 @@ try {
     await page.keyboard.press('ArrowDown');
     assert.equal(
       await editMenu
-        .getByRole('menuitem', { name: '编辑主机', exact: true })
+        .getByRole('menuitem', { name: '编辑', exact: true })
         .evaluate((button) => document.activeElement === button),
       true,
     );
@@ -365,7 +365,7 @@ try {
     assert.equal(await hostMenu.count(), 1);
     assert.deepEqual(
       (await hostMenu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
-      ['连接主机', '编辑主机', '复制主机', '删除主机'],
+      ['连接', '编辑', '复制', '删除'],
     );
     assert.equal(
       await hostMenu.getByRole('menuitem', { name: '新建文件夹', exact: true }).count(),

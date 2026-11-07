@@ -3,6 +3,7 @@ import { createApp, h, nextTick, ref, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import SettingsPanel from './SettingsPanel.vue';
 import { useApplicationStore } from '../stores/application';
+import { useWorkspaceStore } from '../stores/workspace';
 import * as ipc from '../services/ipc';
 import {
   defaultProductPreferences,
@@ -132,6 +133,39 @@ it('shows the selected menu category and saves drafts from all four categories t
     }),
   );
   expect(useApplicationStore().notice).toContain('设置已保存');
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
+  expect(document.querySelector('dialog')).toBeNull();
+});
+
+it('allows closing unchanged, reverted and externally updated settings without a prompt', async () => {
+  const workspace = useWorkspaceStore();
+  expect(await workspace.settingsCloseGuard!()).toBe(true);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await input('[data-testid="theme-select"]', 'dark', 'change');
+  expect(await workspace.settingsCloseGuard!()).toBe(true);
+  const application = useApplicationStore();
+  application.state!.config = { ...application.state!.config, sidebarWidth: 300 };
+  await nextTick();
+  expect(await workspace.settingsCloseGuard!()).toBe(true);
+  expect(document.querySelector('dialog')).toBeNull();
+});
+
+it.each(['cancel', 'close'])('keeps one close prompt and preserves edits on %s', async (action) => {
+  const workspace = useWorkspaceStore();
+  await restoreDefaults();
+  const closing = workspace.settingsCloseGuard!();
+  const repeated = workspace.settingsCloseGuard!();
+  await nextTick();
+  expect(document.querySelectorAll('dialog[aria-label="设置尚未保存"]')).toHaveLength(1);
+  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+  if (action === 'cancel') dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  else dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  expect(await closing).toBe(false);
+  expect(await repeated).toBe(false);
+  await nextTick();
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(root.querySelector<HTMLInputElement>('[aria-label="侧边栏宽度"]')!.value).toBe('248');
+  expect(useApplicationStore().state!.config.sidebarWidth).toBe(260);
 });
 
 it('restores general, terminal and shortcut defaults independently in the shared draft', async () => {
@@ -245,6 +279,8 @@ it('disables every category during saving and retains edits after a failed save'
   await input('[data-testid="theme-select"]', 'light', 'change');
   await submit();
   expect([...root.querySelectorAll('fieldset')].every((field) => field.disabled)).toBe(true);
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(false);
+  expect(document.querySelector('dialog')).toBeNull();
   expect(root.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
   await select(3);
   expect(visiblePanels()[0]!.querySelector('fieldset')!.disabled).toBe(true);
@@ -257,6 +293,11 @@ it('disables every category during saving and retains edits after a failed save'
   expect(useApplicationStore().error).toBe('保存失败，请重试');
   expect(useApplicationStore().notice).toBeNull();
   expect(root.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(false);
+  const closing = useWorkspaceStore().settingsCloseGuard!();
+  await nextTick();
+  expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).not.toBeNull();
+  document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭对话框"]')!.click();
+  expect(await closing).toBe(false);
 });
 
 async function storageDraft() {
@@ -271,6 +312,24 @@ async function storageDraft() {
   await select(3);
   await input('[aria-label="数据根目录"]', 'D:\\ServerDeck');
 }
+
+it('warns for a changed data root alone without previewing or starting migration', async () => {
+  const preview = vi.spyOn(ipc, 'storagePreview');
+  const migrate = vi.spyOn(ipc, 'storageMigrate');
+  await storageDraft();
+  const closing = useWorkspaceStore().settingsCloseGuard!();
+  await nextTick();
+  expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).not.toBeNull();
+  document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭对话框"]')!.click();
+  expect(await closing).toBe(false);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
+    'D:\\ServerDeck',
+  );
+  expect(preview).not.toHaveBeenCalled();
+  expect(migrate).not.toHaveBeenCalled();
+  await input('[aria-label="数据根目录"]', 'C:\\ServerDeck');
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
+});
 
 it('restores storage preferences and clears a pending directory change without migrating', async () => {
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);

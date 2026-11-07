@@ -9,7 +9,56 @@ import { useModelsStore } from './stores/models';
 afterEach(() => {
   window.dispatchEvent(new Event('pagehide'));
   document.body.innerHTML = '';
+  document.documentElement.style.removeProperty('--interface-font-scale');
   vi.restoreAllMocks();
+});
+
+it('updates plugin font scale without remounting and accepts older contexts without a scale', async () => {
+  const port = {
+    onmessage: null as ((event: { data: Record<string, unknown> }) => void) | null,
+    start() {},
+    close() {},
+    postMessage() {},
+  };
+  const mounted = vi.fn();
+  document.body.innerHTML = '<div id="app"></div>';
+  vi.spyOn(window, 'postMessage').mockImplementation(() => {});
+  mountPlugin({
+    setup() {
+      mounted();
+      return () => h('p', 'Plugin');
+    },
+  });
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      source: window,
+      data: { kind: 'serverdeck-sdk-connect' },
+      ports: [port as unknown as MessagePort],
+    }),
+  );
+  for (const scale of [1, 1.45, 0.95, undefined, -1]) {
+    port.onmessage!({
+      data: {
+        kind: 'context',
+        props: {},
+        state: {
+          models: [],
+          catalog: null,
+          hostId: '',
+          operations: {},
+          files: {},
+          theme: 'dark',
+          monitorIntervalSecs: 3,
+          interfaceFontScale: scale,
+        },
+      },
+    });
+    await nextTick();
+    expect(document.documentElement.style.getPropertyValue('--interface-font-scale')).toBe(
+      String(scale && scale > 0 ? scale : 1),
+    );
+  }
+  expect(mounted).toHaveBeenCalledOnce();
 });
 
 it('preserves a selected model on unchanged context but clears a removed model instead of showing a blank invalid selection', async () => {

@@ -1,6 +1,6 @@
 :root,
 :root[data-theme='dark'] {
-  --control-height: 32px;
+  --control-height: 36px;
   --compact-height: 28px;
   --control-radius: 4px;
   color-scheme: dark;

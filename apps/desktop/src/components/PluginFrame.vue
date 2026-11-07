@@ -316,7 +316,10 @@ let intersection: IntersectionObserver | undefined;
 onMounted(() => {
   window.addEventListener('message', connect);
   theme = new MutationObserver(context);
-  theme.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  theme.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme', 'style'],
+  });
   if (typeof IntersectionObserver !== 'undefined') {
     intersection = new IntersectionObserver((entries) => {
       visible.value = entries.some((entry) => entry.isIntersecting);

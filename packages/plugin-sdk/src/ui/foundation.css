@@ -1,11 +1,19 @@
+:root {
+  --font-size-caption: calc(12px * var(--interface-font-scale, 1));
+  --font-size-body: calc(14px * var(--interface-font-scale, 1));
+  --font-size-section: calc(16px * var(--interface-font-scale, 1));
+  --font-size-title: calc(20px * var(--interface-font-scale, 1));
+  --font-size-page-title: calc(24px * var(--interface-font-scale, 1));
+}
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
   font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: calc(13px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   letter-spacing: 0;
+  line-height: 1.5;
   background: var(--bg);
   color: var(--text);
 }
@@ -51,8 +59,8 @@ button {
   border-radius: var(--control-radius);
   padding: 5px 12px;
   background: var(--raised);
-  font-size: calc(12px * var(--interface-font-scale, 1));
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: 1.5;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -81,11 +89,11 @@ button {
   font-size: calc(28px * var(--interface-font-scale, 1));
 }
 .host-empty p {
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   margin-bottom: 8px;
 }
 .host-empty small {
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .section-heading {
   display: flex;
@@ -95,14 +103,14 @@ button {
   flex-wrap: wrap;
 }
 .eyebrow {
-  font-size: calc(10px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
   letter-spacing: 0;
   color: var(--accent);
   margin: 0 0 10px;
   font-weight: 600;
 }
 h1 {
-  font-size: calc(21px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-page-title);
   margin: 0;
   font-weight: 600;
   letter-spacing: 0;
@@ -115,21 +123,21 @@ h1 {
   border: 0;
   background: none;
   color: var(--accent);
-  font-size: calc(12px * var(--interface-font-scale, 1));
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: 1.5;
   min-height: var(--compact-height);
   padding: 4px 6px;
 }
 .subtle {
   color: var(--muted);
-  font-size: calc(11px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-caption);
 }
 .banner {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px 16px;
   margin-bottom: 22px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
   line-height: 1.6;
 }
 .banner.error {
@@ -148,11 +156,6 @@ h1 {
   justify-content: space-between;
   align-items: center;
   gap: 20px;
-}
-@media (max-width: 1100px) {
-  h1 {
-    font-size: calc(23px * var(--interface-font-scale, 1));
-  }
 }
 .editor-form input:not([type='checkbox']),
 .editor-form select,
@@ -191,7 +194,7 @@ h1 {
   margin-bottom: 18px;
 }
 .modal-heading h2 {
-  font-size: calc(18px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-title);
   margin: 0;
 }
 .modal-heading .icon-button {
@@ -223,7 +226,7 @@ h1 {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .editor-form textarea {
   resize: vertical;
@@ -236,7 +239,7 @@ h1 {
   align-items: flex-start;
   gap: 8px;
   line-height: 1.6;
-  font-size: calc(12px * var(--interface-font-scale, 1));
+  font-size: var(--font-size-body);
 }
 .checkbox-label input {
   accent-color: var(--accent);

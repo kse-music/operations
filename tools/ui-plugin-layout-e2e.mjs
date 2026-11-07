@@ -37,14 +37,27 @@ const browser = await chromium.launch({
   headless: true,
 });
 const results = [];
+const fontSizeOnly = process.argv.includes('--font-size');
 try {
-  for (const [width, height] of [
-    [2400, 1400],
-    [1440, 900],
-    [900, 600],
-    [390, 844],
-    [390, 460],
-  ]) {
+  for (const [width, height, scale = 1] of fontSizeOnly
+    ? [
+        [1440, 1000, 1],
+        [1920, 1000, 1.45],
+        [900, 700, 1.45],
+        [390, 844, 1.45],
+      ]
+    : [
+        [2400, 1400],
+        [1440, 900],
+        [900, 600],
+        [390, 844],
+        [390, 460],
+      ]) {
+    if (
+      process.env.SERVERDECK_PLUGIN_LAYOUT_WIDTH &&
+      width !== Number(process.env.SERVERDECK_PLUGIN_LAYOUT_WIDTH)
+    )
+      continue;
     for (const theme of ['dark', 'light']) {
       const page = await browser.newPage({ viewport: { width, height } });
       const errors = [];
@@ -384,6 +397,21 @@ try {
         .waitFor();
       assert(await settings.getByRole('button', { name: '保存模型绑定', exact: true }).isVisible());
       const settingsFrame = page.frames().find((f) => f.url().includes('/settings/index.html'));
+      if (fontSizeOnly) {
+        for (const preview of [0.95, scale]) {
+          await page.evaluate(
+            (value) =>
+              document.documentElement.style.setProperty('--interface-font-scale', String(value)),
+            preview,
+          );
+          await settingsFrame.waitForFunction(
+            (value) =>
+              Math.abs(parseFloat(getComputedStyle(document.body).fontSize) - 14 * value) < 0.01,
+            preview,
+          );
+        }
+        assert(await settings.locator('input[value="layout-model-0"]').isChecked());
+      }
       const settingsGeometry = await settingsFrame.evaluate(() => ({
         height: innerHeight,
         contentHeight: document.documentElement.scrollHeight,
@@ -468,6 +496,12 @@ try {
       });
       await openPluginFunction(page, 'Docker 管理', 'layout-host');
       await content().getByText('app-service-1', { exact: true }).waitFor();
+      if (fontSizeOnly) {
+        const textSize = await content()
+          .locator('.ops-table table')
+          .evaluate((element) => parseFloat(getComputedStyle(element).fontSize));
+        assert(Math.abs(textSize - 14 * scale) < 0.01, 'Docker table follows interface font scale');
+      }
       const verifyDockerTable = async (name, longList) => {
         const geometry = await content()
           .locator('.ops-table')
@@ -524,6 +558,21 @@ try {
         }
       };
       await verifyDockerTable('containers', true);
+      if (fontSizeOnly) {
+        const tableSpace = await content()
+          .locator('.ops-table')
+          .evaluate((element) => ({
+            height: element.clientHeight,
+            header: element.querySelector('thead').getBoundingClientRect().height,
+            row: element.querySelector('tbody tr').getBoundingClientRect().height,
+          }));
+        assert(
+          tableSpace.height >= tableSpace.header + tableSpace.row,
+          `Docker table must show its header and a complete row: ${JSON.stringify(tableSpace)}`,
+        );
+      }
+      for (const notice of await page.getByRole('button', { name: '关闭通知', exact: true }).all())
+        await notice.click();
       const openDockerImages = async () => {
         await content().getByRole('tab', { name: '镜像', exact: true }).click();
         await content().getByText('registry.example/application', { exact: true }).waitFor();
@@ -691,6 +740,24 @@ try {
       assert.equal(await question.inputValue(), draft);
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-0');
       await chat.locator('.ai-chat-composer button[type="submit"]:enabled').waitFor();
+      if (fontSizeOnly) {
+        const textSize = await question.evaluate((element) =>
+          parseFloat(getComputedStyle(element).fontSize),
+        );
+        assert(
+          Math.abs(textSize - 14 * scale) < 0.01,
+          'Assistant input follows interface font scale',
+        );
+        const emptyState = await chat.locator('.ai-chat-messages').evaluate((element) => {
+          element.scrollTop = 0;
+          const title = element.querySelector('.ai-chat-empty h3').getBoundingClientRect();
+          return { titleTop: title.top, panelTop: element.getBoundingClientRect().top };
+        });
+        assert(
+          emptyState.titleTop >= emptyState.panelTop,
+          'Assistant empty heading stays reachable at the top',
+        );
+      }
       await capture('assistant-chat', '.plugin-workspace');
       await gear.click();
       await settings.getByRole('button', { name: '管理模型', exact: true }).click();
@@ -764,7 +831,7 @@ try {
         };
       });
       assert(
-        searchGeometry.centered && searchGeometry.height <= 40,
+        searchGeometry.centered && searchGeometry.height <= 40 * scale,
         'Search icon and input must share a compact row',
       );
       await capture('plugin-manager', '.plugin-manager');
