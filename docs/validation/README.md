@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[平台版本更新为 0.3.0](foundation/VALIDATION_BUILD_CACHE.md#2026-11-07-平台版本更新为-030)。
+
 最新：[界面标准基数 14px](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-界面标准基数-14px)。
 
 最新：[顶部导航图标](workspace/VALIDATION_LAYOUT.md#2026-11-07-顶部导航图标)。

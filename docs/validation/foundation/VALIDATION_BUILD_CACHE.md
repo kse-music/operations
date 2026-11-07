@@ -98,3 +98,22 @@
 ### 边界与依赖
 
 仅执行编译检查，未生成或替换桌面可执行文件、Release 安装器及发布摘要，未运行页面 E2E 脚本、完整发布清单脚本、全量业务单测、原生 GUI 或跨平台验收。现有可执行文件和安装包仍可能显示旧版本，需重新构建并启动后生效；版本号变化不表示既有发布条件已满足。当前无剩余实现依赖，本阶段完成后停止。
+
+## 2026-11-07 平台版本更新为 0.3.0
+
+### 完成范围
+
+平台从 0.2.0 更新为 0.3.0，统一 Cargo 工作区、根目录及桌面 npm 清单、Tauri 配置和对应锁文件。关于页继续读取后端 `CARGO_PKG_VERSION`，App 测试与浏览器页面验证数据同步更新；README、变更记录、当前架构说明和随包第三方声明同步。插件、Rust/Vue SDK 和第三方依赖版本不变，历史发布与验收记录保留。
+
+### 本次验证
+
+- 构建前项目磁盘约 255 GiB 可用，沿用根目录 `target/` 和既有 Cargo 配置。
+- `cargo metadata --no-deps --format-version 1 --offline --locked` 及 JSON 结构化断言通过：15 个平台 Cargo 包、6 处 npm/Tauri 清单与锁文件版本均为 0.3.0，Rust/Vue SDK 均仍为 4.0.0，README 与第三方声明的当前版本一致。
+- `npm test -- --run src/App.test.ts`：80 项通过，包括关于页显示 `v0.3.0` 和已有启动、错误、工作区流程。首次执行因沙箱系统临时目录的缓存重命名返回 `EPERM`，尚未运行测试；将该进程的 `TEMP`/`TMP` 指向 `.local/version-qa/0.3.0/tmp/` 后重试通过，未更改持久环境配置。
+- `npm run typecheck`：桌面及 Vue SDK 类型检查通过。
+- `cargo check -p serverdeck-desktop --offline --locked -j 2`：通过，桌面使用 0.3.0，并检查其应用层依赖。
+- `cargo fmt --all -- --check`、修改的 App 测试 ESLint、修改文件 Prettier、`node --check tools/ui-pages-e2e.mjs` 及 `git diff --check`：通过。
+
+### 边界与依赖
+
+未重建桌面可执行文件、Release 安装器或发布摘要，未运行页面 E2E、完整发布清单、全量业务单测、原生 GUI 或跨平台验收。已有程序和安装包仍可能显示旧版本，需要重新构建并启动后生效；本次版本修改不替代发布验收。当前无剩余实现依赖，本阶段完成后停止。

@@ -752,7 +752,7 @@ AppConfig 保持 version=1，新增 serde(default) product 偏好，旧数据可
 
 ## QA 与测试版发布边界（2026-11-02）
 
-统一平台版本为 0.2.0，当前应用标识为 cn.hiboot.desktop，标识迁移见本文“应用域名统一”；Cargo/npm/Tauri 版本一致，插件与 SDK 沿用独立版本。Release 开启 thin LTO、单 codegen-unit 和 strip，前端嵌入二进制；NSIS 采用当前用户安装，不把数据放在安装目录。多尺寸 ICO/ICNS/PNG、许可证清单及依赖通知随包，未引入更新器。
+统一平台版本为 0.3.0，当前应用标识为 cn.hiboot.desktop，标识迁移见本文“应用域名统一”；Cargo/npm/Tauri 版本一致，插件与 SDK 沿用独立版本。Release 开启 thin LTO、单 codegen-unit 和 strip，前端嵌入二进制；NSIS 采用当前用户安装，不把数据放在安装目录。多尺寸 ICO/ICNS/PNG、许可证清单及依赖通知随包，未引入更新器。
 
 本轮修复 Unix 目录权限：仅初始化应用专属数据/日志叶目录到 0700，并在迁移前把 SQLite 文件收紧至 0600，符号链接叶目录拒绝；不修改 HOME 等父目录。Windows 保留系统用户目录 ACL，不声称与 Unix mode 等价。权限失败向上传播，不静默继续。
 

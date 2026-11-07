@@ -63,7 +63,7 @@ async function fixtures(page, theme) {
     hosts.selectedId = 'ui-0';
     application.error = null;
     application.state = {
-      appVersion: '0.2.0',
+      appVersion: '0.3.0',
       databaseVersion: 5,
       dataDirectory: '/ui-fixture/data',
       logDirectory: '/ui-fixture/logs',

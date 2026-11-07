@@ -1,4 +1,4 @@
-ServerDeck 0.2.0 dependency notices
+ServerDeck 0.3.0 dependency notices
 Inventory includes resolved cross-platform Cargo packages and production npm dependencies.
 See DEPENDENCY_INVENTORY.md for scope and manual review limitations.
 
