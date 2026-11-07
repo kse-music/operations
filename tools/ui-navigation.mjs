@@ -62,65 +62,32 @@ export async function reloadHosts(page) {
   });
 }
 
-// Deliver the native event shape to the registered receiver in an owned debug
-// WebView. Keep real Rust package IPC and the production emitter ACL unchanged.
-export async function deliverPluginDrop(page, payload) {
-  await page.waitForFunction(
-    () =>
-      Object.getOwnPropertyNames(window).some((key) => {
-        const value = Object.getOwnPropertyDescriptor(window, key)?.value;
-        return value && typeof value === 'object' && Object.hasOwn(value, 'tauri://drag-drop');
-      }),
-    null,
-    { polling: 50 },
-  );
-  const delivered = await page.evaluate((payload) => {
-    let count = 0;
-    const handlers = new Set();
-    for (const key of Object.getOwnPropertyNames(window)) {
-      const value = Object.getOwnPropertyDescriptor(window, key)?.value;
-      if (!value || typeof value !== 'object' || !Object.hasOwn(value, 'tauri://drag-drop'))
-        continue;
-      const receivers = value['tauri://drag-drop'];
-      for (const id of Object.getOwnPropertyNames(receivers)) {
-        const listener = receivers[id];
-        if (
-          listener.target?.kind === 'Webview' &&
-          listener.target?.label === 'main' &&
-          !handlers.has(listener.handlerId)
-        ) {
-          handlers.add(listener.handlerId);
-          window.__TAURI_INTERNALS__.runCallback(listener.handlerId, {
-            event: 'tauri://drag-drop',
-            id: Number(id),
-            payload,
-          });
-          count++;
-        }
-      }
-    }
-    return count;
-  }, payload);
-  if (delivered < 1) throw new Error('No mounted native drop receiver');
-  // Cached views can retain listeners; the visible upload zone must produce one preview.
-  const preview = page.getByRole('dialog', { name: '安装插件', exact: true });
-  await preview.waitFor();
-  if ((await preview.count()) !== 1)
-    throw new Error('Native drop produced duplicate package previews');
-}
 export async function previewPluginPackage(page, packagePath) {
   await navigateWorkspace(page, '插件管理');
-  const zone = page.getByRole('region', { name: '插件上传区域', exact: true });
-  const box = await zone.boundingBox();
-  if (!box) throw new Error('Plugin drop zone unavailable');
-  const ratio = await page.evaluate(() => devicePixelRatio);
-  await deliverPluginDrop(page, {
-    paths: [packagePath],
-    position: { x: (box.x + box.width / 2) * ratio, y: (box.y + box.height / 2) * ratio },
-  });
-  const preview = page.getByRole('dialog', { name: '安装插件', exact: true });
-  await preview.waitFor();
-  return preview;
+  // Only the native file picker result is substituted. Package validation uses real IPC.
+  const restorePicker = await page.evaluateHandle((selectedPath) => {
+    const bridge = window.__TAURI_INTERNALS__;
+    const invoke = bridge.invoke;
+    bridge.invoke = (command, ...args) =>
+      command === 'plugin_pick'
+        ? Promise.resolve(selectedPath)
+        : invoke.call(bridge, command, ...args);
+    return () => {
+      bridge.invoke = invoke;
+    };
+  }, packagePath);
+  try {
+    await page
+      .locator('.plugin-heading-actions')
+      .getByRole('button', { name: '安装插件', exact: true })
+      .click();
+    const preview = page.getByRole('dialog', { name: '安装插件', exact: true });
+    await preview.waitFor();
+    return preview;
+  } finally {
+    await restorePicker.evaluate((restore) => restore());
+    await restorePicker.dispose();
+  }
 }
 
 export async function openPluginDetails(page, name) {

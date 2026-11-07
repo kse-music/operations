@@ -1,4 +1,4 @@
-// Isolated Windows WebView2 test: real native drag event, package IPC and disk layout.
+// Isolated Windows WebView2 test: fixture picker result, real package IPC and disk layout.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -8,7 +8,7 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { checkWorkspaceTools } from './plugin-workspace-checks.mjs';
-import { navigateWorkspace, openPluginDetails, deliverPluginDrop } from './ui-navigation.mjs';
+import { navigateWorkspace, openPluginDetails, previewPluginPackage } from './ui-navigation.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, '.local/ops-plugin-migration');
 const run = path.join(output, 'native', `run-${randomUUID()}`);
@@ -159,18 +159,7 @@ try {
   assert.equal(await manager.locator('.plugin-source').count(), 0);
   assert.equal(await manager.getByLabel('本地插件包路径', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(run, 'manager.png') });
-  const box = await manager
-    .getByRole('region', { name: '插件上传区域', exact: true })
-    .boundingBox();
-  assert(box);
-  const ratio = await page.evaluate(() => devicePixelRatio);
-  const payload = {
-    paths: [packagePath],
-    position: { x: (box.x + box.width / 2) * ratio, y: (box.y + box.height / 2) * ratio },
-  };
-  await deliverPluginDrop(page, payload);
-  const preview = page.getByRole('dialog', { name: '安装插件', exact: true });
-  await preview.waitFor();
+  const preview = await previewPluginPackage(page, packagePath);
   assert(await preview.getByRole('button', { name: '安装插件', exact: true }).isDisabled());
   await preview.getByRole('checkbox').check();
   await preview.getByRole('button', { name: '安装插件', exact: true }).click();
@@ -185,7 +174,7 @@ try {
   assert.equal(await row.locator('.plugin-row-actions button').count(), 2);
   assert.equal(await row.locator('.plugin-source').count(), 0);
   passed.push(
-    'native WebView drop previews a real package; acknowledgement installs it under plugins/upload',
+    'install button previews a real package from a fixture picker result; acknowledgement installs it under plugins/upload',
   );
   await row.getByRole('button', { name: upload.manifest.name, exact: true }).click();
   await page.locator('[aria-label="插件设置"]').waitFor();

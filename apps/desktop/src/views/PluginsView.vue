@@ -1,8 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { isTauri } from '@tauri-apps/api/core';
-import { getCurrentWebview } from '@tauri-apps/api/webview';
-import type { UnlistenFn } from '@tauri-apps/api/event';
 import {
   Download,
   Puzzle,
@@ -11,7 +8,6 @@ import {
   Search,
   Settings2,
   Trash2,
-  Upload,
 } from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
@@ -27,9 +23,7 @@ const savingDevelopmentKit = ref(false);
 const path = ref(''),
   preview = ref<PluginPackagePreview | null>(null),
   ack = ref(false),
-  inspecting = ref(false),
-  over = ref(false),
-  dropzone = ref<HTMLElement>();
+  inspecting = ref(false);
 const deleting = ref<InstalledPlugin | null>(null),
   clearData = ref(false);
 const existing = computed(() =>
@@ -60,8 +54,7 @@ function resetFilters() {
   status.value = 'all';
 }
 let selection = 0,
-  disposed = false,
-  unlisten: UnlistenFn | undefined;
+  disposed = false;
 function cancelPreview() {
   selection++;
   preview.value = null;
@@ -145,34 +138,12 @@ async function uninstall() {
     deleting.value = null;
   }
 }
-onMounted(async () => {
+onMounted(() => {
   void plugins.refresh();
-  if (!isTauri()) return;
-  try {
-    const listener = await getCurrentWebview().onDragDropEvent((event) => {
-      const payload = event.payload;
-      if (payload.type === 'leave') {
-        over.value = false;
-        return;
-      }
-      const box = dropzone.value?.getBoundingClientRect();
-      if (!box) return;
-      const x = payload.position.x / window.devicePixelRatio,
-        y = payload.position.y / window.devicePixelRatio;
-      const inside = x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
-      over.value = inside && payload.type !== 'drop' && !plugins.busy;
-      if (payload.type === 'drop' && inside) void inspect(payload.paths);
-    });
-    if (disposed) listener();
-    else unlisten = listener;
-  } catch (cause) {
-    plugins.error = `拖拽安装不可用：${errorMessage(cause)}`;
-  }
 });
 onBeforeUnmount(() => {
   disposed = true;
   selection++;
-  unlisten?.();
 });
 </script>
 <template>
@@ -208,25 +179,6 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
-    <section
-      ref="dropzone"
-      :class="['plugin-dropzone', { over, busy: inspecting || plugins.busy }]"
-      aria-label="插件上传区域"
-      @dragover.prevent="over = !plugins.busy"
-      @dragleave="over = false"
-      @drop.prevent="over = false"
-    >
-      <Upload :size="17" aria-hidden="true" />
-      <p role="status">
-        {{
-          inspecting
-            ? '正在检查插件包…'
-            : over
-              ? '松开即可检查插件包'
-              : '也可将 .sdplugin 插件包拖到这里，安装前会显示包信息与所需权限。'
-        }}
-      </p>
-    </section>
     <section class="plugin-installed" aria-label="已安装插件">
       <div class="plugin-filterbar" role="search" aria-label="筛选已安装插件">
         <select v-model="source" aria-label="插件来源">

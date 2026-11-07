@@ -7,31 +7,7 @@ import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
 import type { InstalledPlugin, PluginManifest } from '../types/plugins';
 import { systemPluginFixtures, toolPluginState } from '../services/system-plugins.fixture';
-const native = vi.hoisted(() => ({
-  enabled: false,
-  listener: null as
-    | null
-    | ((event: {
-        payload: { type: string; paths: string[]; position: { x: number; y: number } };
-      }) => void),
-  release: vi.fn(),
-}));
-vi.mock('@tauri-apps/api/core', async (original) => ({
-  ...(await original<typeof import('@tauri-apps/api/core')>()),
-  isTauri: () => native.enabled,
-}));
-vi.mock('@tauri-apps/api/webview', () => ({
-  getCurrentWebview: () => ({
-    onDragDropEvent: async (listener: typeof native.listener) => {
-      native.listener = listener;
-      return native.release;
-    },
-  }),
-}));
 beforeEach(() => {
-  native.enabled = false;
-  native.listener = null;
-  native.release.mockReset();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -182,8 +158,7 @@ it('opens settings by name or gear for every installed plugin', async () => {
   }
 });
 
-it('accepts one native dropped package, previews it and requires acknowledgement before installing', async () => {
-  native.enabled = true;
+it('previews a selected package and requires acknowledgement before installing', async () => {
   vi.spyOn(pluginsApi, 'list').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   const item = systemPluginFixtures()[0]!;
@@ -194,20 +169,18 @@ it('accepts one native dropped package, previews it and requires acknowledgement
     compatible: true,
   });
   const install = vi.spyOn(pluginsApi, 'install').mockResolvedValue(item);
+  vi.spyOn(pluginsApi, 'pick')
+    .mockResolvedValueOnce('bad.zip')
+    .mockResolvedValueOnce('C:/plugins/resources.sdplugin');
   pinia = createPinia();
   mountManager();
   await settle();
-  const zone = root.querySelector<HTMLElement>('[aria-label="插件上传区域"]')!;
-  vi.spyOn(zone, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 20, 500, 160));
-  const drop = (paths: string[]) =>
-    native.listener!({ payload: { type: 'drop', paths, position: { x: 120, y: 60 } } });
-  drop(['bad.zip']);
+  expect(root.querySelector('[aria-label="插件上传区域"]')).toBeNull();
+  const pick = root.querySelector<HTMLButtonElement>('.plugin-heading-actions .primary')!;
+  pick.click();
   await settle();
   expect(preview).not.toHaveBeenCalled();
-  drop(['one.sdplugin', 'two.sdplugin']);
-  await settle();
-  expect(preview).not.toHaveBeenCalled();
-  drop(['C:/plugins/resources.sdplugin']);
+  pick.click();
   await settle();
   expect(preview).toHaveBeenCalledWith('C:/plugins/resources.sdplugin');
   const button = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
@@ -222,11 +195,8 @@ it('accepts one native dropped package, previews it and requires acknowledgement
   button.click();
   await settle();
   expect(install).toHaveBeenCalledWith('C:/plugins/resources.sdplugin', true, null, 'digest');
-  app.unmount();
-  expect(native.release).toHaveBeenCalledOnce();
 });
-it('ignores late preview responses after a newer drop or closing the dialog', async () => {
-  native.enabled = true;
+it('ignores late preview responses after unmounting the manager', async () => {
   vi.spyOn(pluginsApi, 'list').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   let first!: (value: unknown) => void;
@@ -237,30 +207,22 @@ it('ignores late preview responses after a newer drop or closing the dialog', as
     trust: 'local_development_unverified' as const,
     compatible: true,
   };
-  vi.spyOn(pluginsApi, 'previewInfo')
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          first = resolve as typeof first;
-        }),
-    )
-    .mockResolvedValueOnce(result);
+  vi.spyOn(pluginsApi, 'previewInfo').mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        first = resolve as typeof first;
+      }),
+  );
+  vi.spyOn(pluginsApi, 'pick').mockResolvedValue('fixture.sdplugin');
   pinia = createPinia();
   mountManager();
   await settle();
-  vi.spyOn(
-    root.querySelector<HTMLElement>('[aria-label="插件上传区域"]')!,
-    'getBoundingClientRect',
-  ).mockReturnValue(new DOMRect(0, 0, 500, 200));
-  const drop = (path: string) =>
-    native.listener!({ payload: { type: 'drop', paths: [path], position: { x: 50, y: 50 } } });
-  drop('old.sdplugin');
-  drop('new.sdplugin');
+  root.querySelector<HTMLButtonElement>('.plugin-heading-actions .primary')!.click();
   await settle();
-  first({ ...result, manifest: { ...item.manifest, name: 'stale' } });
+  app.unmount();
+  first(result);
   await settle();
-  expect(document.querySelector('.plugin-preview-heading')?.textContent).toContain('new.sdplugin');
-  expect(document.querySelector('.plugin-preview-heading')?.textContent).not.toContain('stale');
+  expect(document.querySelector('.plugin-preview-heading')).toBeNull();
 });
 
 it('combines search, source and status filters and restores the list after clearing them', async () => {

@@ -82,7 +82,7 @@ ResourceView 对 image_remove 直接提交能力请求，由既有 Rust approval
 
 NavigationModule 增加 plugins；plugins 与 pluginSettings 两种工作区视图统一映射至插件模块，AppNavigation 将唯一的插件管理入口从 system 移至 plugins。继续复用 Workspace 的标签激活与配置标签去重，功能页面仍属于 hosts，切换顶部模块只切换菜单、不改变当前工作区及主机上下文。
 
-PluginsView 基于真实 installed 清单在本地组合来源、启用状态与关键字筛选；卡片通过内容区容器查询在双列和单列间切换，不依赖整个窗口宽度。安装、原生拖放、预览代校验及卸载复用既有服务，无 IPC、Rust、权限或数据结构变化。下文设置模块下的插件管理归属为历史描述，以本节为准。
+PluginsView 基于真实 installed 清单在本地组合来源、启用状态与关键字筛选；卡片通过内容区容器查询在双列和单列间切换，不依赖整个窗口宽度。安装按钮、预览代校验及卸载复用既有服务，无 IPC、Rust、权限或数据结构变化。下文设置模块下的插件管理归属为历史描述，以本节为准。
 
 ## 2026-11-05：本机目录定位与重启迁移
 

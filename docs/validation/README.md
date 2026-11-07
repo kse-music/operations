@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[插件管理全宽布局](plugins/PLUGIN_TEST_REPORT.md#2026-11-08-插件管理全宽布局)。
+
 最新：[SFTP 目录加载状态](files/VALIDATION_STAGE4.md#2026-11-07-sftp-目录加载状态)。
 
 最新：[本地 Codex/Claude Code 缺失提示、官方下载安装及重检](ai/VALIDATION_AI_ASSISTANT.md#2026-11-07-本地工具下载安装)。

@@ -12,6 +12,8 @@ const browser = await chromium.launch({
 const results = [];
 try {
   for (const [name, width, height, theme] of [
+    ['wide-dark', 2400, 1400, 'dark'],
+    ['wide-light', 2400, 1400, 'light'],
     ['desktop-dark', 1440, 900, 'dark'],
     ['desktop-light', 1440, 900, 'light'],
     ['small-window', 900, 600, 'dark'],
@@ -96,6 +98,35 @@ try {
     assert.equal(await page.locator('.activity-rail [data-plugin-id]').count(), 0);
     await navigateWorkspace(page, '插件管理');
     await page.locator('.plugin-installed-row').first().waitFor();
+    const geometry = await page.locator('.plugin-manager').evaluate((element) => {
+      const content = element.closest('.content-scroll');
+      const style = getComputedStyle(content);
+      const paddingLeft = parseFloat(style.paddingLeft);
+      const cards = element.querySelectorAll('.plugin-installed-row');
+      return {
+        managerWidth: element.clientWidth,
+        availableWidth: content.clientWidth - paddingLeft - parseFloat(style.paddingRight),
+        leftInset:
+          element.getBoundingClientRect().left -
+          content.getBoundingClientRect().left -
+          content.clientLeft -
+          paddingLeft,
+        sameRow:
+          Math.abs(cards[0].getBoundingClientRect().top - cards[1].getBoundingClientRect().top) < 1,
+        overflow: content.scrollWidth > content.clientWidth + 1,
+      };
+    });
+    assert(
+      Math.abs(geometry.managerWidth - geometry.availableWidth) < 1 &&
+        Math.abs(geometry.leftInset) < 1,
+      `Plugin manager must fill the shared content area: ${JSON.stringify(geometry)}`,
+    );
+    assert.equal(
+      geometry.sameRow,
+      geometry.managerWidth > 840,
+      'Cards must adapt to content width',
+    );
+    assert.equal(geometry.overflow, false, 'Plugin manager must not overflow horizontally');
     for (const [id, icon] of expected) {
       assert.equal(
         await page
@@ -153,7 +184,7 @@ try {
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({ path: `${output}/${name}-host-tools.png` });
     assert.deepEqual(errors, []);
-    results.push({ name, width, height, theme, passed: true });
+    results.push({ name, width, height, theme, ...geometry, passed: true });
     await page.close();
   }
   await writeFile(`${output}/result.json`, JSON.stringify(results, null, 2));
