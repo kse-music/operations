@@ -1,97 +1,20 @@
 use super::*;
-use serverdeck_core::identity::LEGACY_PLUGIN_PREFIX;
-const PACKAGES: [(&str, &[u8]); 2] = [
-    (
-        "cn.hiboot.plugins.docker",
-        include_bytes!("../../../plugins/system/packages/docker.sdplugin"),
-    ),
-    (
-        "cn.hiboot.plugins.assistant",
-        include_bytes!("../../../plugins/system/packages/assistant.sdplugin"),
-    ),
-];
-// UI v2/v3 selected a host renderer. Keep that published contract usable for
-// installed and uploaded legacy packages without granting an ID-based privilege.
-pub(crate) fn legacy_frontend(
-    ui: &serverdeck_plugin_sdk::ui::Ui,
-    page: &str,
-    path: &str,
-) -> Result<Vec<u8>, Error> {
-    use serverdeck_plugin_sdk::{tools::Tool, ui::Surface};
-    if !matches!(path, "frontend.js" | "frontend.css") {
-        return Err(Error::Validation("插件界面资源无效"));
-    }
-    let surface = ui
-        .pages
-        .iter()
-        .find(|p| p.id == page)
-        .and_then(|p| p.surface.as_ref())
-        .ok_or(Error::Validation("插件界面不存在"))?;
-    let name = match surface {
-        Surface::Frontend => return Err(Error::Validation("独立界面没有兼容渲染器")),
-        Surface::Tool { tool } => match tool {
-            Tool::Assistant => "assistant",
-        },
-        Surface::Operations { .. } => {
-            return Ok(if path.ends_with(".js") {
-                include_bytes!("../../../plugins/compat/server/assets/frontend.js").to_vec()
-            } else {
-                include_bytes!("../../../plugins/compat/server/assets/frontend.css").to_vec()
-            });
-        }
-    };
-    let bytes = PACKAGES
-        .iter()
-        .find(|(id, _)| id.rsplit('.').next() == Some(name))
-        .map(|(_, bytes)| *bytes)
-        .ok_or(Error::Validation("兼容界面不可用"))?;
-    let package =
-        serverdeck_plugin_core::package::Package::validate_bytes(bytes, std::env::consts::OS)?;
-    package
-        .files
-        .into_iter()
-        .find(|(entry, _)| entry == path)
-        .map(|(_, bytes)| bytes)
-        .ok_or(Error::Validation("兼容界面资源缺失"))
-}
+include!("../../../plugins/system/packages/registry.rs");
 impl Application {
     /// Startup-only standard package distribution with fixed system grants.
     /// A tombstone preserves uninstall; existing enable choices remain unchanged.
     pub fn provision_bundled_plugins(&self) -> Result<(), Error> {
         for (id, bytes) in PACKAGES {
-            let old_id = id.replacen("cn.hiboot.plugins.", LEGACY_PLUGIN_PREFIX, 1);
-            let previous = match self.plugins.detail(&old_id) {
-                Ok(plugin) => Some(plugin),
-                Err(Error::NotFound) => None,
-                Err(error) => return Err(error),
-            };
             let configured = self.database.bundled_plugin_provisioned(id)?;
             if !configured {
                 match self.plugins.detail(id) {
                     Ok(_) => (),
                     Err(Error::NotFound) => {
-                        // Preserve an uninstall performed under the previous domain.
-                        if previous.is_some()
-                            || !self.database.bundled_plugin_provisioned(&old_id)?
-                        {
-                            self.plugins.install_bundled(bytes, id)?;
-                            let enabled = previous
-                                .as_ref()
-                                .filter(|plugin| {
-                                    plugin.source
-                                        == serverdeck_plugin_core::repository::PluginSource::System
-                                })
-                                .is_none_or(|plugin| plugin.enabled);
-                            self.plugins.set_enabled(id, enabled)?;
-                        }
+                        self.plugins.install_bundled(bytes, id)?;
+                        self.plugins.set_enabled(id, true)?;
                     }
                     Err(error) => return Err(error),
                 }
-            }
-            if previous.is_some_and(|p| {
-                p.source == serverdeck_plugin_core::repository::PluginSource::System
-            }) {
-                self.plugins.retire_bundled_identity(&old_id, id)?;
             }
             match self.plugins.detail(id) {
                 Ok(plugin)
@@ -110,7 +33,6 @@ impl Application {
                             serverdeck_plugin_core::permissions::GrantInput {
                                 expected_revision: plugin.revision,
                                 permissions: grant.permissions,
-                                host_ids: vec![],
                                 operations: grant.operations,
                                 read_roots: grant.read_roots,
                                 write_roots: grant.write_roots,
@@ -159,7 +81,6 @@ fn bundled_grant(
         GrantInput {
             expected_revision: plugin.revision.clone(),
             permissions: plugin.manifest.permissions.clone(),
-            host_ids: vec![],
             operations,
             read_roots: if plugin.manifest.permissions.contains(&Permission::SftpRead) {
                 vec!["/".into()]
@@ -183,6 +104,14 @@ mod tests {
         permissions::GrantInput,
         repository::{InstallInput, PluginSource, UninstallInput},
     };
+
+    fn bundled(id: &str) -> (&'static str, &'static [u8]) {
+        PACKAGES
+            .iter()
+            .copied()
+            .find(|(key, _)| *key == id)
+            .unwrap()
+    }
 
     #[tokio::test]
     async fn releasing_pages_allows_both_guests_to_run_and_reactivate_without_disabling() {
@@ -211,18 +140,22 @@ mod tests {
                     .all(|s| s.state == State::Stopped)
             );
         }
-        assert_eq!(app.plugin_statuses().unwrap().len(), 2);
+        assert_eq!(app.plugin_statuses().unwrap().len(), PACKAGES.len());
         app.shutdown().await;
     }
 
     #[tokio::test]
     async fn bundled_update_preserves_settings_enable_choices_uploads_and_uninstall() {
+        let packages = [
+            bundled("cn.hiboot.plugins.docker"),
+            bundled("cn.hiboot.plugins.assistant"),
+        ];
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         let logs = dir.path().join("logs");
         let app = Application::initialize(data.clone(), logs.clone()).unwrap();
         let mut previous = Vec::new();
-        for (index, (id, bytes)) in PACKAGES.iter().enumerate() {
+        for (index, (id, bytes)) in packages.iter().enumerate() {
             let mut package: serde_json::Value = serde_json::from_slice(bytes).unwrap();
             package["manifest"]["version"] = json!("1.1.1");
             let old = app
@@ -235,7 +168,7 @@ mod tests {
             app.database.mark_bundled_plugin_provisioned(id).unwrap();
         }
         app.provision_bundled_plugins().unwrap();
-        for (index, (id, bytes)) in PACKAGES.iter().enumerate() {
+        for (index, (id, bytes)) in packages.iter().enumerate() {
             let plugin = app.plugins.detail(id).unwrap();
             let mut package: serde_json::Value = serde_json::from_slice(bytes).unwrap();
             assert_eq!(
@@ -261,21 +194,21 @@ mod tests {
             );
         }
         app.plugin_uninstall(UninstallInput {
-            id: PACKAGES[1].0.into(),
+            id: packages[1].0.into(),
             clear_data: false,
             confirmed: true,
         })
         .await
         .unwrap();
         app.plugin_uninstall(UninstallInput {
-            id: PACKAGES[0].0.into(),
+            id: packages[0].0.into(),
             clear_data: false,
             confirmed: true,
         })
         .await
         .unwrap();
         let path = dir.path().join("upload.sdplugin");
-        std::fs::write(&path, PACKAGES[0].1).unwrap();
+        std::fs::write(&path, packages[0].1).unwrap();
         let upload = app
             .plugin_install(InstallInput {
                 path,
@@ -287,27 +220,27 @@ mod tests {
             .unwrap();
         app.provision_bundled_plugins().unwrap();
         assert_eq!(
-            app.plugins.detail(PACKAGES[0].0).unwrap().source,
+            app.plugins.detail(packages[0].0).unwrap().source,
             PluginSource::User
         );
         assert_eq!(
-            app.plugins.detail(PACKAGES[0].0).unwrap().revision,
+            app.plugins.detail(packages[0].0).unwrap().revision,
             upload.revision
         );
-        assert!(app.plugins.grant(PACKAGES[0].0).unwrap().is_none());
+        assert!(app.plugins.grant(packages[0].0).unwrap().is_none());
         assert!(matches!(
-            app.plugins.detail(PACKAGES[1].0),
+            app.plugins.detail(packages[1].0),
             Err(Error::NotFound)
         ));
         app.shutdown().await;
         let restarted = Application::initialize(data, logs).unwrap();
         restarted.provision_bundled_plugins().unwrap();
         assert_eq!(
-            restarted.plugins.detail(PACKAGES[0].0).unwrap().revision,
+            restarted.plugins.detail(packages[0].0).unwrap().revision,
             upload.revision
         );
         assert!(matches!(
-            restarted.plugins.detail(PACKAGES[1].0),
+            restarted.plugins.detail(packages[1].0),
             Err(Error::NotFound)
         ));
         restarted.shutdown().await;
@@ -315,6 +248,7 @@ mod tests {
 
     #[tokio::test]
     async fn system_packages_have_fixed_defaults_while_uploaded_packages_still_require_grants() {
+        let docker = bundled("cn.hiboot.plugins.docker");
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         let logs = dir.path().join("logs");
@@ -328,6 +262,13 @@ mod tests {
             assert!(plugin.enabled);
             let defaults = app.plugin_permissions(id.clone()).await.unwrap().unwrap();
             assert_eq!(defaults.permissions, plugin.manifest.permissions);
+            assert_eq!(defaults, bundled_grant(&plugin).unwrap());
+            if !matches!(
+                id.as_str(),
+                "cn.hiboot.plugins.docker" | "cn.hiboot.plugins.assistant"
+            ) {
+                continue;
+            }
             if id.ends_with("docker") {
                 assert!(defaults.operations.contains(&"system.shell".into()));
                 assert!(
@@ -342,7 +283,6 @@ mod tests {
                     GrantInput {
                         expected_revision: plugin.revision.clone(),
                         permissions: vec![serverdeck_plugin_core::Permission::UiContribute],
-                        host_ids: vec![],
                         operations: vec!["ui.contribute".into()],
                         read_roots: vec![],
                         write_roots: vec![],
@@ -404,19 +344,19 @@ mod tests {
                     .is_err()
             );
         }
-        // Upgrading the application repairs legacy partial grants, without re-enabling plugins.
-        app.plugins.revoke_grant(PACKAGES[0].0).unwrap();
+        // Provisioning restores fixed system grants without re-enabling disabled plugins.
+        app.plugins.revoke_grant(docker.0).unwrap();
         app.provision_bundled_plugins().unwrap();
         assert!(
-            app.plugin_permissions(PACKAGES[0].0.into())
+            app.plugin_permissions(docker.0.into())
                 .await
                 .unwrap()
                 .unwrap()
                 .operations
                 .contains(&"system.shell".into())
         );
-        assert!(!app.plugins.detail(PACKAGES[0].0).unwrap().enabled);
-        let id = PACKAGES[0].0;
+        assert!(!app.plugins.detail(docker.0).unwrap().enabled);
+        let id = docker.0;
         app.plugin_uninstall(UninstallInput {
             id: id.into(),
             clear_data: false,
@@ -427,7 +367,7 @@ mod tests {
         app.provision_bundled_plugins().unwrap();
         assert_eq!(app.plugin_list().await.unwrap().len(), PACKAGES.len() - 1);
         let path = dir.path().join("upload.sdplugin");
-        std::fs::write(&path, PACKAGES[0].1).unwrap();
+        std::fs::write(&path, docker.1).unwrap();
         let uploaded = app
             .plugin_install(InstallInput {
                 path,
@@ -455,99 +395,69 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(!restarted.plugins.detail(PACKAGES[0].0).unwrap().enabled);
+        assert!(!restarted.plugins.detail(docker.0).unwrap().enabled);
         restarted.shutdown().await;
     }
     #[tokio::test]
-    async fn domain_migration_preserves_settings_and_uninstall_choice_and_uses_system_defaults() {
-        let dir = tempfile::tempdir().unwrap();
-        let app =
-            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-        let old_id = format!("{LEGACY_PLUGIN_PREFIX}docker");
-        let old = old_id.as_str();
-        let mut package: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
-        package["manifest"]["id"] = json!(old);
-        let previous = app
-            .plugins
-            .install_bundled(&serde_json::to_vec(&package).unwrap(), old)
-            .unwrap();
-        app.plugins
-            .settings_write(old, &json!({"keep":"my configuration"}))
-            .unwrap();
-        app.plugins
-            .set_grant(
-                old,
-                GrantInput {
-                    expected_revision: previous.revision,
-                    permissions: vec![serverdeck_plugin_core::Permission::UiContribute],
-                    host_ids: vec![],
-                    operations: vec!["ui.contribute".into()],
-                    read_roots: vec![],
-                    write_roots: vec![],
-                    confirmed: true,
-                },
-            )
-            .unwrap();
-        app.database.mark_bundled_plugin_provisioned(old).unwrap();
-        app.database
-            .mark_bundled_plugin_provisioned(&format!("{LEGACY_PLUGIN_PREFIX}assistant"))
-            .unwrap();
-        app.provision_bundled_plugins().unwrap();
-        assert!(matches!(app.plugins.detail(old), Err(Error::NotFound)));
-        let migrated = app.plugins.detail("cn.hiboot.plugins.docker").unwrap();
-        assert!(!migrated.enabled);
-        assert_eq!(
-            app.plugins
-                .settings_read("cn.hiboot.plugins.docker")
-                .unwrap()["keep"],
-            "my configuration"
-        );
-        assert!(
-            app.plugins
-                .grant("cn.hiboot.plugins.docker")
-                .unwrap()
-                .is_some_and(|g| g.permissions == migrated.manifest.permissions)
-        );
-        assert!(matches!(
-            app.plugins.detail("cn.hiboot.plugins.assistant"),
-            Err(Error::NotFound)
-        ));
-        app.provision_bundled_plugins().unwrap();
-        assert_eq!(app.plugin_list().await.unwrap().len(), PACKAGES.len() - 1);
-        app.shutdown().await;
-    }
-    #[tokio::test]
-    async fn removed_service_identities_are_not_reprovisioned() {
+    async fn only_current_system_packages_are_provisioned() {
         let dir = tempfile::tempdir().unwrap();
         let app =
             Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
         for _ in 0..2 {
             app.provision_bundled_plugins().unwrap();
-            let ids: Vec<_> = app
+            let ids: std::collections::BTreeSet<_> = app
                 .plugin_list()
                 .await
                 .unwrap()
                 .into_iter()
                 .map(|p| p.manifest.id)
                 .collect();
-            assert_eq!(ids.len(), 2);
-            assert!(
-                ids.iter()
-                    .all(|id| id.ends_with("docker") || id.ends_with("assistant"))
+            let expected = PACKAGES.iter().map(|(id, _)| (*id).to_owned()).collect();
+            assert_eq!(ids, expected);
+            assert_eq!(
+                ids.len(),
+                PACKAGES.len(),
+                "bundled plugin IDs must be unique"
             );
-        }
-        for id in [
-            "cn.hiboot.plugins.services".to_owned(),
-            format!("{LEGACY_PLUGIN_PREFIX}services"),
-        ] {
-            assert!(matches!(app.plugins.detail(&id), Err(Error::NotFound)));
-            let mut package: serde_json::Value = serde_json::from_slice(PACKAGES[0].1).unwrap();
-            package["manifest"]["id"] = json!(id);
-            assert!(
-                app.plugins
-                    .install_bundled(&serde_json::to_vec(&package).unwrap(), &id)
-                    .is_err()
+            let sources =
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/system");
+            let mut source_ids = std::collections::BTreeSet::new();
+            for entry in std::fs::read_dir(sources).unwrap() {
+                let entry = entry.unwrap();
+                if !entry.file_type().unwrap().is_dir() || entry.file_name() == "packages" {
+                    continue;
+                }
+                let manifest: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(entry.path().join("manifest.json")).unwrap(),
+                )
+                .unwrap();
+                source_ids.insert(manifest["id"].as_str().unwrap().to_owned());
+            }
+            assert_eq!(
+                ids, source_ids,
+                "rebuild plugins when source directories change"
             );
+            for plugin in app.plugin_list().await.unwrap() {
+                if plugin.manifest.entry.ui.is_none() {
+                    continue;
+                }
+                let ui = app
+                    .plugins
+                    .ui(&plugin.manifest.id, &plugin.revision)
+                    .unwrap();
+                let frontend = ui.frontend.unwrap();
+                for asset in [frontend.script, frontend.style] {
+                    let bytes = app
+                        .plugins
+                        .frontend_asset(&plugin.manifest.id, &plugin.revision, &asset)
+                        .unwrap();
+                    assert!(
+                        !bytes.is_empty(),
+                        "{} must supply {asset}",
+                        plugin.manifest.id
+                    );
+                }
+            }
         }
         app.shutdown().await;
     }

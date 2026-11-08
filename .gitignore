@@ -4,9 +4,9 @@
 **/dist/
 **/src-tauri/gen/
 .local/
-/plugins/compat/server/assets/
 *.sdplugin
 *.sdplugin.tmp
+/plugins/system/packages/registry.rs
 *.log
 *.sqlite3
 *.sqlite3-shm

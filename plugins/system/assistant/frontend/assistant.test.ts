@@ -24,8 +24,8 @@ const api = vi.hoisted(() => ({
   end: vi.fn(),
 }));
 vi.mock('@serverdeck/plugin-sdk/services/ai', () => ({ aiApi: api }));
-vi.mock('@serverdeck/plugin-sdk/services/plugin-server', () => ({
-  pluginServerRequest: api.settings,
+vi.mock('@serverdeck/plugin-sdk/services/capability', () => ({
+  requestCapability: api.settings,
 }));
 vi.mock('@serverdeck/plugin-sdk/services/hosts', () => ({ hostsApi: { list: api.hostList } }));
 vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({
@@ -49,7 +49,6 @@ const preview: AiPreview = {
   body: '{"messages":[{"content":"safe-preview"}]}',
   estimatedInputTokens: 100,
   maxOutputTokens: 1024,
-  estimatedMaxCost: null,
   warnings: ['检查脱敏'],
 };
 const answer: AiAnswer = {
@@ -81,7 +80,6 @@ const answer: AiAnswer = {
     },
   ],
   usage: { inputTokens: 10, outputTokens: 20 },
-  estimatedCost: 0.01,
   warnings: ['不可信内容'],
 };
 async function settle() {
@@ -916,7 +914,7 @@ it('shows model identity and missing Key status without changing the saved bindi
   await settle();
   expect(root.querySelector('.binding-current')!.textContent).toContain('模型 A');
   expect(root.textContent).toContain('有未保存的更改');
-  expect(api.settings.mock.calls.some(([, operation]) => operation.kind === 'settings_write')).toBe(
+  expect(api.settings.mock.calls.some(([operation]) => operation.kind === 'settings_write')).toBe(
     false,
   );
   expect(button('保存模型绑定').disabled).toBe(false);
@@ -925,7 +923,7 @@ it('shows model identity and missing Key status without changing the saved bindi
 it('binds a model from plugin settings, persists it across remounts and preserves other settings', async () => {
   let value: Record<string, unknown> = { otherSetting: 'keep' };
   api.settings.mockImplementation(
-    async (_id: string, operation: { kind: string; value?: Record<string, unknown> }) => {
+    async (operation: { kind: string; value?: Record<string, unknown> }) => {
       if (operation.kind === 'settings_write') {
         value = operation.value!;
         return null;
@@ -1033,9 +1031,9 @@ it.each(localProviders)(
     await settle();
     expect(button(`授权使用${source.name}`)).toBeDefined();
     expect(source.authorize).not.toHaveBeenCalled();
-    expect(
-      api.settings.mock.calls.some(([, operation]) => operation.kind === 'settings_write'),
-    ).toBe(false);
+    expect(api.settings.mock.calls.some(([operation]) => operation.kind === 'settings_write')).toBe(
+      false,
+    );
   },
 );
 
@@ -1129,7 +1127,7 @@ it.each(localProviders)(
     };
     let value: Record<string, unknown> = { modelId: 'model-a', keep: true };
     api.settings.mockImplementation(
-      async (_id: string, operation: { kind: string; value?: Record<string, unknown> }) => {
+      async (operation: { kind: string; value?: Record<string, unknown> }) => {
         if (operation.kind === 'settings_write') {
           value = operation.value!;
           return null;

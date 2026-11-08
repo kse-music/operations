@@ -3,21 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductPreferences {
     pub language: String,
     pub download_directory: Option<String>,
     pub ssh_defaults: SshOptions,
-    #[serde(deserialize_with = "retire_task_shortcut")]
     pub shortcuts: BTreeMap<String, String>,
-}
-fn retire_task_shortcut<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let mut shortcuts = BTreeMap::<String, String>::deserialize(deserializer)?;
-    shortcuts.remove("tasks");
-    Ok(shortcuts)
 }
 impl Default for ProductPreferences {
     fn default() -> Self {

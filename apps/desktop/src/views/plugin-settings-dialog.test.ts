@@ -7,6 +7,12 @@ import { useHostsStore } from '../stores/hosts';
 import { useWorkspaceStore } from '../stores/workspace';
 import { pluginsApi } from '../services/plugins';
 import { systemPluginFixtures } from '../services/system-plugins.fixture';
+vi.mock('../components/PluginFrame.vue', () => ({
+  default: {
+    props: ['hostId', 'page'],
+    template: '<div data-frame :data-host="hostId" :data-page="page.id" />',
+  },
+}));
 let app: App, container: HTMLElement, root: HTMLDialogElement, pinia: Pinia;
 const showModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 async function mount(pluginId: string) {
@@ -131,7 +137,7 @@ it('does not overwrite permission edits when the installed list refreshes with u
   expect(root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!.checked).toBe(true);
 });
 
-it('opens a declared settings form in a hostless dialog and discards its draft on cancel', async () => {
+it('opens an independent settings frontend in a hostless dialog and closes it on cancel', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const plugins = usePluginsStore(),
@@ -157,11 +163,13 @@ it('opens a declared settings form in a hostless dialog and discards its draft o
   plugins.schemas[plugin.manifest.id] = {
     revision: plugin.revision,
     ui: {
-      uiVersion: 1,
+      uiVersion: 4,
+      frontend: { script: 'frontend.js', style: 'frontend.css' },
       title: '配置',
       pages: [
         {
           id: 'settings',
+          surface: { kind: 'frontend' },
           title: '插件配置',
           initialAction: null,
           log: null,
@@ -185,16 +193,14 @@ it('opens a declared settings form in a hostless dialog and discards its draft o
   const workspace = useWorkspaceStore();
   workspace.navigate('plugins');
   await mount(plugin.manifest.id);
-  const input = root.querySelector<HTMLInputElement>('.plugin-form input')!;
-  expect(input.value).toBe('配置草稿');
+  expect(root.querySelector('[data-frame]')?.getAttribute('data-host')).toBe('');
+  expect(root.querySelector('[data-frame]')?.getAttribute('data-page')).toBe('settings');
   expect(root.querySelector<HTMLElement>('.plugin-management-panel')!.style.display).toBe('none');
   expect(workspace.current?.view).toBe('plugins');
   expect(workspace.tabs).toHaveLength(1);
   expect(pluginsApi.context).toHaveBeenCalledWith(plugin.manifest.id, null);
-  input.value = '临时草稿';
-  input.dispatchEvent(new Event('input', { bubbles: true }));
   root.querySelector<HTMLButtonElement>('.plugin-config-footer button')!.click();
   await settle();
   expect(document.querySelector('dialog[open]')).toBeNull();
-  expect(plugins.drafts[`plugin-settings:${plugin.manifest.id}:settings`]).toBeUndefined();
+  expect(workspace.pluginConfiguration).toBeUndefined();
 });

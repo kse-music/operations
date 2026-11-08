@@ -1,12 +1,12 @@
 # 本地插件包 v1
 
-当前 Host/Rust/Vue SDK 为 4.0.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；旧包处理见[版本策略](PLUGIN_API_VERSIONING.md#300移除网络诊断)。下述版本号同时记录字段首次引入的最低宿主版本。
+当前 Host/Rust/Vue SDK 为 4.0.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；只使用当前契约，见[版本策略](PLUGIN_API_VERSIONING.md)。
 
-## UI v4 前端入口（Host API 1.4.0）
+## UI v4 前端入口
 
 包格式仍为 1。`entry.ui` 仍指向严格 JSON，不接收包内 HTML。`uiVersion:4` 必须声明 `frontend:{"script":"frontend.js","style":"frontend.css"}`，二者必须是包内真实普通文件，进入 files 的长度/SHA256 校验和现有单文件/总量上限。入口仅允许最长 80 字节的平面 ASCII 文件名，分别以 `.js`/`.css` 结束，不允许点开头、`..`、路径、URL 或额外资源入口。
 
-宿主提供固定 HTML 壳并使用受限本地协议加载这两个入口；包内 JS/CSS 不进入宿主 DOM。构建工具把 Vue 和普通库打入单文件，图片可使用 data URI，运行时不能加载远程资源、动态分块或任意本地路径。新包需 `apiVersion:^1.4.0`；图标规则不变。UI v1–v3 不允许 frontend 字段并继续兼容。完整页面契约见[UI v4](PLUGIN_UI_EXTENSION.md#ui-v4包内独立界面)。
+宿主提供固定 HTML 壳并使用受限本地协议加载这两个入口；包内 JS/CSS 不进入宿主 DOM。构建工具把 Vue 和普通库打入单文件，图片可使用 data URI，运行时不能加载远程资源、动态分块或任意本地路径。新包需 `apiVersion:^4.0.0`；图标规则不变。仅接受 UI v4，缺少包内 frontend 或页面 surface 的声明直接拒绝。完整页面契约见[UI v4](PLUGIN_UI_EXTENSION.md#ui-v4包内独立界面)。
 
 ## 可选插件图标（Host API 1.3.0）
 
@@ -23,17 +23,17 @@
 
 名称最多 64 字节，使用小写字母、数字和单个连字符分隔，首字符为字母。空串、路径、URL、标记文本及其他类型无效。当前支持：`activity`、`archive`、`bot`、`boxes`、`calendar-clock`、`chart-no-axes-combined`、`cloud`、`code`、`container`、`cpu`、`database`、`file-text`、`folder`、`globe`、`hard-drive`、`layers`、`list-tree`、`network`、`radio`、`rocket`、`scroll-text`、`search`、`server`、`settings-2`、`shield`、`terminal`、`wrench`。这些名称对应宿主静态内置的 Lucide 图标，大小与颜色随界面统一控制。
 
-使用 icon 的新包应声明 `apiVersion: "^1.3.0"`，避免将含新字段的包分发给严格拒绝未知字段的旧宿主。formatVersion/schemaVersion 仍为 1，SDK 1.2.0 与 WASM ABI、UI v1/v2/v3 不变；旧包无需补 icon。
+插件声明 `apiVersion: "^4.0.0"`，icon 为当前契约中的可选配置；包/Manifest 格式及 WASM ABI 为 1，UI 为 v4。
 
 ## SDK 4.0 工具贡献
 
-formatVersion/schemaVersion 仍为 1。使用工具的新包声明 apiVersion ^3.0.0、uiVersion 3 或 4；贡献 kind=tool 且 tool 仅为 assistant，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
+formatVersion/schemaVersion 仍为 1。使用工具的新包声明 apiVersion ^4.0.0、uiVersion 4；贡献 kind=tool 且 tool 仅为 assistant，其他贡献不能携带 tool 字段。必须有匹配页面的工具标准视图和独立 WASM 后端，完整校验通过后才可安装。
 
 13A-1 使用 `.sdplugin`，UTF-8 JSON：`{formatVersion: 1, manifest, files: [{path, content}]}`。content 为严格标准 base64，不压缩，不支持链接、设备文件或权限位。源码目录使用 `manifest.json`；打包器将其嵌入 manifest 字段并生成 files 校验清单。不得当作 ZIP 解包。
 
 严格校验由 `crates/plugin-core/src/manifest.rs` 和 `package.rs` 实现，所有结构拒绝未知字段、重复对象字段；数组路径拒绝大小写冲突、文件/目录冲突和重复项。版本化协议需要修改 schemaVersion/formatVersion。当前只接收 1。
 
-manifest 必填：schemaVersion、id（小写反向域名）、name、version（SemVer）、author、description、apiVersion（SemVer 范围）、entry（backend 可空且仅 `.wasm`，ui 可空且新安装只允许严格声明式 `.json`）、permissions、contributions、platforms、files、publisher（可空，自述身份，不代表验证通过）。后端/UI 入口必须在 files 中。贡献声明包含 id、label、kind（workspace/navigation/host_menu/command/settings/server），需要 ui.contribute 声明与 UI 入口。早期阶段允许登记的 .html 元数据仍可列举/卸载，但不会执行，也不能作为新 UI 包安装；当前 UI v1/v2 见 [PLUGIN_UI_EXTENSION.md](PLUGIN_UI_EXTENSION.md)。
+manifest 必填：schemaVersion、id（小写反向域名）、name、version（SemVer）、author、description、apiVersion（SemVer 范围）、entry（backend 可空且仅 `.wasm`，ui 可空且新安装只允许严格声明式 `.json`）、permissions、contributions、platforms、files、publisher（可空，自述身份，不代表验证通过）。后端/UI 入口必须在 files 中。贡献声明包含 id、label、kind（workspace/navigation/host_menu/command/settings/server），需要 ui.contribute 声明与 UI 入口。UI 入口仅接受 JSON 声明，页面必须自带前端，见 [UI v4](PLUGIN_UI_EXTENSION.md)。
 
 files 校验清单每项为 path、size（解码字节数）、sha256（小写十六进制）。每个实际文件须有且只有一个校验项，缺失、额外、损坏均拒绝。manifest.json 是保留名，不允许作为普通载荷文件。
 
@@ -45,6 +45,6 @@ files 校验清单每项为 path、size（解码字节数）、sha256（小写�
 
 示例：`node tools/package-plugin.mjs tests/fixtures/plugins/metadata .local/metadata.sdplugin`（输出必须不存在）。打包器只准备文件，最终权威校验始终在 Rust。
 
-SDK 1.1 的 server 贡献必须对应 UI v2 surface 页面。安装记录的 source 由 Host 写入，不属于包 manifest；上传不能声明 system 来源。分发内置包使用相同 Package 校验和文件摘要，默认禁用/未授权，来源标签不是数字签名。
+server 贡献必须对应 UI v4 operations surface 页面。安装记录的 source 由 Host 写入，不属于包 manifest；上传不能声明 system 来源。分发内置包使用相同 Package 校验和文件摘要，由宿主设置系统来源与预置权限；上传包默认禁用/未授权，来源标签不是数字签名。
 
-运行时版本内容按安装来源存放在应用数据目录 plugins/system/<ID>/versions/<revision> 或 plugins/upload/<ID>/versions/<revision>。packages/<ID>/record.json 为统一记录，备份保留其原来源/安装代；授权与个人数据仍共享 authorizations 和 data 路径。旧 packages/<ID>/versions 在启动时迁移，不重写包或授权。
+运行时版本内容按安装来源存放在应用数据目录 plugins/system/<ID>/versions/<revision> 或 plugins/upload/<ID>/versions/<revision>。packages/<ID>/record.json 为统一记录，备份保留其原来源/安装代；授权与个人数据仍共享 authorizations 和 data 路径。不读取或迁移旧 packages/<ID>/versions 布局。

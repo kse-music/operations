@@ -32,7 +32,7 @@ const settle = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await nextTick();
 };
-it('requires explicit upgrade approval; cancelled upgrade preserves drafts and failure clears stale bindings', async () => {
+it('requires explicit upgrade approval; cancelled upgrade preserves schemas and failure clears stale bindings', async () => {
   const manifest: PluginManifest = {
     schemaVersion: 1,
     id: 'dev.example',
@@ -40,7 +40,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
     version: '1.0.0',
     author: 'Developer',
     description: '',
-    apiVersion: '^1',
+    apiVersion: '^4.0.0',
     entry: { backend: null, ui: null },
     permissions: [],
     contributions: [],
@@ -63,7 +63,6 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
     manifest: { ...manifest, version: '1.1.0' },
     packageDigest: 'preview-digest',
     trust: 'local_development_unverified',
-    compatible: true,
   });
   const install = vi
       .spyOn(pluginsApi, 'install')
@@ -74,13 +73,13 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
   await settle();
   expect(root.querySelector('[aria-label="插件界面语言"]')).toBeNull();
   const plugins = usePluginsStore(pinia);
-  const key = 'extension:dev.example:host:a';
-  plugins.drafts[key] = {
-    values: { content: 'unsaved' },
-    output: null,
-    dirty: true,
-    revision: 'old',
+  const ui = {
+    uiVersion: 4 as const,
+    title: 'Test',
+    pages: [],
+    frontend: { script: 'frontend.js', style: 'frontend.css' },
   };
+  plugins.schemas['dev.example'] = { revision: 'old', ui };
   vi.spyOn(pluginsApi, 'pick').mockResolvedValue('fixture.sdplugin');
   expect(root.querySelector('[aria-label="本地插件包路径"]')).toBeNull();
   const button = (text: string) =>
@@ -97,7 +96,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
   expect(install).not.toHaveBeenCalled();
   plugins.decide(false);
   await settle();
-  expect(plugins.drafts[key]?.dirty).toBe(true);
+  expect(plugins.schemas['dev.example']?.revision).toBe('old');
   expect(context).not.toHaveBeenCalled();
   button('升级插件').click();
   await nextTick();
@@ -105,7 +104,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves drafts and f
   await settle();
   expect(context).toHaveBeenCalledWith('dev.example', null);
   expect(install).toHaveBeenCalledWith('fixture.sdplugin', true, '1.0.0', 'preview-digest');
-  expect(plugins.drafts[key]).toBeUndefined();
+  expect(plugins.schemas['dev.example']).toBeUndefined();
   expect(plugins.installed[0]?.revision).toBe('old');
   expect(useNotificationsStore(pinia).items).toEqual(
     expect.arrayContaining([expect.objectContaining({ text: 'Commit failed', error: true })]),
@@ -158,6 +157,37 @@ it('opens settings by name or gear for every installed plugin', async () => {
   }
 });
 
+it('shows an additional system plugin from the host list without a built-in UI registration', async () => {
+  const items = systemPluginFixtures();
+  const extra: InstalledPlugin = {
+    ...items[0]!,
+    manifest: {
+      ...items[0]!.manifest,
+      id: 'org.example.new-tool',
+      name: '新增内置工具',
+      icon: 'database',
+    },
+    enabled: true,
+    revision: 'new-system-plugin',
+  };
+  items.push(extra);
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(items);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  const settings = vi.fn();
+  mountManager(settings);
+  await settle();
+  expect(root.querySelectorAll('[data-plugin-id]')).toHaveLength(3);
+  const card = root.querySelector('[data-plugin-id="org.example.new-tool"]')!;
+  expect(card.textContent).toContain('新增内置工具');
+  expect(card.querySelector('.plugin-source')?.textContent).toBe('系统内置');
+  expect(card.querySelector('.plugin-status')?.textContent).toBe('已启用');
+  expect(card.querySelector('svg.lucide-database')).not.toBeNull();
+  card.querySelector<HTMLButtonElement>('.plugin-name-button')!.click();
+  expect(settings).toHaveBeenCalledWith(extra.manifest.id);
+});
+
 it('previews a selected package and requires acknowledgement before installing', async () => {
   vi.spyOn(pluginsApi, 'list').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
@@ -166,7 +196,6 @@ it('previews a selected package and requires acknowledgement before installing',
     manifest: item.manifest,
     packageDigest: 'digest',
     trust: 'local_development_unverified',
-    compatible: true,
   });
   const install = vi.spyOn(pluginsApi, 'install').mockResolvedValue(item);
   vi.spyOn(pluginsApi, 'pick')
@@ -205,7 +234,6 @@ it('ignores late preview responses after unmounting the manager', async () => {
     manifest: item.manifest,
     packageDigest: 'new',
     trust: 'local_development_unverified' as const,
-    compatible: true,
   };
   vi.spyOn(pluginsApi, 'previewInfo').mockImplementationOnce(
     () =>

@@ -73,8 +73,6 @@
     "allow-app-exit-confirm",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "allow-workspace-load",
-    "allow-workspace-save",
     "allow-forward-start",
     "allow-forward-list",
     "allow-forward-stop",

@@ -1,1 +1,0 @@
-ALTER TABLE hosts ADD COLUMN ssh_options TEXT NOT NULL DEFAULT '{}';

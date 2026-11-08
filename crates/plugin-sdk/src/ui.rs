@@ -124,27 +124,24 @@ impl Label {
 }
 impl Ui {
     pub fn validate(&self) -> Result<(), &'static str> {
-        if !matches!(self.ui_version, 1..=4)
+        if self.ui_version != 4
             || !self.title.valid()
             || self.pages.is_empty()
             || self.pages.len() > 8
-            || self
-                .frontend
-                .as_ref()
-                .is_some_and(|f| self.ui_version != 4 || !f.valid())
-            || (self.ui_version == 4 && self.frontend.is_none())
+            || self.frontend.as_ref().is_none_or(|f| !f.valid())
         {
             return Err("UI 版本、标题或页面数量无效");
         }
         let mut pages = BTreeSet::new();
         for page in &self.pages {
+            if page.surface.is_none() {
+                return Err("插件页面必须声明独立界面类型");
+            }
             if let Some(surface) = &page.surface {
                 let valid = match surface {
-                    Surface::Frontend => self.ui_version == 4,
-                    Surface::Tool { .. } => matches!(self.ui_version, 3 | 4),
+                    Surface::Frontend | Surface::Tool { .. } => true,
                     Surface::Operations { sections } => {
-                        matches!(self.ui_version, 2..=4)
-                            && valid_sections(sections, &["containers", "images"])
+                        valid_sections(sections, &["containers", "images"])
                     }
                 };
                 if !valid

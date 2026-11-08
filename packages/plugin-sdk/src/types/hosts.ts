@@ -9,8 +9,6 @@ export interface HostInput {
   authType: AuthType;
   credentialId: string | null;
   groupId: string | null;
-  /** Legacy metadata retained for database/backup compatibility; no management UI. */
-  tags: string[];
   description: string;
   favorite: boolean;
   connectTimeoutSecs: number;
@@ -102,7 +100,6 @@ export function hostInput(host?: Host, timeout = 15): HostInput {
     authType: host?.authType ?? 'agent',
     credentialId: host?.credentialId ?? null,
     groupId: host?.groupId ?? null,
-    tags: [...(host?.tags ?? [])],
     description: host?.description ?? '',
     favorite: host?.favorite ?? false,
     connectTimeoutSecs: host?.connectTimeoutSecs ?? timeout,

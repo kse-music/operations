@@ -6,7 +6,7 @@
 
 ## 当前推荐：完整插件目录与 UI v4
 
-两个系统插件和上传插件采用同一源码/包结构：
+系统插件和上传插件采用同一源码/包结构：
 
 ```text
 plugins/system/<name>/       # 上传源码可放任意显式目录
@@ -21,7 +21,15 @@ plugins/system/<name>/       # 上传源码可放任意显式目录
     src/lib.rs               # 自身 WASM 业务/能力策略及 Rust 测试
 ```
 
-公共前端类型、客户端、Store、基础 UI 和主题在 `packages/plugin-sdk`；前端导入 `@serverdeck/plugin-sdk/...`，禁止引用 `apps/desktop`、其他插件或 Tauri。共享基础优先提入 SDK，避免插件互相引用业务实现。完整新业务示例是 `tests/fixtures/plugins/custom-ui`，不需要在宿主新增页面/工具分支。旧 v2/v3 兼容源码单独放在 `plugins/compat`，不作为新插件开发模板。
+公共前端类型、客户端、Store、基础 UI 和主题在 `packages/plugin-sdk`；前端导入 `@serverdeck/plugin-sdk/...`，禁止引用 `apps/desktop`、其他插件或 Tauri。共享基础优先提入 SDK，避免插件互相引用业务实现。完整新业务示例是 `tests/fixtures/plugins/custom-ui`，不需要在宿主新增页面/工具分支。当前只支持自带前端的 UI v4，不提供旧协议兼容层。
+
+## 新增内置插件：自动发现
+
+在 `plugins/system/<name>/` 放入完整源码，目录名只使用小写字母、数字和连字符。`manifest.json` 的 `id` 必须唯一，使用合法反向域名，不要求与目录名相同。必须包含 `backend/Cargo.toml`、`backend/Cargo.lock` 和 `backend/src/lib.rs`；Rust 后端使用独立 workspace，并通过 `../../../../crates/plugin-sdk` 引用公开 SDK。声明界面时还需清单指向的 UI JSON、`frontend/main.ts` 和对应组件/样式。
+
+`npm run plugins:fetch` 自动下载全部已发现插件及测试夹具的锁定依赖；`npm run plugins:build` 自动打包并生成 `plugins/system/packages/registry.rs`。桌面和 Tauri 的 `dev/build` 同样先执行发现与打包，重新启动新构建的客户端后，插件按原有 system 来源安装、预置授权并进入管理列表，无需修改宿主页面、Rust 注册数组或发布 CI。已有禁用、设置、卸载选择和同 ID 上传安装仍受保护；更新已存在的插件时继续提高版本号。
+
+只扫描 `plugins/system` 的直接子目录，保留 `packages` 为输出目录；普通说明文件被忽略，目录/必要文件链接、缺失输入、重复 ID 和非法清单明确报错，不静默跳过。注册文件只引用本次发现并全部构建成功的系统插件，陈旧 `.sdplugin` 与测试夹具不会自动成为内置插件。目录移除不会清理已安装插件或用户数据。生成文件不提交；直接运行 Cargo 前仍须先打包。新增插件如需 SDK 尚未公开的宿主能力，须先实现对应能力。
 
 ```powershell
 npm run typecheck
@@ -34,19 +42,19 @@ node tools/plugin-ui-isolation-e2e.mjs
 
 单包构建同时编译独立 WASM 与 Vue 前端，并检查源码边界，打成 backend.wasm/ui.json/frontend.js/frontend.css。运行时使用 sandbox iframe，不访问宿主 DOM；仅使用 SDK 已公开服务和自身声明动作。UI资源必须单文件，不可远程加载或任意读取本地文件。打包输出仍需不存在且在源目录之外。原生 QA 使用全新目录和自己的 HTTP/TCP 夹具，不能代替真实 SSH 或其他平台验收。
 
-版本为 Host API / Rust SDK / Vue SDK 4.0.0。以下旧 v1/v2/v3 开发说明继续用于兼容包；旧版本/“只包含三文件”以本节 UI4 流程为准。自动运维、批量运维及依赖已删除权限的旧安装记录会停用归档，保留用户数据；其余已有上传安装不自动升级或重置；用户主动升级沿用原确认/备份/重新授权机制。
+版本为 Host API / Rust SDK / Vue SDK 4.0.0，界面仅 UI v4。开发期旧包不迁移或自动归档；用户主动升级仍使用确认、备份和重新授权机制。
 
 ## 配置插件图标
 
-在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^4.0.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表、旧版兼容及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
+在 `manifest.json` 中添加 `"icon": "rocket"`（或 `bot`、`database` 等支持的图标名），并声明 `"apiVersion": "^4.0.0"`。按原流程打包、预览及安装后，上传插件即可显示自己选定的图标；不填写使用默认 `boxes`。完整名称列表及校验规则见[包格式中的图标配置](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。无需增加权限、文件或前端代码。
 
 ## 工作区工具插件
 
-AI 助手独立，系统服务保留监控、进程端口、systemd 与日志；两者只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v3 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
+Docker 和 AI 助手各自独立，只依赖公开 SDK；例如 `node tools/build-plugin.mjs plugins/system/assistant .local/assistant.sdplugin`。公开 UI v4 和工具能力对上传包同样开放，完整契约、权限及宿主职责见 [内置插件](BUILTIN_PLUGINS.md)。仓库 plugins/upload 不预置插件，旧 Nginx 测试插件已删除；四个协议测试包源码位于 tests/fixtures/plugins，构建这些夹具必须传显式目录。
 
-两个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v2 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
+两个内置系统插件也是独立标准 WASM 包，源码位于 plugins/system，使用本文相同的构建/安装/授权流程。公开服务器能力和 UI v4 对上传包同样开放；来源由宿主记录，见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
 
-平台 SDK 4.0.0，API wire version=1（兼容不使用已移除能力的 ^1.x/^2.x/^3.x 包）；包 formatVersion=1、manifest schemaVersion=1，UI 支持 v1 表单、v2 标准服务器视图和 v3 工作区工具。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
+平台 SDK/Host API 4.0.0，插件声明 ^4.0.0；API wire version=1、包 formatVersion=1、manifest schemaVersion=1，界面仅支持自带前端的 UI v4。当前只支持显式确认的未签名本地开发包，不存在在线市场或可信官方签名发行流程。官方示例代码也显示来源未验证。
 
 ## 构建公开 SDK 示例
 
@@ -59,7 +67,7 @@ node tools/build-plugin.mjs plugins/system/docker .local/docker.sdplugin
 npm run plugins:build
 ```
 
-打包输出必须不存在且位于源目录外。构建脚本使用 --offline --locked；新环境先通过 Cargo 正常获取示例 Cargo.lock 对应依赖。`.local/plugin-build` 保存独立 WASM 构建缓存及临时打包输入，不进入产品目录。打包工具只包含 manifest、backend.wasm、ui.json；摘要由工具生成，安装端重新验证。
+打包输出必须不存在且位于源目录外。构建脚本使用 --offline --locked；新环境先通过 Cargo 正常获取示例 Cargo.lock 对应依赖。`.local/plugin-build` 保存独立 WASM 构建缓存及临时打包输入，不进入产品目录。有界面包包含 manifest、backend.wasm、ui.json 和 frontend JS/CSS；摘要由工具生成，安装端重新验证。
 
 Host Info 演示主机脱敏信息、只读 uname、独立设置和五种贡献点。早期 hello-world 是生命周期测试，diagnostics 是公开 SDK 能力集成测试，不冒充实际业务。自定义插件参考其 manifest/backend/ui 文件及 [PLUGIN_SDK.md](PLUGIN_SDK.md)、[PLUGIN_UI_EXTENSION.md](PLUGIN_UI_EXTENSION.md)。
 
@@ -81,4 +89,4 @@ WASM ABI、受控 API、取消/配额/错误码见 [PLUGIN_RUNTIME.md](PLUGIN_RU
 
 Windows 本地自动化：`cargo test --workspace`、前端 test/typecheck/build/lint；隔离 Linux SDK 验证使用 `tools/plugin-test-host/test.ps1`。真实桌面 UI 使用 `-Mode ui`，会构建任务专用 Tauri 客户端、创建全新独立数据目录及无宿主挂载的临时容器，测试结束清理其 OS 凭据与容器，不读取用户主机配置。Docker 镜像准备、环境调整、真实执行结果与平台范围见 [PLUGIN_TEST_REPORT.md](../validation/plugins/PLUGIN_TEST_REPORT.md)。用户服务器不作为开发测试目标。
 
-仓库 plugins/upload 与客户端安装仓库是不同位置，前者不被启动扫描或自动注册。Windows 普通配置的上传内容位于 `%APPDATA%/cn.hiboot.desktop/plugins/upload/<ID>/versions`，安装记录位于同一 plugins 根目录的 packages/<ID>/record.json。安装成功后设置中的插件管理立即显示插件，禁用或未授权不会隐藏安装身份；启用且有功能页面时才显示在当前主机工具栏。旧路径自动迁移且授权/配置保持不变。内置源码/内容分别位于项目 plugins/system 和应用数据目录 plugins/system，协议测试夹具位于 tests/fixtures/plugins，完整迁移边界见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。
+仓库 plugins/upload 与客户端安装仓库是不同位置，前者不被启动扫描或自动注册。Windows 普通配置的上传内容位于 `%APPDATA%/cn.hiboot.desktop/plugins/upload/<ID>/versions`，安装记录位于同一 plugins 根目录的 packages/<ID>/record.json。安装成功后设置中的插件管理立即显示插件，禁用或未授权不会隐藏安装身份；启用且有功能页面时才显示在当前主机工具栏。不搬移旧开发版目录或转换旧记录。内置源码/内容分别位于项目 plugins/system 和应用数据目录 plugins/system，协议测试夹具位于 tests/fixtures/plugins，存储与升级规则见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)。

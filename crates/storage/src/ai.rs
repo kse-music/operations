@@ -56,7 +56,6 @@ impl Database {
 pub struct ModelRecord {
     pub id: String,
     pub name: String,
-    #[serde(deserialize_with = "saved_config")]
     pub config: Config,
     pub secret_ref: Option<String>,
     pub revision: String,
@@ -78,24 +77,6 @@ struct Registry {
     version: u32,
     models: Vec<ModelRecord>,
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Legacy {
-    #[serde(deserialize_with = "saved_config")]
-    config: Config,
-    secret_ref: Option<String>,
-    revision: String,
-}
-
-fn saved_config<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Config, D::Error> {
-    let mut value = serde_json::Value::deserialize(deserializer)?;
-    if let Some(config) = value.as_object_mut() {
-        config.remove("inputPricePerMillion");
-        config.remove("outputPricePerMillion");
-    }
-    serde_json::from_value(value).map_err(serde::de::Error::custom)
-}
-
 fn read(connection: &Connection) -> Result<Registry, Error> {
     let value: Option<String> = connection
         .query_row(
@@ -112,34 +93,10 @@ fn read(connection: &Connection) -> Result<Registry, Error> {
         }
         return Ok(registry);
     }
-    let legacy: Option<String> = connection
-        .query_row(
-            "SELECT value FROM application_settings WHERE key='ai_config'",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(storage_error)?;
-    let mut registry = Registry {
+    Ok(Registry {
         version: 1,
         models: vec![],
-    };
-    if let Some(legacy) = legacy {
-        let old: Legacy = serde_json::from_str(&legacy).map_err(storage_error)?;
-        old.config.validate()?;
-        registry.models.push(ModelRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: "默认模型".into(),
-            config: old.config,
-            secret_ref: old.secret_ref,
-            revision: old.revision,
-        });
-        write(connection, &registry)?;
-        connection
-            .execute("DELETE FROM application_settings WHERE key='ai_config'", [])
-            .map_err(storage_error)?;
-    }
-    Ok(registry)
+    })
 }
 fn write(connection: &Connection, registry: &Registry) -> Result<(), Error> {
     let value = serde_json::to_string(registry).map_err(storage_error)?;
@@ -148,14 +105,7 @@ fn write(connection: &Connection, registry: &Registry) -> Result<(), Error> {
 }
 impl Database {
     pub fn ai_models(&self) -> Result<Vec<ModelRecord>, Error> {
-        // Serializes legacy conversion without putting AI on the application startup path.
-        let mut connection = self.connect()?;
-        let tx = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(storage_error)?;
-        let registry = read(&tx)?;
-        tx.commit().map_err(storage_error)?;
-        Ok(registry.models)
+        Ok(read(&self.connect()?)?.models)
     }
     pub fn ai_model(&self, id: &str) -> Result<ModelRecord, Error> {
         self.ai_models()?

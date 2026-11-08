@@ -200,18 +200,9 @@ impl Profile {
             }
             state
         } else {
-            let existing = defaults
-                .data
-                .join("serverdeck.sqlite3")
-                .try_exists()
-                .map_err(io)?;
             State {
                 version: 1,
-                active: if existing {
-                    defaults.clone()
-                } else {
-                    Locations::unified(defaults.data.clone())
-                },
+                active: Locations::unified(defaults.data),
                 migration: None,
                 notice: None,
             }

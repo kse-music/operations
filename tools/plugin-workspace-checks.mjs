@@ -80,7 +80,6 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
         authType: 'agent',
         credentialId: null,
         groupId: null,
-        tags: [],
         description: 'No SSH connection is opened',
         favorite: false,
         connectTimeoutSecs: 5,

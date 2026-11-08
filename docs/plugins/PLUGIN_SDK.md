@@ -20,7 +20,7 @@ AI DTO 增加 `LocalCodexStatus { authorized, model, message }`，`AiConfig.prov
 
 内置 SSH 智能体复用 ai_prepare/ai_send/ai_execute 和原宿主票据；AiAnswer.agent 为可选查询记录/计划清单，AiExecution.agent 为可选逐项复查结果。只有 Host 识别的内置 system 助手启用该编排，上传插件及旧原生 IPC 继续原合同，字段缺省仍兼容。计划实际载荷保存在宿主，Guest 只能提交不透明 ID，不能修改目标、操作或确认文案。无新增权限、IPC 或数据库结构，版本仍为4.0.0。
 
-Host API / Rust SDK / TypeScript SDK 当前均为 4.0.0，支持 UI v1–v4。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；依赖这些旧权限的安装记录会停用归档，保留用户数据。迁移规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
+Host API / Rust SDK / TypeScript SDK 当前均为 4.0.0，仅支持 UI v4，清单 API 范围须匹配当前 4.0.0。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；未知权限或旧 API/UI 直接拒绝，不转换旧安装记录。版本规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
 
 | SDK 内容                                               | 使用入口                                        |
 | ------------------------------------------------------ | ----------------------------------------------- |
@@ -36,9 +36,9 @@ Host API / Rust SDK / TypeScript SDK 当前均为 4.0.0，支持 UI v1–v4。�
 
 ## 工作区工具（当前契约）
 
-公开 tools::Tool / tools::Operation、AI 领域权限和 Capability::ToolInvoke；UI v3 允许 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,docker}；上传包可使用相同契约。模型设置与凭据、可信连接保留在宿主；网络诊断、network.run 及 diagnostic_* 已移除。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
+公开 tools::Tool / tools::Operation、AI 领域权限和 Capability::ToolInvoke；UI v4 支持 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,docker}；上传包可使用相同契约。模型设置与凭据、可信连接保留在宿主；网络诊断、network.run 及 diagnostic_* 已移除。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
 
-公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。ABI/wire version 仍为 1，宿主语义 API 为 4.0.0；新包声明 ^4.0.0。未使用已移除权限/枚举的旧 ^1.x/^2.x/^3.x 包继续兼容，不能调用已删除能力。
+公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。ABI/wire version 仍为 1，宿主语义 API 为 4.0.0；新包声明 ^4.0.0。旧主版本范围不再协商，未知权限或已经删除的能力直接拒绝。
 
 `export_plugin!(handle)` 导出经过缓冲区长度/指针检查的 ABI，不解引用任意原始指针。仅导出符号使用 Rust 要求的 unsafe(no_mangle) 属性，没有 unsafe 内存访问块。不能在 Guest 中使用宿主文件、网络、环境或其他原生导入。
 
@@ -88,4 +88,4 @@ FileDocument 最多 32 KiB UTF-8，返回插件专属 id，不返回内部 SFTP 
 
 业务结果超过 1 KiB 返回 `{__pluginResult:{id,bytes,chunks}}`，由标准可信渲染器用公开 result_read 验证完整分块后释放；单结果 4 MiB、总量 8 MiB、八项/每插件两项、TTL 60 秒、每块 32 KiB。不能跨插件或上下文代读取；不放宽 WASM 的 64 KiB 消息和 200 万 fuel 限额。
 
-`server::SurfaceState` 只复用 bridge 协议收发/hostResponse 匹配，各独立包提供自己的 Capability 允许列表；普通 invoke 不能伪造 Resume。UI v2 的共享可信服务器组件也适用于用户上传包。容器票据只授权一次精确目标交接；终端事件通道由主窗口 plugin_terminal_open 复验 host/target/安装代/连接配置后建立，Guest 不得到终端 Session。详见 [系统插件与资源限制](BUILTIN_PLUGINS.md)。
+`server::SurfaceState` 只复用 bridge 协议收发/hostResponse 匹配，各独立包提供自己的 Capability 允许列表；普通 invoke 不能伪造 Resume。UI v4 页面通过公开 SDK 共享基础组件，上传包使用相同授权链。容器票据只授权一次精确目标交接；终端事件通道由主窗口 plugin_terminal_open 复验 host/target/安装代/连接配置后建立，Guest 不得到终端 Session。详见 [系统插件与资源限制](BUILTIN_PLUGINS.md)。

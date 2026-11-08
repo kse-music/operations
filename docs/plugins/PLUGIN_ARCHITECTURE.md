@@ -4,15 +4,13 @@
 
 Host API / Rust SDK / Vue SDK 当前为 4.0，两个标准插件的前端和测试位于各自 `plugins/system/<name>/frontend`，Guest 位于 `backend`。公开前端 SDK 为 `packages/plugin-sdk`；宿主提供桥接与公共原生服务，业务视图不再由宿主静态导入。新通用 frontend 贡献可以定义独立 WASM 动作，扩展新业务无需修改宿主工具枚举。
 
-构建输出为标准包内的 WASM、ui.json、单一 JS 和 CSS。内置与上传共用该构建/校验/加载/调用链；资源进入不透明来源的 sandbox iframe，桥绑定安装代并保留现有逐请求授权。UI v1 保持声明式表单；旧 v2/v3 的标准视图使用兼容资源进入相同沙箱，不强制重装。公共服务实现与 SDK 接口的职责、缓存生命周期见[总体架构](../architecture/ARCHITECTURE.md#2026-11-04插件源码归属与-ui-v4)，新边界见[安全](PLUGIN_SECURITY.md)。下文 UI v2/v3 的“固定可信组件”描述为历史协议行为，由当前加载方式替代。
-
-自动运维与批量运维的整个专属执行链已删除；旧安装先归档记录再解码，payload、设置及旧表保留而不执行。当前结构与升级契约见[总体架构](../architecture/ARCHITECTURE.md#2026-11-05移除两个工具及专属执行链)。
+构建输出为标准包内的 WASM、ui.json、单一 JS 和 CSS。内置与上传共用该构建/校验/加载/调用链；资源进入不透明来源的 sandbox iframe，桥绑定安装代并保留现有逐请求授权。仅接受 UI v4 和当前 Host API；每个页面声明 surface 和包内前端，不提供宿主代渲染或旧协议回退。公共服务实现与 SDK 接口的职责、缓存生命周期见[总体架构](../architecture/ARCHITECTURE.md#2026-11-04插件源码归属与-ui-v4)，新边界见[安全](PLUGIN_SECURITY.md)。旧插件身份/目录/已删合同的自动迁移与退役归档已移除。
 
 ## 工作区工具标准化
 
-AI 助手独立分发，系统服务仅保留监控、进程端口、systemd 与日志，源码/锁文件/产物独立，系统与上传使用相同公开 ToolInvoke/UI v3 契约。PluginToolSurface 注入通过实际 WASM 的领域 API；App/workspace 仅解析已安装且启用/授权的贡献，不直接挂载原生业务页。插件功能从当前主机工具栏进入并归属主机运维，插件管理及配置统一归属设置，不再提供顶部运维工具模块；网络诊断引擎及其专属任务和兼容资源已移除；SSH/SFTP 和 AI 共用的受控执行能力保留。票据及 AI 资源归属和边界见 [内置插件](BUILTIN_PLUGINS.md)。
+Docker 与 AI 助手独立分发，系统与上传插件使用相同的公开 ToolInvoke/UI v4 契约。App/workspace 只解析已安装且启用/授权的贡献，PluginFrame 持续挂载页面并通过 SDK 桥交互。主机功能归属当前主机工作区，管理与配置由插件管理和配置弹窗提供。票据及资源边界见[内置插件](BUILTIN_PLUGINS.md)。
 
-2026-11-04：系统内置与上传插件统一为标准 WASM 包及运行时，来源由宿主记录。系统包预置声明权限和必要路径，grant/revoke IPC 不允许改写；上传包仍显式授权。全部插件使用当前主机，无主机白名单，旧 hostIds 仅兼容读取且不再输出。主机工具栏平铺显示已启用且有功能页面的插件，管理列表只有卸载。两个插件源码和完整契约见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)；下文 13A 为历史阶段，默认禁用只描述上传安装。
+2026-11-04：系统内置与上传插件统一为标准 WASM 包及运行时，来源由宿主记录。系统包预置声明权限和必要路径，grant/revoke IPC 不允许改写；上传包仍显式授权。全部插件使用当前主机，无主机白名单，授权拒绝 hostIds 字段。主机工具栏平铺显示已启用且有功能页面的插件，管理列表支持安装、配置、启停、授权和卸载。两个插件源码和完整契约见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)；下文 13A 为历史阶段，默认禁用只描述上传安装。
 
 13A-1：desktop → application → plugin-core → core。插件包、元数据、信任接口和仓库独立于 SSH、Agent 与 Tauri。13A-2 新增 application → plugin-runtime → plugin-core/core/Wasmi，带后端的包在启用或按需激活时真实执行 WASM。元数据包继续不执行代码。能力 API/UI 尚未实现，不能视为可用。ABI、配额与未实现的 OS 保障见 [PLUGIN_RUNTIME.md](PLUGIN_RUNTIME.md)。
 

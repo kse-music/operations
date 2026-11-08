@@ -1,12 +1,18 @@
 import { expect, it } from 'vitest';
-import { actionPayload, safeValues, uiResult } from './plugin-ui';
+import { actionPayload, safeValues } from './plugin-ui';
 import type { PluginUiPage } from '../types/plugins';
 const page: PluginUiPage = {
+  surface: { kind: 'frontend' },
   id: 'test',
   title: 'Test',
-  initialAction: 'read',
+  initialAction: null,
   fields: [],
-  actions: [{ id: 'save', label: 'Save', discardDirty: false, enabledWhen: null }],
+  actions: ['read', 'save'].map((id) => ({
+    id,
+    label: id,
+    discardDirty: false,
+    enabledWhen: null,
+  })),
   log: null,
 };
 it('accepts only declared actions and bounded primitive state', () => {
@@ -18,15 +24,8 @@ it('accepts only declared actions and bounded primitive state', () => {
   expect(() => safeValues({ session: { id: 'internal' } })).toThrow();
   expect(() => actionPayload(page, 'save', { a: '中'.repeat(32768) })).toThrow();
 });
-it('rejects native command messages, URLs, invalid states and prototype mutations', () => {
-  for (const result of [
-    { values: {}, invoke: 'credential_read' },
-    { output: 'x', url: 'https://bad.example' },
-    { values: { constructor: 'bad' } },
-    { saved: 'yes' },
-  ])
-    expect(() => uiResult(result)).toThrow();
-  expect(
-    uiResult({ values: { documentId: 'opaque' }, output: 'real output', saved: false }),
-  ).toEqual({ values: { documentId: 'opaque' }, output: 'real output', saved: false });
+it('does not accept an undeclared action through an initialization field', () => {
+  expect(() =>
+    actionPayload({ ...page, initialAction: 'credential_read' }, 'credential_read', {}),
+  ).toThrow();
 });

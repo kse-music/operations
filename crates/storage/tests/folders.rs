@@ -22,7 +22,6 @@ fn host(db: &Database, group: Option<&str>) -> Host {
         auth_type: AuthType::Agent,
         credential_id: None,
         group_id: group.map(str::to_owned),
-        tags: vec!["历史".into()],
         description: "保留".into(),
         favorite: true,
         connect_timeout_secs: 15,
@@ -32,19 +31,11 @@ fn host(db: &Database, group: Option<&str>) -> Host {
 }
 
 #[test]
-fn v6_migration_keeps_host_membership_and_credential_links() {
+fn current_schema_keeps_host_membership_and_credential_links_after_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
+    Database::open(&path).unwrap();
     let c = Connection::open(&path).unwrap();
-    for sql in [
-        include_str!("../migrations/001_settings.sql"),
-        include_str!("../migrations/002_hosts.sql"),
-        include_str!("../migrations/003_known_hosts.sql"),
-        include_str!("../migrations/004_terminal_workspace.sql"),
-        include_str!("../migrations/006_optional_host_name.sql"),
-    ] {
-        c.execute_batch(sql).unwrap();
-    }
     c.execute(
         "INSERT INTO host_groups(id,name,sort_order) VALUES('legacy','上海',3)",
         [],
@@ -52,7 +43,6 @@ fn v6_migration_keeps_host_membership_and_credential_links() {
     .unwrap();
     c.execute("INSERT INTO credentials(id,name,kind,key_path,secret_ref,revision) VALUES('credential','Legacy key','private_key','~/.ssh/legacy-test-key','legacy-ref',3)", []).unwrap();
     c.execute("INSERT INTO hosts(id,name,hostname,port,username,auth_type,credential_id,group_id,connect_timeout_secs) VALUES('host','','192.0.2.1',22,'ops','private_key','credential','legacy',15)", []).unwrap();
-    c.pragma_update(None, "user_version", 6).unwrap();
     drop(c);
     let db = Database::open(&path).unwrap();
     assert_eq!(db.version().unwrap(), serverdeck_core::DATABASE_VERSION);
@@ -112,7 +102,6 @@ fn hierarchy_copy_delete_and_restart_preserve_contents_and_reject_invalid_parent
     let copied = db.host_copy(&h.id).unwrap();
     assert_ne!(copied.id, h.id);
     assert_eq!(copied.config.group_id, h.config.group_id);
-    assert_eq!(copied.config.tags, h.config.tags);
     assert_eq!(copied.config.ssh, h.config.ssh);
     let mut expected = h.config.clone();
     expected.name = copied.config.name.clone();

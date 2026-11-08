@@ -181,17 +181,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const pages = pluginPages.value.filter((page) =>
           isHostTab(tab) ? page.hostId === tab.hostId : page.key === tab.key,
         );
-        const draftKeys = pages.map((page) => page.key);
-        if (draftKeys.length) {
-          const plugins = usePluginsStore();
-          let accepted = true;
-          for (const key of draftKeys)
-            if (!(await plugins.discard(key))) {
-              accepted = false;
-              break;
-            }
-          if (!accepted) continue;
-        }
         if (isHostTab(tab)) {
           if (tab.hostId && !(await files.prepareHostClose(tab.hostId))) continue;
           const first = terminals.hostTabs(tab.hostId)[0];
@@ -214,7 +203,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           }
         }
         if (isHostTab(tab) && tab.hostId && !(await files.clearHostTransfers(tab.hostId))) continue;
-        for (const key of draftKeys) usePluginsStore().forget(key);
         pluginPages.value = pluginPages.value.filter((page) => !pages.includes(page));
         removed.add(tab);
         tabs.value = tabs.value.filter((item) => item !== tab);

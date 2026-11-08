@@ -241,14 +241,18 @@ mod tests {
 #[cfg(test)]
 mod config_tests {
     #[test]
-    fn existing_config_defaults_to_three_transfers_and_bounds_new_values() {
+    fn current_transfer_settings_are_required_and_limits_are_validated() {
         let mut value = serde_json::to_value(crate::AppConfig::default()).expect("json");
         value
             .as_object_mut()
             .expect("object")
             .remove("transferConcurrency");
         value["terminalFontSize"] = 18.into();
-        let mut config: crate::AppConfig = serde_json::from_value(value).expect("old config");
+        assert!(serde_json::from_value::<crate::AppConfig>(value).is_err());
+        let mut config = crate::AppConfig {
+            terminal_font_size: 18,
+            ..Default::default()
+        };
         assert_eq!(config.transfer_concurrency, 3);
         assert_eq!(config.terminal_font_size, 18);
         config.transfer_concurrency = 0;

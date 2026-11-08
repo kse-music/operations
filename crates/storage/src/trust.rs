@@ -52,31 +52,4 @@ mod tests {
         );
         assert!(db.trusted_key("localhost", 23).expect("lookup").is_none());
     }
-
-    #[test]
-    fn v2_host_and_credential_metadata_survive_trust_migration() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("db");
-        let connection = rusqlite::Connection::open(&path).expect("v2 database");
-        connection
-            .execute_batch(include_str!("../migrations/001_settings.sql"))
-            .expect("settings");
-        connection
-            .execute_batch(include_str!("../migrations/002_hosts.sql"))
-            .expect("hosts");
-        connection.execute("INSERT INTO credentials(id,name,kind,key_path,secret_ref,revision) VALUES('credential','Key','private_key','/home/fixture/.ssh/key',NULL,7)",[]).expect("metadata");
-        connection
-            .pragma_update(None, "user_version", 2)
-            .expect("v2");
-        drop(connection);
-        let db = Database::open(&path).expect("migration");
-        assert_eq!(
-            db.version().expect("version"),
-            serverdeck_core::DATABASE_VERSION
-        );
-        let catalog = db.catalog().expect("metadata preserved");
-        assert_eq!(catalog.credentials[0].revision, 7);
-        db.trust_key("localhost", 22, "public-key", "fingerprint")
-            .expect("new trust table");
-    }
 }

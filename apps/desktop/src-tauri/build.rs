@@ -87,8 +87,6 @@ fn main() {
             "text_close",
             "file_terminal",
             "app_exit_confirm",
-            "workspace_load",
-            "workspace_save",
             "forward_start",
             "forward_list",
             "forward_stop",

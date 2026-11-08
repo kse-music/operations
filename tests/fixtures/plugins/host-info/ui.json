@@ -1,5 +1,5 @@
 {
-  "uiVersion": 1,
+  "uiVersion": 4,
   "title": {
     "zh-CN": "主机信息",
     "en-US": "Host Info"
@@ -11,7 +11,7 @@
         "zh-CN": "当前主机",
         "en-US": "Current host"
       },
-      "initialAction": "host",
+      "initialAction": null,
       "fields": [],
       "actions": [
         {
@@ -33,7 +33,10 @@
           "enabledWhen": null
         }
       ],
-      "log": null
+      "log": null,
+      "surface": {
+        "kind": "frontend"
+      }
     },
     {
       "id": "navigation",
@@ -41,7 +44,7 @@
         "zh-CN": "当前主机",
         "en-US": "Current host"
       },
-      "initialAction": "host",
+      "initialAction": null,
       "fields": [],
       "actions": [
         {
@@ -63,7 +66,10 @@
           "enabledWhen": null
         }
       ],
-      "log": null
+      "log": null,
+      "surface": {
+        "kind": "frontend"
+      }
     },
     {
       "id": "menu",
@@ -71,7 +77,7 @@
         "zh-CN": "当前主机",
         "en-US": "Current host"
       },
-      "initialAction": "host",
+      "initialAction": null,
       "fields": [],
       "actions": [
         {
@@ -93,7 +99,10 @@
           "enabledWhen": null
         }
       ],
-      "log": null
+      "log": null,
+      "surface": {
+        "kind": "frontend"
+      }
     },
     {
       "id": "diagnose",
@@ -101,7 +110,7 @@
         "zh-CN": "当前主机",
         "en-US": "Current host"
       },
-      "initialAction": "host",
+      "initialAction": null,
       "fields": [],
       "actions": [
         {
@@ -123,7 +132,10 @@
           "enabledWhen": null
         }
       ],
-      "log": null
+      "log": null,
+      "surface": {
+        "kind": "frontend"
+      }
     },
     {
       "id": "settings",
@@ -131,7 +143,7 @@
         "zh-CN": "插件设置",
         "en-US": "Plugin settings"
       },
-      "initialAction": "settings_read",
+      "initialAction": null,
       "fields": [
         {
           "id": "note",
@@ -165,7 +177,14 @@
           "enabledWhen": null
         }
       ],
-      "log": null
+      "log": null,
+      "surface": {
+        "kind": "frontend"
+      }
     }
-  ]
+  ],
+  "frontend": {
+    "script": "frontend.js",
+    "style": "frontend.css"
+  }
 }

@@ -72,85 +72,43 @@ fn local_provider_consents_are_independent_and_keep_registered_models() {
 }
 
 #[test]
-fn legacy_configuration_is_converted_once_without_changing_key_reference() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("db");
-    let db = Database::open(&path).unwrap();
-    let config = Config {
-        model: "existing-user-model".into(),
-        base_url: "http://127.0.0.1:8080/v1".into(),
-        allow_insecure_http: true,
-        ..Default::default()
-    };
-    let mut legacy = serde_json::json!({"config":config,"secretRef":"existing-os-ref","revision":"old-revision"});
-    let legacy_config = legacy["config"].as_object_mut().unwrap();
-    legacy_config.remove("contextWindowTokens");
-    legacy_config.insert("inputPricePerMillion".into(), serde_json::json!(1.0));
-    legacy_config.insert("outputPricePerMillion".into(), serde_json::json!(2.0));
-    let connection = rusqlite::Connection::open(&path).unwrap();
-    connection
-        .execute(
-            "INSERT INTO application_settings(key,value) VALUES('ai_config',?1)",
-            [legacy.to_string()],
-        )
-        .unwrap();
-    let models = db.ai_models().unwrap();
-    assert_eq!(models.len(), 1);
-    assert_eq!(models[0].config, config);
-    assert_eq!(models[0].name, "默认模型");
-    assert_eq!(models[0].secret_ref.as_deref(), Some("existing-os-ref"));
-    assert_eq!(models[0].revision, "old-revision");
-    let reopened = Database::open(&path).unwrap();
-    assert_eq!(reopened.ai_models().unwrap()[0].id, models[0].id);
-    assert!(reopened.pending_secret_gc().unwrap().is_empty());
-    assert_eq!(
-        connection
-            .query_row(
-                "SELECT COUNT(*) FROM application_settings WHERE key='ai_config'",
-                [],
-                |r| r.get::<_, u32>(0)
-            )
-            .unwrap(),
-        0
-    );
-}
-
-#[test]
-fn saved_model_windows_round_trip_and_legacy_prices_are_discarded_on_save() {
+fn removed_model_fields_are_rejected_without_rewriting_the_registry() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let db = Database::open(&path).unwrap();
     let connection = rusqlite::Connection::open(&path).unwrap();
-    let mut legacy = serde_json::to_value(record("old", "Old model")).unwrap();
-    let config = legacy["config"].as_object_mut().unwrap();
-    config.remove("contextWindowTokens");
-    config.insert("inputPricePerMillion".into(), serde_json::json!(1.0));
-    config.insert("outputPricePerMillion".into(), serde_json::json!(2.0));
-    let registry = serde_json::json!({"version":1,"models":[legacy]});
+    let mut invalid = serde_json::to_value(record("a", "Model A")).unwrap();
+    invalid["config"]["inputPricePerMillion"] = serde_json::json!(1.0);
+    let raw = serde_json::json!({"version":1,"models":[invalid]}).to_string();
     connection
         .execute(
             "INSERT INTO application_settings(key,value) VALUES('ai_models',?1)",
-            [registry.to_string()],
+            [&raw],
         )
         .unwrap();
-    let mut model = db.ai_model("old").unwrap();
+    assert!(db.ai_models().is_err());
     assert_eq!(
-        model.config.context_window_tokens,
-        Config::default().context_window_tokens
+        connection
+            .query_row(
+                "SELECT value FROM application_settings WHERE key='ai_models'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        raw
     );
+}
+#[test]
+fn saved_model_context_windows_and_key_references_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let mut model = record("a", "Model A");
     model.config.context_window_tokens = 8192;
-    db.ai_model_save(model, Some("r-old")).unwrap();
-    let saved = Database::open(&path).unwrap().ai_model("old").unwrap();
-    assert_eq!(saved.config.context_window_tokens, 8192);
-    assert_eq!(saved.secret_ref.as_deref(), Some("ref-old"));
-    let raw: String = connection
-        .query_row(
-            "SELECT value FROM application_settings WHERE key='ai_models'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(!raw.contains("PricePerMillion"));
+    db.ai_model_save(model.clone(), None).unwrap();
+    let saved = Database::open(&path).unwrap().ai_model("a").unwrap();
+    assert_eq!(saved.config, model.config);
+    assert_eq!(saved.secret_ref, model.secret_ref);
 }
 #[test]
 fn model_crud_reopens_rejects_conflicts_and_keeps_other_credentials() {
@@ -203,7 +161,7 @@ fn model_crud_reopens_rejects_conflicts_and_keeps_other_credentials() {
     );
 }
 #[test]
-fn corrupt_legacy_and_future_registry_preserve_data_and_do_not_block_other_modules() {
+fn unused_old_settings_and_unsupported_registry_are_not_rewritten() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let db = Database::open(&path).unwrap();
@@ -214,7 +172,7 @@ fn corrupt_legacy_and_future_registry_preserve_data_and_do_not_block_other_modul
             [],
         )
         .unwrap();
-    assert!(db.ai_models().is_err());
+    assert!(db.ai_models().unwrap().is_empty());
     assert_eq!(
         connection
             .query_row(

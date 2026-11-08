@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { checkWorkspaceTools } from './plugin-workspace-checks.mjs';
 import { navigateWorkspace, openPluginDetails, previewPluginPackage } from './ui-navigation.mjs';
+import { discoverSystemPlugins } from './system-plugins.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
+const expectedPluginIds = (await discoverSystemPlugins(root)).map((plugin) => plugin.id).sort();
 const output = path.join(root, '.local/ops-plugin-migration');
 const run = path.join(output, 'native', `run-${randomUUID()}`);
 const data = path.join(run, 'data'),
@@ -107,9 +109,8 @@ try {
   assert.equal((await invoke('host_list')).hosts.length, 0);
   safe = true;
   const installed = await invoke('plugin_list');
-  assert.equal(installed.length, 2);
+  assert.deepEqual(installed.map((plugin) => plugin.manifest.id).sort(), expectedPluginIds);
   for (const plugin of installed) {
-    assert(plugin.manifest.id.startsWith('cn.hiboot.plugins.'));
     assert.equal(plugin.source, 'system');
     assert.equal(plugin.enabled, true);
     const grant = await invoke('plugin_permissions', { id: plugin.manifest.id });
@@ -127,7 +128,7 @@ try {
       ),
     );
   }
-  passed.push('two cn.hiboot standard packages installed under the owned system directory');
+  passed.push('all discovered standard packages installed under the owned system directory');
   assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
   const settings = await openPluginDetails(page, 'Docker 管理');
   assert(
@@ -155,7 +156,7 @@ try {
   await navigateWorkspace(page, '插件管理');
   const manager = page.locator('.plugin-manager');
   await manager.waitFor();
-  assert.equal(await manager.locator('[data-plugin-id]').count(), 2);
+  assert.equal(await manager.locator('[data-plugin-id]').count(), expectedPluginIds.length);
   assert.equal(await manager.locator('.plugin-source').count(), 0);
   assert.equal(await manager.getByLabel('本地插件包路径', { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(run, 'manager.png') });
@@ -191,7 +192,10 @@ try {
     .getByRole('button', { name: '确认卸载', exact: true })
     .click();
   await row.waitFor({ state: 'detached' });
-  assert.equal((await invoke('plugin_list')).length, 2);
+  assert.deepEqual(
+    (await invoke('plugin_list')).map((plugin) => plugin.manifest.id).sort(),
+    expectedPluginIds,
+  );
   assert.equal((await invoke('host_list')).hosts.length, 0);
   passed.push(
     'source appears only inside individual pages; real native uninstall removes the uploaded package',

@@ -120,7 +120,26 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
             .unwrap()
     };
     let initial = invoke("plugin_list", json!({}));
-    assert_eq!(initial.as_array().unwrap().len(), 2);
+    let source_directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../plugins/system");
+    let expected_ids: std::collections::BTreeSet<_> = std::fs::read_dir(source_directory)
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_type().unwrap().is_dir() && entry.file_name() != "packages")
+        .map(|entry| {
+            let manifest: Value =
+                serde_json::from_slice(&std::fs::read(entry.path().join("manifest.json")).unwrap())
+                    .unwrap();
+            manifest["id"].as_str().unwrap().to_owned()
+        })
+        .collect();
+    let initial_ids: std::collections::BTreeSet<_> = initial
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|plugin| plugin["manifest"]["id"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(expected_ids, initial_ids);
     for plugin in initial.as_array().unwrap() {
         assert_eq!(plugin["source"], "system");
         assert_eq!(plugin["enabled"], true);
@@ -193,7 +212,13 @@ fn system_packages_use_standard_ipc_and_main_window_acl() {
         .provision_bundled_plugins()
         .expect("provision after uninstall");
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    assert_eq!(runtime.block_on(reopened.plugin_list()).unwrap().len(), 1);
+    let after_uninstall = runtime.block_on(reopened.plugin_list()).unwrap();
+    assert_eq!(after_uninstall.len(), expected_ids.len() - 1);
+    assert!(
+        after_uninstall
+            .iter()
+            .all(|plugin| plugin.manifest.id != id)
+    );
 }
 
 #[test]
@@ -267,7 +292,7 @@ fn plugin_metadata_real_ipc_lifecycle_and_acl() {
     );
     invoke(
         "plugin_grant",
-        json!({"id":"dev.serverdeck.metadata","input":{"expectedRevision":installed["revision"],"permissions":["settings.read","settings.write"],"hostIds":[],"operations":["settings.read","settings.write"],"readRoots":[],"writeRoots":[],"confirmed":true}}),
+        json!({"id":"dev.serverdeck.metadata","input":{"expectedRevision":installed["revision"],"permissions":["settings.read","settings.write"],"operations":["settings.read","settings.write"],"readRoots":[],"writeRoots":[],"confirmed":true}}),
     );
     assert_eq!(
         invoke(
@@ -853,7 +878,7 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
     );
     assert_eq!(child["parentId"], group["id"]);
     assert!(get_ipc_response(&main, request("group_save", json!({"id":group["id"],"input":{"name":"IPC 分组","sortOrder":1,"parentId":child["id"]}}), origin)).is_err());
-    let mut input = json!({"name":"IPC 主机","hostname":"example.com","port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":child["id"],"tags":["linux"],"description":"原备注","favorite":false,"connectTimeoutSecs":15});
+    let mut input = json!({"name":"IPC 主机","hostname":"example.com","port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":child["id"],"description":"原备注","favorite":false,"connectTimeoutSecs":15});
     let test_error = get_ipc_response(&main, request("host_test", json!({"input":input}), origin))
         .expect_err("host test requires authentication");
     assert_eq!(test_error["code"], "VALIDATION");

@@ -507,7 +507,7 @@ onMounted(async () => {
   }
 });
 function protectDraft(event: BeforeUnloadEvent): void {
-  if (files.dirty || plugins.dirtyCount) {
+  if (files.dirty) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -574,7 +574,6 @@ watch(
         tab.pluginId &&
         JSON.stringify(old[tab.pluginId]) !== JSON.stringify(plugins.grants[tab.pluginId])
       ) {
-        plugins.forget(tab.key);
         plugins.clearPlugin(tab.pluginId);
       }
     }

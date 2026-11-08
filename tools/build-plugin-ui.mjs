@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const sdk = path.join(root, 'packages/plugin-sdk/src');
 
-export async function buildPluginUi(source, output, dependencies = []) {
+export async function buildPluginUi(source, output) {
   const owner = path.resolve(source, 'frontend');
   const within = (parent, file) => file === parent || file.startsWith(parent + path.sep);
   await build({
@@ -25,7 +25,6 @@ export async function buildPluginUi(source, output, dependencies = []) {
           if (
             !within(owner, file) &&
             !within(sdk, file) &&
-            !dependencies.some((parent) => within(parent, file)) &&
             !file.includes(`${path.sep}node_modules${path.sep}`)
           )
             throw new Error(

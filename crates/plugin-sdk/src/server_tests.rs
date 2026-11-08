@@ -1,6 +1,19 @@
 use crate::{Capability, serde_json::json, server::SurfaceState};
 
 #[test]
+fn independent_examples_use_the_current_ui_contract() {
+    for text in [
+        include_str!("../../../tests/fixtures/plugins/host-info/ui.json"),
+        include_str!("../../../plugins/development-kit/example/ui.json"),
+    ] {
+        let ui: crate::ui::Ui = serde_json::from_str(text).unwrap();
+        ui.validate().unwrap();
+        assert_eq!(ui.ui_version, 4);
+        assert!(ui.frontend.is_some());
+    }
+}
+
+#[test]
 fn independent_frontend_requires_v4_safe_assets_and_declared_actions() {
     let text = include_str!("../../../tests/fixtures/plugins/custom-ui/ui.json");
     let original: crate::ui::Ui = serde_json::from_str(text).unwrap();
@@ -9,9 +22,16 @@ fn independent_frontend_requires_v4_safe_assets_and_declared_actions() {
         original.pages[0].surface,
         Some(crate::ui::Surface::Frontend)
     ));
-    let mut legacy = original.clone();
-    legacy.ui_version = 3;
-    assert!(legacy.validate().is_err());
+    for version in [1, 2, 3, 5] {
+        let mut unsupported = original.clone();
+        unsupported.ui_version = version;
+        assert!(unsupported.validate().is_err(), "{version}");
+        unsupported.frontend = None;
+        assert!(unsupported.validate().is_err(), "{version}");
+    }
+    let mut missing_surface = original.clone();
+    missing_surface.pages[0].surface = None;
+    assert!(missing_surface.validate().is_err());
     let mut missing = original.clone();
     missing.frontend = None;
     assert!(missing.validate().is_err());
@@ -94,7 +114,7 @@ fn server_surface_rejects_unsupported_versions_categories_and_mixed_form_actions
 }
 
 #[test]
-fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
+fn tool_surfaces_require_ui_v4_and_keep_bridge_policy_and_inputs_closed() {
     use crate::{
         tools::{Operation, Tool},
         ui::{Surface, Ui},
@@ -118,7 +138,7 @@ fn tool_surfaces_require_ui_v3_and_keep_bridge_policy_and_inputs_closed() {
     });
     server.ui_version = 3;
     server.frontend = None;
-    server.validate().unwrap();
+    assert!(server.validate().is_err());
     assert!(matches!(
         original.pages[0].surface,
         Some(Surface::Tool {

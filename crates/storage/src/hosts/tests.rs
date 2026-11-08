@@ -1,5 +1,5 @@
 use super::*;
-use serverdeck_core::{AppConfig, Theme, openssh};
+use serverdeck_core::openssh;
 
 fn input() -> HostInput {
     HostInput {
@@ -11,7 +11,6 @@ fn input() -> HostInput {
         auth_type: AuthType::Agent,
         credential_id: None,
         group_id: None,
-        tags: vec!["生产".into(), "linux".into(), "linux".into()],
         description: "测试备注".into(),
         favorite: true,
         connect_timeout_secs: 30,
@@ -66,128 +65,6 @@ fn unnamed_hosts_can_be_created_updated_copied_and_reopened() {
 }
 
 #[test]
-fn migrates_v5_hosts_without_changing_configuration_or_links() {
-    let dir = tempfile::tempdir().expect("dir");
-    let path = dir.path().join("v5.sqlite3");
-    let connection = Connection::open(&path).expect("open");
-    for sql in [
-        include_str!("../../migrations/001_settings.sql"),
-        include_str!("../../migrations/002_hosts.sql"),
-        include_str!("../../migrations/003_known_hosts.sql"),
-        include_str!("../../migrations/004_terminal_workspace.sql"),
-    ] {
-        connection.execute_batch(sql).expect("v5 schema");
-    }
-    connection
-        .pragma_update(None, "user_version", 5)
-        .expect("v5");
-    let legacy = Database { path: path.clone() };
-    let group_id = uuid::Uuid::new_v4().to_string();
-    connection
-        .execute(
-            "INSERT INTO host_groups(id,name,sort_order) VALUES(?1,'生产',2)",
-            [&group_id],
-        )
-        .expect("legacy group");
-    let credential = legacy
-        .credential_save(
-            "private-key",
-            None,
-            "key",
-            AuthType::PrivateKey,
-            Some("C:/keys/test"),
-            None,
-        )
-        .expect("credential");
-    let jump = legacy.host_create(input()).expect("jump");
-    let mut config = input();
-    config.name = "应用".into();
-    config.group_id = Some(group_id.clone());
-    config.auth_type = AuthType::PrivateKey;
-    config.credential_id = Some(credential.id.clone());
-    config.ssh.jump_host_id = Some(jump.id.clone());
-    legacy.host_create(config).expect("child");
-    let settings = AppConfig {
-        theme: Theme::Light,
-        ..Default::default()
-    };
-    legacy.save_config(&settings).expect("settings");
-    let old_hosts = connection
-        .prepare(&format!(
-            "SELECT {HOST_COLUMNS} FROM hosts ORDER BY name COLLATE NOCASE,id"
-        ))
-        .expect("old hosts")
-        .query_map([], host_row)
-        .expect("query")
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .expect("hosts");
-    let old_groups = connection
-        .prepare(
-            "SELECT id,name,sort_order FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id",
-        )
-        .expect("old groups")
-        .query_map([], |row| {
-            Ok(HostGroup {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort_order: row.get(2)?,
-                parent_id: None,
-            })
-        })
-        .expect("query")
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .expect("groups");
-    let before = serde_json::to_value(Catalog {
-        hosts: old_hosts,
-        groups: old_groups,
-        credentials: vec![
-            legacy
-                .credential_record(&credential.id)
-                .expect("credential metadata")
-                .public,
-        ],
-        pending_secret_deletions: connection
-            .query_row("SELECT count(*) FROM secret_gc", [], |r| r.get(0))
-            .expect("pending deletions"),
-    })
-    .expect("old catalog");
-    drop(connection);
-    let migrated = Database::open(&path).expect("migrate");
-    assert_eq!(
-        migrated.version().expect("version"),
-        serverdeck_core::DATABASE_VERSION
-    );
-    assert_eq!(
-        serde_json::to_value(migrated.catalog().expect("after")).expect("json"),
-        before
-    );
-    let groups = migrated.catalog().expect("catalog").groups;
-    assert_eq!(groups[0].id, group_id);
-    assert_eq!(groups[0].name, "生产");
-    assert_eq!(groups[0].parent_id, None);
-    assert_eq!(migrated.load_config().expect("settings"), settings);
-    let mut unnamed = input();
-    unnamed.name.clear();
-    let saved = migrated
-        .host_create(unnamed)
-        .expect("unnamed after migration");
-    let connection = migrated.connect().expect("connect");
-    assert!(
-        connection
-            .execute("UPDATE hosts SET port=0 WHERE id=?1", [&saved.id])
-            .is_err()
-    );
-    assert!(
-        connection
-            .execute(
-                "UPDATE hosts SET group_id='missing' WHERE id=?1",
-                [&saved.id]
-            )
-            .is_err()
-    );
-}
-
-#[test]
 fn host_crud_copy_groups_and_restart_preserve_real_data() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");
@@ -206,7 +83,6 @@ fn host_crud_copy_groups_and_restart_preserve_real_data() {
     config.group_id = Some(group.id.clone());
     let created = db.host_create(config).expect("create");
     assert_eq!(created.config.hostname, "example.com");
-    assert_eq!(created.config.tags.len(), 2);
     let mut changed = created.config.clone();
     changed.name = "修改后的主机".into();
     changed.port = 22;
@@ -304,47 +180,6 @@ fn proxyjump_import_is_topological_persistent_and_cycles_are_rejected() {
     assert!(
         db.import_hosts(missing.candidates, &["other".into()], None)
             .is_err()
-    );
-}
-
-#[test]
-fn migrates_existing_v1_without_losing_settings() {
-    let dir = tempfile::tempdir().expect("dir");
-    let path = dir.path().join("v1.sqlite3");
-    let connection = Connection::open(&path).expect("open");
-    connection
-        .execute_batch(include_str!("../../migrations/001_settings.sql"))
-        .expect("v1");
-    let config = AppConfig {
-        theme: Theme::Light,
-        ..Default::default()
-    };
-    connection
-        .execute(
-            "INSERT INTO application_settings(key,value) VALUES('app_config',?1)",
-            [serde_json::to_string(&config).expect("json")],
-        )
-        .expect("settings");
-    connection
-        .pragma_update(None, "user_version", 1)
-        .expect("version");
-    drop(connection);
-    let db = Database::open(&path).expect("migrate");
-    assert_eq!(
-        db.version().expect("version"),
-        serverdeck_core::DATABASE_VERSION
-    );
-    assert_eq!(db.load_config().expect("settings"), config);
-    db.host_create(input()).expect("create after migration");
-    drop(db);
-    assert_eq!(
-        Database::open(path)
-            .expect("reopen")
-            .catalog()
-            .expect("catalog")
-            .hosts
-            .len(),
-        1
     );
 }
 

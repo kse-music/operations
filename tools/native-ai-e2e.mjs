@@ -202,32 +202,6 @@ try {
     assert.equal(await page.locator('input[type=password]').count(), 0);
   }
   await register('模型 A', 'fixture-model', key);
-  // Recreate the old single-model settings format only in this UUID-owned test database.
-  const converted = spawnSync(
-    'python',
-    [
-      '-c',
-      `import sqlite3,json,sys
-db=sqlite3.connect(sys.argv[1]); row=db.execute("SELECT value FROM application_settings WHERE key='ai_models'").fetchone(); models=json.loads(row[0])['models']; assert len(models)==1
-m=models[0]; legacy={k:m[k] for k in ['config','secretRef','revision']}
-with db:
- db.execute("INSERT INTO application_settings(key,value) VALUES('ai_config',?)",(json.dumps(legacy),)); db.execute("DELETE FROM application_settings WHERE key='ai_models'")
-db.close()`,
-      path.join(output, 'serverdeck.sqlite3'),
-    ],
-    { windowsHide: true, encoding: 'utf8' },
-  );
-  if (converted.error) throw converted.error;
-  assert.equal(converted.status, 0, converted.stderr);
-  await page.getByRole('button', { name: '刷新模型', exact: true }).click();
-  await page.getByRole('button', { name: '编辑模型 默认模型', exact: true }).click();
-  assert.equal(
-    await page.getByLabel('API Key（留空保留已有 Key）', { exact: true }).inputValue(),
-    '',
-  );
-  await page.getByLabel('模型名称', { exact: true }).fill('模型 A');
-  await page.getByRole('button', { name: '保存模型', exact: true }).click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
   await register('模型 B', 'fixture-other', otherKey);
   const registered = await rpc('ai_models');
   assert.equal(registered.length, 2);
@@ -379,7 +353,6 @@ db.close()`,
         authType: 'agent',
         credentialId: null,
         groupId: null,
-        tags: [],
         description: '',
         favorite: false,
         connectTimeoutSecs: 1,
@@ -473,7 +446,7 @@ db.close()`,
         autoExecuted: false,
         secretReadback: false,
         modelCrud: true,
-        legacyKeyMigration: true,
+        currentModelRegistry: true,
         selectedModelRouting: true,
         stalePreviewRevoked: true,
       },

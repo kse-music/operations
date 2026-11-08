@@ -12,7 +12,7 @@ fn plugin() -> InstalledPlugin {
             version: "1.0.0".into(),
             author: "Local".into(),
             description: String::new(),
-            api_version: "^1".into(),
+            api_version: "^4.0.0".into(),
             entry: Entry {
                 backend: None,
                 ui: None,
@@ -42,7 +42,6 @@ fn input() -> GrantInput {
     GrantInput {
         expected_revision: "version-one".into(),
         permissions: plugin().manifest.permissions,
-        host_ids: vec!["12345678-1234-4234-8234-123456789012".into()],
         operations: vec![
             "hosts.read".into(),
             "ssh.read_only".into(),
@@ -58,10 +57,9 @@ fn input() -> GrantInput {
 }
 
 #[test]
-fn identity_is_bound_but_any_current_host_is_allowed_including_legacy_grants() {
+fn identity_is_bound_and_remote_capabilities_require_a_current_host() {
     let plugin = plugin();
     let grant = Grant::new(&plugin, input()).unwrap();
-    assert!(grant.host_ids.is_empty());
     let host = "12345678-1234-4234-8234-123456789012";
     grant
         .authorize(&plugin, Some(host), &Capability::HostsRead)
@@ -96,26 +94,12 @@ fn identity_is_bound_but_any_current_host_is_allowed_including_legacy_grants() {
                 .is_err()
         );
     }
-    let mut legacy = serde_json::to_value(&grant).unwrap();
-    assert!(legacy.get("hostIds").is_none());
-    legacy["hostIds"] = serde_json::json!([host]);
-    let legacy: Grant = serde_json::from_value(legacy).unwrap();
-    legacy
-        .authorize(
-            &plugin,
-            Some("87654321-4321-4321-8321-123456789012"),
-            &Capability::HostsRead,
-        )
-        .unwrap();
-    assert!(
-        legacy
-            .authorize(&plugin, None, &Capability::HostsRead)
-            .is_err()
-    );
-    let mut no_hosts = serde_json::to_value(input()).unwrap();
-    assert!(no_hosts.get("hostIds").is_none());
-    no_hosts["confirmed"] = true.into();
-    assert!(Grant::new(&plugin, serde_json::from_value(no_hosts).unwrap()).is_ok());
+    let mut invalid = serde_json::to_value(&grant).unwrap();
+    invalid["hostIds"] = serde_json::json!([host]);
+    assert!(serde_json::from_value::<Grant>(invalid).is_err());
+    let mut invalid = serde_json::to_value(input()).unwrap();
+    invalid["hostIds"] = serde_json::json!([host]);
+    assert!(serde_json::from_value::<GrantInput>(invalid).is_err());
 }
 
 #[test]

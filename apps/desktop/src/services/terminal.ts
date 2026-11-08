@@ -7,7 +7,6 @@ import type {
   TerminalSize,
   TerminalUploadSelection,
 } from '../types/terminal';
-import type { WorkspaceLayout } from '../types/workspace';
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
@@ -28,8 +27,6 @@ export const terminalApi = {
     events.onmessage = receive;
     return invoke('terminal_local_open', { size, events });
   },
-  workspaceLoad: (): Promise<WorkspaceLayout | null> => invoke('workspace_load'),
-  workspaceSave: (layout: WorkspaceLayout): Promise<void> => invoke('workspace_save', { layout }),
   forwardStart: (id: string, input: ForwardInput): Promise<ForwardInfo> =>
     invoke('forward_start', { id, input }),
   forwardList: (id: string): Promise<ForwardInfo[]> => invoke('forward_list', { id }),

@@ -374,3 +374,25 @@ async fn service_and_container_plans_require_observed_identity_and_verify_actual
         "a stop/start sequence must not partially execute against a stale frozen precondition; use restart"
     );
 }
+
+#[tokio::test]
+async fn former_suggestions_reply_is_rejected_instead_of_downgrading_agent_execution() {
+    let (config, http) = model(vec![
+        json!({"summary":"old reply","suggestions":[{"command":"reboot","reason":"untrusted"}]}),
+    ])
+    .await;
+    let assistant = Assistant::default();
+    let preview = prepare(&assistant, config);
+    let host = Host(Response::records(vec![]));
+    let result = assistant
+        .send_agent(&preview.id, "revision", b"test-key", true, &host)
+        .await;
+    assert!(matches!(
+        result,
+        Err(Error::Connection {
+            code: "AI_PROTOCOL",
+            ..
+        })
+    ));
+    assert_eq!(http.await.unwrap().len(), 1);
+}

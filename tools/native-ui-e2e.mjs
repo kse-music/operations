@@ -452,7 +452,6 @@ try {
       authType: 'password',
       credentialId: null,
       groupId: groups[0].id,
-      tags: [],
       description: '',
       favorite: false,
       connectTimeoutSecs: 15,
@@ -609,17 +608,8 @@ try {
   }
   assert.equal(await page.locator('.terminal-tab').count(), 4);
   await command('$sdBeforeExit = 42', '42');
-  const legacyTabs = Array.from({ length: 5 }, (_, index) => {
-    const pane = randomUUID();
-    return {
-      key: randomUUID(),
-      title: `旧会话 ${index + 1}`,
-      panes: [{ key: pane, hostId: index === 4 ? host.id : null }],
-      layout: { kind: 'leaf', pane },
-    };
-  });
-  const legacyLayout = { version: 1, active: legacyTabs[0].key, tabs: legacyTabs };
-  await rpc('workspace_save', { layout: legacyLayout });
+  await assert.rejects(() => rpc('workspace_load'));
+  await assert.rejects(() => rpc('workspace_save', { layout: {} }));
   await quit();
   await start();
   await command(
@@ -630,9 +620,8 @@ try {
   assert.equal(saved.groups.length, 2);
   assert.equal(saved.hosts.find((h) => h.id === host.id).groupId, null);
   passed.push(
-    'exit with four local shells and a remote tab restarts on welcome; old five-tab layout is ignored and explicit local selection opens exactly one fresh shell',
+    'exit with four local shells and a remote tab restarts on welcome; explicit local selection opens exactly one fresh shell',
   );
-  assert.deepEqual(await rpc('workspace_load'), legacyLayout);
   assert.equal(await page.locator(`.terminal-pane[data-host-id="${host.id}"]`).count(), 0);
   await showHostTree(page);
   await page.locator(`.tree-host[data-host-id="${host.id}"]`).click();
@@ -845,11 +834,7 @@ try {
     assert.equal((await rpc('host_list')).hosts.find((h) => h.id === id).name, '');
     assert.equal(await page.locator(`[data-host-id="${id}"] .host-name`).textContent(), display);
     await hoverHost(display);
-    await hostContextAction(
-      page,
-      page.locator('.tree-host').filter({ hasText: display }),
-      '删除',
-    );
+    await hostContextAction(page, page.locator('.tree-host').filter({ hasText: display }), '删除');
     await unnamedDeletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
     await unnamedDeletion.waitFor({ state: 'hidden' });
   }

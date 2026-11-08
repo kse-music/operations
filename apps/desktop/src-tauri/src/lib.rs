@@ -28,24 +28,6 @@ pub fn run() {
                 tracing::warn!(operation = "focus_existing_window", error = %error, "could not focus existing window");
             }
         }))
-        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("profile-migration")
-            .setup(|app, _| {
-                if app.config().identifier == serverdeck_core::identity::APPLICATION_ID
-                    && app.config().app.app_directories_override.is_none()
-                {
-                    for path in [
-                        app.path().app_data_dir()?,
-                        app.path().app_local_data_dir()?,
-                        app.path().app_config_dir()?,
-                        app.path().app_cache_dir()?,
-                        app.path().app_log_dir()?,
-                    ] {
-                        serverdeck_application::identity::migrate_legacy_directory(&path)?;
-                    }
-                }
-                Ok(())
-            })
-            .build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
@@ -239,8 +221,6 @@ pub fn command_handler<R: tauri::Runtime>()
         file_commands::text_close,
         file_commands::file_terminal,
         file_commands::app_exit_confirm,
-        commands::workspace_load,
-        commands::workspace_save,
         commands::forward_start,
         commands::forward_list,
         commands::forward_stop,

@@ -210,28 +210,15 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   const probe = await tcpConnect(cleanupPort);
   probe.destroy();
   await cleanupDialog.getByRole('button', { name: '关闭面板', exact: true }).click();
-  await page.waitForFunction(async () => {
-    const saved = await window.__TAURI_INTERNALS__.invoke('workspace_load');
-    return saved?.tabs[0]?.panes.length === 2;
-  });
-  const saved = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('workspace_load'));
-  assert.equal(saved.tabs[0].panes.length, 2);
-  assert(
-    !JSON.stringify(saved).includes('BRACKET_CONFIRMED'),
-    'workspace metadata must not contain terminal content',
-  );
+  assert.equal(await page.locator('.terminal-pane').count(), 2);
   await page.screenshot({ path: path.join(artifacts, 'splits.png') });
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
-  await page
-    .getByRole('navigation')
-    .getByRole('button', { name: /SSH 终端/ })
-    .click();
-  assert.equal(await panes().count(), 2);
-  assert.equal(await panes().locator('.xterm-container[data-state="idle"]').count(), 2);
-  assert.equal(await panes().locator('.xterm-container[data-state="connected"]').count(), 0);
+  await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
+  assert.equal(await page.locator('.terminal-pane').count(), 0);
+  assert.equal(await page.locator('.terminal-tab').count(), 0);
   await assert.rejects(() => tcpConnect(cleanupPort));
-  passed('workspace reload restores idle panes and closes the previous WebView sessions');
+  passed('workspace reload starts without terminal tabs and closes the previous WebView sessions');
 }
 
 async function networkChecks(page, panes, passed, openTerminal, pin) {

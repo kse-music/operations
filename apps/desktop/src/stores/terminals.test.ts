@@ -4,8 +4,6 @@ vi.mock('../services/terminal', () => ({
   terminalApi: {
     close: vi.fn(),
     closeHost: vi.fn(),
-    workspaceLoad: vi.fn(),
-    workspaceSave: vi.fn(),
   },
 }));
 import { terminalApi } from '../services/terminal';
@@ -60,7 +58,7 @@ describe('independent terminal tabs', () => {
     fresh.open(null);
     expect(fresh.tabs.map((tab) => tab.sessionNumber)).toEqual([1, 1]);
     expect(fresh.panes.every((pane) => !pane.sessionId && pane.connectRequested)).toBe(true);
-    expect(terminalApi.workspaceLoad).not.toHaveBeenCalled();
+    expect(terminalApi).not.toHaveProperty('workspaceLoad');
   });
   it('uses the address as the default terminal title for unnamed hosts', () => {
     const store = useTerminalsStore();
@@ -272,12 +270,12 @@ describe('independent terminal tabs', () => {
     store.split(store.focused, 'columns');
     store.rename(store.active, '部署');
     await vi.advanceTimersByTimeAsync(1000);
-    expect(terminalApi.workspaceSave).not.toHaveBeenCalled();
+    expect(terminalApi).not.toHaveProperty('workspaceSave');
     store.open(host);
     await store.closeAll(store.tabs[0]!.key);
     await vi.advanceTimersByTimeAsync(1000);
     expect(store.tabs).toEqual([]);
-    expect(terminalApi.workspaceSave).not.toHaveBeenCalled();
-    expect(terminalApi.workspaceLoad).not.toHaveBeenCalled();
+    expect(terminalApi).not.toHaveProperty('workspaceSave');
+    expect(terminalApi).not.toHaveProperty('workspaceLoad');
   });
 });

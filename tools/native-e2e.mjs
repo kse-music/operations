@@ -184,7 +184,6 @@ try {
         authType: 'password',
         credentialId: null,
         groupId,
-        tags: [],
         description: '',
         favorite: false,
         connectTimeoutSecs: 15,

@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ServerDeck",
   "description": "Public SDK UI example: sanitized host metadata and read-only uname diagnostic",
-  "apiVersion": "^1.0.0",
+  "apiVersion": "^4.0.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"

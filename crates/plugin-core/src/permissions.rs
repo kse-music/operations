@@ -26,9 +26,6 @@ pub const OPERATIONS: &[&str] = &[
 pub struct GrantInput {
     pub expected_revision: String,
     pub permissions: Vec<Permission>,
-    // Accepted only to read older clients/files. All enabled plugins use the current host.
-    #[serde(default, skip_serializing)]
-    pub host_ids: Vec<String>,
     pub operations: Vec<String>,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
@@ -44,8 +41,6 @@ pub struct Grant {
     pub package_digest: String,
     pub revision: String,
     pub permissions: Vec<Permission>,
-    #[serde(default, skip_serializing)]
-    pub host_ids: Vec<String>,
     pub operations: Vec<String>,
     pub read_roots: Vec<String>,
     pub write_roots: Vec<String>,
@@ -88,7 +83,6 @@ impl Grant {
             package_digest: plugin.package_digest.clone(),
             revision: plugin.revision.clone(),
             permissions: input.permissions,
-            host_ids: vec![],
             operations: input.operations,
             read_roots: input.read_roots,
             write_roots: input.write_roots,

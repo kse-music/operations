@@ -1,52 +1,28 @@
 # 插件 API 版本策略
 
-## 4.0.0 兼容补充：镜像删除确认
+平台尚未正式发布，插件按当前契约开发和安装，不承诺兼容历史开发版。Host API、Rust SDK 和 TypeScript/Vue SDK 当前均为 **4.0.0**；插件清单声明 `apiVersion: "^4.0.0"`，宿主只检查该范围是否包含当前 Host API，不再协商 1.x、2.x 或 3.x 的旧实现。
 
-Docker 标准包更新至 1.5.1，镜像删除只保留一次宿主批准。宿主 Approval 响应可选增加 imageId，来自冻结的原生镜像删除请求；旧响应无此字段时保留通用宿主审批。无新增权限、IPC 命令或必填字段，Host/Rust/Vue SDK 仍为 4.0.0，包声明 ^4.0.0，ABI/wire/包格式保持。助手包仍为 1.6.0。
+## 当前协议
 
-## 4.0.0：移除系统服务标准界面
+| 层级                                    | 当前版本与要求                                                 |
+| --------------------------------------- | -------------------------------------------------------------- |
+| Host API / Rust SDK / Vue SDK           | 4.0.0                                                          |
+| 插件 UI                                 | `uiVersion: 4`，每包自带 `frontend` JS/CSS，每页声明 `surface` |
+| 包 / Manifest                           | `formatVersion: 1` / `schemaVersion: 1`                        |
+| WASM ABI / 生命周期 wire / 能力 Request | 1                                                              |
+| 安装记录 / 授权记录                     | 1，包含宿主写入的实际安装来源                                  |
 
-Host API、Rust SDK 和 Vue SDK 升至 4.0.0。删除 Monitor surface，以及 operations 中 overview/disks/network/processes/ports/services/logs 分类，operations 仅接受 containers/images；删除旧视图注入适配。公开 metrics、系统查询/受控操作与日志能力继续供独立前端和 AI 使用。Docker 1.5.0、助手 1.6.0 声明 ^4.0.0，ABI/wire/包格式仍为 1。
+这些是不同层的版本号。ABI/wire 为 1 不代表支持旧版 Host API 或 UI。
 
-不再分发 services，并拒绝当前及旧域名 services 身份重新安装。已安装旧身份或声明被删标准视图的包归档退役，原包、配置和授权保留；只有 backup 不兼容时保留 current，归档原记录和独立包并清除 backup/previousVersion。新安装被删视图时明确提示升级为独立界面。仅使用保留合同的 ^1.x/^2.x/^3.x 包继续兼容。以下为历史版本。
+UI v1/v2/v3、缺少 frontend 的界面和旧 HTML 入口均拒绝。权限、工具枚举、分类、字段与资源入口使用当前 SDK 的严格校验，不接受已经删除的合同，也不提供宿主代渲染页面。授权不接受已删除的 `hostIds` 字段；远端能力绑定可信宿主选择的当前主机。
 
-## 3.0.0：移除网络诊断
+## 安装与正常升级
 
-Host API、Rust SDK 和 Vue SDK 升至 3.0.0，三个系统包升至 1.3.0。删除 network.run、tools::Tool::Network、DiagnosticStart/List/Cancel、网络诊断 UI 分类/兼容页面以及原生 diagnostic_* IPC；前端不再导出 services/tasks、types/tasks 或 PluginToolIntent。通用导出使用 services/download；AI、SSH/SFTP、监控网络流量与端口能力保留，ABI/wire/包格式仍为 1。未使用移除契约的 ^1.x/^2.x 包继续使用。
+- 上传包默认禁用且未授权；即使 ID 与内置插件相同，也不能继承系统来源和预置权限。
+- 安装更高版本仍需绑定当前版本与预览摘要、明确确认停止旧资源。成功升级保留设置、旧版本备份，授权须重新批准；提交失败保留旧指针和授权。
+- 内置 Docker/助手的正常版本升级继续保留启停、设置、卸载选择，不覆盖用户上传来源或降级。
+- 不再进行旧插件 ID 迁移、旧 payload 目录搬移、已删除插件自动归档或授权旧字段转换。无法按当前契约解码的数据返回错误，保留原因与原文件；不自动重置用户数据。
 
-启动时只对已知系统服务记录归档原始元数据、收窄旧权限，再以标准包升级保留启停/配置/卸载选择；升级完成前不开放运行时。旧诊断上传包退出注册并保留记录、payload 和用户数据，不能通过旧包恢复能力；旧备份记录中的已删除能力不再反序列化为活动安装。新包及旧 IPC 请求均拒绝已删除契约。以下为历史版本说明。
+## 后续变更
 
-## 2.1.0：UI v4 组合分类与缓存可见性
-
-Host API、Rust SDK、Vue SDK 为 2.1.0，三个系统包 services/docker/assistant 为 1.2.0。UI v4 operations.sections 新增 overview/disks/network/diagnostics，允许一个标准 server 贡献组合公开能力；UI v2/v3 类别保持原限制。没有新原生 IPC 或权限，后台仍按 Guest 白名单、grant、上下文和单次审批复验。SDK 新增 usePluginVisibility，组合页面文档和 KeepAlive 激活状态。
-
-保留网络 ToolInvoke/旧 monitor/tool UI 协议及兼容资源；旧 ^2.0 与未使用已删除能力的 ^1.x 包继续兼容。旧四项 system 记录归档、用户数据与上传来源保留，services 沿用自己的配置和启停。ABI/wire 与包/manifest 格式仍为 1。下文记录各历史版本。
-
-## 2.0.0：移除自动运维和批量运维
-
-Host API、Rust SDK 和 TypeScript/Vue SDK 均为 2.0.0。删除 batch.run、automation.manage、tasks.create 及其对应操作、Tool 枚举、DTO 和 IPC；系统包 1.1.3 声明 ^2.0.0。WASM ABI、wire、Manifest/包格式仍为 1，UI v4 不变。
-
-Host 同时协商当前 2.0 与保留能力的 1.4 范围；仅使用保留接口的旧 v1 包、UI v1–v3 和上传权限逻辑继续兼容。声明已移除权限的旧安装先转为非活动历史，新包请求未知/已移除权限或操作直接拒绝。较新的不支持范围仍拒绝，测试继续验证主版本边界。下文版本条目记录其发布时状态。
-
-## 1.4.0：包内前端与公共 Vue SDK
-
-Host API 1.4.0、Rust SDK 1.3.0 新增 UI v4 的 frontend 入口及通用 frontend surface；新包声明 `apiVersion: "^1.4.0"`，避免旧 Host 严格字段检查失败。TypeScript/Vue SDK `@serverdeck/plugin-sdk` 独立版本为 1.0.0。SDK 实现统一有界桥，既有 Capability/WASM ABI/wire、manifest schemaVersion 和包 formatVersion 仍为 1，旧 SDK 1.0–1.2 的能力和 UI v1–v3 继续兼容。
-
-九个分发包版本为 1.1.0。预置逻辑保留已有安装，不强制升级、重写摘要或继承新的授权；新安装使用 UI v4，旧 v2/v3 由兼容资源渲染。用户主动安装更高版本仍遵循标准升级确认、备份、重新授权规则。以下各版本条目描述其发布时状态，当前 Host/SDK 版本以上述为准。
-
-## 1.3.0：插件清单图标
-
-Host API 升至 1.3.0，manifest 增加可选 icon 图标名。旧清单省略字段仍可读取，None 序列化时不增加字段；使用图标的新包声明 ^1.3.0，旧 Host 对未知字段的严格拒绝保持。SDK crate 仍为 1.2.0，包 formatVersion/schemaVersion、WASM ABI、消息版本和 UI 版本不变。不增加权限、资源加载或动态代码能力。支持名称及默认回退见[包格式](PLUGIN_PACKAGE_FORMAT.md#可选插件图标host-api-130)。
-
-## 1.2.0：工作区工具
-
-API/SDK 1.2.0 在主版本 1 内新增四个封闭权限及 ToolInvoke，UI v3 增加 tool 贡献与工具类型枚举。新工具包要求 ^1.2.0；UI v1/v2、SDK 1.0/1.1 旧能力继续可用，ABI/消息/Capture Request 版本仍为 1。新能力不接受任意 IPC 或 Guest 确认字段。AI、网络、批量和自动化工具走公开标准能力；模型管理/凭据/任务中心保留为宿主基础能力。旧文末“AI API 不属于此版本”的限制仅适用于历史 1.0。
-
-- 包 formatVersion=1、manifest schemaVersion=1 是独立严格格式；未知版本拒绝。manifest apiVersion 为 SemVer 范围，当前 Host API 为 1.3.0。
-- WASM ABI sd_api_version 必须为 1，生命周期消息 protocolVersion=1；Host Capability Request.apiVersion=1。版本不兼容在执行能力前拒绝。
-- SDK crate 独立版本为 1.2.0，只依赖公开 serde 协议，不依赖私有 Host crate。Rust 与 TS DTO 同步，并通过真实 IPC/独立 WASM 编译与 Linux SSH/SFTP 测试校验。
-- 13A-3 增加仅 Host 可发出的 resume（操作码 7）；普通 UI 不能选择该入口。旧 hello-world 的无能力 invoke 行为保留，不强制转成业务插件。
-- 增加可选能力/扩展点应在兼容主版本内明确协商；严格 DTO 的新字段不能不加版本就假定旧 Host 会忽略。改变现有语义、必需字段或安全约束必须升级对应协议/主版本并保留迁移说明。
-- 授权记录 version=1，绑定包摘要和安装代。升级不迁移权限，必须重新批准，包括新增权限；用户数据/设置可保留，但不作为授权证据。单次高风险批准不跨上下文、版本或升级复用。
-
-13A-4 已交付声明式 UI uiVersion=1（SDK ui 模块），只接受 JSON。早期阶段的 .html 元数据不代表已支持 Web UI，不执行脚本；新安装需要改为 ui.json。Host Info 使用公开 SDK 和 UI 协议；当时用于验收的 Nginx 测试插件现已删除。Agent、AI API、在线市场和跨机器分发不属于此版本兼容性承诺。
+正式发布前直接同步源码、SDK、示例、构建器、类型和测试，不为开发期旧包新增兼容层。正式发布后的兼容策略在实际发布时确定。包格式、安全约束和公开能力分别见[包格式](PLUGIN_PACKAGE_FORMAT.md)、[安全边界](PLUGIN_SECURITY.md)及[公开 SDK](PLUGIN_SDK.md)。

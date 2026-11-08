@@ -16,11 +16,10 @@ use std::{
 pub enum Trust {
     LocalDevelopmentUnverified,
 }
-#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginSource {
     System,
-    #[default]
     User,
 }
 
@@ -38,7 +37,6 @@ pub trait PublisherVerifier: Send + Sync {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstalledPlugin {
-    #[serde(default)]
     pub source: PluginSource,
     pub manifest: Manifest,
     pub enabled: bool,
@@ -53,7 +51,6 @@ pub struct PackagePreview {
     pub manifest: Manifest,
     pub package_digest: String,
     pub trust: Trust,
-    pub compatible: bool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -99,13 +96,10 @@ impl Repository {
         ] {
             ensure_directory(&root.join(name))?;
         }
-        let repository = Self {
+        Ok(Self {
             root,
             platform: std::env::consts::OS.into(),
-        };
-        repository.retire_removed_tools()?;
-        repository.migrate_payload_layout()?;
-        Ok(repository)
+        })
     }
     pub fn preview(&self, path: &Path) -> Result<Manifest, Error> {
         Ok(Package::read(path, &self.platform)?.manifest)
@@ -116,7 +110,6 @@ impl Repository {
             manifest: p.manifest,
             package_digest: p.digest,
             trust: Trust::LocalDevelopmentUnverified,
-            compatible: true,
         })
     }
     pub fn ui(&self, id: &str, revision: &str) -> Result<serverdeck_plugin_sdk::ui::Ui, Error> {

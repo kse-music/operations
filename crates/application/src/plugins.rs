@@ -22,11 +22,7 @@ impl Application {
         if !ui.pages.iter().any(|p| p.id == page && p.surface.is_some()) {
             return Err(Error::Validation("插件界面不存在"));
         }
-        if ui.frontend.is_some() {
-            self.plugins.frontend_asset(id, revision, path)
-        } else {
-            super::bundled_plugins::legacy_frontend(&ui, page, path)
-        }
+        self.plugins.frontend_asset(id, revision, path)
     }
 
     pub fn plugin_frontend_document(
@@ -39,10 +35,7 @@ impl Application {
         if !ui.pages.iter().any(|p| p.id == page && p.surface.is_some()) {
             return Err(Error::Validation("插件没有独立界面"));
         }
-        let frontend = ui.frontend.unwrap_or(serverdeck_plugin_sdk::ui::Frontend {
-            script: "frontend.js".into(),
-            style: "frontend.css".into(),
-        });
+        let frontend = ui.frontend.ok_or(Error::Validation("插件没有独立界面"))?;
         // Entry names have already passed the strict SDK validation.
         Ok(format!("<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><link rel=\"stylesheet\" href=\"{}\"></head><body><div id=\"app\"></div><script type=\"module\" src=\"{}\"></script></body></html>", frontend.style, frontend.script).into_bytes())
     }

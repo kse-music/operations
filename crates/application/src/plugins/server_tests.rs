@@ -89,7 +89,6 @@ async fn chunk_resources_are_bounded_owned_expiring_and_released_on_stop() {
         GrantInput {
             expected_revision: plugin.revision.clone(),
             permissions: vec![Permission::UiContribute],
-            host_ids: vec![],
             operations: vec!["ui.contribute".into()],
             read_roots: vec![],
             write_roots: vec![],

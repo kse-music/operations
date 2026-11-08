@@ -30,34 +30,6 @@ pub struct ValidatedPackage {
     pub digest: String,
 }
 
-/// Inspect only retired standard UI declarations, before decoding the current SDK.
-pub(crate) fn uses_removed_server_view(ui: &serde_json::Value) -> bool {
-    ui["pages"].as_array().is_some_and(|pages| {
-        pages.iter().any(|page| {
-            let surface = &page["surface"];
-            surface["kind"] == "monitor"
-                || (surface["kind"] == "operations"
-                    && surface["sections"].as_array().is_some_and(|sections| {
-                        sections.iter().any(|section| {
-                            matches!(
-                                section.as_str(),
-                                Some(
-                                    "overview"
-                                        | "disks"
-                                        | "network"
-                                        | "processes"
-                                        | "ports"
-                                        | "services"
-                                        | "logs"
-                                        | "diagnostics"
-                                )
-                            )
-                        })
-                    }))
-        })
-    })
-}
-
 impl Package {
     pub fn read(path: &Path, platform: &str) -> Result<ValidatedPackage, Error> {
         if !std::fs::symlink_metadata(path)
@@ -140,7 +112,7 @@ impl Package {
         }
         if let Some(entry) = &package.manifest.entry.ui {
             if !entry.ends_with(".json") {
-                return Err(invalid("插件 UI 仅支持声明式 JSON，不执行 HTML/JavaScript"));
+                return Err(invalid("插件 UI 入口必须是 JSON 声明"));
             }
             let bytes = &files
                 .iter()
@@ -150,13 +122,8 @@ impl Package {
             if bytes.len() > 64 * 1024 {
                 return Err(invalid("插件 UI 声明超过 64 KiB"));
             }
-            let raw_ui: serde_json::Value = serde_json::from_slice(bytes)
-                .map_err(|_| invalid("插件 UI 声明无效或含脚本/未知字段"))?;
-            if uses_removed_server_view(&raw_ui) {
-                return Err(invalid("系统服务标准界面已移除，请升级插件使用独立界面"));
-            }
-            let ui: serverdeck_plugin_sdk::ui::Ui = serde_json::from_value(raw_ui)
-                .map_err(|_| invalid("插件 UI 声明无效或含脚本/未知字段"))?;
+            let ui: serverdeck_plugin_sdk::ui::Ui = serde_json::from_slice(bytes)
+                .map_err(|_| invalid("插件 UI 声明无效或含未知字段"))?;
             ui.validate().map_err(invalid)?;
             if let Some(frontend) = &ui.frontend {
                 for entry in [&frontend.script, &frontend.style] {

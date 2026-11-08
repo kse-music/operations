@@ -1,7 +1,7 @@
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 import { useModelsStore } from '@serverdeck/plugin-sdk/stores/models';
-import { pluginServerRequest } from '@serverdeck/plugin-sdk/services/plugin-server';
+import { requestCapability } from '@serverdeck/plugin-sdk/services/capability';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
 import { aiApi } from '@serverdeck/plugin-sdk/services/ai';
 import {
@@ -78,7 +78,7 @@ export function useModelBinding() {
     error.value = '';
     try {
       const [value, , local] = await Promise.all([
-        pluginServerRequest<unknown>('', { kind: 'settings_read' }),
+        requestCapability<unknown>({ kind: 'settings_read' }),
         models.refresh(),
         Promise.all(sources.map(loadLocal)),
       ]);
@@ -118,7 +118,7 @@ export function useModelBinding() {
     message.value = '';
     try {
       const value = { ...settings, modelId: id || null };
-      await pluginServerRequest('', { kind: 'settings_write', value });
+      await requestCapability({ kind: 'settings_write', value });
       if (current !== version || !visible.value) return;
       settings = value;
       modelId.value = id;

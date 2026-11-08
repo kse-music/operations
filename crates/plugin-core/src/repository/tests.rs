@@ -19,7 +19,7 @@ fn package(version: &str) -> Package {
             version: version.into(),
             author: "Local developer".into(),
             description: "No executable entry".into(),
-            api_version: "^1.0".into(),
+            api_version: "^4.0".into(),
             entry: Entry {
                 backend: None,
                 ui: None,
@@ -59,7 +59,7 @@ fn independent_ui_assets_require_current_grants_declared_entries_and_matching_di
     let dir = tempfile::tempdir().unwrap();
     let repo = Repository::open(dir.path().join("plugins")).unwrap();
     let mut p = package("1.0.0");
-    p.manifest.api_version = "^1.4.0".into();
+    p.manifest.api_version = "^4.0.0".into();
     p.manifest.entry.backend = Some("backend.wasm".into());
     p.manifest.entry.ui = Some("ui.json".into());
     p.manifest.permissions = vec![Permission::UiContribute];
@@ -105,7 +105,6 @@ fn independent_ui_assets_require_current_grants_declared_entries_and_matching_di
         GrantInput {
             expected_revision: installed.revision.clone(),
             permissions: vec![Permission::UiContribute],
-            host_ids: vec![],
             operations: vec!["ui.contribute".into()],
             read_roots: vec![],
             write_roots: vec![],
@@ -160,20 +159,20 @@ fn independent_ui_assets_require_current_grants_declared_entries_and_matching_di
     );
 }
 #[test]
-fn plugin_icon_survives_preview_install_and_restart_and_is_optional_for_legacy_packages() {
+fn optional_plugin_icon_survives_preview_install_and_restart() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("plugins");
     let repo = Repository::open(root.clone()).unwrap();
     let mut p = package("1.0.0");
-    let legacy = serde_json::to_vec(&p).unwrap();
+    let without_icon = serde_json::to_vec(&p).unwrap();
     assert!(
         serde_json::to_value(&p).unwrap()["manifest"]
             .get("icon")
             .is_none()
     );
-    assert!(Package::validate_bytes(&legacy, std::env::consts::OS).is_ok());
+    assert!(Package::validate_bytes(&without_icon, std::env::consts::OS).is_ok());
     p.manifest.icon = Some("rocket".into());
-    p.manifest.api_version = "^1.3.0".into();
+    p.manifest.api_version = "^4.0.0".into();
     let path = save(dir.path(), &p);
     assert_eq!(
         repo.preview_info(&path).unwrap().manifest.icon.as_deref(),
@@ -222,13 +221,14 @@ fn plugin_icon_rejects_paths_urls_markup_and_invalid_names_but_allows_future_ico
 }
 
 #[test]
-fn preview_digest_and_ui_grant_are_enforced_and_scripts_rejected() {
+fn preview_digest_and_ui_grant_are_enforced_and_unknown_fields_rejected() {
     use crate::permissions::GrantInput;
     let dir = tempfile::tempdir().unwrap();
     let repo = Repository::open(dir.path().join("plugins")).unwrap();
     let mut p = package("1.0.0");
-    let ui=br#"{"uiVersion":1,"title":{"zh-CN":"Host","en-US":"Host"},"pages":[{"id":"host","title":"Host","initialAction":"read","fields":[],"actions":[],"log":null}]}"#;
+    let ui = br#"{"uiVersion":4,"title":{"zh-CN":"Host","en-US":"Host"},"frontend":{"script":"frontend.js","style":"frontend.css"},"pages":[{"id":"host","title":"Host","surface":{"kind":"frontend"},"initialAction":null,"fields":[],"actions":[{"id":"read","label":"Read","discardDirty":false,"enabledWhen":null}],"log":null}]}"#;
     p.manifest.entry.ui = Some("ui.json".into());
+    p.manifest.entry.backend = Some("backend.wasm".into());
     p.manifest.permissions = vec![Permission::UiContribute];
     p.manifest.contributions = vec![Contribution {
         id: "host".into(),
@@ -236,15 +236,25 @@ fn preview_digest_and_ui_grant_are_enforced_and_scripts_rejected() {
         kind: ContributionKind::Workspace,
         tool: None,
     }];
-    p.manifest.files.push(FileDigest {
-        path: "ui.json".into(),
-        size: ui.len() as u64,
-        sha256: digest(ui),
-    });
-    p.files.push(PackageFile {
-        path: "ui.json".into(),
-        content: STANDARD.encode(ui),
-    });
+    for (path, bytes) in [
+        ("ui.json", ui.as_slice()),
+        (
+            "frontend.js",
+            b"document.body.textContent='Host'".as_slice(),
+        ),
+        ("frontend.css", b"body{color:inherit}".as_slice()),
+        ("backend.wasm", b"\0asm\x01\0\0\0".as_slice()),
+    ] {
+        p.manifest.files.push(FileDigest {
+            path: path.into(),
+            size: bytes.len() as u64,
+            sha256: digest(bytes),
+        });
+        p.files.push(PackageFile {
+            path: path.into(),
+            content: STANDARD.encode(bytes),
+        });
+    }
     let path = save(dir.path(), &p);
     let preview = repo.preview_info(&path).unwrap();
     assert!(
@@ -267,7 +277,6 @@ fn preview_digest_and_ui_grant_are_enforced_and_scripts_rejected() {
         GrantInput {
             expected_revision: installed.revision.clone(),
             permissions: vec![Permission::UiContribute],
-            host_ids: vec![],
             operations: vec!["ui.contribute".into()],
             read_roots: vec![],
             write_roots: vec![],
@@ -282,10 +291,13 @@ fn preview_digest_and_ui_grant_are_enforced_and_scripts_rejected() {
     assert!(repo.ui("dev.example", "stale").is_err());
     repo.revoke_grant("dev.example").unwrap();
     assert!(repo.ui("dev.example", &installed.revision).is_err());
-    for value in [
-        serde_json::json!({"uiVersion":1,"title":"Bad","pages":[],"script":"credential_read"}),
-        serde_json::json!({"uiVersion":1,"title":"Bad","pages":[{"id":"host","title":"Host","fields":[{"id":"__proto__","label":"Bad","kind":"text","default":""}],"actions":[]}]}),
-    ] {
+    let original: Value = serde_json::from_slice(ui).unwrap();
+    let mut unknown = original.clone();
+    unknown["script"] = serde_json::json!("credential_read");
+    let mut invalid_field = original.clone();
+    invalid_field["pages"][0]["fields"] =
+        serde_json::json!([{"id":"__proto__","label":"Bad","kind":"text","default":""}]);
+    for value in [unknown, invalid_field] {
         let bytes = serde_json::to_vec(&value).unwrap();
         p.files[1].content = STANDARD.encode(&bytes);
         p.manifest.files[1].size = bytes.len() as u64;
@@ -461,7 +473,7 @@ fn rejects_paths_aliases_duplicate_files_and_file_directory_conflicts() {
 
 #[test]
 fn rejects_incompatible_versions_permissions_unknown_fields_links_and_corruption() {
-    for api in ["^99.0", "not a range"] {
+    for api in ["^1.0", "^2.0", "^3.0", "^99.0", "not a range"] {
         let mut p = package("1.0.0");
         p.manifest.api_version = api.into();
         assert!(validate(&p).is_err());
@@ -616,7 +628,6 @@ fn grants_persist_but_upgrade_new_permissions_revoke_and_uninstall_never_reuses_
     let grant = GrantInput {
         expected_revision: installed.revision,
         permissions: vec![Permission::HostsRead],
-        host_ids: vec!["12345678-1234-4234-8234-123456789012".into()],
         operations: vec!["hosts.read".into()],
         read_roots: vec![],
         write_roots: vec![],
@@ -720,71 +731,6 @@ fn real_atomic_commit_error_keeps_old_generation() {
 }
 
 #[test]
-fn legacy_payload_layout_migrates_without_changing_revision_grants_or_settings() {
-    use crate::permissions::GrantInput;
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("plugins");
-    let repo = Repository::open(root.clone()).unwrap();
-    let mut package = package("1.0.0");
-    package.manifest.permissions = vec![Permission::SettingsRead, Permission::SettingsWrite];
-    let path = save(dir.path(), &package);
-    let plugin = repo.install(input(&path, None)).unwrap();
-    repo.set_enabled("dev.example", true).unwrap();
-    repo.set_grant(
-        "dev.example",
-        GrantInput {
-            expected_revision: plugin.revision.clone(),
-            permissions: vec![Permission::SettingsRead],
-            host_ids: vec![],
-            operations: vec!["settings.read".into()],
-            read_roots: vec![],
-            write_roots: vec![],
-            confirmed: true,
-        },
-    )
-    .unwrap();
-    repo.settings_write("dev.example", &serde_json::json!({"theme":"dark"}))
-        .unwrap();
-    let record = fs::read(repo.folder("dev.example").unwrap().join("record.json")).unwrap();
-    let authorization = fs::read(root.join("authorizations/dev.example.json")).unwrap();
-    let legacy = repo.folder("dev.example").unwrap().join("versions");
-    fs::rename(
-        repo.payload_folder(PluginSource::User, "dev.example")
-            .unwrap()
-            .join("versions"),
-        &legacy,
-    )
-    .unwrap();
-    let migrated = Repository::open(root.clone()).unwrap();
-    let current = migrated.detail("dev.example").unwrap();
-    assert_eq!(current.revision, plugin.revision);
-    assert!(current.enabled);
-    assert_eq!(
-        fs::read(migrated.folder("dev.example").unwrap().join("record.json")).unwrap(),
-        record
-    );
-    assert_eq!(
-        fs::read(root.join("authorizations/dev.example.json")).unwrap(),
-        authorization
-    );
-    assert!(migrated.grant("dev.example").unwrap().is_some());
-    assert_eq!(
-        migrated.settings_read("dev.example").unwrap()["theme"],
-        "dark"
-    );
-    assert!(
-        root.join("upload/dev.example/versions")
-            .join(&current.revision)
-            .exists()
-    );
-    assert_eq!(
-        migrated.read_file(&current, "readme.txt").unwrap(),
-        b"metadata only; no executable"
-    );
-    Repository::open(root).unwrap();
-}
-
-#[test]
 fn source_change_stores_uploaded_upgrade_in_upload_and_keeps_system_backup() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("plugins");
@@ -825,207 +771,26 @@ fn source_change_stores_uploaded_upgrade_in_upload_and_keeps_system_backup() {
 }
 
 #[test]
-fn migration_refuses_a_conflicting_payload_without_overwriting_it() {
+fn unsupported_records_fail_without_migrating_or_deleting_user_data() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("plugins");
-    let repo = Repository::open(root.clone()).unwrap();
-    let path = save(dir.path(), &package("1.0.0"));
-    let plugin = repo.install(input(&path, None)).unwrap();
-    let legacy = repo
-        .folder("dev.example")
-        .unwrap()
-        .join("versions")
-        .join(&plugin.revision);
-    fs::create_dir_all(&legacy).unwrap();
-    fs::write(legacy.join("keep.txt"), b"old bytes").unwrap();
-    assert!(Repository::open(root).is_err());
-    assert_eq!(fs::read(legacy.join("keep.txt")).unwrap(), b"old bytes");
-    assert!(repo.read_file(&plugin, "readme.txt").is_ok());
-}
-
-#[test]
-fn removed_contracts_are_archived_without_loading_assets_or_deleting_data() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("plugins");
-    let repo = Repository::open(root.clone()).unwrap();
-    let retained = repo
-        .install(input(&save(dir.path(), &package("1.0.0")), None))
-        .unwrap();
-    let base: Value =
-        serde_json::from_slice(&fs::read(root.join("packages/dev.example/record.json")).unwrap())
-            .unwrap();
-    let legacy = format!(
-        "{}automation",
-        serverdeck_core::identity::LEGACY_PLUGIN_PREFIX
-    );
-    let mut originals = Vec::new();
-    for (id, permission) in [
-        ("cn.hiboot.plugins.batch", "batch.run"),
-        ("cn.hiboot.plugins.automation", "automation.manage"),
-        (legacy.as_str(), "automation.manage"),
-        ("dev.old-task-provider", "tasks.create"),
-    ] {
-        let mut record = base.clone();
-        record["current"]["manifest"]["id"] = serde_json::json!(id);
-        record["current"]["manifest"]["permissions"] = serde_json::json!([permission]);
-        record["current"]["enabled"] = serde_json::json!(true);
-        let folder = root.join("packages").join(id);
-        fs::create_dir_all(&folder).unwrap();
-        let bytes = serde_json::to_vec(&record).unwrap();
-        fs::write(folder.join("record.json"), &bytes).unwrap();
-        let data = root.join("data").join(id);
-        fs::create_dir_all(&data).unwrap();
-        fs::write(data.join("settings.json"), b"retained user settings").unwrap();
-        originals.push((id.to_owned(), bytes));
-    }
-    drop(repo);
-    let reopened = Repository::open(root.clone()).unwrap();
-    assert_eq!(
-        reopened
-            .list()
-            .unwrap()
-            .iter()
-            .map(|p| p.manifest.id.as_str())
-            .collect::<Vec<_>>(),
-        [retained.manifest.id.as_str()]
-    );
-    let archives = fs::read_dir(root.join("retired"))
-        .unwrap()
-        .map(|p| p.unwrap().path())
-        .collect::<Vec<_>>();
-    assert_eq!(archives.len(), originals.len());
-    for (id, bytes) in originals {
-        assert!(matches!(reopened.detail(&id), Err(Error::NotFound)));
-        assert!(
-            archives
-                .iter()
-                .any(|p| fs::read(p.join("record.json")).unwrap() == bytes)
-        );
-        assert_eq!(
-            fs::read(root.join("data").join(&id).join("settings.json")).unwrap(),
-            b"retained user settings"
-        );
-    }
-    assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 1);
-    for id in ["cn.hiboot.plugins.batch", "cn.hiboot.plugins.automation"] {
-        let mut old = package("1.0.0");
-        old.manifest.id = id.into();
-        assert!(old.manifest.validate(std::env::consts::OS).is_err());
-    }
-}
-
-#[test]
-fn merged_system_records_are_archived_but_uploaded_identities_and_settings_stay_intact() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("repo");
     let repo = Repository::open(root.clone()).unwrap();
     repo.install(input(&save(dir.path(), &package("1.0.0")), None))
         .unwrap();
-    let template: Value =
-        serde_json::from_slice(&fs::read(root.join("packages/dev.example/record.json")).unwrap())
-            .unwrap();
-    let ids = [
-        "cn.hiboot.plugins.resources",
-        "cn.hiboot.plugins.processes",
-        "cn.hiboot.plugins.logs",
-        "io.serverdeck.plugins.network",
-    ];
-    let mut originals = Vec::new();
-    for id in ids.iter().chain(["cn.hiboot.plugins.network"].iter()) {
-        let mut record = template.clone();
-        record["current"]["manifest"]["id"] = serde_json::json!(id);
-        record["current"]["source"] = serde_json::json!(if *id == "cn.hiboot.plugins.network" {
-            "user"
-        } else {
-            "system"
-        });
-        let folder = root.join("packages").join(id);
-        fs::create_dir(&folder).unwrap();
-        let bytes = serde_json::to_vec(&record).unwrap();
-        fs::write(folder.join("record.json"), &bytes).unwrap();
-        let data = root.join("data").join(id);
-        fs::create_dir(&data).unwrap();
-        fs::write(data.join("settings.json"), b"preserved").unwrap();
-        originals.push((id.to_string(), bytes));
-    }
-    drop(repo);
-    let repo = Repository::open(root.clone()).unwrap();
-    assert_eq!(repo.list().unwrap().len(), 2);
-    assert_eq!(
-        repo.detail("cn.hiboot.plugins.network").unwrap().source,
-        PluginSource::User
-    );
-    let archives = fs::read_dir(root.join("retired"))
-        .unwrap()
-        .map(|p| p.unwrap().path())
-        .collect::<Vec<_>>();
-    assert_eq!(archives.len(), 4);
-    for (id, bytes) in originals {
-        assert_eq!(
-            fs::read(root.join("data").join(&id).join("settings.json")).unwrap(),
-            b"preserved"
-        );
-        if id == "cn.hiboot.plugins.network" {
-            continue;
-        }
-        assert!(matches!(repo.detail(&id), Err(Error::NotFound)));
-        assert!(
-            archives
-                .iter()
-                .any(|path| fs::read(path.join("record.json")).unwrap() == bytes)
-        );
-    }
-    assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 2);
-}
-
-#[test]
-fn removed_network_uploads_are_inactive_and_new_packages_cannot_reintroduce_the_contract() {
-    let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().join("plugins");
-    let repo = Repository::open(root.clone()).unwrap();
-    let retained = repo
-        .install(input(&save(dir.path(), &package("1.0.0")), None))
-        .unwrap();
-    let mut old: Value =
-        serde_json::from_slice(&fs::read(root.join("packages/dev.example/record.json")).unwrap())
-            .unwrap();
-    let id = "dev.removed-network";
-    old["current"]["manifest"]["id"] = serde_json::json!(id);
-    old["current"]["manifest"]["permissions"] = serde_json::json!(["network.run"]);
-    old["current"]["enabled"] = serde_json::json!(true);
-    let folder = root.join("packages").join(id);
-    fs::create_dir(&folder).unwrap();
-    let original = serde_json::to_vec(&old).unwrap();
-    fs::write(folder.join("record.json"), &original).unwrap();
-    let data = root.join("data").join(id);
+    let record_path = root.join("packages/dev.example/record.json");
+    let mut record: Value = serde_json::from_slice(&fs::read(&record_path).unwrap()).unwrap();
+    record["current"]["manifest"]["apiVersion"] = serde_json::json!("^1.0.0");
+    let original = serde_json::to_vec(&record).unwrap();
+    fs::write(&record_path, &original).unwrap();
+    let data = root.join("data/dev.example");
     fs::create_dir(&data).unwrap();
-    fs::write(data.join("settings.json"), b"keep user settings").unwrap();
-    let repo = Repository::open(root.clone()).unwrap();
-    assert_eq!(repo.list().unwrap().len(), 1);
-    assert_eq!(
-        repo.detail(&retained.manifest.id).unwrap().revision,
-        retained.revision
-    );
-    assert!(matches!(repo.detail(id), Err(Error::NotFound)));
+    fs::write(data.join("settings.json"), b"preserve user data").unwrap();
+    let reopened = Repository::open(root.clone()).unwrap();
+    assert!(reopened.list().is_err());
+    assert_eq!(fs::read(&record_path).unwrap(), original);
     assert_eq!(
         fs::read(data.join("settings.json")).unwrap(),
-        b"keep user settings"
+        b"preserve user data"
     );
-    let archived = fs::read_dir(root.join("retired"))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    assert_eq!(fs::read(archived.join("record.json")).unwrap(), original);
-    let mut invalid = serde_json::to_value(package("1.0.0")).unwrap();
-    invalid["manifest"]["permissions"] = serde_json::json!(["network.run"]);
-    assert!(
-        Package::validate_bytes(&serde_json::to_vec(&invalid).unwrap(), std::env::consts::OS)
-            .is_err()
-    );
-    assert_eq!(Repository::open(root).unwrap().list().unwrap().len(), 1);
+    assert!(!root.join("retired").exists());
 }
-
-#[path = "removed_views_tests.rs"]
-mod removed_views_tests;

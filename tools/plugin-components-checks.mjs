@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { writeFile, readFile, readdir } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   openPluginFunction,
@@ -88,7 +88,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   };
   const list = await invoke('plugin_list');
   assert.equal(list.length, 2);
-  const archive = await readdir(path.join(run, 'plugins/retired'));
   for (const name of [
     'batch',
     'automation',
@@ -99,11 +98,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     'services',
   ]) {
     const id = `cn.hiboot.plugins.${name}`;
-    assert(archive.some((entry) => entry.startsWith(`${id}-removed-`)));
-    assert.deepEqual(
-      JSON.parse(await readFile(path.join(run, 'plugins/data', id, 'settings.json'), 'utf8')),
-      { retained: 'owned upgrade fixture' },
-    );
     await assert.rejects(() => invoke('plugin_activate', { id }));
     assert.equal(
       await page
@@ -115,7 +109,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   for (const command of ['batch_start', 'automation_status'])
     await assert.rejects(() => invoke(command, {}));
   passed.push(
-    'upgrade retires both enabled tools without deleting settings; removed IPC/activation are denied',
+    'only current built-in tools are registered; unknown plugin activation and removed IPC are denied',
   );
   const configurationRequests = {};
   for (const plugin of list) {
@@ -189,7 +183,6 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
           authType: 'private_key',
           credentialId: credential.id,
           groupId: null,
-          tags: [],
           description: 'Owned disposable plugin test endpoint',
           favorite: false,
           connectTimeoutSecs: 10,

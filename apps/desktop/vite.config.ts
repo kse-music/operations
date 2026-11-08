@@ -19,7 +19,6 @@ export default defineConfig({
     include: [
       'src/**/*.test.ts',
       '../../plugins/system/**/*.test.ts',
-      '../../plugins/compat/**/*.test.ts',
       '../../packages/plugin-sdk/src/**/*.test.ts',
     ],
     restoreMocks: true,

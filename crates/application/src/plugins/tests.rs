@@ -17,7 +17,6 @@ fn host_input(port: u16) -> HostInput {
         auth_type: AuthType::Agent,
         credential_id: None,
         group_id: None,
-        tags: vec![],
         description: String::new(),
         favorite: false,
         connect_timeout_secs: 5,
@@ -61,11 +60,10 @@ fn all_permissions() -> Vec<Permission> {
         Permission::SettingsWrite,
     ]
 }
-fn grant(revision: String, host: String) -> GrantInput {
+fn grant(revision: String) -> GrantInput {
     GrantInput {
         expected_revision: revision,
         permissions: all_permissions(),
-        host_ids: vec![host],
         operations: serverdeck_plugin_core::permissions::OPERATIONS
             .iter()
             .map(|s| (*s).into())
@@ -89,7 +87,7 @@ async fn install(
         version: "1.0.0".into(),
         author: "Local test".into(),
         description: String::new(),
-        api_version: "^1".into(),
+        api_version: "^4.0.0".into(),
         entry: Entry {
             backend: wasm.map(|_| "backend.wasm".into()),
             ui: None,
@@ -212,12 +210,9 @@ async fn failed_upgrade_resumes_old_capabilities_and_retains_identity_and_grant(
     let app = Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
     let host = app.database.host_create(host_input(22)).unwrap();
     let plugin = install(&app, dir.path(), "dev.rollback", None).await;
-    app.plugin_grant(
-        "dev.rollback".into(),
-        grant(plugin.revision.clone(), host.id.clone()),
-    )
-    .await
-    .unwrap();
+    app.plugin_grant("dev.rollback".into(), grant(plugin.revision.clone()))
+        .await
+        .unwrap();
     app.plugin_set_enabled("dev.rollback".into(), true)
         .await
         .unwrap();
@@ -322,7 +317,7 @@ async fn default_deny_revocation_any_current_host_context_and_redacted_metadata(
         .await
         .unwrap();
     assert_eq!(denied.error.unwrap().code, "PLUGIN_PERMISSION_DENIED");
-    app.plugin_grant("dev.policy".into(), grant(plugin.revision, host.id.clone()))
+    app.plugin_grant("dev.policy".into(), grant(plugin.revision))
         .await
         .unwrap();
     app.plugin_context(
@@ -398,7 +393,7 @@ async fn settings_are_persistent_and_confined_and_closed_sessions_never_execute(
     let host = app.database.host_create(host_input(22)).unwrap();
     for id in ["dev.first", "dev.second"] {
         let p = install(&app, dir.path(), id, None).await;
-        app.plugin_grant(id.into(), grant(p.revision, host.id.clone()))
+        app.plugin_grant(id.into(), grant(p.revision))
             .await
             .unwrap();
         app.plugin_set_enabled(id.into(), true).await.unwrap();
@@ -558,12 +553,9 @@ async fn linux_sdk_capability_roundtrip() {
     );
     let wasm = std::fs::read(std::env::var("SERVERDECK_PLUGIN_SDK_WASM").unwrap()).unwrap();
     let plugin = install(&app, dir.path(), "dev.sdk-linux", Some(&wasm)).await;
-    app.plugin_grant(
-        "dev.sdk-linux".into(),
-        grant(plugin.revision, host.id.clone()),
-    )
-    .await
-    .unwrap();
+    app.plugin_grant("dev.sdk-linux".into(), grant(plugin.revision))
+        .await
+        .unwrap();
     app.plugin_set_enabled("dev.sdk-linux".into(), true)
         .await
         .unwrap();
@@ -972,7 +964,6 @@ async fn standard_server_roundtrip(app: &Application, host: &str, ops: &str, fil
             GrantInput {
                 expected_revision: installed.revision,
                 permissions: installed.manifest.permissions,
-                host_ids: vec![],
                 operations: vec![
                     "ui.contribute",
                     "metrics.read",

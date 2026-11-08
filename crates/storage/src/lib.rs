@@ -8,7 +8,6 @@ pub mod ai;
 pub mod hosts;
 pub mod plugins;
 pub mod trust;
-pub mod workspace;
 use serverdeck_core::{AppConfig, DATABASE_VERSION, Error, product::WindowGeometry};
 
 #[derive(Clone)]
@@ -56,7 +55,7 @@ impl Database {
         let version: u32 = connection
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(storage_error)?;
-        if version > DATABASE_VERSION {
+        if version != DATABASE_VERSION {
             return Err(Error::UnsupportedDatabase(version));
         }
         let json: String = connection
@@ -86,72 +85,30 @@ impl Database {
             std::fs::set_permissions(&database.path, std::fs::Permissions::from_mode(0o600))
                 .map_err(storage_error)?;
         }
-        // Table rebuilds must not trigger ON DELETE SET NULL on referencing hosts.
-        // This connection is used only for migrations and checks the foreign keys before commit.
-        connection
-            .pragma_update(None, "foreign_keys", false)
-            .map_err(storage_error)?;
-        // A write transaction serializes concurrent application startups/migrations.
+        // Serialize initialization without rewriting an existing schema.
         let transaction = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
         let version: u32 = transaction
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .map_err(storage_error)?;
-        if version > DATABASE_VERSION {
+        if version == 0 {
+            let tables: u32 = transaction.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+                [], |row| row.get(0),
+            ).map_err(storage_error)?;
+            if tables != 0 {
+                return Err(Error::UnsupportedDatabase(version));
+            }
+            transaction
+                .execute_batch(include_str!("../schema.sql"))
+                .map_err(storage_error)?;
+            transaction
+                .pragma_update(None, "user_version", DATABASE_VERSION)
+                .map_err(storage_error)?;
+        } else if version != DATABASE_VERSION {
             return Err(Error::UnsupportedDatabase(version));
         }
-        if version == 0 {
-            transaction
-                .execute_batch(include_str!("../migrations/001_settings.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 2 {
-            transaction
-                .execute_batch(include_str!("../migrations/002_hosts.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 3 {
-            transaction
-                .execute_batch(include_str!("../migrations/003_known_hosts.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 4 {
-            transaction
-                .execute_batch(include_str!("../migrations/004_terminal_workspace.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 6 {
-            transaction
-                .execute_batch(include_str!("../migrations/006_optional_host_name.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 7 {
-            transaction
-                .execute_batch(include_str!("../migrations/007_host_folders.sql"))
-                .map_err(storage_error)?;
-        }
-        if version < 8 {
-            transaction
-                .execute_batch(include_str!("../migrations/008_imported_private_keys.sql"))
-                .map_err(storage_error)?;
-            if transaction
-                .query_row("PRAGMA foreign_key_check", [], |_| Ok(()))
-                .optional()
-                .map_err(storage_error)?
-                .is_some()
-            {
-                return Err(Error::Validation("凭据迁移后的外键检查失败"));
-            }
-        }
-        if version < 9 {
-            transaction
-                .execute_batch(include_str!("../migrations/009_host_credentials.sql"))
-                .map_err(storage_error)?;
-        }
-        transaction
-            .pragma_update(None, "user_version", DATABASE_VERSION)
-            .map_err(storage_error)?;
         transaction.commit().map_err(storage_error)?;
         database.load_config()?;
         Ok(database)
@@ -266,7 +223,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migration_is_idempotent_and_settings_survive_reopen() {
+    fn current_schema_initializes_once_and_settings_survive_reopen() {
         let directory = tempfile::tempdir().expect("tempdir");
         let path = directory.path().join("nested/serverdeck.sqlite3");
         let database = Database::open(&path).expect("open");
@@ -307,6 +264,49 @@ mod tests {
             )
             .expect("tables");
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn development_schemas_and_unversioned_data_are_rejected_without_changes() {
+        for version in 0..DATABASE_VERSION {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("unsupported.sqlite3");
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE retained(value TEXT); INSERT INTO retained VALUES('keep');",
+                )
+                .unwrap();
+            connection
+                .pragma_update(None, "user_version", version)
+                .unwrap();
+            assert!(
+                matches!(Database::open(&path), Err(Error::UnsupportedDatabase(found)) if found == version)
+            );
+            assert_eq!(
+                connection
+                    .query_row("SELECT value FROM retained", [], |row| row
+                        .get::<_, String>(0))
+                    .unwrap(),
+                "keep"
+            );
+            assert_eq!(
+                connection
+                    .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+                    .unwrap(),
+                version
+            );
+            assert_eq!(
+                connection
+                    .query_row(
+                        "SELECT count(*) FROM sqlite_master WHERE type='table'",
+                        [],
+                        |row| row.get::<_, u32>(0)
+                    )
+                    .unwrap(),
+                1
+            );
+        }
     }
 
     #[test]

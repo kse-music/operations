@@ -98,7 +98,6 @@ export interface AiPreview {
   body: string;
   estimatedInputTokens: number;
   maxOutputTokens: number;
-  estimatedMaxCost: number | null;
   warnings: string[];
 }
 export interface AiProposal {
@@ -113,7 +112,6 @@ export interface AiAnswer {
   text: string;
   proposals: AiProposal[];
   usage: { inputTokens: number; outputTokens: number } | null;
-  estimatedCost: number | null;
   warnings: string[];
   agent?: AiAgentReport;
 }

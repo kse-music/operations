@@ -51,7 +51,6 @@ pub struct Config {
     pub model: String,
     pub allow_insecure_http: bool,
     pub max_output_tokens: u32,
-    #[serde(default = "default_context_window_tokens")]
     pub context_window_tokens: u32,
 }
 fn default_context_window_tokens() -> u32 {
@@ -261,7 +260,6 @@ pub struct Preview {
     pub body: String,
     pub estimated_input_tokens: u64,
     pub max_output_tokens: u32,
-    pub estimated_max_cost: Option<f64>,
     pub warnings: Vec<String>,
 }
 #[derive(Clone, Serialize)]
@@ -293,7 +291,6 @@ pub struct Answer {
     pub text: String,
     pub proposals: Vec<Proposal>,
     pub usage: Option<Usage>,
-    pub estimated_cost: Option<f64>,
     pub warnings: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentReport>,

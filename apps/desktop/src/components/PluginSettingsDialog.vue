@@ -23,7 +23,7 @@ const pages = computed(() =>
 const contribution = computed(() =>
   pages.value.find((entry) => entry.id === workspace.pluginConfiguration?.contributionId),
 );
-const draftKey = computed(
+const contextKey = computed(
   () => `plugin-settings:${props.pluginId}:${workspace.pluginConfiguration?.contributionId}`,
 );
 const builtinAssistant = computed(() => isBuiltinAssistant(plugin.value));
@@ -31,8 +31,7 @@ const assistantSettings = computed(
   () => builtinAssistant.value && contribution.value?.id === 'settings',
 );
 const saving = ref(false);
-const deciding = ref(false);
-const busy = computed(() => saving.value || deciding.value || plugins.busy);
+const busy = computed(() => saving.value || plugins.busy);
 watch(contribution, (value) => {
   if (value) return;
   saving.value = false;
@@ -40,23 +39,9 @@ watch(contribution, (value) => {
     workspace.pluginConfiguration.contributionId = null;
 });
 
-async function discard(): Promise<boolean> {
-  if (busy.value) return false;
-  if (!contribution.value) return true;
-  deciding.value = true;
-  try {
-    const key = draftKey.value;
-    if (!(await plugins.discard(key))) return false;
-    plugins.forget(key);
-    return true;
-  } finally {
-    deciding.value = false;
-  }
-}
-
 async function showPanel(id: string | null): Promise<void> {
   const configuration = workspace.pluginConfiguration;
-  if (!configuration || configuration.contributionId === id || !(await discard())) return;
+  if (!configuration || configuration.contributionId === id || busy.value) return;
   configuration.contributionId = id;
 }
 
@@ -68,7 +53,7 @@ async function select(event: Event): Promise<void> {
 }
 
 async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
-  if (!(await discard())) return;
+  if (busy.value) return;
   workspace.pluginConfiguration = undefined;
   if (action === 'models') workspace.navigate('models');
   if (action === 'close' && opener instanceof HTMLElement) {
@@ -114,12 +99,12 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       </label>
       <PluginView
         v-if="contribution"
-        :key="draftKey"
+        :key="contextKey"
         settings-page
         :plugin-id="pluginId"
         :contribution-id="contribution.id"
         host-id=""
-        :tab-key="draftKey"
+        :tab-key="contextKey"
         @busy="saving = $event"
         @settings-action="finish($event)"
       />

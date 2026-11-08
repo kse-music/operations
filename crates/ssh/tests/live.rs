@@ -115,7 +115,6 @@ async fn real_linux_password_pty_multichannel_resize_interactive_reconnect_and_o
             auth_type: AuthType::Password,
             credential_id: None,
             group_id: None,
-            tags: vec![],
             description: String::new(),
             favorite: false,
             connect_timeout_secs: 15,

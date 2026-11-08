@@ -145,7 +145,6 @@ try {
         authType: 'password',
         credentialId,
         groupId: null,
-        tags: [],
         description: 'Isolated disposable Linux fixture',
         favorite: false,
         connectTimeoutSecs: 10,
@@ -202,18 +201,19 @@ try {
         .connections[id]?.state === 'connected',
     hostId,
   );
-  await view.getByRole('button', { name: '读取主机信息', exact: true }).click();
-  await view.locator('.plugin-output').filter({ hasText: 'Plugin QA Linux' }).waitFor();
+  const frontend = view.frameLocator('iframe.plugin-frame');
+  await frontend.getByRole('button', { name: '读取主机信息', exact: true }).click();
+  await frontend.locator('.plugin-output').filter({ hasText: 'Plugin QA Linux' }).waitFor();
   assert(
-    !/credentialId|secretRef|password/.test(await view.locator('.plugin-output').textContent()),
+    !/credentialId|secretRef|password/.test(await frontend.locator('.plugin-output').textContent()),
   );
-  await view.getByRole('button', { name: '只读诊断 uname -a', exact: true }).click();
-  await view.locator('.plugin-output').filter({ hasText: 'exitCode' }).waitFor();
-  assert((await view.locator('.plugin-output').textContent()).includes('Linux'));
+  await frontend.getByRole('button', { name: '只读诊断 uname -a', exact: true }).click();
+  await frontend.locator('.plugin-output').filter({ hasText: 'exitCode' }).waitFor();
+  assert((await frontend.locator('.plugin-output').textContent()).includes('Linux'));
   passed.push('installed public SDK WASM UI uses real host projection and authenticated SSH uname');
   assert.equal(await view.getByLabel('插件界面语言', { exact: true }).count(), 0);
   assert.equal(await page.locator('html').getAttribute('lang'), 'zh-CN');
-  await view.getByRole('button', { name: '读取主机信息', exact: true }).waitFor();
+  await frontend.getByRole('button', { name: '读取主机信息', exact: true }).waitFor();
   await page.screenshot({ path: path.join(artifacts, 'global-language-dark.png') });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
   assert((await view.evaluate((el) => getComputedStyle(el).color)) !== 'rgb(255, 255, 255)');
@@ -228,16 +228,16 @@ try {
     .getByRole('navigation', { name: '当前主机工具', exact: true })
     .getByRole('button', { name: 'Host Info', exact: true })
     .click();
-  await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
+  await frontend.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
   await showHostTree(page);
   await hostContextAction(
     page,
     page.locator('.tree-host-row').filter({ hasText: 'Plugin QA Linux' }),
     'Host Info',
   );
-  await view.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
+  await frontend.getByRole('heading', { name: '当前主机', exact: true }).waitFor();
   const configuration = await openPluginSettings(page, 'Host Info');
-  const form = configuration.locator('.plugin-workspace');
+  const form = configuration.frameLocator('iframe.plugin-frame');
   await form
     .getByLabel('备注（仅保存于本插件）', { exact: true })
     .fill('<img src=x onerror=alert(1)>');
@@ -247,13 +247,13 @@ try {
     .locator('.plugin-output')
     .filter({ hasText: '<img src=x onerror=alert(1)>' })
     .waitFor();
-  assert.equal(await form.locator('img,iframe,script').count(), 0);
+  assert.equal(await form.locator('#app img, #app iframe, #app script').count(), 0);
   passed.push(
     'all five extension surfaces and isolated settings render hostile strings as inert text',
   );
   const disabledSettings = await setPluginEnabled(page, 'Host Info', false);
   await page.waitForFunction(
-    () => !document.querySelector('.plugin-workspace:visible .plugin-form'),
+    () => !document.querySelector('.plugin-workspace:visible iframe.plugin-frame'),
   );
   assert.equal((await invoke('plugin_detail', { id: 'dev.serverdeck.host-info' })).enabled, false);
   await disabledSettings.getByRole('button', { name: '启用插件', exact: true }).waitFor();

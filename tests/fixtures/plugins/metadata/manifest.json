@@ -5,8 +5,11 @@
   "version": "1.0.0",
   "author": "ServerDeck",
   "description": "Installation fixture without executable code",
-  "apiVersion": "^1.0.0",
-  "entry": { "backend": null, "ui": null },
+  "apiVersion": "^4.0.0",
+  "entry": {
+    "backend": null,
+    "ui": null
+  },
   "permissions": [],
   "contributions": [],
   "platforms": ["windows", "linux", "macos"],

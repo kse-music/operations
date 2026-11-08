@@ -24,7 +24,7 @@
     "../../packages/plugin-sdk/src/**/*.vue",
     "../../plugins/system/**/*.ts",
     "../../plugins/system/**/*.vue",
-    "../../plugins/compat/**/*.ts",
-    "../../plugins/compat/**/*.vue"
+    "../../tests/fixtures/plugins/host-info/frontend/**/*.ts",
+    "../../tests/fixtures/plugins/host-info/frontend/**/*.vue"
   ]
 }

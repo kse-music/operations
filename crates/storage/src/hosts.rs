@@ -10,7 +10,7 @@ use serverdeck_core::{
 };
 use uuid::Uuid;
 
-const HOST_COLUMNS: &str = "id,name,hostname,port,username,auth_type,credential_id,group_id,tags,description,favorite,connect_timeout_secs,created_at,updated_at,ssh_options";
+const HOST_COLUMNS: &str = "id,name,hostname,port,username,auth_type,credential_id,group_id,description,favorite,connect_timeout_secs,created_at,updated_at,ssh_options";
 
 fn decode_error<E: std::error::Error + Send + Sync + 'static>(error: E) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
@@ -26,14 +26,13 @@ fn host_row(row: &Row<'_>) -> rusqlite::Result<Host> {
             auth_type: AuthType::parse(&row.get::<_, String>(5)?).map_err(decode_error)?,
             credential_id: row.get(6)?,
             group_id: row.get(7)?,
-            tags: serde_json::from_str(&row.get::<_, String>(8)?).map_err(decode_error)?,
-            description: row.get(9)?,
-            favorite: row.get(10)?,
-            connect_timeout_secs: row.get(11)?,
-            ssh: serde_json::from_str(&row.get::<_, String>(14)?).map_err(decode_error)?,
+            description: row.get(8)?,
+            favorite: row.get(9)?,
+            connect_timeout_secs: row.get(10)?,
+            ssh: serde_json::from_str(&row.get::<_, String>(13)?).map_err(decode_error)?,
         },
-        created_at: row.get(12)?,
-        updated_at: row.get(13)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
     })
 }
 fn one_host(connection: &Connection, id: &str) -> Result<Host, Error> {
@@ -92,15 +91,15 @@ fn insert_host(connection: &Connection, input: &HostInput) -> Result<Host, Error
     validate_links(connection, input)?;
     let id = Uuid::new_v4().to_string();
     validate_jump_chain(connection, &id, input)?;
-    connection.execute("INSERT INTO hosts(id,name,hostname,port,username,auth_type,credential_id,group_id,tags,description,favorite,connect_timeout_secs,ssh_options) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-        params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,serde_json::to_string(&input.tags).map_err(storage_error)?,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
+    connection.execute("INSERT INTO hosts(id,name,hostname,port,username,auth_type,credential_id,group_id,description,favorite,connect_timeout_secs,ssh_options) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
     one_host(connection, &id)
 }
 fn update_host(connection: &Connection, id: &str, input: &HostInput) -> Result<Host, Error> {
     let previous = one_host(connection, id)?;
     validate_links(connection, input)?;
     validate_jump_chain(connection, id, input)?;
-    connection.execute("UPDATE hosts SET name=?2,hostname=?3,port=?4,username=?5,auth_type=?6,credential_id=?7,group_id=?8,tags=?9,description=?10,favorite=?11,connect_timeout_secs=?12,ssh_options=?13,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,serde_json::to_string(&input.tags).map_err(storage_error)?,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
+    connection.execute("UPDATE hosts SET name=?2,hostname=?3,port=?4,username=?5,auth_type=?6,credential_id=?7,group_id=?8,description=?9,favorite=?10,connect_timeout_secs=?11,ssh_options=?12,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?1",params![id,input.name,input.hostname,input.port,input.username,input.auth_type.as_str(),input.credential_id,input.group_id,input.description,input.favorite,input.connect_timeout_secs,serde_json::to_string(&input.ssh).map_err(storage_error)?]).map_err(storage_error)?;
     if previous.config.credential_id != input.credential_id {
         retire_host_credential(connection, previous.config.credential_id.as_deref())?;
     }

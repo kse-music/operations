@@ -65,47 +65,6 @@ if (!reuse) {
   await copyFile(path.join(buildDirectory, 'debug', 'serverdeck-desktop.exe'), executable);
   build([]);
 }
-if (!reuse && process.env.SERVERDECK_PLUGIN_COMPONENT_FIXTURE) {
-  // Old enabled records must be retired before the new SDK decodes their removed permissions.
-  const template = JSON.parse(
-    await readFile(path.join(root, 'plugins/system/packages/docker.sdplugin'), 'utf8'),
-  ).manifest;
-  for (const [name, permission] of [
-    ['batch', 'batch.run'],
-    ['automation', 'automation.manage'],
-    ['resources', 'metrics.read'],
-    ['processes', 'system.read'],
-    ['logs', 'logs.read'],
-    ['services', 'system.read'],
-    ['network', 'network.run'],
-  ]) {
-    const id = `cn.hiboot.plugins.${name}`;
-    const folder = path.join(run, 'plugins/packages', id);
-    const data = path.join(run, 'plugins/data', id);
-    await mkdir(folder, { recursive: true });
-    await mkdir(data, { recursive: true });
-    await writeFile(
-      path.join(folder, 'record.json'),
-      JSON.stringify({
-        version: 1,
-        current: {
-          source: 'system',
-          manifest: { ...template, id, version: '1.1.2', permissions: [permission] },
-          enabled: true,
-          trust: 'local_development_unverified',
-          packageDigest: '0'.repeat(64),
-          revision: 'version-retired',
-          previousVersion: null,
-        },
-        backup: null,
-      }),
-    );
-    await writeFile(
-      path.join(data, 'settings.json'),
-      JSON.stringify({ retained: 'owned upgrade fixture' }),
-    );
-  }
-}
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const port = await new Promise((resolve) => {
   const server = createServer();
@@ -239,7 +198,6 @@ try {
               authType: 'agent',
               credentialId: null,
               groupId: null,
-              tags: [],
               description: 'QA isolation probe; never connected',
               favorite: false,
               connectTimeoutSecs: 5,
@@ -291,7 +249,6 @@ try {
             authType: 'agent',
             credentialId: null,
             groupId: null,
-            tags: [],
             description: 'UI-only host context; never connected',
             favorite: false,
             connectTimeoutSecs: 5,

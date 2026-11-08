@@ -49,14 +49,13 @@ Windows x64 安装与运行已验证，远端验收环境为 Ubuntu 24.04；macO
 ```powershell
 npm ci
 rustup target add wasm32-unknown-unknown
-cargo fetch --manifest-path plugins/system/docker/backend/Cargo.toml --target wasm32-unknown-unknown --locked
-cargo fetch --manifest-path plugins/system/assistant/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+npm run plugins:fetch
 npm run tauri -- dev
 ```
 
 `npm run dev` 仅启动浏览器前端，完整功能需要 Tauri/Rust 后端。
 
-`dev/build`（包括 Tauri 入口）会先生成内置插件包 `plugins/system/packages/*.sdplugin` 和旧版插件兼容界面的 `plugins/compat/server/assets/`。这些产物由 Git 忽略。插件编译使用 `--offline --locked`，首次构建或锁文件更新后须先按上述命令下载依赖。
+`dev/build`（包括 Tauri 入口）会自动发现 `plugins/system/` 下的插件源码目录，生成 `plugins/system/packages/*.sdplugin` 和 Rust 注册文件 `registry.rs`。新增完整插件目录后无需修改构建、注册或发布清单，重新构建并启动客户端即可出现在插件管理中。产物由 Git 忽略；`packages` 是保留的产物目录。插件编译使用 `--offline --locked`，首次构建、新增依赖或锁文件更新后先运行 `npm run plugins:fetch` 下载全部已发现插件及测试夹具的锁定依赖。
 
 构建 Windows NSIS 测试安装包：
 
@@ -77,7 +76,7 @@ Git 忽略调试、打包和测试生成的文件，包括各级 `.local/` 下�
 完成开发准备后，首次运行测试或测试夹具锁文件更新时，先下载夹具的锁定依赖。
 
 ```powershell
-cargo fetch --manifest-path tests/fixtures/plugins/server-capabilities/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+npm run plugins:fetch
 npm run plugins:build
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
@@ -90,7 +89,7 @@ npm test
 npm run build
 ```
 
-直接执行依赖插件资源的 Cargo 检查、测试或编译前，先运行 `npm run plugins:build`。该命令还会生成 Git 忽略的 `server-capabilities.sdplugin` 测试夹具。插件、兼容界面、夹具或公开 SDK 源码变化后也需重新生成，Rust 的 `include_bytes!` 在编译时读取这些产物。
+直接执行依赖插件资源的 Cargo 检查、测试或编译前，先运行 `npm run plugins:build`。该命令还会生成 Git 忽略的 `server-capabilities.sdplugin` 测试夹具。插件目录增删、插件/夹具或公开 SDK 源码变化后也需重新生成，Rust 的 `include!` / `include_bytes!` 在编译时读取注册文件及插件包。只把源码目录放入仓库不会热安装到已经运行的客户端。
 
 以上命令用于本地检查，不代表所有平台均已通过。需要系统凭据库、桌面应用或授权 SSH 服务器的测试，另见[原生验收说明](docs/release/RELEASE_CHECKLIST.md#原生验收)；已执行结果见[测试报告](docs/validation/TEST_REPORT.md)。
 

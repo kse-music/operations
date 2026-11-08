@@ -523,7 +523,7 @@ async fn registration_test_is_required_bound_to_configuration_and_key_and_single
 }
 
 async fn asset(app: &Application, name: &str, address: &str) -> serverdeck_core::hosts::Host {
-    app.host_save(None, serde_json::from_value(json!({"name":name,"hostname":address,"port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":null,"tags":[],"description":"","favorite":false,"connectTimeoutSecs":1})).unwrap(), None).await.unwrap()
+    app.host_save(None, serde_json::from_value(json!({"name":name,"hostname":address,"port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":null,"description":"","favorite":false,"connectTimeoutSecs":1})).unwrap(), None).await.unwrap()
 }
 fn route_input(model: &Model, question: &str) -> ResolveHostsInput {
     ResolveHostsInput {

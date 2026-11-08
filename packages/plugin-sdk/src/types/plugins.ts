@@ -135,17 +135,16 @@ export interface PluginEvent {
 export type PluginLocale = 'zh-CN' | 'en-US';
 export type PluginLabel = string | Record<PluginLocale, string>;
 export interface PluginUi {
-  uiVersion: number;
+  uiVersion: 4;
   title: PluginLabel;
   pages: PluginUiPage[];
-  frontend?: { script: string; style: string } | null;
+  frontend: { script: string; style: string };
 }
 export interface PluginUiPage {
-  surface?:
+  surface:
     | { kind: 'frontend' }
     | { kind: 'operations'; sections: import('./server').ServerSection[] }
-    | { kind: 'tool'; tool: PluginTool }
-    | null;
+    | { kind: 'tool'; tool: PluginTool };
   id: string;
   title: PluginLabel;
   initialAction: string | null;
@@ -164,7 +163,6 @@ export interface PluginPackagePreview {
   manifest: PluginManifest;
   packageDigest: string;
   trust: 'local_development_unverified';
-  compatible: boolean;
 }
 export type PluginValues = Record<string, string | boolean | null>;
 export interface PluginUiResult {

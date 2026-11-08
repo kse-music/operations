@@ -189,12 +189,11 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
     hostname: 'prod.example',
     groupId: 'group',
     favorite: true,
-    tags: ['production'],
     createdAt: '',
     updatedAt: '',
   };
   hosts.catalog = {
-    hosts: [first, { ...first, id: 'second', name: 'Staging', favorite: false, tags: ['staging'] }],
+    hosts: [first, { ...first, id: 'second', name: 'Staging', favorite: false }],
     groups: [{ id: 'group', name: 'Servers', sortOrder: 0, parentId: null }],
     credentials: [],
     pendingSecretDeletions: 0,

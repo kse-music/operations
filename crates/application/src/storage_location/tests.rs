@@ -11,11 +11,7 @@ struct Fixture {
 impl Fixture {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let defaults = Locations {
-            data: dir.path().join("roaming"),
-            logs: dir.path().join("local/logs"),
-            webview: dir.path().join("local"),
-        };
+        let defaults = Locations::unified(dir.path().join("profile"));
         let database = Database::open(defaults.data.join("serverdeck.sqlite3")).unwrap();
         database
             .save_config(&AppConfig {

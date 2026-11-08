@@ -199,22 +199,9 @@ impl Assistant {
                 complete_usage = false;
                 usage = None;
             }
-            let decision = match serde_json::from_str::<Decision>(&completion.text) {
-                Ok(value) => value,
-                Err(_) => {
-                    // Old compatible providers may still return the former suggestions schema.
-                    let mut answer = self.finish_answer(root, pending, completion)?;
-                    answer.usage = usage;
-                    answer.warnings.push(
-                        "模型未使用智能体工具协议，本次仅显示原有分析与受控命令建议。".into(),
-                    );
-                    answer.agent = Some(AgentReport {
-                        observations,
-                        steps: vec![],
-                    });
-                    return Ok(answer);
-                }
-            };
+            let decision: Decision = serde_json::from_str(&completion.text).map_err(|_| {
+                failure("AI_PROTOCOL", "模型未返回有效的智能体协议，未执行任何变更")
+            })?;
             match decision {
                 Decision::Query { requests } => {
                     if requests.is_empty()
@@ -273,7 +260,6 @@ impl Assistant {
                     return Ok(Answer {
                         text: pending.redactor.text(&text),
                         proposals: vec![],
-                        estimated_cost: None,
                         usage,
                         warnings: vec![],
                         agent: Some(AgentReport {
@@ -342,7 +328,7 @@ impl Assistant {
                     } else {
                         pending.redactor.text(&summary)
                     };
-                    return Ok(Answer{text,proposals,estimated_cost:None,usage,warnings:vec!["计划需确认后执行；工具查询已脱敏发送给当前绑定模型，执行结果仅在本地复查展示。".into()],agent:Some(AgentReport{observations,steps:public_steps})});
+                    return Ok(Answer{text,proposals,usage,warnings:vec!["计划需确认后执行；工具查询已脱敏发送给当前绑定模型，执行结果仅在本地复查展示。".into()],agent:Some(AgentReport{observations,steps:public_steps})});
                 }
             }
         }

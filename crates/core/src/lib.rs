@@ -10,7 +10,6 @@ pub mod hosts;
 pub mod identity;
 pub mod openssh;
 pub mod terminal;
-pub mod workspace;
 
 pub const CONFIG_VERSION: u32 = 1;
 pub const DATABASE_VERSION: u32 = 9;
@@ -28,7 +27,7 @@ pub enum Error {
     Validation(&'static str),
     #[error("配置版本 {0} 不受当前应用支持")]
     UnsupportedConfig(u32),
-    #[error("数据库版本 {0} 高于当前应用支持版本")]
+    #[error("数据库版本 {0} 不受当前应用支持")]
     UnsupportedDatabase(u32),
     #[error("本地存储操作失败")]
     Storage(#[source] Box<dyn std::error::Error + Send + Sync>),
@@ -79,7 +78,6 @@ impl LogLevel {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InterfaceFontSize {
-    #[serde(alias = "extraSmall")]
     Small,
     #[default]
     Standard,
@@ -94,18 +92,14 @@ pub enum InterfaceFontSize {
 pub struct AppConfig {
     pub version: u32,
     pub theme: Theme,
-    #[serde(default)]
     pub interface_font_size: InterfaceFontSize,
     pub sidebar_width: u16,
     pub terminal_font_size: u8,
-    #[serde(default)]
     pub terminal: terminal::TerminalPreferences,
     pub connect_timeout_secs: u16,
     pub monitor_interval_secs: u8,
-    #[serde(default = "files::default_concurrency")]
     pub transfer_concurrency: u8,
     pub log_level: LogLevel,
-    #[serde(default)]
     pub product: product::ProductPreferences,
 }
 
@@ -255,24 +249,15 @@ mod tests {
     }
 
     #[test]
-    fn interface_font_size_defaults_for_legacy_configs_and_rejects_unknown_values() {
+    fn interface_font_size_accepts_current_values_and_rejects_removed_or_missing_values() {
         let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
         assert_eq!(json["interfaceFontSize"], "standard");
         json.as_object_mut()
             .expect("config object")
             .remove("interfaceFontSize");
-        let legacy: AppConfig = serde_json::from_value(json.clone()).expect("read legacy config");
-        assert_eq!(legacy.interface_font_size, InterfaceFontSize::Standard);
-        assert_eq!(legacy.terminal_font_size, 16);
-
+        assert!(serde_json::from_value::<AppConfig>(json.clone()).is_err());
         json["interfaceFontSize"] = "extraSmall".into();
-        let former: AppConfig = serde_json::from_value(json.clone()).expect("read former level");
-        assert_eq!(former.interface_font_size, InterfaceFontSize::Small);
-        assert_eq!(
-            serde_json::to_value(former).expect("serialize migrated level")["interfaceFontSize"],
-            "small"
-        );
-
+        assert!(serde_json::from_value::<AppConfig>(json.clone()).is_err());
         json["interfaceFontSize"] = "extraLarge".into();
         let large: AppConfig = serde_json::from_value(json.clone()).expect("read extra large");
         assert_eq!(large.interface_font_size, InterfaceFontSize::ExtraLarge);

@@ -127,7 +127,6 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
       username: 'ops',
       authType: 'password',
       credentialId: null,
-      tags: [],
       description: '',
       favorite: false,
     }),
@@ -153,7 +152,6 @@ it.each(['agent', 'private_key'] as const)(
       hostname: 'server.example',
       username: 'ops',
       authType: 'agent',
-      tags: ['legacy-tag'],
       description: 'legacy note',
       favorite: true,
       groupId: 'legacy-folder',
@@ -256,7 +254,6 @@ it.each(['agent', 'private_key'] as const)(
     );
     expect(store.catalog?.hosts[0]).toMatchObject({
       name: 'Updated',
-      tags: ['legacy-tag'],
       description: 'legacy note',
       favorite: true,
     });

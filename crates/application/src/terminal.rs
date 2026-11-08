@@ -2,7 +2,6 @@ use super::*;
 use serverdeck_core::{
     connection::{ForwardInfo, ForwardInput},
     hosts::Host,
-    workspace::WorkspaceLayout,
 };
 use serverdeck_core::{
     hosts::AuthType,
@@ -177,12 +176,6 @@ impl Application {
         }
         self.files.reset_editors();
         self.terminals.close_views().await
-    }
-    pub async fn workspace_load(&self) -> Result<Option<WorkspaceLayout>, Error> {
-        self.blocking(|db| db.load_workspace()).await
-    }
-    pub async fn workspace_save(&self, layout: WorkspaceLayout) -> Result<(), Error> {
-        self.blocking(move |db| db.save_workspace(&layout)).await
     }
     pub async fn forward_start(&self, id: &str, input: ForwardInput) -> Result<ForwardInfo, Error> {
         if self.shutting_down.load(Ordering::Acquire) {

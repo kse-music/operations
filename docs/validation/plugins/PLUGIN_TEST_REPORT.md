@@ -1,5 +1,60 @@
 # 插件阶段验证记录
 
+## 2026-11-08 内置插件自动发现
+
+### 范围与主要文件
+
+- `tools/system-plugins.mjs` 发现直接子目录，校验必要源码、锁文件、UI 入口和唯一 manifest ID；按目录名稳定排序，忽略 `packages` 与普通说明文件，拒绝链接、不完整输入及重复身份。
+- `tools/build-system-plugins.mjs` 共用发现结果进行依赖准备/构建；全部编译和包身份核对成功后发布产物，最后生成 `plugins/system/packages/registry.rs`。Rust `bundled_plugins.rs` 直接包含生成注册，不再维护两项常量清单。生成文件由 Git 忽略，陈旧包与显式测试夹具不因存在于磁盘而自动注册。
+- 根 `plugins:fetch`、发布 CI、README 和插件开发指南同步；应用、IPC 和原生管理脚本的真实安装数量检查改为核对发现结果，不再把内置数量固定为二。管理页增加任意新 system ID 的展示与配置入口回归。
+- 原分发/升级/授权/卸载实现保留。源码目录移除不自动删除用户安装、设置或数据；新原生能力仍须通过公开 SDK 和宿主实现。工作区其他已有修改保留，本记录仅说明本次自动发现验证。
+
+### 实际验证
+
+证据位于 `.local/qa/system-plugin-discovery/`。构建前 D 盘空闲约 249 GiB；Cargo 继续使用根 `target/`，原生测试编译后复制 EXE 到 QA 目录运行。
+
+1. 将开发包中真实 Rust/Vue 示例复制为临时第三个 `plugins/system/qa-autodiscovery-<uuid>/`，使用独立 `dev.serverdeck.*` ID，只在插件目录内调整 SDK 相对依赖。未增加构建/注册清单项。`npm run plugins:build` 自动编译三份 WASM/UI 插件和单独测试夹具；生成注册仅三项，不含测试夹具。
+2. 带第三个插件运行应用 `bundled_plugins::tests`：4 项全部通过。真实启动安装列表与源码 manifest 身份集合一致，独立前端 JS/CSS 可读取，WASM 激活/释放正常；Docker/助手升级、设置、禁用、卸载墓碑与同 ID 上传安装保护仍通过。注册快照见 `registry-with-third.rs`，日志见 `with-third-tests.log`。
+3. 临时将验证插件的 Rust 源码改为编译错误；命令按预期失败，断言上一份注册文件和已发布验证包字节未变，然后恢复源码。见 `expected-build-failure.log`。编译完成前不发布部分新包。
+4. 核验临时源码绝对路径、所有权及无目录链接后，将其移入 QA 保存，保留旧产物再次运行 `npm run build`。构建成功，注册回到当前两项且不包含旧包；之后将验证包移入 QA 保存。最终快照见 `registry-final.rs`，源码与包证据保留在 `source-fixture/`、`verified-extra-plugin.sdplugin`，实际系统源码目录恢复为 assistant/docker/packages。
+5. `npm run test:build`：21 项全部通过（含 7 项原磁盘门禁与 14 项发现/注册/依赖准备测试）。覆盖目录增删、陈旧输出排除、重复 ID、必要文件缺失、无效 JSON/ID/UI 路径、空列表和 Junction 拒绝。首次沙箱内运行创建 Junction 被 EPERM 拒绝，未降低断言；在项目 QA 目录沙箱外复验后全通过，见 `build-tools-tests.log`。
+6. 管理页专项 Vitest：1 文件 8 项通过，包含第三个非预置 ID 的名称、来源、状态、图标与配置事件。首次受沙箱系统临时目录重命名权限阻断，改用工作区专属 TEMP/TMP 后通过，见 `frontend-manager.log`。
+7. 移除临时插件后的应用内置分发测试再次 4 项通过；Tauri `system_packages_use_standard_ipc_and_main_window_acl` 原生 IPC 专项 1 项通过，核对当前源码身份、初始预置授权、主窗口 ACL 及卸载后不重装，见 `final-tests.log`、`ipc-tests.log`。IPC 测试载体没有默认窗口图标资源，打印既有资源提示，未影响用例结果。
+8. `npm run plugins:fetch`、`npm run typecheck`、`npm run lint`、`npm run build`、`cargo fmt --all -- --check`、应用/桌面 all-targets 严格 Clippy（离线锁定、`-D warnings`）、修改后的 IPC 目标严格 Clippy、相关脚本语法与 Prettier 检查通过。生产前端保留既有 Monaco 大 chunk 提示。未把预期编译失败或首次环境权限失败计为通过。
+
+### 限制与依赖
+
+未运行前端全量、Rust 工作区全量、原生 WebView2 GUI 管理脚本、安装器或 macOS/Linux 验收；已更新原生管理脚本的发现/数量断言，仅做脚本语法和格式检查。未在本阶段重新构建应用 EXE 或启动用户客户端。源码目录变化在下一次正常构建和启动时生效，不提供运行中热安装；新依赖先运行 `npm run plugins:fetch`，直接 Cargo 操作前先运行 `npm run plugins:build`。未操作用户应用数据、远端主机或数据库结构。本阶段实现完成，后续运行依赖桌面构建与启动。
+
+## 2026-11-08 移除插件历史兼容
+
+### 范围与主要文件
+
+- 平台尚未正式 release，不维护开发期旧包。删除 `plugins/compat` 源码及生成资源、宿主 `legacy_frontend`、UI v1–v3 表单/日志及其草稿维护；只按包内前端进入 iframe。当前主机页缓存、设置弹窗与助手生命周期继续保留。
+- `plugin-sdk/ui.rs`、`plugin-core/manifest.rs`/`package.rs` 只接受当前 UI v4、Host API 4.0.0；页面 surface 和 frontend 必需，未知权限、路径、摘要及 WASM 校验继续生效。删除旧 Host 版本协商、HTML 元数据例外、插件旧域名/payload/退役归档迁移与授权 hostIds 字段兼容。
+- `bundled_plugins.rs`、Repository、构建器和 Vue 类型/检查入口同步；公开 SDK 的旧服务签名改用 `requestCapability(operation)`，助手绑定设置更新调用。Host Info 补齐独立 Vue 前端，全部测试夹具清单使用当前 API。
+- 正常安装/升级、原子失败回滚、来源隔离、启停/卸载选择、设置和数据保护继续保留。移除纯迁移专项测试，新增/更新旧 API/UI/授权字段拒绝与不迁移、不删除数据的断言。PRD、架构、决策、实施计划、插件开发文档及项目规范同步。
+
+### 执行与证据
+
+证据位于 `.local/qa/no-plugin-compat/`。Rust 原生测试均先编译到根 `target/`，复制 EXE 到 QA 后执行；Cargo 保持关闭增量和行号级调试信息，构建前 D 盘可用空间约 250 GiB。
+
+- `npm run plugins:build`、`npm run build`、Host Info 独立 WASM/UI 打包、桌面与 SDK 类型检查、ESLint、桌面 `cargo check --offline --locked`、相关包/桌面 all-targets 严格 Clippy（`-D warnings`）通过。生产前端保留既有 Monaco 大 chunk 提示。
+- 前端全量 52 文件：471 项通过、1 项终端剪贴板异步读取/重连用例失败，失败为 `terminal-clipboard.test.ts:462` 无法找到菜单按钮；历史设置关闭验证已记录同一问题，本次未修改终端功能。没有删除或降低该断言；首次尝试串行复验经 npm 转发未真正带入 Vitest 参数，仍为同一结果，保留日志。
+- 原生 SDK/插件核心/运行时/应用层覆盖当前包、权限/资源路径和摘要、WASM 生命周期、正常升级回滚、配置与数据保护。SDK 新增当前示例声明校验。最终数量见下方补充记录。
+- 首轮原生测试使用系统临时目录时受到沙箱文件权限限制；改为工作区临时目录后，剩余回环网络及 Junction 用例仍受沙箱限制。在隔离 QA 路径以沙箱外测试复验后，核心 20 项和应用层 79 项通过，应用层另有 3 项既有 ignored；运行时 12 项通过。
+
+### 最终补充
+
+- SDK 最终 7 项、插件核心 20 项、运行时 12 项、应用层 79 项，共 118 项通过，应用层 3 项既有 ignored。安全/生命周期测试未降低断言；Junction 与本机网络受限失败已在隔离 QA 路径复验通过。
+- 直接调用 Vitest 并设置 `--no-file-parallelism --exclude src/components/terminal-clipboard.test.ts` 后，51 文件、460 项全部通过；该排除明确针对全量中已知失败的终端文件，不能据此宣称全量通过。最后删除旧结果解析与 initialAction 动作回退后，动作校验/服务/iframe 桥的 3 文件、31 项再次通过。设置和主机 iframe 保留测试使用当前 UI v4。
+- 最新类型、ESLint、严格 Clippy、生产构建、脚本语法与差异检查通过；SDK/前端修改文件按项目格式检查。生产构建后确认 `plugins/compat` 仍不存在，SDK 开发包随生产前端重新生成。
+- 一次补充验证命令从 desktop 目录执行了使用根路径的编辑脚本，脚本在读取首个文件前失败，未造成部分编辑；已从仓库根目录正确执行并复验。那次 Vitest 设置产生的空临时目录经绝对路径/链接检查后清除，证据保留在约定的根 `.local/qa/no-plugin-compat`。
+
+### 限制与依赖
+
+未重建桌面 EXE/安装器，未执行原生 WebView2 GUI、外部真实 SSH/模型、macOS/Linux 验收。此阶段不涉及数据库迁移、用户数据清理或远端操作。旧开发版记录不再自动转换，不符合当前合同的数据明确报错并保留原文件；用户已确认没有历史旧包。源码阶段完成后停止，运行新版本依赖后续桌面构建与启动。
+
 ## 2026-11-08 插件管理全宽布局
 
 - `styles/plugins.css` 移除插件管理独有的 1600px 最大宽度和自动居中，沿用共享内容区边距及原有卡片容器查询。同步 PRD、实施计划及验证索引；保留工作区同期的其他修改。

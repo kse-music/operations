@@ -105,7 +105,6 @@ let cleanupFiles;
 let hostId;
 let credentialId;
 let originalConfig;
-let originalLayout;
 let dataDirectory;
 async function restartIsolated(waitUntil = 0, closeAction = null) {
   const current = child;
@@ -198,7 +197,6 @@ try {
   }
   if (installedExecutable) {
     originalConfig = bootstrap.config;
-    originalLayout = await page.evaluate(() => window.__TAURI_INTERNALS__.invoke('workspace_load'));
   }
   dataDirectory = bootstrap.dataDirectory;
   scoped = true;
@@ -214,11 +212,6 @@ try {
       await invoke('credential_delete', { id: credential.id, detachHosts: true });
     await invoke('credential_cleanup');
   }, !!installedExecutable);
-  await page.evaluate(() =>
-    window.__TAURI_INTERNALS__.invoke('workspace_save', {
-      layout: { version: 1, active: '', tabs: [] },
-    }),
-  );
   await page.reload();
   await page.getByText('本地后端已就绪', { exact: true }).waitFor();
   await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
@@ -247,7 +240,6 @@ try {
           authType: 'password',
           credentialId: credential.value.id,
           groupId: null,
-          tags: [],
           description: 'Temporary authorized validation',
           favorite: false,
           connectTimeoutSecs: 15,
@@ -450,7 +442,7 @@ try {
       openTerminal,
       pin: target.pin,
     });
-    // Advanced checks intentionally rename/split tabs and restore an idle layout.
+    // Advanced checks finish by reloading to an empty workspace.
     // Start downstream modules from a fresh normal-profile shell, keeping their host context explicit.
     await page.evaluate(async () => {
       const store = document
@@ -561,14 +553,10 @@ try {
       });
   }
   if (installedExecutable && originalConfig && page) {
-    await page.evaluate(
-      async ({ config, layout }) => {
-        const invoke = window.__TAURI_INTERNALS__.invoke;
-        await invoke('config_save', { config });
-        await invoke('workspace_save', { layout: layout || { version: 1, active: '', tabs: [] } });
-      },
-      { config: originalConfig, layout: originalLayout },
-    );
+    await page.evaluate(async (config) => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      await invoke('config_save', { config });
+    }, originalConfig);
   }
   target.secret = undefined;
   if (page && child.exitCode === null && !child.signalCode) {

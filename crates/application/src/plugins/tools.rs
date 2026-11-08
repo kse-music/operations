@@ -383,7 +383,6 @@ mod tests {
             GrantInput {
                 expected_revision: upload.revision,
                 permissions: upload.manifest.permissions,
-                host_ids: vec![],
                 operations: vec!["assistant.use".into(), "ui.contribute".into()],
                 read_roots: vec![],
                 write_roots: vec![],

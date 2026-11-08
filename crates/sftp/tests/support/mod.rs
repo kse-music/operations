@@ -476,7 +476,6 @@ impl Server {
                 auth_type: AuthType::Password,
                 credential_id: None,
                 group_id: None,
-                tags: vec![],
                 description: String::new(),
                 favorite: false,
                 connect_timeout_secs: 3,

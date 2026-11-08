@@ -90,7 +90,7 @@ it('keeps uploaded same-ID assistants on the exclusive context and invalidates r
   p.clearPlugin(id);
   expect(p.owns(id, 'retained')).toBe(false);
 });
-it('keeps per-host drafts across switches and only asks before closing their workspace', async () => {
+it('keeps per-host plugin pages across switches and releases only the closed workspace', async () => {
   const p = fixture(),
     w = useWorkspaceStore(),
     t = useTerminalsStore();
@@ -100,26 +100,16 @@ it('keeps per-host drafts across switches and only asks before closing their wor
   expect(w.module).toBe('hosts');
   expect(w.active).toBe('host:a');
   const key = w.activePluginKey;
-  p.drafts[key] = { values: { content: 'edits for a' }, output: null, dirty: true, revision: 'r1' };
   await w.openPlugin('dev.example', 'host', 'b');
   expect(p.prompt).toBeNull();
   expect(w.current?.hostId).toBe('b');
-  expect(p.drafts[key]?.values.content).toBe('edits for a');
   expect(w.pluginPages).toHaveLength(2);
   w.selectHost('a');
   expect(w.activePluginKey).toBe(key);
   expect(w.current?.pluginId).toBe('dev.example');
-  const declined = w.close('host:a');
-  expect(p.prompt).not.toBeNull();
-  p.decide(false);
-  await declined;
-  expect(w.current?.hostId).toBe('a');
-  const accepted = w.close('host:a');
-  p.decide(true);
-  await accepted;
+  await w.close('host:a');
   expect(w.tabs.map((tab) => tab.key)).toEqual(['host:b']);
   expect(w.pluginPages.map((page) => page.hostId)).toEqual(['b']);
-  expect(p.drafts[key]).toBeUndefined();
   expect(context).not.toHaveBeenCalled();
   expect(t.tabs).toHaveLength(1);
 });

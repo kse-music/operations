@@ -32,7 +32,16 @@ vi.mock('@serverdeck/plugin-sdk/stores/ops', async () => import('./stores/ops'))
 vi.mock('@serverdeck/plugin-sdk/stores/files', async () => import('./stores/files'));
 vi.mock('@serverdeck/plugin-sdk/stores/models', async () => import('./stores/models'));
 vi.mock('@serverdeck/plugin-sdk/services/ai', async () => import('./services/ai'));
-vi.mock('./components/PluginFrame.vue', () => ({ default: { render: () => null } }));
+vi.mock('./components/PluginFrame.vue', async () => {
+  const { ref } = await import('vue');
+  return {
+    default: {
+      props: ['page'],
+      setup: () => ({ content: ref('') }),
+      template: `<textarea v-if="page.id === 'draft'" v-model="content" />`,
+    },
+  };
+});
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 let app: App | undefined, pinia: Pinia, root: HTMLDivElement;
 const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
@@ -159,29 +168,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it.each([null, '', 'a'])(
-  'starts with no terminal tabs and opens one fresh Shell despite a legacy layout (%s)',
+it.each(['', 'a'])(
+  'starts with no terminal tabs and opens one fresh Shell for the selected host (%s)',
   async (savedHostId) => {
     app!.unmount();
     loadSidebarConfig();
     vi.spyOn(useHostsStore(), 'load').mockResolvedValue();
     vi.spyOn(useBackgroundStore(), 'start').mockImplementation(() => {});
     vi.spyOn(useFilesStore(), 'poll').mockResolvedValue();
-    const load = vi.spyOn(terminalApi, 'workspaceLoad').mockResolvedValue(
-      savedHostId !== null
-        ? {
-            version: 1,
-            active: 'saved-0',
-            tabs: Array.from({ length: 5 }, (_, index) => ({
-              key: `saved-${index}`,
-              title: '旧会话',
-              panes: [{ key: `saved-pane-${index}`, hostId: savedHostId || null }],
-              layout: { kind: 'leaf' as const, pane: `saved-pane-${index}` },
-            })),
-          }
-        : null,
-    );
-    const save = vi.spyOn(terminalApi, 'workspaceSave').mockResolvedValue();
     const terminals = useTerminalsStore();
     const open = vi.spyOn(terminals, 'open');
     app = createApp(AppShell).use(pinia);
@@ -193,7 +187,7 @@ it.each([null, '', 'a'])(
     expect(open).not.toHaveBeenCalled();
     expect(terminals.tabs).toEqual([]);
     expect(terminals.panes).toEqual([]);
-    expect(load).not.toHaveBeenCalled();
+    expect(terminalApi).not.toHaveProperty('workspaceLoad');
     root
       .querySelector<HTMLButtonElement>(
         savedHostId ? `.tree-host[data-host-id="${savedHostId}"]` : '[aria-label="本地终端"]',
@@ -210,7 +204,7 @@ it.each([null, '', 'a'])(
     expect(terminals.tabs[0]).toMatchObject({ sessionNumber: 1 });
     expect(terminals.tabs[0]!.key).not.toMatch(/^saved-/);
     expect(open).toHaveBeenCalledOnce();
-    expect(save).not.toHaveBeenCalled();
+    expect(terminalApi).not.toHaveProperty('workspaceSave');
   },
 );
 
@@ -2013,7 +2007,7 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
     id: 'dev.host-draft',
     name: '主机草稿工具',
     permissions: ['ui.contribute'],
-    entry: { backend: null, ui: 'ui.json' },
+    entry: { backend: 'backend.wasm', ui: 'ui.json' },
     contributions: [
       { id: 'draft', kind: 'workspace', label: '主机草稿工具' },
       { id: 'settings', kind: 'settings', label: '草稿工具配置' },
@@ -2035,11 +2029,13 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   plugins.schemas[plugin.manifest.id] = {
     revision: plugin.revision,
     ui: {
-      uiVersion: 1,
+      uiVersion: 4,
+      frontend: { script: 'frontend.js', style: 'frontend.css' },
       title: '主机草稿工具',
       pages: [
         {
           id: 'settings',
+          surface: { kind: 'frontend' },
           title: '草稿工具配置',
           initialAction: null,
           fields: [],
@@ -2048,6 +2044,7 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
         },
         {
           id: 'draft',
+          surface: { kind: 'frontend' },
           title: '草稿',
           initialAction: null,
           fields: [
@@ -2120,8 +2117,8 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   await show('a');
   expect(editorA.value).toBe('draft for a');
   expect(workspace.tabs.filter((tab) => tab.hostId === 'a')).toHaveLength(1);
-  expect(plugins.drafts['extension:dev.host-draft:draft:a']?.values.content).toBe('draft for a');
-  expect(plugins.drafts['extension:dev.host-draft:draft:b']?.values.content).toBe('draft for b');
+  expect(editorA.value).toBe('draft for a');
+  expect(editorB.value).toBe('draft for b');
 });
 
 it('opens disabled, ungranted and UI-less plugins in a modal without creating individual tabs', async () => {

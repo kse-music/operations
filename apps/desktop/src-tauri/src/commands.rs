@@ -1,21 +1,5 @@
 use serverdeck_application::Application;
-use serverdeck_core::{
-    connection::{ForwardInfo, ForwardInput},
-    workspace::WorkspaceLayout,
-};
-#[tauri::command]
-pub async fn workspace_load(
-    application: tauri::State<'_, Application>,
-) -> Result<Option<WorkspaceLayout>, IpcError> {
-    application.workspace_load().await.map_err(Into::into)
-}
-#[tauri::command]
-pub async fn workspace_save(
-    application: tauri::State<'_, Application>,
-    layout: WorkspaceLayout,
-) -> Result<(), IpcError> {
-    application.workspace_save(layout).await.map_err(Into::into)
-}
+use serverdeck_core::connection::{ForwardInfo, ForwardInput};
 #[tauri::command]
 pub async fn forward_start(
     application: tauri::State<'_, Application>,

@@ -233,7 +233,6 @@ impl Assistant {
             body: serialized,
             estimated_input_tokens,
             max_output_tokens: config.max_output_tokens,
-            estimated_max_cost: None,
             warnings,
         };
         let mut state = lock(&self.state)?;
@@ -433,7 +432,6 @@ impl Assistant {
             text: pending.redactor.text(&text),
             proposals,
             usage: completion.usage,
-            estimated_cost: None,
             warnings,
             agent: None,
         })

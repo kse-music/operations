@@ -244,7 +244,6 @@ async fn sends_exact_redacted_preview_then_holds_commands_for_individual_approva
     assert_eq!(actual["messages"][1]["role"], "user");
     assert_eq!(actual["store"], false);
     assert_eq!(answer.usage.unwrap().input_tokens, 100);
-    assert_eq!(answer.estimated_cost, None);
     assert!(matches!(answer.proposals[0].risk, CommandRisk::ReadOnly));
     assert!(matches!(answer.proposals[1].risk, CommandRisk::Change));
     assert!(matches!(answer.proposals[2].risk, CommandRisk::ManualOnly));

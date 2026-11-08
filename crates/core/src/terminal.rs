@@ -18,7 +18,7 @@ pub enum CursorStyle {
     Underline,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TerminalPreferences {
     pub font_family: String,
     pub line_height: u16,
@@ -225,24 +225,25 @@ mod preference_tests {
         assert!(preferences.validate().is_err());
     }
     #[test]
-    fn old_settings_receive_new_defaults_without_resetting_existing_values() {
+    fn missing_terminal_settings_are_rejected() {
         let mut value = serde_json::to_value(crate::AppConfig::default()).expect("serialize");
         value.as_object_mut().expect("object").remove("terminal");
         value["terminalFontSize"] = 18.into();
-        let config: crate::AppConfig = serde_json::from_value(value).expect("old config");
-        assert_eq!(config.terminal_font_size, 18);
-        assert_eq!(config.terminal, TerminalPreferences::default());
+        assert!(serde_json::from_value::<crate::AppConfig>(value).is_err());
     }
     #[test]
-    fn quick_copy_paste_defaults_off_for_existing_settings_and_roundtrips() {
+    fn quick_copy_paste_is_required_defaults_off_and_roundtrips() {
         let mut value = serde_json::to_value(TerminalPreferences::default()).expect("serialize");
         value
             .as_object_mut()
             .expect("object")
             .remove("quickCopyPaste");
         value["scrollback"] = 1234.into();
-        let mut preferences: TerminalPreferences =
-            serde_json::from_value(value).expect("existing preferences");
+        assert!(serde_json::from_value::<TerminalPreferences>(value).is_err());
+        let mut preferences = TerminalPreferences {
+            scrollback: 1234,
+            ..Default::default()
+        };
         assert!(!preferences.quick_copy_paste);
         assert_eq!(preferences.scrollback, 1234);
         preferences.quick_copy_paste = true;

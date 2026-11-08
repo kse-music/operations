@@ -9,7 +9,6 @@ fn host(db: &Database, name: &str) -> Host {
         auth_type: AuthType::Password,
         credential_id: None,
         group_id: None,
-        tags: vec!["中文".into()],
         description: String::new(),
         favorite: true,
         connect_timeout_secs: 15,
@@ -63,11 +62,12 @@ fn additive_preferences_and_logical_window_size_survive_reopen() {
         })
         .is_err()
     );
-    let mut old = serde_json::to_value(config).unwrap();
+    let mut old = serde_json::to_value(&config).unwrap();
     old.as_object_mut().unwrap().remove("product");
-    let migrated: serverdeck_core::AppConfig = serde_json::from_value(old).unwrap();
-    assert_eq!(migrated.product.language, "zh-CN");
-    migrated.validate().unwrap();
+    assert!(serde_json::from_value::<serverdeck_core::AppConfig>(old).is_err());
+    let mut invalid = config.product.clone();
+    invalid.shortcuts.insert("tasks".into(), "Ctrl+J".into());
+    assert!(invalid.validate().is_err());
 }
 
 #[test]

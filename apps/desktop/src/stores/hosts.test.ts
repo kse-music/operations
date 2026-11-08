@@ -17,7 +17,6 @@ const fixtures: Host[] = [
     name: '生产',
     hostname: 'prod.example',
     username: 'ops',
-    tags: ['Linux'],
     favorite: true,
     createdAt: '2026-01-01',
     updatedAt: '2026-02-02',

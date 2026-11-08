@@ -5,10 +5,19 @@
   "version": "1.0.0",
   "author": "ServerDeck QA",
   "description": "Generic package-owned UI and Wasm fixture",
-  "apiVersion": "^1.4.0",
-  "entry": { "backend": "backend.wasm", "ui": "ui.json" },
+  "apiVersion": "^4.0.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
   "permissions": ["ui.contribute"],
-  "contributions": [{ "id": "custom", "label": "Custom UI QA", "kind": "workspace" }],
+  "contributions": [
+    {
+      "id": "custom",
+      "label": "Custom UI QA",
+      "kind": "workspace"
+    }
+  ],
   "platforms": ["windows", "linux", "macos"],
   "files": [],
   "publisher": null

@@ -135,7 +135,6 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
             text: route.message,
             proposals: [],
             usage: null,
-            estimatedCost: null,
             warnings: [],
           };
           entry.state = 'complete';

@@ -41,9 +41,7 @@ jobs:
       - run: rustup target add ${{ matrix.target }}
       - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
-      - run: cargo fetch --manifest-path plugins/system/docker/backend/Cargo.toml --target wasm32-unknown-unknown --locked
-      - run: cargo fetch --manifest-path plugins/system/assistant/backend/Cargo.toml --target wasm32-unknown-unknown --locked
-      - run: cargo fetch --manifest-path tests/fixtures/plugins/server-capabilities/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+      - run: npm run plugins:fetch
       - name: Generate bundled plugins and test fixture before Rust checks and tests
         run: npm run plugins:build
       - run: cargo fmt --all -- --check

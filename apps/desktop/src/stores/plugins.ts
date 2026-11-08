@@ -11,16 +11,9 @@ import type {
   PluginRuntimeStatus,
   PluginLocale,
   PluginLabel,
-  PluginValues,
   PluginUi,
 } from '../types/plugins';
 
-export interface PluginDraft {
-  values: PluginValues;
-  output: unknown;
-  dirty: boolean;
-  revision: string;
-}
 export interface ImageRemovalReview {
   imageId: string;
   hostName: string;
@@ -40,7 +33,6 @@ export const usePluginsStore = defineStore('plugins', () => {
   const locale = computed<PluginLocale>(
     () => application.state?.config.product?.language ?? 'zh-CN',
   );
-  const drafts = ref<Record<string, PluginDraft>>({});
   const schemas = ref<Record<string, { revision: string; ui: PluginUi }>>({});
   async function schema(id: string): Promise<PluginUi> {
     const plugin = installed.value.find((p) => p.manifest.id === id);
@@ -73,7 +65,6 @@ export const usePluginsStore = defineStore('plugins', () => {
         : [];
     }),
   );
-  const dirtyCount = computed(() => Object.values(drafts.value).filter((d) => d.dirty).length);
   const t = (zh: string, en: string) => (locale.value === 'en-US' ? en : zh);
   const label = (value: PluginLabel) => (typeof value === 'string' ? value : value[locale.value]);
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -224,25 +215,12 @@ export const usePluginsStore = defineStore('plugins', () => {
     prompt.value = null;
     current?.resolve(accepted);
   }
-  async function discard(key: string): Promise<boolean> {
-    if (!drafts.value[key]?.dirty) return true;
-    return ask(
-      t('放弃未保存的插件编辑？', 'Discard plugin edits?'),
-      t('此页面的未保存内容将被放弃。', 'Unsaved changes in this page will be discarded.'),
-    );
-  }
-  function forget(key: string) {
-    delete drafts.value[key];
-  }
   function clearPlugin(id: string) {
     owners.delete(id);
     assistantOwners.delete(id);
     contextVersions.set(id, contextVersion(id) + 1);
     delete schemas.value[id];
     contexts.delete(id);
-    for (const key of Object.keys(drafts.value))
-      if (key.startsWith(`extension:${id}:`) || key.startsWith(`plugin-settings:${id}:`))
-        delete drafts.value[key];
   }
   useErrorNotifications(error);
   onScopeDispose(stop);
@@ -254,12 +232,10 @@ export const usePluginsStore = defineStore('plugins', () => {
     busy,
     loaded,
     error,
-    drafts,
     schemas,
     schema,
     prompt,
     extensions,
-    dirtyCount,
     t,
     label,
     refresh,
@@ -268,8 +244,6 @@ export const usePluginsStore = defineStore('plugins', () => {
     mutate,
     ask,
     decide,
-    discard,
-    forget,
     clearPlugin,
     bind,
     contextVersion,

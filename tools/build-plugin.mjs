@@ -52,7 +52,9 @@ if (manifest.entry.ui)
   );
 if (manifest.entry.ui) {
   const ui = JSON.parse(await readFile(path.join(source, manifest.entry.ui), 'utf8'));
-  if (ui.frontend) await buildPluginUi(source, staging);
+  if (ui.uiVersion !== 4 || !ui.frontend)
+    throw new Error('Plugin UI requires uiVersion 4 and packaged frontend assets');
+  await buildPluginUi(source, staging);
 }
 run(process.execPath, [
   path.join(root, 'tools', 'package-plugin.mjs'),

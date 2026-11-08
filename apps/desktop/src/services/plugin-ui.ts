@@ -1,5 +1,4 @@
-import type { PluginUiPage, PluginValues, PluginUiResult, PluginReply } from '../types/plugins';
-import { pluginsApi } from './plugins';
+import type { PluginUiPage, PluginValues } from '../types/plugins';
 
 const identifier = (key: string) =>
   /^[a-zA-Z0-9_-]{1,64}$/.test(key) && !['__proto__', 'prototype', 'constructor'].includes(key);
@@ -23,34 +22,10 @@ export function actionPayload(
   action: string,
   values: PluginValues,
 ): { action: string; values: PluginValues } {
-  if (
-    !identifier(action) ||
-    !(page.actions.some((a) => a.id === action) || page.initialAction === action)
-  )
+  if (!identifier(action) || !page.actions.some((a) => a.id === action))
     throw new Error('插件界面动作未在页面声明');
   const payload = { action, values: safeValues(values) };
   if (new TextEncoder().encode(JSON.stringify(payload)).length > 60 * 1024)
     throw new Error('插件表单超过消息大小限制');
   return payload;
-}
-export function uiResult(value: unknown): PluginUiResult {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return { output: value };
-  const data = value as Record<string, unknown>;
-  if (!('values' in data) && !('output' in data) && !('saved' in data)) return { output: value };
-  if (Object.keys(data).some((key) => !['values', 'output', 'saved'].includes(key)))
-    throw new Error('插件返回了不支持的界面消息');
-  if ('saved' in data && typeof data.saved !== 'boolean') throw new Error('插件保存状态无效');
-  return {
-    values: 'values' in data ? safeValues(data.values) : undefined,
-    output: data.output,
-    saved: data.saved as boolean | undefined,
-  };
-}
-export async function sendPluginAction(
-  id: string,
-  page: PluginUiPage,
-  action: string,
-  values: PluginValues,
-): Promise<PluginReply> {
-  return pluginsApi.call(id, actionPayload(page, action, values));
 }

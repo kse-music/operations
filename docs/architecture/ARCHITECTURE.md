@@ -1,5 +1,25 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-08 当前契约与数据库初始化
+
+移除应用旧域名目录自动迁移及旧系统凭据服务回退，NativeStore 只访问 cn.hiboot.desktop.credentials.v1。AppConfig/TerminalPreferences/ProductPreferences 使用完整当前字段，拒绝 extraSmall、缺失的必填设置和已删除 tasks 快捷键；新配置仍由显式 Default 初始化。
+
+Storage 将分阶段开发升级 SQL 合并为 schema.sql：结构与原最终 schema 9 的列、主外键和索引等价，不改 DATABASE_VERSION，不改写已有当前数据库。只有空且 user_version=0 的数据库可以初始化；其他非当前版本报错并保留。旧 ai_config 与价格字段不再转换，读取当前 ai_models 不写库；注册模型和当前密钥引用照常保存。为保留现有数据库结构与原始数据，tags SQL 列原样保留，但主机 DTO、校验、读写、SDK 和调用方不再使用它。
+
+删除 workspace_load/workspace_save 的 Rust/IPC/ACL/前端服务与持久化类型；运行时终端分屏几何与显式打开会话仍使用现有状态。无目录定位文件时使用统一当前数据目录；用户明确配置的迁移、复制校验、取消和失败回退状态机保留。AI 智能体的旧建议格式回退、始终为空的费用响应字段和插件预览恒真 compatible 字段删除；实际 Token 和所有执行安全边界保留。
+
+## 2026-11-08 内置插件构建与注册自动发现
+
+`tools/system-plugins.mjs` 按稳定目录顺序读取 `plugins/system` 的直接子目录，以 manifest ID 为安装身份；校验目录、必要源码/锁文件和界面入口，拒绝链接、重复 ID 和不完整输入。`packages` 是保留输出目录，不参与发现。`build-system-plugins.mjs` 复用单包编译器，先完成所有包的编译和身份核对，再发布 `.sdplugin`，最后生成只含本轮系统插件的 `packages/registry.rs`；内容未变化不重写。测试夹具仍显式构建，但不进入注册文件，旧产物不根据存在与否加入注册。
+
+`application/bundled_plugins.rs` 用 `include!` 引入生成注册，继续调用既有内置分发、版本判断、授权和卸载墓碑逻辑。前端按真实安装记录显示，无新增业务页分支。`npm run plugins:fetch` / 发布 CI 复用同一目录发现下载锁定依赖，正式编译继续离线、锁定。注册文件和包均为 Git 忽略的编译输入；直接 Cargo 操作前先运行插件构建。此方案不增加运行期目录扫描、热安装、SDK 权限或数据库迁移，删除源码目录不自动删除已安装记录或用户数据。
+
+## 2026-11-08 移除插件历史兼容
+
+插件统一使用 Host/SDK 4.0.0 与 UI v4。包必须携带 frontend JS/CSS，每页声明 surface；主窗口只提供 iframe、原生服务和权限桥，不再渲染旧表单或代供业务前端。删除 plugins/compat、兼容资源构建和跨插件源码导入例外，旧 API/UI 在校验阶段拒绝。Host Info 夹具也使用自带前端。
+
+Repository 只按当前 packages/system/upload/data/authorizations 布局操作；不再搬移旧 payload、转换插件旧域名、退役旧身份或读取授权 hostIds。无法读取当前合同的记录返回错误，原文件与用户数据保持；正常安装升级、原子回滚、来源隔离、授权和卸载选择保留。平台未正式发布，不维护开发期旧包兼容；下文相关历史章节不再代表当前实现。
+
 ## 2026-11-07 本地工具安装
 
 本地来源状态新增 installed / installSupported。未授权时只查可执行文件，不读取配置或启动 CLI。先检测用户 PATH、常用原生目录，再回退应用数据目录 local-tools/{local-codex|local-claude-code}。新增主窗口专属 ai_local_tool_install(modelId, requestId) 与 ai_local_tool_install_cancel(requestId)，只接受固定两种来源；iframe 桥仅可信内置助手可调用，取消绑定本页面持有的请求，关闭页面取消下载。

@@ -263,7 +263,6 @@ pub fn preview(text: &str, default_user: &str, timeout: u16) -> Result<ImportPre
             },
             credential_id: None,
             group_id: None,
-            tags: vec![],
             description: String::new(),
             favorite: false,
             connect_timeout_secs: timeout,

@@ -6,20 +6,6 @@ use std::collections::BTreeSet;
 
 pub const API_VERSION: &str = "4.0.0";
 
-pub(crate) fn is_removed_tool_id(id: &str) -> bool {
-    [
-        "cn.hiboot.plugins.",
-        serverdeck_core::identity::LEGACY_PLUGIN_PREFIX,
-    ]
-    .iter()
-    .any(|prefix| {
-        matches!(
-            id.strip_prefix(prefix),
-            Some("batch" | "automation" | "services")
-        )
-    })
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Manifest {
@@ -126,9 +112,6 @@ pub fn validate_path(path: &str) -> Result<(), Error> {
 impl Manifest {
     pub fn validate(&self, platform: &str) -> Result<(), Error> {
         validate_id(&self.id)?;
-        if is_removed_tool_id(&self.id) {
-            return Err(invalid("此内置插件已从产品中移除"));
-        }
         if let Some(icon) = &self.icon
             && (icon.is_empty()
                 || icon.len() > 64
@@ -159,13 +142,7 @@ impl Manifest {
         let api =
             VersionReq::parse(&self.api_version).map_err(|_| invalid("插件 API 版本范围无效"))?;
         let current = Version::parse(API_VERSION).map_err(|_| invalid("宿主 API 版本无效"))?;
-        // Retained v1 capabilities and ABI remain usable by existing packages.
-        let legacy = Version::new(1, 4, 0);
-        if !api.matches(&current)
-            && !api.matches(&legacy)
-            && !api.matches(&Version::new(2, 1, 0))
-            && !api.matches(&Version::new(3, 0, 0))
-        {
+        if !api.matches(&current) {
             return Err(invalid("插件 API 版本与宿主不兼容"));
         }
         if self.platforms.is_empty()
@@ -199,12 +176,10 @@ impl Manifest {
         {
             return Err(invalid("UI 贡献需要 UI 入口和 ui.contribute 声明"));
         }
-        for (path, suffix) in [(&self.entry.backend, ".wasm"), (&self.entry.ui, ".html")] {
+        for (path, suffix) in [(&self.entry.backend, ".wasm"), (&self.entry.ui, ".json")] {
             if let Some(path) = path {
                 validate_path(path)?;
-                let supported =
-                    path.ends_with(suffix) || (suffix == ".html" && path.ends_with(".json"));
-                if !supported || !self.files.iter().any(|f| &f.path == path) {
+                if !path.ends_with(suffix) || !self.files.iter().any(|f| &f.path == path) {
                     return Err(invalid("插件入口必须在文件清单中且类型受支持"));
                 }
             }

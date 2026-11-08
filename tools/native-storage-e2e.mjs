@@ -132,7 +132,6 @@ try {
       authType: 'password',
       credentialId,
       groupId: null,
-      tags: [],
       description: 'isolated storage migration',
       favorite: false,
       connectTimeoutSecs: 15,

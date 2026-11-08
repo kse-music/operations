@@ -40,7 +40,6 @@ pub struct HostInput {
     pub auth_type: AuthType,
     pub credential_id: Option<String>,
     pub group_id: Option<String>,
-    pub tags: Vec<String>,
     pub description: String,
     pub favorite: bool,
     pub connect_timeout_secs: u16,
@@ -129,21 +128,6 @@ impl HostInput {
         if self.description.len() > 8192 || self.description.contains('\0') {
             return Err(Error::Validation("备注过长或包含非法字符"));
         }
-        if self.tags.len() > 32 {
-            return Err(Error::Validation("每台主机最多 32 个标签"));
-        }
-        self.tags = self
-            .tags
-            .into_iter()
-            .map(|tag| tag.trim().to_owned())
-            .collect();
-        if self.tags.iter().any(|tag| {
-            tag.is_empty() || tag.chars().count() > 64 || tag.chars().any(char::is_control)
-        }) {
-            return Err(Error::Validation("标签须为 1–64 个字符"));
-        }
-        self.tags.sort();
-        self.tags.dedup();
         if self.auth_type == AuthType::Agent && self.credential_id.is_some() {
             return Err(Error::Validation(
                 "SSH Agent 使用系统代理，不关联密码或私钥凭据",
@@ -307,7 +291,6 @@ mod tests {
             auth_type: AuthType::Agent,
             credential_id: None,
             group_id: None,
-            tags: vec![],
             description: String::new(),
             favorite: false,
             connect_timeout_secs: 15,
@@ -365,9 +348,6 @@ mod tests {
         assert!(invalid.normalize().is_err());
         let mut invalid = host();
         invalid.username = "a b".into();
-        assert!(invalid.normalize().is_err());
-        let mut invalid = host();
-        invalid.tags = vec!["".into()];
         assert!(invalid.normalize().is_err());
     }
 }
