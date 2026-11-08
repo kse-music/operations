@@ -2,7 +2,7 @@
 
 ## 下载独立开发包
 
-在「插件 → 插件管理」点击「下载插件开发包」，选择 ZIP 的保存位置，解压后阅读根目录的 `README.md`。ZIP 随客户端提供配套 SDK、接口文档和独立样例。准备 Node.js、Rust 及 WASM 目标后，按快速入门安装依赖、修改样例并运行 `npm run package`。把生成的 `example.sdplugin` 拖到插件管理页，安装、授权并启用后，从插件卡片打开样例配置页。下文命令适用于从 ServerDeck 源码仓库开发。
+在「设置 → 插件」列表底部点击「下载插件开发包」，选择 ZIP 的保存位置，解压后阅读根目录的 `README.md`。ZIP 随客户端提供配套 SDK、接口文档和独立样例。准备 Node.js、Rust 及 WASM 目标后，按快速入门安装依赖、修改样例并运行 `npm run package`。通过「安装插件」选择生成的 `example.sdplugin`，授权并启用后，从插件卡片打开样例配置页。下文命令适用于从 ServerDeck 源码仓库开发。
 
 ## 当前推荐：完整插件目录与 UI v4
 

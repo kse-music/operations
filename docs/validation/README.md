@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[本地终端上移、插件归入统一设置，保留会话及保存保护](workspace/VALIDATION_LAYOUT.md#2026-11-08-本地终端上移与插件归入设置)。
+
+最新：[移除收起栏重复搜索，保留右上角搜索](workspace/VALIDATION_LAYOUT.md#2026-11-08-移除收起栏重复搜索)。
+
+最新：[收起侧栏保留 52px 图标导航与原有工作区状态](workspace/VALIDATION_LAYOUT.md#2026-11-08-收起侧栏保留图标导航)。
+
+最新：[移除右上角重复应用菜单，保留各功能已有入口](workspace/VALIDATION_LAYOUT.md#2026-11-08-移除重复应用菜单)。
+
+最新：[桌面工作台组合布局：常驻主机树、单排标签和统一设置窗口](workspace/VALIDATION_LAYOUT.md#2026-11-08-桌面工作台组合布局)。
+
 最新：[终端剪贴板重连回归修复：全量前端 472 项通过](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-08-剪贴板重连回归测试修复)。
 
 最新：[跨模块开发期兼容清理：当前 schema、设置、身份、终端与 AI](foundation/VALIDATION_PRE_RELEASE_CLEANUP.md)。
@@ -47,6 +57,8 @@
 最新：[模型管理移至设置](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-07-模型管理移至设置)。
 
 最新：[SFTP 列表高度与传输面板](files/VALIDATION_STAGE4.md#2026-11-07-sftp-列表高度与传输面板)。
+
+最新：[SFTP 右键复制本地路径](files/VALIDATION_STAGE4.md#2026-11-08-右键复制本地路径)。
 
 最新：[SFTP 本地路径显示与表头排序](files/VALIDATION_STAGE4.md#2026-11-06-sftp-本地路径显示与表头排序)。
 

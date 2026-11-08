@@ -42,6 +42,12 @@
   flex-wrap: wrap;
   max-width: 100%;
 }
+.plugin-manager-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
 .plugin-manager .plugin-heading > div > .subtle {
   margin: 8px 0 0;
 }
@@ -340,28 +346,30 @@
   margin-top: 5px;
   flex-shrink: 0;
 }
-.modal:has(> .plugin-config-body)[open] {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(720px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  overflow: hidden;
-  padding: 0;
+.plugin-configuration {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
-.modal:has(> .plugin-config-body > .plugin-settings-workspace)[open] {
-  height: min(570px, calc(100dvh - 32px));
+.plugin-configuration-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex-shrink: 0;
+  margin-bottom: 16px;
 }
-.modal:has(> .plugin-config-body) > .modal-heading {
+.plugin-configuration-heading h1 {
   margin: 0;
-  padding: 12px clamp(12px, 4vw, 20px);
-  border-bottom: 1px solid var(--border);
-}
-.modal:has(> .plugin-config-body) > .modal-heading h2 {
+  font-size: var(--font-size-page-title);
   overflow-wrap: anywhere;
 }
 .plugin-config-body {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -381,9 +389,6 @@
 .plugin-config-body > .plugin-contribution-select {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
-}
-.modal:has(> .assistant-config-body > .plugin-settings-workspace)[open] {
-  height: min(640px, calc(100dvh - 32px));
 }
 .assistant-config-body:has(> .plugin-settings-workspace) {
   overflow: hidden;

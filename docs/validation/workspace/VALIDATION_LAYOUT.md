@@ -1,5 +1,55 @@
 # 页面布局调整验收
 
+## 2026-11-08 本地终端上移与插件归入设置
+
+- 已实现：本地终端固定于主机树上方、独立于主机筛选；收起栏保留上方主机/本地终端与底部唯一设置入口。插件管理进入七类统一设置窗口，不创建工作区标签或替换活动主机；配置详情共用同一窗口，返回保留列表筛选。开发包下载移到列表底部。功能页齿轮、全局搜索、模型跳转均复用新路径。
+- 生命周期：PluginSettingsPanel 复用原插件配置、权限与 iframe 桥；配置保存通过 pluginSettingsBusy、管理操作通过 plugins.busy 阻止关闭、返回和分类切换。通用偏好组件保持挂载，跨插件分类保留草稿及未保存关闭提醒；模型/插件各自保存，原连接与插件草稿保留。关闭窗口显式恢复入口焦点。
+- 主要文件：App.vue、AppNavigation.vue、SettingsDialog.vue、PluginSettingsPanel.vue（替代 PluginSettingsDialog）、GlobalSearch.vue、PluginFrame.vue、PluginsView.vue、stores/workspace.ts、types/navigation.ts、styles/product.css、settings.css、plugins.css；同步相关单测、共享导航与浏览器/原生脚本，以及 PRD、架构、决策、使用和插件开发说明。
+- 前端回归：从 apps/desktop 执行 `node ../../node_modules/vitest/vitest.mjs run --reporter=dot`，52 文件/471 项通过。包括设置路由、主机关闭保护、插件保存中禁止离开、权限调用、设置分类草稿保留、从插件页关闭时的未保存确认、焦点恢复、主机/插件草稿和终端会话保留。首次从仓库根目录使用 --root 全量运行时，四个目录外测试无法解析；改用项目目录运行后全部通过。全局搜索断言同步“设置”分类，未删除业务断言。
+- 最终面板整理后，应用壳、侧栏、全局搜索和插件配置四文件/93 项定向复验通过；权限详情使用顶部“插件”返回列表，取消按钮仅为可编辑的配置页保留。类型、ESLint、格式和纯前端构建再次通过。
+- 浏览器工作台：`tools/ui-desktop-workbench-e2e.mjs` 四组（1440×900 深浅色、900×600 深色超大字号、390×844 浅色超大字号）通过。实际检查顶部本地入口、底部唯一设置、52px 收起栏、插件列表/详情返回及筛选保留、统一设置无额外标签、主机工具与通用草稿关闭保护，无横向溢出或未捕获脚本错误。
+- 打包插件 iframe：`tools/ui-plugin-layout-e2e.mjs` 在 900×600 深浅色通过；`--font-size` 在 390×844、1.45 倍字号深浅色通过，共四组。使用现有真实插件包与 SDK 桥，验证 100 个模型的列表滚动、保存/取消/失败重试、管理模型跳转、权限与配置切换、上传插件权限、聊天草稿和入口焦点。深色两组挂起保存时确认关闭、返回与全部分类按钮禁用。检查发现并修复设置窗口关闭后的焦点丢失；脚本同步当前模型计数、可见单选标签及面板范围，保留长列表和保存断言。
+- 关联回归：主机树布局四组、偏好设置五组、标签菜单三组及主机上下文四组通过；加上工作台与插件 iframe 共 24 组。脚本断言同步本地终端上方位置、七类设置、收起状态的可访问名称，以及设置打开前后的侧栏状态保持。已人工查看桌面插件列表、900px AI 配置及 390px 超大字号截图。
+- 静态与构建：`npm run typecheck`、`npm run lint`、改动文件 Prettier、改动脚本 Node 语法和 `git diff --check` 通过；在 apps/desktop 执行 `node ../../node_modules/vite/bin/vite.js build` 成功，保留已有 RemoteEditor 大 chunk 提示。证据、日志与截图位于 `.local/qa/settings-plugins/`。单测在获准的沙箱外运行以避开 Windows 缓存 EPERM；浏览器使用隔离内存夹具，不连接真实主机或写入用户配置。
+- 限制与风险：按用户“保持运行、只改源码”要求，未执行 Cargo、重建 EXE/安装包、重启或强杀程序。原生脚本仅同步导航契约，未执行新版 WebView2、真实 SSH/SFTP、安装器或 macOS/Linux 验收。原生控件度量和焦点表现仍待实机复核；无新增依赖、配置、权限、IPC 或数据变化。源码阶段完成，无额外实现依赖；实际应用生效需要后续正常退出、重建并启动。
+
+## 2026-11-08 移除收起栏重复搜索
+
+- 删除 AppNavigation 的搜索按钮、Search 导入与 search 事件，以及 App 的对应监听；收起栏保留主机展开和三个底部应用入口。右上角及既有快捷键搜索继续使用原实现。同步当前需求、架构、决策和使用说明，较早验收中的搜索图标描述仅代表当时版本。
+- `node node_modules/vitest/vitest.mjs run --root apps/desktop src/App.test.ts src/components/app-header.test.ts src/components/navigation.test.ts --reporter=dot`：3 文件/84 项通过。应用壳断言收起栏无搜索、全局搜索按钮仅一个，并实际打开和关闭顶部搜索弹窗；保留原树与会话保护断言。`npm run typecheck`、`npm run lint`、修改文件 Prettier、脚本语法、差异检查和纯前端 Vite 构建通过，保留已有编辑器大 chunk 提示。
+- `tools/ui-desktop-workbench-e2e.mjs`：1440×900 深浅色、900×600 超大字号、390×844 超大字号四组通过。断言收起栏四个入口、全局搜索仅一个，并从顶部搜索入口输入查询及关闭弹窗；原有展开/搜索状态恢复、设置草稿和布局断言继续通过。已查看深色桌面截图。日志与证据位于 `.local/qa/remove-rail-search/`；浏览器只使用内存夹具，未连接真实后端或修改用户数据。
+- 本阶段源码完成。沿用用户要求保持程序运行，未执行原生构建、重启、安装包或跨平台验证；原生显示效果尚待复验。无新增依赖、配置、IPC 或已知业务风险；实际应用生效依赖后续正常退出、重建并启动，无额外实现依赖。
+
+## 2026-11-08 收起侧栏保留图标导航
+
+- 真实功能：收起后保留 52px 图标栏，上方为展开主机列表、全局搜索，下方为本地终端、插件管理、设置；图标有悬浮提示与可访问名称，当前应用入口继续高亮。隐藏树内容但保留组件及状态，展开恢复原搜索、分组和选择。窄窗口主内容预留图标栏宽度，主机树展开为浮层。
+- 主要文件：App.vue、AppNavigation.vue、styles/main.css、styles/product.css、App.test.ts、navigation.test.ts，及工作台/布局/共享导航脚本；原生检查脚本的收起断言同步更新，未执行原生脚本。同步 PRD、架构、决策、使用指南及实施计划。
+- 定向单测：`node node_modules/vitest/vitest.mjs run --root apps/desktop src/App.test.ts src/components/app-header.test.ts src/components/navigation.test.ts --reporter=dot`，3 文件/84 项通过。覆盖收起和展开入口、图标名称及导航事件、原树实例和搜索保留、插件/设置/搜索/本地终端可达，以及已有远端窗格保留且未调用关闭 API。Windows 缓存重命名曾出现 EPERM，本轮直接在获准的沙箱外运行测试。
+- 浏览器：`node tools/ui-desktop-workbench-e2e.mjs`，1440×900 深浅色、900×600 深色超大字号、390×844 浅色超大字号四组通过。断言栏宽 52px、所有可见按钮高度至少 40px 且位于栏内、工作区未被遮挡、无页面横向溢出；实际点击主机、搜索、插件和设置入口，展开后搜索及筛选恢复，设置草稿关闭保护正常，无未捕获脚本错误。首次脚本把隐藏树按钮也纳入测量，修正为仅检查图标导航后通过。
+- 原有布局回归：通过独立 Vite 服务运行 `tools/ui-layout-e2e.mjs`，桌面深浅色、900×600、390×844 四组通过，保留主机树滚动/筛选、键盘收起展开及工作区切换检查。合计八组浏览器检查。已人工查看深色桌面与浅色窄窗口截图。产物、日志和测量位于 `.local/qa/collapsed-sidebar/`；浏览器仅使用内存夹具，不连接真实后端、不修改用户配置或远程主机。
+- 静态与构建：`npm run typecheck`、`npm run lint`、改动文件 Prettier、五份改动脚本 Node 语法及 `git diff --check` 通过；在 apps/desktop 运行 `node ../../node_modules/vite/bin/vite.js build` 成功，保留已有 RemoteEditor 大 chunk 提示。
+- 限制与风险：沿用用户“保持运行、只改源码”要求，未执行 Cargo、重建 EXE/安装包、重启或强杀程序。未复验原生 WebView2、真实 SSH/SFTP 和跨平台；原生字体/控件度量仍需后续实机核对。无新增依赖、权限、配置、IPC 或数据变化，无新增实现依赖。当前源码阶段完成，实际应用生效依赖后续正常退出、重建并启动。
+
+## 2026-11-08 移除重复应用菜单
+
+- 已移除 AppHeader 右上角省略号菜单、命令列表、菜单事件转发、外部点击/Esc 监听和专用样式。顶栏仅提供产品标识、侧栏开关与搜索；本地终端、插件管理和设置仍在侧栏底部，新建主机仍用主机栏加号，关于仍在统一设置窗口内。
+- 主要文件：AppHeader.vue、App.vue、styles/product.css 及对应应用壳/导航测试。工作台与设置浏览器脚本改为检查菜单不存在和保留入口；需求、架构、使用说明、实施计划和设计决策同步。
+- 实际验证：应用壳、顶栏和侧栏导航 3 文件/80 项测试通过；TypeScript（桌面及 SDK）、ESLint、改动文件 Prettier、脚本语法与差异检查通过；纯前端 Vite 生产构建成功，保留已有 RemoteEditor 大 chunk 提示。
+- 浏览器：四组通过，覆盖桌面深浅色、900×600 超大字号及 390×844 超大字号。断言省略号菜单不存在，侧栏三个入口和主机工具切换继续可用，设置/关于/模型管理可达，草稿关闭保护保留，页面无横向溢出、无未捕获脚本异常。日志、截图与测量位于 .local/qa/remove-app-menu/。
+- 本轮用户明确要求保持运行、仅改源码。检测到 target/debug/serverdeck-desktop.exe 正在运行后保留该实例，未执行 Cargo/桌面构建、未更新 EXE/安装包、未重启或强杀进程。现有窗口仍显示旧版，后续需正常退出并重建后生效；未执行新版原生 GUI 或跨平台复验。
+- 未引入依赖、配置、权限、IPC 或数据变化；未发现本次修改新增的业务风险。本阶段源码工作完成，无下一阶段实现依赖。
+
+## 2026-11-08 桌面工作台组合布局
+
+- 功能：常驻紧凑主机树、底部本地终端/插件/设置入口、顶部侧栏开关/搜索/应用菜单，单排主机与全局工具标签，主机工具与终端会话分层；不再保留模块选择及“全部主机”分组。统一设置窗口包含偏好四类、模型和关于，草稿、迁移与关闭确认沿用现有逻辑。设置打开时暂停底层插件交互，保留已存在的连接与页面。
+- 主要文件：App.vue、AppHeader.vue、AppNavigation.vue、SettingsDialog.vue、HostSidebar.vue、stores/workspace.ts、types/navigation.ts 及界面样式。同步工作区、设置和插件导航测试及共享浏览器/原生导航辅助脚本；需求、架构、决策和使用说明同步。
+- 全量前端：52 个文件、459 项通过。TypeScript 与 ESLint 通过。生产前端构建成功，保留已有 RemoteEditor 大 chunk 提示。沙箱首次 Vitest 因临时缓存重命名 EPERM 未执行测试，改在获准的沙箱外运行后通过。
+- 浏览器：node tools/ui-desktop-workbench-e2e.mjs，1440×900 深浅色、900×600 超大字号和 390×844 超大字号四组通过。验证单排标签、主机工具恢复、设置跨分类草稿、两次关闭确认及小窗口保存按钮可达；无横向溢出和未捕获脚本异常。浏览器夹具不连接真实主机、不保存用户设置；仅纯浏览器缺失 Tauri 产生的通知会在检查前手动关闭。证据：.local/qa/desktop-workbench/browser/。
+- 补充：原有设置脚本五组、工作区标签右键菜单脚本三组、主机树布局四组和主机上下文四组通过；加上新增工作台四组，共 20 组浏览器检查。检查发现偏好页移入弹窗后丢失原页面的命名容器，已在 settings-dialog-content 恢复 workspace / inline-size，窄窗口单列、路径换行和表单字段布局复验通过。主机上下文检查还发现旧的会话工具栏 flex 规则在新纵向结构中产生窄屏空白，移除后终端紧邻会话栏。最终应用壳、插件上下文与配置弹窗专项 4 文件/100 项通过。
+- 原生：node tools/native-desktop-workbench-e2e.mjs，复用根 target，先构建配置了独立目录的 QA 程序，复制到 QA 目录，再恢复普通配置的 target/debug/serverdeck-desktop.exe。WebView2 与真实本地 PowerShell 检查通过：会话变量在插件标签、全部设置分类和设置 IPC 保存后保留；关闭全局标签不结束终端；关闭本地工作区释放 PTY、回到欢迎页；QA 程序通过确认正常退出。独立证据：.local/qa/desktop-workbench/native/1794118179308/，未改动用户已有数据与配置。
+- 构建：最初通过 npm 入口请求 debug/no-bundle，但 Windows npm 实际只转发 build，因而生成 Release EXE 和 NSIS 安装包；未安装或发布。原生复验改为 node tools/tauri.mjs build --debug --no-bundle，QA 配置和普通配置均成功。最后的容器断点与会话栏修复后，再次通过直接 CLI 刷新普通 Debug EXE、Release EXE 与 NSIS 安装包。编译器保留既有 Windows linker 输出提示。
+- 限制：未重跑完整真实 SSH/SFTP、全部插件及安装器安装流程，未验证 macOS/Linux。没有修改 Rust、IPC、SDK、数据库或持久化配置，也未执行数据清理。当前阶段无额外实现依赖。
+
 ## 2026-11-07 顶部导航图标
 
 - `AppModules.vue` 在主机管理、插件、设置文字前分别显示 Server、Puzzle、Settings 图标。`product.css` 将图标和文字居中排列，图标固定 16px，间距 6px，颜色继承导航按钮。

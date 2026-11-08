@@ -116,7 +116,6 @@ it('keeps host plugins in their device tab across host switches', async () => {
   w.navigate('files', 'b');
   await w.openPlugin('cn.hiboot.plugins.docker', 'images', 'a');
   expect(w.active).toBe('host:a');
-  expect(w.module).toBe('hosts');
   expect(w.tabs.filter((tab) => tab.hostId === 'a')).toHaveLength(1);
   w.selectHost('b');
   expect(w.current).toMatchObject({ view: 'files', hostId: 'b' });
@@ -153,17 +152,17 @@ function openTabs() {
   workspace.navigate('terminals', '');
   workspace.navigate('files', 'a');
   workspace.navigate('assistant');
-  workspace.navigate('models');
+  workspace.navigate('plugins');
   return workspace;
 }
 
 it.each([
-  ['current', ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:', 'models:'], 'models:'],
   [
-    'right',
-    ['host:', 'host:a', 'extension:cn.hiboot.plugins.assistant:assistant:', 'models:'],
-    'models:',
+    'current',
+    ['host:', 'extension:cn.hiboot.plugins.assistant:assistant:'],
+    'extension:cn.hiboot.plugins.assistant:assistant:',
   ],
+  ['right', ['host:', 'host:a'], 'host:a'],
   ['others', ['host:a'], 'host:a'],
   ['all', [], ''],
 ] as const)('closes %s relative to the requested inactive tab', async (scope, keys, active) => {
@@ -175,17 +174,13 @@ it.each([
   if (active === 'host:a') expect(workspace.hostId).toBe('a');
 });
 
-it('closes only tabs in the same row to the right and preserves the active tab', async () => {
+it('closes all workspaces to the right and preserves the active tab', async () => {
   const workspace = openTabs();
   workspace.activate('host:');
   await workspace.close('host:', 'right');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
-  expect(workspace.tabs.map((tab) => tab.key)).toEqual([
-    'host:',
-    'extension:cn.hiboot.plugins.assistant:assistant:',
-    'models:',
-  ]);
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:']);
 });
 
 it('keeps adjacent-tab selection for closing the current tab', async () => {
@@ -193,7 +188,7 @@ it('keeps adjacent-tab selection for closing the current tab', async () => {
   workspace.activate('host:a');
   await workspace.close('host:a');
   expect(workspace.active).toBe('extension:cn.hiboot.plugins.assistant:assistant:');
-  await workspace.close('models:');
+  expect(workspace.tabs.some((tab) => tab.view === 'plugins')).toBe(false);
   await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
@@ -221,118 +216,68 @@ it('handles empty ranges and closing the last tab without creating replacements'
   expect(workspace.current).toBeUndefined();
 });
 
-it('keeps the shared settings draft mounted when only some category tabs close', async () => {
+it('opens settings categories without changing the current host or creating tabs', async () => {
   const workspace = useWorkspaceStore();
+  workspace.navigate('files', 'a');
+  const current = workspace.current;
+  for (const view of [
+    'settings',
+    'settingsTerminal',
+    'settingsShortcuts',
+    'settingsStorage',
+    'models',
+    'plugins',
+    'about',
+  ] as const) {
+    workspace.navigate(view);
+    expect(workspace.settingsView).toBe(view);
+    expect(workspace.current).toBe(current);
+    expect(workspace.hostId).toBe('a');
+    expect(workspace.tabs).toEqual([current]);
+  }
+});
+
+it('retains the settings window when its close guard declines and closes only after approval', async () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('files', 'a');
   workspace.navigate('settings');
-  workspace.navigate('settingsTerminal');
-  workspace.navigate('about');
   const guard = vi.fn(async () => false);
   workspace.settingsCloseGuard = guard;
-  await workspace.close('settings:');
-  await workspace.close('about:');
-  expect(guard).not.toHaveBeenCalled();
-  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['settingsTerminal:']);
-  await workspace.close('settingsTerminal:');
+  await workspace.closeSettings();
   expect(guard).toHaveBeenCalledOnce();
-  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['settingsTerminal:']);
+  expect(workspace.settingsView).toBe('settings');
+  expect(workspace.current?.key).toBe('host:a');
+  guard.mockResolvedValue(true);
+  await workspace.closeSettings();
+  expect(workspace.settingsView).toBeNull();
+  expect(workspace.current?.key).toBe('host:a');
 });
 
 it.each(['right', 'others', 'all'] as const)(
-  'reviews settings before any tab closes in a %s batch',
+  'keeps settings independent from the %s workspace close range',
   async (scope) => {
     const workspace = useWorkspaceStore();
-    workspace.navigate('about');
-    workspace.navigate('terminals', 'a');
-    workspace.navigate('settings');
+    workspace.navigate('files', 'a');
+    workspace.navigate('plugins');
     workspace.navigate('settingsTerminal');
-    const before = workspace.tabs.map((tab) => tab.key);
-    const close = vi.spyOn(useTerminalsStore(), 'closeAll');
     const guard = vi.fn(async () => false);
     workspace.settingsCloseGuard = guard;
-    await workspace.close('about:', scope);
-    expect(workspace.tabs.map((tab) => tab.key)).toEqual(before);
-    expect(workspace.current?.key).toBe('settingsTerminal:');
-    expect(close).not.toHaveBeenCalled();
-    guard.mockResolvedValue(true);
-    await workspace.close('about:', scope);
-    expect(guard).toHaveBeenCalledTimes(2);
-    expect(workspace.tabs.map((tab) => tab.key)).toEqual(
-      scope === 'all' ? [] : scope === 'right' ? ['host:a', 'about:'] : ['about:'],
-    );
+    await workspace.close('host:a', scope);
+    expect(guard).not.toHaveBeenCalled();
+    expect(workspace.settingsView).toBe('settingsTerminal');
+    expect(workspace.tabs.map((tab) => tab.key)).toEqual(scope === 'all' ? [] : ['host:a']);
   },
 );
 
-it('also guards settings closed from the all-hosts group menu', async () => {
+it('opens settings from welcome without creating or activating a host workspace', async () => {
   const workspace = useWorkspaceStore();
-  workspace.navigate('terminals', 'a');
-  workspace.navigate('settings');
-  const guard = vi.fn(async () => false);
-  workspace.settingsCloseGuard = guard;
-  await workspace.close('all-hosts', 'right');
-  expect(guard).toHaveBeenCalledOnce();
-  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:a', 'settings:']);
+  workspace.navigate('about');
+  expect(workspace.tabs).toEqual([]);
+  expect(workspace.current).toBeUndefined();
+  expect(workspace.settingsView).toBe('about');
+  await workspace.closeSettings();
+  expect(workspace.settingsView).toBeNull();
 });
-
-it('switches module menus without changing the active page or host context', async () => {
-  const workspace = useWorkspaceStore();
-  workspace.navigate('files', 'a');
-  workspace.selectModule('system');
-  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
-  workspace.navigate('assistant');
-  workspace.selectModule('plugins');
-  workspace.navigate('models');
-  expect(workspace.module).toBe('system');
-  workspace.selectModule('plugins');
-  expect(workspace.current?.view).toBe('models');
-  workspace.navigate('settings');
-  expect(workspace.current?.view).toBe('settings');
-  workspace.selectModule('hosts');
-  expect(workspace.current?.view).toBe('settings');
-  workspace.selectModule('system');
-  expect(workspace.current?.view).toBe('settings');
-  expect(workspace.module).toBe('system');
-  expect(workspace.hostId).toBe('a');
-  workspace.selectModule('plugins');
-  expect(workspace.current?.view).toBe('settings');
-  workspace.activate('host:a');
-  expect(workspace.module).toBe('hosts');
-  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
-});
-
-it('does not choose another page or create a default when selecting a module after a tab closes', async () => {
-  const workspace = useWorkspaceStore();
-  workspace.navigate('assistant');
-  workspace.navigate('models');
-  workspace.navigate('settings');
-  await workspace.close('settings:');
-  workspace.selectModule('system');
-  expect(workspace.module).toBe('system');
-  expect(workspace.current?.view).toBe('models');
-  expect(workspace.tabs.some((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant')).toBe(true);
-  await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
-  workspace.selectModule('system');
-  expect(workspace.current?.view).toBe('models');
-  workspace.selectModule('system');
-  expect(
-    workspace.tabs.filter((tab) => tab.pluginId === 'cn.hiboot.plugins.assistant'),
-  ).toHaveLength(0);
-  workspace.selectModule('plugins');
-  workspace.activate('models:');
-  expect(workspace.module).toBe('system');
-});
-
-it.each(['hosts', 'plugins', 'system'] as const)(
-  'selects the %s module without opening or selecting any page',
-  (id) => {
-    const workspace = useWorkspaceStore();
-    workspace.selectModule(id);
-    workspace.selectModule(id);
-    expect(workspace.module).toBe(id);
-    expect(workspace.active).toBe('');
-    expect(workspace.current).toBeUndefined();
-    expect(workspace.tabs).toEqual([]);
-  },
-);
 
 it('shows the host controls for a plugin without a settings contribution in the existing workspace', () => {
   const workspace = useWorkspaceStore();
@@ -344,7 +289,6 @@ it('shows the host controls for a plugin without a settings contribution in the 
     contributionId: null,
   });
   expect(workspace.current?.view).toBe('files');
-  expect(workspace.module).toBe('hosts');
   expect(workspace.hostId).toBe('a');
   expect(workspace.tabs).toHaveLength(1);
 });
@@ -359,19 +303,48 @@ it('opens an authorized settings contribution without navigating or creating a w
     contributionId: 'settings',
   });
   expect(workspace.current).toBe(active);
-  expect(workspace.module).toBe('hosts');
   expect(workspace.hostId).toBe('a');
   expect(workspace.tabs).toEqual([active]);
   expect(workspace.pluginPages).toEqual([]);
 });
 
-it('keeps the current page and selected module when an unrelated inactive tab is closed', async () => {
+it.each(['save', 'mutation'] as const)(
+  'blocks settings navigation and closing during a plugin %s',
+  async (operation) => {
+    const workspace = useWorkspaceStore(),
+      plugins = usePluginsStore();
+    workspace.navigate('files', 'a');
+    workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+    const current = workspace.current,
+      configuration = workspace.pluginConfiguration;
+    const guard = vi.fn(async () => true);
+    workspace.settingsCloseGuard = guard;
+    if (operation === 'save') workspace.pluginSettingsBusy = true;
+    else plugins.busy = true;
+    workspace.navigate('models');
+    workspace.navigate('plugins');
+    await workspace.closeSettings();
+    expect(workspace.settingsView).toBe('plugins');
+    expect(workspace.pluginConfiguration).toBe(configuration);
+    expect(workspace.current).toBe(current);
+    expect(guard).not.toHaveBeenCalled();
+    workspace.pluginSettingsBusy = false;
+    plugins.busy = false;
+    workspace.navigate('models');
+    expect(workspace.pluginConfiguration).toBeUndefined();
+    expect(workspace.settingsView).toBe('models');
+    await workspace.closeSettings();
+    expect(workspace.settingsView).toBeNull();
+    expect(workspace.tabs).toEqual([current]);
+  },
+);
+
+it('keeps the current page and settings window when an unrelated inactive tab is closed', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('terminals', 'a');
   workspace.navigate('files', 'b');
-  workspace.selectModule('system');
+  workspace.navigate('settings');
   await workspace.close('host:a');
-  expect(workspace.module).toBe('system');
   expect(workspace.current).toMatchObject({ view: 'files', hostId: 'b' });
   expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:b']);
 });

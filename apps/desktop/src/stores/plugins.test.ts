@@ -97,7 +97,7 @@ it('keeps per-host plugin pages across switches and releases only the closed wor
   const context = vi.spyOn(pluginsApi, 'context').mockResolvedValue();
   t.open(null);
   await w.openPlugin('dev.example', 'host', 'a');
-  expect(w.module).toBe('hosts');
+  expect(w.current?.hostId).toBe('a');
   expect(w.active).toBe('host:a');
   const key = w.activePluginKey;
   await w.openPlugin('dev.example', 'host', 'b');

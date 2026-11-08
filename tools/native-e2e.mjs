@@ -204,7 +204,7 @@ try {
       ),
     );
     results.push('native host update via real IPC, reflected in the sidebar');
-    await page.locator('.module-navigation [data-module="hosts"]').click();
+    await showHostTree(page);
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
     if (await expand.isVisible()) await expand.click();
     const original = (await invoke('host_list')).hosts.find((item) => item.name === 'E2E-Host');
@@ -284,7 +284,7 @@ try {
     await navigateWorkspace(page, '模型管理');
     assert.deepEqual(
       await page
-        .locator('.module-menu [aria-label]')
+        .locator('.settings-dialog-navigation [aria-label]')
         .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label'))),
       ['通用', '终端', '快捷键', '数据与存储', '模型管理', '关于'],
     );

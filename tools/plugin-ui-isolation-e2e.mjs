@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import {
+  closeApplicationSettings,
   closePluginSettings,
   navigateWorkspace,
   selectHostWorkspace,
@@ -166,12 +167,13 @@ try {
     await scope().locator('.ai-view').waitFor();
     await scope().getByLabel('问题', { exact: true }).fill('retained draft');
     await page.getByRole('button', { name: '插件设置', exact: true }).click();
-    const settings = page.getByRole('dialog', { name: 'AI 运维助手 · 配置', exact: true });
+    const settings = page.getByRole('dialog', { name: '设置', exact: true });
     await settings
       .frameLocator('iframe')
       .getByRole('button', { name: '取消', exact: true })
       .click();
-    await settings.waitFor({ state: 'hidden' });
+    await settings.locator('.plugin-configuration').waitFor({ state: 'hidden' });
+    await closeApplicationSettings(page);
     assert.equal(await scope().getByLabel('问题', { exact: true }).inputValue(), 'retained draft');
     passed.push('own settings retain the assistant iframe and draft');
     const frame = page
@@ -289,10 +291,7 @@ try {
     assert(draftFrameA);
     await page.getByRole('button', { name: '插件设置', exact: true }).click();
     await page.locator('dialog[open] [aria-label="插件设置"]').waitFor();
-    assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').innerText(),
-      '主机管理',
-    );
+    assert.notEqual(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), null);
     await closePluginSettings(page);
     assert.equal(await scope().getByLabel('姓名', { exact: true }).inputValue(), '独立插件');
     await open('AI 运维助手');

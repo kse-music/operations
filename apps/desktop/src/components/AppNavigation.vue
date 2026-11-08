@@ -1,73 +1,59 @@
 <script setup lang="ts">
-import {
-  Info,
-  Boxes,
-  PanelLeftClose,
-  Settings2,
-  Keyboard,
-  Terminal,
-  PanelsTopLeft,
-  Puzzle,
-} from '@lucide/vue';
-import { messages, type WorkspaceView } from '../types/product';
-import { computed } from 'vue';
-import { navigationModules, type NavigationModule } from '../types/navigation';
-
-const props = defineProps<{
-  active: WorkspaceView | null;
-  module: NavigationModule;
+import { Server, Settings2, SquareTerminal } from '@lucide/vue';
+import type { WorkspaceView } from '../types/product';
+defineProps<{
+  localActive: boolean;
+  settingsOpen: boolean;
+  collapsed: boolean;
 }>();
-defineEmits<{
-  navigate: [view: WorkspaceView];
-  collapse: [];
-}>();
-const groups = {
-  hosts: [],
-  plugins: [{ view: 'plugins', icon: Puzzle }],
-  system: [
-    { view: 'settings', icon: Settings2 },
-    { view: 'settingsTerminal', icon: Terminal },
-    { view: 'settingsShortcuts', icon: Keyboard },
-    { view: 'settingsStorage', icon: PanelsTopLeft },
-    { view: 'models', icon: Boxes },
-    { view: 'about', icon: Info },
-  ],
-} as const;
-const module = computed(() => props.module);
-const moduleLabel = computed(
-  () => navigationModules.find((item) => item.id === module.value)!.label,
-);
+defineEmits<{ navigate: [view: WorkspaceView]; expand: [] }>();
 </script>
-
 <template>
-  <nav class="activity-rail" aria-label="主导航">
-    <div class="sidebar-workspace-heading">
-      <strong class="sidebar-module-title">{{ moduleLabel }}</strong>
+  <div class="activity-rail" :class="{ 'activity-rail-collapsed': collapsed }">
+    <nav v-if="collapsed" class="activity-group sidebar-quick-actions" aria-label="收起后的导航">
       <button
-        class="shell-icon-button"
-        aria-label="收起主机栏"
-        title="收起侧栏"
-        :aria-expanded="true"
-        aria-controls="host-sidebar"
-        @click="$emit('collapse')"
+        class="nav-item"
+        aria-label="展开主机列表"
+        title="展开主机列表"
+        :aria-expanded="false"
+        aria-controls="host-tree-panel"
+        @click="$emit('expand')"
       >
-        <PanelLeftClose :size="16" aria-hidden="true" />
+        <Server :size="20" aria-hidden="true" />
       </button>
-    </div>
+    </nav>
+    <nav class="activity-group sidebar-work-actions" aria-label="本地工作区">
+      <button
+        class="nav-item"
+        aria-label="本地终端"
+        :title="collapsed ? '本地终端' : undefined"
+        :class="{ active: localActive }"
+        :aria-current="localActive ? 'page' : undefined"
+        @click="$emit('navigate', 'terminals')"
+      >
+        <SquareTerminal :size="collapsed ? 20 : 16" aria-hidden="true" /><span
+          v-if="!collapsed"
+          class="nav-label"
+          >本地终端</span
+        >
+      </button>
+    </nav>
     <slot />
-    <div v-if="groups[module].length" class="activity-group module-menu">
+    <nav class="activity-group sidebar-app-actions" aria-label="应用导航">
       <button
-        v-for="item in groups[module]"
-        :key="item.view"
-        :class="['nav-item', { active: active === item.view }]"
-        :aria-label="messages['zh-CN'][item.view]"
-        :aria-current="active === item.view ? 'page' : undefined"
-        :data-tooltip="messages['zh-CN'][item.view]"
-        @click="$emit('navigate', item.view)"
+        class="nav-item"
+        aria-label="设置"
+        :title="collapsed ? '设置' : undefined"
+        :class="{ active: settingsOpen }"
+        :aria-current="settingsOpen ? 'page' : undefined"
+        @click="$emit('navigate', 'settings')"
       >
-        <component :is="item.icon" :size="16" :stroke-width="1.6" aria-hidden="true" />
-        <span class="nav-label">{{ messages['zh-CN'][item.view] }}</span>
+        <Settings2 :size="collapsed ? 20 : 16" aria-hidden="true" /><span
+          v-if="!collapsed"
+          class="nav-label"
+          >设置</span
+        >
       </button>
-    </div>
-  </nav>
+    </nav>
+  </div>
 </template>

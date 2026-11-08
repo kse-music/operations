@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue';
-import Modal from './Modal.vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { ArrowLeft } from '@lucide/vue';
 import PluginIcon from './PluginIcon.vue';
 import PluginSettings from './PluginSettings.vue';
 import PluginView from '../views/PluginView.vue';
@@ -32,6 +32,8 @@ const assistantSettings = computed(
 );
 const saving = ref(false);
 const busy = computed(() => saving.value || plugins.busy);
+watch(saving, (value) => (workspace.pluginSettingsBusy = value), { flush: 'sync' });
+onBeforeUnmount(() => (workspace.pluginSettingsBusy = false));
 watch(contribution, (value) => {
   if (value) return;
   saving.value = false;
@@ -54,17 +56,31 @@ async function select(event: Event): Promise<void> {
 
 async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
   if (busy.value) return;
-  workspace.pluginConfiguration = undefined;
-  if (action === 'models') workspace.navigate('models');
-  if (action === 'close' && opener instanceof HTMLElement) {
+  workspace.navigate(action === 'models' ? 'models' : 'plugins');
+  if (action === 'close') {
     await nextTick();
-    opener.focus();
+    if (
+      opener instanceof HTMLElement &&
+      opener.isConnected &&
+      opener.closest('.settings-dialog-body')
+    )
+      opener.focus();
+    else
+      document
+        .querySelector<HTMLButtonElement>('.settings-dialog-navigation [aria-label="插件"]')
+        ?.focus();
   }
 }
 </script>
 
 <template>
-  <Modal :title="`${plugin?.manifest.name ?? '插件'} · 配置`" :busy="busy" @close="finish()">
+  <section class="plugin-configuration" :aria-label="`${plugin?.manifest.name ?? '插件'} · 配置`">
+    <header class="plugin-configuration-heading">
+      <button class="button" aria-label="返回插件列表" :disabled="busy" @click="finish()">
+        <ArrowLeft :size="16" aria-hidden="true" />插件
+      </button>
+      <h1>{{ plugin?.manifest.name ?? '插件' }}</h1>
+    </header>
     <div class="plugin-config-body" :class="{ 'assistant-config-body': builtinAssistant }">
       <div v-if="pages.length" class="plugin-config-nav" role="group" aria-label="插件设置分类">
         <button
@@ -129,10 +145,8 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       </section>
       <p v-else class="host-empty" role="status">插件已卸载。</p>
     </div>
-    <footer v-if="!assistantSettings" class="dialog-actions plugin-config-footer">
-      <button class="button" :disabled="busy" @click="finish()">
-        {{ contribution ? '取消' : '关闭' }}
-      </button>
+    <footer v-if="contribution && !assistantSettings" class="dialog-actions plugin-config-footer">
+      <button class="button" :disabled="busy" @click="finish()">取消</button>
     </footer>
-  </Modal>
+  </section>
 </template>

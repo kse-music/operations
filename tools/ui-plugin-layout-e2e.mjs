@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
 import {
+  closeApplicationSettings,
   openPluginDetails,
   openPluginFunction,
   openPluginSettings,
@@ -388,7 +389,7 @@ try {
         results.push({ name, width, height, theme, ...geometry });
       };
       const configuration = await openPluginSettings(page, 'AI 运维助手');
-      assert.equal(await page.locator('.workspace-tab').count(), 1);
+      assert.equal(await page.locator('.workspace-tab').count(), 0);
       const settings = configuration.frameLocator('iframe');
       await settings.getByRole('group', { name: '使用模型' }).waitFor();
       await settings
@@ -429,7 +430,7 @@ try {
       );
       await capture('assistant-settings', 'dialog:has(.plugin-config-body)');
       const geometry = await configuration.boundingBox();
-      assert(geometry.width <= Math.min(width - 32, 720));
+      assert(geometry.width <= Math.min(width - 32, 1080));
       assert(geometry.y >= 16 && geometry.y + geometry.height <= height - 16);
       await configuration.screenshot({
         path: `${output}/config-dialog-${width}x${height}-${theme}.png`,
@@ -446,7 +447,7 @@ try {
         ];
         await useModelsStore().refresh();
       });
-      await settings.getByText('100 个已注册', { exact: true }).waitFor();
+      await settings.locator('.binding-count').getByText('100', { exact: true }).waitFor();
       const crowdedGeometry = await settingsFrame.evaluate(() => ({
         footerBottom: document.querySelector('footer').getBoundingClientRect().bottom,
         height: innerHeight,
@@ -463,8 +464,8 @@ try {
         window.layoutModels = window.layoutModels.slice(0, 2);
         await useModelsStore().refresh();
       });
-      await settings.locator('input[value="layout-model-1"]').check();
-      const holdSave = width === 2400 && theme === 'dark';
+      await settings.locator('label:has(input[value="layout-model-1"])').click();
+      const holdSave = theme === 'dark';
       if (holdSave) await page.evaluate(() => (window.holdLayoutSave = true));
       await settings.getByRole('button', { name: '保存模型绑定', exact: true }).click();
       if (holdSave) {
@@ -472,22 +473,33 @@ try {
         assert(
           await configuration.getByRole('button', { name: '关闭对话框', exact: true }).isDisabled(),
         );
+        assert(
+          await configuration
+            .getByRole('button', { name: '返回插件列表', exact: true })
+            .isDisabled(),
+        );
+        assert(
+          await configuration
+            .getByRole('navigation', { name: '设置分类', exact: true })
+            .getByRole('button')
+            .evaluateAll((buttons) => buttons.every((button) => button.disabled)),
+        );
         await page.evaluate(() => {
           window.holdLayoutSave = false;
           window.releaseLayoutSave();
         });
       }
-      await configuration.waitFor({ state: 'hidden' });
+      await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
       assert.deepEqual(await page.evaluate(() => window.layoutSettings), {
         modelId: 'layout-model-1',
         retained: true,
       });
       const dockerDetails = await openPluginDetails(page, 'Docker 管理');
       const dockerConfiguration = page.getByRole('dialog', {
-        name: 'Docker 管理 · 配置',
+        name: '设置',
         exact: true,
       });
-      assert.equal(await page.locator('.workspace-tab').count(), 1);
+      assert.equal(await page.locator('.workspace-tab').count(), 0);
       await dockerDetails.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
       assert(await dockerDetails.getByLabel('ui.contribute', { exact: true }).isDisabled());
       await capture('docker-settings', 'dialog:has(.plugin-config-body)');
@@ -720,15 +732,16 @@ try {
       await configuration.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
       assert.equal(await configuration.locator('iframe').count(), 0);
       await configuration.getByRole('button', { name: '插件配置', exact: true }).click();
-      await settings.locator('input[value="layout-model-0"]').check();
+      await settings.locator('label:has(input[value="layout-model-0"])').click();
       assert.equal(await page.locator('.workspace-tab').count(), tabsBefore);
       await settings.getByRole('button', { name: '取消', exact: true }).click();
-      await configuration.waitFor({ state: 'hidden' });
+      await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
+      await closeApplicationSettings(page);
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-1');
       assert.equal(await question.inputValue(), draft);
       assert(await gear.evaluate((button) => document.activeElement === button));
       await gear.click();
-      await settings.locator('input[value="layout-model-0"]').check();
+      await settings.locator('label:has(input[value="layout-model-0"])').click();
       const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
       await page.evaluate(() => (window.layoutSaveError = true));
       await save.click();
@@ -736,7 +749,8 @@ try {
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-1');
       await page.evaluate(() => (window.layoutSaveError = false));
       await save.click();
-      await configuration.waitFor({ state: 'hidden' });
+      await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
+      await closeApplicationSettings(page);
       assert.equal(await question.inputValue(), draft);
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-0');
       await chat.locator('.ai-chat-composer button[type="submit"]:enabled').waitFor();
@@ -761,7 +775,7 @@ try {
       await capture('assistant-chat', '.plugin-workspace');
       await gear.click();
       await settings.getByRole('button', { name: '管理模型', exact: true }).click();
-      await configuration.waitFor({ state: 'hidden' });
+      await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
       await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
       await navigateWorkspace(page, '插件管理');
       const manager = page.locator('.plugin-manager');
@@ -787,8 +801,11 @@ try {
       const upload = manager.locator('.plugin-installed-row').last();
       const uploadTabs = await page.locator('.workspace-tab').count();
       await upload.locator('.plugin-name-button').click();
-      const uploadDialog = page.locator('dialog[open]:has(> .plugin-config-body)');
-      await uploadDialog.getByText('用户上传', { exact: true }).waitFor();
+      const uploadDialog = page.getByRole('dialog', { name: '设置', exact: true });
+      await uploadDialog
+        .locator('.plugin-configuration')
+        .getByText('用户上传', { exact: true })
+        .waitFor();
       assert.equal(await page.locator('.workspace-tab').count(), uploadTabs);
       assert.equal(await uploadDialog.locator('iframe').count(), 0);
       await uploadDialog.getByRole('button', { name: '启用插件', exact: true }).waitFor();
@@ -798,16 +815,17 @@ try {
       );
       await uploadDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
       await uploadDialog.waitFor({ state: 'hidden' });
-      assert.equal(
-        await page.locator('.module-navigation [aria-current="page"]').textContent(),
-        '插件',
+      assert.notEqual(
+        await page.locator('.workspace-tab.active').getAttribute('data-view'),
+        'plugins',
       );
       assert.deepEqual(
-        (await page.locator('.module-menu .nav-label').allTextContents()).map((text) =>
-          text.trim(),
-        ),
-        ['插件管理'],
+        await page
+          .locator('.sidebar-app-actions button')
+          .evaluateAll((buttons) => buttons.map((button) => button.ariaLabel)),
+        ['设置'],
       );
+      await navigateWorkspace(page, '插件管理');
       const columns = await manager.evaluate((element) => {
         const cards = element.querySelectorAll('.plugin-installed-row');
         return {

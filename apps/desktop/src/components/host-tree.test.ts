@@ -136,7 +136,7 @@ it('shows an address only once when it already serves as the host name', async (
   }
 });
 
-it('shows the saved host total beside All Hosts regardless of filtering and updates after changes', async () => {
+it('shows the saved host total beside the host heading regardless of filtering and updates after changes', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const store = useHostsStore();
@@ -258,7 +258,7 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
   expect(root.querySelector('[aria-label="已收藏"]')).toBeNull();
-  expect(heading.querySelector('button')?.getAttribute('aria-label')).toBe('本地终端');
+  expect(heading.querySelector('button')?.getAttribute('aria-label')).toBe('新建主机');
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',
   );

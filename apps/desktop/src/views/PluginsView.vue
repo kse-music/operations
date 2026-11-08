@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import {
-  Download,
-  Puzzle,
-  PackagePlus,
-  RefreshCw,
-  Search,
-  Settings2,
-  Trash2,
-} from '@lucide/vue';
+import { Download, Puzzle, PackagePlus, RefreshCw, Search, Settings2, Trash2 } from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -151,7 +143,7 @@ onBeforeUnmount(() => {
     <header class="plugin-heading">
       <div>
         <div class="plugin-manager-title">
-          <h1>插件管理</h1>
+          <h1>插件</h1>
           <span class="plugin-count" aria-label="已安装插件数量">{{
             plugins.installed.length
           }}</span>
@@ -165,14 +157,6 @@ onBeforeUnmount(() => {
           @click="plugins.refresh()"
         >
           <RefreshCw :size="15" aria-hidden="true" />刷新
-        </button>
-        <button
-          class="button"
-          type="button"
-          :disabled="savingDevelopmentKit"
-          @click="saveDevelopmentKit"
-        >
-          <Download :size="16" aria-hidden="true" />下载插件开发包
         </button>
         <button class="button primary" :disabled="plugins.busy || inspecting" @click="pick">
           <PackagePlus :size="16" aria-hidden="true" />安装插件
@@ -287,6 +271,16 @@ onBeforeUnmount(() => {
         </article>
       </div>
     </section>
+    <footer class="plugin-manager-footer">
+      <button
+        class="button"
+        type="button"
+        :disabled="savingDevelopmentKit"
+        @click="saveDevelopmentKit"
+      >
+        <Download :size="16" aria-hidden="true" />下载插件开发包
+      </button>
+    </footer>
     <Modal v-if="preview" title="安装插件" wide :busy="plugins.busy" @close="cancelPreview">
       <div class="plugin-preview" aria-label="插件安装预览">
         <header class="plugin-preview-heading">

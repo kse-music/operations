@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
-import { hostViews, settingsCategories, type WorkspaceView } from '../types/product';
-import { moduleForView, type NavigationModule } from '../types/navigation';
+import { hostViews, type WorkspaceView } from '../types/product';
+import { isSettingsView, type SettingsView } from '../types/navigation';
 import { useTerminalsStore } from './terminals';
 import { useFilesStore } from './files';
 import type { ServerSection } from '../types/server';
@@ -25,21 +25,18 @@ export function pluginPageKey(
   return `extension:${tab.pluginId}:${tab.contributionId}:${tab.hostId}`;
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';
-export const allHostsTabKey = 'all-hosts';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const tabs = ref<WorkspaceTab[]>([]),
     active = ref(''),
-    hostId = ref(''),
-    module = ref<NavigationModule>('hosts');
+    hostId = ref('');
+  const settingsView = ref<SettingsView | null>(null);
+  const pluginSettingsBusy = ref(false);
   const current = computed(() => tabs.value.find((t) => t.key === active.value));
   const pluginPages = ref<WorkspaceTab[]>([]);
   const pluginConfiguration = ref<{ pluginId: string; contributionId: string | null }>();
   const activePluginKey = computed(() =>
     current.value?.view === 'extension' ? pluginPageKey(current.value) : '',
   );
-  function selectModule(id: NavigationModule): void {
-    module.value = id;
-  }
   function selectHost(id: string): void {
     const tab = tabs.value.find((t) => isHostTab(t) && t.hostId === id);
     if (tab) activate(tab.key);
@@ -49,12 +46,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
     active.value = key;
-    module.value = isHostTab(tab) ? 'hosts' : moduleForView(tab.view);
     if (isHostTab(tab)) hostId.value = tab.hostId;
   }
   function openPluginSettings(pluginId: string, contributionId?: string): void {
     const plugins = usePluginsStore();
-    if (pluginConfiguration.value || !plugins.installed.some((p) => p.manifest.id === pluginId))
+    if (
+      pluginConfiguration.value ||
+      pluginSettingsBusy.value ||
+      plugins.busy ||
+      !plugins.installed.some((p) => p.manifest.id === pluginId)
+    )
       return;
     const settings = plugins.extensions.find(
       (entry) =>
@@ -62,6 +63,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         entry.kind === 'settings' &&
         (!contributionId || entry.id === contributionId),
     );
+    settingsView.value = 'plugins';
     pluginConfiguration.value = { pluginId, contributionId: settings?.id ?? null };
   }
   async function openPlugin(
@@ -96,9 +98,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     let tab = tabs.value.find((tab) => tab.key === tabKey);
     if (!tab) {
       tab = { ...page, key: tabKey };
-      const firstGlobal = tabs.value.findIndex((item) => !isHostTab(item));
-      if (target && firstGlobal >= 0) tabs.value.splice(firstGlobal, 0, tab);
-      else tabs.value.push(tab);
+      tabs.value.push(tab);
     } else Object.assign(tab, page, { key: tabKey });
     activate(tabKey);
   }
@@ -107,13 +107,19 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     target = hostId.value,
     section?: WorkspaceTab['section'],
   ): void {
+    if (isSettingsView(view)) {
+      if (pluginSettingsBusy.value || usePluginsStore().busy) return;
+      pluginConfiguration.value = undefined;
+      settingsView.value = view;
+      return;
+    }
     if (view === 'assistant') {
       const plugins = usePluginsStore();
       const entry = plugins.extensions.find(
         (entry) => entry.kind === 'tool' && entry.tool === view,
       );
       if (!entry) {
-        plugins.error = '此运维工具未安装、未启用或未授权，请在“插件 → 插件管理”中检查。';
+        plugins.error = '此运维工具未安装、未启用或未授权，请在“设置 → 插件”中检查。';
         return;
       }
       void openPlugin(entry.pluginId, entry.id, '').catch((cause) => {
@@ -127,9 +133,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     let tab = tabs.value.find((t) => t.key === key);
     if (!tab) {
       tab = { key, view, hostId: hostView ? target : '', section };
-      const firstGlobal = tabs.value.findIndex((item) => !isHostTab(item));
-      if (hostView && firstGlobal >= 0) tabs.value.splice(firstGlobal, 0, tab);
-      else tabs.value.push(tab);
+      tabs.value.push(tab);
     } else {
       tab.view = view;
       delete tab.pluginId;
@@ -140,36 +144,28 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
   const closing = ref<string[]>([]);
   const settingsCloseGuard = shallowRef<() => Promise<boolean>>();
+  async function closeSettings(): Promise<void> {
+    if (!settingsView.value || pluginSettingsBusy.value || usePluginsStore().busy) return;
+    if (settingsCloseGuard.value && !(await settingsCloseGuard.value())) return;
+    if (pluginSettingsBusy.value || usePluginsStore().busy) return;
+    pluginConfiguration.value = undefined;
+    settingsView.value = null;
+  }
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
-    const hostGroup = key === allHostsTabKey;
-    const index = hostGroup
-      ? tabs.value.findIndex(isHostTab)
-      : tabs.value.findIndex((t) => t.key === key);
+    const index = tabs.value.findIndex((t) => t.key === key);
     if (index < 0) return;
-    const targetIsHost = isHostTab(tabs.value[index]!);
     const targets = tabs.value.filter((tab, i) => {
-      if (hostGroup) return scope === 'all' || isHostTab(tab) === (scope === 'current');
       switch (scope) {
         case 'current':
           return tab.key === key;
         case 'right':
-          return i > index && isHostTab(tab) === targetIsHost;
+          return i > index;
         case 'others':
           return tab.key !== key;
         case 'all':
           return true;
       }
     });
-    const settingsTabs = tabs.value.filter((tab) =>
-      settingsCategories.some((category) => category.view === tab.view),
-    );
-    if (
-      settingsTabs.length &&
-      settingsTabs.every((tab) => targets.includes(tab)) &&
-      settingsCloseGuard.value &&
-      !(await settingsCloseGuard.value())
-    )
-      return;
     const removed = new Set<WorkspaceTab>();
     const terminals = useTerminalsStore();
     const files = useFilesStore();
@@ -216,13 +212,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tabs.value = tabs.value.filter((tab) => !removed.has(tab));
     if (!tabs.value.length) {
       active.value = '';
-      module.value = 'hosts';
     } else if (active.value && !tabs.value.some((tab) => tab.key === active.value)) {
-      const rememberedHost =
-        hostGroup && (scope === 'right' || scope === 'others')
-          ? tabs.value.find((tab) => isHostTab(tab) && tab.hostId === hostId.value)
-          : undefined;
-      activate((rememberedHost ?? tabs.value[Math.min(index, tabs.value.length - 1)])!.key);
+      activate(tabs.value[Math.min(index, tabs.value.length - 1)]!.key);
     }
   }
   return {
@@ -230,10 +221,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     active,
     hostId,
     current,
-    module,
     closing,
     settingsCloseGuard,
-    selectModule,
+    settingsView,
+    pluginSettingsBusy,
+    closeSettings,
     selectHost,
     activate,
     navigate,

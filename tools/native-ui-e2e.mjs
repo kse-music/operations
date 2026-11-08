@@ -11,7 +11,12 @@ import { randomUUID } from 'node:crypto';
 import { chromium } from 'playwright-core';
 import { closeNativeWindow } from './native-window-close.mjs';
 import { withPreservedClipboard } from './clipboard-guard.mjs';
-import { navigateWorkspace, selectHostWorkspace, showHostTree } from './ui-navigation.mjs';
+import {
+  navigateWorkspace,
+  selectHostWorkspace,
+  showHostTree,
+  closeApplicationSettings,
+} from './ui-navigation.mjs';
 
 assert.equal(process.platform, 'win32', 'native UI suite requires Windows/WebView2');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -107,7 +112,7 @@ async function start() {
     (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
       text.trim(),
     ),
-    ['全部主机', '本地设备'],
+    ['本地终端'],
   );
 }
 const active = () => page.locator('.terminal-pane:visible');
@@ -164,7 +169,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '关于', exact: true }).count(), 0);
-  await page.locator('.module-navigation [data-module="system"]').click();
+  await navigateWorkspace(page, '通用');
   const about = page.getByRole('button', { name: '关于', exact: true });
   await about.click();
   const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
@@ -174,17 +179,18 @@ try {
   assert.equal(await page.getByRole('dialog', { name: '关于 ServerDeck', exact: true }).count(), 0);
   assert.equal(await about.getAttribute('aria-current'), 'page');
   await about.click();
-  assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 1);
+  assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'about.png') });
-  await page.locator('.workspace-tab[data-view="about"] .tab-close').click();
+  await closeApplicationSettings(page);
   assert.equal(await aboutPage.count(), 0);
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), '');
-  await page.locator('.module-navigation [data-module="hosts"]').click();
+  await closeApplicationSettings(page);
+  await showHostTree(page);
   assert.equal(await page.getByText(/已恢复布局，所有窗格保持未连接/).count(), 0);
   assert.equal(await page.locator('.sidebar-local-device').count(), 0);
   assert.equal(
     await page
-      .locator('.host-list-heading')
+      .locator('.sidebar-work-actions')
       .getByRole('button', { name: '本地终端', exact: true })
       .count(),
     1,
@@ -193,19 +199,16 @@ try {
     await page.locator('.host-list-heading + .host-sidebar-controls + .host-tree-scroll').count(),
     1,
   );
-  assert.equal(await page.locator('.module-navigation button').count(), 3);
-  assert.equal(
-    await page.locator('.module-navigation [aria-current="page"]').textContent(),
-    '主机管理',
-  );
+  assert.equal(await page.locator('.sidebar-app-actions button').count(), 1);
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
   await page
-    .locator('.sidebar-workspace-heading')
+    .locator('.app-header')
     .getByRole('button', { name: '收起主机栏', exact: true })
     .click();
-  assert.equal(await page.locator('.sidebar').isVisible(), false);
+  assert.equal(await page.locator('.activity-rail-collapsed').isVisible(), true);
+  assert.equal(await page.locator('.host-tree-section').isVisible(), false);
   const expandHosts = page
-    .locator('.workspace-navigation')
+    .locator('.app-header')
     .getByRole('button', { name: '展开主机栏', exact: true });
   assert.equal(await expandHosts.evaluate((button) => document.activeElement === button), true);
   await expandHosts.press('Enter');
@@ -235,7 +238,7 @@ try {
     .click({ position: { x: 2, y: 2 } });
   await assertNativeMenuSuppressed(page.locator('.terminal-tab.active [role=tab]'));
   assert.equal(await page.getByRole('menu').count(), 0);
-  await assertNativeMenuSuppressed(page.getByRole('tab', { name: '全部主机', exact: true }));
+  await assertNativeMenuSuppressed(page.getByRole('tab', { name: '本地终端', exact: true }));
   const workspaceMenu = page.getByRole('menu', { name: '工作区标签操作', exact: true });
   assert.deepEqual(
     await workspaceMenu
@@ -394,35 +397,27 @@ try {
   passed.push(
     'the plus button creates an independent PowerShell; middle-click close preserves the original',
   );
-  const tabsBeforeModuleSwitch = await page.locator('.workspace-tab').count();
-  for (const module of ['plugins', 'system']) {
-    await page.locator(`.module-navigation [data-module="${module}"]`).click();
-    assert.equal(await page.getByRole('heading', { name: '请选择功能', exact: true }).count(), 0);
-    assert.equal(await active().locator('.xterm-container[data-state="connected"]').count(), 1);
-    await command("[Console]::WriteLine(('SD_MENU_' + $sdValue))", 'SD_MENU_323');
-    assert.equal(await page.locator('.workspace-tab').count(), tabsBeforeModuleSwitch);
-    assert.equal(await page.locator('.module-menu [aria-current="page"]').count(), 0);
+  const tabsBeforeSettings = await page.locator('.workspace-tab').count();
+  for (const label of ['通用', '终端', '关于']) {
+    await navigateWorkspace(page, label);
+    assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).count(), 1);
+    assert.equal(await page.locator('.workspace-tab').count(), tabsBeforeSettings);
+    assert.equal(
+      await page.locator('.workspace-tab.active').getAttribute('data-view'),
+      'terminals',
+    );
   }
-  await page.screenshot({ path: path.join(artifacts, 'module-without-default.png') });
-  await navigateWorkspace(page, '通用');
-  assert.equal(
-    await page.locator('.module-navigation [aria-current="page"]').textContent(),
-    '设置',
-  );
+  await page.screenshot({ path: path.join(artifacts, 'combined-settings.png') });
+  await closeApplicationSettings(page);
+  await command("[Console]::WriteLine(('SD_WORKSPACE_' + $sdValue))", 'SD_WORKSPACE_323');
   assert.deepEqual(
-    (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-    ['通用', '终端', '快捷键', '数据与存储', '模型管理', '关于'],
+    (await page.locator('.sidebar-app-actions .nav-label').allTextContents()).map((text) =>
+      text.trim(),
+    ),
+    ['设置'],
   );
-  assert.equal(await page.locator('.workspace-header .host-tools').count(), 0);
-  await page.screenshot({ path: path.join(artifacts, 'module-settings.png') });
-  await page.locator('.module-navigation [data-module="hosts"]').click();
-  assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'settings');
-  await page.getByRole('button', { name: '本地终端', exact: true }).click();
-  await command("[Console]::WriteLine(('SD_MODULE_' + $sdValue))", 'SD_MODULE_323');
-  await page.screenshot({ path: path.join(artifacts, 'module-hosts.png') });
-  await page.locator('.workspace-tab[data-view="settings"] .tab-close').click();
   passed.push(
-    'top-level modules only change sidebar menus; the visible PowerShell and its state survive every switch',
+    'one settings window preserves the native PowerShell, its state and the workspace tabs',
   );
   assert.equal(await page.locator('.statusbar [aria-label="任务中心"]').count(), 0);
   await page.keyboard.press('Control+Shift+J');
@@ -655,7 +650,7 @@ try {
     await page.locator('.sidebar').getByRole('button', { name: '主机管理', exact: true }).count(),
     0,
   );
-  assert.equal((await page.locator('.sidebar-module-title').textContent()).trim(), '主机管理');
+  assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机0');
   assert.equal(await page.locator('.workspace-group-tab').count(), 0);
   assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
   assert.equal(await page.locator('.hosts-view').count(), 0);

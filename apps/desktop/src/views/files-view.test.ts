@@ -268,6 +268,32 @@ it.each([
   },
 );
 
+it.each([
+  ['local', '\\\\?\\C:\\Users\\DingHao\\.hyperframes', 'C:\\Users\\DingHao\\.hyperframes'],
+  ['local', '\\\\?\\UNC\\server\\share\\资料', '\\\\server\\share\\资料'],
+  ['local', '/home/user/资料', '/home/user/资料'],
+  ['remote', '/srv/api/config', '/srv/api/config'],
+] as const)(
+  'copies the displayed %s entry path from its context menu',
+  async (side, path, display) => {
+    const files = useFilesStore(pinia);
+    const copy = vi.spyOn(clipboardApi, 'writeText').mockResolvedValue(undefined);
+    const listing = side === 'local' ? files.local! : files.current!.listing!;
+    listing.entries = [{ ...entry, path }];
+    await nextTick();
+    root
+      .querySelector(`[aria-label="${side === 'local' ? '本地' : '远程'}文件"] tbody tr`)!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await nextTick();
+    const copyButton = [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+      (button) => button.textContent?.trim() === '复制绝对路径',
+    )!;
+    copyButton.click();
+    expect(copy).toHaveBeenCalledExactlyOnceWith(display);
+    expect(listing.entries[0]!.path).toBe(path);
+  },
+);
+
 it('uses the original path when reopening a displayed long path and accepts a typed new path', async () => {
   const files = useFilesStore(pinia);
   const display = 'D:\\' + '目录123\\'.repeat(48) + '归档';

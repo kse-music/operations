@@ -21,7 +21,7 @@ describe('product integration boundaries', () => {
     vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
     vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
   });
-  it('has no fixed navigation tabs and returns to an empty workspace after the last close', () => {
+  it('has no fixed navigation tabs and returns to an empty workspace after the last close', async () => {
     const workspace = useWorkspaceStore();
     expect(workspace.tabs).toEqual([]);
     expect(workspace.current).toBeUndefined();
@@ -32,8 +32,10 @@ describe('product integration boundaries', () => {
     expect(workspace.active).toBe('');
     expect(workspace.current).toBeUndefined();
     workspace.navigate('settings');
-    expect(workspace.current?.view).toBe('settings');
-    workspace.close('settings:');
+    expect(workspace.settingsView).toBe('settings');
+    expect(workspace.current).toBeUndefined();
+    await workspace.closeSettings();
+    expect(workspace.settingsView).toBeNull();
     expect(workspace.tabs).toEqual([]);
   });
   it('keeps one workspace per host, restores its tool and isolates global navigation', () => {
@@ -52,7 +54,8 @@ describe('product integration boundaries', () => {
     w.selectHost('a');
     expect(w.current).toMatchObject({ view: 'files', hostId: 'a', section: 'containers' });
     w.navigate('settings', 'b');
-    expect(w.current?.hostId).toBe('');
+    expect(w.current?.hostId).toBe('a');
+    expect(w.settingsView).toBe('settings');
     expect(w.hostId).toBe('a');
     w.selectHost('b');
     w.navigate('server');

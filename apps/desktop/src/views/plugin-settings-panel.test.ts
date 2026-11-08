@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, h, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
-import PluginSettingsDialog from '../components/PluginSettingsDialog.vue';
+import PluginSettingsPanel from '../components/PluginSettingsPanel.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useHostsStore } from '../stores/hosts';
 import { useWorkspaceStore } from '../stores/workspace';
@@ -10,45 +10,36 @@ import { systemPluginFixtures } from '../services/system-plugins.fixture';
 vi.mock('../components/PluginFrame.vue', () => ({
   default: {
     props: ['hostId', 'page'],
-    template: '<div data-frame :data-host="hostId" :data-page="page.id" />',
+    emits: ['saving'],
+    template:
+      '<div data-frame :data-host="hostId" :data-page="page.id"><button data-start-saving @click="$emit(\'saving\', true)">开始保存</button><button data-finish-saving @click="$emit(\'saving\', false)">保存完成</button></div>',
   },
 }));
-let app: App, container: HTMLElement, root: HTMLDialogElement, pinia: Pinia;
-const showModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+let app: App, container: HTMLElement, root: HTMLElement, pinia: Pinia;
 async function mount(pluginId: string) {
   const workspace = useWorkspaceStore();
   container = document.createElement('div');
   document.body.append(container);
   app = createApp({
-    render: () => (workspace.pluginConfiguration ? h(PluginSettingsDialog, { pluginId }) : null),
+    render: () => (workspace.pluginConfiguration ? h(PluginSettingsPanel, { pluginId }) : null),
   }).use(pinia);
   app.mount(container);
   workspace.openPluginSettings(pluginId);
   await settle();
-  root = document.querySelector<HTMLDialogElement>('dialog[open]')!;
+  root = container.querySelector<HTMLElement>('.plugin-configuration')!;
 }
 const settle = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
   await nextTick();
 };
-beforeEach(() => {
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.open = true;
-    },
-  });
-});
 afterEach(() => {
   app?.unmount();
   container?.remove();
-  if (showModal) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', showModal);
-  else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   if (pinia) disposePinia(pinia);
   vi.restoreAllMocks();
 });
 it.each(['system', 'user'] as const)(
-  'opens permission and source controls in a dialog for disabled %s plugins',
+  'opens permission and source controls in a settings panel for disabled %s plugins',
   async (source) => {
     pinia = createPinia();
     setActivePinia(pinia);
@@ -137,7 +128,7 @@ it('does not overwrite permission edits when the installed list refreshes with u
   expect(root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!.checked).toBe(true);
 });
 
-it('opens an independent settings frontend in a hostless dialog and closes it on cancel', async () => {
+it('opens an independent settings frontend without a host and returns to the plugin list on cancel', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const plugins = usePluginsStore(),
@@ -196,11 +187,24 @@ it('opens an independent settings frontend in a hostless dialog and closes it on
   expect(root.querySelector('[data-frame]')?.getAttribute('data-host')).toBe('');
   expect(root.querySelector('[data-frame]')?.getAttribute('data-page')).toBe('settings');
   expect(root.querySelector<HTMLElement>('.plugin-management-panel')!.style.display).toBe('none');
-  expect(workspace.current?.view).toBe('plugins');
-  expect(workspace.tabs).toHaveLength(1);
+  expect(workspace.settingsView).toBe('plugins');
+  expect(workspace.current).toBeUndefined();
+  expect(workspace.tabs).toHaveLength(0);
   expect(pluginsApi.context).toHaveBeenCalledWith(plugin.manifest.id, null);
+  root.querySelector<HTMLButtonElement>('[data-start-saving]')!.click();
+  await settle();
+  expect(workspace.pluginSettingsBusy).toBe(true);
+  expect(root.querySelector<HTMLButtonElement>('[aria-label="返回插件列表"]')!.disabled).toBe(true);
+  workspace.navigate('models');
+  await workspace.closeSettings();
+  expect(workspace.settingsView).toBe('plugins');
+  expect(workspace.pluginConfiguration?.pluginId).toBe(plugin.manifest.id);
+  root.querySelector<HTMLButtonElement>('[data-finish-saving]')!.click();
+  await settle();
+  expect(workspace.pluginSettingsBusy).toBe(false);
   root.querySelector<HTMLButtonElement>('.plugin-config-footer button')!.click();
   await settle();
   expect(document.querySelector('dialog[open]')).toBeNull();
   expect(workspace.pluginConfiguration).toBeUndefined();
+  expect(workspace.settingsView).toBe('plugins');
 });

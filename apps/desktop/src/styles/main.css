@@ -2,7 +2,8 @@
 @import url('./theme.css');
 @import url('./plugins.css');
 .app-shell {
-  --module-header-height: 52px;
+  --module-header-height: 44px;
+  --collapsed-sidebar-width: 52px;
   --host-panel-width: var(--sidebar-width);
   height: 100dvh;
   min-height: 560px;
@@ -12,8 +13,8 @@
       1fr
     );
 }
-.app-shell.hosts-hidden {
-  --host-panel-width: 0px;
+.app-shell.sidebar-collapsed {
+  --host-panel-width: var(--collapsed-sidebar-width);
 }
 .sidebar {
   grid-column: 1;

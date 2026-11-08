@@ -495,8 +495,8 @@ it('retains model navigation and notifications used by the remaining plugins', a
   grant('ui.contribute');
   const ui = bridge();
   await ui.call('workspace.navigate', { view: 'models' });
-  expect(useWorkspaceStore().current?.view).toBe('models');
-  expect(useWorkspaceStore().module).toBe('system');
+  expect(useWorkspaceStore().settingsView).toBe('models');
+  expect(useWorkspaceStore().tabs).toEqual([]);
   await ui.call('ui.notify', { message: 'Retained plugin notification', error: true });
   expect(
     useNotificationsStore().items.some((item) => item.text === 'Retained plugin notification'),

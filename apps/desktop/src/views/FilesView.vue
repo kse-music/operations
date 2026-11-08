@@ -735,7 +735,7 @@ onBeforeUnmount(() => {
       ><button
         role="menuitem"
         @click="
-          copy(menu.entry.path);
+          copy(menu.side === 'local' ? displayLocalPath(menu.entry.path) : menu.entry.path);
           menu = null;
         "
       >

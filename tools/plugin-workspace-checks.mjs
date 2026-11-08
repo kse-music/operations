@@ -19,9 +19,9 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
   };
   assert.deepEqual(
     await page
-      .locator('.module-navigation [data-module]')
+      .locator('.sidebar-app-actions button')
       .evaluateAll((nodes) => nodes.map((n) => n.textContent.trim())),
-    ['主机管理', '插件', '设置'],
+    ['设置'],
   );
   await navigateWorkspace(page, 'AI 运维助手');
   await content().locator('.ai-view').waitFor();

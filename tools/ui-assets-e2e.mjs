@@ -155,9 +155,11 @@ async function openAsset(page, label, regionName = label) {
   await navigateWorkspace(page, label);
   const view = page.getByRole('region', { name: regionName, exact: true });
   await view.waitFor();
-  await page.locator('.content-scroll').evaluate((el) => (el.scrollTop = 0));
+  await page.locator('.settings-dialog-content').evaluate((el) => (el.scrollTop = 0));
   assert.equal(
-    await page.locator('.module-menu [aria-current="page"]').getAttribute('aria-label'),
+    await page
+      .locator('.settings-dialog-navigation [aria-current="page"]')
+      .getAttribute('aria-label'),
     label,
   );
   return view;
@@ -209,11 +211,7 @@ try {
     await saveHost.click();
     await hostDialog.waitFor({ state: 'hidden' });
 
-    await hostContextAction(
-      page,
-      page.locator('.tree-host[data-host-id="fixture-host"]'),
-      '编辑',
-    );
+    await hostContextAction(page, page.locator('.tree-host[data-host-id="fixture-host"]'), '编辑');
     const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
     const saveEdit = edit.getByRole('button', { name: '保存主机', exact: true });
     const nameField = edit.getByLabel('主机名称（可选）', { exact: true });
@@ -229,8 +227,10 @@ try {
 
     const models = await openAsset(page, '模型管理');
     assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').getAttribute('data-module'),
-      'system',
+      await page
+        .locator('.settings-dialog-navigation [aria-current="page"]')
+        .getAttribute('aria-label'),
+      '模型管理',
     );
     await models.getByRole('heading', { name: '内网诊断模型', exact: true }).waitFor();
     assert.equal(await models.locator('.model-list-heading').isVisible(), expectedColumns === 2);

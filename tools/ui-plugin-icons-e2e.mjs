@@ -88,13 +88,14 @@ try {
         ]),
       ];
     }, theme);
-    if (!(await page.locator('.sidebar').isVisible()))
+    if (!(await page.locator('.host-tree-section').isVisible()))
       await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
-    assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
-      '主机管理',
-      '插件',
-      '设置',
-    ]);
+    assert.deepEqual(
+      (await page.locator('.sidebar-app-actions button').allTextContents()).map((text) =>
+        text.trim(),
+      ),
+      ['设置'],
+    );
     assert.equal(await page.locator('.activity-rail [data-plugin-id]').count(), 0);
     await navigateWorkspace(page, '插件管理');
     await page.locator('.plugin-installed-row').first().waitFor();
@@ -144,25 +145,19 @@ try {
     await page
       .locator('.plugin-installed-row[data-plugin-id="dev.uploaded-0"] .plugin-name-button')
       .click();
-    const settings = page.locator('dialog[open]:has(> .plugin-config-body)');
+    const settings = page.getByRole('dialog', { name: '设置', exact: true });
     await settings.waitFor();
-    assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '插件',
-    );
+    assert.equal(await settings.locator('.plugin-configuration').count(), 1);
     assert.equal(
       await page.locator('.activity-rail [aria-current="page"]').getAttribute('aria-label'),
-      '插件管理',
+      '设置',
     );
     assert.equal(await page.locator('[aria-label="选择使用工具的主机"]').count(), 0);
     await page.screenshot({ path: `${output}/${name}-settings.png` });
     await settings.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await settings.waitFor({ state: 'hidden' });
     await selectHostWorkspace(page, 'icon-host');
-    assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').textContent(),
-      '主机管理',
-    );
+    assert.notEqual(await page.locator('.workspace-tab.active').getAttribute('data-host-id'), null);
     const toolbar = page.getByRole('navigation', { name: '当前主机工具', exact: true });
     assert.equal(await toolbar.locator('[aria-haspopup]').count(), 0);
     assert.equal(await page.locator('.host-plugin-menu').count(), 0);

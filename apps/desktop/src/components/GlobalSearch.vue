@@ -6,6 +6,7 @@ import { messages, type WorkspaceView } from '../types/product';
 import { hostDisplayName } from '../types/hosts';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
+import { isSettingsView } from '../types/navigation';
 const plugins = usePluginsStore();
 const workspace = useWorkspaceStore();
 const emit = defineEmits<{
@@ -25,7 +26,7 @@ const results = computed(() => {
       .map(([view, name]) => ({
         key: view,
         kind: 'view',
-        name: `工作区 · ${name}`,
+        name: `${isSettingsView(view as WorkspaceView) ? '设置' : '工作区'} · ${name}`,
         view: view as WorkspaceView,
         hostId: hosts.selectedId ?? '',
         entryId: '',

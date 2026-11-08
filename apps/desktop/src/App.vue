@@ -11,23 +11,12 @@ import {
 import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
 import { interfaceFontSizes } from './types/preferences';
-import AboutView from './views/AboutView.vue';
-import SettingsPanel from './components/SettingsPanel.vue';
+import SettingsDialog from './components/SettingsDialog.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
-import AppModules from './components/AppModules.vue';
-import type { NavigationModule } from './types/navigation';
+import AppHeader from './components/AppHeader.vue';
 import HostTools from './components/HostTools.vue';
-import {
-  FileWarning,
-  Info,
-  ListTodo,
-  Monitor,
-  PanelLeftOpen,
-  Server,
-  Unplug,
-  X,
-} from '@lucide/vue';
+import { FileWarning, Info, ListTodo, Monitor, Puzzle, Server, Unplug, X } from '@lucide/vue';
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
@@ -49,26 +38,15 @@ import {
   globalKey,
   defaultProductPreferences,
   hostViews,
-  settingsCategories,
   type WorkspaceView as View,
 } from './types/product';
-import {
-  allHostsTabKey,
-  isHostTab,
-  type WorkspaceCloseScope,
-  type WorkspaceTab,
-} from './stores/workspace';
+import { isHostTab, type WorkspaceCloseScope, type WorkspaceTab } from './stores/workspace';
 import { serverPluginFor } from './services/server-plugins';
 import GlobalSearch from './components/GlobalSearch.vue';
 import { usePluginsStore } from './stores/plugins';
 import PluginDialogs from './components/PluginDialogs.vue';
-const PluginsView = defineAsyncComponent(() => import('./views/PluginsView.vue'));
-const PluginSettingsDialog = defineAsyncComponent(
-  () => import('./components/PluginSettingsDialog.vue'),
-);
 const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
 const plugins = usePluginsStore();
-const ModelsView = defineAsyncComponent(() => import('./views/ModelsView.vue'));
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
   background = useBackgroundStore(),
@@ -139,29 +117,7 @@ const isHostWorkspace = computed(() => {
   const tab = workspace.current;
   return !!tab && isHostTab(tab);
 });
-const settingsCategory = computed(() =>
-  settingsCategories.find((item) => item.view === view.value),
-);
-const settingsOpen = computed(() =>
-  workspace.tabs.some((tab) => settingsCategories.some((item) => item.view === tab.view)),
-);
-const showSidebar = computed(() => sidebarOpen.value);
-const showHostTree = computed(() => workspace.module === 'hosts');
-const hostWorkspaceTabs = computed(() => workspace.tabs.filter(isHostTab));
-const workspaceRows = computed(() => [
-  {
-    id: 'pages',
-    label: '工作区页面',
-    tabs: workspace.tabs.filter((tab) => !isHostTab(tab)),
-    visible: workspace.tabs.length > 0,
-  },
-  {
-    id: 'hosts',
-    label: '主机工作区',
-    tabs: hostWorkspaceTabs.value,
-    visible: isHostWorkspace.value,
-  },
-]);
+const settingsOpen = computed(() => workspace.settingsView !== null);
 const cachedPluginPages = computed(() => workspace.pluginPages);
 function navigate(
   value: View,
@@ -192,7 +148,7 @@ function setContext(hostId: string, connectShell = false) {
 }
 function tabName(tab: WorkspaceTab) {
   if (isHostTab(tab))
-    return tab.hostId ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机' : '本地设备';
+    return tab.hostId ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机' : '本地终端';
   if (tab.pluginId)
     return plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件';
   return hostViews.has(tab.view)
@@ -205,18 +161,8 @@ function activate(tab: WorkspaceTab) {
   if (tab.view === 'terminals' && tab.hostId) navigate(tab.view, tab.hostId, tab.section);
   else workspace.activate(tab.key);
 }
-function selectModule(module: NavigationModule): void {
-  workspace.selectModule(module);
-}
-function activateAllHosts(): void {
-  const tabs = hostWorkspaceTabs.value;
-  const tab = tabs.find((item) => item.hostId === workspace.hostId) ?? tabs.at(-1);
-  if (tab) workspace.activate(tab.key);
-}
 function revealActiveTab() {
-  for (const tab of document.querySelectorAll(
-    '.workspace-group-tab[aria-selected=true], .workspace-tab.active',
-  ))
+  for (const tab of document.querySelectorAll('.workspace-tab.active'))
     tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 const tabMenu = ref<{ key: string; x: number; y: number } | null>(null);
@@ -225,20 +171,10 @@ let tabMenuTrigger: HTMLButtonElement | null = null;
 const tabMenuIndex = computed(() =>
   workspace.tabs.findIndex((tab) => tab.key === tabMenu.value?.key),
 );
-const menuForAllHosts = computed(() => tabMenu.value?.key === allHostsTabKey);
-const hasTabsToRight = computed(() => {
-  if (menuForAllHosts.value) return workspace.tabs.some((tab) => !isHostTab(tab));
-  const tab = workspace.tabs[tabMenuIndex.value];
-  return (
-    !!tab &&
-    workspace.tabs
-      .slice(tabMenuIndex.value + 1)
-      .some((candidate) => isHostTab(candidate) === isHostTab(tab))
-  );
-});
-const hasOtherTabs = computed(() =>
-  menuForAllHosts.value ? hasTabsToRight.value : workspace.tabs.length > 1,
+const hasTabsToRight = computed(
+  () => tabMenuIndex.value >= 0 && tabMenuIndex.value < workspace.tabs.length - 1,
 );
+const hasOtherTabs = computed(() => workspace.tabs.length > 1);
 const tabCloseActions: { scope: WorkspaceCloseScope; label: string }[] = [
   { scope: 'current', label: '关闭' },
   { scope: 'right', label: '关闭右侧' },
@@ -360,11 +296,7 @@ async function toggleSidebar(): Promise<void> {
   sidebarOpen.value = !sidebarOpen.value;
   await nextTick();
   document
-    .querySelector<HTMLButtonElement>(
-      sidebarOpen.value
-        ? '.sidebar-workspace-heading [aria-label="收起主机栏"]'
-        : '.workspace-navigation [aria-label="展开主机栏"]',
-    )
+    .querySelector<HTMLButtonElement>('.app-header [aria-controls="host-sidebar"]')
     ?.focus({ preventScroll: true });
   revealActiveTab();
 }
@@ -548,7 +480,7 @@ async function surfaceNavigate(section: NonNullable<WorkspaceTab['section']>) {
     const entry = await serverPluginFor(currentHostId.value, section);
     if (entry) openPlugin(entry.pluginId, entry.id, currentHostId.value, section);
     else {
-      notifications.push('请先在插件管理中启用并授权提供此功能的插件。', true);
+      notifications.push('请先在“设置 → 插件”中启用并授权提供此功能的插件。', true);
       navigate('plugins');
     }
   } catch (cause) {
@@ -627,21 +559,28 @@ watch(
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'hosts-hidden': !showSidebar }" :style="layoutStyle">
-    <AppModules :active="workspace.module" @select="selectModule" />
-    <aside v-show="showSidebar" id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
+  <div class="app-shell" :class="{ 'sidebar-collapsed': !sidebarOpen }" :style="layoutStyle">
+    <AppHeader
+      :sidebar-open="sidebarOpen"
+      :search-shortcut="
+        application.state?.config.product?.shortcuts.search ?? defaultShortcuts.search!
+      "
+      @sidebar="toggleSidebar"
+      @search="searching = true"
+    />
+    <aside id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
       <AppNavigation
-        :active="view"
-        :module="workspace.module"
-        @navigate="navigate($event)"
-        @collapse="toggleSidebar"
+        :local-active="isHostWorkspace && view === 'terminals' && !currentHostId"
+        :settings-open="settingsOpen"
+        :collapsed="!sidebarOpen"
+        @expand="toggleSidebar"
+        @navigate="navigate($event, $event === 'terminals' ? '' : currentHostId)"
       >
         <HostSidebar
-          v-show="showHostTree"
-          :active="showHostTree && sidebarOpen"
-          :local-active="view === 'terminals' && !currentHostId"
+          v-show="sidebarOpen"
+          id="host-tree-panel"
+          :active="sidebarOpen"
           @plugin="openPlugin"
-          @local-terminal="navigate('terminals', '')"
           @create="openHost($event)"
           @import-openssh="importingOpenSsh = true"
           @select="setContext($event.id, true)"
@@ -650,7 +589,7 @@ watch(
       </AppNavigation>
     </aside>
     <div
-      v-if="showSidebar"
+      v-if="sidebarOpen"
       class="sidebar-resizer"
       role="separator"
       aria-label="调整主机侧栏宽度"
@@ -664,42 +603,14 @@ watch(
     />
     <main class="main-content">
       <div class="workspace-navigation">
-        <button
-          v-if="!sidebarOpen"
-          class="workspace-sidebar-button"
-          aria-label="展开主机栏"
-          title="展开主机栏"
-          :aria-expanded="false"
-          aria-controls="host-sidebar"
-          @click="toggleSidebar"
-        >
-          <PanelLeftOpen :size="18" aria-hidden="true" />
-        </button>
         <div
-          v-for="row in workspaceRows"
-          v-show="row.visible"
-          :key="row.id"
           class="tabbar workspace-tabs"
-          :class="row.id === 'hosts' ? 'workspace-host-tabs' : 'workspace-page-tabs'"
           role="tablist"
-          :aria-label="row.label"
+          aria-label="工作区"
           @keydown="workspaceKeys"
         >
-          <button
-            v-if="row.id === 'pages' && hostWorkspaceTabs.length"
-            type="button"
-            class="workspace-group-tab"
-            role="tab"
-            :aria-selected="isHostWorkspace"
-            :tabindex="isHostWorkspace ? 0 : -1"
-            @click="activateAllHosts"
-            @contextmenu.prevent.stop="openTabMenu(allHostsTabKey, $event)"
-            @keydown="tabContextKeys(allHostsTabKey, $event)"
-          >
-            全部主机
-          </button>
           <div
-            v-for="tab in row.tabs"
+            v-for="tab in workspace.tabs"
             :key="tab.key"
             :data-host-id="isHostTab(tab) ? tab.hostId : undefined"
             :data-view="tab.view"
@@ -723,6 +634,7 @@ watch(
             >
               <Server v-if="isHostTab(tab) && tab.hostId" :size="14" aria-hidden="true" />
               <Monitor v-else-if="isHostTab(tab)" :size="14" aria-hidden="true" />
+              <Puzzle v-else-if="tab.view === 'plugins'" :size="14" aria-hidden="true" />
               {{ tabName(tab) }}</button
             ><button
               class="tab-close"
@@ -741,7 +653,6 @@ watch(
         class="workspace-header"
         :inert="workspace.closing.includes(workspace.active)"
       >
-        <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
         <HostTools
           v-if="isHostWorkspace && view && currentHostId"
           :active="view"
@@ -750,7 +661,15 @@ watch(
           @navigate="navigate($event)"
           @plugin="openPlugin"
         />
+        <span
+          v-if="currentHost"
+          class="workspace-endpoint"
+          :title="`${currentHost.username}@${currentHost.hostname}:${currentHost.port}`"
+          >{{ currentHost.username }}@{{ currentHost.hostname }}:{{ currentHost.port }}</span
+        >
+        <strong v-else-if="isHostWorkspace" class="workspace-local-label">本地终端</strong>
       </div>
+      <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
         当前仍操作建立时的连接：{{ currentHost?.username }}@{{ currentHost?.hostname }}:{{
           currentHost?.port
@@ -777,8 +696,7 @@ watch(
           :key="page.key"
           :active="
             workspace.activePluginKey === page.key &&
-            (!workspace.pluginConfiguration?.contributionId ||
-              workspace.pluginConfiguration.pluginId !== page.pluginId) &&
+            !settingsOpen &&
             !workspace.closing.includes(page.hostId ? `host:${page.hostId}` : page.key)
           "
           :plugin-id="page.pluginId!"
@@ -812,15 +730,6 @@ watch(
           :host-id="currentHostId"
           @terminal="fileTerminal"
         />
-        <PluginsView v-else-if="view === 'plugins'" @settings="workspace.openPluginSettings" />
-        <ModelsView v-else-if="view === 'models'" />
-        <AboutView v-else-if="view === 'about'" />
-        <SettingsPanel
-          v-if="settingsOpen"
-          v-show="settingsCategory"
-          :category="settingsCategory?.id ?? 'general'"
-          @category="(id) => navigate(settingsCategories.find((item) => item.id === id)!.view)"
-        />
       </div>
       <div
         v-show="view === 'terminals'"
@@ -853,6 +762,7 @@ watch(
     </footer>
   </div>
   <NotificationToasts />
+  <SettingsDialog v-if="settingsOpen" />
   <Modal v-if="pluginTarget" title="选择使用工具的主机" @close="pluginTarget = null">
     <p>选择主机后，工具将在该主机工作区打开。</p>
     <div class="action-row">
@@ -870,11 +780,6 @@ watch(
       <p v-if="!store.catalog?.hosts.length">暂无主机，请先在主机管理中添加。</p>
     </div>
   </Modal>
-  <PluginSettingsDialog
-    v-if="workspace.pluginConfiguration"
-    :key="workspace.pluginConfiguration.pluginId"
-    :plugin-id="workspace.pluginConfiguration.pluginId"
-  />
   <PluginDialogs />
   <GlobalSearch
     v-if="searching"
@@ -935,7 +840,7 @@ watch(
   <ImportDialog v-if="importingOpenSsh" @close="importingOpenSsh = false" />
   <Teleport to="body">
     <div
-      v-if="tabMenu && (menuForAllHosts ? hostWorkspaceTabs.length : tabMenuIndex >= 0)"
+      v-if="tabMenu && tabMenuIndex >= 0"
       ref="tabMenuElement"
       class="context-menu workspace-tab-menu"
       role="menu"

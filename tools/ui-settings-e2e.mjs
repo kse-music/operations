@@ -69,21 +69,19 @@ try {
     const settings = page.locator('.settings-panel');
     const categories = ['通用', '终端', '快捷键', '数据与存储'];
     const select = async (index) => navigateWorkspace(page, categories[index]);
-    const activeMenu = () => page.locator('.module-menu [aria-current="page"]');
+    const activeMenu = () => page.locator('.settings-dialog-navigation [aria-current="page"]');
     const layouts = [];
     const dismissNotices = async () => {
       for (const close of await page.getByRole('button', { name: '关闭通知', exact: true }).all())
         await close.click();
     };
     assert.equal(await settings.getByRole('tablist').count(), 0);
-    assert.deepEqual(await page.locator('.module-navigation button').allTextContents(), [
-      '主机管理',
-      '插件',
-      '设置',
-    ]);
+    assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).count(), 1);
     assert.deepEqual(
-      (await page.locator('.module-menu .nav-label').allTextContents()).map((text) => text.trim()),
-      [...categories, '模型管理', '关于'],
+      (await page.locator('.settings-dialog-navigation .nav-item').allTextContents()).map((text) =>
+        text.trim(),
+      ),
+      [...categories, '模型管理', '插件', '关于'],
     );
     for (let index = 0; index < categories.length; index++) {
       await select(index);
@@ -176,18 +174,13 @@ try {
         path: `${output}/${name}-${['general', 'terminal', 'shortcuts', 'storage'][index]}.png`,
       });
     }
-    const header = await page.locator('.module-header').evaluate((el) => {
-      const system = el.querySelector('[data-module="system"]').getBoundingClientRect();
-      const plugins = el.querySelector('[data-module="plugins"]').getBoundingClientRect();
-      return {
-        rightGap: el.getBoundingClientRect().right - system.right,
-        moduleGap: system.left - plugins.right,
-      };
+    const header = await page.locator('.app-header').evaluate((el) => {
+      const search = el.querySelector('.app-search-button').getBoundingClientRect();
+      return { rightGap: el.getBoundingClientRect().right - search.right };
     });
-    assert(header.rightGap <= 1, `${name}: settings must align with header right edge`);
-    if (width >= 900)
-      assert(header.moduleGap > 100, `${name}: settings must be separated from other modules`);
-    assert.equal(await page.locator('[data-module="system"]').textContent(), '设置');
+    assert(header.rightGap <= 20, `${name}: global search must remain reachable at the right edge`);
+    assert.equal(await page.getByLabel('应用菜单', { exact: true }).count(), 0);
+    assert.equal(await page.locator('.sidebar-app-actions [aria-label="设置"]').count(), 1);
     await select(1);
     const quickCopyPaste = settings.getByRole('checkbox', {
       name: '选中即复制，右键即粘贴',
@@ -212,10 +205,7 @@ try {
     await dismissNotices();
     await settings.getByRole('button', { name: '保存设置', exact: true }).click();
     assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
-    assert.equal(
-      await page.locator('.workspace-tab.active').getAttribute('data-view'),
-      'settingsTerminal',
-    );
+    assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
     assert.equal(
       await settings
         .getByLabel('终端行高', { exact: true })
@@ -232,10 +222,7 @@ try {
     await dismissNotices();
     await settings.getByRole('button', { name: '保存设置', exact: true }).click();
     assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
-    assert.equal(
-      await page.locator('.workspace-tab.active').getAttribute('data-view'),
-      'settingsTerminal',
-    );
+    assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
     assert.equal(
       await settings
         .getByLabel('默认代理地址', { exact: true })
@@ -270,18 +257,18 @@ try {
     assert.match(await about.textContent(), /schema v5/);
     assert.equal(await about.getByRole('button', { name: '重新检查', exact: true }).count(), 1);
     assert.equal(await about.evaluate((el) => el.scrollWidth > el.clientWidth), false);
-    assert.equal(await page.locator('.module-menu [aria-label="本地环境"]').count(), 0);
+    assert.equal(
+      await page.locator('.settings-dialog-navigation [aria-label="本地环境"]').count(),
+      0,
+    );
     await navigateWorkspace(page, '关于');
-    assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 1);
+    assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 0);
     await page.screenshot({ path: `${output}/${name}-about.png` });
     await navigateWorkspace(page, '模型管理');
     await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
-    assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').getAttribute('data-module'),
-      'system',
-    );
     assert.equal(await activeMenu().getAttribute('aria-label'), '模型管理');
-    assert.equal(await page.locator('.workspace-tab[data-view="models"]').count(), 1);
+    assert.equal(await activeMenu().getAttribute('aria-label'), '模型管理');
+    assert.equal(await page.locator('.workspace-tab[data-view="models"]').count(), 0);
     await select(1);
     assert.equal(await quickCopyPaste.isChecked(), true);
     assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '120');
@@ -326,17 +313,20 @@ try {
         `${name}: narrow settings must use one column`,
       );
 
-    // Closing a category keeps the shared draft until its last tab is removed.
+    // Category changes preserve the draft; closing the whole window reviews it once.
     for (const category of categories.slice(1)) {
-      await page.getByRole('button', { name: `关闭工作区标签 ${category}`, exact: true }).click();
+      await navigateWorkspace(page, category);
       assert.equal(
         await page.getByRole('dialog', { name: '设置尚未保存', exact: true }).count(),
         0,
       );
     }
     await navigateWorkspace(page, '关于');
-    const generalTab = page.locator('.workspace-tab[data-view="settings"]');
-    await generalTab.click({ button: 'middle' });
+    const settingsDialog = page.getByRole('dialog', { name: '设置', exact: true });
+    await settingsDialog
+      .locator(':scope > .modal-heading')
+      .getByRole('button', { name: '关闭对话框', exact: true })
+      .click();
     const closeDialog = page.getByRole('dialog', { name: '设置尚未保存', exact: true });
     await closeDialog.waitFor();
     const closeGeometry = await closeDialog.evaluate((el) => {
@@ -352,28 +342,34 @@ try {
     await page.screenshot({ path: `${output}/${name}-unsaved-settings.png` });
     await closeDialog.press('Escape');
     await closeDialog.waitFor({ state: 'detached' });
-    assert.equal(await generalTab.count(), 1);
-    await generalTab.getByRole('button', { name: '关闭工作区标签 通用', exact: true }).click();
+    assert.equal(await settingsDialog.count(), 1);
+    await settingsDialog
+      .locator(':scope > .modal-heading')
+      .getByRole('button', { name: '关闭对话框', exact: true })
+      .click();
     await closeDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await closeDialog.waitFor({ state: 'detached' });
-    const tabCount = await page.locator('.workspace-tab').count();
-    const closeAll = async () => {
-      await page.locator('.workspace-tab[data-view="about"]').click({ button: 'right' });
-      await page.getByRole('menuitem', { name: '关闭所有', exact: true }).click();
+    const closeAgain = async () => {
+      await settingsDialog
+        .locator(':scope > .modal-heading')
+        .getByRole('button', { name: '关闭对话框', exact: true })
+        .click();
       await closeDialog.waitFor();
     };
-    await closeAll();
+    await closeAgain();
     await closeDialog.getByRole('button', { name: '继续编辑', exact: true }).click();
     await closeDialog.waitFor({ state: 'detached' });
-    assert.equal(await page.locator('.workspace-tab').count(), tabCount);
     await select(1);
     assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '120');
-    await closeAll();
+    await closeAgain();
     await closeDialog.getByRole('button', { name: '放弃更改并关闭', exact: true }).click();
-    await page.locator('.workspace-tab').waitFor({ state: 'detached' });
+    await settingsDialog.waitFor({ state: 'detached' });
     await select(1);
     assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '100');
-    await page.getByRole('button', { name: '关闭工作区标签 终端', exact: true }).click();
+    await settingsDialog
+      .locator(':scope > .modal-heading')
+      .getByRole('button', { name: '关闭对话框', exact: true })
+      .click();
     await settings.waitFor({ state: 'detached' });
     assert.equal(await closeDialog.count(), 0);
     assert.deepEqual(errors, []);

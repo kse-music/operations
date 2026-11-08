@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { useBackgroundStore } from '../stores/background';
-import {
-  ChevronDown,
-  ChevronRight,
-  Folder,
-  FolderOpen,
-  Search,
-  Server,
-  SquareTerminal,
-} from '@lucide/vue';
+import { ChevronDown, ChevronRight, Folder, FolderOpen, Search, Server, Plus } from '@lucide/vue';
 const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
 import { usePluginsStore } from '../stores/plugins';
@@ -26,7 +18,7 @@ const store = useHostsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
 const hostAddress = ({ hostname, port }: Host) => hostDisplayName({ name: '', hostname, port });
-const props = withDefaults(defineProps<{ localActive?: boolean; active?: boolean }>(), {
+const props = withDefaults(defineProps<{ active?: boolean }>(), {
   active: true,
 });
 const hostState = (id: string) =>
@@ -36,7 +28,6 @@ const hostState = (id: string) =>
       ? operations.hostState(id)
       : files.hostState(id);
 const emit = defineEmits<{
-  localTerminal: [];
   create: [groupId: string | null];
   importOpenssh: [];
   select: [host: Host];
@@ -385,19 +376,16 @@ onBeforeUnmount(() => {
   >
     <div class="host-list-heading">
       <span class="host-list-title">
-        全部主机<small v-if="store.catalog" class="host-count">{{
-          store.catalog.hosts.length
-        }}</small>
+        主机<small v-if="store.catalog" class="host-count">{{ store.catalog.hosts.length }}</small>
       </span>
       <button
         type="button"
         class="shell-icon-button"
-        aria-label="本地终端"
-        title="本地终端"
-        :aria-current="localActive ? 'page' : undefined"
-        @click="$emit('localTerminal')"
+        aria-label="新建主机"
+        title="新建主机"
+        @click="$emit('create', null)"
       >
-        <SquareTerminal :size="16" aria-hidden="true" />
+        <Plus :size="16" aria-hidden="true" />
       </button>
     </div>
     <div class="host-sidebar-controls">

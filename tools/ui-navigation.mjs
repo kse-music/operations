@@ -7,7 +7,7 @@ const menuModules = {
   数据与存储: 'system',
   模型管理: 'system',
   关于: 'system',
-  插件管理: 'plugins',
+  插件管理: 'system',
 };
 
 export async function terminalAction(page, pane, name) {
@@ -19,8 +19,7 @@ export async function terminalAction(page, pane, name) {
 }
 
 export async function showHostTree(page) {
-  await page.locator('.module-navigation [data-module="hosts"]').click();
-  if (!(await page.locator('.sidebar').isVisible())) {
+  if (!(await page.locator('.host-tree-section').isVisible())) {
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
     if (await expand.isVisible()) await expand.click();
   }
@@ -102,16 +101,16 @@ export async function openPluginDetails(page, name) {
 export async function openPluginSettings(page, name) {
   await navigateWorkspace(page, '插件管理');
   await page.getByRole('button', { name: `配置 ${name}`, exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: `${name} · 配置`, exact: true });
-  await dialog.waitFor();
+  const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  await dialog.getByRole('region', { name: `${name} · 配置`, exact: true }).waitFor();
   return dialog;
 }
 
 export async function closePluginSettings(page) {
-  const dialog = page.locator('dialog[open]:has(> .plugin-config-body)');
-  if (!(await dialog.count())) return;
-  await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await dialog.waitFor({ state: 'hidden' });
+  const panel = page.locator('.plugin-configuration');
+  if (!(await panel.count())) return;
+  await panel.getByRole('button', { name: '返回插件列表', exact: true }).click();
+  await panel.waitFor({ state: 'hidden' });
 }
 
 export async function setPluginEnabled(page, name, enabled) {
@@ -138,10 +137,13 @@ export async function navigateWorkspace(page, name) {
   await closePluginSettings(page);
   const module = hostTools.has(name) ? 'hosts' : menuModules[name];
   if (!module) {
-    if (name === 'AI 运维助手') {
+    if (name === 'AI 运维助手' || name === '服务器管理') {
       // Focus the host shell before its shortcut; input focus may currently be inside an iframe.
-      await page.locator('.module-navigation [data-module="hosts"]').click();
-      await page.keyboard.press('Control+k');
+      await closeApplicationSettings(page);
+      await page
+        .locator('.app-header')
+        .getByRole('button', { name: '全局搜索', exact: true })
+        .click();
       const search = page.getByRole('dialog', { name: '全局搜索', exact: true });
       await search.getByLabel('全局搜索内容', { exact: true }).fill(name);
       await search
@@ -151,7 +153,7 @@ export async function navigateWorkspace(page, name) {
     } else await openPluginFunction(page, name);
     return;
   }
-  await page.locator(`.module-navigation [data-module="${module}"]`).click();
+  if (module !== 'system') await closeApplicationSettings(page);
   if (hostTools.has(name)) {
     const remote = page.getByRole('navigation', { name: '当前主机工具', exact: true });
     if (!(await remote.count())) {
@@ -169,35 +171,54 @@ export async function navigateWorkspace(page, name) {
       await remote.getByRole('button', { name, exact: true }).click();
     }
   } else {
-    if (!(await page.locator('.sidebar').isVisible()))
-      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
-    await page
-      .getByRole('navigation', { name: '主导航', exact: true })
-      .getByRole('button', { name, exact: true })
+    const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+    if (!(await dialog.count()))
+      await page
+        .getByRole('navigation', { name: '应用导航', exact: true })
+        .getByRole('button', { name: '设置', exact: true })
+        .click();
+    await dialog
+      .getByRole('navigation', { name: '设置分类', exact: true })
+      .getByRole('button', { name: name === '插件管理' ? '插件' : name, exact: true })
       .click();
   }
-  if (await page.evaluate(() => innerWidth <= 720)) {
+  if (module !== 'system' && (await page.evaluate(() => innerWidth <= 720))) {
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
     if (await collapse.isVisible()) await collapse.click();
   }
+}
+
+export async function closeApplicationSettings(page) {
+  const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  if (!(await dialog.count())) return;
+  await dialog
+    .locator(':scope > .modal-heading')
+    .getByRole('button', { name: '关闭对话框', exact: true })
+    .click();
+  // Dirty drafts keep their existing confirmation; callers must explicitly resolve it.
+  await dialog.waitFor({ state: 'hidden' });
 }
 
 // Model choice belongs to the assistant's persisted plugin settings.
 export async function bindAssistantModel(page, modelId) {
   const dialog = await openPluginSettings(page, 'AI 运维助手');
   const settings = dialog.frameLocator('iframe');
-  await settings.locator(`input[type="radio"][value=${JSON.stringify(modelId)}]`).check();
+  await settings
+    .locator(`label:has(input[type="radio"][value=${JSON.stringify(modelId)}])`)
+    .click();
   const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
   if (await save.isEnabled()) {
     await save.click();
+    await dialog.locator('.plugin-configuration').waitFor({ state: 'hidden' });
   } else {
     await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
   }
-  await dialog.waitFor({ state: 'hidden' });
+  await closeApplicationSettings(page);
 }
 
 export async function openPluginFunction(page, name, hostId) {
   await closePluginSettings(page);
+  await closeApplicationSettings(page);
   const id =
     hostId ??
     (await page.evaluate(() => {
@@ -215,14 +236,13 @@ export async function openPluginFunction(page, name, hostId) {
 }
 
 export async function selectHostWorkspace(page, id) {
+  await closeApplicationSettings(page);
   if (await page.evaluate(() => innerWidth <= 720)) {
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
     if (await collapse.isVisible()) await collapse.click();
   }
   const tab = page.locator(`.workspace-tab[data-host-id=${JSON.stringify(id)}] [role=tab]`);
   if (await tab.count()) {
-    if (!(await tab.isVisible()))
-      await page.getByRole('tab', { name: '全部主机', exact: true }).click();
     await tab.click();
   } else if (!id) {
     await showHostTree(page);

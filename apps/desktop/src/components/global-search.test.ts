@@ -21,7 +21,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
-it.each(['主机 ·', '工作区 · 通用'])(
+it.each(['主机 ·', '设置 · 通用', '设置 · 插件管理'])(
   'distinguishes host selection from global asset navigation: %s',
   async (label) => {
     pinia = createPinia();
@@ -66,7 +66,10 @@ it.each(['主机 ·', '工作区 · 通用'])(
       expect(selectHost).toHaveBeenCalledExactlyOnceWith('a');
       expect(navigate).not.toHaveBeenCalled();
     } else {
-      expect(navigate).toHaveBeenCalledExactlyOnceWith('settings', 'a');
+      expect(navigate).toHaveBeenCalledExactlyOnceWith(
+        label.includes('插件管理') ? 'plugins' : 'settings',
+        'a',
+      );
       expect(selectHost).not.toHaveBeenCalled();
     }
     expect(close).toHaveBeenCalledOnce();

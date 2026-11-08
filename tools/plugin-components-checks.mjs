@@ -143,10 +143,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
       runtimeStatuses,
       (statuses) => JSON.stringify(activeIds(statuses)) === JSON.stringify(expectedActive),
     );
-    assert.equal(
-      await page.locator('.module-navigation [aria-current="page"]').innerText(),
-      '插件',
-    );
+    assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'plugins');
   }
   assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) > 0);
   assert((configurationRequests['cn.hiboot.plugins.assistant'] ?? 0) <= 4);

@@ -1,5 +1,13 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-08 桌面工作台导航
+
+AppHeader 提供侧栏开关和全局搜索；AppNavigation 提供主机树上方的本地终端与底部唯一设置入口，不再维护模块选择。Workspace 统一按打开顺序保存主机及全局插件功能标签，插件管理通过 settingsView=plugins 打开，不创建标签；保留现有插件页面缓存和主机关闭流程。
+
+侧栏容器始终保留。收起时 AppNavigation 显示 52px 图标栏与主机展开入口，全局搜索仅由 AppHeader 和既有快捷键提供。HostSidebar 仅通过 v-show 隐藏并将 active 置为 false，保留搜索与树状态，同时结束树内拖动和菜单交互。底部应用入口使用原导航事件，主机图标复用展开逻辑；收起时不挂载宽度分隔条。窄窗口工作区预留 52px，展开的主机树覆盖其上，不改变会话生命周期或既有 sidebarWidth 设置。
+
+设置导航通过 Workspace.settingsView 独立持有，设置类入口不会替换活动工作区。SettingsDialog 复用 SettingsPanel、ModelsView、PluginsView 和 AboutView，窗口存续期间始终挂载同一偏好草稿。PluginSettingsPanel 替代独立配置弹窗，在插件分类内复用 PluginView、权限组件及原宿主桥；列表以 v-show 隐藏，返回保持筛选。设置 iframe 必须匹配 plugins 分类、配置目标与上下文所有权。插件保存状态经 pluginSettingsBusy 上报，联合 plugins.busy 阻止返回、分类切换和关闭；closeSettings 同时复用原 settingsCloseGuard 检查通用设置的保存、迁移和未保存修改。插件取消/保存返回列表，管理模型进入同一窗口模型分类；关闭窗口恢复入口焦点。设置打开期间暂停底层插件交互，已有 SSH、传输和插件缓存继续保留。无 Rust IPC、SDK、数据库或持久化配置变化。
+
 ## 2026-11-08 当前契约与数据库初始化
 
 移除应用旧域名目录自动迁移及旧系统凭据服务回退，NativeStore 只访问 cn.hiboot.desktop.credentials.v1。AppConfig/TerminalPreferences/ProductPreferences 使用完整当前字段，拒绝 extraSmall、缺失的必填设置和已删除 tasks 快捷键；新配置仍由显式 Default 初始化。
