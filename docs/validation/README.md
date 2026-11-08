@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[终端剪贴板重连回归修复：全量前端 472 项通过](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-08-剪贴板重连回归测试修复)。
+
 最新：[跨模块开发期兼容清理：当前 schema、设置、身份、终端与 AI](foundation/VALIDATION_PRE_RELEASE_CLEANUP.md)。
 
 最新：[内置插件自动发现：打包、生成注册及新增目录全链路](plugins/PLUGIN_TEST_REPORT.md#2026-11-08-内置插件自动发现)。

@@ -1,5 +1,20 @@
 # 移除终端窗格常驻栏验收（2026-11-02）
 
+## 2026-11-08 剪贴板重连回归测试修复
+
+失败可稳定复现于 `terminal-clipboard.test.ts` 的异步读取用例：测试仍通过内容区菜单点击“重新连接”，当前菜单仅有复制和粘贴，因此在 `menuAction` 查找按钮时失败，尚未触及剪贴板会话隔离断言。
+
+改为通过当前 `connectRequested` 连接请求机制，在同一窗格中关闭旧会话并建立不同 ID 的新会话。保留旧剪贴板读取完成后 xterm 不粘贴、IPC 不发送的断言，并补充窗格未重挂载、旧会话关闭、新会话已连接，以及之后的新剪贴板内容恰好一次发送至新 Session 的验证。不恢复已删除的菜单项，不跳过或弱化原断言，未修改生产组件。
+
+实际检查：
+
+- 修复前定向用例失败，原因是找不到旧“重新连接”菜单项；修复后剪贴板专项 12 项全部通过。
+- `npm test`：52 个文件、472 项全部通过，没有排除终端文件或用例。jsdom 仍输出既有 Canvas getContext 未实现提示，不影响结果。
+- 桌面/SDK TypeScript、ESLint、修改文件 Prettier 和 `git diff --check` 通过。
+- 证据位于 `.local/qa/terminal-clipboard-reconnect/` 的 `before.log`、`after.log`、`full-tests.log`、`typecheck.log`、`lint.log`、`format-check.log`。
+
+本次仅修改测试和验证/状态文档，未修改 Rust、生产终端或剪贴板实现；未重建 EXE/安装器、未新增原生 WebView2/OS 剪贴板或跨平台验收。本阶段无新增运行风险和后续依赖，结束后停止。
+
 ## 已完成与主要文件
 
 - `apps/desktop/src/components/TerminalPane.vue` 删除红框内整块 terminal-toolbar，包括主机名称、账号端点、状态和所有按钮。终端画面直接接续会话栏，不留下占位高度；会话标签继续展示连接状态，窗格保留可访问名称和状态说明。

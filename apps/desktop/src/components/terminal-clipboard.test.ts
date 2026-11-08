@@ -454,15 +454,38 @@ it('reports clipboard permission errors without sending terminal input', async (
 
 it('drops an asynchronous clipboard read if the pane reconnects before it finishes', async () => {
   enable();
-  let finish: (text: string) => void;
-  readText.mockImplementation(() => new Promise<string>((resolve) => (finish = resolve)));
+  const pane = root.querySelector('.terminal-pane');
+  let finish!: (text: string) => void;
+  const reading = new Promise<string>((resolve) => (finish = resolve));
+  readText.mockReturnValueOnce(reading);
   rightClick();
-  tab.state = 'failed';
+  expect(readText).toHaveBeenCalledOnce();
+  vi.mocked(terminalApi.openLocal).mockImplementationOnce(async (_size, receive) => {
+    receive({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: 'local:reconnected', shell: 'test shell' };
+  });
+  const store = useTerminalsStore();
+  store.update(tab.key, { state: 'idle', connectRequested: false });
   await nextTick();
-  await menuAction('重新连接');
-  await vi.waitFor(() => expect(terminalApi.openLocal).toHaveBeenCalledTimes(2));
-  finish!('stale clipboard');
+  store.update(tab.key, { connectRequested: true });
+  await vi.waitFor(() => expect(tab.sessionId).toBe('local:reconnected'));
+  expect(terminalApi.openLocal).toHaveBeenCalledTimes(2);
+  expect(terminalApi.close).toHaveBeenCalledExactlyOnceWith('local:test');
+  expect(tab.state).toBe('connected');
+  expect(root.querySelector('.terminal-pane')).toBe(pane);
+  finish('stale clipboard');
+  await reading;
   await nextTick();
   expect(xterm.pasted).not.toHaveBeenCalled();
   expect(terminalApi.input).not.toHaveBeenCalled();
+
+  readText.mockResolvedValueOnce('fresh clipboard');
+  rightClick();
+  await vi.waitFor(() =>
+    expect(terminalApi.input).toHaveBeenCalledExactlyOnceWith(
+      'local:reconnected',
+      new TextEncoder().encode('fresh clipboard'),
+    ),
+  );
+  expect(xterm.pasted).toHaveBeenCalledExactlyOnceWith('fresh clipboard');
 });
