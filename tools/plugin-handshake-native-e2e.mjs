@@ -161,8 +161,6 @@ try {
         'sandbox still rejects parent DOM access',
       );
       results.push({ ...candidate, attempt, mounted: true, sandboxPreserved: true });
-      if (candidate.id.endsWith('.nginx'))
-        await page.screenshot({ path: path.join(qa, `native-nginx-${attempt}.png`) });
     }
   }
   assert.deepEqual(errors, []);

@@ -1,5 +1,55 @@
 # 插件阶段验证记录
 
+## 2026-11-09 Docker 列表查询免重复确认
+
+### 完成范围
+
+Docker 页面初始化的版本检测和容器/镜像列表各触发通用 Execute 单次审批，造成一次导航连续确认。Docker 包更新至 2.0.2，仅将三条完整固定查询列入 Manifest `preapprovedCommands`。新增独立 `ssh.execute.preapproved` 权限及 operation，系统分发预置、上传包默认不授予；权限页展示完整命令并单独勾选。Native 先验证权限、安装修订、调用绑定及实际 SSH 配置，仅对完全匹配 program/args/timeoutSecs 的 Execute 使用预授权。停止、删除、流、终端、文件写入及未声明命令保持原确认，未接受插件自报只读、未引入 Docker ID/命令业务白名单。
+
+主要文件：`crates/plugin-core/src/{manifest,permissions}.rs`、`crates/plugin-sdk/src/{lib,platform}.rs`、`crates/application/src/{bundled_plugins,plugins/platform}.rs`、`apps/desktop/src/components/PluginSettings.vue`、`packages/plugin-sdk/src/types/plugins.ts`、Docker manifest/后端测试及原生 SSH 回归。同步当前 PRD、实施计划、架构、决策、SDK/安全/包格式/使用与开发包说明。其他任务的 Nginx 删除及已有修改保留。
+
+### 实际验证
+
+- 修改前，新增 `docker_page_queries_repeat_without_confirmation_over_real_ssh` 在 Docker capabilities 返回 `PLUGIN_CONFIRMATION_REQUIRED` 时失败，实际未发送查询命令。修复后真实 WASM → Native → 回环 SSH 协议夹具通过，三种查询各执行两次，共六条；断言解析结果及审批池为空。停止和镜像删除均仍产生审批，取消后 SSH 命令数保持六；追加参数仍审批，主机配置变化及关闭 owner 后拒绝执行。该夹具返回测试输出，不代表真实远端 Docker 业务验收。
+- `cargo test -p serverdeck-plugin-sdk -p serverdeck-plugin-core -p serverdeck-application --lib --no-run --offline --locked --message-format=json` 编译，测试 EXE 复制到 `.local/qa/docker-query-preapproval/` 后运行：SDK **4 项**、核心 **25 项**、应用 **55 项通过/1 项忽略**。新增核心测试覆盖独立权限和 operation、完整参数/超时匹配、升级/摘要/禁用、流/终端不适用，以及未声明、重复、非法、超量命令拒绝。新增上传包原生测试覆盖无授权拒绝、只有 SSH 权限仍审批、显式预授权执行、撤权后拒绝。忽略项需要独立包与显式外部验收环境参数，未运行。
+- Docker 后端沿用根 `target/` 编译并复制测试 EXE：**3 项通过**，断言清单精确等于三条实际查询，停止/删除不在其中。
+- `npm run test -w @serverdeck/desktop -- src/views/plugin-settings-panel.test.ts src/components/plugin-dialogs.test.ts ../../plugins/system/docker/frontend/docker.test.ts`：**3 文件/10 项通过**。新增授权 UI 检查完整命令可见、初始未选择、单独授予及提交 operation；原 Docker 交互和变更确认继续通过。沙箱首次因临时缓存 rename 被拒而未启动测试，获准使用沙箱外本地环境后通过。原生回环网络及临时仓库测试也在沙箱外运行，未访问用户服务器或持久数据。
+- `npm run typecheck`、修改 TS/Vue 的 ESLint、Rust fmt、相关 Prettier 检查通过。`cargo clippy -p serverdeck-plugin-sdk -p serverdeck-plugin-core -p serverdeck-application --all-targets --no-deps --offline --locked -- -D warnings` 及 Docker 后端严格 Clippy 通过。包含依赖的 Clippy 被未修改的 `crates/core/src/openssh.rs:289` 现有 `clippy::single_element_loop` 告警阻断，未为本任务更改该文件。
+- `node tools/tauri.mjs build --debug --no-bundle -- --offline --locked` 成功：重新打包当前内置插件、Vue 类型检查、Vite 生产前端和开发包 ZIP、普通 Windows Debug EXE；保留原有大 chunk 提醒。输出 `target/debug/serverdeck-desktop.exe`，无安装器。构建前输出盘超过 164 GiB 空闲，原生/WASM 缓存遵循项目约定。
+
+日志与前后对照保留在 `.local/qa/docker-query-preapproval/`。`artifact-summary.json` 记录 EXE、Docker 包和开发包 ZIP 的 SHA256；另逐字验证 ZIP 中两端 SDK、权限/包格式文档及 README 与最终源码一致，包内三条命令及版本与源码清单一致。
+
+### 限制、风险及下一步
+
+未连接截图服务器，未运行真实远端 Docker、最终桌面点击或非 Windows 客户端验收。此预授权只认可固定包内容和明确授权，不提供远端命令的 OS 只读沙箱；上传包仍需用户核对。仅三条页面查询适用，详情、日志、Shell 及变更保持当前确认规则；系统版本更新保留原启停和配置。用户正常退出旧程序后启动新 EXE，系统来源 Docker 自动采用新包和预置权限；若以用户上传来源安装则需上传新包并单独授权。无剩余实现依赖，本阶段停止。
+
+## 2026-11-09 移除 Nginx 内置插件
+
+### 完成范围
+
+按用户要求删除 `plugins/system/nginx` 全部 13 个源码、声明、样式和锁文件，删除仓库内可重建的 `plugins/system/packages/nginx.sdplugin`。重新构建后，生成注册仅包含助手和 Docker；现有自动发现机制无需增加黑名单。删除 Nginx WASM 专属用例，真实服务集成保留外部 MySQL 的宿主机/容器七类查询及失败断言，移除其 Nginx/HTTP 分支。
+
+握手浏览器回归改用源码自动发现，移除 Nginx 故障历史包入口和原生脚本专用截图分支。通用 SSH 测试镜像与入口不再安装、配置或启动 Nginx，不再暴露/发布 HTTP 端口。保留助手命令分类、平台权限/路径隔离等通用测试中的服务示例，它们不加载 Nginx 插件。公开 SDK、IPC 和数据库契约没有因本次移除改变。
+
+主要文件：已删除的插件目录、`crates/plugin-runtime/tests/{platform_plugins,service_plugins_live}.rs`、`tools/plugin-handshake*.mjs`、`tools/plugin-test-host/{Dockerfile,entrypoint.sh,test.ps1}`。README、当前内置插件清单、用户/AI 指南、架构、决策、PRD、实施计划及开发包说明同步；历史开发和验收证据保留。任务开始前已有的配置修复文档，以及工作期间出现的 Docker/权限/设置并行修改均保留，不归入本次移除。
+
+### 实际验证
+
+- `npm run plugins:build` 成功；当前自动发现结果严格为 `assistant`、`docker`，注册不含 Nginx。`npm run test:build` 在沙箱外 21 项通过；首轮沙箱内仅 Junction 创建被 EPERM 阻止，不计通过。
+- 全量前端 53 个文件、474 项通过；首轮沙箱临时缓存重命名被 EPERM 阻止，未运行用例，沙箱外重跑通过。`npm run typecheck`、`npm run lint` 通过。
+- `node tools/plugin-handshake-e2e.mjs`：实际助手/Docker 包各挂载两次，4 次通过，未加载 Nginx；浏览器与临时服务正常关闭。
+- 根 `target/` 离线锁定编译应用和插件运行时测试成功，复制 4 个 EXE 至 QA 后运行：应用 53 通过、1 个新增 Docker 并行用例失败、1 忽略；运行时 12 通过；生产包平台集成 1 通过；外部 MySQL 真实服务 1 忽略。全部内置分发专项通过。未将这轮应用全量标记为通过。
+- `node tools/tauri.mjs build --debug --no-bundle` 成功，包含插件构建、Vue 类型检查、Vite 生产构建和 Windows Debug EXE。构建前 D 盘约 165 GiB 可用，复用既定缓存配置。产物字节核对确认存在助手/Docker ID、不含 `cn.hiboot.plugins.nginx`，Nginx 源码与仓库输出包均不存在。未生成 NSIS。
+- 普通 Clippy 完成，保留既有 `core/openssh.rs` 单元素循环警告；`-D warnings` 因该警告失败。修改的两个 Rust 集成文件格式检查通过；全工作区格式检查当时被 Docker 并行测试的格式差异阻止，没有改写该文件。修改脚本的 Node/PowerShell/Shell 语法、文档/JavaScript 格式和差异检查按实际结果记录于本节与 QA。
+
+证据：`.local/qa/remove-nginx-20261109/` 中的 Rust 构建清单、各测试 EXE/日志、前端/Clippy/握手日志及产物断言；四次浏览器结果另存于 `.local/qa/plugin-handshake/browser-after.json`。
+
+### 限制、风险与后续依赖
+
+应用全量测试中的 `docker_page_queries_repeat_without_confirmation_over_real_ssh` 当时返回 `NotFound`，对应任务期间新增的并行修改；本次没有删除或弱化其断言。严格 Clippy 的既有警告仍在。未重新构建/运行通用 SSH Docker 测试镜像，未执行外部 MySQL 真实服务、更新后的原生 WebView2 E2E、跨平台客户端或 NSIS 安装升级验收。
+
+已有客户端安装的 Nginx 包、配置、授权及远端服务不自动删除，因此旧用户仍可能在插件管理中看到它；需由用户使用现有卸载流程处理。历史 QA 包/缓存和用户数据保留。本次源码移除已完成，无新增开发依赖；本阶段结束，不继续其他功能开发。
+
 ## 2026-11-09 插件列表启停
 
 ### 完成范围

@@ -16,6 +16,10 @@ const labels: Record<PluginPermission, [string, string]> = {
   'models.use': ['模型调用', '使用平台已配置模型发送插件提供的消息，凭据保留在宿主'],
   'hosts.read': ['主机信息', '读取当前主机的基本信息'],
   'ssh.execute': ['SSH 命令与终端', '执行插件提供的远程命令，启动前逐次确认真实命令和目标'],
+  'ssh.execute.preapproved': [
+    '固定命令预授权',
+    '下方列出的固定命令无需逐次确认；仍需授予 SSH 命令权限',
+  ],
   'sftp.read': ['读取远程文件', '仅限下方可读目录'],
   'sftp.write': ['写入远程文件', '仅限下方可写目录，写入逐次确认'],
   'ui.contribute': ['插件界面', '显示插件功能和通知'],
@@ -27,6 +31,7 @@ const operationMap: Record<PluginPermission, string[]> = {
   'models.use': ['models.use'],
   'hosts.read': ['hosts.read'],
   'ssh.execute': ['ssh.execute'],
+  'ssh.execute.preapproved': ['ssh.execute.preapproved'],
   'sftp.read': ['sftp.read'],
   'sftp.write': ['sftp.write'],
   'ui.contribute': ['ui.contribute', 'ui.notify'],
@@ -108,6 +113,16 @@ async function revoke() {
             ></label
           >
         </div>
+        <details v-if="plugin.manifest.preapprovedCommands?.length" class="plugin-preset-commands">
+          <summary>预授权命令（{{ plugin.manifest.preapprovedCommands.length }} 条）</summary>
+          <p class="subtle">
+            授予固定命令预授权后，以下命令可在当前选择的主机上执行，无需逐次确认。请先核对内容；此授权不保证命令只读。
+          </p>
+          <pre
+            v-for="(command, index) in plugin.manifest.preapprovedCommands"
+            :key="index"
+          ><code>{{ JSON.stringify(command, null, 2) }}</code></pre>
+        </details>
         <p class="plugin-all-hosts subtle">
           适用于所有主机，使用时操作当前选择的主机。敏感操作仍需逐次确认。
         </p>

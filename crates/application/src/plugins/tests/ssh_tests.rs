@@ -49,6 +49,21 @@ impl server::Handler for Handler {
         if command.contains("fixture-failure") {
             s.extended_data(id, 1, b"fixture permission denied".to_vec())?;
             s.exit_status_request(id, 7)?;
+        } else if command.contains("d version --format") {
+            s.data(id, br#"{"Server":{"Version":"fixture-version"}}"#.to_vec())?;
+            s.exit_status_request(id, 0)?;
+        } else if command.contains("d container ls --all --no-trunc") {
+            s.data(
+                id,
+                br#"{"ID":"fixture-container","Names":"fixture","State":"running"}"#.to_vec(),
+            )?;
+            s.exit_status_request(id, 0)?;
+        } else if command.contains("d image ls --all --no-trunc") {
+            s.data(
+                id,
+                br#"{"ID":"sha256:fixture-image","Repository":"fixture"}"#.to_vec(),
+            )?;
+            s.exit_status_request(id, 0)?;
         } else {
             let value = if command.contains("fixture-large") {
                 vec![b'x'; 280000]
@@ -180,6 +195,191 @@ async fn approved(
     )
     .await
     .unwrap()
+}
+#[tokio::test]
+async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
+    let f = Fixture::new();
+    let app = &f.app;
+    app.provision_bundled_plugins().unwrap();
+    let ssh = ssh(app).await;
+    let id = "cn.hiboot.plugins.docker";
+    app.plugin_activate(id).await.unwrap();
+    for _ in 0..2 {
+        for kind in ["capabilities", "containers", "images"] {
+            let reply = app
+                .plugin_call_scoped(id, "docker-page", json!({"action":"query","input":{"hostId":ssh.host.id,"request":{"kind":kind}}}))
+                .await
+                .unwrap();
+            assert!(reply.error.is_none(), "{kind}: {reply:?}");
+            assert_eq!(reply.result["success"], true);
+            match kind {
+                "capabilities" => assert_eq!(reply.result["detail"]["dockerState"], "running"),
+                "containers" => assert_eq!(reply.result["records"][0]["ID"], "fixture-container"),
+                _ => assert_eq!(reply.result["records"][0]["ID"], "sha256:fixture-image"),
+            }
+        }
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    assert!(app.plugin_host.lock().unwrap().approvals.is_empty());
+    let target = "a".repeat(64);
+    for request in [
+        json!({"kind":"container_action","id":target,"action":"stop","confirmed":true}),
+        json!({"kind":"image_remove","id":target,"confirmed":true}),
+    ] {
+        let pending = app
+            .plugin_call_scoped(
+                id,
+                "docker-page",
+                json!({"action":"query","input":{"hostId":ssh.host.id,"request":request}}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            pending.error.as_ref().unwrap().code,
+            "PLUGIN_CONFIRMATION_REQUIRED"
+        );
+        assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+        app.plugin_approve(pending.result["id"].as_str().unwrap(), false)
+            .unwrap();
+        let cancelled = app
+            .plugin_continue(
+                id,
+                "docker-page",
+                pending.result["continuation"].as_str().unwrap(),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
+        assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    }
+    let command = app
+        .plugin_detail(id.into())
+        .await
+        .unwrap()
+        .manifest
+        .preapproved_commands[0]
+        .clone();
+    let altered = call(
+        app,
+        id,
+        "docker-page",
+        Primitive::Execute {
+            host_id: ssh.host.id.clone(),
+            command: command.clone().arg("; reboot"),
+        },
+    )
+    .await;
+    assert_eq!(altered.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    let mut changed = ssh.host.config.clone();
+    changed.username = "changed-target".into();
+    app.database.host_update(&ssh.host.id, changed).unwrap();
+    let changed = call(
+        app,
+        id,
+        "docker-page",
+        Primitive::Execute {
+            host_id: ssh.host.id.clone(),
+            command: command.clone(),
+        },
+    )
+    .await;
+    assert!(changed.error.is_some());
+    assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    app.plugin_close_scope(id, "docker-page").await.unwrap();
+    assert!(
+        app.plugin_capability_scoped(
+            id,
+            "docker-page",
+            request(cap(Primitive::Execute {
+                host_id: ssh.host.id.clone(),
+                command
+            }))
+        )
+        .await
+        .is_err()
+    );
+    app.shutdown().await;
+}
+#[tokio::test]
+async fn uploaded_presets_need_explicit_grant_and_stop_after_revocation() {
+    let f = Fixture::new();
+    let app = &f.app;
+    let ssh = ssh(app).await;
+    let plugin = app
+        .plugin_install(InstallInput {
+            path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../plugins/system/packages/docker.sdplugin"),
+            development_confirmed: true,
+            expected_version: None,
+            expected_digest: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        plugin.source,
+        serverdeck_plugin_core::repository::PluginSource::User
+    );
+    assert!(
+        app.plugin_permissions(plugin.manifest.id.clone())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let id = &plugin.manifest.id;
+    let operation = Primitive::Execute {
+        host_id: ssh.host.id.clone(),
+        command: plugin.manifest.preapproved_commands[0].clone(),
+    };
+    app.plugin_set_enabled(id.clone(), true).await.unwrap();
+    assert_eq!(
+        call(app, id, "upload-page", operation.clone())
+            .await
+            .error
+            .unwrap()
+            .code,
+        "PLUGIN_PERMISSION_DENIED"
+    );
+    app.plugin_grant(
+        id.clone(),
+        GrantInput {
+            expected_revision: plugin.revision.clone(),
+            permissions: vec![Permission::SshExecute],
+            operations: vec!["ssh.execute".into()],
+            read_roots: vec![],
+            write_roots: vec![],
+            confirmed: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        call(app, id, "upload-page", operation.clone())
+            .await
+            .error
+            .unwrap()
+            .code,
+        "PLUGIN_CONFIRMATION_REQUIRED"
+    );
+    assert!(ssh.calls.lock().unwrap().is_empty());
+    f.grant(&plugin).await;
+    let result = call(app, id, "upload-page", operation.clone()).await;
+    assert!(result.error.is_none(), "{result:?}");
+    assert_eq!(result.result["exitCode"], 0);
+    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    app.plugin_revoke(id.clone()).await.unwrap();
+    assert_eq!(
+        serverdeck_core::IpcError::from(
+            app.plugin_capability_scoped(id, "upload-page", request(cap(operation)))
+                .await
+                .unwrap_err()
+        )
+        .code,
+        "PLUGIN_CANCELLED"
+    );
+    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    app.shutdown().await;
 }
 #[tokio::test]
 async fn wasm_exec_uses_real_ssh_frozen_endpoint_literal_arguments_and_rejects_changed_target() {

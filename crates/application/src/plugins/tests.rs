@@ -128,6 +128,7 @@ impl Fixture {
                 ui: None,
             },
             permissions: permissions(),
+            preapproved_commands: vec![],
             contributions: vec![],
             platforms: vec![std::env::consts::OS.into()],
             files: vec![],

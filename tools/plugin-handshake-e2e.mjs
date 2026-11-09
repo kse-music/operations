@@ -5,18 +5,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
+import { discoverSystemPlugins } from './system-plugins.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const qa = path.join(root, '.local/qa/plugin-handshake');
 await mkdir(qa, { recursive: true });
-const before = process.argv.includes('--before');
-const inputs = before
-  ? [path.join(qa, 'nginx-before.sdplugin')]
-  : process.argv.slice(2).length
-    ? process.argv.slice(2)
-    : ['nginx', 'docker', 'assistant'].map((name) =>
-        path.join(root, 'plugins/system/packages', `${name}.sdplugin`),
-      );
+const inputs = process.argv.slice(2).length
+  ? process.argv.slice(2)
+  : (await discoverSystemPlugins(root)).map(({ destination }) => path.join(root, destination));
 const packages = await Promise.all(
   inputs.map(async (file) => {
     const pkg = JSON.parse(await readFile(file, 'utf8'));
@@ -113,44 +109,33 @@ try {
   await page.goto(`http://127.0.0.1:19429/@fs/${html.replaceAll('\\', '/')}`);
   await page.waitForFunction(() => window.handshakeHarnessReady === true);
   for (const pkg of packages) {
-    for (let attempt = 0; attempt < (before ? 1 : 2); attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       await page.evaluate((value) => window.mountHandshake(value), pkg);
-      if (before) {
-        await page
-          .getByText('插件界面加载超时，请重新加载。', { exact: false })
-          .waitFor({ timeout: 18000 });
-        assert.equal(await page.frameLocator('iframe').locator('#app > *').count(), 0);
-        results.push({ id: pkg.manifest.id, reproducedTimeout: true });
-      } else {
-        try {
-          await page.frameLocator('iframe').locator('#app > *').first().waitFor({ timeout: 10000 });
-        } catch (error) {
-          console.error(
-            JSON.stringify({
-              id: pkg.manifest.id,
-              errors,
-              host: await page.locator('body').innerText(),
-            }),
-          );
-          await page.screenshot({ path: path.join(qa, 'browser-failure.png') });
-          throw error;
-        }
-        assert.equal(await page.getByText('正在加载插件界面…').count(), 0);
-        assert.equal(await page.getByText('插件界面加载超时', { exact: false }).count(), 0);
-        results.push({
-          id: pkg.manifest.id,
-          version: pkg.manifest.version,
-          attempt,
-          mounted: true,
-        });
+      try {
+        await page.frameLocator('iframe').locator('#app > *').first().waitFor({ timeout: 10000 });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            id: pkg.manifest.id,
+            errors,
+            host: await page.locator('body').innerText(),
+          }),
+        );
+        await page.screenshot({ path: path.join(qa, 'browser-failure.png') });
+        throw error;
       }
+      assert.equal(await page.getByText('正在加载插件界面…').count(), 0);
+      assert.equal(await page.getByText('插件界面加载超时', { exact: false }).count(), 0);
+      results.push({
+        id: pkg.manifest.id,
+        version: pkg.manifest.version,
+        attempt,
+        mounted: true,
+      });
     }
   }
   assert.deepEqual(errors, []);
-  await writeFile(
-    path.join(qa, before ? 'browser-before.json' : 'browser-after.json'),
-    JSON.stringify(results, null, 2),
-  );
+  await writeFile(path.join(qa, 'browser-after.json'), JSON.stringify(results, null, 2));
   console.log(JSON.stringify(results));
 } finally {
   await browser?.close();

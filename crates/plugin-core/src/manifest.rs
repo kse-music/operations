@@ -20,6 +20,8 @@ pub struct Manifest {
     pub api_version: String,
     pub entry: Entry,
     pub permissions: Vec<Permission>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preapproved_commands: Vec<serverdeck_plugin_sdk::platform::Command>,
     pub contributions: Vec<Contribution>,
     pub platforms: Vec<String>,
     pub files: Vec<FileDigest>,
@@ -157,6 +159,32 @@ impl Manifest {
         let permissions: BTreeSet<_> = self.permissions.iter().collect();
         if permissions.len() != self.permissions.len() || self.contributions.len() > 32 {
             return Err(invalid("插件权限重复或 UI 贡献超限"));
+        }
+        if self.preapproved_commands.len() > 16
+            || (!self.preapproved_commands.is_empty()
+                && (!permissions.contains(&Permission::SshExecute)
+                    || !permissions.contains(&Permission::SshExecutePreapproved)))
+            || (permissions.contains(&Permission::SshExecutePreapproved)
+                && self.preapproved_commands.is_empty())
+        {
+            return Err(invalid("固定命令预授权需要 SSH 权限和 1–16 条完整命令"));
+        }
+        let mut commands = BTreeSet::new();
+        for command in &self.preapproved_commands {
+            command
+                .validate()
+                .map_err(|_| invalid("预授权命令参数无效"))?;
+            if !commands.insert(command.shell().map_err(|_| invalid("预授权命令参数无效"))?)
+            {
+                return Err(invalid("预授权命令重复"));
+            }
+        }
+        if serde_json::to_vec(&self.preapproved_commands)
+            .map_err(|_| invalid("预授权命令编码失败"))?
+            .len()
+            > 48 * 1024
+        {
+            return Err(invalid("预授权命令总量超过 48 KiB"));
         }
         let mut contribution_ids = BTreeSet::new();
         for c in &self.contributions {

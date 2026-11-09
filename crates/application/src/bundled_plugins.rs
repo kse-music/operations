@@ -213,6 +213,7 @@ fn bundled_grant(
             Permission::ModelsUse => &["models.use"][..],
             Permission::HostsRead => &["hosts.read"],
             Permission::SshExecute => &["ssh.execute"],
+            Permission::SshExecutePreapproved => &["ssh.execute.preapproved"],
             Permission::SftpRead => &["sftp.read"],
             Permission::SftpWrite => &["sftp.write"],
             Permission::UiContribute => &["ui.contribute", "ui.notify"],

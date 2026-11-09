@@ -3,7 +3,7 @@
   "id": "cn.hiboot.plugins.docker",
   "name": "Docker 管理",
   "icon": "container",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "author": "ServerDeck",
   "description": "管理 Docker 容器与镜像，查看详情、日志并打开容器终端。",
   "apiVersion": "^5.0.0",
@@ -11,7 +11,13 @@
     "backend": "backend.wasm",
     "ui": "ui.json"
   },
-  "permissions": ["ui.contribute", "hosts.read", "ssh.execute", "network.connect"],
+  "permissions": [
+    "ui.contribute",
+    "hosts.read",
+    "ssh.execute",
+    "ssh.execute.preapproved",
+    "network.connect"
+  ],
   "contributions": [
     {
       "id": "server",
@@ -22,5 +28,31 @@
   ],
   "platforms": ["windows", "linux", "macos"],
   "files": [],
-  "publisher": null
+  "publisher": null,
+  "preapprovedCommands": [
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; if ! command -v docker >/dev/null 2>&1; then printf '{\"dockerInstalled\":false,\"dockerState\":\"absent\"}'; else d version --format '{{json .}}'; fi"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; d container ls --all --no-trunc --format '{{json .}}'"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; d image ls --all --no-trunc --digests --format '{{json .}}'"
+      ],
+      "timeoutSecs": 30
+    }
+  ]
 }

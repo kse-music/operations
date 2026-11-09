@@ -30,6 +30,6 @@
 
 ## 本次版本与限制
 
-助手包2.0.0，使用SDK5；Docker2.0.0、Nginx1.1.0及外部MySQL2.0.0使用相同平台。SDK4开发期包须重新构建。远端须具备相应Linux工具及SSH用户权限，平台不自动提权或安装远端软件。Windows已进行本轮验证；真实模型账号调用、本地CLI账号费用、macOS/Linux客户端和其他工具版本需在实际环境另行验证。
+助手包2.0.0，使用SDK5；Docker2.0.0及外部MySQL2.0.0使用相同平台。SDK4开发期包须重新构建。远端须具备相应Linux工具及SSH用户权限，平台不自动提权或安装远端软件。Windows已进行本轮验证；真实模型账号调用、本地CLI账号费用、macOS/Linux客户端和其他工具版本需在实际环境另行验证。
 
 接口和安全细节见[SDK](../plugins/PLUGIN_SDK.md)、[插件验证](../validation/plugins/PLUGIN_TEST_REPORT.md)。

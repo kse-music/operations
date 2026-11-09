@@ -1,8 +1,18 @@
 # ServerDeck v0.1 架构
 
+## 2026-11-09 固定命令预授权
+
+可选 Manifest `preapprovedCommands` 保存最多 16 条完整 `Command`，总编码量不超过 48 KiB，需同时声明 `ssh.execute` 和 `ssh.execute.preapproved`。Rust 校验参数、重复项和配额；授权继续绑定包摘要和安装修订。通用 Execute 入口在权限、绑定和实际 SSH 配置检查后，仅对已获独立预授权且 program/args/timeoutSecs 完全匹配的命令跳过单次审批；StreamOpen、Terminal、SaveFile、TcpConnect 不适用。执行槽、超时、输出限额、取消及执行前后目标复验保持原样，无服务名或插件 ID 特判。
+
+Docker 2.0.2 仅声明版本检测、容器列表和镜像列表。命令仍由插件构造和解析，插件后端测试核对声明与实际命令一致。上传包默认无该授权，权限页展示原始完整命令并提供独立勾选；系统来源仅决定分发和预置权限，不证明远端命令只读。未声明此可选能力的插件行为保持当前逐次审批规则。
+
+## 2026-11-09 移除 Nginx 内置实现
+
+删除 `plugins/system/nginx` 及专属 WASM/服务测试分支；构建继续从完整源码目录自动发现，只嵌入助手和 Docker。握手回归使用相同源码发现结果，不维护固定插件名单；通用 SSH 测试环境移除 Nginx 服务和 HTTP 端口。平台 SDK、IPC、数据库和通用草稿/文件/审批能力不变。旧安装仍由普通插件仓库管理，不增加退役黑名单、启动卸载或数据清理；下方 Nginx 实现章节仅记录当时设计。
+
 ## 当前插件平台边界（SDK5，2026-11-09）
 
-Host/Rust/TypeScript SDK统一5.0.0，UI4、ABI/wire1。Docker、AI助手、Nginx及外部MySQL的命令/SQL/解析/脱敏/提示词/计划/DTO均归插件；宿主只提供通用SSH执行/字节流/PTY、SFTP原子编辑、模型消息传输、公开资产元数据、插件配置、权限与单次确认。公开SDK不包含桌面Store、服务枚举或特定插件ID的业务特权。
+Host/Rust/TypeScript SDK统一5.0.0，UI4、ABI/wire1。Docker、AI助手及外部MySQL的命令/SQL/解析/脱敏/提示词/计划/DTO均归插件；宿主只提供通用SSH执行/字节流/PTY、SFTP原子编辑、模型消息传输、公开资产元数据、插件配置、权限与单次确认。公开SDK不包含桌面Store、服务枚举或特定插件ID的业务特权。
 
 目标显式hostId，Native冻结并复验实际SSH配置；模型使用修订绑定。页面owner隔离资源，审批续接原WASM Future而不重放动作。全部插件相同执行配额，关闭owner只撤销自有工作。系统来源仅决定分发及预置授权。新增完整plugins/system目录自动构建/注册；外部包从下载SDK独立开发后上传。当前精确接口和配额以[SDK文档](../plugins/PLUGIN_SDK.md)为准。
 

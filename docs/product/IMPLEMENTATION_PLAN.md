@@ -1,5 +1,15 @@
 # ServerDeck v0.1 实施计划
 
+## 2026-11-09 Docker 列表查询免重复确认
+
+Docker 2.0.2 的版本检测、容器列表和镜像列表已按完整命令预授权，进入、切换及刷新不再逐条审批；停止、删除、Shell、日志和未声明命令保留原流程。通用 Manifest、Rust/TypeScript 权限、授权设置、系统预置和 SDK 文档同步；无服务专用宿主分支或用户配置重置。修改前回环 SSH 测试复现审批拦截，修复后验证三类查询重复执行无审批、变更取消零远程命令、命令篡改/目标变化拒绝，以及上传包显式授权和撤权。
+
+前端专项 10 项、SDK 4 项、插件核心 25 项、Docker 后端 3 项、应用原生 55 项通过（另 1 项外部验收忽略），类型、ESLint、修改模块严格 Clippy、格式和普通 Windows Debug EXE 构建通过。包含依赖的 Clippy 被既有 `openssh.rs` 单元素循环告警阻断。未运行截图服务器的真实 Docker/桌面交互或跨平台验收，未生成安装器。详情见[修复验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-列表查询免重复确认)。下一步依赖用户正常退出旧程序并启动本次新版；本阶段完成后停止。
+
+## 2026-11-09 移除 Nginx 内置插件
+
+已删除 Nginx 独立源码和声明、专属前后端测试、WASM 集成与真实服务测试分支，以及握手脚本中的固定包引用和 Nginx 测试服务配置。当前内置来源为助手和 Docker，原有用户安装与配置保留；不扩展到远端服务卸载或插件数据迁移。验证结果与交付边界见[移除验证](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-09-移除-nginx-内置插件)。下方 Nginx 开发及验收章节保留为历史记录，本阶段结束后不继续其他功能开发。
+
 ## 2026-11-09 界面文本选择范围
 
 应用外壳默认禁止原生文字选择，表单、文本输出和通知正文按需允许选择。旧样式已通过真实鼠标拖动复现标题可选中，修复后五组 Edge 检查通过，覆盖界面拖选和 Ctrl+A、页面及弹窗通知的选中复制、输入框与文本内容区。未重建桌面程序，详见[布局验证](../validation/workspace/VALIDATION_LAYOUT.md#2026-11-09-界面文本选择范围)。
@@ -12,7 +22,7 @@
 
 本阶段已实现并验证，证据见[SDK5验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-09-sdk5-平台边界与插件闭环)。未生成安装器，非Windows/真实账号与完整远端SFTP验收范围见该记录。
 
-Host/Rust/TypeScript SDK统一5.0.0，UI4、ABI/wire1。Docker、AI助手、Nginx及外部MySQL的命令/SQL/解析/脱敏/提示词/计划/DTO均归插件；宿主只提供通用SSH执行/字节流/PTY、SFTP原子编辑、模型消息传输、公开资产元数据、插件配置、权限与单次确认。公开SDK不包含桌面Store、服务枚举或特定插件ID的业务特权。
+Host/Rust/TypeScript SDK统一5.0.0，UI4、ABI/wire1。Docker、AI助手及外部MySQL的命令/SQL/解析/脱敏/提示词/计划/DTO均归插件；宿主只提供通用SSH执行/字节流/PTY、SFTP原子编辑、模型消息传输、公开资产元数据、插件配置、权限与单次确认。公开SDK不包含桌面Store、服务枚举或特定插件ID的业务特权。
 
 目标显式hostId，Native冻结并复验实际SSH配置；模型使用修订绑定。页面owner隔离资源，审批续接原WASM Future而不重放动作。全部插件相同执行配额，关闭owner只撤销自有工作。系统来源仅决定分发及预置授权。新增完整plugins/system目录自动构建/注册；外部包从下载SDK独立开发后上传。当前精确接口和配额以[SDK文档](../plugins/PLUGIN_SDK.md)为准。
 

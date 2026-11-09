@@ -170,6 +170,35 @@ pub fn shell_command(id: &str, bash: bool) -> Result<String, ApiError> {
 mod tests {
     use super::*;
     #[test]
+    fn package_preapproves_only_the_three_fixed_page_queries() {
+        let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+        let commands: Vec<serverdeck_plugin_sdk::platform::Command> =
+            serde_json::from_value(manifest["preapprovedCommands"].clone()).unwrap();
+        let expected = [Query::Capabilities, Query::Containers, Query::Images]
+            .iter()
+            .map(|query| serverdeck_plugin_sdk::platform::Command::script(query.command().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(commands, expected);
+        let id = "a".repeat(64);
+        for query in [
+            Query::ContainerAction {
+                id: id.clone(),
+                action: Action::Stop,
+                confirmed: true,
+            },
+            Query::ImageRemove {
+                id,
+                confirmed: true,
+            },
+        ] {
+            assert!(
+                !commands.contains(&serverdeck_plugin_sdk::platform::Command::script(
+                    query.command().unwrap()
+                ))
+            );
+        }
+    }
+    #[test]
     fn targets_and_confirmation_are_enforced() {
         for id in ["short", "-x", "a; rm -rf /"] {
             assert!(container_id(id).is_err());

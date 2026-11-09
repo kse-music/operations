@@ -28,6 +28,7 @@ fn plugin() -> InstalledPlugin {
                 Permission::SettingsRead,
                 Permission::SettingsWrite,
             ],
+            preapproved_commands: vec![],
             contributions: vec![],
             platforms: vec![std::env::consts::OS.into()],
             files: vec![],
@@ -118,6 +119,102 @@ fn permissions_are_default_deny_and_every_command_requires_confirmation() {
     assert!(serde_json::from_str::<Request>(r#"{"apiVersion":1,"requestId":"x","pluginId":"dev.other","operation":{"kind":"platform","request":{"kind":"hosts"},"bindings":[]}}"#).is_err());
     assert!(serde_json::from_str::<Request>(r#"{"apiVersion":1,"requestId":"x","operation":{"kind":"platform","request":{"kind":"execute","hostId":"host","command":{"program":"reboot","args":[],"timeoutSecs":10},"readOnly":true},"bindings":[]}}"#).is_err());
     assert!(serde_json::from_str::<Request>(r#"{"apiVersion":1,"requestId":"x","operation":{"kind":"system_query","request":{"kind":"containers"}}}"#).is_err());
+}
+#[test]
+fn preset_execution_requires_a_separate_revision_bound_grant_and_exact_command() {
+    let mut plugin = plugin();
+    let command = Command::new("fixture-tool").arg("literal argument");
+    plugin
+        .manifest
+        .permissions
+        .push(Permission::SshExecutePreapproved);
+    plugin.manifest.preapproved_commands = vec![command.clone()];
+    plugin.manifest.validate(std::env::consts::OS).unwrap();
+    let operation = cap(Primitive::Execute {
+        host_id: "host".into(),
+        command: command.clone(),
+    });
+    let mut input = input();
+    input.permissions = plugin.manifest.permissions.clone();
+    input
+        .permissions
+        .retain(|permission| *permission != Permission::SshExecutePreapproved);
+    input.operations.push("ssh.execute".into());
+    let mut grant = Grant::new(&plugin, input).unwrap();
+    assert!(!grant.preapproves(&plugin, &operation));
+    grant.permissions.push(Permission::SshExecutePreapproved);
+    assert!(!grant.preapproves(&plugin, &operation));
+    grant.operations.push("ssh.execute.preapproved".into());
+    assert!(grant.preapproves(&plugin, &operation));
+    for changed in [
+        Command::new("another-tool").arg("literal argument"),
+        command.clone().arg("; reboot"),
+        Command {
+            timeout_secs: 1,
+            ..command.clone()
+        },
+    ] {
+        assert!(!grant.preapproves(
+            &plugin,
+            &cap(Primitive::Execute {
+                host_id: "host".into(),
+                command: changed
+            })
+        ));
+    }
+    for operation in [
+        cap(Primitive::StreamOpen {
+            host_id: "host".into(),
+            command: command.clone(),
+        }),
+        cap(Primitive::Terminal {
+            host_id: "host".into(),
+            command,
+        }),
+    ] {
+        assert!(!grant.preapproves(&plugin, &operation));
+    }
+    for field in 0..4 {
+        let mut changed = plugin.clone();
+        match field {
+            0 => changed.revision = "upgraded".into(),
+            1 => changed.package_digest = "tampered".into(),
+            2 => changed.enabled = false,
+            _ => changed.manifest.preapproved_commands.clear(),
+        }
+        assert!(!grant.preapproves(&changed, &operation));
+    }
+    grant
+        .permissions
+        .retain(|permission| *permission != Permission::SshExecute);
+    assert!(!grant.preapproves(&plugin, &operation));
+}
+
+#[test]
+fn preset_manifest_rejects_undeclared_invalid_duplicate_and_excessive_commands() {
+    let mut manifest = plugin().manifest;
+    let command = Command::new("fixture-tool").arg("literal");
+    manifest.preapproved_commands = vec![command.clone()];
+    assert!(manifest.validate(std::env::consts::OS).is_err());
+    manifest.permissions.push(Permission::SshExecutePreapproved);
+    manifest.validate(std::env::consts::OS).unwrap();
+    for commands in [
+        vec![],
+        vec![command.clone(), command.clone()],
+        vec![command; 17],
+        vec![Command::new("fixture-tool").arg("bad\0argument")],
+        (0..16)
+            .map(|index| Command::new("fixture-tool").arg(format!("{index}{}", "x".repeat(4000))))
+            .collect(),
+    ] {
+        let mut changed = manifest.clone();
+        changed.preapproved_commands = commands;
+        assert!(changed.validate(std::env::consts::OS).is_err());
+    }
+    manifest
+        .permissions
+        .retain(|permission| *permission != Permission::SshExecute);
+    assert!(manifest.validate(std::env::consts::OS).is_err());
 }
 #[test]
 fn file_roots_use_path_component_boundaries_and_cannot_escape() {

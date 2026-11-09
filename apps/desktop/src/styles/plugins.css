@@ -704,6 +704,11 @@
   font-size: var(--font-size-caption);
   color: var(--muted);
 }
+.plugin-preset-commands pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--font-size-caption);
+}
 .plugin-grant-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

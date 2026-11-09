@@ -9,6 +9,7 @@ pub const OPERATIONS: &[&str] = &[
     "network.connect",
     "hosts.read",
     "ssh.execute",
+    "ssh.execute.preapproved",
     "sftp.read",
     "sftp.write",
     "settings.read",
@@ -124,6 +125,30 @@ impl Grant {
             return Err(denied());
         }
         Ok(())
+    }
+    /// An explicit grant approves only immutable, fully specified package commands.
+    /// It does not classify arbitrary commands as read-only or apply to streams/PTYs.
+    pub fn preapproves(&self, plugin: &InstalledPlugin, operation: &Capability) -> bool {
+        let Capability::Platform {
+            request: serverdeck_plugin_sdk::platform::Request::Execute { command, .. },
+            ..
+        } = operation
+        else {
+            return false;
+        };
+        self.authorize(plugin, operation).is_ok()
+            && plugin
+                .manifest
+                .permissions
+                .contains(&Permission::SshExecutePreapproved)
+            && self
+                .permissions
+                .contains(&Permission::SshExecutePreapproved)
+            && self
+                .operations
+                .iter()
+                .any(|name| name == "ssh.execute.preapproved")
+            && plugin.manifest.preapproved_commands.contains(command)
     }
 }
 pub fn denied() -> Error {

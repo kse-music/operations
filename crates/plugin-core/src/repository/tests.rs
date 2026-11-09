@@ -25,6 +25,7 @@ fn package(version: &str) -> Package {
                 ui: None,
             },
             permissions: vec![],
+            preapproved_commands: vec![],
             contributions: vec![],
             platforms: vec![std::env::consts::OS.into()],
             publisher: None,

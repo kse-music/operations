@@ -3,6 +3,7 @@ export type PluginPermission =
   | 'models.use'
   | 'hosts.read'
   | 'ssh.execute'
+  | 'ssh.execute.preapproved'
   | 'sftp.read'
   | 'sftp.write'
   | 'ui.contribute'
@@ -19,6 +20,7 @@ export interface PluginManifest {
   apiVersion: string;
   entry: { backend: string | null; ui: string | null };
   permissions: PluginPermission[];
+  preapprovedCommands?: import('./platform').Command[];
   contributions: {
     id: string;
     label: string;

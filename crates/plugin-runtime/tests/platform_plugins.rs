@@ -72,17 +72,3 @@ async fn assistant_owns_redaction_and_preview_inside_the_packaged_wasm() {
     }
     panic!("The preview did not finish within its bounded platform sequence");
 }
-#[tokio::test]
-async fn nginx_owns_commands_and_parses_remote_failure_without_a_native_nginx_api() {
-    let (_directory, runtime, id) = packaged("nginx");
-    runtime.activate(&id).await.unwrap();
-    let reply=runtime.call(&id,json!({"action":"nginx","input":{"hostId":"host","target":{"kind":"host"},"configPath":"/etc/nginx/nginx.conf","action":"reload"}})).await.unwrap();
-    let request = operation(&reply);
-    assert_eq!(request["kind"], "execute");
-    let script = request["command"]["args"][1].as_str().unwrap();
-    assert!(script.contains("nginx -t"));
-    assert!(script.contains("&&"));
-    let reply=resume(&runtime,&id,&reply,json!({"state":"completed","exitCode":1,"stdout":"","stderr":"invalid config","message":null,"truncated":false})).await;
-    assert_eq!(reply.error.unwrap().code, "REMOTE_COMMAND");
-    runtime.shutdown().await.unwrap();
-}

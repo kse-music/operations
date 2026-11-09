@@ -6,7 +6,7 @@ Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.0.0**；WASM ABI / wire �
 
 插件提供完整业务：页面、命令/SQL、参数校验、结果解析、健康规则、提示词、工具循环、计划及复查。SDK 只提供平台协议、调用客户端、生命周期和通用界面基础。宿主管理身份、凭据、SSH/SFTP、模型传输、权限、审批和资源配额。
 
-SDK **没有** Docker / Nginx / MySQL / AI 运维助手业务接口，也没有桌面 Store、任意 Tauri 转发、系统查询枚举或特定插件 ID 的特权分支。容器操作由插件通过通用 SSH 执行 `docker`，模型业务由插件构造消息调用通用模型能力。新增服务插件只新增完整插件目录；无需修改 SDK、宿主路由或原生业务后端。
+SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 Store、任意 Tauri 转发、系统查询枚举或特定插件 ID 的特权分支。容器操作由插件通过通用 SSH 执行 `docker`，模型业务由插件构造消息调用通用模型能力。新增服务插件只新增完整插件目录；无需修改 SDK、宿主路由或原生业务后端。
 
 | 内容                             | 位置 / 入口                                          |
 | -------------------------------- | ---------------------------------------------------- |
@@ -75,7 +75,9 @@ Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Cap
 
 `Command { program, args, timeoutSecs }` 将程序和参数逐项 POSIX 引用；无需人工拼接。只有明确需要 shell 时使用 `Command::script`，插件仍必须验证/引用插入脚本的值。程序 ≤4096 字节、参数 ≤128 个且每个 ≤8192 字节、合计 ≤16384 字节，无 NUL；Execute 超时 1–30 秒。Stream/PTY 持续到显式关闭或页面生命周期结束。
 
-所有 Execute、StreamOpen、Terminal、SaveFile、TcpConnect 均经可信宿主**逐次确认真实目标与命令/写入摘要**；没有服务名白名单或 Guest 的 confirmed 免审。`models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
+Execute 默认经可信宿主**逐次确认真实目标与命令**。可选 Manifest `preapprovedCommands` 声明 1–16 条完整 Command（合计 JSON ≤48 KiB），同时声明并独立授予 `ssh.execute.preapproved` 权限及同名 operation 后，只有 program、args、timeoutSecs 完全匹配的 Execute 使用预授权；仍需 `ssh.execute`。预授权匹配不支持参数模板或通配符，脚本内容按原样精确匹配；上传包权限页展示完整命令，默认未选此能力，升级按原包摘要/修订重新授权。该机制不保证命令只读，不接受 Guest 的 `readOnly`/`confirmed` 免审，也无服务名白名单。StreamOpen、Terminal、SaveFile、TcpConnect 始终逐次确认真实目标与命令/写入摘要。
+
+`models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
 
 ## 前端闭环
 

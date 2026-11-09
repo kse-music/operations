@@ -1,5 +1,11 @@
 # 验证记录索引
 
+最新：[Docker 列表查询免重复确认：完整命令预授权、上传权限及原生 SSH 回归](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-列表查询免重复确认)。
+
+最新：[移除 Nginx 内置源码、测试分支和分发，仅保留助手与 Docker](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-移除-nginx-内置插件)。
+
+最新：[本机缺失字号配置的备份修复与真实桌面启动验证](foundation/VALIDATION_PRE_RELEASE_CLEANUP.md#2026-11-09-本机缺失字号配置导致启动失败)。
+
 最新：[界面文字禁止拖选，通知及输入内容保留选中复制](workspace/VALIDATION_LAYOUT.md#2026-11-09-界面文本选择范围)。
 
 最新：[插件启停移至设置列表，保留确认、权限和失败反馈](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-插件列表启停)。

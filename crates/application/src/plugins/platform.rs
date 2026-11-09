@@ -252,6 +252,7 @@ impl Application {
             bindings: bindings.clone(),
         };
         if request.needs_confirmation()
+            && !grant.preapproves(plugin, &operation)
             && let Some(approval) = self.plugin_confirmation_bound(
                 call,
                 plugin,

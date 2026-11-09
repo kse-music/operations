@@ -6,7 +6,7 @@ New-Item -ItemType Directory -Path $stateDirectory,(Join-Path $stateDirectory 't
 $containerName = 'serverdeck-plugin13a-' + [Guid]::NewGuid().ToString('N')
 $containerId = $null
 $taskPassword = [Guid]::NewGuid().ToString('N') + 'SdA1!'
-$keys = @('SERVERDECK_PLUGIN_TEST_PORT','SERVERDECK_PLUGIN_TEST_HTTP_PORT','SERVERDECK_PLUGIN_TEST_PASSWORD','SERVERDECK_PLUGIN_TEST_HOST_KEY','SERVERDECK_PLUGIN_TEST_CONTAINER_ID','SERVERDECK_PLUGIN_TEST_DISTRO','SERVERDECK_PLUGIN_SDK_WASM','TEMP','TMP')
+$keys = @('SERVERDECK_PLUGIN_TEST_PORT','SERVERDECK_PLUGIN_TEST_PASSWORD','SERVERDECK_PLUGIN_TEST_HOST_KEY','SERVERDECK_PLUGIN_TEST_CONTAINER_ID','SERVERDECK_PLUGIN_TEST_DISTRO','SERVERDECK_PLUGIN_SDK_WASM','TEMP','TMP')
 $savedEnvironment = @{}
 Push-Location $workspace
 try {
@@ -26,14 +26,11 @@ function Docker([Parameter(ValueFromRemainingArguments=$true)][string[]]$Argumen
 }
 try {
     $env:SERVERDECK_PLUGIN_TEST_DISTRO = $Distro
-    $containerId = (Docker @('run','--detach','--name',$containerName,'--label','cn.hiboot.qa=plugin-13a','--memory','256m','--cpus','1','--pids-limit','128','--security-opt','no-new-privileges','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','SETUID','--cap-add','SETGID','--cap-add','SYS_CHROOT','--cap-add','NET_BIND_SERVICE','--cap-add','DAC_OVERRIDE','--tmpfs','/run:rw,nosuid,nodev,mode=755','--tmpfs','/home/plugin:rw,nodev,mode=755','--publish','127.0.0.1::22','--publish','127.0.0.1::8080','serverdeck-plugin13a-test:13a')).Trim()
+    $containerId = (Docker @('run','--detach','--name',$containerName,'--label','cn.hiboot.qa=plugin-13a','--memory','256m','--cpus','1','--pids-limit','128','--security-opt','no-new-privileges','--cap-drop','ALL','--cap-add','CHOWN','--cap-add','SETUID','--cap-add','SETGID','--cap-add','SYS_CHROOT','--cap-add','NET_BIND_SERVICE','--cap-add','DAC_OVERRIDE','--tmpfs','/run:rw,nosuid,nodev,mode=755','--tmpfs','/home/plugin:rw,nodev,mode=755','--publish','127.0.0.1::22','serverdeck-plugin13a-test:13a')).Trim()
     $portLine = (Docker @('port',$containerId,'22/tcp')).Trim()
     if ($portLine -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'Unexpected container SSH binding' }
     $env:SERVERDECK_PLUGIN_TEST_PORT = $Matches[1]
     $env:SERVERDECK_PLUGIN_TEST_CONTAINER_ID = $containerId
-    $httpBinding = (Docker @('port',$containerId,'8080/tcp')).Trim()
-    if ($httpBinding -notmatch '^127\.0\.0\.1:(\d+)$') { throw 'Unexpected container HTTP binding' }
-    $env:SERVERDECK_PLUGIN_TEST_HTTP_PORT = $Matches[1]
     # Feed ephemeral credentials through stdin only. Never argv, image layer, state file or stdout.
     $passwordProcessInfo = [System.Diagnostics.ProcessStartInfo]::new('wsl.exe')
     $passwordProcessInfo.UseShellExecute = $false

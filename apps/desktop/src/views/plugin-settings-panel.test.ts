@@ -131,6 +131,48 @@ it('does not overwrite permission edits when the installed list refreshes with u
   expect(root.querySelector<HTMLInputElement>('[aria-label="hosts.read"]')!.checked).toBe(true);
 });
 
+it('shows exact preset commands and grants them only after a separate explicit selection', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const plugins = usePluginsStore();
+  const plugin = { ...systemPluginFixtures()[0]!, source: 'user' as const };
+  plugin.manifest = {
+    ...plugin.manifest,
+    permissions: ['ui.contribute', 'ssh.execute', 'ssh.execute.preapproved'],
+    preapprovedCommands: [{ program: 'fixture-tool', args: ['literal; value'], timeoutSecs: 30 }],
+  };
+  plugins.installed = [plugin];
+  plugins.grants[plugin.manifest.id] = null;
+  const grant = vi.spyOn(pluginsApi, 'grant').mockResolvedValue({} as never);
+  vi.spyOn(plugins, 'refresh').mockResolvedValue();
+  await mount(plugin.manifest.id);
+  const preset = root.querySelector<HTMLInputElement>('[aria-label="ssh.execute.preapproved"]')!;
+  expect(preset.checked).toBe(false);
+  expect(root.querySelector('.plugin-preset-commands pre')?.textContent).toContain(
+    'literal; value',
+  );
+  expect(root.textContent).toContain('此授权不保证命令只读');
+  const execute = root.querySelector<HTMLInputElement>('[aria-label="ssh.execute"]')!;
+  execute.checked = true;
+  execute.dispatchEvent(new Event('change'));
+  await nextTick();
+  const submit = async () => {
+    root
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+  };
+  await submit();
+  expect(grant.mock.calls[0]![1].permissions).not.toContain('ssh.execute.preapproved');
+  expect(grant.mock.calls[0]![1].operations).not.toContain('ssh.execute.preapproved');
+  preset.checked = true;
+  preset.dispatchEvent(new Event('change'));
+  await nextTick();
+  await submit();
+  expect(grant.mock.calls[1]![1].permissions).toContain('ssh.execute.preapproved');
+  expect(grant.mock.calls[1]![1].operations).toContain('ssh.execute.preapproved');
+});
+
 it('opens an independent settings frontend without a host and returns to the plugin list on cancel', async () => {
   pinia = createPinia();
   setActivePinia(pinia);

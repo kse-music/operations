@@ -13,6 +13,8 @@ pub enum Permission {
     HostsRead,
     #[serde(rename = "ssh.execute")]
     SshExecute,
+    #[serde(rename = "ssh.execute.preapproved")]
+    SshExecutePreapproved,
     #[serde(rename = "sftp.read")]
     SftpRead,
     #[serde(rename = "sftp.write")]
