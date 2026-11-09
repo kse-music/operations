@@ -63,12 +63,12 @@ async function fixtures(page, theme) {
     hosts.selectedId = 'ui-0';
     application.error = null;
     application.state = {
-      appVersion: '0.3.0',
-      databaseVersion: 5,
+      appVersion: 'ui-test',
+      databaseVersion: 10,
       dataDirectory: '/ui-fixture/data',
       logDirectory: '/ui-fixture/logs',
       config: {
-        version: 1,
+        version: 2,
         theme,
         interfaceFontSize: 'standard',
         sidebarWidth: 248,

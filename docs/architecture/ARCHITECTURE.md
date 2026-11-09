@@ -24,6 +24,8 @@
 
 依赖方向以 `desktop → application → 具体服务 → core` 为主；`ssh → storage/security` 获取受管连接和秘密，SFTP/监控/执行复用 SSH 能力。模块不反向依赖 UI。仅秘密后端等必要边界使用窄接口，不引入通用依赖注入框架。
 
+产品版本只在根目录 `Cargo.toml` 的 `[workspace.package].version` 声明，平台 Rust 包使用 `version.workspace = true`。Tauri 不设置独立 `version`，使用 Cargo 包版本；关于页通过 bootstrap 读取应用层的 `CARGO_PKG_VERSION`。根目录及桌面 npm 私有工程不声明产品版本，发布清单工具通过 Cargo metadata 获取真实桌面版本，并拒绝 npm/Tauri 重复声明。`tools/tauri.mjs` 的 dev/build 在磁盘检查后自动调用 `prepareAppVersion`：先检查来源，再用 `cargo update --workspace` 同步生成锁记录，成功后原样转交 CLI 参数，失败停止；候选 CI 在 Rust 的 locked 检查前执行同一准备流程。用户无需额外命令，SDK、插件和数据格式版本独立。具体发布步骤见[发布检查表](../release/RELEASE_CHECKLIST.md#版本来源与更新)。
+
 ## 启动、IPC 与错误
 
 1. 单实例检查聚焦已有主窗口。
@@ -194,7 +196,11 @@ Ops 保留宿主自身类型化查询/变更及 ACK 日志流；Tasks 仅保留�
 
 ### 当前存储和用户迁移
 
-SQLite 由 bundled SQLite 提供，`user_version=9`，仅空且版本 0 的数据库用 `schema.sql` 初始化；现有版本 9 正常读取，其他版本拒绝且不改写。不为旧开发身份、设置缺字段/别名、旧 AI 模型或旧插件权限添加兼容转换，不删除既有闲置列/附加表。完整配置严格校验，新配置显式 Default。
+SQLite 由 bundled SQLite 提供，当前 `user_version=10`。`storage::migrations` 为新库和已支持的 schema 1–9 执行同一连续 SQL 链；10 起保存迁移名称和规范化换行的 SHA256 校验，拒绝历史变更、缺失及未来版本。表重建只处理已知结构，保留关联和闲置数据；未知字段/索引/触发器造成丢失风险时停止。空且版本 0 的库可初始化，无版本非空库不猜测来源。
+
+`Database::open` 在业务资源创建前持有 `BEGIN IMMEDIATE`，通过独立只读连接和 SQLite Backup API 保存一致快照（含 WAL）；副本校验、关闭和落盘并发布成功后，才在同一事务升级结构、应用配置和版本，完整性/外键检查通过后提交。备份位于数据库旁 `migration-backups/`，独立命名、不覆盖、不自动清理；路径拒绝链接/重解析点，失败副本保留为 `.partial`。失败不重置配置，原因链留在 Rust，IPC 仅展示安全阶段诊断。
+
+应用配置独立升级至 v2，在存储边界按已知 v1 契约补充新增字段、转换字号别名/退役快捷键，保留现有值和原更新时间；历史默认值及每步目标版本固定，当前 DTO/IPC 严格校验。模型注册 v1/旧单模型在首次使用时独立备份并事务升级为 v2，保留身份、修订和系统秘密引用；不读取秘密，不让损坏模型阻断主机启动。定位文件、插件协议/授权和旧身份目录没有被自动转换。完整步骤、支持范围与故障语义见[数据升级契约](DATA_MIGRATIONS.md)，取舍见[ADR 0028](decisions/0028-safe-data-upgrades.md)。
 
 `application_settings` 保存应用/终端/产品偏好、窗口几何和本地模型授权；不保存密码、私钥或对话正文。SQLite/系统库阻塞工作进入受限 `spawn_blocking`，元数据单任务、最多 16 个在途/等待、等待最长三秒，超限 BUSY；5 秒数据库 busy timeout、外键开启，不引入连接池或 WAL。
 
@@ -202,7 +208,7 @@ SQLite 由 bundled SQLite 提供，`user_version=9`，仅空且版本 0 的数�
 
 ### 日志与释放顺序
 
-tracing 仅记录操作、结果和安全原因类别，不记录 DTO、终端/文件/模型正文或凭据；依赖日志默认关闭。日志队列 512 条，当前文件加三个轮转文件、每个 1 MiB，总量 4 MiB；满队列/过大单条丢弃，业务错误本身仍传播，退出保持 guard 刷出队列。
+tracing 仅记录操作、结果和安全原因类别，不记录 DTO、终端/文件/模型正文或凭据；依赖日志默认关闭。定位数据目录后、数据库升级前先按 Info 初始化，升级成功再加载已保存日志级别，迁移失败也保留安全阶段和 SQLite/IO 类别诊断。日志队列 512 条，当前文件加三个轮转文件、每个 1 MiB，总量 4 MiB；满队列/过大单条丢弃，业务错误本身仍传播，退出保持 guard 刷出队列。
 
 退出先由前后端实时检查任务与 dirty 状态，不能依赖轮询快照跳过确认。确认后拒绝新用例，取消安装和插件自有资源/VM、模型、终端上传/本地终端，再排空通用执行、Ops、Monitor、文件和 SSH/转发，最后等待元数据工作并刷新日志。没有已移除调度器或自动化引擎的关闭步骤。
 

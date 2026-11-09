@@ -5,10 +5,12 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub mod ai;
+mod config_migrations;
 pub mod hosts;
+mod migrations;
 pub mod plugins;
 pub mod trust;
-use serverdeck_core::{AppConfig, DATABASE_VERSION, Error, product::WindowGeometry};
+use serverdeck_core::{AppConfig, Error, product::WindowGeometry};
 
 #[derive(Clone)]
 pub struct Database {
@@ -46,35 +48,18 @@ impl Database {
         let connection =
             Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
                 .map_err(storage_error)?;
-        let result: String = connection
-            .pragma_query_value(None, "quick_check", |row| row.get(0))
-            .map_err(storage_error)?;
-        if result != "ok" {
-            return Err(Error::Validation("迁移数据库完整性检查失败"));
-        }
-        let version: u32 = connection
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(storage_error)?;
-        if version != DATABASE_VERSION {
-            return Err(Error::UnsupportedDatabase(version));
-        }
-        let json: String = connection
-            .query_row(
-                "SELECT value FROM application_settings WHERE key = 'app_config'",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(storage_error)?;
-        serde_json::from_str::<AppConfig>(&json)
-            .map_err(storage_error)?
-            .validate()?;
-        Ok(())
+        migrations::verify(&connection)
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let database = Self {
-            path: path.as_ref().to_owned(),
+            path: if path.as_ref().is_absolute() {
+                path.as_ref().to_owned()
+            } else {
+                std::env::current_dir().map_err(storage_error)?.join(path)
+            },
         };
+        migrations::check_path(&database.path)?;
         if let Some(parent) = database.path.parent() {
             std::fs::create_dir_all(parent).map_err(storage_error)?;
         }
@@ -85,31 +70,7 @@ impl Database {
             std::fs::set_permissions(&database.path, std::fs::Permissions::from_mode(0o600))
                 .map_err(storage_error)?;
         }
-        // Serialize initialization without rewriting an existing schema.
-        let transaction = connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(storage_error)?;
-        let version: u32 = transaction
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .map_err(storage_error)?;
-        if version == 0 {
-            let tables: u32 = transaction.query_row(
-                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-                [], |row| row.get(0),
-            ).map_err(storage_error)?;
-            if tables != 0 {
-                return Err(Error::UnsupportedDatabase(version));
-            }
-            transaction
-                .execute_batch(include_str!("../schema.sql"))
-                .map_err(storage_error)?;
-            transaction
-                .pragma_update(None, "user_version", DATABASE_VERSION)
-                .map_err(storage_error)?;
-        } else if version != DATABASE_VERSION {
-            return Err(Error::UnsupportedDatabase(version));
-        }
-        transaction.commit().map_err(storage_error)?;
+        migrations::upgrade(&database, &mut connection)?;
         database.load_config()?;
         Ok(database)
     }
@@ -221,6 +182,7 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serverdeck_core::DATABASE_VERSION;
 
     #[test]
     fn current_schema_initializes_once_and_settings_survive_reopen() {
@@ -267,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn development_schemas_and_unversioned_data_are_rejected_without_changes() {
+    fn unrelated_or_unversioned_databases_are_rejected_without_changes() {
         for version in 0..DATABASE_VERSION {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("unsupported.sqlite3");
@@ -280,9 +242,7 @@ mod tests {
             connection
                 .pragma_update(None, "user_version", version)
                 .unwrap();
-            assert!(
-                matches!(Database::open(&path), Err(Error::UnsupportedDatabase(found)) if found == version)
-            );
+            assert!(Database::open(&path).is_err());
             assert_eq!(
                 connection
                     .query_row("SELECT value FROM retained", [], |row| row
@@ -318,7 +278,7 @@ mod tests {
         connection
             .execute("UPDATE application_settings SET value = 'broken'", [])
             .expect("corrupt");
-        assert!(matches!(Database::open(path), Err(Error::Storage(_))));
+        assert!(matches!(Database::open(path), Err(Error::Migration { .. })));
     }
 }
 

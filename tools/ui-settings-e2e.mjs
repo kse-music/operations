@@ -37,7 +37,7 @@ try {
       const root = 'D:\\ServerDeck\\' + '目录迁移与超长路径验证\\'.repeat(6);
       application.state = {
         appVersion: 'ui-test',
-        databaseVersion: 5,
+        databaseVersion: 10,
         dataDirectory: root,
         logDirectory: `${root}logs`,
         storage: {
@@ -49,7 +49,7 @@ try {
           notice: null,
         },
         config: {
-          version: 1,
+          version: 2,
           theme,
           interfaceFontSize: 'standard',
           sidebarWidth: 260,

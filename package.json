@@ -1,6 +1,5 @@
 {
   "name": "serverdeck",
-  "version": "0.3.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -17,7 +16,7 @@
     "build": "npm run build -w @serverdeck/desktop",
     "typecheck": "npm run typecheck -w @serverdeck/desktop && npm run typecheck -w @serverdeck/plugin-sdk",
     "test": "npm run test -w @serverdeck/desktop",
-    "test:build": "node --test tools/build-space.test.mjs tools/system-plugins.test.mjs",
+    "test:build": "node --test tools/build-space.test.mjs tools/system-plugins.test.mjs tools/app-version.test.mjs",
     "test:native": "node tools/native-e2e.mjs",
     "test:terminal": "node tools/native-terminal-e2e.mjs",
     "lint": "eslint apps/desktop/src apps/desktop/vite.config.ts packages/plugin-sdk/src plugins/system tests/fixtures/plugins/custom-ui/frontend tests/fixtures/plugins/host-info/frontend --max-warnings 0",

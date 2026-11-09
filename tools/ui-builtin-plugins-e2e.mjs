@@ -120,11 +120,11 @@ try {
         const application = useApplicationStore();
         application.state = {
           appVersion: 'layout-test',
-          databaseVersion: 9,
+          databaseVersion: 10,
           dataDirectory: '',
           logDirectory: '',
           config: {
-            version: 1,
+            version: 2,
             theme,
             interfaceFontSize: font,
             sidebarWidth: 260,
@@ -242,7 +242,6 @@ try {
           }
         };
         pluginsApi.call = async (_id, payload) => {
-          if (payload.action === 'history') return { result: [], error: null };
           if (payload.action !== 'query')
             throw new Error('Unexpected plugin fixture action: ' + payload.action);
           const kind = payload.input.request.kind;

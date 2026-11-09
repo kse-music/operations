@@ -5,7 +5,7 @@ import Docker from './App.vue';
 
 const api = vi.hoisted(() => ({
   query: vi.fn(),
-  feedback: vi.fn(async () => []),
+  actions: vi.fn<(action: string) => void>(),
   logOpen: vi.fn<(host: string, input: unknown) => Promise<{ id: string }>>(async () => ({
     id: 'container-log',
   })),
@@ -20,16 +20,16 @@ vi.mock('@serverdeck/plugin-sdk/context', () => ({
   }),
 }));
 vi.mock('@serverdeck/plugin-sdk', () => ({
-  invoke: (action: string, input: { hostId: string; request: unknown }) =>
-    action === 'query'
+  invoke: (action: string, input: { hostId: string; request: unknown }) => {
+    api.actions(action);
+    return action === 'query'
       ? api.query(input.hostId, input.request)
-      : action === 'history'
-        ? api.feedback()
-        : action === 'logs'
-          ? api.logOpen(input.hostId, input)
-          : action === 'shell'
-            ? Promise.resolve({ ticket: 'shell-ticket', hostId: input.hostId })
-            : Promise.reject(new Error('unexpected action')),
+      : action === 'logs'
+        ? api.logOpen(input.hostId, input)
+        : action === 'shell'
+          ? Promise.resolve({ ticket: 'shell-ticket', hostId: input.hostId })
+          : Promise.reject(new Error('unexpected action'));
+  },
 }));
 vi.mock('@serverdeck/plugin-sdk/terminal', () => ({ openTerminal: api.terminal }));
 vi.mock('@serverdeck/plugin-sdk/platform', () => ({
@@ -100,6 +100,8 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   app = createApp(Docker, { hostId: 'host', onShell: shell }).use(pinia);
   app.mount(root);
   await settle();
+  expect(root.textContent).not.toContain('操作反馈');
+  expect(root.querySelector('[role="alert"]')).toBeNull();
   const actionLabels = (id: string) =>
     [...root.querySelectorAll(`[data-ops-target="${id}"] .ops-row-actions button`)].map((button) =>
       button.textContent?.trim(),
@@ -263,4 +265,5 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   await click('刷新运维列表');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('Docker daemon unavailable');
   expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
+  expect(api.actions.mock.calls.some(([action]) => action === 'history')).toBe(false);
 });

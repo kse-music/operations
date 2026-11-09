@@ -23,13 +23,6 @@ export interface OpsResponse {
   records: Record<string, unknown>[];
   detail: Record<string, unknown> | null;
 }
-export interface Feedback {
-  at: number;
-  hostId: string;
-  operation: string;
-  target: string;
-  outcome: string;
-}
 export interface LogInput {
   source: { kind: 'container'; id: string };
   lines: number;

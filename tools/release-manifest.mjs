@@ -2,16 +2,12 @@ import { readFile, writeFile, stat, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { readAppVersion } from './app-version.mjs';
 const root = path.resolve(import.meta.dirname, '..');
 const config = JSON.parse(
   await readFile(path.join(root, 'apps/desktop/src-tauri/tauri.conf.json'), 'utf8'),
 );
-const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-const desktop = JSON.parse(await readFile(path.join(root, 'apps/desktop/package.json'), 'utf8'));
-const cargo = await readFile(path.join(root, 'Cargo.toml'), 'utf8');
-assert.equal(pkg.version, config.version);
-assert.equal(desktop.version, pkg.version);
-assert(cargo.includes(`version = "${pkg.version}"`));
+const version = readAppVersion(root);
 // Release readiness is tracked in docs/release/RELEASE_CHECKLIST.md, independently of the version.
 assert.equal(config.identifier, 'cn.hiboot.desktop', 'application must use the cn.hiboot identity');
 assert.equal(config.bundle.windows.nsis.installMode, 'currentUser');
@@ -28,7 +24,7 @@ assert(ico.readUInt16LE(4) > 1, 'multi-resolution desktop icon');
 const executable = path.resolve(root, 'target/release/serverdeck-desktop.exe');
 const installer = path.resolve(
   root,
-  `target/release/bundle/nsis/ServerDeck_${config.version}_x64-setup.exe`,
+  `target/release/bundle/nsis/ServerDeck_${version}_x64-setup.exe`,
 );
 const entries = [];
 for (const file of [executable, installer])
@@ -71,7 +67,7 @@ await writeFile(
   path.join(output, 'release-manifest.json'),
   JSON.stringify(
     {
-      version: config.version,
+      version,
       platform: 'windows-x86_64',
       signing: 'NotSigned (verified separately with Get-AuthenticodeSignature)',
       updater: false,

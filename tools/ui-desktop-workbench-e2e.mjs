@@ -63,11 +63,11 @@ try {
         aiApi.models = async () => [];
         useApplicationStore(pinia).state = {
           appVersion: 'layout-check',
-          databaseVersion: 9,
+          databaseVersion: 10,
           dataDirectory: 'D:/ServerDeck',
           logDirectory: 'D:/ServerDeck/logs',
           config: {
-            version: 1,
+            version: 2,
             theme,
             interfaceFontSize: size,
             sidebarWidth: 248,

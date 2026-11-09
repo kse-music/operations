@@ -22,6 +22,7 @@
 ## 架构与决策：architecture
 
 - [总体架构](architecture/ARCHITECTURE.md)：模块职责、数据流、接口和生命周期。
+- [数据库与配置升级](architecture/DATA_MIGRATIONS.md)：支持版本、事务与一致备份、失败恢复及后续迁移开发规则。
 - [技术决策](architecture/DECISIONS.md)：按主题索引独立 ADR，标明有效、部分替代和退出范围的关系。
 - [ADR 0001：SSH 候选库与密码学安全门禁](architecture/decisions/0001-ssh-crypto-gate.md)：独立决策记录。
 

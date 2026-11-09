@@ -24,12 +24,6 @@
           "label": "shell",
           "discardDirty": false,
           "enabledWhen": null
-        },
-        {
-          "id": "history",
-          "label": "history",
-          "discardDirty": false,
-          "enabledWhen": null
         }
       ],
       "initialAction": null,

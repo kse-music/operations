@@ -77,7 +77,22 @@ struct Registry {
     version: u32,
     models: Vec<ModelRecord>,
 }
-fn read(connection: &Connection) -> Result<Registry, Error> {
+const REGISTRY_VERSION: u32 = 2;
+
+fn upgrade_model_config(value: &mut serde_json::Value) -> Result<(), Error> {
+    let fields = value
+        .as_object_mut()
+        .ok_or(Error::Validation("模型配置须为对象"))?;
+    fields
+        .entry("contextWindowTokens")
+        .or_insert_with(|| serde_json::json!(131_072));
+    fields.remove("inputPricePerMillion");
+    fields.remove("outputPricePerMillion");
+    let config: Config = serde_json::from_value(value.clone()).map_err(storage_error)?;
+    config.validate()
+}
+
+fn read(database: &Database, connection: &Connection) -> Result<Registry, Error> {
     let value: Option<String> = connection
         .query_row(
             "SELECT value FROM application_settings WHERE key='ai_models'",
@@ -86,17 +101,76 @@ fn read(connection: &Connection) -> Result<Registry, Error> {
         )
         .optional()
         .map_err(storage_error)?;
-    if let Some(value) = value {
-        let registry: Registry = serde_json::from_str(&value).map_err(storage_error)?;
-        if registry.version != 1 {
-            return Err(Error::Validation("模型列表版本不受当前应用支持"));
+    let upgraded = if let Some(value) = value {
+        let mut value = super::config_migrations::json(&value)?;
+        match value["version"].as_u64() {
+            Some(version) if version == u64::from(REGISTRY_VERSION) => {
+                return serde_json::from_value(value).map_err(storage_error);
+            }
+            Some(1) => {
+                let models = value
+                    .get_mut("models")
+                    .and_then(serde_json::Value::as_array_mut)
+                    .ok_or(Error::Validation("模型列表格式无效"))?;
+                for model in models {
+                    let config = model
+                        .get_mut("config")
+                        .ok_or(Error::Validation("模型配置缺失"))?;
+                    upgrade_model_config(config)?;
+                }
+                value["version"] = serde_json::json!(2);
+                serde_json::from_value::<Registry>(value).map_err(storage_error)?
+            }
+            _ => return Err(Error::Validation("模型列表版本不受当前应用支持")),
         }
-        return Ok(registry);
+    } else {
+        let legacy: Option<String> = connection
+            .query_row(
+                "SELECT value FROM application_settings WHERE key='ai_config'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(storage_error)?;
+        let Some(legacy) = legacy else {
+            return Ok(Registry {
+                version: REGISTRY_VERSION,
+                models: vec![],
+            });
+        };
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Legacy {
+            config: Config,
+            secret_ref: Option<String>,
+            revision: String,
+        }
+        let mut value = super::config_migrations::json(&legacy)?;
+        let config = value
+            .get_mut("config")
+            .ok_or(Error::Validation("模型配置缺失"))?;
+        upgrade_model_config(config)?;
+        let legacy: Legacy = serde_json::from_value(value).map_err(storage_error)?;
+        Registry {
+            version: 2,
+            models: vec![ModelRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                name: "默认模型".into(),
+                config: legacy.config,
+                secret_ref: legacy.secret_ref,
+                revision: legacy.revision,
+            }],
+        }
+    };
+    if upgraded.version != REGISTRY_VERSION {
+        return Err(Error::Validation("模型配置升级路径不完整，未修改原数据"));
     }
-    Ok(Registry {
-        version: 1,
-        models: vec![],
-    })
+    // All callers hold a write transaction. Keep AI failures isolated from startup;
+    // the legacy row and the verified full database backup retain the original.
+    super::migrations::backup(database, serverdeck_core::DATABASE_VERSION)
+        .map_err(|error| super::migrations::failure("模型配置备份", error))?;
+    write(connection, &upgraded)?;
+    Ok(upgraded)
 }
 fn write(connection: &Connection, registry: &Registry) -> Result<(), Error> {
     let value = serde_json::to_string(registry).map_err(storage_error)?;
@@ -105,7 +179,13 @@ fn write(connection: &Connection, registry: &Registry) -> Result<(), Error> {
 }
 impl Database {
     pub fn ai_models(&self) -> Result<Vec<ModelRecord>, Error> {
-        Ok(read(&self.connect()?)?.models)
+        let mut connection = self.connect()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage_error)?;
+        let registry = read(self, &transaction)?;
+        transaction.commit().map_err(storage_error)?;
+        Ok(registry.models)
     }
     pub fn ai_model(&self, id: &str) -> Result<ModelRecord, Error> {
         self.ai_models()?
@@ -124,7 +204,7 @@ impl Database {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
-        let mut registry = read(&tx)?;
+        let mut registry = read(self, &tx)?;
         if registry
             .models
             .iter()
@@ -169,7 +249,7 @@ impl Database {
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
-        let mut registry = read(&tx)?;
+        let mut registry = read(self, &tx)?;
         let index = registry
             .models
             .iter()

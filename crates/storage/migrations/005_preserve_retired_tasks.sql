@@ -1,0 +1,2 @@
+-- Version 5 introduced retired task features. Keep their existing tables and data;
+-- do not initialize retired features in a new database.

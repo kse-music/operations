@@ -1,0 +1,39 @@
+{
+  "interfaceFontSize": "standard",
+  "transferConcurrency": 3,
+  "terminal": {
+    "fontFamily": "Cascadia Mono, Consolas, monospace",
+    "lineHeight": 100,
+    "scrollback": 5000,
+    "theme": "deck",
+    "cursorStyle": "block",
+    "cursorBlink": true,
+    "quickCopyPaste": false,
+    "pasteConfirmChars": 4096,
+    "shortcuts": {
+      "copy": "Ctrl+Shift+C",
+      "paste": "Ctrl+Shift+V",
+      "find": "Ctrl+Shift+F",
+      "splitRows": "Ctrl+Shift+H",
+      "splitColumns": "Ctrl+Shift+E",
+      "newTab": "Ctrl+Shift+T",
+      "closePane": "Ctrl+Shift+W",
+      "nextTab": "Ctrl+Shift+Right",
+      "previousTab": "Ctrl+Shift+Left",
+      "zoomIn": "Ctrl+Shift+=",
+      "zoomOut": "Ctrl+Shift+-"
+    }
+  },
+  "product": {
+    "language": "zh-CN",
+    "downloadDirectory": null,
+    "sshDefaults": {
+      "authTimeoutSecs": 15,
+      "keepaliveIntervalSecs": 15,
+      "keepaliveCountMax": 3,
+      "jumpHostId": null,
+      "proxy": null
+    },
+    "shortcuts": { "search": "Ctrl+K", "settings": "Ctrl+," }
+  }
+}

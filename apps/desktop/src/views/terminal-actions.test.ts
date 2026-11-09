@@ -163,11 +163,11 @@ beforeEach(async () => {
   };
   useApplicationStore().state = {
     appVersion: 'test',
-    databaseVersion: 9,
+    databaseVersion: 10,
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 1,
+      version: 2,
       theme: 'dark',
       interfaceFontSize: 'standard',
       sidebarWidth: 248,

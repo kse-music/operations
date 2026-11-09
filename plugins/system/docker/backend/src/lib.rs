@@ -5,12 +5,9 @@ use serverdeck_plugin_sdk::{
     serde_json::{self, Value, json},
 };
 mod docker;
-std::thread_local! {static HISTORY:std::cell::RefCell<std::collections::VecDeque<Value>>=const{std::cell::RefCell::new(std::collections::VecDeque::new())};static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
+std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
 fn dispatch(context: Context, action: String, input: Value) -> Action {
     Box::pin(async move {
-        if action == "history" {
-            return Ok(HISTORY.with_borrow(|entries| json!(*entries)));
-        }
         let host = input["hostId"]
             .as_str()
             .filter(|s| !s.is_empty())
@@ -20,8 +17,7 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
             "query" => {
                 let query: docker::Query = serde_json::from_value(input["request"].clone())
                     .map_err(|_| ApiError::new("INPUT", "Docker 请求无效"))?;
-                let info = context.info().await?;
-                let result = if let docker::Query::Probe {
+                if let docker::Query::Probe {
                     location,
                     target,
                     port,
@@ -43,14 +39,7 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
                     }
                 } else {
                     execute(&context, &host, &query).await
-                };
-                if matches!(
-                    query,
-                    docker::Query::ContainerAction { .. } | docker::Query::ImageRemove { .. }
-                ) {
-                    HISTORY.with_borrow_mut(|history|{if history.len()>=200{history.pop_front();}history.push_back(json!({"at":info["unixMs"],"hostId":host,"operation":input["request"]["kind"],"target":input["request"]["id"],"outcome":if result.is_ok(){"completed"}else{"failed"}}));});
                 }
-                result
             }
             "logs" => {
                 let id = input["source"]["id"]

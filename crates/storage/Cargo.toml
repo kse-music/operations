@@ -8,12 +8,11 @@ license.workspace = true
 [dependencies]
 serde.workspace = true
 serverdeck-core.workspace = true
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled", "backup"] }
+sha2 = "0.10"
 serde_json.workspace = true
 tracing.workspace = true
 uuid.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true
 
 [lints]

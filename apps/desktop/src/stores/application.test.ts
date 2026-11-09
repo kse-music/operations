@@ -15,11 +15,11 @@ afterEach(() => disposePinia(pinia));
 
 const bootstrap = (): Bootstrap => ({
   appVersion: 'test',
-  databaseVersion: 7,
+  databaseVersion: 10,
   dataDirectory: 'D:\\Data',
   logDirectory: 'D:\\Data\\logs',
   config: {
-    version: 1,
+    version: 2,
     theme: 'dark',
     interfaceFontSize: 'standard',
     sidebarWidth: 248,

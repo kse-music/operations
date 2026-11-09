@@ -117,3 +117,26 @@
 ### 边界与依赖
 
 未重建桌面可执行文件、Release 安装器或发布摘要，未运行页面 E2E、完整发布清单、全量业务单测、原生 GUI 或跨平台验收。已有程序和安装包仍可能显示旧版本，需要重新构建并启动后生效；本次版本修改不替代发布验收。当前无剩余实现依赖，本阶段完成后停止。
+
+## 2026-11-09 产品版本单一来源
+
+### 完成范围
+
+- 当前产品版本保留为 0.3.0，唯一手工入口为根目录 `Cargo.toml` 的 `[workspace.package].version`。移除根目录/桌面私有 npm 清单及 npm 锁元数据中的重复版本，Tauri 配置省略 version 并继承 Cargo；关于页继续读取后端真实版本。
+- `tools/app-version.mjs` 通过 Cargo metadata 获取桌面与应用层版本，并拒绝 npm 和各平台 Tauri 配置重新引入重复声明；桌面 build/dev 与候选 CI 接入检查。`release-manifest.mjs` 据此确定 NSIS 文件名和摘要版本，保留原有身份、权限、图标及包内 EXE 校验。
+- `tools/tauri.mjs` 的 dev/build 自动调用 `prepareAppVersion`，在磁盘检查后检查版本来源，再使用 `cargo update --workspace` 刷新生成的工作区锁记录；成功后原样转交 CLI 参数，失败停止。候选 CI 在 Rust locked 检查前执行同一准备流程，不再保留要求用户手动运行的 `version:sync` / `version:check` 脚本。SDK、插件和数据格式独立，不随产品版本改动。关于页和浏览器页面夹具采用明确测试版本，README/PRD/实施计划指向实际来源，第三方声明标题不再复制产品版本；历史验收版本保留。
+- 主要文件：根目录及桌面 npm 清单/锁、`tauri.conf.json`、`tools/app-version{,.test}.mjs`、`tools/tauri.mjs`、`tools/release-manifest.mjs`、候选 CI 和相关说明；保留工作区原有的数据迁移及其他修改。
+
+### 执行验证
+
+- 先执行新回归，在原配置检出根 npm 清单重复版本（7 项通过、1 项失败）。移除重复后 `npm run test:build` 的 **29 项全部通过**，日志 `.local/qa/app-version/build-tests.log`；最后补强旧锁刷新断言后，版本专属 **8 项全部通过**，日志 `version-tests.log`。使用真实 Cargo 隔离工作区，仅修改一个版本字段到 `1.2.3-beta.2`，核验桌面/应用层 metadata 同步、旧锁经 Cargo 刷新且 SDK 仍为 5.0.0；另覆盖五处重复声明拒绝及无效版本错误诊断。
+- `npm run version:check` 输出 **0.3.0**；`npm ci --dry-run --ignore-scripts --offline --no-audit --no-fund --loglevel=error` 成功，验证无私有包版本的清单/锁可供 npm 使用，没有实际重装依赖。
+- 关于页定向 Vitest **1 项通过、77 项未选**，显示后端注入的 `v9.8.7-test.1`，不绑定仓库当前产品版本。`npm run typecheck` 桌面及 SDK 通过；`npm run build` 通过，包含内置 WASM/前端打包、类型检查及 Vite 生产构建，保留已有 Monaco 大 chunk 提示。
+- `cargo check -p serverdeck-desktop --offline --locked -j 2` 通过，包含 Tauri 配置/代码生成与应用层，日志 `.local/qa/app-version/cargo-check.log`。构建前 D 盘约 164 GiB 可用，复用根 `target/` 及既有 WASM 缓存；未创建另一套桌面缓存。
+- 修改代码和配置的 Prettier、App 测试 ESLint、修改工具语法、差异空白及新增文档链接/锚点检查通过。首次构建工具回归的 junction 用例因沙箱 `EPERM` 失败，沙箱外原样运行后 29 项通过，没有跳过或削弱断言。`tauri info` 的在线依赖版本查询受网络限制，未完成并已取消，不计为通过。
+- 入口自动准备先在旧实现上检出三项失败：两条入口仍携带旧锁进入下游，同步失败也没有阻止启动。修正后执行 `node --test tools/app-version.test.mjs tools/build-space.test.mjs`，**18 项全部通过**，日志 `.local/qa/app-version/automatic-entry-tests.log`。隔离工程使用真实 npm、Node 包装器与 Cargo，以 `npm run tauri -- dev` 和 `node tools/tauri.mjs build --bundles nsis` 调用；只将下游 Tauri GUI/原生构建替换为参数和锁记录器，核验启动前已刷新版本、参数完整、SDK 版本独立、失败保留旧锁并阻止下游启动。测试通过进程级 `CARGO_NET_OFFLINE=true` 固定离线条件，不修改持久环境。
+- 当前工程的自动准备入口实际运行后输出 **0.3.0**，锁文件内容哈希未变；准备代码、测试、npm/CI 配置格式和工具语法检查通过。自动准备沿用 Cargo 的正常依赖解析方式，不强制离线，以免新环境在首次获取依赖前失败；本机验证通过进程环境离线运行，未验证 CI 新环境的联网依赖下载。
+
+### 边界与后续依赖
+
+本阶段未升产品版本、未生成或发布 EXE/NSIS 安装包，没有执行完整 `release-manifest.mjs`（它需要当前安装器）、原生 UI、全量 Rust/前端业务或跨平台验收。真实版本继承已完成编译检查，但安装器属性和现有二进制仍须重新构建并验收；入口补充验证不等同真实开发窗口或完整 NSIS 打包验收。更新版本后仅编辑 Cargo 单一字段，继续使用既有开发/打包命令即可自动准备，再将生成的锁记录一并提交；当前实现无其他依赖。

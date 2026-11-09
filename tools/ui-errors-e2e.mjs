@@ -148,11 +148,11 @@ try {
         const application = useApplicationStore(pinia);
         application.state = {
           appVersion: 'browser-ui-test',
-          databaseVersion: 6,
+          databaseVersion: 10,
           dataDirectory: '',
           logDirectory: '',
           config: {
-            version: 1,
+            version: 2,
             theme: 'dark',
             sidebarWidth: 248,
             terminalFontSize: 14,

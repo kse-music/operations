@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ServerDeck",
-  "version": "0.3.0",
   "identifier": "cn.hiboot.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

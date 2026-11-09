@@ -27,11 +27,11 @@ beforeEach(() => {
   setActivePinia(pinia);
   useApplicationStore().state = {
     appVersion: 'test',
-    databaseVersion: 5,
+    databaseVersion: 10,
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 1,
+      version: 2,
       theme: 'dark',
       interfaceFontSize: 'standard',
       sidebarWidth: 260,
@@ -431,7 +431,7 @@ it('requires explicit document discard and sends all preferences with confirmed 
   await vi.waitFor(() =>
     expect(migrate).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
-        version: 1,
+        version: 2,
         product: expect.any(Object),
         terminal: expect.any(Object),
       }),

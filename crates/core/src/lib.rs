@@ -11,8 +11,8 @@ pub mod identity;
 pub mod openssh;
 pub mod terminal;
 
-pub const CONFIG_VERSION: u32 = 1;
-pub const DATABASE_VERSION: u32 = 9;
+pub const CONFIG_VERSION: u32 = 2;
+pub const DATABASE_VERSION: u32 = 10;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -31,6 +31,12 @@ pub enum Error {
     UnsupportedDatabase(u32),
     #[error("本地存储操作失败")]
     Storage(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("本地数据升级未完成（{stage}），请保留原数据和 migration-backups 中的已有备份后重试")]
+    Migration {
+        stage: &'static str,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("本地操作正忙，请稍后重试")]
     Busy,
     #[error("后台任务执行失败")]
@@ -194,6 +200,7 @@ impl From<Error> for IpcError {
             Error::Validation(_) => "VALIDATION",
             Error::UnsupportedConfig(_) | Error::UnsupportedDatabase(_) => "VERSION_UNSUPPORTED",
             Error::Storage(_) => "STORAGE",
+            Error::Migration { .. } => "DATA_MIGRATION_FAILED",
             Error::Busy => "BUSY",
             Error::Worker(_) => "WORKER",
             Error::ShuttingDown => "SHUTTING_DOWN",
@@ -217,7 +224,7 @@ mod tests {
         assert!(AppConfig::default().validate().is_ok());
         for config in [
             AppConfig {
-                version: 2,
+                version: CONFIG_VERSION + 1,
                 ..Default::default()
             },
             AppConfig {
@@ -288,5 +295,18 @@ mod tests {
         let json = serde_json::to_string(&IpcError::from(error)).expect("serialize error");
         assert!(json.contains("STORAGE"));
         assert!(!json.contains("sensitive internal payload"));
+    }
+
+    #[test]
+    fn migration_errors_expose_the_stage_and_keep_private_diagnostics_in_the_source_chain() {
+        let error = Error::Migration {
+            stage: "升级前备份",
+            source: Box::new(std::io::Error::other("private configuration payload")),
+        };
+        assert!(std::error::Error::source(&error).is_some());
+        let ipc = IpcError::from(error);
+        assert_eq!(ipc.code, "DATA_MIGRATION_FAILED");
+        assert!(ipc.message.contains("升级前备份"));
+        assert!(!ipc.message.contains("private configuration payload"));
     }
 }

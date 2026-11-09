@@ -7,7 +7,9 @@ use std::{
 
 use serverdeck_core::LogLevel;
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    EnvFilter, Registry, layer::SubscriberExt, reload, util::SubscriberInitExt,
+};
 
 struct RotatingWriter {
     directory: PathBuf,
@@ -85,14 +87,32 @@ impl Write for RotatingWriter {
     }
 }
 
-pub struct Logger(Mutex<Option<WorkerGuard>>);
+pub struct Logger {
+    guard: Mutex<Option<WorkerGuard>>,
+    filter: reload::Handle<EnvFilter, Registry>,
+}
 
 impl Logger {
     pub fn flush(&self) {
-        if let Ok(mut guard) = self.0.lock() {
+        if let Ok(mut guard) = self.guard.lock() {
             guard.take();
         }
     }
+    pub fn set_level(&self, level: LogLevel) -> Result<(), Box<dyn std::error::Error>> {
+        self.filter.reload(filter(level)?)?;
+        Ok(())
+    }
+}
+
+fn filter(level: LogLevel) -> Result<EnvFilter, Box<dyn std::error::Error>> {
+    Ok(EnvFilter::try_new(format!(
+        "off,serverdeck_application={},serverdeck_storage={},serverdeck_desktop={},serverdeck_security={},serverdeck_ssh={}",
+        level.as_str(),
+        level.as_str(),
+        level.as_str(),
+        level.as_str(),
+        level.as_str()
+    ))?)
 }
 
 pub fn initialize(directory: &Path, level: LogLevel) -> Result<Logger, Box<dyn std::error::Error>> {
@@ -103,14 +123,7 @@ pub fn initialize(directory: &Path, level: LogLevel) -> Result<Logger, Box<dyn s
         .lossy(true)
         .finish(writer);
     // Dependency debug output is excluded, even if application debug is enabled.
-    let filter = EnvFilter::try_new(format!(
-        "off,serverdeck_application={},serverdeck_storage={},serverdeck_desktop={},serverdeck_security={},serverdeck_ssh={}",
-        level.as_str(),
-        level.as_str(),
-        level.as_str(),
-        level.as_str(),
-        level.as_str()
-    ))?;
+    let (filter, handle) = reload::Layer::new(filter(level)?);
     tracing_subscriber::registry()
         .with(filter)
         .with(
@@ -119,7 +132,10 @@ pub fn initialize(directory: &Path, level: LogLevel) -> Result<Logger, Box<dyn s
                 .with_writer(writer),
         )
         .try_init()?;
-    Ok(Logger(Mutex::new(Some(guard))))
+    Ok(Logger {
+        guard: Mutex::new(Some(guard)),
+        filter: handle,
+    })
 }
 
 #[cfg(test)]

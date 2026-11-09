@@ -19,7 +19,7 @@ ServerDeck 是面向开发者和运维人员的本地优先服务器运维桌面
 
 ## 版本与平台
 
-当前源码版本为 **0.3.0**，安装包仍需重新构建与验收。
+当前源码版本以根目录 [Cargo.toml](Cargo.toml) 的 `[workspace.package].version` 为唯一来源，开发与打包入口自动同步锁文件并检查版本来源。安装包仍需重新构建与验收。
 Windows x64 安装与运行已验证，远端验收环境为 Ubuntu 24.04；macOS/Linux 客户端尚未完成构建和实机兼容性验证。当前完整界面语言为简体中文。
 
 依赖安全通告、内存目标和长期稳定性等发布条件尚未全部满足。详细状态见[安全说明](docs/release/SECURITY.md)和[发布检查表](docs/release/RELEASE_CHECKLIST.md)。
@@ -60,6 +60,8 @@ npm run tauri -- dev
 `dev/build`（包括 Tauri 入口）会自动发现 `plugins/system/` 下的插件源码目录，生成 `plugins/system/packages/*.sdplugin` 和 Rust 注册文件 `registry.rs`。新增完整插件目录后无需修改构建、注册或发布清单，重新构建并启动客户端即可出现在插件管理中。产物由 Git 忽略；`packages` 是保留的产物目录。插件编译使用 `--offline --locked`，首次构建、新增依赖或锁文件更新后先运行 `npm run plugins:fetch` 下载全部已发现插件及测试夹具的锁定依赖。
 
 构建 Windows NSIS 测试安装包：
+
+发布新版本时，只修改上述 Cargo 工作区版本，继续使用 `npm run tauri -- dev` 开发或下方命令打包即可。入口自动检查版本来源，并让 Cargo 更新生成的工作区锁记录；将更新后的 `Cargo.lock` 一并提交。Tauri 安装包、原生程序及“关于”页自动继承同一版本；私有 npm 工程不再重复声明产品版本。SDK、插件包、数据库及配置格式各自管理版本，历史验证记录无需随产品版本改写。
 
 ```powershell
 node tools/tauri.mjs build --bundles nsis

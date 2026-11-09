@@ -72,13 +72,17 @@ fn local_provider_consents_are_independent_and_keep_registered_models() {
 }
 
 #[test]
-fn removed_model_fields_are_rejected_without_rewriting_the_registry() {
+fn old_model_format_upgrades_once_without_changing_identity_secret_reference_or_context() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let db = Database::open(&path).unwrap();
     let connection = rusqlite::Connection::open(&path).unwrap();
     let mut invalid = serde_json::to_value(record("a", "Model A")).unwrap();
     invalid["config"]["inputPricePerMillion"] = serde_json::json!(1.0);
+    invalid["config"]
+        .as_object_mut()
+        .unwrap()
+        .remove("contextWindowTokens");
     let raw = serde_json::json!({"version":1,"models":[invalid]}).to_string();
     connection
         .execute(
@@ -86,9 +90,34 @@ fn removed_model_fields_are_rejected_without_rewriting_the_registry() {
             [&raw],
         )
         .unwrap();
-    assert!(db.ai_models().is_err());
+    let models = db.ai_models().unwrap();
+    assert_eq!(models[0].id, "a");
+    assert_eq!(models[0].name, "Model A");
+    assert_eq!(models[0].secret_ref.as_deref(), Some("ref-a"));
+    assert_eq!(models[0].revision, "r-a");
+    assert_eq!(models[0].config.context_window_tokens, 131_072);
+    let saved: String = connection
+        .query_row(
+            "SELECT value FROM application_settings WHERE key='ai_models'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(value["version"], 2);
+    assert!(
+        value["models"][0]["config"]
+            .get("inputPricePerMillion")
+            .is_none()
+    );
+    let backups = std::fs::read_dir(dir.path().join("migration-backups"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1);
+    let backup = rusqlite::Connection::open(&backups[0]).unwrap();
     assert_eq!(
-        connection
+        backup
             .query_row(
                 "SELECT value FROM application_settings WHERE key='ai_models'",
                 [],
@@ -96,6 +125,13 @@ fn removed_model_fields_are_rejected_without_rewriting_the_registry() {
             )
             .unwrap(),
         raw
+    );
+    assert_eq!(db.ai_models().unwrap()[0].id, "a");
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("migration-backups"))
+            .unwrap()
+            .count(),
+        1
     );
 }
 #[test]
@@ -161,7 +197,7 @@ fn model_crud_reopens_rejects_conflicts_and_keeps_other_credentials() {
     );
 }
 #[test]
-fn unused_old_settings_and_unsupported_registry_are_not_rewritten() {
+fn damaged_legacy_settings_and_unsupported_registry_are_not_rewritten_or_block_startup() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let db = Database::open(&path).unwrap();
@@ -172,7 +208,7 @@ fn unused_old_settings_and_unsupported_registry_are_not_rewritten() {
             [],
         )
         .unwrap();
-    assert!(db.ai_models().unwrap().is_empty());
+    assert!(db.ai_models().is_err());
     assert_eq!(
         connection
             .query_row(
@@ -188,4 +224,107 @@ fn unused_old_settings_and_unsupported_registry_are_not_rewritten() {
     let reopened = Database::open(path).unwrap();
     assert_eq!(reopened.load_config().unwrap(), db.load_config().unwrap());
     assert!(reopened.catalog().unwrap().hosts.is_empty());
+}
+
+#[test]
+fn legacy_single_model_migrates_lazily_and_keeps_the_original_row_and_secret_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let legacy = serde_json::json!({"config":Config {model:"kept-model".into(),..Default::default()},"secretRef":"opaque-original-reference","revision":"original-revision"}).to_string();
+    connection.execute("INSERT INTO application_settings(key,value,updated_at) VALUES('ai_config',?1,'original-time')", [&legacy]).unwrap();
+    Database::open(&path).unwrap();
+    assert!(!dir.path().join("migration-backups").exists());
+    let models = db.ai_models().unwrap();
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].name, "默认模型");
+    assert_eq!(models[0].config.model, "kept-model");
+    assert_eq!(
+        models[0].secret_ref.as_deref(),
+        Some("opaque-original-reference")
+    );
+    assert_eq!(models[0].revision, "original-revision");
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT value FROM application_settings WHERE key='ai_config'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        legacy
+    );
+    assert_eq!(db.ai_models().unwrap()[0].id, models[0].id);
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("migration-backups"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn model_upgrade_failures_preserve_raw_settings_and_do_not_block_application_config() {
+    for value in [
+        serde_json::json!({"version":1,"models":["invalid"]}),
+        serde_json::json!({"version":1,"models":[{"config":null}]}),
+        serde_json::json!({"version":99,"models":[]}),
+        {
+            let mut value = serde_json::json!({"version":2,"models":[record("a","A")]});
+            value["models"][0]["config"]
+                .as_object_mut()
+                .unwrap()
+                .remove("contextWindowTokens");
+            value
+        },
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let db = Database::open(&path).unwrap();
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let raw = value.to_string();
+        connection
+            .execute(
+                "INSERT INTO application_settings(key,value) VALUES('ai_models',?1)",
+                [&raw],
+            )
+            .unwrap();
+        assert!(db.ai_models().is_err());
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT value FROM application_settings WHERE key='ai_models'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            raw
+        );
+        assert!(!dir.path().join("migration-backups").exists());
+        assert!(Database::open(&path).unwrap().load_config().is_ok());
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let connection = rusqlite::Connection::open(&path).unwrap();
+    let raw = serde_json::json!({"version":1,"models":[record("a","A")]}).to_string();
+    connection
+        .execute(
+            "INSERT INTO application_settings(key,value) VALUES('ai_models',?1)",
+            [&raw],
+        )
+        .unwrap();
+    std::fs::write(dir.path().join("migration-backups"), b"occupied").unwrap();
+    assert!(matches!(db.ai_models(), Err(Error::Migration { .. })));
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT value FROM application_settings WHERE key='ai_models'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+        raw
+    );
 }

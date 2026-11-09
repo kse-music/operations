@@ -1,6 +1,6 @@
 # ADR 0025：定位文件与确认启动后清理数据源
 
-原决策日期：2026-11-05。状态：有效。此记录保留用户主动数据根迁移的理由，不恢复已删除的旧身份/格式自动迁移。
+原决策日期：2026-11-05。状态：有效。此记录保留用户主动数据根迁移的理由，不自动搬迁旧身份目录；已知数据格式升级由 ADR 0028 管理。
 
 ## 背景与选项
 
@@ -14,4 +14,4 @@
 
 先持久化 Committed 状态再逐文件复核并清理源，只删除已核对的副本对应项；未知/变化文件保留，清理失败报告并可重试，不能回退到已部分删除的旧目录。定位与清理状态机增加了少量本机元数据，换取明确的失败恢复边界；不把复制成功误认为用户已确认新目录可用。
 
-当前 schema/凭据版本保护见[ADR 0017](0017-current-data-contract.md)，实现见[总体架构](../ARCHITECTURE.md#当前存储和用户迁移)，原证据见[设置与数据目录验证](../../validation/workspace/VALIDATION_SETTINGS_NAVIGATION.md)。
+当前数据库和配置升级见[ADR 0028](0028-safe-data-upgrades.md)，凭据边界仍见[ADR 0017](0017-current-data-contract.md)；实现见[总体架构](../ARCHITECTURE.md#当前存储和用户迁移)，原证据见[设置与数据目录验证](../../validation/workspace/VALIDATION_SETTINGS_NAVIGATION.md)。

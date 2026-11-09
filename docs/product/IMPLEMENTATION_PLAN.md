@@ -4,7 +4,7 @@
 
 ## 当前基线与状态口径
 
-- 应用版本 0.3.0，尚未正式 release；Host/Rust/TS SDK 5.0.0、UI v4、ABI/wire 1，数据库 schema 9。
+- 应用版本以根目录 [Cargo.toml](../../Cargo.toml) 的 `[workspace.package].version` 为准，尚未正式 release；Host/Rust/TS SDK 5.0.0、UI v4、ABI/wire 1，数据库 schema 10、应用偏好/模型注册格式 v2。
 - 当前内置 Docker 与 AI 助手；外部 MySQL 为独立上传包。已移除模块列入下方范围表，不作为待恢复任务。
 - “已实现”表示有真实调用链；“已有验证”仅指链接记录中的版本、平台和场景。旧测试数量、旧安装包或已移除功能的通过记录不证明当前完整版本已验收。
 - 普通 Windows Debug EXE 已有构建记录；SDK5、Nginx 移除及 Docker 预授权后的完整安装器/跨平台/长期矩阵未完成。
@@ -14,6 +14,7 @@
 | 模块               | 当前真实交付                                                                                                        | 已有验证与限制入口                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 应用基础           | Tauri/Vue、单实例、严格配置、系统凭据、日志、960×600 最小窗口及尺寸恢复、安全退出和用户主动数据根迁移               | [最小窗口与设置验证](../validation/workspace/VALIDATION_LAYOUT.md#2026-11-09-最小窗口-960600-与设置弹窗)、[基础阶段](../validation/foundation/VALIDATION.md)、[当前契约清理](../validation/foundation/VALIDATION_PRE_RELEASE_CLEANUP.md)、[数据目录](../validation/workspace/VALIDATION_SETTINGS_NAVIGATION.md)；其他平台和故障矩阵未完整验收                                                                                 |
+| 数据升级           | schema 1–9 → 10、应用配置 v1 → v2、按需模型注册/单模型升级；一致备份、事务/历史校验、原数据/引用保留                | [升级契约](../architecture/DATA_MIGRATIONS.md)、[验证记录](../validation/foundation/VALIDATION_DATA_UPGRADES.md)；安装器及非 Windows 原生升级矩阵未验收                                                                                                                                                                                                                                                                       |
 | 主机               | 多级文件夹、搜索/拖动/复制/右键管理、直接认证、五分钟单次 SSH 测试保存门禁、OpenSSH 导入                            | [主机表单与测试](../validation/hosts/VALIDATION_HOST_INVENTORY.md)、[目录](../validation/hosts/VALIDATION_HOST_TREE_FOLDERS.md)、[操作入口](../validation/hosts/VALIDATION_HOST_LIST_ACTIONS.md)；旧 JSON 归档验收为历史                                                                                                                                                                                                      |
 | SSH/终端           | 真实 PTY、多会话/分屏、ACK 背压、剪贴板、本地 Shell、rz；同窗格重连、会话菜单/复制、转发、导出及 SFTP 联动          | [SSH](../validation/terminal/VALIDATION_STAGE3.md)、[日常使用](../validation/terminal/VALIDATION_SSH_USABILITY.md)、[终端入口与剪贴板](../validation/terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-09-终端入口补齐)、[rz](../validation/terminal/VALIDATION_ZMODEM.md)；系统 Agent/跨平台及长期稳定性仍有缺口                                                                                                          |
 | SFTP               | 双栏浏览、元数据、排序/历史/加载态、可取消校验传输、Windows 文件拖出和原子文本编辑，记录归属主机工作区              | [SFTP](../validation/files/VALIDATION_STAGE4.md)、[权限元数据](../validation/files/VALIDATION_SFTP_METADATA.md)；手动宽度和仅远程视图未实现                                                                                                                                                                                                                                                                                   |
@@ -34,7 +35,7 @@
 | 网络诊断、批量/自动运维、常用命令库、本地计划 | 页面、专属执行/IPC/SDK 调用链已移除；[诊断移除](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-05完整移除网络诊断)、[批量/自动化移除](../validation/plugins/PLUGIN_TEST_REPORT.md#2026-11-05移除自动运维与批量运维)。旧任务/调度验收不构成当前能力                                                                        |
 | 任务中心                                      | 无独立入口/快捷键；SFTP 记录按主机运行期管理，[生命周期验证](../validation/files/VALIDATION_STAGE4.md#2026-11-05移除任务中心与主机临时传输记录)                                                                                                                                                                                |
 | 主机 JSON、应用备份恢复、终端布局持久化       | 当前调用链已删除；[主机归档下线](../validation/hosts/VALIDATION_HOST_LIST_ACTIONS.md#2026-11-06-主机-json-导入导出下线)、[备份下线](../validation/workspace/VALIDATION_PRODUCT.md#2026-11-06-应用配置备份与恢复下线)、[当前契约](../validation/foundation/VALIDATION_PRE_RELEASE_CLEANUP.md)。旧文件及闲置数据库数据不自动删除 |
-| 开发期旧接口/配置自动兼容                     | SDK5/UI4/schema9 严格校验；旧模型/身份/设置/插件迁移层已移除。单插件问题可隔离诊断，主动数据根迁移及正常升级回滚继续保留                                                                                                                                                                                                       |
+| 开发期旧插件接口/身份自动兼容                 | SDK5/UI4 执行契约和旧身份仍严格隔离，单插件问题可诊断；数据库/偏好/模型格式升级已转入上方数据升级模块，不归此退出范围                                                                                                                                                                                                          |
 
 ## 剩余工作与验收门禁
 
@@ -48,7 +49,7 @@
 | 依赖安全               | 复核 RSA/GLib 等报告及实际依赖图，落实修复或经明确安全决策限制；保持审计非零可见，不加 ignore 假绿                                                    | 修复来源及平台验证；见[安全说明](../release/SECURITY.md)                                                                      |
 | 性能与长期稳定性       | 复测当前进程树冷启动/内存、20 会话并发；150 MB 目标尚未关闭，旧普通模式约 271 MiB private；补 24 小时并发、断线/网络切换/睡眠、百次启动退出及资源释放 | 固定机器/场景和可重复测量，避免用旧版本数据声明当前达标                                                                       |
 | 原生与跨平台           | Windows 实际拖放/选择器/输入法/物理多屏，以及 macOS arm64/x64、Linux 构建/凭据/Agent/高 DPI/安装卸载                                                  | 对应真实系统和硬件；已有 Linux 单项验证不代表全产品验收                                                                       |
-| 发布                   | 当前 0.3.0、cn.hiboot 身份和 SDK5 安装器回归、数据保留、签名/公证、可信发布渠道及许可人工复核                                                         | [发布检查表](../release/RELEASE_CHECKLIST.md)、[依赖清单](../release/DEPENDENCY_INVENTORY.md)；旧 0.1.0-beta.1 安装包只作历史 |
+| 发布                   | 当前工作区版本、cn.hiboot 身份和 SDK5 安装器回归、数据保留、签名/公证、可信发布渠道及许可人工复核                                                     | [发布检查表](../release/RELEASE_CHECKLIST.md)、[依赖清单](../release/DEPENDENCY_INVENTORY.md)；旧 0.1.0-beta.1 安装包只作历史 |
 
 ## 阶段依赖与推进规则
 

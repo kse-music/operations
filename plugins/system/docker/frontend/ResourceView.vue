@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 const panelVisible = usePluginVisibility();
 import { usePlatformContext } from '@serverdeck/plugin-sdk/context';
@@ -15,7 +15,7 @@ const stateLabels: Record<string, string> = {
   connecting: '连接中',
   failed: '连接失败',
 };
-import type { OpsRequest, OpsResponse, ContainerShell, Feedback, LogInput } from './types';
+import type { OpsRequest, OpsResponse, ContainerShell, LogInput } from './types';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import OpsTable from '@serverdeck/plugin-sdk/ui/OpsTable.vue';
 import OpsDetails from './OpsDetails.vue';
@@ -55,8 +55,6 @@ const detail = ref<Record<string, unknown> | null>(null),
 const detailLoading = ref(false),
   detailError = ref<string | null>(null);
 const capabilities = ref<Record<string, unknown> | null>(null);
-const history = ref<Feedback[]>([]),
-  historyOpen = ref(false);
 const pending = ref<{
   title: string;
   target: string;
@@ -178,11 +176,6 @@ async function execute(action: NonNullable<typeof pending.value>) {
       error.value = errorMessage(cause);
     notice.value = null;
   } finally {
-    try {
-      history.value = await invoke<Feedback[]>('history');
-    } catch (cause) {
-      if (!error.value) error.value = errorMessage(cause);
-    }
     busy.value = false;
   }
 }
@@ -225,13 +218,6 @@ function visibility() {
   if (panelVisible.value) void load();
 }
 watch(panelVisible, visibility);
-onMounted(async () => {
-  try {
-    history.value = await invoke<Feedback[]>('history');
-  } catch (cause) {
-    if (!disposed) error.value = errorMessage(cause);
-  }
-});
 onBeforeUnmount(() => {
   disposed = true;
   ++generation;
@@ -328,7 +314,7 @@ const slotContext = {
     <footer class="ops-footer">
       <span class="subtle"
         ><ShieldCheck :size="13" aria-hidden="true" />当前 SSH 账号执行 · 不自动提权</span
-      ><button class="text-button" @click="historyOpen = true">操作反馈</button>
+      >
     </footer>
     <StreamDialog v-if="log" :stream-id="log.id" :title="log.title" @close="log = undefined" />
     <Modal v-if="probe" title="TCP 连通性检测" @close="probe = false">
@@ -356,19 +342,6 @@ const slotContext = {
           检测 TCP 端口
         </button>
       </div>
-    </Modal>
-    <Modal v-if="historyOpen" title="本次操作反馈" wide @close="historyOpen = false">
-      <p class="subtle">仅记录目标与结果，不记录输出。</p>
-      <p
-        v-for="(entry, index) in history.filter((e) => e.hostId === connection?.host.id)"
-        :key="index"
-      >
-        {{ new Date(entry.at).toLocaleTimeString() }} · {{ entry.operation }} · {{ entry.target }} ·
-        {{ entry.outcome }}
-      </p>
-      <p v-if="!history.some((e) => e.hostId === connection?.host.id)" class="host-empty">
-        当前主机暂无操作记录。
-      </p>
     </Modal>
     <Modal v-if="pending" title="确认主机运维操作" :busy="busy" @close="pending = null">
       <p>{{ pending.title }}</p>

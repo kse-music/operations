@@ -85,11 +85,11 @@ async function closeSession(index: number): Promise<void> {
 function loadSidebarConfig(): void {
   useApplicationStore().state = {
     appVersion: 'test',
-    databaseVersion: 6,
+    databaseVersion: 10,
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 1,
+      version: 2,
       theme: 'dark',
       interfaceFontSize: 'standard',
       sidebarWidth: 248,
@@ -285,7 +285,7 @@ it.each(['.activity-rail', '.sidebar', '.content-scroll', '.sidebar input'])(
 
 it('opens About inside the settings window and preserves the connected terminal', async () => {
   loadSidebarConfig();
-  useApplicationStore().state!.appVersion = '0.3.0';
+  useApplicationStore().state!.appVersion = '9.8.7-test.1';
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   terminals.open(useHostsStore().catalog!.hosts[0]!);
@@ -296,8 +296,8 @@ it('opens About inside the settings window and preserves the connected terminal'
   await openNavigation('关于');
   const page = document.querySelector('.about-view')!;
   expect(page.querySelector('h1')?.textContent).toBe('关于 ServerDeck');
-  expect(page.textContent).toContain('v0.3.0');
-  expect(page.textContent).toContain('schema v6');
+  expect(page.textContent).toContain('v9.8.7-test.1');
+  expect(page.textContent).toContain('schema v10');
   expect(page.querySelector('[data-testid="backend-ready"]')).not.toBeNull();
   expect(workspace.current).toMatchObject({ key: 'host:a', view: 'terminals', hostId: 'a' });
   expect(workspace.settingsView).toBe('about');

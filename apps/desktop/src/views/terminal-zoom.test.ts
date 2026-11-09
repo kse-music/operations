@@ -78,11 +78,11 @@ beforeEach(async () => {
   setActivePinia(pinia);
   useApplicationStore().state = {
     appVersion: 'test',
-    databaseVersion: 5,
+    databaseVersion: 10,
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 1,
+      version: 2,
       theme: 'dark',
       interfaceFontSize: 'standard',
       sidebarWidth: 260,

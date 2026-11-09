@@ -5,9 +5,9 @@
 ## 当前可复核项
 
 - [x] 阅读 PRD 与后续需求，形成带证据/范围/缺口的功能矩阵（TEST_REPORT）。
-- [x] Cargo/npm/Tauri 版本一致；当前应用标识统一为 cn.hiboot.desktop，只使用当前目录和凭据服务，不清库、不自动迁移旧身份；当前 schema 为 9。
+- [x] 产品版本统一继承 Cargo 工作区，npm/Tauri 不另存版本；当前应用标识统一为 cn.hiboot.desktop，只使用当前目录和凭据服务，不清库、不自动迁移旧身份；当前 schema 为 10。
 - [x] Windows Release NSIS 当前用户安装；多分辨率图标、版本、发布者、描述。
-- [x] 默认配置初始化；安装目录与业务数据分离；当前 schema 9 初始化、重复打开及非当前版本拒绝保留数据。
+- [x] 默认配置初始化；安装目录与业务数据分离；已知结构/配置先一致备份再事务升级，未知/未来格式拒绝并保留数据，见[升级契约](../architecture/DATA_MIGRATIONS.md)。
 - [x] Rust fmt / Clippy / 常规单元集成 / 显式系统凭据与真实 Linux Engine；前端类型/ESLint/单元/生产构建。
 - [x] 20 个真实终端、8 MiB 输出、5000 条目录、5 文件 SHA256、1000 主机首屏的可复跑基线。
 - [x] npm 原 14 中等风险修复到 0；RustSec 原始失败结果和上游风险保留，没有 ignore 假绿。
@@ -16,6 +16,8 @@
 - [x] 最终 Network 修复后功能 34、性能 8、自动化 10、真实传输中确认退出 3；独立运维 21、约 313 秒并发曲线、五次进程树退出、实际卸载保留数据库（范围/Hash 见 TEST_REPORT）。
 
 ## 稳定版阻断项
+
+- [ ] 在实际安装器与各目标平台执行从支持版本升级、失败恢复、备份可读、数据/秘密引用保留和旧程序拒绝新库的矩阵；不能以 SQLite/应用层回归代替系统安装升级验收。每次结构/配置变更必须保持迁移链及数据保留回归。
 
 - [ ] 完成签名 Windows 安装器、可信下载发布渠道、签名验证和升级/卸载系统矩阵；当前未签名。
 - [ ] 完成 当前 cn.hiboot 应用身份的 NSIS 安装/卸载，以及 macOS/Linux 当前目录与凭据存储原生验收。
@@ -26,6 +28,21 @@
 - [ ] SFTP 面板宽度/仅远程模式、命令交互终端执行模式等 PRD 差异明确实现或由用户正式调整需求。
 - [ ] 实际系统 Agent/硬件令牌、Windows 原生拖放/选择器/输入法与物理多显示器。
 - [ ] 依赖许可证清单人工复核；THIRD_PARTY_NOTICES 汇总源文件，46 个解析包缺顶层许可文件，不能声称已完成法律审查。
+
+## 版本来源与更新
+
+产品发布只修改根目录 [Cargo.toml](../../Cargo.toml) 的 `[workspace.package].version`。平台 Rust 包继承工作区版本，Tauri 未声明 `version` 时使用 Cargo 包版本，关于页读取后端 `CARGO_PKG_VERSION`；两个私有 npm 工程不单独声明产品版本。SDK/API、插件包、数据库 schema 与配置格式独立管理，不能跟随产品版本批量替换。
+
+修改后继续按需使用原有命令，无需额外版本命令：
+
+```powershell
+# 开发
+npm run tauri -- dev
+# 打包
+node tools/tauri.mjs build --bundles nsis
+```
+
+桌面 dev/build 入口自动检查 Cargo metadata 中的桌面版本，并拒绝 npm 或 Tauri 再次声明独立版本；随后使用 `cargo update --workspace` 刷新工作区包的生成锁记录，保留已锁定的第三方依赖，成功后继续原命令。将更新后的 `Cargo.lock` 一并提交，不手工逐项改锁文件；准备失败会停止并显示原因。候选 CI 也在 Rust locked 检查前调用同一准备流程。发布摘要及 NSIS 文件名由工具读取同一版本，旧安装包和历史验证记录保留当时版本；改号不能代替重新构建和验收。
 
 ## 复建及产物
 
@@ -52,7 +69,7 @@ node tools/release-manifest.mjs
 
 Cargo 审计单独执行 `cargo audit --deny unsound`，目前预期失败并应阻止稳定发布。CI 没有上传签名秘密、没有写 contents 权限，没有自动上传测试输出。已有 npm/Cargo lock 必须保留。
 
-Windows 安装包：`target/release/bundle/nsis/ServerDeck_0.1.0-beta.1_x64-setup.exe`；程序：`target/release/serverdeck-desktop.exe`；校验：`.local/release-qa/SHA256SUMS` 和 `release-manifest.json`。校验值不是发布者签名。最终安装器大小/Hash 以清单为准。
+Windows 安装包：`target/release/bundle/nsis/ServerDeck_<版本>_x64-setup.exe`，其中版本来自上述 Cargo 工作区；程序：`target/release/serverdeck-desktop.exe`；校验：`.local/release-qa/SHA256SUMS` 和 `release-manifest.json`。本表早期验收的安装包版本为 `0.1.0-beta.1`，不表示当前源码已完成安装器验收。校验值不是发布者签名。最终安装器大小/Hash 以清单为准。
 
 这些是本机构建产物路径，`target/` 和 `.local/` 已被 Git 忽略，不是下载地址；克隆源码不会获得安装器或校验文件。发布时需另行提供可信的分发入口。
 

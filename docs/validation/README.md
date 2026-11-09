@@ -1,5 +1,11 @@
 # 验证记录索引
 
+最新：[Docker 移除操作反馈入口、历史动作及内存记录，保留即时结果与确认](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-移除操作反馈)。
+
+最新：[数据库和配置安全自动升级：一致备份、事务回滚、历史版本/模型隔离及业务启动](foundation/VALIDATION_DATA_UPGRADES.md)。
+
+最新：[产品版本收敛为 Cargo 单一来源，开发/打包入口自动同步与检查](foundation/VALIDATION_BUILD_CACHE.md#2026-11-09-产品版本单一来源)。
+
 最新：[助手移除空模型绑定选项，保留未配置状态并拒绝空值保存](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-助手移除空模型绑定选项)。
 
 最新：[助手配置页移除模型设置快捷入口，保留刷新及模型绑定](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-助手配置页移除模型设置快捷入口)。

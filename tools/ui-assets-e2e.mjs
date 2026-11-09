@@ -32,11 +32,11 @@ async function fixtures(page, appearance) {
     const application = useApplicationStore(pinia);
     application.state = {
       appVersion: 'ui-test',
-      databaseVersion: 5,
+      databaseVersion: 10,
       dataDirectory: '',
       logDirectory: '',
       config: {
-        version: 1,
+        version: 2,
         theme,
         interfaceFontSize,
         sidebarWidth: 260,

@@ -40,11 +40,14 @@ pub fn run() {
                     serverdeck_application::storage_location::Locations { data, logs, webview: app.path().app_local_data_dir()? },
                 )?;
                 let locations = profile.locations().clone();
+                // Record upgrade failures before loading configuration. Apply the
+                // persisted log level only after its safe upgrade has completed.
+                let guard = logging::initialize(&locations.logs, serverdeck_core::LogLevel::Info)?;
+                app.manage(guard);
                 let application = Application::initialize(locations.data, locations.logs.clone())?;
                 profile.record_initialized()?;
                 let config = tauri::async_runtime::block_on(application.bootstrap())?.config;
-                let guard = logging::initialize(&locations.logs, config.log_level)?;
-                app.manage(guard);
+                app.state::<logging::Logger>().set_level(config.log_level)?;
                 application.provision_bundled_plugins()?;
                 app.manage(storage_commands::StorageState::new(profile));
                 app.manage(application);

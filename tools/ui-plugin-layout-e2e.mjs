@@ -300,9 +300,6 @@ try {
               case 'container_shell':
                 result = { shellTicket: 'layout-shell-ticket' };
                 break;
-              case 'system_feedback':
-                result = [];
-                break;
               case 'system_query': {
                 const data = {
                   capabilities: [{ dockerInstalled: true, dockerState: 'running' }],
@@ -550,15 +547,15 @@ try {
             `${name}: footer at bottom of workspace (${JSON.stringify(geometry)})`,
           );
         } else {
-          const feedback = content().getByRole('button', { name: '操作反馈', exact: true });
-          await feedback.scrollIntoViewIfNeeded();
-          const feedbackBounds = await feedback.evaluate((element) => {
+          const footer = content().locator('.ops-footer');
+          await footer.scrollIntoViewIfNeeded();
+          const footerBounds = await footer.evaluate((element) => {
             const { top, bottom } = element.getBoundingClientRect();
             return { top, bottom, viewportHeight: innerHeight };
           });
           assert(
-            feedbackBounds.top >= -1 && feedbackBounds.bottom <= feedbackBounds.viewportHeight + 1,
-            `${name}: footer reachable in a short window (${JSON.stringify(feedbackBounds)})`,
+            footerBounds.top >= -1 && footerBounds.bottom <= footerBounds.viewportHeight + 1,
+            `${name}: footer reachable in a short window (${JSON.stringify(footerBounds)})`,
           );
           await content()
             .locator('.docker-workbench')
