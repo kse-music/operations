@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[AI 提问触发 PLUGIN_FUEL：固定规则初始化复用、长问题开销及正式 WASM 连续问答回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-09-提问触发-plugin_fuel-修复)。
+
 最新：[Docker 移除操作反馈入口、历史动作及内存记录，保留即时结果与确认](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-移除操作反馈)。
 
 最新：[数据库和配置安全自动升级：一致备份、事务回滚、历史版本/模型隔离及业务启动](foundation/VALIDATION_DATA_UPGRADES.md)。

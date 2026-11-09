@@ -10,8 +10,7 @@ pub struct Plan {
     pub logs: bool,
 }
 impl Plan {
-    fn classify(question: &str) -> Self {
-        let q = question.to_lowercase();
+    fn classify_lowercase(q: &str) -> Self {
         let has = |words: &[&str]| words.iter().any(|word| q.contains(word));
         let docker = has(&["docker", "container", "容器", "compose", "swarm"]);
         let processes = has(&["process", "进程", "线程", "pid"])
@@ -73,7 +72,8 @@ impl Plan {
         }
     }
     pub fn for_question(question: &str, history: &[ChatMessage]) -> Self {
-        let mut plan = Self::classify(question);
+        let lower = question.to_lowercase();
+        let mut plan = Self::classify_lowercase(&lower);
         // Only an ambiguous follow-up inherits the last user's domain. An explicit
         // new topic must not accumulate all domains seen in the conversation.
         if !plan.metrics
@@ -84,7 +84,7 @@ impl Plan {
             && ((plan.logs
                 && !["系统日志", "systemd", "journal"]
                     .iter()
-                    .any(|word| question.to_lowercase().contains(word)))
+                    .any(|word| lower.contains(word)))
                 || [
                     "那",
                     "它",
@@ -97,12 +97,12 @@ impl Plan {
                     "what about",
                 ]
                 .iter()
-                .any(|word| question.to_lowercase().contains(word)))
+                .any(|word| lower.contains(word)))
             && let Some(previous) = history
                 .iter()
                 .rev()
                 .filter(|message| matches!(message.role, ChatRole::User))
-                .map(|message| Self::classify(&message.content))
+                .map(|message| Self::classify_lowercase(&message.content.to_lowercase()))
                 .find(|plan| {
                     plan.metrics || plan.processes || plan.docker || plan.services || plan.ports
                 })

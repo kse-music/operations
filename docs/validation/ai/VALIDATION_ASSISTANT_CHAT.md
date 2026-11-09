@@ -1,5 +1,33 @@
 # 助手直接对话验证
 
+## 2026-11-09 提问触发 PLUGIN_FUEL 修复
+
+用户报告提问后整个助手变为“插件暂不可用 PLUGIN_FUEL”。修复前运行正式助手标准包，现有 `assistant_owns_redaction_and_preview_inside_the_packaged_wasm` 在模型元数据返回后真实触发 `OutOfFuel`，尚未调用模型补全；仅验证 iframe 挂载及 Native Rust 业务测试不能发现此故障。
+
+助手标准包提升为 **2.0.6**，随新客户端按现有系统插件升级流程保留启停及绑定设置。主要文件为助手 `backend/src/{redact,lib,collection,budget}.rs`、`manifest.json` 和 `crates/plugin-runtime/tests/platform_plugins.rs`：
+
+- 固定正则在 startup 编译并由各 VM 复用，将各规则 lazy-DFA 缓存限制为 64 KiB。自定义脱敏值仍由每个 Redactor 独立持有和清零，地址选择按请求生效，Unicode 匹配规则保持；初始化失败通过生命周期错误传播。
+- 采集分类的追问判断复用一次小写转换，避免接近 8 KiB 的中文问题反复转换而耗尽燃料。预算测量只在消息实际变化后重新编码，保持原压缩顺序、完整轮次及必需证据断言。
+- 正式代码保持通用每入口 **20,000,000 fuel、16 MiB、2 秒**和所有权限/审批边界；诊断期间的临时测量代码及较高诊断额度未保留在源码和交付 EXE 中。
+
+实际验证（Windows）：
+
+| 检查               | 结果与断言                                                                                                                                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 故障基线           | QA 副本运行原正式包测试真实失败，错误为 `PLUGIN_FUEL / OutOfFuel`；证据 `baseline.log`                                                                                                                    |
+| 正式打包 WASM      | 4 项通过：预览、带资产的模型路由、同 VM 连续三轮准备/发送（含长中文历史、主机/无主机、地址脱敏开/关）、空问题及 8190 字节必需问题超预算；验证模型前后脱敏、实际 usage、拒绝时无模型请求及随后 health 成功 |
+| 助手 Native 测试   | 16 项通过，含 Unicode 空白/大小写、缓存不共享自定义秘密或地址选择、完整证据、预算、取消和执行确认回归                                                                                                     |
+| 运行时 Native 测试 | 12 项通过，含死循环 fuel 终止、启动 fuel、trap、内存/消息边界、取消、显式重启及生命周期；外部 MySQL 真实服务测试按原条件忽略 1 项                                                                         |
+| 前端回归           | `assistant.test.ts`、`plugin-ui-bridge.test.ts`，2 文件 59 项通过                                                                                                                                         |
+| 静态检查           | 助手严格 Clippy、普通运行时 Clippy、Rust fmt、修改文档/清单 Prettier 和 diff whitespace 检查通过；运行时严格 Clippy 被原有 `core/src/openssh.rs:289` 的 `single_element_loop` 提示阻断，未改无关代码      |
+| Windows 构建       | `node tools/tauri.mjs build --debug --no-bundle -- --offline --locked` 通过，含最终助手/Docker 包、Vue 类型检查、Vite 前端、开发包及默认配置 Debug EXE；保留既有大 chunk 提示                             |
+
+原生测试均以编译后复制至 QA 目录的 EXE 运行（首次定位命令直接运行了 Cargo 测试，随后在 QA 副本重现并保存基线）。运行时和 Vitest 首次因沙箱临时目录文件操作被拒而失败，将本次进程 TEMP/TMP 指向任务 QA 目录后通过；未放宽生产权限。根 `target/` 与既有 WASM 缓存复用，构建盘空闲超过 160 GiB。
+
+证据位于 `.local/qa/assistant-fuel/`：`baseline.log`、`platform_plugins.log`、`serverdeck_plugin_runtime.log`、`assistant-tests.log`、`frontend-tests.log`、`assistant-clippy.log`、`runtime-clippy.log`、`desktop-build.log`。`ServerDeck-fixed.exe` 是正常配置交付副本，与 `target/debug/serverdeck-desktop.exe` SHA-256 相同：`1AF1B725AD49CBE0234EC7E32F288F3CEF926FC64BE7F7974A0D66F9BFE26A3B`。
+
+未使用真实模型账号、远程主机或日常用户数据，未执行原生 WebView2 点击验收、Release/安装器及其他平台验收；模型/主机响应是协议测试夹具，实际执行的是正式 WASM 与原生运行时。未发现本轮新增阻断；更长/复杂输入仍受通用资源限额约束。使用修复依赖正常退出旧客户端并启动新 EXE，由启动流程升级系统助手包；不修改用户安装包或重置配置。本阶段结束后停止。
+
 ## 2026-11-09 上下文脱敏范围与预算修复
 
 范围为当前 SDK5 助手插件，标准包 2.0.3；补齐 ADR 0027 已有要求，不恢复旧 Native 助手业务接口或扩大工具权限。

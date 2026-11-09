@@ -3,7 +3,7 @@
   "id": "cn.hiboot.plugins.assistant",
   "name": "AI 运维助手",
   "icon": "bot",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "author": "ServerDeck",
   "description": "通过 SSH 查询主机、生成操作计划，在确认后执行并复查结果。",
   "apiVersion": "^5.0.0",

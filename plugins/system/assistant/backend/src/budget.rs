@@ -118,10 +118,12 @@ fn question_index(messages: &[Message]) -> Option<usize> {
 pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fitted, Error> {
     let mut reduced = false;
     let mut dropped = 0;
+    let (mut fits, mut input_tokens) = measure(&messages, model, limit)?;
     for keep in [3, 0] {
-        if measure(&messages, model, limit)?.0 {
+        if fits {
             break;
         }
+        let mut changed = false;
         let start = question_index(&messages).unwrap_or(messages.len());
         for message in &mut messages[start..] {
             if !matches!(message.role, Role::User) {
@@ -131,11 +133,15 @@ pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fi
                 && reduce_payload(&mut payload, keep)
             {
                 message.content = payload.to_string();
-                reduced = true;
+                changed = true;
             }
         }
+        if changed {
+            reduced = true;
+            (fits, input_tokens) = measure(&messages, model, limit)?;
+        }
     }
-    while !measure(&messages, model, limit)?.0 {
+    while !fits {
         // Only remove old, complete user/assistant chat turns preceding the current
         // question. Never remove system policy, the question or a tool-result pair.
         let question = question_index(&messages);
@@ -159,6 +165,7 @@ pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fi
                 .saturating_add(1)
         );
         messages[index].content = value.to_string();
+        (fits, input_tokens) = measure(&messages, model, limit)?;
     }
     let mut warnings = Vec::new();
     if reduced {
@@ -167,12 +174,6 @@ pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fi
     if dropped > 0 {
         warnings.push(format!(
             "请求预算不足，已省略 {dropped} 个最早的完整对话轮次。"
-        ));
-    }
-    let (fits, input_tokens) = measure(&messages, model, limit)?;
-    if !fits {
-        return Err(Error::Validation(
-            "请求预算不足以保留必要上下文，请缩小主机范围",
         ));
     }
     Ok(Fitted {

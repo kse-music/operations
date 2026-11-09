@@ -74,6 +74,13 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
 }
 std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
 fn handle(opcode: i32, payload: Value) -> Value {
+    // Compile immutable rules once, using the startup entry's own fuel budget.
+    if opcode == 0
+        && let Err(error) = redact::initialize()
+    {
+        let error: ApiError = error.into();
+        return serverdeck_plugin_sdk::json_error(&error.code, &error.message);
+    }
     RUNTIME.with_borrow_mut(|runtime| runtime.handle(opcode, payload))
 }
 serverdeck_plugin_sdk::export_plugin!(handle);
