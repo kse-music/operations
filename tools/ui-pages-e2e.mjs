@@ -151,6 +151,10 @@ async function fixtures(page, theme) {
       })),
     };
     filesApi.local = async (path) => ({ ...listing, path: path ?? listing.path });
+    filesApi.localDrives = async () => [
+      { path: 'C:\\', name: 'C: 本地磁盘' },
+      { path: 'D:\\', name: 'D: 本地磁盘' },
+    ];
     filesApi.list = async (_session, path) => ({ ...listing, path });
     filesApi.connections = async () => [session];
     filesApi.tasks = async () => [];

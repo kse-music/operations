@@ -20,6 +20,7 @@ import { useFilesStore } from '../stores/files';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 const store = useFilesStore();
+const emit = defineEmits<{ ready: [] }>();
 const container = ref<HTMLElement>(),
   error = ref<string | null>(null),
   busy = ref(false),
@@ -97,6 +98,7 @@ onMounted(() => {
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
     if (confirmed.value && !busy.value) void save();
   });
+  emit('ready');
 });
 onBeforeUnmount(() => {
   editor?.dispose();
@@ -158,7 +160,7 @@ async function perform(action: 'close' | 'reload'): Promise<void> {
 }
 useErrorNotifications(() => [
   error.value,
-  !document.value.atomicSave ? '服务器缺少原子替换扩展，此文档只可查看。' : null,
+  document.value?.atomicSave === false ? '服务器缺少原子替换扩展，此文档只可查看。' : null,
 ]);
 </script>
 <template>

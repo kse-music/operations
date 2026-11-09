@@ -20,6 +20,8 @@ import { FileWarning, Info, ListTodo, Monitor, Puzzle, Server, Unplug, X } from 
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
+import RemoteEditorHost from './components/RemoteEditorHost.vue';
+import FileOpenDialogs from './components/FileOpenDialogs.vue';
 import { useHostsStore } from './stores/hosts';
 import { hostDisplayName, type Host } from './types/hosts';
 const TerminalsView = defineAsyncComponent(() => import('./views/TerminalsView.vue'));
@@ -351,7 +353,6 @@ function openServer(host: Host): void {
   navigate('server', host.id);
 }
 const FilesView = defineAsyncComponent(() => import('./views/FilesView.vue'));
-const RemoteEditor = defineAsyncComponent(() => import('./components/RemoteEditor.vue'));
 import { useTerminalsStore } from './stores/terminals';
 
 const application = useApplicationStore();
@@ -785,7 +786,8 @@ watch(
     @select-host="setContext"
     @plugin="openPlugin"
   />
-  <RemoteEditor v-if="files.document" />
+  <RemoteEditorHost v-if="files.document" :key="files.document.token" />
+  <FileOpenDialogs />
   <Modal
     v-if="files.exitReview"
     title="确认退出 ServerDeck"

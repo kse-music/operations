@@ -1,3 +1,4 @@
+mod external;
 mod support;
 use serverdeck_core::{IpcError, files::*};
 use serverdeck_sftp::Files;

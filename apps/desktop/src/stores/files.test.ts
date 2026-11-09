@@ -9,6 +9,14 @@ const mocks = vi.hoisted(() => ({
   close: vi.fn(),
   clearTransfers: vi.fn(),
   switchUser: vi.fn(),
+  read: vi.fn(),
+  closeEditor: vi.fn(),
+  externalPrepare: vi.fn(),
+  externalReady: vi.fn(),
+  externalSave: vi.fn(),
+  openLocal: vi.fn(),
+  cancel: vi.fn(),
+  externalCancel: vi.fn(),
 }));
 vi.mock('../services/files', () => ({ filesApi: mocks }));
 import { useFilesStore } from './files';
@@ -24,6 +32,128 @@ beforeEach(() => {
   mocks.connections.mockResolvedValue([]);
   mocks.tasks.mockResolvedValue([]);
   mocks.clearTransfers.mockResolvedValue(undefined);
+  mocks.closeEditor.mockResolvedValue(undefined);
+  mocks.openLocal.mockResolvedValue(true);
+});
+
+describe('file opening and external editing', () => {
+  function connected() {
+    const store = useFilesStore();
+    store.active = host.id;
+    store.connections[host.id] = {
+      host,
+      id: 'session',
+      state: 'connected',
+      error: null,
+      trust: null,
+      path: '/',
+      listing: null,
+      loading: false,
+    };
+    mocks.connections.mockResolvedValue([{ id: 'session', hostId: host.id }]);
+    return store;
+  }
+  const external = {
+    token: 'external',
+    sessionId: 'session',
+    path: '/config.ini',
+    localPath: 'D:/app/external-edits/edit-1/config.ini',
+    transferId: 'download',
+    ready: false,
+    atomicSave: true,
+  };
+  it('shows read progress, keeps ini eligible and offers a fallback with the actual error', async () => {
+    const store = connected();
+    let reject!: (error: unknown) => void;
+    mocks.read.mockImplementation(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const request = store.edit('/config.ini', 100);
+    expect(store.editorBusy).toBe(true);
+    expect(store.openingPath).toBe('/config.ini');
+    expect(mocks.read).toHaveBeenCalledWith('session', '/config.ini');
+    reject({ code: 'TEXT_ENCODING', message: '文件不是有效 UTF-8，未进行有损解码' });
+    await request;
+    expect(store.editorBusy).toBe(false);
+    expect(store.openIssue?.message).toContain('UTF-8');
+    expect(store.document).toBeNull();
+    expect(store.error).toBeNull();
+    mocks.read.mockClear();
+    await store.edit('/large.log', 2 * 1024 * 1024 + 1);
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(store.openIssue?.message).toContain('2 MiB');
+  });
+  it('opens only a verified completed download once and keeps the original session when another host becomes active', async () => {
+    const store = connected();
+    store.offerExternal('/config.ini');
+    mocks.externalPrepare.mockResolvedValue(external);
+    await store.startExternal();
+    expect(mocks.externalPrepare).toHaveBeenCalledWith('session', '/config.ini');
+    store.active = 'other-host';
+    mocks.tasks.mockResolvedValue([transfer({ id: 'download', state: 'completed', filesDone: 1 })]);
+    mocks.externalReady.mockResolvedValue({ ...external, ready: true });
+    await store.poll();
+    await vi.waitFor(() =>
+      expect(mocks.openLocal).toHaveBeenCalledExactlyOnceWith(external.localPath),
+    );
+    await store.poll();
+    expect(mocks.externalReady).toHaveBeenCalledExactlyOnceWith('external');
+    expect(mocks.openLocal).toHaveBeenCalledTimes(1);
+    expect(store.externalDocument?.sessionId).toBe('session');
+  });
+  it('does not open a failed download or upload without confirmation and retains recovery state after conflicts', async () => {
+    const store = connected();
+    store.externalDocument = { ...external };
+    mocks.tasks.mockResolvedValue([
+      transfer({ id: 'download', state: 'failed', message: '网络中断' }),
+    ]);
+    await store.poll();
+    expect(mocks.openLocal).not.toHaveBeenCalled();
+    expect(store.externalError).toBe('网络中断');
+    store.externalDocument.ready = true;
+    await store.saveExternal(false);
+    expect(mocks.externalSave).not.toHaveBeenCalled();
+    mocks.externalSave.mockRejectedValueOnce({ message: '文件已被外部修改；未覆盖' });
+    await store.saveExternal(true);
+    expect(mocks.externalSave).toHaveBeenCalledExactlyOnceWith('external', true);
+    expect(store.externalDocument.localPath).toBe(external.localPath);
+    expect(store.externalError).toContain('未覆盖');
+    expect(await store.prepareHostClose(host.id)).toBe(false);
+    expect(mocks.close).not.toHaveBeenCalled();
+  });
+  it('ends external editing explicitly while keeping the local recovery path', async () => {
+    const store = connected();
+    store.externalDocument = { ...external };
+    store.tasks = [transfer({ id: 'download', state: 'running' })];
+    await store.closeExternal();
+    expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith('download');
+    expect(mocks.closeEditor).toHaveBeenCalledExactlyOnceWith('external', true);
+    expect(store.externalDocument).toBeNull();
+    expect(store.notice).toContain(external.localPath);
+  });
+  it('cancels an in-flight external save without closing or losing its recovery copy', async () => {
+    const store = connected();
+    store.externalDocument = { ...external, ready: true };
+    let reject!: (error: unknown) => void;
+    mocks.externalSave.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, fail) => {
+          reject = fail;
+        }),
+    );
+    const saving = store.saveExternal(true);
+    expect(store.externalSaving).toBe(true);
+    await store.cancelExternalSave();
+    expect(mocks.externalCancel).toHaveBeenCalledExactlyOnceWith('external');
+    reject({ message: '回传已取消' });
+    await saving;
+    expect(store.externalSaving).toBe(false);
+    expect(store.externalDocument.localPath).toBe(external.localPath);
+    expect(mocks.closeEditor).not.toHaveBeenCalled();
+  });
 });
 
 describe('host transfer lifetime', () => {

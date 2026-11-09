@@ -2,7 +2,13 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Host } from '../types/hosts';
-import type { DirectoryListing, SftpUser, TextDocument, TransferInfo } from '../types/files';
+import type {
+  DirectoryListing,
+  ExternalDocument,
+  SftpUser,
+  TextDocument,
+  TransferInfo,
+} from '../types/files';
 import { unfinished } from '../types/files';
 import type { TerminalEvent } from '../types/terminal';
 import { filesApi } from '../services/files';
@@ -61,6 +67,13 @@ export const useFilesStore = defineStore('files', () => {
     document = ref<TextDocument | null>(null),
     dirty = ref(false),
     editorBusy = ref(false),
+    openingPath = ref(''),
+    openIssue = ref<{ sessionId: string; path: string; message: string } | null>(null),
+    externalDocument = ref<ExternalDocument | null>(null),
+    externalBusy = ref(false),
+    externalSaving = ref(false),
+    localOpening = ref(false),
+    externalError = ref<string | null>(null),
     exitReview = ref(false),
     closingHosts = ref<string[]>([]);
   const current = computed(() => connections.value[active.value]);
@@ -231,7 +244,11 @@ export const useFilesStore = defineStore('files', () => {
     )
       return false;
     const { id, host } = connection;
-    if (editorBusy.value || document.value?.sessionId === id) {
+    if (
+      editorBusy.value ||
+      document.value?.sessionId === id ||
+      externalDocument.value?.sessionId === id
+    ) {
       error.value = '请先保存并关闭编辑文档，再切换 SFTP 用户。';
       return false;
     }
@@ -283,20 +300,158 @@ export const useFilesStore = defineStore('files', () => {
       await navigate(current.value.path);
     if (local.value && !localLoading.value) await localLoad(local.value.path);
   }
-  async function edit(path: string): Promise<void> {
+  async function edit(path: string, size: number | null = null): Promise<void> {
     if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value)) return;
-    if (document.value) {
+    if (document.value || externalDocument.value) {
       error.value = '请先保存或关闭当前编辑文档。';
+      return;
+    }
+    const sessionId = current.value.id;
+    openIssue.value = null;
+    openingPath.value = path;
+    if (size !== null && size > 2 * 1024 * 1024) {
+      openIssue.value = {
+        sessionId,
+        path,
+        message: '文件超过内置编辑器的 2 MiB 上限，可使用系统应用编辑。',
+      };
       return;
     }
     editorBusy.value = true;
     try {
-      document.value = await filesApi.read(current.value.id, path);
+      document.value = await filesApi.read(sessionId, path);
       dirty.value = false;
+    } catch (cause) {
+      openIssue.value = { sessionId, path, message: errorMessage(cause) };
+    } finally {
+      editorBusy.value = false;
+    }
+  }
+  async function editorFailed(): Promise<void> {
+    const old = document.value;
+    if (!old) return;
+    openIssue.value = {
+      sessionId: old.sessionId,
+      path: old.path,
+      message: '内置编辑器加载失败，可重试或使用系统应用编辑。',
+    };
+    try {
+      await filesApi.closeEditor(old.token, false);
+      if (document.value?.token === old.token) document.value = null;
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
+  }
+  function offerExternal(path: string): void {
+    if (!current.value?.id) return;
+    if (document.value || externalDocument.value || editorBusy.value) {
+      error.value = '请先保存或关闭当前编辑文档。';
+      return;
+    }
+    openIssue.value = {
+      sessionId: current.value.id,
+      path,
+      message: '使用本机应用编辑远程文件，保存后返回此处确认回传。',
+    };
+  }
+  async function openLocal(path: string): Promise<void> {
+    if (localOpening.value) return;
+    localOpening.value = true;
+    try {
+      await filesApi.openLocal(path);
     } catch (cause) {
       error.value = errorMessage(cause);
     } finally {
-      editorBusy.value = false;
+      localOpening.value = false;
+    }
+  }
+  async function startExternal(): Promise<void> {
+    const issue = openIssue.value;
+    if (!issue || externalBusy.value || document.value || externalDocument.value) return;
+    externalBusy.value = true;
+    externalError.value = null;
+    try {
+      externalDocument.value = await filesApi.externalPrepare(issue.sessionId, issue.path);
+      openIssue.value = null;
+      void poll();
+    } catch (cause) {
+      externalError.value = errorMessage(cause);
+    } finally {
+      externalBusy.value = false;
+    }
+  }
+  async function finishExternalDownload(): Promise<void> {
+    const old = externalDocument.value;
+    if (!old || old.ready || externalBusy.value || externalError.value) return;
+    const task = tasks.value.find((task) => task.id === old.transferId);
+    if (!task || unfinished(task)) return;
+    if (task.state !== 'completed') {
+      externalError.value = task.message ?? '外部编辑副本下载未完成，请结束本次编辑后重试。';
+      return;
+    }
+    externalBusy.value = true;
+    try {
+      const ready = await filesApi.externalReady(old.token);
+      externalDocument.value = ready;
+      await filesApi.openLocal(ready.localPath);
+    } catch (cause) {
+      externalError.value = errorMessage(cause);
+    } finally {
+      externalBusy.value = false;
+    }
+  }
+  async function saveExternal(confirmed: boolean): Promise<void> {
+    const external = externalDocument.value;
+    if (!external?.ready || externalBusy.value || !confirmed) return;
+    externalBusy.value = true;
+    externalSaving.value = true;
+    externalError.value = null;
+    try {
+      const result = await filesApi.externalSave(external.token, true);
+      if (!result.document) {
+        externalError.value = `${result.message ?? '回传失败'}；恢复路径：${result.recoveryPath ?? '无'}`;
+        return;
+      }
+      notice.value = '外部编辑的文件已回传并校验；继续编辑后需再次确认回传。';
+      void refresh();
+    } catch (cause) {
+      externalError.value = errorMessage(cause);
+    } finally {
+      externalBusy.value = false;
+      externalSaving.value = false;
+    }
+  }
+  async function cancelExternalSave(): Promise<void> {
+    if (
+      !externalDocument.value ||
+      (!externalSaving.value && (externalDocument.value.ready || !externalBusy.value))
+    )
+      return;
+    try {
+      await filesApi.externalCancel(externalDocument.value.token);
+    } catch (cause) {
+      externalError.value = errorMessage(cause);
+    }
+  }
+  async function closeExternal(): Promise<void> {
+    const external = externalDocument.value;
+    if (!external || externalBusy.value) return;
+    externalBusy.value = true;
+    try {
+      if (
+        !external.ready &&
+        tasks.value.some((task) => task.id === external.transferId && unfinished(task))
+      ) {
+        await filesApi.cancel(external.transferId);
+      }
+      await filesApi.closeEditor(external.token, true);
+      externalDocument.value = null;
+      externalError.value = null;
+      notice.value = `已结束外部编辑，本地副本保留于：${external.localPath}`;
+    } catch (cause) {
+      externalError.value = errorMessage(cause);
+    } finally {
+      externalBusy.value = false;
     }
   }
   async function prepareHostClose(hostId: string): Promise<boolean> {
@@ -313,6 +468,7 @@ export const useFilesStore = defineStore('files', () => {
         if (task.hostId === hostId && unfinished(task)) ids.add(task.sessionId);
       if (
         (document.value && ids.has(document.value.sessionId) && dirty.value) ||
+        (externalDocument.value && ids.has(externalDocument.value.sessionId)) ||
         (editorBusy.value && active.value === hostId)
       ) {
         error.value = '请先保存或关闭此主机的编辑文档，再关闭主机。';
@@ -392,6 +548,7 @@ export const useFilesStore = defineStore('files', () => {
         (t) => t.state === 'completed' && before.get(t.id) && before.get(t.id) !== 'completed',
       );
       tasks.value = value;
+      void finishExternalDownload();
       if (finished.length) {
         void refresh();
       }
@@ -447,6 +604,20 @@ export const useFilesStore = defineStore('files', () => {
     document,
     dirty,
     editorBusy,
+    openingPath,
+    openIssue,
+    externalDocument,
+    externalBusy,
+    externalSaving,
+    localOpening,
+    cancelExternalSave,
+    externalError,
+    editorFailed,
+    offerExternal,
+    openLocal,
+    startExternal,
+    saveExternal,
+    closeExternal,
     exitReview,
     closingHosts,
     prepareHostClose,

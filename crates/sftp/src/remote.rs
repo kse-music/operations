@@ -32,6 +32,16 @@ pub(crate) fn map(error: SftpError) -> Error {
 pub(crate) fn missing(error: &SftpError) -> bool {
     matches!(error, SftpError::Status(s) if s.status_code == StatusCode::NoSuchFile)
 }
+pub(crate) fn check_editor_cancel(cancel: Option<&CancellationToken>) -> Result<(), Error> {
+    if cancel.is_some_and(CancellationToken::is_cancelled) {
+        Err(fail(
+            "EDITOR_CANCELLED",
+            "回传已取消，未提交的远程原文件及本地副本保留",
+        ))
+    } else {
+        Ok(())
+    }
+}
 pub(crate) struct Remote {
     pub raw: RawSftpSession,
     pub atomic: bool,
@@ -224,6 +234,14 @@ impl Remote {
         }
     }
     pub async fn hash(&self, path: &str) -> Result<String, Error> {
+        self.hash_cancellable(path, None).await
+    }
+    pub async fn hash_cancellable(
+        &self,
+        path: &str,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<String, Error> {
+        check_editor_cancel(cancel)?;
         let handle = self
             .raw
             .open(path, OpenFlags::READ, FileAttributes::default())
@@ -234,6 +252,7 @@ impl Remote {
             let mut digest = Sha256::new();
             let mut offset = 0;
             loop {
+                check_editor_cancel(cancel)?;
                 match self.raw.read(&handle, offset, 32768).await {
                     Ok(value) if value.data.is_empty() => break,
                     Ok(value) => {

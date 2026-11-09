@@ -185,6 +185,168 @@ fn operation(reply: &Reply) -> &Value {
 }
 
 #[tokio::test]
+async fn docker_compose_prepares_project_commands_and_survives_denial() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let snapshot = json!({"ID":"a".repeat(64),"Name":"/shop-web-1","Image":"nginx","State":"running","ExitCode":0,"Project":"shop","Service":"web","OneOff":"False","WorkingDir":"/srv/my shop","ConfigFiles":"/srv/my shop/compose.yaml"}).to_string();
+    let completed = |stdout: &str| json!({"state":"completed","exitCode":0,"stdout":stdout,"stderr":"","truncated":false,"message":null});
+    let projects = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"compose_projects"}}), |request| {
+        assert!(request["command"]["args"][1].as_str().unwrap().ends_with("d compose ls --all --format json"));
+        completed(r#"[{"Name":"shop","Status":"running(1)","ConfigFiles":"/srv/my shop/compose.yaml"}]"#)
+    }).await;
+    assert_eq!(done(&projects)["records"][0]["Name"], "shop");
+    let services = invoke(
+        &runtime,
+        &id,
+        "query",
+        json!({"hostId":"host","request":{"kind":"compose_services","project":"shop"}}),
+        |_| completed(&snapshot),
+    )
+    .await;
+    assert_eq!(done(&services)["detail"]["services"][0]["Service"], "web");
+    let mut reply = runtime.call(&id, json!({"action":"query","input":{"hostId":"host","request":{"kind":"compose_action","project":"shop","action":"stop","confirmed":true}}})).await.unwrap();
+    assert_eq!(operation(&reply)["kind"], "host");
+    reply = resume(&runtime, &id, &reply, metadata(operation(&reply))).await;
+    assert_eq!(
+        reply.result["request"]["operation"]["bindings"],
+        json!(["host-binding"])
+    );
+    reply = resume(&runtime, &id, &reply, completed(&snapshot)).await;
+    let script = operation(&reply)["command"]["args"][1].as_str().unwrap();
+    assert!(script.contains("--project-name 'shop'"));
+    assert!(script.contains("--file '/srv/my shop/compose.yaml' stop --timeout 5"));
+    let manifest: Value =
+        serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
+    assert!(
+        !manifest["preapprovedCommands"]
+            .as_array()
+            .unwrap()
+            .contains(&operation(&reply)["command"])
+    );
+    let cancelled = runtime.resume(&id, json!({"hostResponse":{"requestId":reply.result["request"]["requestId"],"result":null,"error":{"code":"USER_CANCELLED","message":"取消"}}})).await.unwrap();
+    assert_eq!(cancelled.error.as_ref().unwrap().code, "USER_CANCELLED");
+    let mut opened = false;
+    let logs = invoke(&runtime, &id, "logs", json!({"hostId":"host","source":{"kind":"compose","project":"shop"},"lines":200,"follow":true}), |request| {
+        match request["kind"].as_str().unwrap() {
+            "host" => metadata(request),
+            "execute" => completed(&snapshot),
+            "stream_open" => { opened = true; assert!(request["command"]["args"][1].as_str().unwrap().contains("logs --no-color --timestamps --tail 200 --follow")); json!({"id":"compose-stream"}) },
+            other => panic!("unexpected {other}"),
+        }
+    }).await;
+    assert!(opened);
+    assert_eq!(done(&logs)["id"], "compose-stream");
+    runtime.shutdown().await.unwrap();
+}
+
+// Opt-in only: the caller creates and owns this isolated, networkless QA project.
+// Uses real Docker through WSL; does not claim to exercise the native SSH/UI bridge.
+#[tokio::test]
+#[ignore = "requires an explicitly created SERVERDECK_COMPOSE_QA_PROJECT in local WSL Docker"]
+async fn docker_compose_live_project_lifecycle() {
+    let project = std::env::var("SERVERDECK_COMPOSE_QA_PROJECT").unwrap();
+    assert!(project.starts_with("sd-compose-qa-"));
+    assert!(
+        project
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    );
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    async fn run(runtime: &Runtime, id: &str, action: &str, input: Value, project: &str) -> Value {
+        let mut reply = runtime
+            .call(id, json!({"action":action,"input":input}))
+            .await
+            .unwrap();
+        for _ in 0..10 {
+            if reply.result["kind"] == "done" {
+                return done(&reply).clone();
+            }
+            let request = operation(&reply).clone();
+            let result = if request["kind"] == "host" {
+                metadata(&request)
+            } else {
+                assert!(matches!(
+                    request["kind"].as_str(),
+                    Some("execute" | "stream_open")
+                ));
+                let command = &request["command"];
+                let script = command["args"][1].as_str().unwrap();
+                if script.contains("exec docker") {
+                    assert!(script.contains(&format!("--project-name '{project}'")));
+                    assert!(!script.contains("down"));
+                    assert!(!script.contains("up -d"));
+                }
+                let program = command["program"].as_str().unwrap().to_string();
+                let args = command["args"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|a| a.as_str().unwrap().to_string())
+                    .collect::<Vec<_>>();
+                let output = tokio::task::spawn_blocking(move || {
+                    std::process::Command::new("wsl")
+                        .args(["--user", "root", "--exec", &program])
+                        .args(args)
+                        .output()
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+                let stdout = String::from_utf8(output.stdout).unwrap();
+                let stderr = String::from_utf8(output.stderr).unwrap();
+                if request["kind"] == "stream_open" {
+                    assert!(output.status.success(), "{stderr}");
+                    assert!(stdout.contains("COMPOSE_QA_WEB"));
+                    assert!(stdout.contains("COMPOSE_QA_WORKER"));
+                    json!({"id":"real-compose-logs"})
+                } else {
+                    json!({"state":"completed","exitCode":output.status.code(),"stdout":stdout,"stderr":stderr,"truncated":false,"message":null})
+                }
+            };
+            reply = resume(runtime, id, &reply, result).await;
+        }
+        panic!("live Compose action exceeded request bound");
+    }
+    let projects = run(
+        &runtime,
+        &id,
+        "query",
+        json!({"hostId":"host","request":{"kind":"compose_projects"}}),
+        &project,
+    )
+    .await;
+    assert!(
+        projects["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["Name"] == project)
+    );
+    for (action, expected) in [
+        ("stop", "exited"),
+        ("start", "running"),
+        ("restart", "running"),
+    ] {
+        run(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"compose_action","project":project,"action":action,"confirmed":true}}), &project).await;
+        let detail = run(
+            &runtime,
+            &id,
+            "query",
+            json!({"hostId":"host","request":{"kind":"compose_services","project":project}}),
+            &project,
+        )
+        .await;
+        let rows = detail["detail"]["services"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r["State"] == expected));
+    }
+    let logs = run(&runtime, &id, "logs", json!({"hostId":"host","source":{"kind":"compose","project":project},"lines":200,"follow":false}), &project).await;
+    assert_eq!(logs["id"], "real-compose-logs");
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn assistant_owns_redaction_and_preview_inside_the_packaged_wasm() {
     let (_directory, runtime, id) = packaged("assistant");
     runtime.activate(&id).await.unwrap();

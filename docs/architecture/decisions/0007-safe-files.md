@@ -2,6 +2,8 @@
 
 整理状态：部分被 [ADR 0018](0018-workspace-lifecycle.md) 替代；安全替换原则保留，当前无持续目录跟随，主机关闭会确认取消并排空传输。
 
+外部编辑范围由 [ADR 0031](0031-external-file-editing.md) 扩展：小型 UTF-8 限制继续适用于内置编辑器，外部副本按字节流式回传，复用本记录的冲突检测和保守原子替换原则。
+
 以下保留原决策正文和当时验证边界；当前接口及功能以[总体架构](../ARCHITECTURE.md)和[决策索引](../DECISIONS.md)为准。
 
 日期：2026-11-01；状态：已实现，验证见 [阶段四验收](../../validation/files/VALIDATION_STAGE4.md)。

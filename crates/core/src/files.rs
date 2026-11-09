@@ -87,6 +87,12 @@ pub struct DirectoryListing {
     pub parent: Option<String>,
     pub entries: Vec<FileEntry>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDrive {
+    pub path: String,
+    pub name: String,
+}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteAction {
@@ -207,6 +213,18 @@ pub struct SaveResult {
     pub document: Option<TextDocument>,
     pub recovery_path: Option<String>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalDocument {
+    pub token: String,
+    pub session_id: String,
+    pub path: String,
+    pub local_path: String,
+    pub transfer_id: String,
+    pub atomic_save: bool,
+    pub ready: bool,
 }
 
 pub fn valid_path(path: &str) -> Result<(), Error> {

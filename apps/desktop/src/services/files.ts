@@ -3,6 +3,7 @@ import { ensureDesktop } from './ipc';
 import type { TerminalEvent, TerminalSession, TerminalSize } from '../types/terminal';
 import type {
   DirectoryListing,
+  LocalDrive,
   FileEntry,
   RemoteAction,
   TransferInput,
@@ -13,6 +14,7 @@ import type {
   FileTerminalAction,
   SftpUser,
   FileUserSession,
+  ExternalDocument,
 } from '../types/files';
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   ensureDesktop();
@@ -39,6 +41,7 @@ export const filesApi = {
   },
   list: (id: string, path: string) => call<DirectoryListing>('files_list', { id, path }),
   local: (path: string | null) => call<DirectoryListing>('files_local', { path }),
+  localDrives: () => call<LocalDrive[]>('files_local_drives'),
   properties: (id: string, path: string) => call<FileEntry>('files_properties', { id, path }),
   action: (id: string, action: RemoteAction) => call<void>('files_action', { id, action }),
   close: (id: string, cancel: boolean) => call<void>('files_close', { id, cancel }),
@@ -52,6 +55,13 @@ export const filesApi = {
   retry: (id: string, sessionId: string, conflict: ConflictPolicy, confirmed: boolean) =>
     call<TransferInfo>('transfer_retry', { id, sessionId, conflict, confirmed }),
   read: (id: string, path: string) => call<TextDocument>('text_read', { id, path }),
+  openLocal: (path: string) => call<boolean>('files_open_local', { path }),
+  externalPrepare: (id: string, path: string) =>
+    call<ExternalDocument>('external_prepare', { id, path }),
+  externalReady: (token: string) => call<ExternalDocument>('external_ready', { token }),
+  externalSave: (token: string, confirmed: boolean) =>
+    call<SaveResult>('external_save', { token, confirmed }),
+  externalCancel: (token: string) => call<void>('external_cancel', { token }),
   save: (token: string, content: string, confirmReplace: boolean) =>
     call<SaveResult>('text_save', { input: { token, content, confirmReplace } }),
   dirty: (token: string, dirty: boolean) => call<void>('text_dirty', { token, dirty }),

@@ -5,6 +5,7 @@ import ServerTabs from './ServerTabs.vue';
 import OpsDetails from './OpsDetails.vue';
 import { Container, Layers, CircleCheck, Box } from '@lucide/vue';
 import ContainerDetails from './ContainerDetails.vue';
+import ComposeDetails from './ComposeDetails.vue';
 import './docker.css';
 import type { ServerSection } from './types';
 import type { PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
@@ -13,7 +14,7 @@ const props = defineProps<{
   initialSection?: ServerSection;
   page?: PluginUiPage;
 }>();
-const sections = computed<ServerSection[]>(() => ['containers', 'images']);
+const sections = computed<ServerSection[]>(() => ['containers', 'images', 'compose']);
 const emit = defineEmits<{
   section: [section: ServerSection];
 }>();
@@ -37,13 +38,19 @@ const columns = computed(() =>
         { key: 'State', label: '状态' },
         { key: 'Ports', label: '端口映射' },
       ]
-    : [
-        { key: 'Repository', label: '仓库' },
-        { key: 'Tag', label: '标签' },
-        { key: 'ID', label: '镜像 ID' },
-        { key: 'Size', label: '大小' },
-        { key: 'CreatedSince', label: '创建时间' },
-      ],
+    : section.value === 'compose'
+      ? [
+          { key: 'Name', label: '项目' },
+          { key: 'Status', label: '状态' },
+          { key: 'ConfigFiles', label: '配置文件' },
+        ]
+      : [
+          { key: 'Repository', label: '仓库' },
+          { key: 'Tag', label: '标签' },
+          { key: 'ID', label: '镜像 ID' },
+          { key: 'Size', label: '大小' },
+          { key: 'CreatedSince', label: '创建时间' },
+        ],
 );
 const activeStates = ['running', 'paused', 'restarting'];
 const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
@@ -55,9 +62,22 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
       ><ResourceView
         :key="section"
         :host-id="hostId"
-        :list-request="{ kind: section === 'images' ? 'images' : 'containers' }"
+        :list-request="{
+          kind:
+            section === 'compose'
+              ? 'compose_projects'
+              : section === 'images'
+                ? 'images'
+                : 'containers',
+        }"
         :columns="columns"
-        row-key="ID"
+        :row-key="section === 'compose' ? 'Name' : 'ID'"
+        :search-placeholder="section === 'compose' ? '搜索项目名称、状态或配置文件…' : undefined"
+        :hint="
+          section === 'compose'
+            ? '管理已有项目；启动不会重新部署，已删除全部容器的项目不在列表中。'
+            : undefined
+        "
       >
         <template #summary="{ rows, loading, error }">
           <div class="docker-summary">
@@ -66,7 +86,13 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
                 ><component :is="section === 'images' ? Layers : Container" :size="19"
               /></span>
               <div>
-                <span>{{ section === 'images' ? '本地镜像' : '全部容器' }}</span
+                <span>{{
+                  section === 'compose'
+                    ? 'Compose 项目'
+                    : section === 'images'
+                      ? '本地镜像'
+                      : '全部容器'
+                }}</span
                 ><strong>{{ loading || error ? '—' : rows.length }}</strong>
               </div>
             </article>
@@ -122,7 +148,54 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
           ></template
         >
         <template #actions="{ row, busy, inspect, execute, openLog, openShell }">
-          <template v-if="section === 'containers'">
+          <template v-if="section === 'compose'">
+            <button
+              class="text-button"
+              :disabled="busy"
+              @click="
+                inspect(
+                  { kind: 'compose_services', project: String(row.Name) },
+                  `${row.Name} · 服务状态`,
+                )
+              "
+            >
+              服务
+            </button>
+            <button
+              class="text-button"
+              :disabled="busy"
+              @click="
+                openLog(
+                  {
+                    source: { kind: 'compose', project: String(row.Name) },
+                    lines: 200,
+                    follow: true,
+                  },
+                  `${row.Name} · 项目日志`,
+                )
+              "
+            >
+              日志
+            </button>
+            <button
+              v-for="action in ['start', 'stop', 'restart'] as const"
+              :key="action"
+              class="text-button"
+              :class="{ danger: action !== 'start' }"
+              :disabled="busy"
+              @click="
+                execute({
+                  kind: 'compose_action',
+                  project: String(row.Name),
+                  action,
+                  confirmed: true,
+                })
+              "
+            >
+              {{ { start: '启动', stop: '停止', restart: '重启' }[action] }}
+            </button>
+          </template>
+          <template v-else-if="section === 'containers'">
             <button
               class="text-button"
               :disabled="busy"
@@ -198,8 +271,12 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
           </button>
         </template>
         <template #detail-content="{ detail, query }">
+          <ComposeDetails
+            v-if="typeof detail.composeProject === 'string' && Array.isArray(detail.services)"
+            :detail="detail"
+          />
           <ContainerDetails
-            v-if="typeof detail.id === 'string' && Array.isArray(detail.environment)"
+            v-else-if="typeof detail.id === 'string' && Array.isArray(detail.environment)"
             :key="detail.id"
             :container-id="detail.id"
             :detail="detail"

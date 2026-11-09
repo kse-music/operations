@@ -19,6 +19,146 @@ fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
 }
 
 #[test]
+fn local_drives_use_real_system_roots_and_main_window_acl() {
+    let directory = tempfile::tempdir().unwrap();
+    let application =
+        Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+            .unwrap();
+    let app = mock_builder()
+        .manage(application)
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "untrusted-drives", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let drives = get_ipc_response(&main, request("files_local_drives", json!({}), origin))
+        .expect("real drive enumeration")
+        .deserialize::<Vec<serverdeck_core::files::LocalDrive>>()
+        .unwrap();
+    assert!(!drives.is_empty());
+    let executable = std::env::current_exe().unwrap();
+    assert!(
+        drives
+            .iter()
+            .any(|drive| executable.starts_with(&drive.path))
+    );
+    let drive = drives
+        .iter()
+        .find(|drive| executable.starts_with(&drive.path))
+        .unwrap();
+    let root = get_ipc_response(
+        &main,
+        request("files_local", json!({"path": drive.path}), origin),
+    )
+    .expect("browse an actual drive root")
+    .deserialize::<serverdeck_core::files::DirectoryListing>()
+    .unwrap();
+    assert!(root.parent.is_none());
+    assert_eq!(
+        std::path::Path::new(&root.path),
+        std::fs::canonicalize(&drive.path).unwrap()
+    );
+    #[cfg(windows)]
+    {
+        assert!(drives.len() <= 26);
+        assert!(drives.windows(2).all(|pair| pair[0].path < pair[1].path));
+        for drive in &drives {
+            assert_eq!(drive.path.len(), 3);
+            assert!(drive.path.as_bytes()[0].is_ascii_uppercase());
+            assert!(drive.path.ends_with(":\\"));
+            assert!(drive.name.starts_with(&drive.path[..2]));
+        }
+    }
+    assert!(get_ipc_response(&other, request("files_local_drives", json!({}), origin)).is_err());
+    assert!(
+        get_ipc_response(
+            &main,
+            request("files_local_drives", json!({}), "https://untrusted.invalid")
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn file_opening_commands_reject_untrusted_windows_and_invalid_files_without_launching_apps() {
+    let directory = tempfile::tempdir().unwrap();
+    let application =
+        Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+            .unwrap();
+    let app = mock_builder()
+        .manage(application)
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "untrusted-open", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    for path in [
+        "config.ini".to_owned(),
+        "https://example.invalid/file.ini".into(),
+        directory.path().to_string_lossy().into_owned(),
+        directory
+            .path()
+            .join("missing.ini")
+            .to_string_lossy()
+            .into_owned(),
+        "bad\0file".into(),
+    ] {
+        assert!(
+            get_ipc_response(
+                &main,
+                request("files_open_local", json!({"path": path}), origin)
+            )
+            .is_err()
+        );
+    }
+    for (command, body) in [
+        ("files_open_local", json!({"path": directory.path()})),
+        (
+            "external_prepare",
+            json!({"id": "invalid-session", "path": "/config.ini"}),
+        ),
+        ("external_ready", json!({"token": "unknown"})),
+        (
+            "external_save",
+            json!({"token": "unknown", "confirmed": true}),
+        ),
+    ] {
+        assert!(get_ipc_response(&other, request(command, body.clone(), origin)).is_err());
+        assert!(
+            get_ipc_response(&main, request(command, body, "https://untrusted.invalid")).is_err()
+        );
+    }
+    let error = get_ipc_response(
+        &main,
+        request(
+            "external_save",
+            json!({"token": "unknown", "confirmed": false}),
+            origin,
+        ),
+    )
+    .unwrap_err();
+    assert!(error["message"].as_str().unwrap().contains("确认"));
+}
+
+#[test]
 fn storage_preview_confirmation_and_main_window_acl() {
     use serverdeck_application::storage_location::{LOCATOR, Locations, Profile};
     use serverdeck_desktop_lib::storage_commands::StorageState;

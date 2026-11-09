@@ -46,6 +46,15 @@ pub enum Query {
     Capabilities,
     Containers,
     Images,
+    ComposeProjects,
+    ComposeServices {
+        project: String,
+    },
+    ComposeAction {
+        project: String,
+        action: crate::compose::Action,
+        confirmed: bool,
+    },
     ContainerDetails {
         id: String,
         reveal_env: bool,
@@ -62,28 +71,10 @@ pub enum Query {
         id: String,
         confirmed: bool,
     },
-    Probe {
-        location: String,
-        target: String,
-        port: u16,
-    },
 }
 fn confirm(value: bool) -> Result<(), ApiError> {
     if !value {
         return Err(invalid("此操作需要明确确认目标"));
-    }
-    Ok(())
-}
-pub fn target_valid(target: &str, port: u16) -> Result<(), ApiError> {
-    if port == 0
-        || target.is_empty()
-        || target.len() > 253
-        || target.starts_with('-')
-        || !target
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b".-:_%".contains(&b))
-    {
-        return Err(invalid("目标须为 IP/域名和 1–65535 端口"));
     }
     Ok(())
 }
@@ -93,15 +84,26 @@ impl Query {
    Self::Capabilities=>"if ! command -v docker >/dev/null 2>&1; then printf '{\"dockerInstalled\":false,\"dockerState\":\"absent\"}'; else d version --format '{{json .}}'; fi".into(),
    Self::Containers=>"d container ls --all --no-trunc --format '{{json .}}'".into(),
    Self::Images=>"d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
+   Self::ComposeProjects=>crate::compose::PROJECTS.into(),
+   Self::ComposeServices{project}=>{crate::compose::project_name(project)?;return crate::compose::services_command();},
+   Self::ComposeAction{..}=>return Err(invalid("Compose 变更必须先重新查询真实项目配置")),
    Self::ContainerDetails{id,reveal_env}=>{container_id(id)?;inspect_command(if *reveal_env {ENVIRONMENT_FORMAT} else {DETAILS_FORMAT})?},
    Self::ContainerStats{id}=>{container_id(id)?;"d stats --all --no-stream --no-trunc --format '{{json .}}'".into()},
    Self::ContainerAction{id,action,confirmed}=>{container_id(id)?;confirm(*confirmed)?;let name=match action{Action::Start=>"start",Action::Stop=>"stop --time 10",Action::Restart=>"restart --time 10",Action::Remove=>"rm"};format!("d container {name} {}",quote(id)?)},
    Self::ImageRemove{id,confirmed}=>{image_id(id)?;confirm(*confirmed)?;format!("d image rm {}",quote(id)?)},
-   Self::Probe{location,target,port}=>{target_valid(target,*port)?;if location!="remote"{return Err(invalid("远程命令只能从远端检测"));}format!("exec python3 -c {} {} {port}",quote("import socket,sys,time,json; t=time.monotonic(); s=socket.create_connection((sys.argv[1],int(sys.argv[2])),3); s.close(); print(json.dumps({'reachable':True,'milliseconds':round((time.monotonic()-t)*1000,2)}))")?,quote(target)?)},
   };
         Ok(format!("{PRELUDE}{body}"))
     }
     pub fn response(&self, text: &str) -> Result<Value, ApiError> {
+        if matches!(self, Self::ComposeProjects) {
+            return crate::compose::projects(text);
+        }
+        if let Self::ComposeServices { project } = self {
+            let services = crate::compose::services(text, project)?;
+            return Ok(
+                json!({"success":true,"records":[],"detail":{"composeProject":project,"services":services},"message":null,"code":null}),
+            );
+        }
         let format = || ApiError::new("DOCKER_FORMAT", "远端 Docker 输出格式无效");
         let mut rows = vec![];
         let mut detail = Value::Null;
@@ -150,9 +152,6 @@ impl Query {
                     json!({"dockerInstalled":true,"dockerState":if v["Server"].is_object(){"running"}else{"unavailable"},"dockerVersion":v})
                 };
             }
-            Self::Probe { .. } => {
-                detail = serde_json::from_str(text.trim()).map_err(|_| format())?
-            }
             _ => (),
         }
         Ok(json!({"success":true,"code":null,"message":null,"records":rows,"detail":detail}))
@@ -181,6 +180,25 @@ pub fn shell_command(id: &str, bash: bool) -> Result<String, ApiError> {
 mod tests {
     use super::*;
     #[test]
+    fn removed_tcp_queries_are_rejected_without_network_permission() {
+        for location in ["local", "remote"] {
+            assert!(
+                serde_json::from_value::<Query>(json!({
+                    "kind": "probe", "location": location, "target": "127.0.0.1", "port": 80
+                }))
+                .is_err()
+            );
+        }
+        let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+        assert!(
+            !manifest["permissions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|permission| permission == "network.connect")
+        );
+    }
+    #[test]
     fn package_preapproves_fixed_reads_without_approving_mutations() {
         let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
         let commands: Vec<serverdeck_plugin_sdk::platform::Command> =
@@ -198,6 +216,10 @@ mod tests {
                 reveal_env: true,
             },
             Query::ContainerStats { id: "a".repeat(64) },
+            Query::ComposeProjects,
+            Query::ComposeServices {
+                project: "shop".into(),
+            },
         ]
         .iter()
         .map(|query| serverdeck_plugin_sdk::platform::Command::script(query.command().unwrap()))

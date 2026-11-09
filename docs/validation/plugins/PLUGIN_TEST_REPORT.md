@@ -1,5 +1,12 @@
 # 插件阶段验证记录
 
+## 2026-11-10 移除 Docker TCP 连通性检测
+
+- 本轮移除探测功能，最终校验的 Docker 包为 2.1.2。移除入口、弹窗和前端请求类型，删除本地连接与远程 Python 探测分支、参数校验和响应解析，并从插件清单移除 `network.connect`。平台通用网络能力继续供其他插件使用。
+- Docker 前端最终复验 7 项、插件 Rust 单元 8 项通过，新增回归验证本地/远程探测请求被拒绝且清单不再申请网络权限。原生测试复用根 `target/` 编译，将 EXE 复制到 `.local/qa/docker-remove-tcp/` 后执行。
+- `node tools/build-system-plugins.mjs` 完成 WASM 和插件前端打包。实际 Docker 包在 1280×820 深色标准字号、960×600 浅色大字号两组浏览器夹具中通过，检查 TCP 入口不存在以及项目列表、服务详情、操作说明和日志交互。脚本副本、截图和结果位于 `.local/qa/docker-remove-tcp/`，复制原 Compose 界面脚本时改用独立证据目录并增加入口缺失断言。
+- 桌面/SDK 类型检查、相关 ESLint、Prettier、Rustfmt 和严格 Clippy 通过。未重建桌面 EXE 或安装器，未执行真实远端操作；运行中的客户端需后续构建并启动以使用新包。
+
 ## 2026-11-09 移除确认弹窗执行详情
 
 按用户要求移除易读操作确认弹窗的“执行详情”入口及命令脚本展示，只保留真实 SSH 主机、容器/镜像名称、操作影响和操作/取消按钮。删除宿主 `PluginDialogs.vue` 的详情模板与样式、插件 store 的闲置详情字段和 server 的详情传参；原生审批仍绑定原完整命令、owner、主机修订和续接票据。未修改权限、危险操作确认或其他插件默认完整审批流程。SDK 与当前功能说明同步；Docker 包仍为 2.0.7，此轮是宿主显示修正，无需改动插件包版本或持久配置。
@@ -1199,3 +1206,72 @@ Linux 集成实际完成：随机 OS 凭据经既有应用连接路径认证、�
 默认全工作区仍跳过既有 OS 凭据专门测试、真实 Linux 交互 PTY 测试，以及需外部夹具的新 SDK 测试；新 SDK Linux 测试另行显式执行，包含真实 OS 凭据保存/读取/清理，但不等同于所有凭据类型和 PTY 交互都已验收。未验证 macOS/Linux 原生桌面及所有发行版。远端命令取消不保证进程已终止，已确认写入安全收尾、32 KiB/30 秒/输出等限额见 SDK/安全文档；这些不是未完成的隐藏能力。
 
 下一阶段依赖：已经验证的 grant/context/confirmation/capability IPC、公开 SDK 与资源生命周期。13A-4 尚未完成插件管理页和 UI 贡献渲染，不把当前 API 当作完整 UI 功能。
+
+## 2026-11-10 Docker Compose 项目管理
+
+### 范围与实现
+
+- Docker 包升级至 2.1.0，在原插件内增加「Compose 项目」标签；宿主、SDK、数据库及用户配置格式不变。
+- 通过真实 `docker compose ls --all --format json` 发现已有项目；服务快照只读取必要的容器状态和 Compose 标签，按项目过滤并排除一次性容器，包含已停止服务。
+- 提供项目日志、整组启动/停止/重启。启动仅作用于已有容器；所有 profile 的已有服务参与操作。不编辑配置、不拉取/重建、不删除项目或卷。
+- 固定读取从六条增加至八条；变更执行不在预授权集合中，继续经宿主确认。变更/日志先绑定 SSH 配置修订，从当前服务标签核对一致的原始目录及有序配置路径，逐项引用参数；前端不能指定执行目录或配置文件。缺失、冲突、非法路径及非法项目名明确拒绝。
+- 缓存标签页的激活状态参与可见性判断，切页/隐藏释放自有日志，迟到打开的日志也显式停止。未知变更结果提示刷新核对，不自动重放。
+
+### 实际执行与结果
+
+环境：Windows 宿主、WSL Ubuntu、真实 Docker Compose v2.39.4；构建前 D 盘约 244 GiB 可用，继续使用根 `target/` 和现有 WASM `.local/plugin-build/docker/`。原生测试 EXE 复制到 `.local/qa/compose/` 后运行。
+
+| 检查 | 实际命令/方式 | 结果 |
+| --- | --- | --- |
+| Vue 交互与回归 | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend` | 3 项通过；原容器/镜像、项目服务、操作说明、取消/失败、空列表、日志关闭及迟到结果 |
+| 类型检查 | `npm run typecheck` | 桌面和公开 SDK 均通过 |
+| Rust 单元测试 | `cargo test --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --no-run`，复制生成的 EXE 到 QA 目录运行 | 7 项通过；读取预授权精确匹配、全部项目变更不免审、参数引用、项目隔离及缺失/冲突配置拒绝 |
+| 正式 WASM | `cargo test -p serverdeck-plugin-runtime --test platform_plugins --offline --locked --no-run`，复制生成的 EXE 后运行 | 默认 5 项通过、真实环境项默认忽略；Compose 用例验证项目解析、原 Future 审批续接/拒绝、SSH 修订绑定和项目日志请求，另含现有助手回归 |
+| 真实 Compose | 设置 `SERVERDECK_COMPOSE_QA_PROJECT=sd-compose-qa-20261110-4a91`，运行 QA EXE 的 `docker_compose_live_project_lifecycle --ignored --nocapture` | 1 项通过；正式 WASM 经 WSL 运行真实命令，验证两个服务（含 profile）、多配置文件、有空格的目录、stop/start/restart 后全部服务的实际状态以及两个服务的日志标记 |
+| 正式前端打包界面 | `node tools/ui-docker-compose-e2e.mjs` | 1280×820 深色/标准字号、960×600 浅色/145% 字号均通过；项目、服务、操作说明、日志释放、空/错状态，无页面横向溢出及 pageerror |
+| 构建 | `node tools/build-system-plugins.mjs`、`npm run build -w @serverdeck/desktop` | WASM、标准包、插件前端与桌面前端构建通过；Vite 仍提示现有 RemoteEditor 等大分块，不作为构建失败 |
+| 静态检查 | `npx eslint plugins/system/docker/frontend tools/ui-docker-compose-e2e.mjs --max-warnings 0`；`cargo clippy --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --all-targets -- -D warnings` | 均通过 |
+
+真实 QA 使用独立项目名和已有 `nginx:1.14.2` 镜像的两个普通 Shell/sleep 容器；无网络、端口或卷，文件系统只读、非 root 进程、删除 capabilities。创建前查询确认项目名无既有容器；测试后只对该项目执行 `down`（不加删除卷选项），再次查询确认无残留容器，未对其他项目执行变更。
+
+证据及可复现入口：
+
+- [正式 WASM 集成测试源码](../../../crates/plugin-runtime/tests/platform_plugins.rs)、[前端交互测试](../../../plugins/system/docker/frontend/docker.test.ts)、[打包前端浏览器检查工具](../../../tools/ui-docker-compose-e2e.mjs)。
+- [界面检查结果 JSON](../../../.local/qa/compose/ui/results.json)、[标准窗口项目页](../../../.local/qa/compose/ui/projects-1280-dark.png)、[最小窗口大字号项目页](../../../.local/qa/compose/ui/projects-960-light.png)、[最小窗口服务详情](../../../.local/qa/compose/ui/services-960-light.png)。
+- [真实 QA 主配置](../../../.local/qa/compose/live%20project/compose.yaml)、[覆盖配置](../../../.local/qa/compose/live%20project/override.yaml)。`.local/` 证据仅在本次工作区保存，不作为分发资源。
+
+### 过程中失败与处理
+
+- 首次 Vitest 在沙箱临时目录转换缓存时出现 `EPERM rename`；仅为测试进程将 `TEMP/TMP` 指向本任务 `.local/qa/compose/temp` 后重跑通过。首次沙箱 Edge 退出，使用独立临时浏览器配置在允许的环境重跑通过，不访问用户浏览器资料。
+- 直接将单插件包输出到已存在的正式包路径被打包器 `EEXIST` 保护拒绝；改用既有系统构建入口，经暂存构建及验证后发布，未删除原包或绕过排他写入。
+- QA 最初通过 WSL 默认 Shell 转交通配符产生参数展开错误，尚未创建容器；改为 WSL `--exec` 保持参数边界。正式 SSH 命令中的 profile 参数一直逐项引用。
+- 新增测试最初发现预授权期望顺序和加载态断言不匹配，已修正测试并复跑通过。前端 ESLint 多次组件挂载告警通过复用测试挂载函数解决，未关闭规则。
+- 插件目录格式扫描发现原有 `ContainerEnvironment.vue`、`main.ts` 的 Prettier 差异；两者未改动。本次修改文件独立进行格式检查，避免夹带无关格式化。
+
+### 限制与未执行项
+
+- 真实测试使用 WSL 命令适配器，SSH 资产元数据/流句柄在测试边界提供夹具；不等同完整 Tauri 原生 SSH、宿主确认弹窗或远端日志流端到端验收。浏览器也仅使用明确的界面夹具，不冒充远端功能测试。
+- 未构建/安装新的桌面 EXE 或安装包，未验证 macOS/Linux 桌面、所有 Compose 版本和真实远端多主机场景。
+- 操作依赖原始目录和配置文件；不保证恢复自定义 `--env-file` 等全部历史参数，配置文件名含逗号不支持还原。全部容器被删除的项目不可发现，一次性容器和未创建服务不在详情范围。
+- 每次命令仍受平台 30 秒和输出限额限制，大项目可能部分完成后超时；用户应刷新核对，不能把未知结果当作未执行后自动重试。
+- 下一步验收依赖：远端已安装 Compose 的授权 SSH 测试主机、仍存在的原始项目配置，以及正常启动当前桌面构建；本阶段不包含镜像更新/重新部署或安装发布。
+
+## 2026-11-10 Docker 版本核心字段表单
+
+- Docker 包由当前 2.1.1 升至 2.1.2，版本弹窗沿用只读字段布局，仅显示“Docker 已安装、Docker 状态、Docker 版本、客户端版本、运行平台”五项。移除该弹窗中的原始 JSON 展开和额外组件/构建字段；不修改其他详情的数据呈现。
+- 状态使用中文；Docker 版本及运行平台分别来自当前返回的 `Server.Version` 与 `Server.Os/Arch`，客户端版本单独读取 `Client.Version`。服务端不存在、字段为空或类型不正确时显示“不可用”，不拿客户端信息代替；未知状态显示“未知”。当前版本响应仍复用既有查询和权限，未修改 SDK、原生 IPC、后端命令或持久格式。
+- 增加四组经真实版本弹窗入口的前端用例：服务端/客户端完整且版本不同、服务端缺失、Docker 未安装、字段类型不正确。均断言恰好五项及正确归属，没有 `details/pre`，未知字段不渲染。
+
+实际执行：
+
+| 检查 | 命令/方式 | 结果 |
+| --- | --- | --- |
+| 前端回归 | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend`，进程 TEMP/TMP 指向 `.local/qa/docker-capabilities/temp` | 7 项通过（包含四组新增版本弹窗用例） |
+| 类型 | `npm run typecheck` | 桌面及 SDK 均通过 |
+| 静态与格式 | 对 `OpsDetails.vue`、`docker.test.ts`、`ui-docker-compose-e2e.mjs` 执行 ESLint `--max-warnings 0`；对本次代码及 manifest 执行 Prettier check | 通过 |
+| 插件构建 | `node tools/build-system-plugins.mjs` | WASM、独立前端和标准包构建通过；构建前 D 盘约 244 GiB 空闲 |
+| 打包前端集成/布局 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-capabilities/ui` 后运行 `node tools/ui-docker-compose-e2e.mjs` | 正式包通过 SDK MessageChannel 加载；1280×820 深色标准字号、960×600 浅色 145% 字号均通过；字段/值、无 JSON、模态框边界及无页面横向溢出断言通过，另保留 Compose 交互回归 |
+
+证据：[检查结果](../../../.local/qa/docker-capabilities/ui/results.json)、[深色版本表单](../../../.local/qa/docker-capabilities/ui/capabilities-1280-dark.png)、[最小窗口大字号表单](../../../.local/qa/docker-capabilities/ui/capabilities-960-light.png)。截图已逐张查看，五项字段及关闭按钮完整可见。
+
+限制：本轮界面检查使用明确的版本响应夹具，不冒充真实远端查询；未重新执行原生 SSH 链路、Rust 测试或跨平台桌面验收，未重新生成桌面 EXE/安装包。后续使用需加载新插件包或重新构建桌面；核心字段缺失仍如实显示不可用。保留本轮开始时已有的 Compose、TCP 检测移除及其他修改。

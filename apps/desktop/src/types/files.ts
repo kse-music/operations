@@ -15,6 +15,10 @@ export interface DirectoryListing {
   parent: string | null;
   entries: FileEntry[];
 }
+export interface LocalDrive {
+  path: string;
+  name: string;
+}
 export interface SftpUser {
   username: string;
   serverPath: string;
@@ -71,6 +75,15 @@ export interface SaveResult {
   document: TextDocument | null;
   recoveryPath: string | null;
   message: string | null;
+}
+export interface ExternalDocument {
+  token: string;
+  sessionId: string;
+  path: string;
+  localPath: string;
+  transferId: string;
+  atomicSave: boolean;
+  ready: boolean;
 }
 export type FileTerminalAction = { kind: 'directory' | 'view' | 'tail'; path: string };
 export const unfinished = (task: TransferInfo): boolean =>

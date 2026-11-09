@@ -46,6 +46,12 @@ const settle = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
   await nextTick();
 };
+function mountDocker(props: { initialSection?: 'compose'; onShell?: () => void } = {}) {
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(Docker, { hostId: 'host', ...props }).use(pinia);
+  app.mount(root);
+}
 afterEach(() => {
   app?.unmount();
   if (pinia) disposePinia(pinia);
@@ -96,13 +102,11 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
             ? [{ CPUPerc: '12.34%', MemUsage: '42 MiB / 128 MiB' }]
             : [],
   }));
-  root = document.createElement('div');
-  document.body.append(root);
   const shell = vi.fn();
-  app = createApp(Docker, { hostId: 'host', onShell: shell }).use(pinia);
-  app.mount(root);
+  mountDocker({ onShell: shell });
   await settle();
   expect(root.textContent).not.toContain('操作反馈');
+  expect(root.textContent).not.toContain('TCP 连通性检测');
   expect(root.querySelector('[role="alert"]')).toBeNull();
   const actionLabels = (id: string) =>
     [...root.querySelectorAll(`[data-ops-target="${id}"] .ops-row-actions button`)].map((button) =>
@@ -282,4 +286,234 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('Docker daemon unavailable');
   expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
   expect(api.actions.mock.calls.some(([action]) => action === 'history')).toBe(false);
+});
+
+it.each([
+  {
+    name: 'available Docker',
+    detail: {
+      dockerInstalled: true,
+      dockerState: 'running',
+      dockerVersion: {
+        Client: { Version: '28.5.1', GitCommit: 'CLIENT_BUILD_METADATA', Os: 'darwin' },
+        Server: {
+          Version: '27.5.1',
+          Os: 'linux',
+          Arch: 'amd64',
+          GoVersion: 'GO_BUILD_METADATA',
+          Components: [{ Name: 'containerd' }],
+        },
+      },
+      dockerInfo: { Debug: 'UNNEEDED_DETAILS' },
+    },
+    expected: ['是', '运行中', '27.5.1', '28.5.1', 'linux / amd64'],
+  },
+  {
+    name: 'missing server information',
+    detail: {
+      dockerInstalled: true,
+      dockerState: 'unavailable',
+      dockerVersion: { Client: { Version: '28.5.1', Os: 'darwin', Arch: 'arm64' }, Server: null },
+    },
+    expected: ['是', '不可用或权限不足', '不可用', '28.5.1', '不可用'],
+  },
+  {
+    name: 'Docker not installed',
+    detail: { dockerInstalled: false, dockerState: 'absent' },
+    expected: ['否', '未安装', '不可用', '不可用', '不可用'],
+  },
+  {
+    name: 'invalid version fields',
+    detail: {
+      dockerInstalled: true,
+      dockerState: 'unexpected',
+      dockerVersion: {
+        Server: { Version: { nested: 'UNNEEDED_DETAILS' }, Os: ['linux'], Arch: null },
+        Client: [],
+      },
+    },
+    expected: ['是', '未知', '不可用', '不可用', '不可用'],
+  },
+])('shows only core Docker capability fields for $name', async ({ detail, expected }) => {
+  vi.clearAllMocks();
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+  pinia = createPinia();
+  setActivePinia(pinia);
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    records: [],
+    detail: request.kind === 'capabilities' ? detail : null,
+    code: null,
+    message: null,
+  }));
+  mountDocker();
+  await settle();
+  const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+    (b) => b.textContent?.trim() === '版本 / 能力详情',
+  );
+  expect(button).toBeTruthy();
+  button!.click();
+  await settle();
+  const modal = document.querySelector('dialog[aria-label="主机能力与版本"]');
+  expect(modal).toBeTruthy();
+  expect([...modal!.querySelectorAll('dt')].map((field) => field.textContent)).toEqual([
+    'Docker 已安装',
+    'Docker 状态',
+    'Docker 版本',
+    '客户端版本',
+    '运行平台',
+  ]);
+  expect([...modal!.querySelectorAll('dd')].map((field) => field.textContent?.trim())).toEqual(
+    expected,
+  );
+  expect(modal!.querySelector('pre, details')).toBeNull();
+  for (const hidden of [
+    'CLIENT_BUILD_METADATA',
+    'GO_BUILD_METADATA',
+    'UNNEEDED_DETAILS',
+    'containerd',
+  ])
+    expect(modal!.textContent).not.toContain(hidden);
+});
+
+it('manages Compose projects with host confirmations, service details and owned project logs', async () => {
+  vi.clearAllMocks();
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.open = true;
+    },
+  });
+  pinia = createPinia();
+  setActivePinia(pinia);
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    code: null,
+    message: null,
+    records:
+      request.kind === 'compose_projects'
+        ? [{ Name: 'shop', Status: 'running(2)', ConfigFiles: '/srv/shop/compose.yaml' }]
+        : [],
+    detail:
+      request.kind === 'compose_services'
+        ? {
+            composeProject: 'shop',
+            services: [
+              {
+                ID: 'web',
+                Name: '/shop-web-1',
+                Service: 'web',
+                Image: 'shop-web',
+                State: 'running',
+                ExitCode: 0,
+              },
+            ],
+          }
+        : { dockerState: 'running' },
+  }));
+  mountDocker({ initialSection: 'compose' });
+  await settle();
+  const click = async (label: string) => {
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === label || b.getAttribute('aria-label') === label,
+    );
+    expect(button, label).toBeTruthy();
+    button!.click();
+    await settle();
+  };
+  expect(api.query).toHaveBeenCalledWith('host', { kind: 'compose_projects' });
+  expect(root.querySelector('[data-ops-target="shop"]')?.textContent).toContain('running(2)');
+  await click('服务');
+  expect(api.query).toHaveBeenCalledWith('host', { kind: 'compose_services', project: 'shop' });
+  expect(document.querySelector('dialog')?.textContent).toContain('shop-web-1');
+  await click('关闭对话框');
+  for (const [label, action] of [
+    ['启动', 'start'],
+    ['停止', 'stop'],
+    ['重启', 'restart'],
+  ]) {
+    await click(label!);
+    expect(api.query).toHaveBeenCalledWith('host', {
+      kind: 'compose_action',
+      project: 'shop',
+      action,
+      confirmed: true,
+    });
+    expect(
+      api.presentations.mock.calls.some(
+        ([options]) =>
+          options?.confirmation?.title === `${label} Compose 项目？` &&
+          options.confirmation.message.includes('shop'),
+      ),
+    ).toBe(true);
+  }
+  api.query.mockRejectedValueOnce({ code: 'USER_CANCELLED', message: '取消' });
+  await click('停止');
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  await click('日志');
+  expect(api.logOpen).toHaveBeenLastCalledWith('host', {
+    hostId: 'host',
+    source: { kind: 'compose', project: 'shop' },
+    lines: 200,
+    follow: true,
+  });
+  await click('镜像');
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(api.logClose).toHaveBeenCalled();
+  await click('Compose 项目');
+  api.query.mockRejectedValueOnce(new Error('permission denied'));
+  await click('重启');
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('permission denied');
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('可能部分完成');
+  api.query.mockResolvedValueOnce({ success: true, records: [], detail: null });
+  await click('刷新运维列表');
+  expect(root.textContent).toContain('没有匹配项目');
+  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('0');
+  api.query.mockRejectedValueOnce(new Error('docker: unknown command: compose'));
+  await click('刷新运维列表');
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('unknown command');
+  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
+});
+
+it('closes a late Compose log stream after its tab is deactivated', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    code: null,
+    message: null,
+    detail: { dockerState: 'running' },
+    records:
+      request.kind === 'compose_projects'
+        ? [{ Name: 'shop', Status: 'running(1)', ConfigFiles: '/srv/shop/compose.yaml' }]
+        : [],
+  }));
+  let finish: (value: { id: string }) => void = () => {};
+  api.logOpen.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  mountDocker({ initialSection: 'compose' });
+  await settle();
+  const button = (label: string) =>
+    [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      (b) => b.textContent?.trim() === label,
+    )!;
+  button('日志').click();
+  await settle();
+  expect(root.querySelector('.ops-table')?.getAttribute('aria-busy')).toBe('true');
+  button('容器').click();
+  await settle();
+  finish({ id: 'container-log' });
+  await settle();
+  expect(api.logClose).toHaveBeenCalled();
+  expect(document.querySelector('dialog')).toBeNull();
 });

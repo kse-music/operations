@@ -64,6 +64,10 @@ beforeEach(async () => {
       this.open = true;
     },
   });
+  vi.spyOn(filesApi, 'localDrives').mockResolvedValue([
+    { path: 'C:\\', name: 'C: 本地磁盘' },
+    { path: 'D:\\', name: 'D: 本地磁盘' },
+  ]);
   await mountView();
 });
 afterEach(() => {
@@ -75,6 +79,118 @@ afterEach(() => {
   if (originalShowModal)
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+});
+
+it('opens local ini files with the system application picker on double click and reports failures locally', async () => {
+  const files = useFilesStore(pinia);
+  files.local!.entries = [
+    { ...entry, name: 'config.ini', path: 'D:/test/config.ini', kind: 'file', size: 120 },
+  ];
+  const open = vi.spyOn(filesApi, 'openLocal').mockResolvedValue(true);
+  const read = vi.spyOn(filesApi, 'read');
+  await nextTick();
+  root
+    .querySelector('[title="config.ini"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await vi.waitFor(() => expect(open).toHaveBeenCalledExactlyOnceWith('D:/test/config.ini'));
+  expect(read).not.toHaveBeenCalled();
+  open.mockRejectedValueOnce({ message: '无法显示系统打开方式' });
+  root
+    .querySelector('[title="config.ini"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await vi.waitFor(() => expect(files.error).toBe('无法显示系统打开方式'));
+});
+
+it('replaces the folder browser with a drive selector immediately after the parent button', async () => {
+  await vi.waitFor(() => expect(filesApi.localDrives).toHaveBeenCalled());
+  const parent = root.querySelector('[aria-label="本地上级"]')!;
+  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  expect(root.querySelector('[aria-label="选择本地目录"]')).toBeNull();
+  expect(parent.nextElementSibling?.contains(picker)).toBe(true);
+  expect(picker.closest('label')?.nextElementSibling?.getAttribute('aria-label')).toBe('本地路径');
+  expect([...picker.options].map((option) => option.textContent?.trim())).toEqual([
+    'C: 本地磁盘',
+    'D: 本地磁盘',
+  ]);
+  expect(picker.value).toBe('D:\\');
+  expect(root.querySelector('[aria-label="选择上传文件夹…"]')).not.toBeNull();
+});
+
+it('navigates to the selected drive root and preserves local back navigation', async () => {
+  const files = useFilesStore(pinia);
+  const load = vi.spyOn(filesApi, 'local').mockImplementation(async (path) => ({
+    path: path!,
+    parent: null,
+    entries: [],
+  }));
+  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  picker.value = 'C:\\';
+  picker.dispatchEvent(new Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(files.local?.path).toBe('C:\\'));
+  expect(load).toHaveBeenCalledWith('C:\\');
+  expect(root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe('C:\\');
+  expect(files.current?.path).toBe('/srv/api');
+  expect(files.stepHistory('local', 'back')).toBe(true);
+  await vi.waitFor(() => expect(files.local?.path).toBe('D:/test'));
+  expect(picker.value).toBe('D:\\');
+});
+
+it('restores the previous drive and list when a drive becomes unavailable', async () => {
+  const files = useFilesStore(pinia);
+  const previous = files.local;
+  let reject!: (error: unknown) => void;
+  vi.spyOn(filesApi, 'local').mockImplementation(
+    () => new Promise((_resolve, fail) => (reject = fail)),
+  );
+  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  picker.value = 'C:\\';
+  picker.dispatchEvent(new Event('change', { bubbles: true }));
+  await nextTick();
+  expect(files.localLoading).toBe(true);
+  expect(picker.value).toBe('C:\\');
+  reject({ message: '磁盘不可用' });
+  await vi.waitFor(() => expect(files.error).toBe('磁盘不可用'));
+  expect(files.local).toBe(previous);
+  expect(picker.value).toBe('D:\\');
+  expect(root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe('D:/test');
+});
+
+it('matches canonical Windows drive paths and leaves UNC paths unselected', async () => {
+  const files = useFilesStore(pinia);
+  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  files.local = { path: '\\\\?\\c:\\Users\\test', parent: null, entries: [] };
+  await nextTick();
+  expect(picker.value).toBe('C:\\');
+  files.local = { path: '\\\\?\\UNC\\server\\share', parent: null, entries: [] };
+  await nextTick();
+  expect(picker.value).toBe('');
+  expect(picker.selectedIndex).toBe(-1);
+  expect(picker.querySelector('option[value=""]')).toBeNull();
+  expect(root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe(
+    '\\\\server\\share',
+  );
+});
+
+it('shows loading and failure states and retries drive discovery on focus', async () => {
+  app!.unmount();
+  let reject!: (error: unknown) => void;
+  vi.mocked(filesApi.localDrives).mockImplementationOnce(
+    () => new Promise((_resolve, fail) => (reject = fail)),
+  );
+  await mountView();
+  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  expect(picker.disabled).toBe(true);
+  expect(picker.textContent).toContain('加载磁盘');
+  reject({ message: '无法读取磁盘列表' });
+  await vi.waitFor(() => expect(picker.disabled).toBe(false));
+  expect(picker.textContent).toContain('磁盘加载失败');
+  expect(useFilesStore(pinia).error).toBe('无法读取磁盘列表');
+  picker.dispatchEvent(new FocusEvent('focus'));
+  await vi.waitFor(() => expect(picker.value).toBe('D:\\'));
+  vi.mocked(filesApi.localDrives).mockResolvedValueOnce([]);
+  picker.dispatchEvent(new PointerEvent('pointerdown'));
+  await vi.waitFor(() => expect(picker.textContent).toContain('无可用磁盘'));
+  expect(picker.value).toBe('');
 });
 
 it('confirms a sudo identity, clears the password immediately, and displays the verified user', async () => {

@@ -7,7 +7,7 @@ import {
   Copy,
   Eye,
   EyeOff,
-  FolderOpen,
+  HardDrive,
   FolderPlus,
   FileUp,
   FolderUp,
@@ -34,6 +34,7 @@ import {
   remoteJoin,
   unfinished,
   type FileEntry,
+  type LocalDrive,
   type ConflictPolicy,
   type Direction,
   type TransferInfo,
@@ -148,6 +149,40 @@ function displayLocalPath(path: string): string {
   return path;
 }
 
+const localDrives = ref<LocalDrive[]>([]),
+  localDrivesLoading = ref(false),
+  localDrivesFailed = ref(false);
+const selectedDrive = computed(() => {
+  const path = displayLocalPath(store.localPendingPath ?? store.local?.path ?? '')
+    .replaceAll('\\', '/')
+    .toLowerCase();
+  return (
+    localDrives.value.find((drive) =>
+      path.startsWith(drive.path.replaceAll('\\', '/').toLowerCase()),
+    )?.path ?? ''
+  );
+});
+async function loadLocalDrives(): Promise<void> {
+  if (localDrivesLoading.value) return;
+  localDrivesLoading.value = true;
+  localDrivesFailed.value = false;
+  try {
+    const drives = await filesApi.localDrives();
+    if (!disposed) localDrives.value = drives;
+  } catch (cause) {
+    if (!disposed) {
+      localDrivesFailed.value = true;
+      store.error = errorMessage(cause);
+    }
+  } finally {
+    localDrivesLoading.value = false;
+  }
+}
+async function selectLocalDrive(event: Event): Promise<void> {
+  const path = (event.target as HTMLSelectElement).value;
+  if (localDrives.value.some((drive) => drive.path === path)) await store.localLoad(path);
+}
+
 watch(
   () => store.localPendingPath ?? store.local?.path,
   (value) => {
@@ -203,14 +238,6 @@ function navigateWithMouse(side: 'local' | 'remote', event: MouseEvent): void {
   if (store.closingHosts.includes(chosen.value)) return;
   if (store.stepHistory(side, event.button === 3 ? 'back' : 'forward')) {
     menu.value = null;
-  }
-}
-async function browseLocal(): Promise<void> {
-  try {
-    const paths = await filesApi.pick('folder');
-    if (paths[0]) await store.localLoad(paths[0]);
-  } catch (cause) {
-    store.error = errorMessage(cause);
   }
 }
 async function picked(folder = false): Promise<void> {
@@ -511,11 +538,15 @@ async function openEntry(side: 'local' | 'remote', entry: FileEntry): Promise<vo
   if (entry.kind === 'directory' || entry.kind === 'symlink') {
     if (side === 'local') await store.localLoad(entry.path);
     else await store.navigate(entry.path);
-  } else if (side === 'remote') await store.edit(entry.path);
+  } else if (entry.kind === 'file') {
+    if (side === 'remote') await store.edit(entry.path, entry.size);
+    else await store.openLocal(entry.path);
+  } else store.error = '特殊文件不能直接打开。';
 }
 let unlisten: UnlistenFn | undefined,
   disposed = false;
 onMounted(async () => {
+  void loadLocalDrives();
   if (props.hostId && store.current?.host.id !== props.hostId) await connect();
   if (!store.local) await store.localLoad();
   try {
@@ -577,6 +608,8 @@ onBeforeUnmount(() => {
     </div>
 
     <p v-if="store.notice" class="banner success" role="status">{{ store.notice }}</p>
+    <p v-if="store.editorBusy" class="banner" role="status">正在打开 {{ store.openingPath }}…</p>
+    <p v-if="store.localOpening" class="banner" role="status">正在显示系统打开方式…</p>
     <p v-if="!chosen" class="banner" role="status">
       请在主机管理中打开远程主机后使用 SFTP 文件管理。
     </p>
@@ -596,8 +629,35 @@ onBeforeUnmount(() => {
             :disabled="!store.local?.parent"
             @click="store.local?.parent && store.localLoad(store.local.parent)"
           >
-            <ArrowUp :size="15" aria-hidden="true" /></button
-          ><input v-model="localPath" aria-label="本地路径" required /><button
+            <ArrowUp :size="15" aria-hidden="true" />
+          </button>
+          <label class="local-drive-picker">
+            <HardDrive :size="15" aria-hidden="true" />
+            <select
+              aria-label="选择本地磁盘"
+              title="选择本地磁盘"
+              :value="selectedDrive"
+              :disabled="localDrivesLoading && !localDrives.length"
+              :aria-busy="localDrivesLoading"
+              @focus="loadLocalDrives"
+              @pointerdown="loadLocalDrives"
+              @change="selectLocalDrive"
+            >
+              <option v-if="!localDrives.length" value="" disabled>
+                {{
+                  localDrivesLoading
+                    ? '加载磁盘…'
+                    : localDrivesFailed
+                      ? '磁盘加载失败'
+                      : '无可用磁盘'
+                }}
+              </option>
+              <option v-for="drive in localDrives" :key="drive.path" :value="drive.path">
+                {{ drive.name }}
+              </option>
+            </select>
+          </label>
+          <input v-model="localPath" aria-label="本地路径" required /><button
             class="tool-button"
             aria-label="前往"
             title="前往本地路径"
@@ -607,13 +667,6 @@ onBeforeUnmount(() => {
         </form>
         <div class="toolbar">
           <button
-            class="tool-button"
-            aria-label="选择本地目录"
-            title="选择本地目录"
-            @click="browseLocal"
-          >
-            <FolderOpen :size="15" aria-hidden="true" /></button
-          ><button
             class="tool-button"
             aria-label="刷新本地"
             title="刷新本地"
@@ -852,7 +905,22 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
-        {{ menu.entry.kind === 'directory' ? '进入目录' : '打开文本' }}</button
+        {{
+          menu.entry.kind === 'directory'
+            ? '进入目录'
+            : menu.side === 'local'
+              ? '选择应用打开…'
+              : '打开文本'
+        }}</button
+      ><button
+        v-if="menu.side === 'remote' && menu.entry.kind === 'file'"
+        role="menuitem"
+        @click="
+          store.offerExternal(menu.entry.path);
+          menu = null;
+        "
+      >
+        使用系统应用编辑…</button
       ><button
         role="menuitem"
         @click="

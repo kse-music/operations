@@ -1,5 +1,47 @@
 # SFTP 文件管理阶段验收
 
+## 2026-11-10 文件打开与外部编辑回传
+
+### 完成范围
+
+- 修复左侧本地文件双击无动作：Windows 普通文件显示系统应用选择器，菜单同步显示“选择应用打开”，等待期间有状态提示，取消正常返回。
+- 远程文本读取、大小拒绝及 Monaco 加载失败有局部反馈；UTF-8 `.ini` 仍可内置打开。已加载编辑器运行错误不自动销毁草稿，关闭时的提示观察者允许文档为空。
+- 新增远程外部编辑：现有队列校验下载、独立本地副本、原生选择器、用户确认后的流式原子回传；保留原始编码和字节。远程快照/本地稳定性、WRITE 权限、uid/gid/mode、取消、失败恢复路径和只读能力边界均由后端约束。
+- 外部文档固定原 SFTP 身份与路径，持续参与主机关闭、切用户和退出保护；数据目录迁移前要求先结束外部编辑。页面重载取消尚未提交的外部回传，迟到保存不重新注册已移除会话，回归同时核对原件/本地副本和授权清除。结束、失败和退出保留本地副本，不自动上传、删除或恢复授权。取舍见 [ADR 0031](../../architecture/decisions/0031-external-file-editing.md)。
+
+### 修改与验证
+
+主要实现为 `FileOpenDialogs.vue`、`RemoteEditorHost.vue`、`RemoteEditor.vue`、Files store/view/service、桌面文件 IPC/主窗口 ACL、`windows-file-drag/src/open.rs`、`sftp/src/external.rs` 及共用 `editor.rs` 保存链路。DTO、应用层、存储迁移入口和对应文档同步。没有数据库或持久配置版本变更，保留原有磁盘选择及 Docker 等其他工作区修改。
+
+| 检查                     | 结果与证据                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 前端关联回归             | 5 个文件 155 项通过：Files store/view、FilePane、加载失败隔离及 App；覆盖本地双击不误读远程、格式反馈、下载仅打开一次、确认/冲突/取消回传、主机隔离和关闭保留路径                                                                                                                                                                                                                                       |
+| Rust 编译及复制 EXE 验证 | SFTP 单元 2、真实回环协议 15、Windows Shell 单元 2、桌面 IPC 8，合计 27 项通过；交互单测 1 项默认忽略，未计入通过。构建清单 `.local/sftp-external-test-build.jsonl`，最终日志目录由 `.local/sftp-external-editor/final-qa-path.txt` 指向                                                                                                                                                                |
+| 外部编辑关键断言         | 非 UTF-8/二进制原样保存、超过 2 MiB 流式处理、同大小同 mtime 的远程摘要冲突、写入故障/缺少原子扩展保留原件与副本、句柄释放、取消后重试、重复回传后的新基线、禁止通过文本 dirty/保存接口绕过外部会话保护                                                                                                                                                                                                 |
+| 类型与静态检查           | 桌面/SDK TypeScript、相关 ESLint、Rust fmt、涉及四个 crate 的全目标 Clippy `-D warnings` 通过；修改代码 Prettier 和 Node 脚本语法检查通过                                                                                                                                                                                                                                                               |
+| 浏览器实际 Monaco 与布局 | `node tools/ui-file-open-e2e.mjs` 在 Edge 的 1280×820、960×600 两组通过：真实 `.ini` 编辑器打开/关闭、回传确认、冲突/重试、副本保留说明、弹窗边界和无页面/根组件异常。证据 `.local/sftp-external-editor/browser/result.json` 与两张截图；已查看最小窗口截图                                                                                                                                             |
+| Windows 原生 UI          | `tools/native-file-open-e2e.mjs` 启动复制的隔离 QA EXE，真实 IPC 读取专用本地文件，主机元数据仅用于显示离线文件页，未发起 SSH。通过 computer-use 实际双击 `config.ini`，观察到系统“选择一个应用以打开此 .ini 文件”；Escape 后等待态解除，文件及全局错误均为空，测试程序正常退出。证据路径由 `.local/sftp-external-editor/native-app-path.txt` 指向，含 `ready.json`、`result.json` 和关闭选择器后的截图 |
+| 桌面 Debug 构建          | `node tools/tauri.mjs build --debug --no-bundle` 通过，已恢复普通应用身份，产物为 `target/debug/serverdeck-desktop.exe`，日志 `.local/sftp-external-editor/final-debug-build.log`；保留既有 Monaco 大 chunk 和 Windows 链接器输出库文件提示，未打安装包                                                                                                                                                                                                           |
+
+### 失败记录与限制
+
+最初沙箱内 Vitest 临时文件重命名出现 EPERM；将 TEMP/TMP 指向本任务 QA 目录后关联回归通过。沙箱阻断本机 TCP 使回环 SSH/模型及部分 IPC 失败；使用同一构建的 QA 副本在正常本地权限下复验，最终 27 项通过。浏览器初轮因开发服务器热更新产生重复模块，测试替换没有命中组件引用，关闭等待超时；重启临时 Vite 服务后真实 Monaco 和交互流程均通过。初期原生单测对系统选择器取消返回值的假设不成立，改以实际主窗口双击、观察系统弹窗及取消后的应用状态为交互证据，默认忽略的单测不计入交互验收。
+
+本轮未连接用户服务器，未验证真实外部应用修改远端文件的完整桌面链路、macOS/Linux 系统应用选择器、安装器、断线时原子提交结果未知及全部外部应用保存行为。SQLite 等关联多文件格式不提供事务或配套文件同步。SFTP v3 的最终检查到 rename 竞态和 ACL/xattr/硬链接限制仍然存在；本地副本持续占用磁盘，由用户结束编辑并关闭外部应用后自行管理。
+
+本阶段实现完成后停止；真实服务器/外部应用组合及其他平台验收需要对应授权测试环境，不作为本轮已验证能力。
+
+## 2026-11-10 本地磁盘选择
+
+- 下拉列表已移除“选择磁盘”占位项，有盘符时只显示实际磁盘；UNC 等无匹配盘符的路径保持未选择，不自动切换磁盘。加载、读取失败和无可用磁盘的状态仅在列表为空时显示。相关修改为 `FilesView.vue`、`files-view.test.ts` 和 PRD 对应浏览章节；收紧既有选项集合与 UNC 未选择断言。`npm test -- src/views/files-view.test.ts` 32 项、桌面 TypeScript、相关 ESLint/Prettier 及 `node tools/tauri.mjs build --debug --no-bundle` 通过，构建日志为 `.local/qa/local-drive-picker/remove-placeholder-build.log`；产物仍为 `target/debug/serverdeck-desktop.exe`。本次未重跑原生 IPC、完整 SFTP 或物理键鼠验收，无新增已知问题及后续依赖，保留原有构建提示。
+- 移除本地工具栏“选择本地目录”按钮，在“本地上级”右侧增加带磁盘图标的下拉框。Windows 通过原生 GetLogicalDrives/GetDriveTypeW 返回实际盘符和磁盘类型；选择后复用目录读取、加载态、失败恢复与独立本地导航历史。上传选择器、远程文件操作和持久格式不变，无新增依赖。原生调用复用 `windows-file-drag` 的 Windows 互操作边界，在阻塞任务中执行；IPC 仅对本地主窗口开放。
+- `npm test -- src/views/files-view.test.ts src/stores/files.test.ts src/components/file-pane.test.ts src/services/files.test.ts`：4 文件、73 项通过。新增覆盖入口位置与移除、磁盘根目录跳转及后退、不可访问时恢复、Windows 扩展路径/大小写与 UNC、盘符读取加载/失败/重试/空态。首次运行因沙箱临时目录 rename EPERM 未执行测试，改用 `.local/qa/local-drive-picker/tmp` 的 TEMP/TMP 后通过。
+- `cargo test -p serverdeck-desktop --test ipc --no-run --offline` 构建，复制测试 EXE 至 `.local/qa/local-drive-picker/ipc.exe` 后执行：7 项通过。新增测试调用真实系统枚举、实际浏览构建盘根目录、核对盘符排序/名称/路径，并拒绝非主窗口和远程来源。首次完整测试在沙箱内 6 过、1 项原有模型 HTTP 回环因 AI_NETWORK 失败；获准在沙箱外重跑 7 项通过。测试资源缺少默认窗口图标的原有提示不影响断言。
+- `npm run typecheck`、相关 ESLint、`cargo fmt --all -- --check`、`cargo clippy -p serverdeck-windows-file-drag -p serverdeck-desktop --all-targets --offline -- -D warnings` 通过。Vite 生产构建通过，保留现有 Monaco 大 chunk 提示，产物在 `.local/qa/local-drive-picker/frontend/`。
+- 本机无头 Edge 加载真实 Vue 组件及独立浏览器夹具：1280×820 深色标准字号、960×600 浅色 145% 字号、600×820 深色 145% 字号三组通过，验证控件顺序、切换目录、失败恢复及路径栏无水平溢出。首次沙箱阻止 Edge 启动，获准在沙箱外完成；结果、脚本和截图在 `.local/qa/local-drive-picker/`。浏览器夹具不替代原生 IPC，后者由上一项真实 Windows 测试覆盖。
+- `node tools/tauri.mjs build --debug --no-bundle` 最终通过，产物为 `target/debug/serverdeck-desktop.exe`，包含最新界面与原生后端；日志保留于 `.local/qa/local-drive-picker/desktop-build.log`。首次构建因同路径开发版正在运行而覆盖失败（Windows 5，进程 11360），用户正常退出后重建成功，未强制结束进程。保留既有 Monaco 大 chunk 和链接器输出库文件提示，未生成安装包。
+- 未测试可移动设备热插拔、断开的映射盘、物理键鼠操作、安装器和非 Windows 客户端。非 Windows 当前仅提供 `/` 文件系统入口，不枚举挂载点；磁盘名称展示类型，不查询卷标。未执行完整远程 SSH/SFTP 回归；本次不改变远程或传输协议。构建阻碍已解除，无本阶段剩余依赖，不启动其他功能工作。
+
 ## 2026-11-09 SFTP 切换用户
 
 - 远程文件栏新增确认式用户切换、当前身份显示及切回原登录用户。默认 root，支持临时 sudo 密码或免密；浏览与传输分别启动该身份的无 PTY sftp-server。新目录读取成功才替换原连接，失败关闭候选并保留原连接；有编辑文档或未完成传输时拒绝。插件只选择原登录身份，不继承桌面 sudo 授权。主机配置和持久格式未变更。

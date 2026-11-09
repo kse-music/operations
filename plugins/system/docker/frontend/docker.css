@@ -117,6 +117,9 @@
   width: 100%;
   max-width: none;
 }
+.docker-workbench .ops-toolbar > .subtle {
+  flex-basis: 100%;
+}
 .docker-workbench .ops-table :is(th, td) {
   padding: 12px 16px;
 }

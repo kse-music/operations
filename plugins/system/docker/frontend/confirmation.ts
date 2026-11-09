@@ -5,6 +5,19 @@ export function mutationConfirmation(
   request: OpsRequest,
   name?: string,
 ): PluginConfirmation | undefined {
+  if (request.kind === 'compose_action') {
+    const actions = {
+      start: ['启动', '将启动项目中已创建的服务容器，不拉取镜像或重新部署。'],
+      stop: ['停止', '项目中的服务将暂时不可用，可以稍后重新启动。不删除容器或数据卷。'],
+      restart: ['重启', '项目中的服务将短暂中断，然后重新启动。不应用配置或镜像更新。'],
+    } as const;
+    const [label, impact] = actions[request.action];
+    return {
+      title: `${label} Compose 项目？`,
+      message: `项目：${request.project}\n\n${impact}`,
+      confirmLabel: label,
+    };
+  }
   if (request.kind !== 'container_action' && request.kind !== 'image_remove') return undefined;
   const shortId = request.id.replace(/^sha256:/, '').slice(0, 12);
   const target = name && name !== request.id ? `${name}（${shortId}）` : shortId;

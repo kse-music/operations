@@ -67,6 +67,23 @@ pub async fn files_local(
     application.files_local(path).await.map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_local_drives() -> Result<Vec<LocalDrive>, IpcError> {
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(serverdeck_windows_file_drag::local_drives)
+            .await
+            .map_err(|error| IpcError::from(Error::Worker(Box::new(error))))?
+            .map_err(Into::into)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(vec![LocalDrive {
+            path: "/".into(),
+            name: "/ 文件系统".into(),
+        }])
+    }
+}
+#[tauri::command]
 pub async fn files_properties(
     application: tauri::State<'_, Application>,
     id: String,
@@ -212,6 +229,66 @@ pub async fn text_read(
     path: String,
 ) -> Result<TextDocument, IpcError> {
     application.text_read(&id, &path).await.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn external_prepare(
+    application: tauri::State<'_, Application>,
+    id: String,
+    path: String,
+) -> Result<ExternalDocument, IpcError> {
+    application
+        .external_prepare(&id, &path)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn external_ready(
+    application: tauri::State<'_, Application>,
+    token: String,
+) -> Result<ExternalDocument, IpcError> {
+    application.external_ready(&token).await.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn external_save(
+    application: tauri::State<'_, Application>,
+    token: String,
+    confirmed: bool,
+) -> Result<SaveResult, IpcError> {
+    application
+        .external_save(token, confirmed)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_open_local<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    path: String,
+) -> Result<bool, IpcError> {
+    #[cfg(windows)]
+    {
+        let parent = window
+            .hwnd()
+            .map_err(|error| IpcError::from(Error::Worker(Box::new(error))))?
+            .0 as isize;
+        tauri::async_runtime::spawn_blocking(move || {
+            serverdeck_windows_file_drag::open_with(&path, Some(parent))
+        })
+        .await
+        .map_err(|error| IpcError::from(Error::Worker(Box::new(error))))?
+        .map_err(Into::into)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, path);
+        Err(Error::Validation("系统打开方式当前仅支持 Windows，请下载后使用本地应用打开").into())
+    }
+}
+#[tauri::command]
+pub fn external_cancel(
+    application: tauri::State<'_, Application>,
+    token: String,
+) -> Result<(), IpcError> {
+    application.external_cancel(&token).map_err(Into::into)
 }
 #[tauri::command]
 pub async fn text_save(

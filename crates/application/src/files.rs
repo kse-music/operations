@@ -191,6 +191,61 @@ impl Application {
     pub async fn text_read(&self, id: &str, path: &str) -> Result<TextDocument, Error> {
         self.files.read_text(id, path).await
     }
+    pub async fn external_prepare(&self, id: &str, path: &str) -> Result<ExternalDocument, Error> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        remote_absolute(path)?;
+        if !self
+            .file_connections()?
+            .iter()
+            .any(|session| session.id == id)
+        {
+            return Err(Error::Validation("外部编辑需要有效的 SFTP 文件连接"));
+        }
+        let root = self.data_directory.join("external-edits");
+        let directory = tokio::task::spawn_blocking(move || {
+            for ancestor in root.ancestors() {
+                match std::fs::symlink_metadata(ancestor) {
+                    Ok(metadata) => {
+                        #[cfg(windows)]
+                        let linked = {
+                            use std::os::windows::fs::MetadataExt;
+                            metadata.file_attributes() & 0x400 != 0
+                        };
+                        #[cfg(not(windows))]
+                        let linked = metadata.file_type().is_symlink();
+                        if linked {
+                            return Err(Error::Validation("外部编辑目录不能包含链接或重解析点"));
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                    Err(error) => return Err(Error::Storage(Box::new(error))),
+                }
+            }
+            crate::private_directory(&root)?;
+            tempfile::Builder::new()
+                .prefix("edit-")
+                .tempdir_in(root)
+                .map(|directory| directory.keep())
+                .map_err(|error| Error::Storage(Box::new(error)))
+        })
+        .await
+        .map_err(|error| Error::Worker(Box::new(error)))??;
+        self.files.prepare_external(id, path, &directory).await
+    }
+    pub async fn external_ready(&self, token: &str) -> Result<ExternalDocument, Error> {
+        self.files.external_ready(token).await
+    }
+    pub async fn external_save(&self, token: String, confirmed: bool) -> Result<SaveResult, Error> {
+        self.files.save_external(token, confirmed).await
+    }
+    pub fn external_cancel(&self, token: &str) -> Result<(), Error> {
+        self.files.cancel_external_save(token)
+    }
+    pub fn has_external_editors(&self) -> Result<bool, Error> {
+        self.files.has_external_editors()
+    }
     pub async fn text_save(&self, input: SaveText) -> Result<SaveResult, Error> {
         self.files.save_text(input).await
     }

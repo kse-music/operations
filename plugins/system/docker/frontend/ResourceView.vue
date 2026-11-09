@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onActivated, onDeactivated, onBeforeUnmount, ref, watch } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
-const panelVisible = usePluginVisibility();
+const pluginVisible = usePluginVisibility();
+const active = ref(true);
+const panelVisible = computed(() => pluginVisible.value && active.value);
+onActivated(() => {
+  active.value = true;
+});
+onDeactivated(() => {
+  active.value = false;
+});
+import { call } from '@serverdeck/plugin-sdk/platform';
 import { usePlatformContext } from '@serverdeck/plugin-sdk/context';
 import { invoke } from '@serverdeck/plugin-sdk';
 import { openTerminal } from '@serverdeck/plugin-sdk/terminal';
@@ -31,6 +40,7 @@ const props = defineProps<{
   rowKey: string;
   sort?: string;
   hint?: string;
+  searchPlaceholder?: string;
 }>();
 const platform = usePlatformContext();
 const chosen = computed(() => props.hostId ?? platform.hostId);
@@ -58,10 +68,6 @@ const detailLoading = ref(false),
   detailError = ref<string | null>(null);
 const capabilities = ref<Record<string, unknown> | null>(null);
 const log = ref<{ id: string; title: string }>();
-const probe = ref(false),
-  probeTarget = ref(''),
-  probePort = ref(80),
-  probeLocation = ref<'local' | 'remote'>('remote');
 let generation = 0,
   detailGeneration = 0,
   disposed = false;
@@ -92,6 +98,7 @@ async function load() {
   const token = ++generation;
   busy.value = true;
   error.value = null;
+  notice.value = null;
   rows.value = [];
   try {
     const value = await query(props.listRequest);
@@ -103,6 +110,7 @@ async function load() {
   }
 }
 async function inspect(request: OpsRequest, title: string) {
+  if (busy.value || !panelVisible.value) return;
   closeDetail();
   const token = ++detailGeneration,
     id = session();
@@ -133,9 +141,9 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
       });
       await openTerminal(ticket.ticket, ticket.hostId);
     } else {
-      await query(request, mutationConfirmation(request, targetName));
-      notice.value = '请求完成，请核对刷新后的目标状态。';
+      const value = await query(request, mutationConfirmation(request, targetName));
       await load();
+      if (!error.value) notice.value = value.message || '请求完成，请核对刷新后的目标状态。';
     }
   } catch (cause) {
     if (
@@ -143,7 +151,11 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
         (cause as { code?: string } | null)?.code ?? '',
       )
     )
-      error.value = errorMessage(cause);
+      error.value =
+        errorMessage(cause) +
+        (request.kind === 'compose_action'
+          ? '；操作可能部分完成，请刷新核对项目状态，勿直接重复执行。'
+          : '');
     notice.value = null;
   } finally {
     busy.value = false;
@@ -198,11 +210,41 @@ const slotContext = {
   execute,
   query,
   openLog: async (input: LogInput, title: string) => {
+    if (busy.value || !panelVisible.value) return;
+    const token = generation;
+    busy.value = true;
     try {
       const stream = await invoke<{ id: string }>('logs', { hostId: session(), ...input });
-      if (panelVisible.value) log.value = { id: stream.id, title };
+      if (!disposed && token === generation && panelVisible.value)
+        log.value = { id: stream.id, title };
+      else {
+        try {
+          await call({ kind: 'stream_stop', streamId: stream.id });
+        } catch (cause) {
+          if (
+            ['NOT_FOUND', 'PLUGIN_CANCELLED', 'PLUGIN_PERMISSION_DENIED'].includes(
+              (cause as { code?: string } | null)?.code ?? '',
+            )
+          )
+            return;
+          console.error(
+            'Docker late log stream cleanup failed',
+            (cause as { code?: string } | null)?.code ?? 'UNKNOWN',
+          );
+          throw cause;
+        }
+      }
     } catch (cause) {
-      error.value = errorMessage(cause);
+      if (
+        !disposed &&
+        token === generation &&
+        !['USER_CANCELLED', 'PLUGIN_USER_CANCELLED'].includes(
+          (cause as { code?: string } | null)?.code ?? '',
+        )
+      )
+        error.value = errorMessage(cause);
+    } finally {
+      if (!disposed && token === generation) busy.value = false;
     }
   },
   openShell: (id: string) => {
@@ -234,14 +276,13 @@ const slotContext = {
         >
           版本 / 能力详情
         </button>
-        <button class="text-button" @click="probe = !probe">TCP 连通性检测</button>
       </div>
       <div class="ops-toolbar">
         <label class="ops-search"
           ><Search :size="15" aria-hidden="true" /><input
             v-model="filter"
             aria-label="运维项目搜索"
-            placeholder="搜索名称、镜像、状态或端口…"
+            :placeholder="searchPlaceholder ?? '搜索名称、镜像、状态或端口…'"
         /></label>
         <slot name="toolbar" />
         <button class="button" :disabled="busy" @click="load">
@@ -286,31 +327,5 @@ const slotContext = {
       >
     </footer>
     <StreamDialog v-if="log" :stream-id="log.id" :title="log.title" @close="log = undefined" />
-    <Modal v-if="probe" title="TCP 连通性检测" @close="probe = false">
-      <div class="ops-toolbar">
-        <select v-model="probeLocation" aria-label="检测位置">
-          <option value="remote">从远端主机</option>
-          <option value="local">从本地设备</option></select
-        ><input v-model="probeTarget" aria-label="连通性目标" placeholder="IP / 域名" /><input
-          v-model.number="probePort"
-          type="number"
-          min="1"
-          max="65535"
-          aria-label="连通性端口"
-        /><button
-          class="button"
-          :disabled="busy"
-          @click="
-            probe = false;
-            inspect(
-              { kind: 'probe', location: probeLocation, target: probeTarget, port: probePort },
-              'TCP 连通性结果',
-            );
-          "
-        >
-          检测 TCP 端口
-        </button>
-      </div>
-    </Modal>
   </section>
 </template>

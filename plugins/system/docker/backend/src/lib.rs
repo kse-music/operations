@@ -4,6 +4,7 @@ use serverdeck_plugin_sdk::{
     platform::{Command, Request},
     serde_json::{self, Value, json},
 };
+mod compose;
 mod docker;
 std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
 fn dispatch(context: Context, action: String, input: Value) -> Action {
@@ -17,31 +18,26 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
             "query" => {
                 let query: docker::Query = serde_json::from_value(input["request"].clone())
                     .map_err(|_| ApiError::new("INPUT", "Docker 请求无效"))?;
-                if let docker::Query::Probe {
-                    location,
-                    target,
-                    port,
-                } = &query
-                {
-                    if location == "local" {
-                        docker::target_valid(target, *port)?;
-                        let detail = context
-                            .request(Request::TcpConnect {
-                                target: target.clone(),
-                                port: *port,
-                            })
-                            .await?;
-                        Ok(
-                            json!({"success":true,"code":null,"message":null,"records":[],"detail":detail}),
-                        )
-                    } else {
-                        execute(&context, &host, &query).await
-                    }
-                } else {
-                    execute(&context, &host, &query).await
-                }
+                execute(&context, &host, &query).await
             }
             "logs" => {
+                if input["source"]["kind"] == "compose" {
+                    let project = input["source"]["project"]
+                        .as_str()
+                        .ok_or_else(|| ApiError::new("INPUT", "Compose 日志项目无效"))?;
+                    let lines = input["lines"]
+                        .as_u64()
+                        .and_then(|v| u16::try_from(v).ok())
+                        .ok_or_else(|| ApiError::new("INPUT", "日志行数无效"))?;
+                    return compose::logs(
+                        &context,
+                        &host,
+                        project,
+                        lines,
+                        input["follow"].as_bool().unwrap_or(false),
+                    )
+                    .await;
+                }
                 let id = input["source"]["id"]
                     .as_str()
                     .ok_or_else(|| ApiError::new("INPUT", "日志容器无效"))?;
@@ -77,6 +73,14 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
     })
 }
 async fn execute(context: &Context, host: &str, query: &docker::Query) -> Result<Value, ApiError> {
+    if let docker::Query::ComposeAction {
+        project,
+        action,
+        confirmed,
+    } = query
+    {
+        return compose::execute(context, host, project, action, *confirmed).await;
+    }
     let result = context
         .execute(host, Command::script(query.command()?))
         .await?

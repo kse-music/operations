@@ -1,4 +1,5 @@
 mod editor;
+mod external;
 mod local;
 mod remote;
 mod transfer;
@@ -220,8 +221,18 @@ impl Files {
     }
     pub fn reset_editors(&self) {
         if let Ok(mut documents) = self.documents.lock() {
+            for document in documents.values() {
+                if let Some(external) = &document.external {
+                    external.cancel.cancel();
+                }
+            }
             documents.clear();
         }
+    }
+    pub fn has_external_editors(&self) -> Result<bool, Error> {
+        Ok(locked(&self.documents)?
+            .values()
+            .any(|document| document.external.is_some()))
     }
     pub fn dirty_count(&self) -> usize {
         self.documents

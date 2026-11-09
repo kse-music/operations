@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[SFTP 本地文件打开、远程外部编辑与确认回传](files/VALIDATION_STAGE4.md#2026-11-10-文件打开与外部编辑回传)。
+
+最新：[SFTP 本地磁盘选择、目录切换与权限/布局验证](files/VALIDATION_STAGE4.md#2026-11-10-本地磁盘选择)。
+
+最新：[Docker 版本弹窗改为核心字段表单、缺失值及最小窗口验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-版本核心字段表单)。
+
+最新：[移除 Docker TCP 连通性检测入口、实现和网络权限](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-移除-docker-tcp-连通性检测)。
+
+最新：[Docker Compose 项目列表、服务状态、项目日志、整组启停/重启及真实 Compose 验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-compose-项目管理)。
+
 最新：[移除确认弹窗的执行详情与命令展示，保留业务说明和确认/取消](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-移除确认弹窗执行详情)。
 
 最新：[Docker 停止/删除使用易读确认、名称和影响说明，技术命令默认折叠](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-确认弹窗易读化)。

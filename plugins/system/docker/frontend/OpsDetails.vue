@@ -21,6 +21,8 @@ const labels: Record<string, string> = {
   dockerState: 'Docker 状态',
   dockerInstalled: 'Docker 已安装',
   dockerVersion: 'Docker 版本',
+  dockerClientVersion: '客户端版本',
+  dockerPlatform: '运行平台',
   dockerInfo: 'Docker 信息',
   systemd: 'systemd 可用',
   systemdUser: '用户服务可用',
@@ -34,8 +36,39 @@ const labels: Record<string, string> = {
   Uid: '用户 UID',
   Gid: '用户组 GID',
 };
-const isProcess = computed(() => 'pid' in props.detail && 'startTicks' in props.detail);
+const isDocker = computed(() =>
+  ['dockerInstalled', 'dockerState', 'dockerVersion'].some((key) => key in props.detail),
+);
+const isProcess = computed(
+  () => !isDocker.value && 'pid' in props.detail && 'startTicks' in props.detail,
+);
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
 const entries = computed(() => {
+  if (isDocker.value) {
+    const version = record(props.detail.dockerVersion);
+    const server = record(version.Server);
+    const client = record(version.Client);
+    const states: Record<string, string> = {
+      running: '运行中',
+      unavailable: '不可用或权限不足',
+      absent: '未安装',
+    };
+    return Object.entries({
+      dockerInstalled:
+        typeof props.detail.dockerInstalled === 'boolean' ? props.detail.dockerInstalled : null,
+      dockerState: states[text(props.detail.dockerState) ?? ''] ?? '未知',
+      dockerVersion: text(server.Version),
+      dockerClientVersion: text(client.Version),
+      dockerPlatform: [text(server.Os), text(server.Arch)].filter(Boolean).join(' / ') || null,
+    });
+  }
   const entries = Object.entries(props.detail).filter(
     ([key]) =>
       ![
