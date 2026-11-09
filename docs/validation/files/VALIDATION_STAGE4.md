@@ -1,5 +1,14 @@
 # SFTP 文件管理阶段验收
 
+## 2026-11-09 SFTP 切换用户
+
+- 远程文件栏新增确认式用户切换、当前身份显示及切回原登录用户。默认 root，支持临时 sudo 密码或免密；浏览与传输分别启动该身份的无 PTY sftp-server。新目录读取成功才替换原连接，失败关闭候选并保留原连接；有编辑文档或未完成传输时拒绝。插件只选择原登录身份，不继承桌面 sudo 授权。主机配置和持久格式未变更。
+- 前端全量 Vitest：54 文件、505 项通过，含切换确认、密码立即清空、切回、失败保留连接、旧事件/导航/轮询隔离及主机关闭等待。随后补充文件选择器旧结果隔离、插件拒绝继承 sudo/切换中身份，4 个相关文件 78 项通过。桌面及插件 SDK TypeScript、相关 ESLint、Prettier 和 Vite 生产构建通过；保留既有 Monaco 大 chunk 提示，构建位于 `.local/qa/sftp-user/frontend/`。
+- SSH/SFTP 单元与本机回环协议：34 项通过，1 项既有真实主机测试按默认忽略。覆盖密码错误/免密/无需密码时不发送多余内容、分块认证提示和就绪标记、独立传输通道、普通租约不复用 sudo、清洁文档仍阻止切换及既有文件安全回归。通过 `cargo test -p serverdeck-ssh -p serverdeck-sftp --no-run` 构建，再复制至 `.local/qa/sftp-user/rust/` 执行。首次沙箱阻止套接字绑定（Windows 10013），获准在沙箱外运行回环测试后通过。
+- Windows → WSL Ubuntu 24.04 的隔离真实 OpenSSH/sudo 应用服务测试通过：使用自建回环 sshd 和临时 Ed25519 密钥，验证 sudo root 上传及 UID=0、读取内容、编辑保护、未知用户/服务路径失败后保留原连接、候选释放、切到 nobody 后新目录 UID=65534、切回原登录用户及插件候选隔离。临时服务已停止，Linux 测试目录已清理；脚本、结果及日志在 `.local/qa/sftp-user/live/` 和 `.local/qa/sftp-user/real-sudo.mjs`。夹具首次因公钥注释与 StrictModes 目录校验失败，修正夹具后通过，未放宽生产主机密钥或服务器安全校验。
+- `cargo check -p serverdeck-application -p serverdeck-desktop`、Cargo 格式和差异检查通过。严格 Clippy 因既有 `crates/core/src/openssh.rs:289` 的 `single_element_loop` 告警失败；未修改无关逻辑，使用 `-D warnings -A clippy::single_element_loop` 检查四个受影响包及所有 target 后通过，不等同零告警全量检查。Tauri IPC 回归从 QA 副本执行通过，验证新命令到达后端且未登记会话被拒绝，其他窗口/远程来源不能调用；首次沙箱阻止其既有回环模型夹具，沙箱外重跑通过。新增“活动传输阻止身份切换”断言所在集成测试单独重跑通过。
+- 密码分支使用本机真实 SSH/SFTP 协议夹具验证，真实 sudo 测试使用 root 的免密授权；未验证真实密码型 sudo、requiretty、PAM 多轮认证、用户生产主机、原生 WebView2 鼠标操作、桌面安装包或非 Windows 客户端。仅 internal-sftp、要求 PTY 或未授权执行固定 Shell/外部 sftp-server 的服务器明确不支持此方式。断开后需重新授权；连接存续期间密码保留在 Rust 受保护内存用于新传输通道，JS/SSH 库内部副本不承诺绝对清零。
+
 ## 2026-11-08 右键复制本地路径
 
 - 本地文件右键的“复制绝对路径”复用地址栏的路径格式化，盘符路径移除 Windows 扩展前缀，共享路径显示为标准 UNC 形式。远程路径按原值复制，文件操作保留后端原始路径。

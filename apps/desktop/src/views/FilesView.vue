@@ -16,6 +16,7 @@ import {
   Download,
   Trash2,
   CircleX,
+  UserRoundCog,
 } from '@lucide/vue';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { isTauri } from '@tauri-apps/api/core';
@@ -58,6 +59,62 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   transferHistory = ref(false),
   localArea = ref<HTMLElement>(),
   remoteArea = ref<HTMLElement>();
+const userForm = ref<{
+  id: string;
+  hostId: string;
+  username: string;
+  serverPath: string;
+  password: string;
+  original: boolean;
+} | null>(null);
+const switchingUser = ref(false);
+function closeUserForm(): void {
+  if (switchingUser.value) return;
+  if (userForm.value) userForm.value.password = '';
+  userForm.value = null;
+}
+function showUserForm(): void {
+  const connection = store.current;
+  if (!connection?.id || connection.state !== 'connected') return;
+  menu.value = null;
+  transfer.value = null;
+  operation.value = null;
+  userForm.value = {
+    id: connection.id,
+    hostId: connection.host.id,
+    username: 'root',
+    serverPath: '',
+    password: '',
+    original: false,
+  };
+}
+async function submitUser(): Promise<void> {
+  const form = userForm.value;
+  if (!form || switchingUser.value) return;
+  if (store.current?.id !== form.id || store.active !== form.hostId) {
+    closeUserForm();
+    return;
+  }
+  const user = form.original
+    ? null
+    : {
+        username: form.username.trim(),
+        serverPath: form.serverPath.trim(),
+        password: form.password || null,
+      };
+  form.password = '';
+  switchingUser.value = true;
+  try {
+    const changed = await store.switchUser(user);
+    if (changed) {
+      remoteSelection.value = [];
+      userForm.value = null;
+    }
+  } finally {
+    if (user) user.password = null;
+    switchingUser.value = false;
+  }
+}
 const hasTransferHistory = computed(() =>
   store.tasks.some((task) => task.hostId === chosen.value && !unfinished(task)),
 );
@@ -114,6 +171,7 @@ watch(
   () => {
     remoteSelection.value = [];
     transferHistory.value = false;
+    closeUserForm();
   },
 );
 async function connect(): Promise<void> {
@@ -156,8 +214,10 @@ async function browseLocal(): Promise<void> {
   }
 }
 async function picked(folder = false): Promise<void> {
+  const session = store.current?.id;
   try {
     const paths = await filesApi.pick(folder ? 'folder' : 'files');
+    if (!session || store.current?.id !== session || store.current.switchingUser) return;
     if (paths.length) prepareTransfer('upload', paths);
   } catch (cause) {
     store.error = errorMessage(cause);
@@ -166,7 +226,7 @@ async function picked(folder = false): Promise<void> {
 function prepareTransfer(direction: Direction, sources: string[], destination?: string): void {
   menu.value = null;
   const current = store.current;
-  if (!current?.id || current.state !== 'connected') {
+  if (!current?.id || current.state !== 'connected' || current.switchingUser) {
     store.error = '请先连接远程主机。';
     return;
   }
@@ -480,6 +540,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  if (userForm.value) userForm.value.password = '';
   disposed = true;
   endDownloadDrag();
   unlisten?.();
@@ -488,8 +549,8 @@ onBeforeUnmount(() => {
 <template>
   <section
     class="files-view page-view"
-    :inert="store.closingHosts.includes(chosen)"
-    :aria-busy="store.closingHosts.includes(chosen)"
+    :inert="store.closingHosts.includes(chosen) || store.current?.switchingUser"
+    :aria-busy="store.closingHosts.includes(chosen) || store.current?.switchingUser"
   >
     <div class="section-heading">
       <div>
@@ -611,7 +672,12 @@ onBeforeUnmount(() => {
         @dblclick.capture="ignoreDownloadClick"
         @mouseup="navigateWithMouse('remote', $event)"
       >
-        <h2>远程文件 <span v-if="over">松开后选择上传策略</span></h2>
+        <h2>
+          远程文件
+          <span v-if="store.current?.state === 'connected'"
+            >（{{ store.current.username ?? store.current.host.username }}）</span
+          ><span v-if="over">松开后选择上传策略</span>
+        </h2>
         <form class="path-bar" @submit.prevent="store.navigate(remotePath)">
           <button
             class="tool-button"
@@ -637,6 +703,13 @@ onBeforeUnmount(() => {
           </button>
         </form>
         <div class="toolbar">
+          <button
+            class="button"
+            :disabled="store.current?.state !== 'connected'"
+            @click="showUserForm"
+          >
+            <UserRoundCog :size="14" aria-hidden="true" />切换用户
+          </button>
           <button
             class="tool-button"
             aria-label="新建文件夹"
@@ -704,6 +777,64 @@ onBeforeUnmount(() => {
     </div>
     <TransferPanel :host-id="chosen" />
   </section>
+  <Modal v-if="userForm" title="切换 SFTP 用户" :busy="switchingUser" @close="closeUserForm">
+    <form class="editor-form" @submit.prevent="submitUser">
+      <p class="subtle">
+        当前用户：{{
+          store.current?.username ?? store.current?.host.username
+        }}。切换只影响文件管理；请先结束传输并保存、关闭编辑文档。
+      </p>
+      <label v-if="store.current?.elevated" class="checkbox-label">
+        <input
+          v-model="userForm.original"
+          type="checkbox"
+          :disabled="switchingUser"
+          @change="userForm.password = ''"
+        />切回原登录用户 {{ store.current.host.username }}
+      </label>
+      <template v-if="!userForm.original">
+        <label
+          >目标用户<input
+            v-model="userForm.username"
+            aria-label="目标用户"
+            required
+            maxlength="64"
+            :disabled="switchingUser"
+            autocomplete="off"
+        /></label>
+        <label
+          >sudo 密码<input
+            v-model="userForm.password"
+            aria-label="sudo 密码"
+            type="password"
+            autocomplete="off"
+            :disabled="switchingUser"
+            placeholder="免密 sudo 时留空"
+        /></label>
+        <p class="subtle">
+          通常填写当前 SSH 登录用户的密码。本次文件连接期间临时使用，断开后释放，不保存到主机配置。
+        </p>
+        <label
+          >SFTP 服务程序<input
+            v-model="userForm.serverPath"
+            aria-label="SFTP 服务程序"
+            :disabled="switchingUser"
+            placeholder="留空自动查找 sftp-server"
+        /></label>
+        <p class="subtle">
+          服务器须允许通过 sudo 运行 Shell 和 sftp-server。仅支持 internal-sftp
+          或要求交互终端的服务器无法使用此方式。
+        </p>
+      </template>
+      <p v-if="switchingUser" role="status">正在验证新的文件连接…</p>
+      <footer class="dialog-actions">
+        <button class="button" type="button" :disabled="switchingUser" @click="closeUserForm">
+          取消
+        </button>
+        <button class="button primary" :disabled="switchingUser">确认切换</button>
+      </footer>
+    </form>
+  </Modal>
   <Modal
     v-if="transferHistory && hasTransferHistory"
     title="传输记录"

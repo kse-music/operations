@@ -50,6 +50,7 @@
     "allow-background-tasks",
     "allow-files-connections",
     "allow-files-open",
+    "allow-files-switch-user",
     "allow-files-list",
     "allow-files-local",
     "allow-files-properties",

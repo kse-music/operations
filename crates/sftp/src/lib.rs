@@ -177,6 +177,24 @@ impl Files {
         locked(&self.documents)?.retain(|_, d| d.public.session_id != id);
         self.engine.close(id).await
     }
+    pub fn check_user_switch(&self, id: &str) -> Result<(), Error> {
+        if locked(&self.documents)?
+            .values()
+            .any(|d| d.public.session_id == id)
+        {
+            return Err(fail(
+                "EDITOR_OPEN",
+                "请先保存并关闭此连接的编辑文档，再切换 SFTP 用户",
+            ));
+        }
+        if self.transfers.session_unfinished(id)? > 0 {
+            return Err(fail(
+                "TRANSFERS_ACTIVE",
+                "请等待或取消此连接的传输，再切换 SFTP 用户",
+            ));
+        }
+        Ok(())
+    }
     pub async fn shutdown(&self) {
         self.stopping
             .store(true, std::sync::atomic::Ordering::Release);

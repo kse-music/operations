@@ -23,6 +23,17 @@ pub async fn files_open(
         .map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_switch_user(
+    application: tauri::State<'_, Application>,
+    id: String,
+    user: Option<SftpUser>,
+) -> Result<FileUserSession, IpcError> {
+    application
+        .files_switch_user(id, user)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn file_terminal(
     application: tauri::State<'_, Application>,
     host_id: String,

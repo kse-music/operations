@@ -413,11 +413,13 @@ try {
     passed('search real terminal scrollback');
     await command('exit');
     await active().locator('.xterm-container[data-state="closed"]').waitFor();
-    await terminalAction(page, active(), '重新连接');
+    assert.equal(await active().locator('.terminal-footnote').count(), 0);
+    assert.equal(await active().getByRole('button', { name: '重新连接', exact: true }).count(), 0);
+    await openTerminal();
     await active().locator('.xterm-container[data-state="connected"]').waitFor();
     await command("printf '\\n__SD_%s__\\n' RECONNECTED");
     await contains('__SD_RECONNECTED__');
-    passed('manual reconnect creates fresh shell');
+    passed('closed terminal has no bottom actions; opening a new session creates a fresh shell');
   }
   if (process.argv.includes('--exit-transfer'))
     await transferExitChecks({ page, artifacts, hostId, passed, restart: restartIsolated });

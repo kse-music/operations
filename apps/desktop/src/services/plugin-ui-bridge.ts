@@ -116,6 +116,15 @@ export function createPluginUiBridge(input: {
     check(true);
     const host = hosts.catalog?.hosts.find((h) => h.id === hostId);
     if (!host) throw new Error('目标主机未登记');
+    const checkFileIdentity = () => {
+      const connection = files.connections[hostId];
+      if (file && (connection?.elevated || connection?.switchingUser))
+        throw {
+          code: 'PLUGIN_SFTP_IDENTITY',
+          message: '请先在 SFTP 文件页切回原登录用户，再使用插件文件功能。',
+        };
+    };
+    checkFileIdentity();
     if (file) await files.open(host);
     else await ops.open(host, false);
     await new Promise<void>((resolve, reject) => {
@@ -138,6 +147,7 @@ export function createPluginUiBridge(input: {
         if (finished) return;
         try {
           check(true);
+          checkFileIdentity();
           const c = file ? files.connections[hostId] : ops.connections[hostId];
           if (!c) throw new Error('连接未建立');
           if (c.state === 'connected') {

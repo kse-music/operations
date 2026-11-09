@@ -4,6 +4,7 @@ mod connect;
 mod forward;
 mod monitor;
 mod ops;
+mod sftp_user;
 mod subsystem;
 pub use subsystem::SubsystemChannel;
 mod proxy;
@@ -101,11 +102,13 @@ struct TransportKey {
 enum SessionKind {
     Terminal,
     Files,
+    DedicatedFiles,
     Monitor,
     Operations,
 }
 struct Control {
     kind: SessionKind,
+    file_user: Option<serverdeck_core::files::SftpUser>,
     info: TerminalSession,
     cancel: CancellationToken,
     input: mpsc::Sender<Vec<u8>>,
@@ -154,7 +157,7 @@ impl Engine {
                     route_host_ids: c.info.route_host_ids.clone(),
                     kind: match c.kind {
                         SessionKind::Terminal => "terminal",
-                        SessionKind::Files => "files",
+                        SessionKind::Files | SessionKind::DedicatedFiles => "files",
                         SessionKind::Monitor => "monitor",
                         SessionKind::Operations => "operations",
                     },
@@ -205,7 +208,7 @@ impl Engine {
         size: TerminalSize,
         sink: Sink,
     ) -> Result<TerminalSession, Error> {
-        self.open_internal(host, plan, size, sink, SessionKind::Terminal, None)
+        self.open_internal(host, plan, size, sink, SessionKind::Terminal, None, None)
     }
     pub fn open_file_plan(
         &self,
@@ -220,6 +223,27 @@ impl Engine {
             sink,
             SessionKind::Files,
             None,
+            None,
+        )
+    }
+    pub fn open_file_user_plan(
+        &self,
+        host: Host,
+        plan: ConnectionPlan,
+        sink: Sink,
+        user: Option<serverdeck_core::files::SftpUser>,
+    ) -> Result<TerminalSession, Error> {
+        if let Some(user) = &user {
+            user.validate()?;
+        }
+        self.open_internal(
+            host,
+            plan,
+            TerminalSize { cols: 80, rows: 24 },
+            sink,
+            SessionKind::DedicatedFiles,
+            None,
+            user,
         )
     }
     pub fn open_monitor_plan(
@@ -234,6 +258,7 @@ impl Engine {
             TerminalSize { cols: 80, rows: 24 },
             sink,
             SessionKind::Monitor,
+            None,
             None,
         )
     }
@@ -250,6 +275,7 @@ impl Engine {
             sink,
             SessionKind::Operations,
             None,
+            None,
         )
     }
     pub fn open_container_terminal_plan(
@@ -261,7 +287,15 @@ impl Engine {
         shell: serverdeck_core::ops::ContainerShell,
     ) -> Result<TerminalSession, Error> {
         let command = shell.command()?;
-        self.open_internal(host, plan, size, sink, SessionKind::Terminal, Some(command))
+        self.open_internal(
+            host,
+            plan,
+            size,
+            sink,
+            SessionKind::Terminal,
+            Some(command),
+            None,
+        )
     }
     pub fn open_command_terminal_plan(
         &self,
@@ -274,7 +308,15 @@ impl Engine {
         if command.is_empty() || command.len() > 64 * 1024 || command.contains('\0') {
             return Err(Error::Validation("远程终端命令无效"));
         }
-        self.open_internal(host, plan, size, sink, SessionKind::Terminal, Some(command))
+        self.open_internal(
+            host,
+            plan,
+            size,
+            sink,
+            SessionKind::Terminal,
+            Some(command),
+            None,
+        )
     }
     pub fn open_file_terminal_plan(
         &self,
@@ -285,8 +327,17 @@ impl Engine {
         action: serverdeck_core::files::FileTerminalAction,
     ) -> Result<TerminalSession, Error> {
         let command = action.command()?;
-        self.open_internal(host, plan, size, sink, SessionKind::Terminal, Some(command))
+        self.open_internal(
+            host,
+            plan,
+            size,
+            sink,
+            SessionKind::Terminal,
+            Some(command),
+            None,
+        )
     }
+    #[allow(clippy::too_many_arguments)]
     fn open_internal(
         &self,
         host: Host,
@@ -295,6 +346,7 @@ impl Engine {
         sink: Sink,
         kind: SessionKind,
         command: Option<String>,
+        file_user: Option<serverdeck_core::files::SftpUser>,
     ) -> Result<TerminalSession, Error> {
         size.validate()?;
         if plan.hops.last().is_none_or(|hop| hop.host.id != host.id) {
@@ -347,8 +399,10 @@ impl Engine {
             })
             .clone();
         if matches!(kind, SessionKind::Files | SessionKind::Operations)
+            && file_user.is_none()
             && let Some(existing) = registry.sessions.values().find(|control| {
                 control.kind == kind
+                    && control.file_user.is_none()
                     && control.info.transport_id == transport.id
                     && control.ready.load(Ordering::Acquire)
                     && !control.cancel.is_cancelled()
@@ -365,6 +419,7 @@ impl Engine {
         };
         let control = Arc::new(Control {
             kind,
+            file_user,
             info: info.clone(),
             cancel: CancellationToken::new(),
             input,

@@ -369,12 +369,6 @@ async function confirmExit(): Promise<void> {
     exitBusy.value = false;
   }
 }
-function openFiles(host: Host, path?: string, pane?: string): void {
-  if (!currentConfiguration(host)) return;
-  dismissTabMenu();
-  navigate('files', host.id);
-  void files.open(host, path, pane);
-}
 function fileTerminal(host: Host, action: import('./types/files').FileTerminalAction): void {
   if (!currentConfiguration(host)) return;
   terminals.open(host, action);
@@ -741,7 +735,6 @@ watch(
             :visible="view === 'terminals'"
             :host-id="currentHostId"
             toolbar-target="#terminal-session-tools"
-            @files="openFiles"
             @server="openServer"
           />
         </div>

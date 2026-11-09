@@ -11,6 +11,9 @@ const menuModules = {
 };
 
 export async function terminalAction(page, pane, name) {
+  if (name === 'SFTP 文件') return navigateWorkspace(page, name);
+  const shortcut = { 关闭终端: 'Control+Shift+w', 查找: 'Control+Shift+f' }[name];
+  if (shortcut) return pane.locator('.xterm-helper-textarea').press(shortcut);
   await pane.locator('.xterm-helper-textarea').press('Shift+F10');
   await page
     .getByRole('menu', { name: '终端操作', exact: true })

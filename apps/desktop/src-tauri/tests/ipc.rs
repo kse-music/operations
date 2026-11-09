@@ -744,6 +744,21 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
             .expect_err("only the local main window can start native file dragging");
         assert!(error.as_str().is_some_and(|s| s.contains("not allowed")));
     }
+    let switch = json!({"id":"missing","user":{"username":"root","serverPath":"","password":null}});
+    assert_eq!(
+        get_ipc_response(&main, request("files_switch_user", switch.clone(), origin))
+            .expect_err("switch requires a live file lease")["code"],
+        "NOT_FOUND"
+    );
+    for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+        let error = get_ipc_response(window, request("files_switch_user", switch.clone(), url))
+            .expect_err("only local main window may authorize sudo SFTP");
+        assert!(
+            error
+                .as_str()
+                .is_some_and(|message| message.contains("not allowed"))
+        );
+    }
     for command in [
         "ai_models",
         "ai_local_codex_status",

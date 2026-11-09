@@ -98,7 +98,7 @@ NativeStore 使用系统凭据库，当前服务为 `cn.hiboot.desktop.credentia
 
 应用自己的 `ssh_known_hosts` 按规范化 hostname+port 保存完整公钥、SHA256 和信任时间。未知主机认证前等待活跃 challenge 的用户核验，60 秒超时；竞争确认复验公钥，已知密钥变化硬拒绝，证书默认拒绝。系统 known_hosts 哈希/CA/撤销尚未接入。本地 RSA 私钥签名受[密码学门禁](DECISIONS.md)拒绝，不能以测试通过代替安全审查。
 
-每个终端独立 PTY/取消令牌/任务句柄，关闭只结束自身 Channel 和所属转发；Transport 在无相关租约后释放。SFTP/Monitor/执行拥有独立租约，单个子系统失败不误关其他会话。`TerminalPane` 显式重连复用既有 `connect`：保留 xterm/PaneKey、清空输入与待确认粘贴、关闭旧 Session 后创建新 Shell，generation 隔离迟到事件。连接中及固定文件/容器动作重跑须确认，插件一次性票据禁止重放；显式重连和文件导航校验当前目录中的主机连接配置。同步锁只作短暂注册表操作，不跨 await 或串行化全部输出。
+每个终端独立 PTY/取消令牌/任务句柄，关闭只结束自身 Channel 和所属转发；Transport 在无相关租约后释放。SFTP/Monitor/执行拥有独立租约，单个子系统失败不误关其他会话。`TerminalPane` 的 `connect` 清空输入与待确认粘贴，关闭旧 Session 后创建新 Shell，generation 隔离迟到事件；当前界面不提供同窗格手动重连入口，重新连接使用新建或复制普通会话，不重放文件/容器动作或插件票据。同步锁只作短暂注册表操作，不跨 await 或串行化全部输出。
 
 ### 有界输入输出与布局
 
@@ -106,7 +106,7 @@ PTY 每块最多 16 KiB，经 Tauri Channel 交给 xterm，`xterm.write(callback
 
 前端区分会话标签、PaneKey 和 Session。二叉树仅计算分屏几何，固定 PaneKey 保持 xterm 挂载；每标签最多八窗格，全应用最多 32。后台终端持续消费 ACK。编号按主机运行内计数，最后会话成功关闭后重置；不持久化终端布局、标题、正文或会话，不保留旧 workspace_load/save 接口。
 
-`TerminalsView` 挂载会话新建、拖动排序、双击重命名、关闭、分屏快捷键及绑定目标 TabKey 的会话菜单；菜单复用 store 的重命名/关闭/按主机关闭所有，复制只调用普通 `open(host)`，不复制动作或票据。菜单支持右键和键盘、视口限位与焦点恢复。`TerminalPane` 在现有底部说明区提供操作菜单，内容区仍仅复制/粘贴；主动导出须确认，只读取此 xterm 的 `buffer.normal`，复用本地 UTF-8 下载能力，不自动录制。默认键位由 `core::terminal::default_shortcuts` 与前端偏好共同约束，关闭的是当前窗格而非整个工作区。
+`TerminalsView` 挂载会话新建、拖动排序、双击重命名、关闭、分屏快捷键及绑定目标 TabKey 的会话菜单；菜单复用 store 的重命名/关闭/按主机关闭所有，复制只调用普通 `open(host)`，不复制动作或票据。菜单支持右键和键盘、视口限位与焦点恢复。`TerminalPane` 不挂载底部操作栏、快捷键提示及其重连/转发/SFTP/导出界面，内容区菜单仅复制/粘贴，查找和字号快捷键保留；SFTP 使用主机工具栏入口。默认键位由 `core::terminal::default_shortcuts` 与前端偏好共同约束，关闭的是当前窗格而非整个工作区。
 
 纯文本复制粘贴使用受限 Tauri 原生剪贴板服务，只在用户动作后运行。异步读取绑定连接 generation，重连/卸载废弃旧读取及待确认粘贴；2 MiB 上限、大文本确认和 Bracketed Paste 保留。字号/行高变化适配当前 xterm 和 PTY，不重启 Shell。
 
@@ -116,13 +116,15 @@ Linux 本地 PTY 使用有效 `$SHELL`、账户 Shell 或 `/bin/sh` 的交互模
 
 首跳可经 SOCKS5/HTTP CONNECT，后续 direct-tcpip 嵌套 SSH，逐跳信任与认证。端口转发归属 Session，默认回环、公共绑定需确认；Local/Remote/Dynamic 有界并发与取消。远端取消未确认时关闭所属 Transport，明确报告共享会话可能断开；不自动恢复转发。
 
-`TerminalPane` 的操作菜单挂载既有 `ForwardDialog`，捕获该窗格当前 SessionId，复用原转发服务和后端，不使用活动工作区推断目标。本地或未连接窗格禁用入口；断开、重连或隐藏窗格关闭管理界面，转发生命周期仍由所属 Session 负责。
+当前终端界面不挂载转发管理对话框；Rust 转发服务、IPC 及会话清理边界保留，未因删除界面入口放宽权限或更改生命周期。
 
 rz 使用固定版本 ZMODEM 实现与流式握手识别。Rust 原生选择器发放绑定终端/取消令牌的文件句柄，不提供任意路径读取；分块读取，等待选择和上传不阻塞输出 ACK，普通输入在上传时隔离。关闭/取消撤销句柄，迟到选择不能向新 Session 发送文件。协议与实际验证见[ZMODEM 记录](../validation/terminal/VALIDATION_ZMODEM.md)。
 
 ## SFTP、传输与编辑
 
-Files 租约复用完整认证路由但不启动 Shell。目录使用 SFTP v3 RawSftpSession，传输各有独立 Channel；请求、响应、目录条目/名称和递归规划均有上限。原生选择器只通过受限文件命令开放，不授予通用 fs/shell 权限。
+普通 Files 租约复用完整认证路由并请求 SFTP 子系统，不启动 Shell。目录使用 SFTP v3 RawSftpSession，传输各有独立 Channel；请求、响应、目录条目/名称和递归规划均有上限。原生选择器只通过受限文件命令开放，不授予通用 fs/shell 权限。
+
+`files_switch_user` 仅允许本地主窗口调用。它核对原租约与当前主机配置，创建不复用已有 Files 租约的候选连接；候选目录读取成功且原连接无传输/编辑文档后关闭旧连接，失败释放候选。sudo 身份固定在独立 Control 上，各 Channel 用同一身份启动外部 sftp-server；目标用户与程序路径严格校验并按 Shell 参数转义。无 PTY；固定包装先切到目标 HOME（失败时 `/`），发送随机就绪标记后 exec 服务。密码仅响应 stderr 中本次唯一提示标记，最多发送一次；认证与 SFTP 二进制流分开，启动超时/关闭会释放 Channel。密码用 Zeroizing 保存在租约内存，不改变主机或凭据配置。前端隔离旧事件、目录请求和轮询结果，主机关闭等待切换完成。插件仅选择 `login_file_connections`，不会继承 sudo 身份。取舍见 [ADR 0029](decisions/0029-sftp-user.md)。
 
 Pinia 保存每主机文件连接、实际目录和独立导航历史；连续目录请求由代号隔离，失败保留原目录。权限按 mode 展示，owner 仅从受限 longname 格式解析，未知回退 UID，不猜测名称。两栏内部滚动，活动传输面板与页头记录共用同一任务状态。
 

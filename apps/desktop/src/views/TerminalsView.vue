@@ -12,7 +12,6 @@ import TerminalPane from '../components/TerminalPane.vue';
 import Modal from '../components/Modal.vue';
 const emit = defineEmits<{
   server: [host: import('../types/hosts').Host];
-  files: [host: import('../types/hosts').Host, path: string | undefined, pane: string];
 }>();
 const store = useTerminalsStore(),
   application = useApplicationStore();
@@ -316,7 +315,6 @@ watch(
           :active="item.tab === store.active && props.visible"
           @close="store.closePane(item.pane.key)"
           @action="action"
-          @files="(host, path, pane) => emit('files', host, path, pane)"
           @server="(host) => emit('server', host)"
         />
       </div>

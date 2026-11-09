@@ -11,12 +11,16 @@ import type {
   TextDocument,
   SaveResult,
   FileTerminalAction,
+  SftpUser,
+  FileUserSession,
 } from '../types/files';
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   ensureDesktop();
   return invoke(command, args);
 }
 export const filesApi = {
+  switchUser: (id: string, user: SftpUser | null) =>
+    call<FileUserSession>('files_switch_user', { id, user }),
   connections: () => call<TerminalSession[]>('files_connections'),
   open(hostId: string, receive: (event: TerminalEvent) => void): Promise<TerminalSession> {
     const events = new Channel<TerminalEvent>();

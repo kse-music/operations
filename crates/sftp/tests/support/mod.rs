@@ -57,6 +57,9 @@ pub struct FileFaults {
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
     pub links: Mutex<HashMap<String, String>>,
+    pub sudo_password: Mutex<Option<String>>,
+    pub sudo_commands: Mutex<Vec<String>>,
+    pub reject_sudo: std::sync::atomic::AtomicBool,
 }
 enum HandleValue {
     File(tokio::fs::File),
@@ -410,6 +413,79 @@ impl server::Handler for Handler {
         }
         Ok(())
     }
+    async fn exec_request(
+        &mut self,
+        id: ChannelId,
+        command: &[u8],
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        let command = String::from_utf8_lossy(command).to_string();
+        self.faults
+            .sudo_commands
+            .lock()
+            .unwrap()
+            .push(command.clone());
+        session.channel_success(id)?;
+        if self
+            .faults
+            .reject_sudo
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            session.exit_status_request(id, 1)?;
+            session.close(id)?;
+            return Ok(());
+        }
+        fn marker(command: &str, prefix: &str) -> String {
+            let start = command.find(prefix).expect("startup marker");
+            command[start..start + prefix.len() + 34].into()
+        }
+        let ready = marker(&command, "__SD_SFTP_");
+        let expected = self.faults.sudo_password.lock().unwrap().clone();
+        if expected.is_some() && command.contains("sudo -n") {
+            session.exit_status_request(id, 1)?;
+            session.close(id)?;
+            return Ok(());
+        }
+        let prompt = expected.as_ref().map(|_| marker(&command, "__SD_SUDO_"));
+        let mut channel = self.channels.remove(&id).expect("channel");
+        let disk = Disk {
+            faults: self.faults.clone(),
+            root: self.root.clone(),
+            handles: HashMap::new(),
+            atomic: self.atomic,
+            delay: self.delay,
+        };
+        self.workers.push(tokio::spawn(async move {
+            if let Some(prompt) = prompt {
+                for part in prompt.as_bytes().chunks(7) {
+                    channel.extended_data(1, part).await.unwrap();
+                }
+                let mut input = Vec::new();
+                loop {
+                    match channel.wait().await {
+                        Some(russh::ChannelMsg::Data { data }) => {
+                            input.extend_from_slice(&data);
+                            if input.ends_with(b"\n") {
+                                break;
+                            }
+                        }
+                        Some(russh::ChannelMsg::Close) | None => return,
+                        _ => (),
+                    }
+                }
+                if input != format!("{}\n", expected.unwrap()).as_bytes() {
+                    channel.extended_data(1, prompt.as_bytes()).await.unwrap();
+                    let _ = channel.close().await;
+                    return;
+                }
+            }
+            for part in ready.as_bytes().chunks(7) {
+                channel.data(part).await.unwrap();
+            }
+            russh_sftp::server::run(channel.into_stream(), disk).await;
+        }));
+        Ok(())
+    }
     async fn pty_request(
         &mut self,
         channel: ChannelId,
@@ -507,22 +583,33 @@ impl Server {
         }
     }
     pub async fn open(&self) -> TerminalSession {
+        self.open_identity(None, false).await
+    }
+    pub async fn open_as(&self, user: Option<serverdeck_core::files::SftpUser>) -> TerminalSession {
+        self.open_identity(user, true).await
+    }
+    async fn open_identity(
+        &self,
+        user: Option<serverdeck_core::files::SftpUser>,
+        dedicated: bool,
+    ) -> TerminalSession {
         let (tx, mut events) = tokio::sync::mpsc::channel(32);
-        let info = self
-            .engine
-            .open_file_plan(
-                self.host.clone(),
-                ConnectionPlan {
-                    hops: vec![Hop {
-                        host: self.host.clone(),
-                        revision: 1,
-                        auth: Authentication::Password(Zeroizing::new(self.password.clone())),
-                    }],
-                    proxy: None,
-                },
-                Arc::new(move |event| tx.try_send(event).is_ok()),
-            )
-            .expect("open");
+        let plan = ConnectionPlan {
+            hops: vec![Hop {
+                host: self.host.clone(),
+                revision: 1,
+                auth: Authentication::Password(Zeroizing::new(self.password.clone())),
+            }],
+            proxy: None,
+        };
+        let sink: serverdeck_ssh::Sink = Arc::new(move |event| tx.try_send(event).is_ok());
+        let info = if dedicated {
+            self.engine
+                .open_file_user_plan(self.host.clone(), plan, sink, user)
+        } else {
+            self.engine.open_file_plan(self.host.clone(), plan, sink)
+        }
+        .expect("open");
         tokio::time::timeout(Duration::from_secs(8), async {
             while let Some(event) = events.recv().await {
                 if let TerminalEvent::State { state, code, .. } = event {

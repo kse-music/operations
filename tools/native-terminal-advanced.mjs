@@ -1,6 +1,6 @@
 import { terminalAction, navigateWorkspace } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import net from 'node:net';
 import { once } from 'node:events';
@@ -121,7 +121,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
     .getByRole('button', { name: /SSH 终端/ })
     .click();
   if (await panes().nth(0).getByLabel('终端查找内容').isVisible())
-    await terminalAction(page, panes().nth(0), '查找');
+    await panes().nth(0).locator('.xterm-helper-textarea').press('Control+Shift+g');
   await panes().nth(0).locator('.xterm-helper-textarea').focus();
   await page.keyboard.press('Control+Shift+g');
   await panes().nth(0).getByLabel('终端查找内容').waitFor();
@@ -133,7 +133,7 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   passed(
     'persisted terminal font/line-height/scrollback/theme/cursor settings and configurable search shortcut',
   );
-  await terminalAction(page, panes().nth(0), '查找');
+  await panes().nth(0).locator('.xterm-helper-textarea').press('Control+Shift+g');
   await send(
     panes().nth(0),
     "bind 'set enable-bracketed-paste on'; printf '\\n__SD_%s__\\n' BRACKET_READY",
@@ -166,17 +166,9 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   await page.keyboard.press('Enter');
   await contains(panes().nth(0), '__SD_BRACKET_CONFIRMED__');
   passed('large-paste confirmation and real Bash bracketed-paste boundaries');
-  const downloads = path.join(artifacts, 'downloads');
-  await mkdir(downloads, { recursive: true });
-  const downloaded = page.waitForEvent('download');
-  await terminalAction(page, panes().nth(0), '导出内容');
-  const exporting = page.getByRole('dialog', { name: '导出终端内容', exact: true });
-  await exporting.getByRole('button', { name: '确认导出文本' }).click();
-  const download = await downloaded;
-  const file = `terminal-${Date.now()}.txt`;
-  await download.saveAs(path.join(downloads, file));
-  assert((await readFile(path.join(downloads, file), 'utf8')).includes('__SD_BRACKET_CONFIRMED__'));
-  passed('explicit local UTF-8 terminal export without automatic recording');
+  assert.equal(await page.locator('.terminal-footnote').count(), 0);
+  assert.equal(await page.getByRole('button', { name: '打开终端操作', exact: true }).count(), 0);
+  passed('terminal bottom actions and shortcut hints are absent');
   await networkChecks(page, panes, passed, openTerminal, pin);
   // Observe renderer heap after repeated real output; keep a finite scrollback and record actual values.
   const cdp = await page.context().newCDPSession(page);
@@ -201,15 +193,10 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   );
   passed('8 MiB repeated real output with finite scrollback and measured renderer heap');
   // Leave a real listener alive so reload must prove it releases the previous sessions.
-  await terminalAction(page, panes().nth(0), '端口转发');
-  const cleanupDialog = page.getByRole('dialog', { name: '端口转发', exact: true });
-  await cleanupDialog.getByRole('button', { name: '启动转发', exact: true }).click();
-  const liveForward = cleanupDialog.locator('.forward-row').filter({ hasText: '运行中' });
-  await liveForward.waitFor();
-  const cleanupPort = Number((await liveForward.locator('strong').innerText()).match(/:(\d+)$/)[1]);
+  const liveForward = await startForward(page, 'local', 8080);
+  const cleanupPort = liveForward.input.listenPort;
   const probe = await tcpConnect(cleanupPort);
   probe.destroy();
-  await cleanupDialog.getByRole('button', { name: '关闭面板', exact: true }).click();
   assert.equal(await page.locator('.terminal-pane').count(), 2);
   await page.screenshot({ path: path.join(artifacts, 'splits.png') });
   await page.reload();
@@ -221,43 +208,46 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   passed('workspace reload starts without terminal tabs and closes the previous WebView sessions');
 }
 
+// The forwarding UI was removed; retain real backend and routing assertions through IPC.
+async function startForward(page, kind, targetPort, listenPort = 0) {
+  return page.evaluate(
+    async (input) => {
+      const store = document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('terminals');
+      const id = store.tabs.find((tab) => tab.key === store.active)?.panes[0]?.sessionId;
+      if (!id) throw new Error('No active SSH session for forwarding verification');
+      const forward = await window.__TAURI_INTERNALS__
+        .invoke('forward_start', { id, input })
+        .catch((cause) => {
+          throw new Error(cause?.message ?? String(cause));
+        });
+      if (forward.state !== 'running') throw new Error(`Forward did not start: ${forward.state}`);
+      return forward;
+    },
+    {
+      kind,
+      bindAddress: '127.0.0.1',
+      listenPort,
+      targetHost: kind === 'dynamic' ? null : '127.0.0.1',
+      targetPort: kind === 'dynamic' ? null : targetPort,
+      confirmPublic: false,
+    },
+  );
+}
 async function networkChecks(page, panes, passed, openTerminal, pin) {
-  const dialog = page.getByRole('dialog', { name: '端口转发', exact: true });
-  await terminalAction(page, panes().nth(0), '端口转发');
-  await dialog.waitFor();
-  const row = (kind) =>
-    dialog
-      .locator('.forward-row')
-      .filter({ has: page.locator('strong').filter({ hasText: new RegExp(`^${kind} ·`) }) });
-  async function port(kind) {
-    const item = row(kind).filter({ hasText: '运行中' }).first();
-    await item.waitFor();
-    const text = await item.locator('strong').innerText();
-    return Number(text.match(/:(\d+)$/)[1]);
-  }
-  async function start(kind, targetPort, listenPort = 0) {
-    await dialog.getByLabel('转发类型', { exact: true }).selectOption(kind);
-    await dialog.getByLabel('监听端口', { exact: true }).fill(String(listenPort));
-    if (kind !== 'dynamic')
-      await dialog.getByLabel('转发目标端口', { exact: true }).fill(String(targetPort));
-    await dialog.getByRole('button', { name: '启动转发', exact: true }).click();
-  }
-  await start('local', 22);
-  const local = await port('local');
+  const localForward = await startForward(page, 'local', 22);
+  const local = localForward.input.listenPort;
   await sshBanner(local);
   passed('real Linux Local Forward reaches SSH service');
-  await start('local', 22, local);
-  await dialog.getByRole('alert').filter({ hasText: '端口冲突' }).first().waitFor();
+  await assert.rejects(() => startForward(page, 'local', 22, local), /端口冲突/);
   await sshBanner(local);
   passed('local bind conflict leaves existing SSH forwarding intact');
-  await start('dynamic', 0);
-  const dynamic = await port('dynamic');
+  const dynamicForward = await startForward(page, 'dynamic', 0);
+  const dynamic = dynamicForward.input.listenPort;
   await sshBanner(dynamic, true);
   passed('real Linux dynamic SOCKS5 forwarding');
-  await dialog.getByRole('button', { name: '关闭面板', exact: true }).click();
   await routeChecks({ page, panes, passed, openTerminal, pin, dynamic });
-  await terminalAction(page, panes().nth(0), '端口转发');
-  await dialog.waitFor();
   const sockets = new Set();
   const echo = net.createServer((socket) => {
     sockets.add(socket);
@@ -269,12 +259,9 @@ async function networkChecks(page, panes, passed, openTerminal, pin) {
   try {
     const echoPort = echo.address().port,
       remotePort = 39000 + Math.floor(Math.random() * 5000);
-    await start('remote', echoPort, remotePort);
-    await row('remote').filter({ hasText: '运行中' }).waitFor();
-    await start('local', remotePort);
-    const chainRow = row('local').filter({ hasText: `→ 127.0.0.1:${remotePort}` });
-    await chainRow.waitFor();
-    const chainPort = Number((await chainRow.locator('strong').innerText()).match(/:(\d+)$/)[1]);
+    const remoteForward = await startForward(page, 'remote', echoPort, remotePort);
+    const chainForward = await startForward(page, 'local', remotePort);
+    const chainPort = chainForward.input.listenPort;
     const stream = net.createConnection(chainPort, '127.0.0.1');
     stream.setTimeout(8000, () => stream.destroy(new Error('forward echo timeout')));
     await once(stream, 'connect');
@@ -284,27 +271,25 @@ async function networkChecks(page, panes, passed, openTerminal, pin) {
     for await (const chunk of stream) chunks.push(chunk);
     assert(Buffer.concat(chunks).equals(expected), 'real remote forward byte integrity');
     passed('real Linux Remote Forward returns 128KiB through paired SSH channels');
-    await row('remote')
-      .filter({ hasText: '运行中' })
-      .getByRole('button', { name: '停止转发', exact: true })
-      .click();
-    await row('remote').filter({ hasText: '已停止' }).waitFor();
-    await chainRow.getByRole('button', { name: '停止转发', exact: true }).click();
-    await row('dynamic')
-      .filter({ hasText: '运行中' })
-      .getByRole('button', { name: '停止转发', exact: true })
-      .click();
-    await row('local')
-      .filter({ hasText: '运行中' })
-      .getByRole('button', { name: '停止转发', exact: true })
-      .click();
+    await page.evaluate(async (forward) => {
+      await window.__TAURI_INTERNALS__.invoke('forward_stop', { id: forward.id });
+      const forwards = await window.__TAURI_INTERNALS__.invoke('forward_list', {
+        id: forward.sessionId,
+      });
+      if (forwards.find((item) => item.id === forward.id)?.state !== 'stopped')
+        throw new Error('Remote forward did not stop');
+    }, remoteForward);
+    for (const forward of [chainForward, dynamicForward, localForward])
+      await page.evaluate(
+        (id) => window.__TAURI_INTERNALS__.invoke('forward_stop', { id }),
+        forward.id,
+      );
     await assert.rejects(() => tcpConnect(local));
     await assert.rejects(() => tcpConnect(dynamic));
     passed('forward stop releases real local and dynamic listeners');
   } finally {
     for (const socket of sockets) socket.destroy();
     await new Promise((resolve) => echo.close(resolve));
-    await dialog.getByRole('button', { name: '关闭面板', exact: true }).click();
   }
 }
 async function tcpConnect(port) {

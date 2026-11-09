@@ -4,6 +4,8 @@ use serverdeck_core::{
     terminal::{TerminalSession, TerminalSize},
 };
 use serverdeck_ssh::Sink;
+#[cfg(test)]
+mod tests;
 impl Application {
     pub fn file_connections(&self) -> Result<Vec<TerminalSession>, Error> {
         self.terminals.file_connections()
@@ -17,6 +19,81 @@ impl Application {
             return Err(Error::ShuttingDown);
         }
         self.terminals.open_file_plan(host, plan, sink)
+    }
+    pub async fn files_switch_user(
+        &self,
+        id: String,
+        user: Option<SftpUser>,
+    ) -> Result<FileUserSession, Error> {
+        if let Some(user) = &user {
+            user.validate()?;
+        } else if !self.terminals.file_is_elevated(&id)? {
+            return Err(Error::Validation("SFTP 已使用原登录用户"));
+        }
+        self.files.check_user_switch(&id)?;
+        let old = self.terminals.session_info(&id)?;
+        let secrets = self.secrets.clone();
+        let engine = self.terminals.clone();
+        let source = id.clone();
+        let (host, plan) = self
+            .blocking(move |db| {
+                let (host, plan) =
+                    super::terminal::connection_plan(&db, secrets.as_ref(), &old.host_id)?;
+                if engine.lease_profile(&source)? != plan.signature()? {
+                    return Err(Error::Conflict);
+                }
+                Ok((host, plan))
+            })
+            .await?;
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        let (sender, mut events) = tokio::sync::mpsc::channel(16);
+        let session = self.terminals.open_file_user_plan(
+            host,
+            plan,
+            Arc::new(move |event| sender.try_send(event).is_ok()),
+            user,
+        )?;
+        let prepared = async {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                while let Some(event) = events.recv().await {
+                    match event {
+                        serverdeck_core::terminal::TerminalEvent::State {
+                            state: "connected",
+                            ..
+                        } => return Ok(()),
+                        serverdeck_core::terminal::TerminalEvent::State {
+                            state: "failed" | "closed",
+                            ..
+                        }
+                        | serverdeck_core::terminal::TerminalEvent::Trust { .. } => {
+                            return Err(Error::Validation(
+                                "文件连接已失效，请重新连接主机后切换用户",
+                            ));
+                        }
+                        _ => (),
+                    }
+                }
+                Err(Error::Validation("文件连接已关闭"))
+            })
+            .await
+            .map_err(|_| Error::Validation("切换用户连接超时，原文件连接保留"))??;
+            let listing = self.files.list(&session.id, ".").await?;
+            self.files.check_user_switch(&id)?;
+            self.files.close(&id, false).await?;
+            Ok(listing)
+        }
+        .await;
+        match prepared {
+            Ok(listing) => Ok(FileUserSession { session, listing }),
+            Err(error) => {
+                if let Err(cleanup) = self.files.close(&session.id, false).await {
+                    tracing::warn!(operation = "sftp_switch_cleanup", error = %cleanup, "failed to close candidate SFTP lease");
+                }
+                Err(error)
+            }
+        }
     }
     pub async fn file_terminal(
         &self,

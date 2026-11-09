@@ -564,7 +564,7 @@ impl Application {
     async fn plugin_platform_file_session(&self, call: &Call, host: &str) -> Result<String, Error> {
         let session = self
             .terminals
-            .file_connections()?
+            .login_file_connections()?
             .into_iter()
             .find(|session| session.host_id == host)
             .ok_or_else(|| failure("PLUGIN_SESSION_CLOSED", "目标主机没有已验证的 SFTP 连接"))?;

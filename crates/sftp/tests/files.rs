@@ -49,6 +49,138 @@ async fn assert_completed(files: &Files, id: &str) {
 }
 
 #[tokio::test]
+async fn sudo_file_channels_authenticate_each_transfer_and_keep_login_leases_separate() {
+    use zeroize::Zeroizing;
+    let server = Server::start(true, Duration::ZERO).await;
+    *server.faults.sudo_password.lock().unwrap() = Some("sudo-secret".into());
+    let login = server.open().await;
+    let elevated = server
+        .open_as(Some(SftpUser {
+            username: "root".into(),
+            server_path: String::new(),
+            password: Some(Zeroizing::new("sudo-secret".into())),
+        }))
+        .await;
+    assert_ne!(login.id, elevated.id);
+    assert_eq!(login.transport_id, elevated.transport_id);
+    assert!(server.engine.file_is_elevated(&elevated.id).unwrap());
+    assert!(!server.engine.file_is_elevated(&login.id).unwrap());
+    let files = Files::new(server.engine.clone(), 3);
+    files
+        .list(&elevated.id, ".")
+        .await
+        .expect("sudo browser handshake");
+    let local = tempfile::tempdir().unwrap();
+    tokio::fs::write(local.path().join("sudo.txt"), b"sudo transfer content")
+        .await
+        .unwrap();
+    let upload = files
+        .transfers
+        .start(input(
+            &elevated.id,
+            Direction::Upload,
+            vec![path(&local.path().join("sudo.txt"))],
+            "/".into(),
+            ConflictPolicy::Fail,
+        ))
+        .unwrap();
+    assert_completed(&files, &upload.id).await;
+    assert_eq!(
+        tokio::fs::read(server.root.path().join("sudo.txt"))
+            .await
+            .unwrap(),
+        b"sudo transfer content"
+    );
+    let doc = files.read_text(&elevated.id, "/sudo.txt").await.unwrap();
+    assert!(files.check_user_switch(&elevated.id).is_err());
+    files.close_editor(&doc.token, false).unwrap();
+    files.check_user_switch(&elevated.id).unwrap();
+    let commands = server.faults.sudo_commands.lock().unwrap().clone();
+    assert!(
+        commands.len() >= 2,
+        "browser and transfer use separate sudo channels"
+    );
+    assert!(
+        commands
+            .iter()
+            .all(|command| !command.contains("sudo-secret"))
+    );
+    let ordinary = server.open().await;
+    assert_eq!(
+        ordinary.id, login.id,
+        "normal opens must not reuse sudo leases"
+    );
+    let dedicated_login = server.open_as(None).await;
+    assert_ne!(
+        dedicated_login.id, login.id,
+        "switch candidates must own a new lease"
+    );
+    files.close(&elevated.id, false).await.unwrap();
+    files
+        .list(&login.id, ".")
+        .await
+        .expect("other lease survives");
+    files.shutdown().await;
+    server.engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn sudo_rejection_and_bad_password_leave_the_original_sftp_usable() {
+    use zeroize::Zeroizing;
+    let server = Server::start(true, Duration::ZERO).await;
+    *server.faults.sudo_password.lock().unwrap() = Some("correct-password".into());
+    let login = server.open().await;
+    let files = Files::new(server.engine.clone(), 3);
+    for password in [None, Some(Zeroizing::new("incorrect-password".into()))] {
+        let candidate = server
+            .open_as(Some(SftpUser {
+                username: "root".into(),
+                server_path: String::new(),
+                password,
+            }))
+            .await;
+        let error = match files.list(&candidate.id, ".").await {
+            Ok(_) => panic!("sudo must reject"),
+            Err(error) => error,
+        };
+        assert!(matches!(
+            serverdeck_core::IpcError::from(error).code,
+            "SFTP_SUDO_DENIED" | "SFTP_SUDO_AUTH"
+        ));
+        files.close(&candidate.id, false).await.unwrap();
+        files
+            .list(&login.id, ".")
+            .await
+            .expect("old browser retained");
+    }
+    *server.faults.sudo_password.lock().unwrap() = None;
+    let no_password = server
+        .open_as(Some(SftpUser {
+            username: "root".into(),
+            server_path: String::new(),
+            password: None,
+        }))
+        .await;
+    files
+        .list(&no_password.id, ".")
+        .await
+        .expect("passwordless sudo");
+    let extra_password = server
+        .open_as(Some(SftpUser {
+            username: "root".into(),
+            server_path: String::new(),
+            password: Some(Zeroizing::new("unused-password".into())),
+        }))
+        .await;
+    files
+        .list(&extra_password.id, ".")
+        .await
+        .expect("unused password must not corrupt SFTP packets");
+    files.shutdown().await;
+    server.engine.shutdown().await;
+}
+
+#[tokio::test]
 async fn downloads_selected_file_links_under_the_link_name_without_following_tree_links() {
     let server = Server::start(true, Duration::ZERO).await;
     let session = server.open().await;
@@ -578,6 +710,15 @@ async fn bounded_host_queue_cancel_cleanup_disconnect_and_retry() {
             <= 3
     );
     assert!(states.iter().any(|i| i.state == "queued"));
+    assert_eq!(
+        IpcError::from(
+            files
+                .check_user_switch(&session.id)
+                .expect_err("unfinished transfers block identity changes")
+        )
+        .code,
+        "TRANSFERS_ACTIVE"
+    );
     files.transfers.cancel(&tasks[6].id).expect("cancel queued");
     assert_eq!(finished(&files, &tasks[6].id).await.state, "cancelled");
     files.transfers.cancel(&tasks[0].id).expect("cancel active");

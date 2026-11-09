@@ -8,6 +8,8 @@ Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.0.0**；WASM ABI / wire �
 
 SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 Store、任意 Tauri 转发、系统查询枚举或特定插件 ID 的特权分支。容器操作由插件通过通用 SSH 执行 `docker`，模型业务由插件构造消息调用通用模型能力。新增服务插件只新增完整插件目录；无需修改 SDK、宿主路由或原生业务后端。
 
+插件文件原语只使用主机 SSH 登录身份的 SFTP 租约，不继承桌面文件页手动切换的 sudo 用户或密码。文件页处于 sudo 身份或切换中时，`connections.ensureConnection(hostId, true)` 明确要求先切回原登录用户，不报告虚假的连接成功；桌面切用户不扩大插件已授权的目录或身份。
+
 | 内容                             | 位置 / 入口                                          |
 | -------------------------------- | ---------------------------------------------------- |
 | Rust 协议、顺序 async 动作执行器 | `crates/plugin-sdk/src/{lib,platform,backend}.rs`    |

@@ -23,6 +23,40 @@ const page: PluginUiPage = {
   actions: [{ id: 'greet', label: 'Greet', discardDirty: false, enabledWhen: null }],
   log: null,
 };
+
+it.each(['elevated', 'switchingUser'] as const)(
+  'rejects a plugin file connection while the desktop identity is %s',
+  async (state) => {
+    const { useHostsStore } = await import('../stores/hosts');
+    const { useFilesStore } = await import('../stores/files');
+    const host = { ...hostInput(), id: 'host', createdAt: '', updatedAt: '' };
+    useHostsStore().catalog = {
+      hosts: [host],
+      groups: [],
+      credentials: [],
+      pendingSecretDeletions: 0,
+    };
+    const files = useFilesStore();
+    files.connections.host = {
+      host,
+      id: 'sudo',
+      path: '/',
+      state: 'connected',
+      error: null,
+      trust: null,
+      listing: null,
+      loading: false,
+      [state]: true,
+    };
+    const open = vi.spyOn(files, 'open');
+    grant('ui.contribute', 'sftp.read');
+    await expect(
+      bridge().call('connections.ensure', { hostId: 'host', files: true }),
+    ).rejects.toMatchObject({ code: 'PLUGIN_SFTP_IDENTITY' });
+    expect(open).not.toHaveBeenCalled();
+    expect(files.connections.host.id).toBe('sudo');
+  },
+);
 beforeEach(() => {
   pinia = createPinia();
   setActivePinia(pinia);

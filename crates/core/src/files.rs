@@ -8,6 +8,56 @@ pub const TEXT_LIMIT: usize = 2 * 1024 * 1024;
 pub const TREE_LIMIT: usize = 100_000;
 pub const LIST_LIMIT: usize = 20_000;
 
+// Runtime-only sudo authorization. Never serialize or log the password.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SftpUser {
+    pub username: String,
+    pub server_path: String,
+    pub password: Option<zeroize::Zeroizing<String>>,
+}
+impl SftpUser {
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.username.is_empty()
+            || self.username.len() > 64
+            || self.username.starts_with('-')
+            || !self
+                .username
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
+        {
+            return Err(Error::Validation(
+                "目标用户名须为 1–64 位字母、数字、下划线、点或连字符，不能以 - 开头",
+            ));
+        }
+        if !self.server_path.is_empty()
+            && (!self.server_path.starts_with('/')
+                || self.server_path.len() > 4096
+                || self.server_path.chars().any(char::is_control)
+                || self.server_path.split('/').any(|part| part == ".."))
+        {
+            return Err(Error::Validation(
+                "SFTP 服务程序须为远程绝对路径，留空时自动查找",
+            ));
+        }
+        if self.password.as_ref().is_some_and(|password| {
+            password.is_empty() || password.len() > 4096 || password.chars().any(char::is_control)
+        }) {
+            return Err(Error::Validation(
+                "sudo 密码不能含换行或控制字符，最多 4096 字节",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileUserSession {
+    pub session: crate::terminal::TerminalSession,
+    pub listing: DirectoryListing,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EntryKind {

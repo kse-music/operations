@@ -15,6 +15,15 @@ export interface DirectoryListing {
   parent: string | null;
   entries: FileEntry[];
 }
+export interface SftpUser {
+  username: string;
+  serverPath: string;
+  password: string | null;
+}
+export interface FileUserSession {
+  session: import('./terminal').TerminalSession;
+  listing: DirectoryListing;
+}
 export type RemoteAction =
   | { kind: 'mkdir'; path: string }
   | { kind: 'rename'; path: string; destination: string }

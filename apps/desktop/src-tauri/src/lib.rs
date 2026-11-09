@@ -204,6 +204,7 @@ pub fn command_handler<R: tauri::Runtime>()
         monitor_commands::monitor_stop,
         file_commands::files_connections,
         file_commands::files_open,
+        file_commands::files_switch_user,
         file_commands::files_list,
         file_commands::files_local,
         file_commands::files_properties,

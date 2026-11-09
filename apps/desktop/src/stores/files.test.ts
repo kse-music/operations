@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   connections: vi.fn(),
   close: vi.fn(),
   clearTransfers: vi.fn(),
+  switchUser: vi.fn(),
 }));
 vi.mock('../services/files', () => ({ filesApi: mocks }));
 import { useFilesStore } from './files';
@@ -141,6 +142,107 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('file workspace ownership', () => {
+  it('replaces the file identity only after verification and ignores late events from the old lease', async () => {
+    let receive!: (event: unknown) => void;
+    mocks.open.mockImplementation(async (_host, callback) => {
+      receive = callback;
+      callback({ type: 'state', state: 'connected' });
+      return { id: 'old' };
+    });
+    mocks.list.mockResolvedValue({ path: '/home/user', parent: '/home', entries: [] });
+    const store = useFilesStore();
+    await store.open(host);
+    let finish!: (value: unknown) => void;
+    mocks.switchUser.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = store.switchUser({ username: 'root', serverPath: '', password: null });
+    expect(store.current?.id).toBe('old');
+    expect(store.current?.switchingUser).toBe(true);
+    await store.navigate('/ignored');
+    expect(mocks.list).toHaveBeenCalledTimes(1);
+    finish({
+      session: { id: 'root-session', routeHostIds: [] },
+      listing: { path: '/root', parent: '/', entries: [] },
+    });
+    expect(await pending).toBe(true);
+    receive({ type: 'state', state: 'closed' });
+    expect(store.current).toMatchObject({
+      id: 'root-session',
+      username: 'root',
+      state: 'connected',
+      path: '/root',
+      switchingUser: false,
+    });
+    expect(store.stepHistory('remote', 'back')).toBe(false);
+  });
+  it('keeps the old identity and directory on failure and blocks switching with an open editor', async () => {
+    const store = useFilesStore();
+    store.active = host.id;
+    store.connections[host.id] = {
+      host,
+      id: 'old',
+      state: 'connected',
+      path: '/home',
+      listing: null,
+      loading: false,
+      error: null,
+      trust: null,
+    };
+    mocks.switchUser.mockRejectedValue({ message: 'sudo denied' });
+    expect(await store.switchUser({ username: 'root', serverPath: '', password: null })).toBe(
+      false,
+    );
+    expect(store.current).toMatchObject({ id: 'old', path: '/home', state: 'connected' });
+    expect(store.error).toBe('sudo denied');
+    store.document = { sessionId: 'old' } as TextDocument;
+    expect(await store.switchUser(null)).toBe(false);
+    expect(mocks.switchUser).toHaveBeenCalledTimes(1);
+    expect(store.error).toContain('保存并关闭');
+  });
+  it('waits for a pending user switch before closing the host and discards an earlier poll', async () => {
+    const store = useFilesStore();
+    store.active = host.id;
+    store.connections[host.id] = {
+      host,
+      id: 'old',
+      state: 'connected',
+      path: '/home',
+      listing: null,
+      loading: false,
+      error: null,
+      trust: null,
+    };
+    let pollFinish!: (value: unknown) => void;
+    mocks.connections.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          pollFinish = resolve;
+        }),
+    );
+    const poll = store.poll();
+    let finish!: (value: unknown) => void;
+    mocks.switchUser.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const pending = store.switchUser({ username: 'root', serverPath: '', password: null });
+    store.closingHosts.push(host.id);
+    const close = store.prepareHostClose(host.id);
+    expect(mocks.close).not.toHaveBeenCalled();
+    finish({ session: { id: 'root-session' }, listing: { path: '/', parent: null, entries: [] } });
+    expect(await pending).toBe(true);
+    expect(await close).toBe(true);
+    expect(mocks.close).toHaveBeenCalledWith('root-session', false);
+    pollFinish([{ id: 'old' }]);
+    await poll;
+    expect(store.current?.state).toBe('closed');
+  });
   it('opens through the real IPC boundary and never disconnects just because the page changes', async () => {
     mocks.open.mockImplementation(async (_host, receive) => {
       receive({ type: 'state', state: 'connected' });

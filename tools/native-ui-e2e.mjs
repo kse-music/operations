@@ -227,7 +227,7 @@ try {
     page.locator('.activity-rail'),
     page.locator('.sidebar'),
     page.locator('.sidebar input'),
-    active().locator('.terminal-footnote'),
+    page.locator('.app-header'),
   ])
     await assertNativeMenuSuppressed(target);
   assert.equal(await page.getByRole('menu').count(), 0);

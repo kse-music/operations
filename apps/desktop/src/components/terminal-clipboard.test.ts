@@ -62,7 +62,6 @@ vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
 let app: App, pinia: Pinia, root: HTMLDivElement, tab: TerminalPaneModel;
 const active = ref(true);
 const events = {
-  files: vi.fn(),
   server: vi.fn(),
   close: vi.fn(),
 };
@@ -71,7 +70,6 @@ const PaneHarness = {
     h(TerminalPane, {
       tab,
       active: active.value,
-      onFiles: events.files,
       onServer: events.server,
       onClose: events.close,
     }),
@@ -183,10 +181,14 @@ async function menuAction(label: string): Promise<void> {
   await nextTick();
 }
 
-it('removes the persistent toolbar while retaining copy and paste in the local context menu', async () => {
+it('removes persistent terminal bars while retaining copy and paste in the local context menu', async () => {
   expect(root.querySelector('.terminal-toolbar')).toBeNull();
   expect(root.querySelector('.terminal-identity')).toBeNull();
+  expect(root.querySelector('.terminal-footnote')).toBeNull();
   expect(root.querySelector('.terminal-pane')?.firstElementChild).toBe(
+    root.querySelector('.xterm-container'),
+  );
+  expect(root.querySelector('.terminal-pane')?.lastElementChild).toBe(
     root.querySelector('.xterm-container'),
   );
   xterm.selection = 'selected from menu';
@@ -369,7 +371,7 @@ it('intercepts right mouse events only inside the terminal and does not also inv
   expect(down.defaultPrevented).toBe(true);
   expect(handler).not.toHaveBeenCalled();
   expect(readText).toHaveBeenCalledOnce();
-  rightClick('.terminal-footnote');
+  rightClick('.terminal-pane');
   rightClick('.xterm-container', 0);
   expect(readText).toHaveBeenCalledOnce();
 });

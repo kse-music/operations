@@ -6,12 +6,26 @@ pub struct SubsystemChannel {
     pub transport_closed: CancellationToken,
 }
 impl Engine {
+    pub fn file_is_elevated(&self, id: &str) -> Result<bool, Error> {
+        let owner = self.control(id)?;
+        if !matches!(owner.kind, SessionKind::Files | SessionKind::DedicatedFiles) {
+            return Err(failure("SFTP_NOT_CONNECTED", "需要文件连接"));
+        }
+        Ok(owner.file_user.is_some())
+    }
     pub fn file_connections(&self) -> Result<Vec<TerminalSession>, Error> {
+        self.list_file_connections(false)
+    }
+    pub fn login_file_connections(&self) -> Result<Vec<TerminalSession>, Error> {
+        self.list_file_connections(true)
+    }
+    fn list_file_connections(&self, login_only: bool) -> Result<Vec<TerminalSession>, Error> {
         Ok(locked(&self.registry)?
             .sessions
             .values()
             .filter(|c| {
-                c.kind == SessionKind::Files
+                matches!(c.kind, SessionKind::Files | SessionKind::DedicatedFiles)
+                    && (!login_only || c.file_user.is_none())
                     && c.ready.load(Ordering::Acquire)
                     && !c.cancel.is_cancelled()
             })
@@ -74,7 +88,7 @@ impl Engine {
     }
     pub async fn open_sftp_channel(&self, id: &str) -> Result<SubsystemChannel, Error> {
         let owner = self.control(id)?;
-        if owner.kind != SessionKind::Files
+        if !matches!(owner.kind, SessionKind::Files | SessionKind::DedicatedFiles)
             || !owner.ready.load(Ordering::Acquire)
             || owner.cancel.is_cancelled()
         {
@@ -92,23 +106,34 @@ impl Engine {
             .await
             .clone()
             .ok_or(Error::NotFound)?;
-        let setup = async {
-            let mut channel = connection.channel_open_session().await.map_err(network)?;
-            channel
-                .request_subsystem(true, "sftp")
-                .await
-                .map_err(network)?;
-            accepted(&mut channel).await?;
-            Ok(SubsystemChannel {
-                channel,
-                session_closed: owner.cancel.clone(),
-                transport_closed: connection.alive.clone(),
-            })
+        let mut channel = tokio::select! {
+            result = tokio::time::timeout(Duration::from_secs(15), connection.channel_open_session()) => result.map_err(|_| failure("SFTP_TIMEOUT", "SFTP Channel 建立超时"))?.map_err(network)?,
+            _ = owner.cancel.cancelled() => return Err(failure("SFTP_DISCONNECTED", "文件连接已关闭")),
         };
-        tokio::select! {
-            result = tokio::time::timeout(Duration::from_secs(15), setup) => result.map_err(|_| failure("SFTP_TIMEOUT", "SFTP Channel 建立超时"))?,
+        let startup = async {
+            if let Some(user) = &owner.file_user {
+                sftp_user::start(&mut channel, user).await
+            } else {
+                channel
+                    .request_subsystem(true, "sftp")
+                    .await
+                    .map_err(network)?;
+                accepted(&mut channel).await
+            }
+        };
+        let result = tokio::select! {
+            result = tokio::time::timeout(Duration::from_secs(20), startup) => result.unwrap_or_else(|_| Err(failure("SFTP_TIMEOUT", "SFTP 启动超时，请检查 sudo 策略和服务程序路径"))),
             _ = owner.cancel.cancelled() => Err(failure("SFTP_DISCONNECTED", "文件连接已关闭")),
+        };
+        if let Err(error) = result {
+            let _ = tokio::time::timeout(Duration::from_secs(2), channel.close()).await;
+            return Err(error);
         }
+        Ok(SubsystemChannel {
+            channel,
+            session_closed: owner.cancel.clone(),
+            transport_closed: connection.alive.clone(),
+        })
     }
     // Reload closes view-owned terminals; independent, authenticated file leases keep tasks alive.
     pub async fn close_views(&self) -> Result<(), Error> {

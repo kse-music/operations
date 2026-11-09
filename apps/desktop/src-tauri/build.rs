@@ -67,6 +67,7 @@ fn main() {
             "monitor_stop",
             "files_connections",
             "files_open",
+            "files_switch_user",
             "files_list",
             "files_local",
             "files_properties",

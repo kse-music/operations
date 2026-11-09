@@ -18,17 +18,12 @@ const native = vi.hoisted(() => ({
   input: vi.fn(),
   ack: vi.fn(),
   resize: vi.fn(),
-  forwardList: vi.fn(),
-  forwardStart: vi.fn(),
-  forwardStop: vi.fn(),
-  download: vi.fn(),
   receivers: [] as ((event: TerminalEvent) => void)[],
 }));
 const terminals = vi.hoisted(() => ({
   instances: [] as { osc?: (value: string) => boolean; writes: unknown[] }[],
 }));
 vi.mock('../services/terminal', () => ({ terminalApi: native }));
-vi.mock('../services/download', () => ({ downloadResult: native.download }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;
@@ -38,13 +33,6 @@ vi.mock('@xterm/xterm', () => ({
     parser = {
       registerOscHandler: (_code: number, handler: (value: string) => boolean) => {
         this.osc = handler;
-      },
-    };
-    index = terminals.instances.length;
-    buffer = {
-      normal: {
-        length: 2,
-        getLine: (index: number) => ({ translateToString: () => `normal-${this.index}-${index}` }),
       },
     };
     constructor(public options: unknown) {
@@ -90,7 +78,6 @@ const host: Host = {
   updatedAt: '',
 };
 const hostId = ref('host');
-const files = vi.fn();
 async function flush() {
   await Promise.resolve();
   await nextTick();
@@ -106,12 +93,6 @@ function button(name: string, scope: ParentNode = document): HTMLButtonElement {
   );
   expect(result, `missing button: ${name}`).toBeTruthy();
   return result!;
-}
-async function action(name: string) {
-  button('打开终端操作', pane()).click();
-  await flush();
-  button(name, document.querySelector('[aria-label="终端功能"]')!).click();
-  await flush();
 }
 async function tabMenu(index = 0) {
   root
@@ -143,8 +124,6 @@ beforeEach(async () => {
   });
   native.close.mockResolvedValue(undefined);
   native.ack.mockResolvedValue(undefined);
-  native.forwardList.mockResolvedValue([]);
-  native.forwardStart.mockResolvedValue({ id: 'forward', state: 'running' });
   const open = (_host: unknown, _size: unknown, receive: (event: TerminalEvent) => void) => {
     const id = `session-${native.receivers.length}`;
     native.receivers.push(receive);
@@ -185,7 +164,7 @@ beforeEach(async () => {
   root = document.createElement('div');
   document.body.append(root);
   app = createApp({
-    setup: () => () => h(TerminalsView, { hostId: hostId.value, onFiles: files }),
+    setup: () => () => h(TerminalsView, { hostId: hostId.value }),
   }).use(pinia);
   app.mount(root);
   await flush();
@@ -200,13 +179,13 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-it('reconnects the same pane without replay and ignores old-generation data', async () => {
+it('isolates old-generation data when a connection request reuses the same pane', async () => {
   const store = useTerminalsStore();
   const key = store.focused;
   const original = native.receivers[0]!;
   original({ type: 'state', state: 'disconnected', code: null, message: 'connection lost' });
   await flush();
-  button('重新连接', pane()).click();
+  store.update(key, { state: 'idle', connectRequested: true });
   await flush();
   expect(native.close).toHaveBeenCalledWith('session-0');
   expect(native.open).toHaveBeenCalledTimes(2);
@@ -219,84 +198,49 @@ it('reconnects the same pane without replay and ignores old-generation data', as
   expect(native.input).not.toHaveBeenCalled();
 });
 
-it('cancels a connected reconnect and blocks changed targets and consumed plugin tickets', async () => {
-  await action('重新连接');
-  button('取消', document.querySelector('dialog[aria-label="重新连接终端"]')!).click();
-  await flush();
-  expect(native.close).not.toHaveBeenCalled();
-  useHostsStore().catalog!.hosts[0]!.hostname = 'changed.example';
-  native.receivers[0]!({ type: 'state', state: 'failed', code: null, message: null });
-  await flush();
-  button('重新连接', pane()).click();
-  await flush();
-  expect(native.open).toHaveBeenCalledTimes(1);
-  expect(native.close).not.toHaveBeenCalled();
-  expect(pane().textContent).not.toContain('changed.example');
-  useTerminalsStore().panes[0]!.pluginTerminal = {
-    pluginId: 'plugin',
-    owner: 'owner',
-    ticket: 'used',
-  };
-  button('打开终端操作', pane()).click();
-  await flush();
-  expect(button('重新连接', document.querySelector('[aria-label="终端功能"]')!).disabled).toBe(
-    true,
-  );
-});
-
-it('binds forwards to the current session and closes its UI on disconnect', async () => {
-  await action('端口转发');
-  const dialog = document.querySelector('dialog[aria-label="端口转发"]')!;
-  expect(native.forwardList).toHaveBeenCalledWith('session-0');
-  dialog
-    .querySelector('form')!
-    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await flush();
-  expect(native.forwardStart).toHaveBeenCalledWith(
-    'session-0',
-    expect.objectContaining({ bindAddress: '127.0.0.1', confirmPublic: false }),
-  );
-  native.receivers[0]!({ type: 'state', state: 'disconnected', code: null, message: null });
-  await flush();
-  expect(document.querySelector('dialog[aria-label="端口转发"]')).toBeNull();
-});
-
-it('opens SFTP with only this pane host and its validated OSC 7 path', async () => {
+it('retains the validated OSC 7 path without terminal file navigation', async () => {
   terminals.instances[0]!.osc!('file:///srv/project');
   await flush();
-  await action('打开 SFTP 文件');
-  expect(files).toHaveBeenCalledWith(
-    expect.objectContaining({ id: 'host', hostname: 'target.example' }),
-    '/srv/project',
-    useTerminalsStore().focused,
-  );
+  expect(useTerminalsStore().panes[0]?.cwd).toBe('/srv/project');
+  expect(pane().querySelector('.terminal-footnote')).toBeNull();
 });
 
-it('exports only this normal buffer after confirmation and keeps content right-click minimal', async () => {
-  pane()
-    .querySelector('.xterm-container')!
-    .dispatchEvent(
-      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 20 }),
+it.each(['connected', 'disconnected'] as const)(
+  'removes bottom actions in the %s state and keeps content right-click minimal',
+  async (state) => {
+    native.receivers[0]!({ type: 'state', state, code: null, message: null });
+    await flush();
+    expect([...pane().children]).toEqual([pane().querySelector('.xterm-container')]);
+    expect(pane().textContent).not.toContain('Ctrl+');
+    expect(pane().querySelector('button')).toBeNull();
+    pane()
+      .querySelector('.xterm-container')!
+      .dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX: 20,
+          clientY: 20,
+        }),
+      );
+    await flush();
+    expect(
+      [...document.querySelectorAll('[role=menu] [role=menuitem]')].map((item) =>
+        item.getAttribute('aria-label'),
+      ),
+    ).toEqual(['复制', '粘贴']);
+    expect(button('粘贴', document.querySelector('[role=menu]')!).disabled).toBe(
+      state !== 'connected',
     );
-  await flush();
-  expect(
-    [...document.querySelectorAll('[role=menu] [role=menuitem]')].map((item) =>
-      item.getAttribute('aria-label'),
-    ),
-  ).toEqual(['复制', '粘贴']);
-  document
-    .querySelector('[role=menu]')!
-    .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  await flush();
-  await action('导出终端文本');
-  expect(native.download).not.toHaveBeenCalled();
-  button('确认导出', document.querySelector('dialog[aria-label="导出终端文本"]')!).click();
-  await flush();
-  expect(native.download).toHaveBeenCalledWith(
-    expect.stringMatching(/^ServerDeck-.*\.txt$/),
-    'normal-0-0\nnormal-0-1',
-  );
-});
+    document
+      .querySelector('[role=menu]')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await flush();
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(native.open).toHaveBeenCalledTimes(1);
+    expect(native.close).not.toHaveBeenCalled();
+  },
+);
 
 it('duplicates the right-click target as an ordinary fresh shell and preserves the active tab until chosen', async () => {
   const store = useTerminalsStore();
@@ -341,7 +285,7 @@ it('closes only the menu target host and retains failed sessions and other hosts
   expect(store.error).toBe('close failed');
 });
 
-it('provides keyboard session menus and disables remote actions for local shells', async () => {
+it('provides keyboard session menus and leaves local shells without bottom actions', async () => {
   const trigger = root.querySelector<HTMLButtonElement>('.terminal-tab [role=tab]')!;
   trigger.focus();
   trigger.dispatchEvent(
@@ -356,9 +300,6 @@ it('provides keyboard session menus and disables remote actions for local shells
   hostId.value = '';
   useTerminalsStore().open(null);
   await flush();
-  button('打开终端操作', pane()).click();
-  await flush();
-  const actions = document.querySelector('[aria-label="终端功能"]')!;
-  expect(button('端口转发', actions).disabled).toBe(true);
-  expect(button('打开 SFTP 文件', actions).disabled).toBe(true);
+  expect([...pane().children]).toEqual([pane().querySelector('.xterm-container')]);
+  expect(pane().querySelector('button')).toBeNull();
 });

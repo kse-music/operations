@@ -7,7 +7,7 @@ import { useHostsStore } from '../stores/hosts';
 import { clipboardApi } from '../services/clipboard';
 import { filesApi } from '../services/files';
 import { hostInput } from '../types/hosts';
-import type { DirectoryListing, FileEntry } from '../types/files';
+import type { DirectoryListing, FileEntry, FileUserSession } from '../types/files';
 
 const release = vi.hoisted(() => vi.fn());
 vi.mock('@tauri-apps/api/webview', () => ({
@@ -75,6 +75,107 @@ afterEach(() => {
   if (originalShowModal)
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+});
+
+it('confirms a sudo identity, clears the password immediately, and displays the verified user', async () => {
+  const files = useFilesStore(pinia);
+  let finish!: (value: FileUserSession) => void;
+  const change = vi.spyOn(filesApi, 'switchUser').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+    button.textContent?.includes('切换用户'),
+  )!;
+  button.click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="切换 SFTP 用户"]')!;
+  const password = dialog.querySelector<HTMLInputElement>('[aria-label="sudo 密码"]')!;
+  expect(dialog.querySelector<HTMLInputElement>('[aria-label="目标用户"]')?.value).toBe('root');
+  password.value = 'temporary-password';
+  password.dispatchEvent(new Event('input', { bubbles: true }));
+  dialog
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await nextTick();
+  expect(change).toHaveBeenCalledWith('sftp-a', {
+    username: 'root',
+    serverPath: '',
+    password: 'temporary-password',
+  });
+  expect(password.value).toBe('');
+  expect(password.disabled).toBe(true);
+  expect(root.querySelector('.files-view')?.hasAttribute('inert')).toBe(true);
+  finish({
+    session: { id: 'sudo-a', hostId: 'a', transportId: 'transport', routeHostIds: [] },
+    listing: { path: '/', parent: null, entries: [] },
+  });
+  await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
+  expect(files.current?.id).toBe('sudo-a');
+  expect(root.textContent).toContain('root');
+  expect(change.mock.calls[0]![1]?.password).toBeNull();
+});
+
+it('returns to the login user only after an explicit confirmation', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.username = 'root';
+  files.current!.elevated = true;
+  const change = vi.spyOn(filesApi, 'switchUser').mockResolvedValue({
+    session: { id: 'normal-a', hostId: 'a', transportId: 'transport', routeHostIds: [] },
+    listing: { path: '/home/operator', parent: '/home', entries: [] },
+  });
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.includes('切换用户'))!
+    .click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="切换 SFTP 用户"]')!;
+  dialog.querySelector<HTMLInputElement>('[type="checkbox"]')!.click();
+  await nextTick();
+  expect(dialog.querySelector('[aria-label="sudo 密码"]')).toBeNull();
+  expect(change).not.toHaveBeenCalled();
+  dialog
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(files.current?.id).toBe('normal-a'));
+  expect(change).toHaveBeenCalledWith('sftp-a', null);
+  expect(files.current?.username).toBe('operator');
+});
+
+it('preserves the original connection after sudo rejection and leaves a blank password for retry', async () => {
+  const files = useFilesStore(pinia);
+  vi.spyOn(filesApi, 'switchUser').mockRejectedValue({ message: 'sudo denied' });
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.includes('切换用户'))!
+    .click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="切换 SFTP 用户"]')!;
+  dialog
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(files.error).toBe('sudo denied'));
+  expect(files.current?.id).toBe('sftp-a');
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector<HTMLInputElement>('[aria-label="sudo 密码"]')!.value).toBe('');
+});
+
+it('drops a file chooser result if the SFTP identity changed while it was open', async () => {
+  const files = useFilesStore(pinia);
+  let finish!: (paths: string[]) => void;
+  vi.spyOn(filesApi, 'pick').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  root.querySelector<HTMLButtonElement>('[aria-label="选择上传文件…"]')!.click();
+  await nextTick();
+  files.current!.id = 'new-identity';
+  finish(['D:/selected.txt']);
+  await nextTick();
+  await nextTick();
+  expect(document.querySelector('dialog')).toBeNull();
 });
 
 it.each(['local', 'remote'] as const)(

@@ -1109,39 +1109,6 @@ it('switches full file pages from the toolbar without closing file or terminal s
   expect(document.querySelector('[aria-controls="workspace-file-panel"]')).toBeNull();
 });
 
-it('opens the full file page with the terminal directory and rejects changed connection settings', async () => {
-  const workspace = useWorkspaceStore(),
-    terminals = useTerminalsStore(),
-    files = useFilesStore();
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
-  await flush();
-  const pane = terminals.panes[0]!;
-  pane.state = 'connected';
-  pane.sessionId = 'existing';
-  const open = vi.spyOn(files, 'open').mockResolvedValue();
-  const terminalView = document.querySelector('.terminals-view') as HTMLElement & {
-    __vueParentComponent: { emit: (event: string, ...args: unknown[]) => void };
-  };
-  terminalView.__vueParentComponent.emit('files', pane.host, '/srv/project', pane.key);
-  await flush();
-  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'a' });
-  expect(open).toHaveBeenCalledWith(pane.host, '/srv/project', pane.key);
-  expect(document.querySelector('.files-view')).not.toBeNull();
-  expect(document.querySelector('.workspace-file-panel')).toBeNull();
-  document.querySelector<HTMLButtonElement>('.workspace-header [aria-label="SSH 终端"]')!.click();
-  await flush();
-  open.mockClear();
-  useHostsStore().catalog!.hosts[0] = { ...pane.host!, hostname: 'changed.example' };
-  terminalView.__vueParentComponent.emit('files', pane.host, '/srv/project', pane.key);
-  await flush();
-  expect(workspace.current?.view).toBe('terminals');
-  expect(open).not.toHaveBeenCalled();
-  expect(pane.sessionId).toBe('existing');
-  expect(
-    [...document.querySelectorAll('[role="alert"]')].map((alert) => alert.textContent).join(' '),
-  ).toContain('主机连接配置已变更');
-});
-
 it.each(['a', 'b'])(
   'opens context actions without changing the active session (%s)',
   async (id) => {

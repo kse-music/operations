@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[SFTP 独立 sudo 切用户、失败保护及真实 OpenSSH 身份验证](files/VALIDATION_STAGE4.md#2026-11-09-sftp-切换用户)。
+
 最新：[AI 提问触发 PLUGIN_FUEL：固定规则初始化复用、长问题开销及正式 WASM 连续问答回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-09-提问触发-plugin_fuel-修复)。
 
 最新：[Docker 移除操作反馈入口、历史动作及内存记录，保留即时结果与确认](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-移除操作反馈)。
@@ -220,7 +222,7 @@
 - [SSH 日常使用增强验收](terminal/VALIDATION_SSH_USABILITY.md)
 - [SSH 与交互式终端验收](terminal/VALIDATION_STAGE3.md)
 - [终端快捷复制粘贴验收（2026-11-02）](terminal/VALIDATION_TERMINAL_CLIPBOARD.md)
-- [移除终端窗格常驻栏验收（2026-11-02）](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md)
+- [终端常驻栏与操作入口验证](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md)（含[移除底部操作栏](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-09-移除终端底部操作栏)；早期入口补齐记录保留为历史）
 - [ZMODEM rz 上传验证（2026-11-03）](terminal/VALIDATION_ZMODEM.md)
 
 ## SFTP 与文件

@@ -2,7 +2,7 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Host } from '../types/hosts';
-import type { DirectoryListing, TextDocument, TransferInfo } from '../types/files';
+import type { DirectoryListing, SftpUser, TextDocument, TransferInfo } from '../types/files';
 import { unfinished } from '../types/files';
 import type { TerminalEvent } from '../types/terminal';
 import { filesApi } from '../services/files';
@@ -23,6 +23,9 @@ export interface FileConnection {
   listing: DirectoryListing | null;
   loading: boolean;
   followPane?: string;
+  username?: string;
+  elevated?: boolean;
+  switchingUser?: boolean;
 }
 
 type HistoryDirection = 'back' | 'forward';
@@ -95,7 +98,7 @@ export const useFilesStore = defineStore('files', () => {
     connection = current.value,
     direction?: HistoryDirection,
   ): Promise<void> {
-    if (!connection?.id) return;
+    if (!connection?.id || connection.switchingUser) return;
     const { id, host } = connection;
     const generation = (generations.get(host.id) ?? 0) + 1;
     generations.set(host.id, generation);
@@ -161,6 +164,7 @@ export const useFilesStore = defineStore('files', () => {
     if (closingHosts.value.includes(host.id)) return;
     active.value = host.id;
     let connection = connections.value[host.id];
+    if (connection?.switchingUser) return;
     if (connection?.id && connection.state === 'connected') {
       connection.followPane = pane;
       await navigate(path ?? connection.path, connection);
@@ -191,7 +195,9 @@ export const useFilesStore = defineStore('files', () => {
     };
     connection = connections.value[host.id]!;
     try {
+      let eventSession = '';
       const request = filesApi.open(host.id, (event) => {
+        if (eventSession && connection.id !== eventSession) return;
         if (event.type === 'state') {
           connection.state = event.state;
           if (event.message) connection.error = event.message;
@@ -202,6 +208,7 @@ export const useFilesStore = defineStore('files', () => {
       });
       opening.set(host.id, request);
       const value = await request;
+      eventSession = value.id;
       connection.id = value.id;
       connection.routeHostIds = value.routeHostIds;
       if (connection.state === 'connected') await navigate(connection.path, connection);
@@ -212,6 +219,55 @@ export const useFilesStore = defineStore('files', () => {
       opening.delete(host.id);
     }
     if (!local.value) await localLoad();
+  }
+  const switching = new Map<string, Promise<boolean>>();
+  async function switchUser(user: SftpUser | null): Promise<boolean> {
+    const connection = current.value;
+    if (
+      !connection?.id ||
+      connection.state !== 'connected' ||
+      connection.switchingUser ||
+      closingHosts.value.includes(connection.host.id)
+    )
+      return false;
+    const { id, host } = connection;
+    if (editorBusy.value || document.value?.sessionId === id) {
+      error.value = '请先保存并关闭编辑文档，再切换 SFTP 用户。';
+      return false;
+    }
+    connection.switchingUser = true;
+    transferGeneration++;
+    connection.loading = false;
+    connection.pendingPath = undefined;
+    generations.set(host.id, (generations.get(host.id) ?? 0) + 1);
+    const request = (async () => {
+      try {
+        const value = await filesApi.switchUser(id, user);
+        connection.id = value.session.id;
+        connection.routeHostIds = value.session.routeHostIds;
+        connection.username = user?.username ?? host.username;
+        connection.elevated = user !== null;
+        connection.state = 'connected';
+        connection.listing = value.listing;
+        connection.path = value.listing.path;
+        connection.error = null;
+        connection.followPane = undefined;
+        remoteHistories.delete(connection);
+        return true;
+      } catch (cause) {
+        error.value = errorMessage(cause);
+        return false;
+      } finally {
+        connection.switchingUser = false;
+        transferGeneration++;
+      }
+    })();
+    switching.set(host.id, request);
+    try {
+      return await request;
+    } finally {
+      switching.delete(host.id);
+    }
   }
   async function trust(accept: boolean): Promise<void> {
     if (!current.value?.id) return;
@@ -245,6 +301,7 @@ export const useFilesStore = defineStore('files', () => {
   }
   async function prepareHostClose(hostId: string): Promise<boolean> {
     try {
+      await switching.get(hostId);
       // Wait for an already requested lease so it cannot arrive after the workspace closes.
       await opening.get(hostId)?.catch(() => undefined);
       const [latest, live] = await Promise.all([filesApi.tasks(), filesApi.connections()]);
@@ -321,7 +378,11 @@ export const useFilesStore = defineStore('files', () => {
       const [value, live] = await Promise.all([filesApi.tasks(), filesApi.connections()]);
       if (generation !== transferGeneration) return;
       for (const connection of Object.values(connections.value)) {
-        if (connection.state === 'connected' && !live.some((c) => c.id === connection.id)) {
+        if (
+          connection.state === 'connected' &&
+          !connection.switchingUser &&
+          !live.some((c) => c.id === connection.id)
+        ) {
           connection.state = 'failed';
           connection.error = 'SSH 文件连接已关闭，请重新连接。';
         }
@@ -391,6 +452,7 @@ export const useFilesStore = defineStore('files', () => {
     prepareHostClose,
     clearHostTransfers,
     open,
+    switchUser,
     navigate,
     stepHistory,
     localLoad,
