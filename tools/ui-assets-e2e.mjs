@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
-import { hostContextAction, hostTreeAction, navigateWorkspace } from './ui-navigation.mjs';
+import {
+  closeApplicationSettings,
+  hostContextAction,
+  hostTreeAction,
+  navigateWorkspace,
+} from './ui-navigation.mjs';
 
 const url = process.env.SERVERDECK_ASSETS_URL ?? 'http://127.0.0.1:1421';
 const output = process.env.SERVERDECK_ASSETS_OUTPUT ?? '.local/assets-layout-qa/ui';
@@ -14,8 +19,8 @@ const browser = await chromium.launch({
 });
 
 // Test-only in-memory fixtures. No real credentials or providers.
-async function fixtures(page, theme) {
-  await page.evaluate(async (theme) => {
+async function fixtures(page, appearance) {
+  await page.evaluate(async ({ theme, interfaceFontSize }) => {
     const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
     const { useApplicationStore } = await import('/src/stores/application.ts');
     const { useHostsStore } = await import('/src/stores/hosts.ts');
@@ -33,6 +38,7 @@ async function fixtures(page, theme) {
       config: {
         version: 1,
         theme,
+        interfaceFontSize,
         sidebarWidth: 260,
         terminalFontSize: 14,
         connectTimeoutSecs: 10,
@@ -117,6 +123,17 @@ async function fixtures(page, theme) {
       },
     ];
     aiApi.models = async () => models;
+    aiApi.localCodexStatus = async () => ({
+      installed: false,
+      authorized: false,
+      installSupported: true,
+      message: '尚未安装本地 Codex，请先下载安装工具。',
+    });
+    aiApi.localClaudeCodeStatus = async () => ({
+      installed: true,
+      authorized: true,
+      message: '已连接本地 Claude Code，使用已有配置与登录状态',
+    });
     aiApi.modelTest = async ({ config }) => {
       if (config.contextWindowTokens !== 8192) throw new Error('上下文窗口未传给连接测试');
       return { id: 'window-test', elapsedMs: 10, expiresInSeconds: 300 };
@@ -135,7 +152,7 @@ async function fixtures(page, theme) {
       return { value: model, warnings: [] };
     };
     useNotificationsStore(pinia).items = [];
-  }, theme);
+  }, appearance);
 }
 
 async function inspect(page, label) {
@@ -167,19 +184,20 @@ async function openAsset(page, label, regionName = label) {
 
 const results = [];
 try {
-  for (const [name, width, height, theme] of [
-    ['desktop-dark', 1440, 900, 'dark'],
-    ['desktop-light', 1440, 900, 'light'],
-    ['wide', 2400, 1000, 'dark'],
-    ['small', 900, 600, 'light'],
-    ['narrow', 390, 844, 'dark'],
+  for (const [name, width, height, theme, interfaceFontSize] of [
+    ['desktop-dark', 1440, 900, 'dark', 'standard'],
+    ['desktop-light', 1440, 900, 'light', 'standard'],
+    ['wide', 2400, 1000, 'dark', 'standard'],
+    ['small', 900, 600, 'light', 'standard'],
+    ['small-large-font', 900, 600, 'light', 'ultraLarge'],
+    ['narrow', 390, 844, 'dark', 'standard'],
   ]) {
     const page = await browser.newPage({ viewport: { width, height } });
     const errors = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(url);
     await page.getByText('后端未连接', { exact: true }).waitFor();
-    await fixtures(page, theme);
+    await fixtures(page, { theme, interfaceFontSize });
     const expectedColumns = width >= 1440 ? 2 : 1;
     const screenshot = (view) => page.screenshot({ path: `${output}/${name}-${view}.png` });
 
@@ -187,6 +205,7 @@ try {
     await page.getByLabel('默认下载目录', { exact: true }).waitFor();
     assert.equal(await page.getByRole('group', { name: '系统凭据库', exact: true }).count(), 0);
     await inspect(page, `${name}: data and storage settings`);
+    await closeApplicationSettings(page);
 
     await hostTreeAction(page, null, '新建主机');
     const hostDialog = page.getByRole('dialog', { name: '新建主机', exact: true });
@@ -224,6 +243,8 @@ try {
     await saveEdit.click();
     await edit.waitFor({ state: 'hidden' });
     await page.getByText('编辑后需重测', { exact: true }).waitFor();
+    const notices = page.getByRole('button', { name: '关闭通知', exact: true });
+    while (await notices.count()) await notices.first().click();
 
     const models = await openAsset(page, '模型管理');
     assert.equal(
@@ -233,9 +254,35 @@ try {
       '模型管理',
     );
     await models.getByRole('heading', { name: '内网诊断模型', exact: true }).waitFor();
+    const localTab = models.getByRole('tab', { name: '本地来源', exact: true });
+    const remoteTab = models.getByRole('tab', { name: '远程模型 2', exact: true });
+    const remotePanel = models.getByRole('tabpanel', { name: '远程模型 2', exact: true });
+    const localPanel = models.getByRole('tabpanel', { name: '本地来源', exact: true });
+    assert.equal(await remoteTab.getAttribute('aria-selected'), 'true');
+    assert(await remotePanel.isVisible());
+    assert(!(await localPanel.isVisible()));
+    assert.equal(await models.locator('h1 .asset-count').count(), 0);
+    assert(await remotePanel.getByRole('button', { name: '注册模型', exact: true }).isVisible());
+    assert(await remotePanel.locator('.model-page-note').isVisible());
+    assert(!(await models.getByRole('button', { name: '刷新状态', exact: true }).isVisible()));
     assert.equal(await models.locator('.model-list-heading').isVisible(), expectedColumns === 2);
     await inspect(page, `${name}: models`);
     await screenshot('models');
+    await localTab.click();
+    assert(await localPanel.isVisible());
+    assert(!(await remotePanel.isVisible()));
+    assert(await localPanel.getByRole('button', { name: '刷新状态', exact: true }).isVisible());
+    await localPanel.getByRole('button', { name: '刷新状态', exact: true }).click();
+    await localPanel.getByText('已连接本地 Claude Code，使用已有配置与登录状态').waitFor();
+    await inspect(page, `${name}: local sources`);
+    await screenshot('local-sources');
+    await localTab.press('End');
+    assert.equal(await remoteTab.getAttribute('aria-selected'), 'true');
+    assert(await remoteTab.evaluate((el) => document.activeElement === el));
+    await remoteTab.press('ArrowLeft');
+    assert.equal(await localTab.getAttribute('aria-selected'), 'true');
+    await localTab.press('ArrowRight');
+    assert(await remotePanel.isVisible());
     await models.getByRole('button', { name: '编辑模型 内网诊断模型', exact: true }).click();
     const modelDialog = page.getByRole('dialog', { name: '编辑模型', exact: true });
     await modelDialog.locator('.model-advanced summary').click();
@@ -262,7 +309,7 @@ try {
       .waitFor();
 
     assert.deepEqual(errors, [], `${name}: page errors`);
-    results.push({ name, width, height, theme, columns: expectedColumns });
+    results.push({ name, width, height, theme, interfaceFontSize, columns: expectedColumns });
     await page.close();
   }
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));

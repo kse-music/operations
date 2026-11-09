@@ -19,7 +19,7 @@ try {
     ['desktop-dark', 1440, 900, 'dark'],
     ['desktop-light', 1440, 900, 'light'],
     ['wide-window', 2400, 1000, 'dark'],
-    ['small-window', 900, 600, 'dark'],
+    ['small-window', 960, 600, 'dark'],
     ['narrow-window', 390, 844, 'light'],
   ]) {
     const page = await browser.newPage({ viewport: { width, height } });

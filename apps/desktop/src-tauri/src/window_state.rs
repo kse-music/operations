@@ -6,21 +6,33 @@ pub fn initialize<R: Runtime>(
     app: &tauri::AppHandle<R>,
     application: &Application,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let saved = tauri::async_runtime::block_on(application.window_geometry())?;
-    if let Some(g) = saved
+    let mut saved = tauri::async_runtime::block_on(application.window_geometry())?;
+    if let Some(mut g) = saved
         && let Some(window) = app.get_webview_window("main")
     {
-        let mut width = g.width;
-        let mut height = g.height;
+        let config = app
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|config| config.label == "main")
+            .ok_or("main window configuration missing")?;
+        let min_width = config.min_width.unwrap_or_default();
+        let min_height = config.min_height.unwrap_or_default();
+        let mut width = g.width.max(min_width);
+        let mut height = g.height.max(min_height);
         if let Some(m) = window.current_monitor()? {
             let size = m.size().to_logical::<f64>(m.scale_factor());
-            width = width.min(size.width.max(900.0));
-            height = height.min(size.height.max(600.0));
+            width = width.min(size.width.max(min_width));
+            height = height.min(size.height.max(min_height));
         }
         window.set_size(tauri::LogicalSize::new(width, height))?;
         if g.maximized {
             window.maximize()?;
         }
+        g.width = width;
+        g.height = height;
+        saved = Some(g);
     }
     let (sender, mut receiver) = tokio::sync::watch::channel(saved);
     app.manage(WindowState(sender));

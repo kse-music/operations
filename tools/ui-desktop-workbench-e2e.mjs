@@ -25,7 +25,7 @@ try {
   for (const [name, width, height, theme, size] of [
     ['desktop-dark', 1440, 900, 'dark', 'standard'],
     ['desktop-light', 1440, 900, 'light', 'standard'],
-    ['small-large-type', 900, 600, 'dark', 'ultraLarge'],
+    ['small-large-type', 960, 600, 'dark', 'ultraLarge'],
     ['narrow-large-type', 390, 844, 'light', 'ultraLarge'],
   ]) {
     const page = await browser.newPage({ viewport: { width, height } });

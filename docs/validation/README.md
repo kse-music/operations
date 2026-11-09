@@ -1,5 +1,9 @@
 # 验证记录索引
 
+最新：[最小窗口调整为 960×600，原生设置布局及保存、取消、关闭验收](workspace/VALIDATION_LAYOUT.md#2026-11-09-最小窗口-960600-与设置弹窗)。
+
+最新：[模型管理拆分本地来源与远程模型 Tab，默认远程、操作与提示归位](ai/VALIDATION_MODEL_MANAGEMENT.md#2026-11-09-本地来源与远程模型-tab)。
+
 最新：[Docker 列表查询免重复确认：完整命令预授权、上传权限及原生 SSH 回归](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-列表查询免重复确认)。
 
 最新：[移除 Nginx 内置源码、测试分支和分发，仅保留助手与 Docker](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-移除-nginx-内置插件)。

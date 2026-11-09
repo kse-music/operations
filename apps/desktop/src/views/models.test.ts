@@ -6,6 +6,12 @@ const api = vi.hoisted(() => ({
   modelSave: vi.fn(),
   modelDelete: vi.fn(),
   modelTest: vi.fn(),
+  localCodexStatus: vi.fn(),
+  localClaudeCodeStatus: vi.fn(),
+  localCodexAuthorize: vi.fn(),
+  localClaudeCodeAuthorize: vi.fn(),
+  localToolInstall: vi.fn(),
+  localToolInstallCancel: vi.fn(),
 }));
 vi.mock('../services/ai', () => ({ aiApi: api }));
 import ModelsView from './ModelsView.vue';
@@ -59,6 +65,12 @@ beforeEach(() => {
   api.models.mockResolvedValue([]);
   api.modelTest.mockResolvedValue({ id: 'passed-test', elapsedMs: 42, expiresInSeconds: 300 });
   api.modelDelete.mockResolvedValue({ value: null, warnings: [] });
+  api.localCodexStatus.mockResolvedValue({ installed: false, message: '尚未安装本地 Codex' });
+  api.localClaudeCodeStatus.mockResolvedValue({
+    installed: true,
+    authorized: true,
+    message: '已连接本地 Claude Code',
+  });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -70,6 +82,93 @@ afterEach(() => {
   app?.unmount();
   root?.remove();
   disposePinia(pinia);
+});
+it('opens remote models by default and scopes counts, actions and feedback to their tabs', async () => {
+  api.models.mockResolvedValue([model('a', '模型 A'), model('b', '模型 B')]);
+  await mount();
+  const localTab = root.querySelector<HTMLButtonElement>('#model-tab-local')!;
+  const remoteTab = root.querySelector<HTMLButtonElement>('#model-tab-remote')!;
+  const localPanel = root.querySelector<HTMLElement>('#model-panel-local')!;
+  const remotePanel = root.querySelector<HTMLElement>('#model-panel-remote')!;
+  expect(remoteTab.getAttribute('aria-selected')).toBe('true');
+  expect(remoteTab.querySelector('.asset-count')?.textContent).toBe('2');
+  expect(localTab.querySelector('.asset-count')).toBeNull();
+  expect(root.querySelector('h1')?.textContent).toBe('模型管理');
+  expect(localPanel.style.display).toBe('none');
+  expect(remotePanel.style.display).not.toBe('none');
+  expect(remotePanel.textContent).toContain('模型 A');
+  expect(remotePanel.textContent).toContain('注册模型');
+  expect(remotePanel.textContent).toContain('Key 保存于系统凭据库');
+  expect(remotePanel.textContent).not.toContain('本地 Codex');
+  useModelsStore().error = '远程模型读取失败';
+  localTab.click();
+  await settle();
+  expect(localPanel.style.display).not.toBe('none');
+  expect(remotePanel.style.display).toBe('none');
+  expect(localPanel.textContent).toContain('刷新状态');
+  expect(localPanel.textContent).toContain('无法读取登录凭据');
+  expect(localPanel.textContent).not.toContain('远程模型读取失败');
+  expect(localPanel.textContent).not.toContain('注册模型');
+  expect(localPanel.textContent).not.toContain('Key 保存于系统凭据库');
+  button('刷新状态').click();
+  await settle();
+  expect(api.models).toHaveBeenCalledOnce();
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(2);
+  remoteTab.click();
+  await settle();
+  expect(remotePanel.style.display).not.toBe('none');
+  expect(remotePanel.textContent).toContain('远程模型读取失败');
+  button('刷新模型').click();
+  await settle();
+  expect(api.models).toHaveBeenCalledTimes(2);
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(2);
+});
+it('supports arrow, Home and End keys with one tab stop and linked panels', async () => {
+  await mount();
+  const localTab = root.querySelector<HTMLButtonElement>('#model-tab-local')!;
+  const remoteTab = root.querySelector<HTMLButtonElement>('#model-tab-remote')!;
+  remoteTab.focus();
+  for (const [key, target] of [
+    ['ArrowLeft', localTab],
+    ['ArrowLeft', remoteTab],
+    ['Home', localTab],
+    ['End', remoteTab],
+    ['ArrowRight', localTab],
+    ['ArrowRight', remoteTab],
+  ] as const) {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    await settle();
+    expect(document.activeElement).toBe(target);
+    expect(target.getAttribute('aria-selected')).toBe('true');
+    expect(root.querySelectorAll('[role="tab"][tabindex="0"]')).toHaveLength(1);
+    const panel = root.querySelector<HTMLElement>(`#${target.getAttribute('aria-controls')}`)!;
+    expect(panel.getAttribute('aria-labelledby')).toBe(target.id);
+    expect(panel.style.display).not.toBe('none');
+  }
+});
+it('keeps a local download alive when switching tabs and shows its completion on return', async () => {
+  let finish!: () => void;
+  api.localToolInstall.mockImplementationOnce(() => new Promise<void>((r) => (finish = r)));
+  await mount();
+  const localTab = root.querySelector<HTMLButtonElement>('#model-tab-local')!;
+  localTab.click();
+  await settle();
+  button('下载安装').click();
+  await settle();
+  expect(api.localToolInstall).toHaveBeenCalledExactlyOnceWith('local-codex', expect.any(String));
+  root.querySelector<HTMLButtonElement>('#model-tab-remote')!.click();
+  await settle();
+  expect(api.localToolInstallCancel).not.toHaveBeenCalled();
+  expect(api.localCodexStatus).toHaveBeenCalledOnce();
+  api.localCodexStatus.mockResolvedValue({ installed: true, message: '已安装，尚未授权' });
+  finish();
+  await settle();
+  localTab.click();
+  await settle();
+  expect(root.querySelector('#model-panel-local')?.textContent).toContain('下载完成');
+  expect(button('授权使用').disabled).toBe(false);
+  expect(api.localCodexAuthorize).not.toHaveBeenCalled();
+  expect(api.localToolInstallCancel).not.toHaveBeenCalled();
 });
 it('registers and lists real returned models, sends the key only in the transient save input', async () => {
   await mount();

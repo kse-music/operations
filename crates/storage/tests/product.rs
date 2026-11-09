@@ -71,6 +71,29 @@ fn additive_preferences_and_logical_window_size_survive_reopen() {
 }
 
 #[test]
+fn saved_width_below_the_current_window_minimum_remains_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    db.save_window_geometry(WindowGeometry {
+        width: 900.0,
+        height: 600.0,
+        maximized: false,
+    })
+    .unwrap();
+    drop(db);
+
+    let geometry = Database::open(path)
+        .unwrap()
+        .window_geometry()
+        .unwrap()
+        .unwrap();
+    assert_eq!(geometry.width, 900.0);
+    assert_eq!(geometry.height, 600.0);
+    assert!(!geometry.maximized);
+}
+
+#[test]
 fn proxy_default_requires_a_live_credential_and_blocks_deletion_until_unlinked() {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open(dir.path().join("db")).unwrap();

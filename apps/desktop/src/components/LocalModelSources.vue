@@ -148,7 +148,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .local-model-sources {
   padding: 20px;
-  margin-top: 20px;
 }
 .local-model-source {
   display: flex;

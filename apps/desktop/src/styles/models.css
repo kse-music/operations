@@ -1,3 +1,44 @@
+.models-view > .section-heading {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.model-tabs {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.model-tabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--font-size-body);
+  white-space: nowrap;
+}
+.model-tabs > button:hover {
+  color: var(--text);
+}
+.model-tabs > button[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+.model-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.model-toolbar {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.model-tab-panel > .asset-feedback {
+  margin: 0;
+}
 .model-catalog {
   border: 1px solid var(--border);
   border-radius: 8px;

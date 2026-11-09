@@ -80,6 +80,7 @@ pub struct WindowGeometry {
 }
 impl WindowGeometry {
     pub fn validate(&self) -> Result<(), Error> {
+        // Persisted geometry can be smaller than the current UI minimum; restore clamps it.
         if !self.width.is_finite()
             || !self.height.is_finite()
             || !(900.0..=7680.0).contains(&self.width)
