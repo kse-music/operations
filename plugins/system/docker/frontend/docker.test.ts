@@ -2,15 +2,42 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import Docker from './App.vue';
-import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
-import { hostInput } from '@serverdeck/plugin-sdk/types/hosts';
+
 const api = vi.hoisted(() => ({
   query: vi.fn(),
   feedback: vi.fn(async () => []),
-  logOpen: vi.fn(async () => ({ id: 'container-log', sessionId: 'lease', hostId: 'host' })),
-  logClose: vi.fn(async () => {}),
+  logOpen: vi.fn<(host: string, input: unknown) => Promise<{ id: string }>>(async () => ({
+    id: 'container-log',
+  })),
+  logClose: vi.fn<(id: string) => Promise<void>>(async () => {}),
+  terminal: vi.fn(async () => {}),
 }));
-vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({ opsApi: api }));
+vi.mock('@serverdeck/plugin-sdk/context', () => ({
+  usePlatformContext: () => ({
+    hostId: 'host',
+    hosts: [{ id: 'host', name: 'QA', hostname: 'qa', username: 'ops', port: 22 }],
+    connections: { host: { hostId: 'host', state: 'connected' } },
+  }),
+}));
+vi.mock('@serverdeck/plugin-sdk', () => ({
+  invoke: (action: string, input: { hostId: string; request: unknown }) =>
+    action === 'query'
+      ? api.query(input.hostId, input.request)
+      : action === 'history'
+        ? api.feedback()
+        : action === 'logs'
+          ? api.logOpen(input.hostId, input)
+          : action === 'shell'
+            ? Promise.resolve({ ticket: 'shell-ticket', hostId: input.hostId })
+            : Promise.reject(new Error('unexpected action')),
+}));
+vi.mock('@serverdeck/plugin-sdk/terminal', () => ({ openTerminal: api.terminal }));
+vi.mock('@serverdeck/plugin-sdk/platform', () => ({
+  call: (r: { kind: string }) =>
+    r.kind === 'stream_stop'
+      ? api.logClose('container-log')
+      : Promise.resolve({ records: [], done: false }),
+}));
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const settle = async () => {
@@ -35,13 +62,6 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   });
   pinia = createPinia();
   setActivePinia(pinia);
-  useOpsStore().connections.host = {
-    host: { ...hostInput(), id: 'host', createdAt: '', updatedAt: '' },
-    state: 'connected',
-    error: null,
-    trust: null,
-    session: { id: 'lease', hostId: 'host', transportId: 'transport', routeHostIds: ['host'] },
-  };
   let statsAvailable = true;
   api.query.mockImplementation(async (_id, request) => ({
     success: request.kind !== 'container_stats' || statsAvailable,
@@ -96,7 +116,7 @@ it('shows container detail tabs, scopes environment values to their tab and pres
     await settle();
   };
   await click('详情');
-  expect(api.query).toHaveBeenCalledWith('lease', {
+  expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_details',
     id: 'container',
     revealEnv: false,
@@ -121,7 +141,7 @@ it('shows container detail tabs, scopes environment values to their tab and pres
     false,
   );
   await selectTab('资源使用');
-  expect(api.query).toHaveBeenCalledWith('lease', { kind: 'container_stats', id: 'container' });
+  expect(api.query).toHaveBeenCalledWith('host', { kind: 'container_stats', id: 'container' });
   expect(panel()?.textContent).toContain('12.34%');
   await selectTab('端口映射');
   expect(panel()?.textContent).toContain('8080/tcp');
@@ -132,7 +152,7 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   expect(panel()?.textContent).toContain('/data');
   expect(panel()?.textContent).toContain('只读');
   await selectTab('环境变量');
-  expect(api.query).toHaveBeenCalledWith('lease', {
+  expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_details',
     id: 'container',
     revealEnv: true,
@@ -166,14 +186,13 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   await settle();
   expect(document.body.textContent).not.toContain('late-fixture');
   await click('日志');
-  expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe(
-    'owned-container · 日志',
-  );
-  expect(api.logOpen).toHaveBeenCalledWith(
-    'lease',
-    { source: { kind: 'container', id: 'container' }, lines: 200, follow: true },
-    expect.any(Function),
-  );
+  expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe('owned-container');
+  expect(api.logOpen).toHaveBeenCalledWith('host', {
+    hostId: 'host',
+    source: { kind: 'container', id: 'container' },
+    lines: 200,
+    follow: true,
+  });
   document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await settle();
   expect(api.logClose).toHaveBeenCalledWith('container-log');
@@ -202,31 +221,33 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   };
   await confirmExitedAction('启动');
   await confirmExitedAction('删除');
-  expect(api.query).toHaveBeenCalledWith('lease', {
+  expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_action',
     id: 'exited',
     action: 'start',
     confirmed: true,
   });
-  expect(api.query).toHaveBeenCalledWith('lease', {
+  expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_action',
     id: 'exited',
     action: 'remove',
     confirmed: true,
   });
   await click('Shell');
-  expect(shell).toHaveBeenCalledWith(expect.objectContaining({ id: 'host' }), {
-    id: 'container',
-    bash: false,
-    confirmed: false,
-  });
+  expect(api.terminal).not.toHaveBeenCalled();
+  const shellTarget = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
+  shellTarget.value = 'container';
+  shellTarget.dispatchEvent(new Event('input'));
+  await settle();
+  await click('确认执行');
+  expect(api.terminal).toHaveBeenCalledWith('shell-ticket', 'host');
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
   expect(actionLabels('image')).toEqual(['删除']);
   await click('删除');
   expect(document.querySelector('dialog')).toBeNull();
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
-  expect(api.query).toHaveBeenCalledWith('lease', {
+  expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'image_remove',
     id: 'image',
     confirmed: true,

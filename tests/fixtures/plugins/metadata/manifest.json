@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ServerDeck",
   "description": "Installation fixture without executable code",
-  "apiVersion": "^4.0.0",
+  "apiVersion": "^5.0.0",
   "entry": {
     "backend": null,
     "ui": null

@@ -1,91 +1,104 @@
-# Plugin SDK：Rust / TypeScript 4.0.0
+# Plugin SDK 5.0.0
 
-## 本地工具安装（2026-11-07）
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.0.0**；WASM ABI / wire 为 1，界面为 UI v4。当前开发期直接拒绝旧主版本、旧业务能力和旧 UI，不提供兼容层。
 
-本地状态增加可选 installed / installSupported 字段。TypeScript 的 localToolInstall(modelId, requestId) 与 localToolInstallCancel(requestId) 为内置助手受限桥扩展，只接受固定本地来源，不允许 Guest 传下载 URL、路径、命令或安装脚本。取消仅可操作本页发起的请求，关闭页面同步撤销；上传同 ID 插件无此能力。SDK 版本仍为 4.0.0。
+## 职责边界
 
-## 本地 Claude Code（2026-11-07）
+插件提供完整业务：页面、命令/SQL、参数校验、结果解析、健康规则、提示词、工具循环、计划及复查。SDK 只提供平台协议、调用客户端、生命周期和通用界面基础。宿主管理身份、凭据、SSH/SFTP、模型传输、权限、审批和资源配额。
 
-TypeScript 增加 `LOCAL_CLAUDE_CODE_MODEL_ID`、`LocalClaudeCodeStatus`、`localClaudeCodeStatus()` / `localClaudeCodeAuthorize(authorized)`，Provider 扩展为 `local_claude_code`。状态只返回授权、公开模型元数据和安全提示；接口与本地 Codex 一样，仅可信内置 system 助手可通过 Host 桥使用，上传同 ID 包不得访问。授权 true 必须经过宿主确认，两个来源的授权记录独立；原注册模型接口保持。属于内置助手受限扩展，无新增通用插件权限，SDK 版本仍为 4.0.0。
+SDK **没有** Docker / Nginx / MySQL / AI 运维助手业务接口，也没有桌面 Store、任意 Tauri 转发、系统查询枚举或特定插件 ID 的特权分支。容器操作由插件通过通用 SSH 执行 `docker`，模型业务由插件构造消息调用通用模型能力。新增服务插件只新增完整插件目录；无需修改 SDK、宿主路由或原生业务后端。
 
-## 2026-11-07 内置助手本地 Codex 接口
+| 内容                             | 位置 / 入口                                          |
+| -------------------------------- | ---------------------------------------------------- |
+| Rust 协议、顺序 async 动作执行器 | `crates/plugin-sdk/src/{lib,platform,backend}.rs`    |
+| Vue/TS SDK                       | `packages/plugin-sdk/src/`，`@serverdeck/plugin-sdk` |
+| 独立页面启动                     | `runtime` → `mountPlugin(App)`                       |
+| 本包声明的 WASM 动作             | `invoke<T>(action, input)`                           |
+| 平台原语                         | `platform` → `call<T>(request)`                      |
+| 安全公开元数据                   | `context` → `usePlatformContext()`                   |
+| 连接 / 终端 / 取消 / 草稿        | `connections` / `terminal` / `actions` / `drafts`    |
+| 通用组件                         | `ui/{Modal,OpsTable,TrendChart,StreamDialog}.vue`    |
 
-AI DTO 增加 `LocalCodexStatus { authorized, model, message }`，`AiConfig.provider` 增加 `local_codex`。SDK 的 `aiApi.localCodexStatus()` 返回安全状态与模型元数据，`aiApi.localCodexAuthorize(boolean)` 申请或撤销本地访问。两者经宿主桥仅允许 system 来源的内置 AI 助手，上传同 ID 或其他插件得到权限错误；授权启用通过宿主弹窗，iframe 无法提交自述确认。
+下载的开发包包含上述两端 SDK、工具、锁文件、文档和完整样例，无需 ServerDeck 源码或 Tauri 工具链。
 
-来源 ID `local-codex` 由宿主解析，不写入模型注册表，也不能通过模型管理注册成本地提供者。其余 `ai_resolve_hosts`、`ai_prepare`、`ai_send`、`ai_execute` 和历史模型绑定参数保持一致。新原生命令仅在本地主窗口 ACL 内开放，插件 WASM 没有新增能力或权限。
+## Rust 动作
 
-## 当前公开 SDK 与源码边界
+```rust
+use serverdeck_plugin_sdk::{
+    ApiError, backend::{Action, Context, Runtime}, platform::Command,
+    serde_json::{Value, json},
+};
+fn dispatch(context: Context, action: String, input: Value) -> Action {
+    Box::pin(async move {
+        if action != "inspect" { return Err(ApiError::new("ACTION", "未知动作")); }
+        let host = input["hostId"].as_str()
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| ApiError::new("HOST", "请选择主机"))?;
+        let result = context.execute(host, Command::new("free").arg("-b"))
+            .await?.checked()?;
+        // 这里由插件解析真实输出并判断健康状态。
+        Ok(json!({"output": result.stdout}))
+    })
+}
+std::thread_local! {
+    static RUNTIME: std::cell::RefCell<Runtime> =
+        std::cell::RefCell::new(Runtime::new(dispatch));
+}
+fn handle(opcode: i32, payload: Value) -> Value {
+    RUNTIME.with_borrow_mut(|runtime| runtime.handle(opcode, payload))
+}
+serverdeck_plugin_sdk::export_plugin!(handle);
+```
 
-内置助手的可选 keepRunning 属性由宿主按来源和打开的工作区注入；AI 客户端可选 begin/end 仅通过现有 UI MessageChannel 标记本页在途流程，旧宿主未注入时不调用。它们不是原生 IPC 或执行授权；隐藏页的新问题/执行审批不开放，上传包不取得后台例外。关闭页面仍撤销根请求，其他页面不重绑共享原生上下文。
+每个动作中的平台调用须**顺序 await**。执行器保存原 Future；遇到审批时宿主保存续接状态，批准/拒绝后送回原等待点，不重跑动作开头。不要自己重试已提交的写操作。取消会以 `USER_CANCELLED` 返回，插件可收尾和返回部分结果；关闭/撤权会强制终止该作用域。
 
-内置 SSH 智能体复用 ai_prepare/ai_send/ai_execute 和原宿主票据；AiAnswer.agent 为可选查询记录/计划清单，AiExecution.agent 为可选逐项复查结果。只有 Host 识别的内置 system 助手启用该编排，上传插件及旧原生 IPC 继续原合同，字段缺省仍兼容。计划实际载荷保存在宿主，Guest 只能提交不透明 ID，不能修改目标、操作或确认文案。无新增权限、IPC 或数据库结构，版本仍为4.0.0。
+`Context::request(platform::Request)` 返回 JSON；`execute(...).checked()` 拒绝非零、未知退出码及截断。`info()` 提供时间、随机 nonce、安装修订和作用域信息。`Host` / `Model` 请求返回不透明 `binding`，可用 `context.with_bindings(vec![binding])` 将后续操作绑定到原 SSH 配置或模型修订；失效须重新准备，不能静默改投其他目标。
 
-Host API / Rust SDK / TypeScript SDK 当前均为 4.0.0，仅支持 UI v4，清单 API 范围须匹配当前 4.0.0。自动运维与批量运维及其 task_create/task_read/task_cancel 契约已移除；未知权限或旧 API/UI 直接拒绝，不转换旧安装记录。版本规则见[版本约定](PLUGIN_API_VERSIONING.md)。Rust SDK 位于 `crates/plugin-sdk`，仍只依赖 serde/serde_json；TypeScript/Vue SDK 位于 `packages/plugin-sdk`，包名 `@serverdeck/plugin-sdk`，作为 workspace 包使用，尚未发布 npm。两者均不导入 desktop/application 私有实现。Vue/Pinia 为前端 peer，Lucide/marked 沿用项目已有普通库，不构成宿主内部依赖。
+## 平台原语及权限
 
-| SDK 内容                                               | 使用入口                                        |
-| ------------------------------------------------------ | ----------------------------------------------- |
-| 独立界面启动/主题/状态注入                             | `@serverdeck/plugin-sdk/runtime` 的 mountPlugin |
-| 自身已声明 WASM 动作                                   | 包根 invoke(action, values)                     |
-| 主机只读目录/模型元数据/连接/系统/监控/日志/文件客户端 | services 和 stores 子路径                       |
-| 公开 DTO 与工具能力类型                                | types 子路径；宿主类型从此处重导出              |
-| 通用表格/详情/模态框/图表/连接选择器/主题              | ui 子路径                                       |
+Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Capability` 只有 `Platform { request, bindings }`，身份和页面 owner 由可信宿主绑定。目标使用明确的登记 `hostId`，不使用界面当前选中主机或内部 session ID。
 
-客户端通过运行时注入的有界 MessageChannel 使用公共服务；不能在 Guest 传 native command、插件身份、凭据或原始租约。业务 API 经 Host stage → 不可变票据 → 该包实际 WASM → 类型化授权能力，服务端仍复验输入/范围/状态。连接凭据和模型 Key、原生文件选择/下载、指纹/变更批准由 Host 处理。SDK 是接口与可复用前端基础，原生服务实现不复制进每个 WASM。
+| 请求 kind                                      | 用途                              | 权限 / operation              |
+| ---------------------------------------------- | --------------------------------- | ----------------------------- |
+| `info`                                         | 时间、nonce、当前插件/作用域修订  | `ui.contribute`               |
+| `hosts`, `host`                                | 安全资产目录、指定主机及修订绑定  | `hosts.read`                  |
+| `models`, `model`, `model_complete`            | 安全模型目录/绑定、插件自备消息   | `models.use`                  |
+| `execute`                                      | 单次 SSH 命令，真实退出状态与输出 | `ssh.execute`                 |
+| `stream_open/poll/pause/stop`                  | 任意已批准命令的有界 ACK 字节流   | `ssh.execute`                 |
+| `terminal`                                     | 已批准命令的一次性 PTY 票据       | `ssh.execute`                 |
+| `read_file`, `close_file`                      | 受目录范围约束的文本编辑句柄      | `sftp.read`                   |
+| `save_file`, `file_dirty`                      | 冲突检测、原子保存、退出保护      | `sftp.write`                  |
+| `settings_read/write`                          | 本插件独立 JSON 配置              | `settings.read/write`         |
+| `notify`                                       | 有界通知                          | `ui.contribute` / `ui.notify` |
+| `tcp_connect`                                  | 从本机探测目标 TCP 端口，3 秒超时 | `network.connect`             |
+| `result_read/close`, `output_open/part/finish` | SDK 内部透明分块传输              | `ui.contribute`               |
 
-插件前端代码、编排和测试只引用自己的目录和公开 SDK；backend 独立编译和单测，禁止依赖 core/application/Tauri。编译器会拒绝越界源码或 Tauri 包引用。可用 `npm run typecheck -w @serverdeck/plugin-sdk` 独立检查 SDK；仓库 `npm run typecheck` 同时检查宿主、插件和 SDK，`npm test` 会收集各插件自己的测试文件。UI4、兼容旧安装和资源入口见[UI 协议](PLUGIN_UI_EXTENSION.md)。下文 1.2/1.1 为既有能力说明，当前 Host 为 4.0.0，ABI/wire 仍为 1。
+`Command { program, args, timeoutSecs }` 将程序和参数逐项 POSIX 引用；无需人工拼接。只有明确需要 shell 时使用 `Command::script`，插件仍必须验证/引用插入脚本的值。程序 ≤4096 字节、参数 ≤128 个且每个 ≤8192 字节、合计 ≤16384 字节，无 NUL；Execute 超时 1–30 秒。Stream/PTY 持续到显式关闭或页面生命周期结束。
 
-## 工作区工具（当前契约）
+所有 Execute、StreamOpen、Terminal、SaveFile、TcpConnect 均经可信宿主**逐次确认真实目标与命令/写入摘要**；没有服务名白名单或 Guest 的 confirmed 免审。`models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
 
-公开 tools::Tool / tools::Operation、AI 领域权限和 Capability::ToolInvoke；UI v4 支持 tool 贡献。输入为可信 Host 冻结的单次票据，Guest 自行限制可转发的领域，Host 仍复验所有范围；返回值沿用受限结构化结果资源。独立源码见 plugins/system/{assistant,docker}；上传包可使用相同契约。模型设置与凭据、可信连接保留在宿主；网络诊断、network.run 及 diagnostic_* 已移除。准确配额、撤销及生命周期见 [内置插件](BUILTIN_PLUGINS.md) 和 [安全边界](PLUGIN_SECURITY.md)。
+## 前端闭环
 
-公开 crate 为 `crates/plugin-sdk`，只依赖 serde/serde_json，不引用 ServerDeck 私有 crate、Tauri、SSH 或秘密库。Guest 以稳定版 Rust 的 `wasm32-unknown-unknown` 编译 cdylib；不需要 WASI。ABI/wire version 仍为 1，宿主语义 API 为 4.0.0；新包声明 ^4.0.0。旧主版本范围不再协商，未知权限或已经删除的能力直接拒绝。
+```ts
+import { invoke } from '@serverdeck/plugin-sdk';
+const result = await invoke('inspect', { hostId });
+```
 
-`export_plugin!(handle)` 导出经过缓冲区长度/指针检查的 ABI，不解引用任意原始指针。仅导出符号使用 Rust 要求的 unsafe(no_mangle) 属性，没有 unsafe 内存访问块。不能在 Guest 中使用宿主文件、网络、环境或其他原生导入。
+动作必须在当前 `ui.json` 页面 actions 中声明；结构化 input 为 JSON，最大 60 KiB、深度16、4096节点。不得传函数、循环引用或原型特殊字段。前端可直接使用 `call` 处理通用文件、配置等；业务编排放在自己的 WASM 中。`connections.ensureConnection(hostId, files?)` 委托平台连接及真实指纹审核，不向插件暴露租约。`terminal.openTerminal(ticket,hostId)` 仅打开本页已批准票据。
 
-后端 handle 收到操作码 6 时处理 UI 的业务输入；可返回 `json_reply(host_call(id, Capability::...))`。Host 逐请求授权和执行，然后只用操作码 7 resume 回传 `{hostResponse: Response}`。普通 UI 调用不能选择 resume；不要把操作码 6 的任意 payload 当作 Host 返回值。每次调用最多八次 Host 请求，错误需显式处理；完成可返回 `{"kind":"done","value":...}`。激活/停用等生命周期应返回短诊断并释放 Guest 自有状态，不在激活回复中请求能力。
+Context 只含主题/字号、入口 hostId、可见状态和获授权的公开元数据。资产目录需 hosts.read；仅 SSH/SFTP 权限只能看到入口主机的安全连接状态。无凭据表、认证配置、代理命令、内部连接/transport ID。models.use 允许模型公开状态；修改模型、Key、授权和安装工具不属于插件桥。
 
-所有 Request 都包含 apiVersion、requestId、operation，没有 pluginId、hostId、Session 或凭据字段。身份由 Host 安装实例绑定，目标由主界面设置的上下文决定。Response 包含 requestId、result、error；先检查 error。高风险操作返回 PLUGIN_CONFIRMATION_REQUIRED，result.confirmationRequired 是由 Host 生成的审批信息；仅主界面可确认，然后以相同请求重试。不能把等待确认当作执行成功。主界面批准 IPC 的确认过期或失效错误为 `PLUGIN_CONFIRMATION_EXPIRED`，须由用户重新发起原操作取得新确认，不能自动批准或复用旧确认。
+`setDraftDirty(boolean)` 仅报告当前页草稿状态，不传正文。`usePluginVisibility()` 用于停止隐藏页面的交互与轮询。每个打开的页面拥有隔离 owner；系统与上传插件采用相同规则。隐藏页不能发起新调用或审批，已开始的保留工作可收尾；Stream/PTY 关闭。关闭 owner 只清理其自有资源，最后一个 owner 离开才释放共享 VM 根。
 
-| Capability kind                 | 内容/返回                                           | 权限与操作范围                                           |
-| ------------------------------- | --------------------------------------------------- | -------------------------------------------------------- |
-| hosts_read                      | 当前主机 id/name/hostname/port/username（HostInfo） | hosts.read / hosts.read，必须有当前主机上下文            |
-| execute                         | command、timeoutSecs(1–30)；CommandResult           | ssh.execute / ssh.read_only 或 ssh.execute；后者独立确认 |
-| read_file                       | path；FileDocument                                  | sftp.read / sftp.read；授权规范路径                      |
-| save_file                       | documentId、content；SaveResult                     | sftp.write / sftp.write；独立确认并按原摘要检查冲突      |
-| close_file / file_dirty         | documentId、discard 或 dirty                        | 仅本插件/上下文文档；dirty 需要 sftp.write               |
-| settings_read / settings_write  | 本插件 JSON 设置（16 KiB）                          | settings.read / settings.write，不读取主应用配置         |
-| notify                          | 1–1024 字节文本通知                                 | ui.contribute / ui.notify                                |
-| log_start                       | path、lines(1–200)；日志句柄                        | sftp.read / logs.read；规范路径范围，现有 SSH/SFTP 连接  |
-| log_poll / log_pause / log_stop | logId；events / paused / 停止                       | 仅本插件/上下文日志句柄                                  |
+## 资源与错误
 
-命令 Host 只将精确的 `uname -a`、`uname -s`、`nginx -v`、`nginx -V`、`systemctl is-active nginx`、`systemctl status nginx --no-pager`、`command -v nginx` 归为只读，任何额外参数、管道、换行或变量赋值都不在此名单；Guest 不能自己声明只读。其他命令需要允许 ssh.execute 操作范围与本次确认。不会自动提权或拼接本地 Shell。
+- WASM 每次入口 20,000,000 fuel、16 MiB 线性内存、64 KiB 消息、每秒20消息；入口完成后检查2秒壁钟。
+- 每插件一个在途动作，全局4个能力槽；动作含续接最多96次平台请求、180秒。透明分块也占请求预算。
+- Execute stdout/stderr **各256 KiB**；超限取消并明确 truncated，不报完整成功。
+- 单结果≤1 MiB，chunk32 KiB，TTL60秒；结果池和上传池各最多8个/8 MiB。两端 SDK 自动读/释放结果，大于48 KiB 的 WASM 输出自动分块。`__pluginResult` 为保留的传输字段，业务返回对象不要使用该字段。
+- 文本文件≤32 KiB；配置≤16 KiB；模型消息≤64条且编码总量≤48 KiB，模型调用最多150秒。
+- 原子文件提交已开始后等待安全收尾；中断不等于远端命令未执行，须展示真实错误并独立核对，禁止自动重放。
 
-CommandResult 的 state 可能 completed/failed/uncertain；exitCode 非零是真实失败，null 表示没有确认退出码。stdout/stderr 各最多 4 KiB，超限会取消并设置 truncated，不能把部分输出视为完整。取消/断线/超时通过既有 SSH 执行器发 TERM/关闭 Channel，不保证远端程序已经终止；检查 state/message 后决定是否需要人工核对，不盲目重试。
+失败保留 `{code,message}`，不要静默替换为空列表或成功。常见错误有 `PLUGIN_PERMISSION_DENIED`、`PLUGIN_CANCELLED`、`USER_CANCELLED`、`PLUGIN_TARGET_CHANGED`、`PLUGIN_CONFIRMATION_EXPIRED`、输出/配额错误。清理和原请求同时失败时保留两者原因。
 
-FileDocument 最多 32 KiB UTF-8，返回插件专属 id，不返回内部 SFTP Session 或编辑器 token。读写均校验规范路径，保存复用现有原子替换/属性保留/冲突与恢复策略。SaveResult.saved=false 时必须保留草稿并展示 message/recoveryPath。file_dirty 关联主应用退出保护；close_file(discard=false) 不丢弃未保存编辑。已确认写入开始后等待安全收尾；停止遇到收尾超过 40 秒会明确报 COMMIT_PENDING，不能宣称未写入。
-
-日志使用既有有界 ACK 流：log_poll 返回状态事件或 dataBase64（原始字节）、sequence、stream、at，Host 消费后 ACK，未轮询不持续堆积。可以暂停、搜索本地有限缓存并显式停止。每插件最多两个日志，主应用现有总量八个仍生效。公开 execute 仍是显式授权的有界单次 SSH 命令，不能创建后台批量任务。
-
-总消息 64 KiB，API 负载安全预算 60 KiB；四个 Host 能力调用并发槽、每插件一个在途请求、每秒二十次准入，无无界请求队列。所有文档/日志和插件资源都绑定上下文代；切换主机、撤销授权、禁用、升级和卸载撤销句柄并取消/排空相应资源。
-
-可运行源码与命令见 `tests/fixtures/plugins/diagnostics/README.md`。13A-4 的公开 ui 模块定义声明式 JSON；Host Info 展示五类贡献。旧 Nginx 测试插件已删除，历史配置/验证/重载/日志验收证据保留于[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md)。见 [PLUGIN_UI_EXTENSION.md](PLUGIN_UI_EXTENSION.md)、[PLUGIN_DEVELOPMENT.md](PLUGIN_DEVELOPMENT.md)；SDK 不授予原生 UI API。
-
-## 1.1 标准服务器能力
-
-新增权限 `metrics.read`、`system.read`、`system.manage`、`logs.read`。上传包默认拒绝，系统分发包预先授予声明范围，仍通过同一逐请求授权检查；全部插件不再有主机白名单，调用绑定当前主机上下文。公开强类型位于 `server.rs`，操作名为 snake_case、字段 camelCase。SystemQuery 包含 capabilities、containers/images/container_details/container_stats/container_action/image_remove、processes/process_details/signal、ports、services/service_details/service_action、probe；参数与既有封闭请求一致，不接受任意命令或 Guest confirmed。
-
-| Capability                      | 参数和结果                                                 | 范围                                                                    |
-| ------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- |
-| system_query                    | request: Query；结构化 success/code/message/records/detail | 读取 system.read，修改/明文环境 system.manage 并逐次批准                |
-| system_feedback                 | 当前主机反馈                                               | system.read                                                             |
-| metrics_open                    | intervalSecs=3/5/10/30；返回 id                            | metrics.read                                                            |
-| metrics_snapshot                | monitorId、afterRevision；快照或 null                      | 仅自有采样器；sessionId 为公开句柄                                      |
-| metrics_visible / metrics_close | monitorId、visible / 关闭                                  | 仅自有采样器                                                            |
-| system_log_start                | source=file/container/service、lines、follow；返回 id      | logs.read，文件额外需 sftp.read/可读根                                  |
-| system_log_poll/pause/stop      | logId、paused；有界 events                                 | 仅自有日志，dataBase64 保留原字节                                       |
-| container_shell                 | id、bash；返回 shellTicket                                 | system.manage / system.shell；内置 System Docker 直接进入，其余逐次批准 |
-| result_read / result_close      | resultId、chunk；chunk/dataBase64 / 关闭                   | ui.contribute；绑定原插件/上下文                                        |
-
-业务结果超过 1 KiB 返回 `{__pluginResult:{id,bytes,chunks}}`，由标准可信渲染器用公开 result_read 验证完整分块后释放；单结果 4 MiB、总量 8 MiB、八项/每插件两项、TTL 60 秒、每块 32 KiB。不能跨插件或上下文代读取；不放宽 WASM 的 64 KiB 消息和 200 万 fuel 限额。
-
-`server::SurfaceState` 只复用 bridge 协议收发/hostResponse 匹配，各独立包提供自己的 Capability 允许列表；普通 invoke 不能伪造 Resume。UI v4 页面通过公开 SDK 共享基础组件，上传包使用相同授权链。容器票据只授权一次精确目标交接；终端事件通道由主窗口 plugin_terminal_open 复验 host/target/安装代/连接配置后建立，Guest 不得到终端 Session。详见 [系统插件与资源限制](BUILTIN_PLUGINS.md)。
+参见[开发指南](PLUGIN_DEVELOPMENT.md)、[安全边界](PLUGIN_SECURITY.md)、[运行时](PLUGIN_RUNTIME.md)。

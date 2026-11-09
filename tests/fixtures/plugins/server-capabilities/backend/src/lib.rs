@@ -1,91 +1,12 @@
-use serverdeck_plugin_sdk::{
-    Capability,
-    serde_json::Value,
-    server::{LogSource, Query, SurfaceState},
-};
-use std::sync::Mutex;
-static STATE: Mutex<Option<SurfaceState>> = Mutex::new(None);
-fn allows(cap: &Capability) -> bool {
-    matches!(
-        cap,
-        Capability::SystemQuery {
-            request: Query::Capabilities
-                | Query::Processes
-                | Query::ProcessDetails { .. }
-                | Query::Signal { .. }
-                | Query::Ports
-                | Query::Services { .. }
-                | Query::ServiceDetails { .. }
-                | Query::ServiceAction { .. }
-                | Query::Probe { .. }
-        } | Capability::MetricsOpen { .. }
-            | Capability::MetricsSnapshot { .. }
-            | Capability::MetricsVisible { .. }
-            | Capability::MetricsClose { .. }
-            | Capability::SystemLogStart {
-                source: LogSource::Service { .. },
-                ..
-            }
-            | Capability::SystemLogPoll { .. }
-            | Capability::SystemLogPause { .. }
-            | Capability::SystemLogStop { .. }
-            | Capability::SystemFeedback
-    )
-}
-fn handle(operation: i32, payload: Value) -> Value {
-    let Ok(mut guard) = STATE.lock() else {
-        return serverdeck_plugin_sdk::json_error("STATE", "Plugin state is unavailable");
-    };
-    guard
-        .get_or_insert_with(SurfaceState::default)
-        .handle(operation, payload, allows)
-}
+//! Test-only probe of the public platform; never included among system plugins.
+use serverdeck_plugin_sdk::{ApiError,backend::{Action,Context,Runtime},platform::{self,Command},serde_json::{Value,json}};
+fn dispatch(context:Context,action:String,input:Value)->Action{Box::pin(async move{match action.as_str(){
+ "pipeline"=>{context.request(platform::Request::SettingsWrite{value:input["first"].clone()}).await?;let target=input["target"].as_str().ok_or_else(||ApiError::new("INPUT","target"))?;let port=input["port"].as_u64().and_then(|v|u16::try_from(v).ok()).ok_or_else(||ApiError::new("INPUT","port"))?;let result=context.request(platform::Request::TcpConnect{target:target.into(),port}).await;match result{Ok(value)=>Ok(json!({"connected":value})),Err(error)=>Ok(json!({"cancelled":error.code=="USER_CANCELLED","code":error.code}))}},
+ "command"=>{let host=input["hostId"].as_str().ok_or_else(||ApiError::new("INPUT","host"))?;let command=serverdeck_plugin_sdk::serde_json::from_value::<Command>(input["command"].clone()).map_err(|_|ApiError::new("INPUT","command"))?;let result=context.execute(host,command).await?.checked()?;Ok(json!({"output":result.stdout}))},
+ "platform"=>{let request=serverdeck_plugin_sdk::serde_json::from_value(input).map_err(|_|ApiError::new("INPUT","primitive"))?;context.request(request).await},
+ "large"=>{let size=input["bytes"].as_u64().filter(|size|*size<=1024*1024).ok_or_else(||ApiError::new("INPUT","size"))?;Ok(json!({"text":"x".repeat(size as usize)}))},
+ _=>Err(ApiError::new("ACTION","Unknown fixture action")),
+}})}
+std::thread_local!{static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
+fn handle(op:i32,payload:Value)->Value{RUNTIME.with_borrow_mut(|runtime|runtime.handle(op,payload))}
 serverdeck_plugin_sdk::export_plugin!(handle);
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn refuses_capabilities_outside_this_plugins_domain() {
-        assert!(!allows(&Capability::Execute {
-            command: "arbitrary".into(),
-            timeout_secs: 1
-        }));
-        assert!(!allows(&Capability::SettingsRead));
-    }
-    #[test]
-    fn accepts_its_domain_and_rejects_other_server_domains() {
-        assert!(allows(&Capability::SystemLogStart {
-            source: LogSource::Service {
-                scope: serverdeck_plugin_sdk::server::Scope::User,
-                unit: "owned.service".into()
-            },
-            lines: 200,
-            follow: true
-        }));
-        assert!(!allows(&Capability::SystemLogStart {
-            source: LogSource::File {
-                path: "/var/log/messages".into()
-            },
-            lines: 200,
-            follow: true
-        }));
-        assert!(!allows(&Capability::SystemLogStart {
-            source: LogSource::Container { id: "a".repeat(64) },
-            lines: 200,
-            follow: true
-        }));
-        assert!(allows(&Capability::MetricsOpen { interval_secs: 3 }));
-        assert!(!allows(&Capability::ToolInvoke {
-            input_id: "owned".into(),
-            operation: serverdeck_plugin_sdk::tools::Operation::AiPrepare
-        }));
-        assert!(allows(&Capability::SystemQuery {
-            request: serverdeck_plugin_sdk::server::Query::Services {
-                scope: serverdeck_plugin_sdk::server::Scope::System
-            }
-        }));
-        assert!(!allows(&Capability::SystemQuery {
-            request: serverdeck_plugin_sdk::server::Query::Containers
-        }));
-    }
-}

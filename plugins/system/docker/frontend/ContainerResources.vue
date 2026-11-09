@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
-import type { OpsRequest, OpsResponse } from '@serverdeck/plugin-sdk/types/ops';
+import type { OpsRequest, OpsResponse } from './types';
 
 const props = defineProps<{
   containerId: string;

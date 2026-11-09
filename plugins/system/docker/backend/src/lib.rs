@@ -1,80 +1,104 @@
 use serverdeck_plugin_sdk::{
-    Capability,
-    serde_json::Value,
-    server::{LogSource, Query, SurfaceState},
+    ApiError,
+    backend::{Action, Context, Runtime},
+    platform::{Command, Request},
+    serde_json::{self, Value, json},
 };
-use std::sync::Mutex;
-static STATE: Mutex<Option<SurfaceState>> = Mutex::new(None);
-fn allows(cap: &Capability) -> bool {
-    matches!(
-        cap,
-        Capability::SystemQuery {
-            request: Query::Capabilities
-                | Query::Containers
-                | Query::Images
-                | Query::ContainerDetails { .. }
-                | Query::ContainerStats { .. }
-                | Query::ContainerAction { .. }
-                | Query::ImageRemove { .. }
-                | Query::Probe { .. }
-        } | Capability::SystemFeedback
-            | Capability::ContainerShell { .. }
-            | Capability::SystemLogStart {
-                source: LogSource::Container { .. },
-                ..
+mod docker;
+std::thread_local! {static HISTORY:std::cell::RefCell<std::collections::VecDeque<Value>>=const{std::cell::RefCell::new(std::collections::VecDeque::new())};static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
+fn dispatch(context: Context, action: String, input: Value) -> Action {
+    Box::pin(async move {
+        if action == "history" {
+            return Ok(HISTORY.with_borrow(|entries| json!(*entries)));
+        }
+        let host = input["hostId"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| ApiError::new("HOST", "请选择主机"))?
+            .to_owned();
+        match action.as_str() {
+            "query" => {
+                let query: docker::Query = serde_json::from_value(input["request"].clone())
+                    .map_err(|_| ApiError::new("INPUT", "Docker 请求无效"))?;
+                let info = context.info().await?;
+                let result = if let docker::Query::Probe {
+                    location,
+                    target,
+                    port,
+                } = &query
+                {
+                    if location == "local" {
+                        docker::target_valid(target, *port)?;
+                        let detail = context
+                            .request(Request::TcpConnect {
+                                target: target.clone(),
+                                port: *port,
+                            })
+                            .await?;
+                        Ok(
+                            json!({"success":true,"code":null,"message":null,"records":[],"detail":detail}),
+                        )
+                    } else {
+                        execute(&context, &host, &query).await
+                    }
+                } else {
+                    execute(&context, &host, &query).await
+                };
+                if matches!(
+                    query,
+                    docker::Query::ContainerAction { .. } | docker::Query::ImageRemove { .. }
+                ) {
+                    HISTORY.with_borrow_mut(|history|{if history.len()>=200{history.pop_front();}history.push_back(json!({"at":info["unixMs"],"hostId":host,"operation":input["request"]["kind"],"target":input["request"]["id"],"outcome":if result.is_ok(){"completed"}else{"failed"}}));});
+                }
+                result
             }
-            | Capability::SystemLogPoll { .. }
-            | Capability::SystemLogPause { .. }
-            | Capability::SystemLogStop { .. }
-    )
+            "logs" => {
+                let id = input["source"]["id"]
+                    .as_str()
+                    .ok_or_else(|| ApiError::new("INPUT", "日志容器无效"))?;
+                let lines = input["lines"]
+                    .as_u64()
+                    .and_then(|v| u16::try_from(v).ok())
+                    .ok_or_else(|| ApiError::new("INPUT", "日志行数无效"))?;
+                let command =
+                    docker::log_command(id, lines, input["follow"].as_bool().unwrap_or(false))?;
+                context
+                    .request(Request::StreamOpen {
+                        host_id: host,
+                        command: Command::script(command),
+                    })
+                    .await
+            }
+            "shell" => {
+                let id = input["id"]
+                    .as_str()
+                    .ok_or_else(|| ApiError::new("INPUT", "终端容器无效"))?;
+                context
+                    .request(Request::Terminal {
+                        host_id: host,
+                        command: Command::script(docker::shell_command(
+                            id,
+                            input["bash"].as_bool().unwrap_or(false),
+                        )?),
+                    })
+                    .await
+            }
+            _ => Err(ApiError::new("ACTION", "未知 Docker 动作")),
+        }
+    })
 }
-fn handle(operation: i32, payload: Value) -> Value {
-    let Ok(mut guard) = STATE.lock() else {
-        return serverdeck_plugin_sdk::json_error("STATE", "Plugin state is unavailable");
-    };
-    guard
-        .get_or_insert_with(SurfaceState::default)
-        .handle(operation, payload, allows)
+async fn execute(context: &Context, host: &str, query: &docker::Query) -> Result<Value, ApiError> {
+    let result = context
+        .execute(host, Command::script(query.command()?))
+        .await?
+        .checked()?;
+    let mut response = query.response(&result.stdout)?;
+    if !result.stderr.is_empty() {
+        response["message"] = json!(result.stderr);
+    }
+    Ok(response)
+}
+fn handle(opcode: i32, payload: Value) -> Value {
+    RUNTIME.with_borrow_mut(|runtime| runtime.handle(opcode, payload))
 }
 serverdeck_plugin_sdk::export_plugin!(handle);
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn refuses_capabilities_outside_this_plugins_domain() {
-        assert!(!allows(&Capability::Execute {
-            command: "arbitrary".into(),
-            timeout_secs: 1
-        }));
-        assert!(!allows(&Capability::SettingsRead));
-    }
-    #[test]
-    fn accepts_its_domain_and_rejects_other_server_domains() {
-        assert!(allows(&Capability::SystemLogStart {
-            source: LogSource::Container { id: "a".repeat(64) },
-            lines: 200,
-            follow: true
-        }));
-        assert!(!allows(&Capability::SystemLogStart {
-            source: LogSource::File {
-                path: "/var/log/messages".into()
-            },
-            lines: 200,
-            follow: true
-        }));
-        assert!(!allows(&Capability::SystemLogStart {
-            source: LogSource::Service {
-                scope: serverdeck_plugin_sdk::server::Scope::System,
-                unit: "owned.service".into()
-            },
-            lines: 200,
-            follow: true
-        }));
-        assert!(allows(&Capability::SystemQuery {
-            request: serverdeck_plugin_sdk::server::Query::Containers
-        }));
-        assert!(!allows(&Capability::SystemQuery {
-            request: serverdeck_plugin_sdk::server::Query::Processes
-        }));
-    }
-}

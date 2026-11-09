@@ -6,7 +6,6 @@ import PluginSettings from './PluginSettings.vue';
 import PluginView from '../views/PluginView.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
-import { isBuiltinAssistant } from '../services/plugin-pages';
 
 const props = defineProps<{ pluginId: string }>();
 const plugins = usePluginsStore();
@@ -25,10 +24,6 @@ const contribution = computed(() =>
 );
 const contextKey = computed(
   () => `plugin-settings:${props.pluginId}:${workspace.pluginConfiguration?.contributionId}`,
-);
-const builtinAssistant = computed(() => isBuiltinAssistant(plugin.value));
-const assistantSettings = computed(
-  () => builtinAssistant.value && contribution.value?.id === 'settings',
 );
 const saving = ref(false);
 const busy = computed(() => saving.value || plugins.busy);
@@ -81,7 +76,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       </button>
       <h1>{{ plugin?.manifest.name ?? '插件' }}</h1>
     </header>
-    <div class="plugin-config-body" :class="{ 'assistant-config-body': builtinAssistant }">
+    <div class="plugin-config-body plugin-settings-body">
       <div v-if="pages.length" class="plugin-config-nav" role="group" aria-label="插件设置分类">
         <button
           class="button"
@@ -145,7 +140,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       </section>
       <p v-else class="host-empty" role="status">插件已卸载。</p>
     </div>
-    <footer v-if="contribution && !assistantSettings" class="dialog-actions plugin-config-footer">
+    <footer v-if="contribution" class="dialog-actions plugin-config-footer">
       <button class="button" :disabled="busy" @click="finish()">取消</button>
     </footer>
   </section>

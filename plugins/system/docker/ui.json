@@ -8,8 +8,26 @@
       "fields": [],
       "actions": [
         {
-          "id": "bridge",
-          "label": "执行界面请求",
+          "id": "query",
+          "label": "query",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "logs",
+          "label": "logs",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "shell",
+          "label": "shell",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "history",
+          "label": "history",
           "discardDirty": false,
           "enabledWhen": null
         }
@@ -17,8 +35,7 @@
       "initialAction": null,
       "log": null,
       "surface": {
-        "kind": "operations",
-        "sections": ["containers", "images"]
+        "kind": "frontend"
       }
     }
   ],

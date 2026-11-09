@@ -19,6 +19,7 @@ export interface TerminalPaneModel {
   cwd?: string;
   fileAction?: import('../types/files').FileTerminalAction;
   containerShell?: import('../types/ops').ContainerShell;
+  pluginTerminal?: { pluginId: string; owner: string; ticket: string };
 }
 export interface TerminalTab {
   key: string;

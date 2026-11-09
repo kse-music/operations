@@ -37,7 +37,7 @@
 - [开发与本地安装](plugins/PLUGIN_DEVELOPMENT.md)
 - [包格式](plugins/PLUGIN_PACKAGE_FORMAT.md)
 - [运行时与 ABI](plugins/PLUGIN_RUNTIME.md)
-- [公开 SDK](plugins/PLUGIN_SDK.md)：Rust 4.0 / Vue 4.0，插件源码边界与公共能力。
+- [公开 SDK](plugins/PLUGIN_SDK.md)：Rust 5.0 / Vue 5.0，插件源码边界与公共能力。
 - [API 版本策略](plugins/PLUGIN_API_VERSIONING.md)
 - [安全边界](plugins/PLUGIN_SECURITY.md)
 - [插件 UI 扩展](plugins/PLUGIN_UI_EXTENSION.md)：当前 UI v4 独立前端、隔离与生命周期。

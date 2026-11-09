@@ -22,7 +22,6 @@ export const messages = {
     terminals: 'SSH 终端',
     files: 'SFTP 文件',
     server: '服务器管理',
-    assistant: 'AI 运维助手',
     about: '关于',
     plugins: '插件管理',
     extension: '插件工作区',

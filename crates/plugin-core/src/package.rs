@@ -137,17 +137,6 @@ impl Package {
             {
                 return Err(invalid("标准视图需要 WASM 后端"));
             }
-            if package.manifest.contributions.iter().any(|c| {
-                match c.kind {
-                    crate::manifest::ContributionKind::Server => !ui.pages.iter().any(|p|
-                        p.id == c.id && matches!(p.surface, Some(serverdeck_plugin_sdk::ui::Surface::Operations {..}))),
-                    crate::manifest::ContributionKind::Tool => !ui.pages.iter().any(|p|
-                        p.id == c.id && matches!(&p.surface, Some(serverdeck_plugin_sdk::ui::Surface::Tool {tool}) if Some(*tool) == c.tool)),
-                    _ => false,
-                }
-            }) {
-                return Err(invalid("贡献需要对应类型的标准视图"));
-            }
             if package
                 .manifest
                 .contributions

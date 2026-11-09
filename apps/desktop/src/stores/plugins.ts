@@ -1,7 +1,6 @@
 import { computed, onScopeDispose, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 import { pluginsApi } from '../services/plugins';
-import { isBuiltinAssistant } from '../services/plugin-pages';
 import { errorMessage } from '../services/ipc';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { useApplicationStore } from './application';
@@ -14,16 +13,10 @@ import type {
   PluginUi,
 } from '../types/plugins';
 
-export interface ImageRemovalReview {
-  imageId: string;
-  hostName: string;
-  hostAddress: string;
-  pluginName: string;
-  pluginVersion: string;
-}
 export const usePluginsStore = defineStore('plugins', () => {
   const application = useApplicationStore();
   const installed = ref<InstalledPlugin[]>([]),
+    problems = ref<import('../types/plugins').PluginProblem[]>([]),
     grants = ref<Record<string, PluginGrant | null>>({}),
     statuses = ref<PluginRuntimeStatus[]>([]);
   const loading = ref(false),
@@ -34,6 +27,12 @@ export const usePluginsStore = defineStore('plugins', () => {
     () => application.state?.config.product?.language ?? 'zh-CN',
   );
   const schemas = ref<Record<string, { revision: string; ui: PluginUi }>>({});
+  const dirtyPages = ref<Record<string, string>>({});
+  const dirty = computed(() => Object.keys(dirtyPages.value).length > 0);
+  function setDraftDirty(key: string, id: string, value: boolean) {
+    if (value) dirtyPages.value[key] = id;
+    else delete dirtyPages.value[key];
+  }
   async function schema(id: string): Promise<PluginUi> {
     const plugin = installed.value.find((p) => p.manifest.id === id);
     if (!plugin) throw new Error('插件已卸载');
@@ -46,7 +45,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     title: string;
     message: string;
     confirmationText?: string | null;
-    imageRemoval?: ImageRemovalReview;
+    owner?: string;
     resolve: (accepted: boolean) => void;
   } | null>(null);
   const extensions = computed(() =>
@@ -71,42 +70,35 @@ export const usePluginsStore = defineStore('plugins', () => {
   const bindings = new Map<string, Promise<void>>();
   const contexts = new Map<string, string>();
   const contextVersions = new Map<string, number>();
-  const owners = new Map<string, string>();
-  const assistantOwners = new Map<string, Set<string>>();
+  const scopeOwners = new Map<string, Set<string>>();
   const contextVersion = (id: string) => contextVersions.get(id) ?? 0;
-  function bind(
-    id: string,
-    input: import('../types/plugins').PluginContextInput | null,
-    owner = '',
-  ): Promise<void> {
-    const shared =
-      !!owner && isBuiltinAssistant(installed.value.find((plugin) => plugin.manifest.id === id));
-    if (shared) {
-      const scopes = assistantOwners.get(id) ?? new Set<string>();
+  function owns(id: string, owner: string): boolean {
+    return scopeOwners.get(id)?.has(owner) === true;
+  }
+  function bind(id: string, owner = ''): Promise<void> {
+    if (owner) {
+      const scopes = scopeOwners.get(id) ?? new Set<string>();
       scopes.add(owner);
-      assistantOwners.set(id, scopes);
-      owners.delete(id);
-    } else {
-      owners.set(id, owner);
-      contextVersions.set(id, contextVersion(id) + 1);
+      scopeOwners.set(id, scopes);
     }
     const prior = bindings.get(id) ?? Promise.resolve();
     const work = async () => {
-      const signature = shared ? 'builtin-assistant' : JSON.stringify(input);
+      if (owner && !owns(id, owner)) return;
       try {
-        if (shared && !owns(id, owner)) return;
-        if ((!shared && input === null) || contexts.get(id) !== signature) {
-          if (shared) contextVersions.set(id, contextVersion(id) + 1);
-          await pluginsApi.context(id, shared ? null : input);
-          contexts.set(id, signature);
+        if (!owner || !contexts.has(id)) {
+          contextVersions.set(id, contextVersion(id) + 1);
+          await pluginsApi.reset(id);
+          if (owner) contexts.set(id, 'platform');
+          else contexts.delete(id);
         }
-        if (
-          owner &&
-          owns(id, owner) &&
-          installed.value.find((plugin) => plugin.manifest.id === id)?.manifest.entry?.backend &&
-          statuses.value.find((status) => status.id === id)?.state !== 'crashed'
-        )
-          await pluginsApi.activate(id);
+        if (owner && owns(id, owner)) {
+          await pluginsApi.scopeVisibility(id, owner, true);
+          if (
+            installed.value.find((p) => p.manifest.id === id)?.manifest.entry.backend &&
+            statuses.value.find((status) => status.id === id)?.state !== 'crashed'
+          )
+            await pluginsApi.activate(id);
+        }
       } catch (cause) {
         contexts.delete(id);
         throw cause;
@@ -124,30 +116,37 @@ export const usePluginsStore = defineStore('plugins', () => {
     return job;
   }
   function release(id: string, owner: string): Promise<void> {
-    const scopes = assistantOwners.get(id);
-    if (scopes?.has(owner)) {
+    const work = async () => {
+      await pluginsApi.closeScope(id, owner);
+      const scopes = scopeOwners.get(id);
+      if (!scopes?.has(owner)) return;
+      if (scopes.size === 1) {
+        await pluginsApi.reset(id);
+        contextVersions.set(id, contextVersion(id) + 1);
+        contexts.delete(id);
+      }
       scopes.delete(owner);
-      if (scopes.size) return Promise.resolve();
-      assistantOwners.delete(id);
-      return bind(id, null).catch((cause) => {
-        assistantOwners.set(id, new Set([owner]));
-        throw cause;
-      });
-    }
-    if (owners.get(id) !== owner) return Promise.resolve();
-    return bind(id, null).catch((cause) => {
-      if (owners.get(id) === '') owners.set(id, owner);
-      throw cause;
+      if (!scopes.size) scopeOwners.delete(id);
+    };
+    const prior = bindings.get(id) ?? Promise.resolve();
+    const job = prior.then(work, work),
+      observed = job.then(
+        () => {},
+        () => {},
+      );
+    bindings.set(id, observed);
+    void observed.then(() => {
+      if (bindings.get(id) === observed) bindings.delete(id);
     });
-  }
-  function owns(id: string, owner: string): boolean {
-    return assistantOwners.get(id)?.has(owner) || owners.get(id) === owner;
+    return job;
   }
   async function refresh(quiet = false): Promise<void> {
     if (loading.value) return;
     loading.value = true;
     try {
-      const list = await pluginsApi.list();
+      const inventory = await pluginsApi.inventory();
+      const list = inventory.installed;
+      problems.value = inventory.problems;
       const next: Record<string, PluginGrant | null> = {};
       for (let start = 0; start < list.length; start += 8) {
         await Promise.all(
@@ -188,14 +187,17 @@ export const usePluginsStore = defineStore('plugins', () => {
     busy.value = true;
     error.value = null;
     let ok = false;
+    let failure: string | null = null;
     try {
       await operation();
       ok = true;
     } catch (cause) {
-      error.value = errorMessage(cause);
+      failure = errorMessage(cause);
     } finally {
       busy.value = false;
       await refresh();
+      if (failure)
+        error.value = error.value ? `${failure}；刷新插件列表失败：${error.value}` : failure;
     }
     return ok;
   }
@@ -203,11 +205,11 @@ export const usePluginsStore = defineStore('plugins', () => {
     title: string,
     message: string,
     confirmationText?: string | null,
-    imageRemoval?: ImageRemovalReview,
+    owner?: string,
   ): Promise<boolean> {
     if (prompt.value) return Promise.resolve(false);
     return new Promise((resolve) => {
-      prompt.value = { title, message, confirmationText, imageRemoval, resolve };
+      prompt.value = { title, message, confirmationText, owner, resolve };
     });
   }
   function decide(accepted: boolean) {
@@ -215,9 +217,13 @@ export const usePluginsStore = defineStore('plugins', () => {
     prompt.value = null;
     current?.resolve(accepted);
   }
+  function cancelPrompt(owner: string) {
+    if (prompt.value?.owner === owner) decide(false);
+  }
   function clearPlugin(id: string) {
-    owners.delete(id);
-    assistantOwners.delete(id);
+    for (const [key, owner] of Object.entries(dirtyPages.value))
+      if (owner === id) delete dirtyPages.value[key];
+    scopeOwners.delete(id);
     contextVersions.set(id, contextVersion(id) + 1);
     delete schemas.value[id];
     contexts.delete(id);
@@ -226,6 +232,10 @@ export const usePluginsStore = defineStore('plugins', () => {
   onScopeDispose(stop);
   return {
     installed,
+    problems,
+    dirtyPages,
+    dirty,
+    setDraftDirty,
     grants,
     statuses,
     loading,
@@ -244,6 +254,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     mutate,
     ask,
     decide,
+    cancelPrompt,
     clearPlugin,
     bind,
     contextVersion,

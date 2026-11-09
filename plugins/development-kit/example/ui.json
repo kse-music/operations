@@ -1,13 +1,18 @@
 {
   "uiVersion": 4,
-  "title": "问候示例",
-  "frontend": { "script": "frontend.js", "style": "frontend.css" },
+  "title": "插件闭环示例",
+  "frontend": {
+    "script": "frontend.js",
+    "style": "frontend.css"
+  },
   "pages": [
     {
       "id": "hello",
       "title": "问候示例",
       "initialAction": null,
-      "surface": { "kind": "frontend" },
+      "surface": {
+        "kind": "frontend"
+      },
       "fields": [
         {
           "id": "name",
@@ -19,7 +24,30 @@
         }
       ],
       "actions": [
-        { "id": "greet", "label": "生成问候", "discardDirty": false, "enabledWhen": null }
+        {
+          "id": "greet",
+          "label": "生成问候",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "log": null
+    },
+    {
+      "id": "host",
+      "title": "样例内存巡检",
+      "initialAction": null,
+      "surface": {
+        "kind": "frontend"
+      },
+      "fields": [],
+      "actions": [
+        {
+          "id": "inspect_memory",
+          "label": "巡检内存",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
       ],
       "log": null
     }

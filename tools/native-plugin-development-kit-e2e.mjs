@@ -9,7 +9,12 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { closeNativeWindow } from './native-window-close.mjs';
-import { navigateWorkspace, openPluginSettings, previewPluginPackage } from './ui-navigation.mjs';
+import {
+  navigateWorkspace,
+  openPluginSettings,
+  previewPluginPackage,
+  setPluginEnabled,
+} from './ui-navigation.mjs';
 
 assert.equal(process.platform, 'win32');
 assert(process.argv[2], 'Usage: node tools/native-plugin-development-kit-e2e.mjs QA_DIR');
@@ -138,7 +143,8 @@ try {
   await configuration.getByRole('checkbox', { name: 'ui.contribute', exact: true }).check();
   await configuration.getByRole('button', { name: '保存并授权', exact: true }).click();
   await configuration.getByText('已授权', { exact: true }).waitFor();
-  await configuration.getByRole('button', { name: '启用插件', exact: true }).click();
+  await setPluginEnabled(page, manifest.name, true);
+  await openPluginSettings(page, manifest.name);
   await configuration.getByRole('button', { name: '插件配置', exact: true }).click();
 
   const frame = configuration.frameLocator('iframe');

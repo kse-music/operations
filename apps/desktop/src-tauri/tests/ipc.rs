@@ -282,7 +282,7 @@ fn plugin_metadata_real_ipc_lifecycle_and_acl() {
         invoke("plugin_detail", json!({"id":"dev.serverdeck.metadata"}))["enabled"],
         true
     );
-    let capability = |operation: Value| json!({"id":"dev.serverdeck.metadata","request":{"apiVersion":1,"requestId":"ipc","operation":operation}});
+    let capability = |operation: Value| json!({"id":"dev.serverdeck.metadata","owner":"ipc-page","request":{"apiVersion":1,"requestId":"ipc","operation":{"kind":"platform","request":operation,"bindings":[]}}});
     assert_eq!(
         invoke(
             "plugin_capability",
@@ -335,6 +335,8 @@ fn plugin_metadata_real_ipc_lifecycle_and_acl() {
         "plugin_save_development_kit",
         "plugin_install",
         "plugin_list",
+        "plugin_inventory",
+        "plugin_reinstall_bundled",
         "plugin_detail",
         "plugin_set_enabled",
         "plugin_uninstall",
@@ -346,7 +348,12 @@ fn plugin_metadata_real_ipc_lifecycle_and_acl() {
         "plugin_grant",
         "plugin_permissions",
         "plugin_revoke",
-        "plugin_context",
+        "plugin_reset",
+        "plugin_continue",
+        "plugin_cancel_scope",
+        "plugin_close_scope",
+        "plugin_scope_visibility",
+        "plugin_platform_terminal_open",
         "plugin_approve",
         "plugin_events",
         "plugin_capability",
@@ -435,7 +442,7 @@ fn real_wasm_backend_through_install_enable_call_disable_and_uninstall_ipc() {
     assert_eq!(
         invoke(
             "plugin_call",
-            json!({"id":"dev.serverdeck.hello","payload":{}})
+            json!({"id":"dev.serverdeck.hello","owner":"ipc-page","payload":{}})
         )["result"]["message"],
         "hello from isolated wasm"
     );
@@ -458,7 +465,7 @@ fn real_wasm_backend_through_install_enable_call_disable_and_uninstall_ipc() {
             &main,
             request(
                 "plugin_call",
-                json!({"id":"dev.serverdeck.hello","payload":{}}),
+                json!({"id":"dev.serverdeck.hello","owner":"ipc-page","payload":{}}),
                 origin
             )
         )
@@ -584,9 +591,20 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     .deserialize::<Value>()
     .unwrap();
     let model = &created["value"];
-    let matched=get_ipc_response(&main,request("ai_resolve_hosts",json!({"input":{"modelId":model["id"],"requestId":"1e620bef-34bf-4ee0-a4f1-e102a2ba8c70","question":"有哪些服务器","previousHostIds":[],"maskAddresses":true,"redactValues":[]}}),origin)).unwrap().deserialize::<Value>().unwrap();
-    assert_eq!(matched["hostIds"], json!([]));
-    assert_eq!(matched["modelRevision"], model["revision"]);
+    for command in [
+        "ai_resolve_hosts",
+        "ai_prepare",
+        "ai_send",
+        "ai_execute",
+        "ai_cancel",
+        "plugin_tool_stage",
+        "plugin_context",
+    ] {
+        assert!(
+            get_ipc_response(&main, request(command, json!({}), origin)).is_err(),
+            "Removed business IPC must not return: {command}"
+        );
+    }
     assert_eq!(model["name"], "IPC 模型");
     assert_eq!(model["hasKey"], true);
     assert!(!created.to_string().contains("fixture-ipc-key"));
@@ -625,26 +643,21 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(
-        get_ipc_response(
-            &main,
-            request("ai_send", json!({"id":"forged","confirmed":false}), origin)
-        )
-        .unwrap_err()["code"],
-        "VALIDATION"
-    );
-    assert_eq!(
-        get_ipc_response(
-            &main,
-            request(
-                "ai_execute",
-                json!({"input":{"proposalId":"forged","confirmed":true,"changeConfirmation":null}}),
-                origin
-            )
-        )
-        .unwrap_err()["code"],
-        "NOT_FOUND"
-    );
+    for (command, body) in [
+        ("ai_send", json!({"id":"forged","confirmed":false})),
+        (
+            "ai_execute",
+            json!({"input":{"proposalId":"forged","confirmed":true,"changeConfirmation":null}}),
+        ),
+    ] {
+        assert!(
+            get_ipc_response(&main, request(command, body, origin))
+                .unwrap_err()
+                .as_str()
+                .unwrap()
+                .contains("not allowed")
+        );
+    }
     let error=get_ipc_response(&main,request("transfer_start",json!({"input":{
         "sessionId":"fb29e64b-3628-46b0-8a22-66a6f450cc8a","direction":"upload","sources":["source"],"destination":"/tmp","conflict":"fail","confirmOverwrite":false
     }}),origin)).expect_err("no file connection");

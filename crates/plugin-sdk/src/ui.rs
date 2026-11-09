@@ -61,8 +61,6 @@ pub struct Page {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Surface {
     Frontend,
-    Operations { sections: Vec<String> },
-    Tool { tool: crate::tools::Tool },
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,12 +103,6 @@ pub fn identifier(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b"_-".contains(&c))
         && !matches!(id, "__proto__" | "prototype" | "constructor")
 }
-fn valid_sections(sections: &[String], allowed: &[&str]) -> bool {
-    !sections.is_empty()
-        && sections.len() <= allowed.len()
-        && sections.iter().collect::<BTreeSet<_>>().len() == sections.len()
-        && sections.iter().all(|s| allowed.contains(&s.as_str()))
-}
 impl Label {
     fn valid(&self) -> bool {
         fn valid(s: &str) -> bool {
@@ -137,23 +129,8 @@ impl Ui {
             if page.surface.is_none() {
                 return Err("插件页面必须声明独立界面类型");
             }
-            if let Some(surface) = &page.surface {
-                let valid = match surface {
-                    Surface::Frontend | Surface::Tool { .. } => true,
-                    Surface::Operations { sections } => {
-                        valid_sections(sections, &["containers", "images"])
-                    }
-                };
-                if !valid
-                    || (!matches!(surface, Surface::Frontend)
-                        && (page.actions.len() != 1
-                            || page.actions[0].id != "bridge"
-                            || !page.fields.is_empty()))
-                    || page.log.is_some()
-                    || page.initial_action.is_some()
-                {
-                    return Err("标准视图需要匹配的 UI 版本、受支持的类型和 bridge 动作");
-                }
+            if page.log.is_some() || page.initial_action.is_some() {
+                return Err("独立界面负责自己的初始化与输出流");
             }
             if !identifier(&page.id)
                 || !pages.insert(&page.id)

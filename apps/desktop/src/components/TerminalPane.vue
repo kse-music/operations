@@ -2,7 +2,7 @@
 import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { opsApi } from '../services/ops';
-import { pluginContainerShell } from '../services/plugin-server';
+import { pluginsApi } from '../services/plugins';
 import { ArrowDown, ArrowUp } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
@@ -161,22 +161,35 @@ async function connect(): Promise<void> {
     session = undefined;
     update({ sessionId: undefined, state: 'opening' });
     fitTerminal();
-    const open = props.tab.containerShell
+    const open = props.tab.pluginTerminal
       ? (
           hostId: string,
           size: import('../types/terminal').TerminalSize,
           receive: (event: TerminalEvent) => void,
-        ) =>
-          props.tab.containerShell!.pluginId
-            ? pluginContainerShell(hostId, size, props.tab.containerShell!, receive)
-            : opsApi.shell(hostId, size, props.tab.containerShell!, receive)
-      : props.tab.fileAction
+        ) => {
+          const launch = props.tab.pluginTerminal!;
+          return pluginsApi.platformTerminalOpen(
+            launch.pluginId,
+            launch.owner,
+            launch.ticket,
+            hostId,
+            size,
+            receive,
+          );
+        }
+      : props.tab.containerShell
         ? (
             hostId: string,
             size: import('../types/terminal').TerminalSize,
             receive: (event: TerminalEvent) => void,
-          ) => filesApi.terminal(hostId, size, props.tab.fileAction!, receive)
-        : terminalApi.open;
+          ) => opsApi.shell(hostId, size, props.tab.containerShell!, receive)
+        : props.tab.fileAction
+          ? (
+              hostId: string,
+              size: import('../types/terminal').TerminalSize,
+              receive: (event: TerminalEvent) => void,
+            ) => filesApi.terminal(hostId, size, props.tab.fileAction!, receive)
+          : terminalApi.open;
     const ready = async () => {
       await Promise.resolve();
       const value = await opening;

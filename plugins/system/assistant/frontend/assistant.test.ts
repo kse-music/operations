@@ -23,23 +23,44 @@ const api = vi.hoisted(() => ({
   begin: vi.fn(),
   end: vi.fn(),
 }));
-vi.mock('@serverdeck/plugin-sdk/services/ai', () => ({ aiApi: api }));
-vi.mock('@serverdeck/plugin-sdk/services/capability', () => ({
-  requestCapability: api.settings,
+vi.mock('./api', () => ({ useAssistantApi: () => api }));
+vi.mock('@serverdeck/plugin-sdk/platform', () => ({
+  call: async (operation: { kind: string }) => {
+    if (operation.kind === 'models')
+      return {
+        models: await api.models(),
+        sources: [
+          { id: 'local-codex', name: '本地 Codex', status: await api.localCodexStatus() },
+          {
+            id: 'local-claude-code',
+            name: '本地 Claude Code',
+            status: await api.localClaudeCodeStatus(),
+          },
+        ],
+      };
+    if (operation.kind === 'hosts') return api.hostList();
+    return api.settings(operation);
+  },
 }));
-vi.mock('@serverdeck/plugin-sdk/services/hosts', () => ({ hostsApi: { list: api.hostList } }));
-vi.mock('@serverdeck/plugin-sdk/services/ops', () => ({
-  opsApi: { open: api.opsOpen, close: api.opsClose },
-}));
-vi.mock('@serverdeck/plugin-sdk/services/terminal', () => ({ terminalApi: { trust: api.trust } }));
+vi.mock('@serverdeck/plugin-sdk/connections', () => ({ ensureConnection: api.opsOpen }));
+vi.mock('@serverdeck/plugin-sdk/actions', () => ({ cancelCurrent: api.cancel }));
+const navigation = vi.hoisted(() => vi.fn());
+vi.mock('@serverdeck/plugin-sdk/transport', () => ({ request: navigation }));
 import AssistantView from './AssistantView.vue';
 import SettingsView from './SettingsView.vue';
 import { useAssistant } from './assistant';
-import { useModelsStore } from '@serverdeck/plugin-sdk/stores/models';
-import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
-import { hostInput } from '@serverdeck/plugin-sdk/types/hosts';
-import { defaultAiConfig, type AiModel } from '@serverdeck/plugin-sdk/types/ai';
-import type { AiAnswer, AiPrepare, AiPreview } from '@serverdeck/plugin-sdk/types/ai';
+import { usePlatformContext, updatePlatformContext } from '@serverdeck/plugin-sdk/context';
+const hostInput = () => ({ port: 22, username: 'ops', description: '', groupId: null });
+import type { AiModel } from './types';
+const defaultAiConfig = () => ({
+  provider: 'openai_compatible' as const,
+  baseUrl: 'https://model.example/v1',
+  model: 'test',
+  allowInsecureHttp: false,
+  maxOutputTokens: 1024,
+  contextWindowTokens: 131072,
+});
+import type { AiAnswer, AiPrepare, AiPreview } from './types';
 let app: App, root: HTMLDivElement, pinia: Pinia;
 const preview: AiPreview = {
   id: 'preview-a',
@@ -237,14 +258,15 @@ it('shows preparation omissions alongside response warnings without duplicates',
 it('retains a conversation when the SDK refreshes unchanged model metadata and clears it for a new revision', async () => {
   await mount();
   await send();
-  const models = useModelsStore();
-  const copy = JSON.parse(JSON.stringify(models.models)) as AiModel[];
-  models.models = copy;
+  const copy = (await api.models()) as AiModel[];
+  updatePlatformContext({ ...JSON.parse(JSON.stringify(usePlatformContext())), models: copy });
   await settle();
   expect(root.textContent).toContain('分析负载');
   expect(root.textContent).toContain('诊断证据不足');
   expect(api.cancel).not.toHaveBeenCalled();
-  models.models = copy.map((model) => ({ ...model, revision: 'changed' }));
+  const changed = copy.map((model) => ({ ...model, revision: 'changed' }));
+  api.models.mockResolvedValue(changed);
+  updatePlatformContext({ ...JSON.parse(JSON.stringify(usePlatformContext())), models: changed });
   await settle();
   expect(root.textContent).not.toContain('诊断证据不足');
   expect(api.cancel).toHaveBeenCalledWith('preview-a');
@@ -308,7 +330,7 @@ it('loads the persisted plugin binding and revokes old previews on rebind, edit 
   await mount();
   await generate();
   expect(root.querySelector('input[type=password]')).toBeNull();
-  const store = useModelsStore();
+  const store = { models: (await api.models()) as AiModel[] };
   const b: AiModel = {
     id: 'model-b',
     name: '模型 B',
@@ -331,10 +353,20 @@ it('loads the persisted plugin binding and revokes old previews on rebind, edit 
   await generate();
   expect(api.prepare.mock.lastCall![0].modelId).toBe('model-b');
   store.models = store.models.map((m) => (m.id === 'model-b' ? { ...m, revision: 'edited' } : m));
+  api.models.mockResolvedValue(store.models);
+  updatePlatformContext({
+    ...JSON.parse(JSON.stringify(usePlatformContext())),
+    models: store.models,
+  });
   await settle();
   expect(root.querySelector('[aria-label="发送预览"]')).toBeNull();
   await generate();
   store.models = store.models.filter((m) => m.id !== 'model-b');
+  api.models.mockResolvedValue(store.models);
+  updatePlatformContext({
+    ...JSON.parse(JSON.stringify(usePlatformContext())),
+    models: store.models,
+  });
   await settle();
   expect(button('发送').disabled).toBe(true);
   expect(root.querySelector('[aria-label="发送预览"]')).toBeNull();
@@ -385,10 +417,7 @@ function catalog(hosts: ReturnType<typeof fixtureHost>[]) {
   return { hosts, groups: [], credentials: [], pendingSecretDeletions: 0 };
 }
 function openConnected() {
-  api.opsOpen.mockImplementation(async (id: string, receive: (value: unknown) => void) => {
-    receive({ type: 'state', state: 'connected', code: null, message: null });
-    return { id: `session-${id}`, hostId: id, transportId: `transport-${id}`, routeHostIds: [] };
-  });
+  api.opsOpen.mockResolvedValue({ state: 'connected' });
 }
 it('matches all assets automatically and only connects the matched host', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
@@ -397,15 +426,15 @@ it('matches all assets automatically and only connects the matched host', async 
   await mount();
   expect(root.querySelectorAll('select')).toHaveLength(0);
   expect(api.opsOpen).not.toHaveBeenCalled();
-  useOpsStore().active = 'b';
+
   await send();
   expect(api.opsOpen).toHaveBeenCalledOnce();
   expect(api.opsOpen.mock.calls[0]![0]).toBe('a');
-  expect(useOpsStore().active).toBe('b');
+
   expect(api.prepare).toHaveBeenCalledWith(
     expect.objectContaining({
       sessionId: null,
-      sessionIds: ['session-a'],
+      sessionIds: ['a'],
       autoHosts: true,
       expectedModelRevision: 'r1',
     }),
@@ -419,74 +448,23 @@ it('returns the matched host connection failure without calling the diagnosis mo
   api.opsOpen.mockRejectedValue({ message: 'SSH 认证失败' });
   await mount();
   await send();
-  expect(root.textContent).toContain('命中主机「主机 a」（a.example:22）连接不上：SSH 认证失败');
+  expect(root.textContent).toContain('主机 a：SSH 认证失败');
   expect(api.prepare).not.toHaveBeenCalled();
   expect(api.send).not.toHaveBeenCalled();
   expect(api.opsOpen).toHaveBeenCalledOnce();
 });
-it('keeps first-use SSH trust explicit and does not accept a fingerprint automatically', async () => {
+it('waits for the trusted platform connection and never prepares after cancellation', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
   api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
-  api.opsOpen.mockImplementation(async (_id: string, receive: (value: unknown) => void) => {
-    receive({
-      type: 'trust',
-      hostname: 'a.example',
-      port: 22,
-      algorithm: 'ssh-ed25519',
-      fingerprint: 'SHA256:fixture',
-    });
-    return { id: 'session-a', hostId: 'a', transportId: 'transport-a', routeHostIds: [] };
-  });
-  await mount();
-  await send();
-  expect(root.textContent).toContain('需要先核对 SSH 主机密钥指纹');
-  expect(api.trust).not.toHaveBeenCalled();
-  expect(api.opsClose).not.toHaveBeenCalled();
-  button('已核对，信任此指纹').click();
-  await settle();
-  expect(api.trust).toHaveBeenCalledWith('session-a', true);
-  expect(api.send).not.toHaveBeenCalled();
-});
-it('preserves a pending SSH lease when awaiting_trust arrives before the fingerprint event', async () => {
-  api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
-  api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
-  let receive!: (value: unknown) => void;
-  api.opsOpen.mockImplementation(async (_id: string, event: (value: unknown) => void) => {
-    receive = event;
-    event({ type: 'state', state: 'awaiting_trust', code: null, message: null });
-    return { id: 'session-a', hostId: 'a', transportId: 'transport-a', routeHostIds: [] };
-  });
-  await mount();
-  await send();
-  expect(api.opsClose).not.toHaveBeenCalled();
-  receive({
-    type: 'trust',
-    hostname: 'a.example',
-    port: 22,
-    algorithm: 'ssh-ed25519',
-    fingerprint: 'SHA256:late-fixture',
-  });
-  await settle();
-  expect(root.textContent).toContain('SHA256:late-fixture');
-  expect(button('已核对，信任此指纹').disabled).toBe(false);
-  expect(api.trust).not.toHaveBeenCalled();
-  expect(api.send).not.toHaveBeenCalled();
-});
-it('cancels a newly opened pending SSH connection and never sends a late model request', async () => {
-  api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
-  api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
-  api.opsOpen.mockResolvedValue({
-    id: 'session-a',
-    hostId: 'a',
-    transportId: 'transport-a',
-    routeHostIds: [],
-  });
+  let finish!: () => void;
+  api.opsOpen.mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
   await mount();
   await generate();
   expect(root.textContent).toContain('正在连接 主机 a');
   button('停止').click();
   await settle();
-  expect(api.opsClose).toHaveBeenCalledWith('session-a');
+  finish();
+  await settle();
   expect(api.prepare).not.toHaveBeenCalled();
   expect(api.send).not.toHaveBeenCalled();
   expect(root.textContent).toContain('已停止回答');
@@ -498,7 +476,7 @@ it('connects multiple matched targets before one combined diagnostic request', a
   await mount();
   await send();
   expect(api.opsOpen).toHaveBeenCalledTimes(2);
-  expect(api.prepare.mock.lastCall![0].sessionIds).toEqual(['session-a', 'session-b']);
+  expect(api.prepare.mock.lastCall![0].sessionIds).toEqual(['a', 'b']);
   expect(api.send).toHaveBeenCalledOnce();
 });
 it('shows a frozen agent plan, submits it for trusted host approval and presents per-target verification', async () => {
@@ -538,6 +516,16 @@ it('shows a frozen agent plan, submits it for trusted host approval and presents
   expect(root.textContent).toContain('sha256:image-a');
   expect(api.execute).not.toHaveBeenCalled();
   button('审核执行计划').click();
+  await settle();
+  expect(api.execute).not.toHaveBeenCalled();
+  await toggle(check('我已审核目标'));
+  const confirmation = document.querySelector<HTMLInputElement>(
+    'dialog input:not([type=checkbox])',
+  )!;
+  confirmation.value = '执行计划 12345678';
+  confirmation.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  button('批准执行这一条').click();
   await settle();
   expect(document.querySelector('.ai-command-review')).toBeNull();
   expect(api.execute).toHaveBeenCalledExactlyOnceWith('plan-a', true, '执行计划 12345678');
@@ -674,41 +662,15 @@ it('bounds retained turns and sent history, and revokes commands for discarded t
   expect(history[1].content).toContain('历史回答过长');
 });
 
-it('reports a real cleanup failure after stopping instead of silently losing it', async () => {
+it('preserves platform connection diagnostics and cancellation cleanup failures', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
   api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
-  api.opsOpen.mockResolvedValue({
-    id: 'session-a',
-    hostId: 'a',
-    transportId: 'transport-a',
-    routeHostIds: [],
-  });
-  api.opsClose.mockRejectedValue({ message: 'close fixture failed' });
+  api.opsOpen.mockRejectedValue({ message: '异步认证被服务器拒绝' });
   await mount();
-  await generate();
-  button('停止').click();
-  await settle();
-  expect(root.textContent).toContain('未完成连接关闭失败：close fixture failed');
+  await send();
+  expect(root.textContent).toContain('异步认证被服务器拒绝');
   expect(api.prepare).not.toHaveBeenCalled();
 });
-
-it('preserves an asynchronous SSH failure reason after the state and message update together', async () => {
-  api.hostList.mockResolvedValue(catalog([fixtureHost('a')]));
-  api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
-  let receive!: (event: unknown) => void;
-  api.opsOpen.mockImplementation(async (_id: string, sink: (event: unknown) => void) => {
-    receive = sink;
-    return { id: 'session-a', hostId: 'a', transportId: 'transport-a', routeHostIds: [] };
-  });
-  await mount();
-  await generate();
-  receive({ type: 'state', state: 'failed', code: 'SSH_AUTH', message: '异步认证被服务器拒绝' });
-  await settle();
-  expect(root.textContent).toContain('连接不上：异步认证被服务器拒绝');
-  expect(root.textContent).not.toContain('连接不上：SSH 运维连接已结束');
-  expect(api.prepare).not.toHaveBeenCalled();
-});
-
 it('uses the entry host as a matching hint while allowing other registered hosts by default', async () => {
   api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
   api.resolveHosts.mockResolvedValue({ hostIds: ['b'], message: '', modelRevision: 'r1' });
@@ -719,7 +681,7 @@ it('uses the entry host as a matching hint while allowing other registered hosts
     expect.objectContaining({ previousHostIds: ['a'] }),
   );
   expect(api.prepare).toHaveBeenCalledWith(
-    expect.objectContaining({ sessionIds: ['session-b'], autoHosts: true }),
+    expect.objectContaining({ sessionIds: ['b'], autoHosts: true }),
   );
   expect(api.opsOpen.mock.calls[0]![0]).toBe('b');
   await send();
@@ -893,51 +855,45 @@ async function mountSettings() {
   app.mount(root);
   await settle();
 }
-it('shows model identity and missing Key status without changing the saved binding on selection', async () => {
+
+function chooseModel(id: string) {
+  const field = root.querySelector<HTMLSelectElement>('select')!;
+  field.value = id;
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+}
+it('shows model identity and disables models without credentials, without changing saved settings', async () => {
   const original = (await api.models())[0] as AiModel;
   api.models.mockResolvedValue([
     original,
     {
       ...original,
-      id: 'model-b',
+      id: 'missing',
       name: '备用模型',
       config: { ...original.config, model: 'backup-model' },
       hasKey: false,
     },
   ]);
   await mountSettings();
-  expect(root.querySelector('select')).toBeNull();
   expect(root.textContent).toContain('backup-model');
-  expect(root.textContent).toContain('未设置 Key');
-  expect(root.querySelector<HTMLInputElement>('input[value="model-a"]')!.checked).toBe(true);
-  root.querySelector<HTMLInputElement>('input[value="model-b"]')!.click();
+  expect(root.querySelector<HTMLOptionElement>('option[value="missing"]')!.disabled).toBe(true);
+  expect(root.querySelector<HTMLSelectElement>('select')!.value).toBe('model-a');
+  chooseModel('');
   await settle();
-  expect(root.querySelector('.binding-current')!.textContent).toContain('模型 A');
-  expect(root.textContent).toContain('有未保存的更改');
-  expect(api.settings.mock.calls.some(([operation]) => operation.kind === 'settings_write')).toBe(
-    false,
-  );
-  expect(button('保存模型绑定').disabled).toBe(false);
+  expect(api.settings.mock.calls.some(([op]) => op.kind === 'settings_write')).toBe(false);
 });
-
-it('binds a model from plugin settings, persists it across remounts and preserves other settings', async () => {
+it('persists a plugin binding across remounts while preserving other settings', async () => {
   let value: Record<string, unknown> = { otherSetting: 'keep' };
-  api.settings.mockImplementation(
-    async (operation: { kind: string; value?: Record<string, unknown> }) => {
-      if (operation.kind === 'settings_write') {
-        value = operation.value!;
-        return null;
-      }
-      return value;
-    },
-  );
+  api.settings.mockImplementation(async (op: { kind: string; value?: Record<string, unknown> }) => {
+    if (op.kind === 'settings_write') {
+      value = op.value!;
+      return null;
+    }
+    return value;
+  });
   await mountSettings();
-  expect(root.textContent).toContain('绑定模型');
-  expect(root.querySelector<HTMLInputElement>('input[value=""]')!.checked).toBe(true);
-  const choice = root.querySelector<HTMLInputElement>('input[value="model-a"]')!;
-  choice.click();
+  chooseModel('model-a');
   await settle();
-  button('保存模型绑定').click();
+  button('保存绑定').click();
   await settle();
   expect(value).toEqual({ otherSetting: 'keep', modelId: 'model-a' });
   expect(root.textContent).toContain('模型绑定已保存');
@@ -946,268 +902,39 @@ it('binds a model from plugin settings, persists it across remounts and preserve
   await mount();
   await send();
   expect(api.prepare.mock.lastCall![0].modelId).toBe('model-a');
-  expect(root.querySelector('select')).toBeNull();
 });
-
-const localProviders = [
-  {
-    id: 'local-codex',
-    name: '本地 Codex',
-    provider: 'local_codex',
-    baseUrl: 'codex://local',
-    status: api.localCodexStatus,
-    authorize: api.localCodexAuthorize,
-  },
-  {
-    id: 'local-claude-code',
-    name: '本地 Claude Code',
-    provider: 'local_claude_code',
-    baseUrl: 'claude-code://local',
-    status: api.localClaudeCodeStatus,
-    authorize: api.localClaudeCodeAuthorize,
-  },
-] as const;
-
-it.each(localProviders)(
-  'keeps the unsaved $name choice when rechecking a manual installation',
-  async (source) => {
-    source.status.mockResolvedValue({
-      installed: false,
-      authorized: false,
-      model: null,
-      message: '尚未安装',
-    });
-    await mountSettings();
-    root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.click();
-    await settle();
-    source.status.mockResolvedValue({
-      installed: true,
-      authorized: false,
-      model: null,
-      message: '请先授权',
-    });
-    button('重新检测').click();
-    await settle();
-    expect(root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.checked).toBe(true);
-    expect(root.querySelector('.binding-current')!.textContent).toContain('模型 A');
-    expect(button(`授权使用${source.name}`)).toBeDefined();
-    expect(api.localToolInstall).not.toHaveBeenCalled();
-  },
-);
-it.each(localProviders)(
-  'offers installation for missing $name and checks it again without granting access',
-  async (source) => {
-    source.status.mockResolvedValue({
-      installed: false,
-      installSupported: true,
-      authorized: false,
-      model: null,
-      message: '尚未安装',
-    });
-    await mountSettings();
-    root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.click();
-    await settle();
-    expect(root.textContent).toContain(`需要安装${source.name}`);
-    expect(button(`授权使用${source.name}`)).toBeUndefined();
-    let finish!: () => void;
-    api.localToolInstall.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    button('下载并安装').click();
-    await settle();
-    expect(api.localToolInstall).toHaveBeenCalledWith(source.id, expect.any(String));
-    expect(root.textContent).toContain('正在从官方源下载并校验');
-    expect(button('保存模型绑定').disabled).toBe(true);
-    source.status.mockResolvedValue({
-      installed: true,
-      authorized: false,
-      model: null,
-      message: '请先授权',
-    });
-    finish();
-    await settle();
-    expect(button(`授权使用${source.name}`)).toBeDefined();
-    expect(source.authorize).not.toHaveBeenCalled();
-    expect(api.settings.mock.calls.some(([operation]) => operation.kind === 'settings_write')).toBe(
-      false,
-    );
-  },
-);
-
-it.each(localProviders)(
-  'shows download failures for $name and allows retry and cancellation',
-  async (source) => {
-    source.status.mockResolvedValue({
-      installed: false,
-      authorized: true,
-      model: null,
-      message: '尚未安装',
-    });
-    api.settings.mockResolvedValue({ modelId: source.id });
-    await mountSettings();
-    api.localToolInstall.mockRejectedValueOnce({ message: '官方源网络不可用' });
-    button('下载并安装').click();
-    await settle();
-    expect(root.textContent).toContain('官方源网络不可用');
-    let fail!: (value: unknown) => void;
-    api.localToolInstall.mockImplementationOnce(
-      () =>
-        new Promise((_, reject) => {
-          fail = reject;
-        }),
-    );
-    api.localToolInstallCancel.mockImplementationOnce(async () => {
-      fail({ code: 'AI_INSTALL_CANCELLED' });
-    });
-    button('下载并安装').click();
-    await settle();
-    button('取消下载').click();
-    await settle();
-    expect(api.localToolInstallCancel).toHaveBeenCalledWith(api.localToolInstall.mock.lastCall![1]);
-    expect(root.textContent).toContain('已取消下载');
-    expect(button('下载并安装')).toBeDefined();
-  },
-);
-
-it.each(localProviders)(
-  'shows a missing $name download notice in the conversation and can detect a manual installation',
-  async (source) => {
-    api.settings.mockResolvedValue({ modelId: source.id });
-    source.status.mockResolvedValue({
-      installed: false,
-      authorized: true,
-      model: null,
-      message: '尚未安装',
-    });
-    await mount();
-    expect(root.querySelector('[aria-label="安装本地工具"]')).not.toBeNull();
-    expect(button('下载并安装')).toBeDefined();
-    const model = {
-      id: source.id,
-      name: source.name,
-      revision: 'r1',
-      hasKey: true,
-      config: {
-        ...defaultAiConfig(),
-        provider: source.provider,
-        baseUrl: source.baseUrl,
-        model: 'fixture',
-      },
-    };
-    source.status.mockResolvedValue({
-      installed: true,
-      authorized: true,
-      model,
-      message: '已连接',
-    });
-    button('重新检测').click();
-    await settle();
-    expect(root.querySelector('[aria-label="安装本地工具"]')).toBeNull();
-    expect(api.localToolInstall).not.toHaveBeenCalled();
-  },
-);
-it.each(localProviders)(
-  'authorizes and binds $name without registering a model or API key',
-  async (source) => {
-    const config = {
-      ...defaultAiConfig(),
-      provider: source.provider,
-      model: 'local-configured-model',
-      baseUrl: source.baseUrl,
-    };
-    const model = {
-      id: source.id,
-      name: source.name,
-      revision: 'local-r1',
-      hasKey: true,
-      config,
-    };
-    let value: Record<string, unknown> = { modelId: 'model-a', keep: true };
-    api.settings.mockImplementation(
-      async (operation: { kind: string; value?: Record<string, unknown> }) => {
-        if (operation.kind === 'settings_write') {
-          value = operation.value!;
-          return null;
-        }
-        return value;
-      },
-    );
-    await mountSettings();
-    expect(root.textContent).toContain('本地 Codex');
-    expect(root.textContent).toContain('本地 Claude Code');
-    expect(root.querySelector('input[value="model-a"]')).not.toBeNull();
-    root.querySelector<HTMLInputElement>(`input[value="${source.id}"]`)!.click();
-    await settle();
-    expect(button('保存模型绑定').disabled).toBe(true);
-    source.status.mockResolvedValue({ authorized: true, model, message: `已连接${source.name}` });
-    button(`授权使用${source.name}`).click();
-    await settle();
-    expect(source.authorize).toHaveBeenCalledWith(true);
-    expect(root.textContent).toContain('local-configured-model');
-    button('保存模型绑定').click();
-    await settle();
-    expect(value).toEqual({ modelId: source.id, keep: true });
-    app.unmount();
-    root.remove();
-    await mount();
-    await send();
-    expect(api.prepare.mock.lastCall![0].modelId).toBe(source.id);
-  },
-);
-
-it.each(localProviders)(
-  'blocks sending when a saved $name binding has lost authorization',
-  async (source) => {
-    api.settings.mockResolvedValue({ modelId: source.id });
-    source.status.mockResolvedValue({
-      authorized: false,
-      model: null,
-      message: `请先授权使用${source.name}`,
-    });
-    await mount();
-    const input = root.querySelector<HTMLTextAreaElement>('textarea')!;
-    input.value = '检查当前主机';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    await settle();
-    expect(root.textContent).toContain(`请先授权使用${source.name}`);
-    expect(root.querySelector<HTMLButtonElement>('button[type="submit"]')!.disabled).toBe(true);
-    expect(api.prepare).not.toHaveBeenCalled();
-  },
-);
-
-it.each(localProviders)(
-  'revokes $name access from settings and shows the resulting state',
-  async (source) => {
-    api.settings.mockResolvedValue({ modelId: source.id });
-    source.status.mockResolvedValue({ authorized: true, model: null, message: 'CLI 不可用' });
-    await mountSettings();
-    source.status.mockResolvedValue({
-      authorized: false,
-      model: null,
-      message: `请先授权使用${source.name}`,
-    });
-    button('撤销本地授权').click();
-    await settle();
-    expect(source.authorize).toHaveBeenCalledWith(false);
-    expect(root.textContent).toContain(`已撤销${source.name} 授权`);
-    expect(button('保存模型绑定').disabled).toBe(true);
-  },
-);
-it('keeps the previous model binding visible when saving fails and allows retry', async () => {
+it('preserves the previous model binding when saving fails and allows retry', async () => {
   await mountSettings();
-  root.querySelector<HTMLInputElement>('input[value=""]')!.click();
+  chooseModel('');
   await settle();
   api.settings.mockRejectedValueOnce({ message: '无法保存插件设置' });
-  button('保存模型绑定').click();
+  button('保存绑定').click();
   await settle();
   expect(root.textContent).toContain('无法保存插件设置');
   expect(root.textContent).not.toContain('已解除模型绑定');
-  expect(button('保存模型绑定').disabled).toBe(false);
+  expect(button('保存绑定').disabled).toBe(false);
   api.settings.mockResolvedValueOnce(null);
-  button('保存模型绑定').click();
+  button('保存绑定').click();
   await settle();
   expect(root.textContent).toContain('已解除模型绑定');
 });
+it('navigates to platform-owned CLI settings without private installation or authorization APIs', async () => {
+  await mountSettings();
+  button('打开平台模型设置').click();
+  await settle();
+  expect(navigation).toHaveBeenCalledWith('workspace.navigate', { view: 'models' });
+  expect(api.localToolInstall).not.toHaveBeenCalled();
+  expect(api.localCodexAuthorize).not.toHaveBeenCalled();
+  expect(api.localClaudeCodeAuthorize).not.toHaveBeenCalled();
+});
+it.each(['local-codex', 'local-claude-code'])(
+  'uses an authorized local model from the same generic catalog: %s',
+  async (id) => {
+    const model = { ...(await api.models())[0], id, name: id };
+    api.models.mockResolvedValue([model]);
+    api.settings.mockResolvedValue({ modelId: id });
+    await mount();
+    await send();
+    expect(api.prepare.mock.lastCall![0].modelId).toBe(id);
+  },
+);

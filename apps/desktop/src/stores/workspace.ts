@@ -7,7 +7,6 @@ import { useFilesStore } from './files';
 import type { ServerSection } from '../types/server';
 import { usePluginsStore } from './plugins';
 import { primaryPluginPage } from '../services/plugin-pages';
-import { errorMessage } from '../services/ipc';
 export interface WorkspaceTab {
   key: string;
   view: WorkspaceView;
@@ -69,7 +68,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function openPlugin(
     pluginId: string,
     contributionId: string,
-    target = hostId.value,
+    target = '',
     section?: ServerSection,
   ): Promise<void> {
     const plugins = usePluginsStore();
@@ -82,7 +81,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     );
     if (!contribution) return openPluginSettings(pluginId);
     if (contribution.kind === 'settings') return openPluginSettings(pluginId, contribution.id);
-    if (!target && contribution.kind !== 'tool') {
+    if (!target && ['server', 'host_menu'].includes(contribution.kind)) target = hostId.value;
+    if (!target && ['server', 'host_menu'].includes(contribution.kind)) {
       plugins.error = '请先选择主机，再打开此工具。';
       return;
     }
@@ -111,20 +111,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (pluginSettingsBusy.value || usePluginsStore().busy) return;
       pluginConfiguration.value = undefined;
       settingsView.value = view;
-      return;
-    }
-    if (view === 'assistant') {
-      const plugins = usePluginsStore();
-      const entry = plugins.extensions.find(
-        (entry) => entry.kind === 'tool' && entry.tool === view,
-      );
-      if (!entry) {
-        plugins.error = '此运维工具未安装、未启用或未授权，请在“设置 → 插件”中检查。';
-        return;
-      }
-      void openPlugin(entry.pluginId, entry.id, '').catch((cause) => {
-        plugins.error = errorMessage(cause);
-      });
       return;
     }
     const hostView = hostViews.has(view);
@@ -177,6 +163,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         const pages = pluginPages.value.filter((page) =>
           isHostTab(tab) ? page.hostId === tab.hostId : page.key === tab.key,
         );
+        const plugins = usePluginsStore();
+        if (
+          pages.some((page) => plugins.dirtyPages[page.key]) &&
+          !(await plugins.ask(
+            '插件配置尚未保存',
+            '关闭工作区会放弃插件中未保存的文本。是否继续关闭？',
+          ))
+        )
+          continue;
         if (isHostTab(tab)) {
           if (tab.hostId && !(await files.prepareHostClose(tab.hostId))) continue;
           const first = terminals.hostTabs(tab.hostId)[0];
@@ -200,6 +195,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         }
         if (isHostTab(tab) && tab.hostId && !(await files.clearHostTransfers(tab.hostId))) continue;
         pluginPages.value = pluginPages.value.filter((page) => !pages.includes(page));
+        for (const page of pages) plugins.setDraftDirty(page.key, page.pluginId!, false);
         removed.add(tab);
         tabs.value = tabs.value.filter((item) => item !== tab);
       } finally {

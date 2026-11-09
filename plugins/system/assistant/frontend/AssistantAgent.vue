@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AiAgentReport, AiExecution } from '@serverdeck/plugin-sdk/types/ai';
+import type { AiAgentReport, AiExecution } from './types';
 defineProps<{ report: AiAgentReport; execution?: AiExecution['agent'] }>();
 const statuses = {
   verified: '已执行并复查',

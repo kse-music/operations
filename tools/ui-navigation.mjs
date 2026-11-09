@@ -114,9 +114,12 @@ export async function closePluginSettings(page) {
 }
 
 export async function setPluginEnabled(page, name, enabled) {
-  const settings = await openPluginDetails(page, name);
-  const action = settings.getByRole('button', {
-    name: enabled ? '启用插件' : '禁用插件',
+  await navigateWorkspace(page, '插件管理');
+  const card = page
+    .locator('.plugin-installed-row')
+    .filter({ has: page.getByRole('button', { name, exact: true }) });
+  const action = card.getByRole('button', {
+    name: `${enabled ? '启用' : '禁用'} ${name}`,
     exact: true,
   });
   if (await action.isVisible()) {
@@ -127,10 +130,10 @@ export async function setPluginEnabled(page, name, enabled) {
         .getByRole('button', { name: '明确确认', exact: true })
         .click();
   }
-  await settings
-    .getByRole('button', { name: enabled ? '禁用插件' : '启用插件', exact: true })
+  await card
+    .getByRole('button', { name: `${enabled ? '禁用' : '启用'} ${name}`, exact: true })
     .waitFor();
-  return settings;
+  return card;
 }
 
 export async function navigateWorkspace(page, name) {

@@ -1,6 +1,6 @@
 {
   "name": "@serverdeck/plugin-sdk",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,8 +13,7 @@
     ".": "./src/index.ts"
   },
   "peerDependencies": {
-    "vue": "^3.5.0",
-    "pinia": "^3.0.0"
+    "vue": "^3.5.0"
   },
   "dependencies": {
     "@lucide/vue": "^1.66.0",

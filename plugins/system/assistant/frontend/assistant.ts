@@ -1,8 +1,8 @@
 import { onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
-import { useAssistantApi } from '@serverdeck/plugin-sdk/services/plugin-tool-services';
+import { useAssistantApi } from './api';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
-import type { AiExecution, AiPrepare, AiProposal, AiTurn } from '@serverdeck/plugin-sdk/types/ai';
+import type { AiExecution, AiPrepare, AiProposal, AiTurn } from './types';
 import { useAssistantHosts } from './assistant-hosts';
 
 const bytes = (value: string) => new TextEncoder().encode(value).length;
@@ -206,16 +206,6 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       proposal.risk === 'manual_only'
     )
       return;
-    if (
-      turns.value.some(
-        (turn) =>
-          turn.answer?.agent?.steps.length &&
-          turn.answer.proposals.some((p) => p.id === proposal.id),
-      )
-    ) {
-      void executeProposal(proposal, true, proposal.changeConfirmation ?? '');
-      return;
-    }
     review.value = proposal;
   }
   async function execute(confirmed: boolean, changeConfirmation: string) {

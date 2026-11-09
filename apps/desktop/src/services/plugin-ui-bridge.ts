@@ -4,721 +4,282 @@ import { useOpsStore } from '../stores/ops';
 import { useFilesStore } from '../stores/files';
 import { useModelsStore } from '../stores/models';
 import { useWorkspaceStore } from '../stores/workspace';
-import { useApplicationStore } from '../stores/application';
 import { useNotificationsStore } from '../stores/notifications';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from './plugins';
-import { pluginInvokeRequest, pluginServerRequest, pluginToolRequest } from './plugin-server';
+import { pluginInvokeRequest, pluginPlatformRequest } from './plugin-server';
 import { clipboardApi } from './clipboard';
 import { terminalApi } from './terminal';
 import { downloadResult } from './download';
-import { isBuiltinAssistant } from './plugin-pages';
-import { aiApi } from './ai';
-import { isLocalModel } from '../types/ai';
-import type {
-  PluginUiPage,
-  PluginToolOperation,
-  PluginCapability,
-  PluginPermission,
-} from '../types/plugins';
-import type { LogInput, LogEvent, OpsRequest } from '../types/ops';
-
-const tools: Record<string, { permission: PluginPermission; operations: readonly string[] }> = {
-  assistant: {
-    permission: 'assistant.use',
-    operations: ['ai_resolve_hosts', 'ai_prepare', 'ai_send', 'ai_execute', 'ai_cancel'],
-  },
-};
-const denied = () => ({
-  code: 'PLUGIN_PERMISSION_DENIED',
-  message: '插件没有此公共能力或上下文已失效',
-});
-
+import { errorMessage } from './ipc';
+import type { PluginUiPage, PluginPermission } from '../types/plugins';
+import type { PlatformRequest } from '@serverdeck/plugin-sdk/types/platform';
 export function createPluginUiBridge(input: {
   id: string;
   revision: string;
   page: PluginUiPage;
   hostId: string;
+  contextKey?: string;
   isActive?: () => boolean;
   canRetain?: () => boolean;
   settingsAction?: (action: 'close' | 'models') => void;
-  stream: (id: string, event: unknown) => void;
+  terminal?: (ticket: string, hostId: string) => void;
+  stream?: (id: string, event: unknown) => void;
 }) {
   const hosts = useHostsStore(),
     ops = useOpsStore(),
-    files = useFilesStore();
-  const models = useModelsStore(),
+    files = useFilesStore(),
+    models = useModelsStore(),
     workspace = useWorkspaceStore(),
-    application = useApplicationStore();
-  const plugins = usePluginsStore(),
+    plugins = usePluginsStore(),
     notifications = useNotificationsStore();
-  let disposed = false,
-    monitor = '';
-  const requests = new Set<AbortController>();
-  const installations = new Set<string>();
-  const aiRoots = new Set<string>();
-  let continuing = false;
-  const retained = () =>
-    input.canRetain?.() === true &&
-    isBuiltinAssistant(plugins.installed.find((plugin) => plugin.manifest.id === input.id)) &&
-    input.page.surface?.kind === 'tool' &&
-    input.page.surface.tool === 'assistant';
-  const backgroundMethods = new Set([
-    'hosts.list',
-    'ops_open',
-    'ops_close',
-    'ops_connections',
-    'ai_resolve_hosts',
-    'ai_prepare',
-    'ai_send',
-  ]);
-  const background = (method: string, completing = false) =>
-    retained() &&
-    (method === 'ai_cancel' ||
-      method === 'ai_end' ||
-      (continuing && (backgroundMethods.has(method) || (completing && method === 'ai_execute'))));
-  async function cancelRoot(id: string) {
-    try {
-      await pluginsApi.toolCancelRequest(input.id, id);
-    } catch (cause) {
-      if (!(
-        cause &&
-        typeof cause === 'object' &&
-        'code' in cause &&
-        ['NOT_FOUND', 'PLUGIN_PERMISSION_DENIED', 'PLUGIN_CANCELLED'].includes(String(cause.code))
-      ))
-        throw cause;
-    }
-  }
-  const streams = new Map<string, { stopped: boolean; eventStream: string }>();
-  const listeners = new Set<() => void>();
-  const leases = new Map<string, string>(),
-    originals = new Map<string, string>();
-  const ownedConnections = new Set<string>();
-  const references = new Map<string, string>();
-  function opaque(value: string): string {
-    let token = references.get(value);
-    if (!token) {
-      token = `sdk-reference-${crypto.randomUUID()}`;
-      references.set(value, token);
-    }
-    return token;
-  }
-  function publicHost(host: import('../types/hosts').Host): import('../types/hosts').Host {
-    const value = JSON.parse(JSON.stringify(host)) as import('../types/hosts').Host;
-    if (value.credentialId) value.credentialId = opaque(value.credentialId);
-    const proxy = value.ssh.proxy;
-    if (proxy?.credentialId) proxy.credentialId = opaque(proxy.credentialId);
-    return value;
-  }
+  const owner = input.contextKey || 'default';
+  let disposed = false;
+  const cleanup = new Set<() => void>();
+  const active = () => !disposed && (input.isActive?.() ?? true);
   function check(requireActive = false) {
-    const plugin = plugins.installed.find((p) => p.manifest.id === input.id);
-    const grant = plugins.grants[input.id];
+    const plugin = plugins.installed.find((p) => p.manifest.id === input.id),
+      grant = plugins.grants[input.id];
     if (
       disposed ||
-      (requireActive && input.isActive && !input.isActive()) ||
+      (requireActive && !active()) ||
       !plugin?.enabled ||
       plugin.revision !== input.revision ||
       grant?.revision !== input.revision ||
       !grant.permissions.includes('ui.contribute') ||
       !grant.operations.includes('ui.contribute')
     )
-      throw denied();
-    const surface = input.page.surface;
-    if (surface?.kind === 'frontend') return surface;
-    const permission = surface?.kind === 'tool' ? tools[surface.tool]?.permission : 'system.read';
-    if (
-      !permission ||
-      !grant.permissions.includes(permission as PluginPermission) ||
-      !grant.operations.includes(permission)
-    )
-      throw denied();
-    return surface;
+      throw { code: 'PLUGIN_PERMISSION_DENIED', message: '插件权限或页面已失效' };
   }
-  function hasAny(...permissions: PluginPermission[]) {
+  function has(permission: PluginPermission) {
     const grant = plugins.grants[input.id];
-    return permissions.some((p) => grant?.permissions.includes(p) && grant.operations.includes(p));
-  }
-  function knownLeases() {
-    const values = new Set<string>();
-    for (const connection of Object.values(ops.connections)) {
-      if (connection.session) {
-        values.add(connection.session.id);
-        values.add(connection.session.transportId);
-      }
-    }
-    for (const connection of Object.values(files.connections))
-      if (connection.id) values.add(connection.id);
-    return values;
-  }
-  function publicValue(value: unknown): unknown {
-    const known = knownLeases();
-    const visit = (value: unknown): unknown => {
-      if (typeof value === 'string' && known.has(value)) {
-        let token = originals.get(value);
-        if (!token) {
-          token = `sdk-lease-${crypto.randomUUID()}`;
-          originals.set(value, token);
-          leases.set(token, value);
-        }
-        return token;
-      }
-      if (Array.isArray(value)) return value.map(visit);
-      if (value && typeof value === 'object') {
-        return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, visit(v)]));
-      }
-      return value;
-    };
-    return visit(JSON.parse(JSON.stringify(value)));
-  }
-  function restore(value: unknown): unknown {
-    if (typeof value === 'string') return leases.get(value) ?? value;
-    if (Array.isArray(value)) return value.map(restore);
-    if (value && typeof value === 'object')
-      return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, restore(v)]));
-    return value;
+    return grant?.permissions.includes(permission) && grant.operations.includes(permission);
   }
   function snapshot() {
     check();
-    const canRead = hasAny(
-      'hosts.read',
-      'assistant.use',
-      'system.read',
-      'metrics.read',
-      'logs.read',
-    );
-    return publicValue({
+    const canRead = has('hosts.read'),
+      canConnect = has('ssh.execute') || has('sftp.read') || has('sftp.write');
+    return {
       theme: document.documentElement.dataset.theme ?? 'dark',
       interfaceFontScale: Number(
         document.documentElement.style.getPropertyValue('--interface-font-scale') || 1,
       ),
       hostId: input.hostId,
-      catalog: canRead && hosts.catalog ? snapshotCatalog() : null,
-      operations: canRead
-        ? Object.fromEntries(
-            Object.entries(ops.connections).map(([id, c]) => [
-              id,
-              { ...c, host: publicHost(c.host) },
-            ]),
-          )
-        : {},
-      files: canRead
-        ? Object.fromEntries(
-            Object.entries(files.connections).map(([id, c]) => [
-              id,
-              {
-                host: publicHost(c.host),
-                id: c.id,
-                state: c.state,
-                error: c.error,
-                trust: c.trust,
-              },
-            ]),
-          )
-        : {},
-      models: hasAny('assistant.use') ? models.models : [],
-      monitorIntervalSecs: application.state?.config.monitorIntervalSecs ?? 3,
-    });
-  }
-  const server = <T>(operation: PluginCapability) => {
-    check(true);
-    const version = plugins.contextVersion(input.id);
-    return pluginServerRequest<T>(input.id, operation, input.page).then((value) => {
-      check(true);
-      if (plugins.contextVersion(input.id) !== version) throw denied();
-      return value;
-    });
-  };
-  function connectionForSession(id: string) {
-    return Object.values(ops.connections).find((c) => c.session?.id === id);
-  }
-  async function call(method: string, raw: Record<string, unknown>): Promise<unknown> {
-    if (method === 'ai_begin') {
-      check(true);
-      if (retained()) continuing = true;
-      return;
-    }
-    if (method === 'ai_end') {
-      check(!background(method));
-      continuing = false;
-      return;
-    }
-    check(!background(method));
-    const args = restore(raw) as Record<string, unknown>;
-    const domain = Object.values(tools).find((tool) => tool.operations.includes(method));
-    if (domain) {
-      const grant = plugins.grants[input.id];
-      if (
-        !grant?.permissions.includes(domain.permission) ||
-        !grant.operations.includes(domain.permission)
-      )
-        throw denied();
-      if (method === 'ai_cancel') {
-        try {
-          await pluginsApi.toolCancelRequest(input.id, String(args.id));
-        } finally {
-          aiRoots.delete(String(args.id));
-        }
-        return;
-      }
-      const resolving =
-        method === 'ai_resolve_hosts'
-          ? (args.input as { requestId?: string })?.requestId
-          : undefined;
-      if (resolving) aiRoots.add(resolving);
-      const controller = new AbortController();
-      requests.add(controller);
-      try {
-        const result = await pluginToolRequest<unknown>(
-          input.id,
-          method as PluginToolOperation,
-          args,
-          input.page,
-          controller.signal,
-          true,
-          () => !input.isActive || input.isActive(),
-        );
-        if (
-          method === 'ai_prepare' &&
-          result &&
-          typeof result === 'object' &&
-          'id' in result &&
-          typeof result.id === 'string'
-        ) {
-          if (disposed) await cancelRoot(result.id);
-          else aiRoots.add(result.id);
-        }
-        return result;
-      } finally {
-        requests.delete(controller);
-        if (resolving) aiRoots.delete(resolving);
-      }
-    }
-    switch (method) {
-      case 'invoke':
-        return pluginInvokeRequest(
-          input.id,
-          input.page,
-          String(args.action),
-          args.values as import('../types/plugins').PluginValues,
-        );
-      case 'capability':
-        return server(args.operation as PluginCapability);
-      case 'hosts.list':
-        if (!hasAny('hosts.read', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
-          throw denied();
-        await hosts.load();
-        if (hosts.error) throw new Error(hosts.error);
-        return snapshotCatalog();
-      case 'ai_models':
-        if (!hasAny('assistant.use')) throw denied();
-        await models.refresh();
-        if (models.error) throw new Error(models.error);
-        return models.models;
-      case 'ai_local_tool_install':
-      case 'ai_local_tool_install_cancel': {
-        check(true);
-        if (
-          !hasAny('assistant.use') ||
-          !isBuiltinAssistant(
-            plugins.installed.find((plugin) => plugin.manifest.id === input.id),
-          ) ||
-          typeof args.requestId !== 'string'
-        )
-          throw denied();
-        const id = args.requestId;
-        if (method.endsWith('_cancel')) {
-          if (!installations.has(id)) throw denied();
-          await aiApi.localToolInstallCancel(id);
-          return;
-        }
-        if (typeof args.modelId !== 'string' || !isLocalModel(args.modelId) || installations.size)
-          throw denied();
-        const controller = new AbortController();
-        requests.add(controller);
-        installations.add(id);
-        const cancel = () => {
-          void aiApi.localToolInstallCancel(id).catch(() => console.warn('本地工具下载取消失败'));
-        };
-        controller.signal.addEventListener('abort', cancel, { once: true });
-        try {
-          await aiApi.localToolInstall(args.modelId, id);
-          check(true);
-        } finally {
-          installations.delete(id);
-          requests.delete(controller);
-          controller.signal.removeEventListener('abort', cancel);
-        }
-        return;
-      }
-      case 'ai_local_codex_status':
-      case 'ai_local_codex_authorize':
-      case 'ai_local_claude_code_status':
-      case 'ai_local_claude_code_authorize': {
-        if (
-          !hasAny('assistant.use') ||
-          !isBuiltinAssistant(plugins.installed.find((plugin) => plugin.manifest.id === input.id))
-        )
-          throw denied();
-        const claude = method.startsWith('ai_local_claude_code_');
-        const provider = claude
-          ? {
-              name: '本地 Claude Code',
-              status: aiApi.localClaudeCodeStatus,
-              authorize: aiApi.localClaudeCodeAuthorize,
-            }
-          : {
-              name: '本地 Codex',
-              status: aiApi.localCodexStatus,
-              authorize: aiApi.localCodexAuthorize,
-            };
-        if (method.endsWith('_status')) return provider.status();
-        if (typeof args.authorized !== 'boolean') throw denied();
-        if (args.authorized) {
-          check(true);
-          const controller = new AbortController();
-          requests.add(controller);
-          const answer = plugins.ask(
-            `使用${provider.name}`,
-            `允许 ServerDeck 启动${provider.name} CLI，使用其现有模型配置和登录状态发送脱敏后的问题、历史及主机上下文。请求发送到该 CLI 当前配置的服务，并按该账号或服务的规则计费。`,
-          );
-          const prompt = plugins.prompt;
-          const cancel = () => {
-            if (prompt && plugins.prompt === prompt) plugins.decide(false);
-          };
-          controller.signal.addEventListener('abort', cancel, { once: true });
-          let approved: boolean;
-          try {
-            approved = await answer;
-          } finally {
-            requests.delete(controller);
-            controller.signal.removeEventListener('abort', cancel);
-          }
-          check(true);
-          if (!approved || controller.signal.aborted)
-            throw {
-              code: claude ? 'AI_CLAUDE_CONSENT' : 'AI_CODEX_CONSENT',
-              message: `已取消${provider.name}授权`,
-            };
-        }
-        check(true);
-        await provider.authorize(args.authorized);
-        return;
-      }
-      case 'ops_open': {
-        if (typeof args.events === 'string' && (args.events.length > 80 || listeners.size >= 32))
-          throw { code: 'PLUGIN_LIMIT', message: '插件连接事件流超过限制' };
-        if (!hasAny('ssh.execute', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
-          throw denied();
-        const host = hosts.catalog?.hosts.find((h) => h.id === args.hostId);
-        if (!host) throw denied();
-        const existing = ops.connections[host.id]?.session?.id;
-        await ops.open(host, false);
-        const current = ops.connections[host.id];
-        if (!current?.session) throw new Error(current?.error ?? '连接未建立');
-        if (existing !== current.session.id) ownedConnections.add(current.session.id);
-        if (typeof args.events === 'string') {
-          if (listeners.size >= 32)
-            throw { code: 'PLUGIN_LIMIT', message: '插件连接事件流超过限制' };
-          const stream = args.events;
-          const stop = watch(
-            () => [current.state, current.trust, current.error],
-            () => {
-              if (!disposed && (!input.isActive || input.isActive() || (continuing && retained())))
-                input.stream(
-                  stream,
-                  current.trust ?? {
-                    type: 'state',
-                    state: current.state,
-                    code: null,
-                    message: current.error,
-                  },
-                );
-              if (['closed', 'failed', 'disconnected', 'cancelled'].includes(current.state))
-                queueMicrotask(() => {
-                  stop();
-                  listeners.delete(stop);
-                });
+      hosts: canRead
+        ? (hosts.catalog?.hosts ?? []).map((h) => ({
+            id: h.id,
+            name: h.name,
+            hostname: h.hostname,
+            port: h.port,
+            username: h.username,
+            description: h.description,
+            groupId: h.groupId,
+          }))
+        : [],
+      groups: canRead
+        ? (hosts.catalog?.groups ?? []).map((g) => ({
+            id: g.id,
+            name: g.name,
+            parentId: g.parentId,
+          }))
+        : [],
+      connections:
+        canRead || canConnect
+          ? Object.fromEntries(
+              Object.entries(ops.connections)
+                .filter(([id]) => canRead || id === input.hostId)
+                .map(([id, c]) => [id, { hostId: id, state: c.state, error: c.error }]),
+            )
+          : {},
+      models: has('models.use')
+        ? models.models.map((m) => ({
+            id: m.id,
+            name: m.name,
+            revision: m.revision,
+            hasKey: m.hasKey,
+            config: {
+              provider: m.config.provider,
+              model: m.config.model,
+              maxOutputTokens: m.config.maxOutputTokens,
+              contextWindowTokens: m.config.contextWindowTokens,
             },
-            { deep: true, immediate: true },
-          );
-          listeners.add(stop);
+          }))
+        : [],
+    };
+  }
+  async function ensure(hostId: string, file: boolean) {
+    check(true);
+    if (!has(file ? 'sftp.read' : 'ssh.execute') && !(file && has('sftp.write')))
+      throw { code: 'PLUGIN_PERMISSION_DENIED', message: '插件没有连接权限' };
+    if (!hosts.catalog) await hosts.load();
+    check(true);
+    const host = hosts.catalog?.hosts.find((h) => h.id === hostId);
+    if (!host) throw new Error('目标主机未登记');
+    if (file) await files.open(host);
+    else await ops.open(host, false);
+    await new Promise<void>((resolve, reject) => {
+      let stop = () => {},
+        finished = false,
+        trusting = false;
+      const finish = (error?: unknown) => {
+        if (finished) return;
+        finished = true;
+        stop();
+        clearTimeout(timer);
+        cleanup.delete(cancel);
+        if (error) reject(error);
+        else resolve();
+      };
+      const cancel = () =>
+        finish({ code: 'PLUGIN_CANCELLED', message: '页面已离开，停止等待连接' });
+      cleanup.add(cancel);
+      const inspect = async () => {
+        if (finished) return;
+        try {
+          check(true);
+          const c = file ? files.connections[hostId] : ops.connections[hostId];
+          if (!c) throw new Error('连接未建立');
+          if (c.state === 'connected') {
+            finish();
+            return;
+          }
+          if (['failed', 'closed', 'disconnected'].includes(c.state))
+            throw new Error(c.error || '连接已结束');
+          if (c.trust && !trusting) {
+            trusting = true;
+            const trust = c.trust;
+            const accepted = await plugins.ask(
+              '核验 SSH 主机指纹',
+              trust.hostname +
+                ':' +
+                trust.port +
+                ' · ' +
+                trust.algorithm +
+                '\n' +
+                trust.fingerprint +
+                '\n请通过可信渠道核对此真实指纹。',
+              undefined,
+              owner,
+            );
+            const id = file ? files.connections[hostId]?.id : ops.connections[hostId]?.session?.id;
+            if (id) await terminalApi.trust(id, accepted && active());
+            if (!accepted || !active()) throw new Error('未确认主机指纹');
+            trusting = false;
+          }
+        } catch (error) {
+          finish(error);
         }
-        return current.session;
+      };
+      stop = watch(
+        () => {
+          const c = file ? files.connections[hostId] : ops.connections[hostId];
+          return [c?.state, c?.trust, c?.error];
+        },
+        () => void inspect(),
+        { deep: true },
+      );
+      const timer = setTimeout(() => finish(new Error('连接超时')), 120000);
+      void inspect();
+    });
+    check(true);
+    return { hostId, state: 'connected' };
+  }
+  async function call(method: string, args: Record<string, unknown>): Promise<unknown> {
+    const primitive =
+      method === 'platform.request' ? (args.operation as PlatformRequest | undefined) : undefined;
+    const resourceCleanup =
+      primitive && ['close_file', 'stream_stop', 'result_close'].includes(primitive.kind);
+    check(!resourceCleanup);
+    switch (method) {
+      case 'invoke': {
+        if (typeof args.action !== 'string') throw new Error('插件动作无效');
+        const result = await pluginInvokeRequest(
+          input.id,
+          input.page,
+          args.action,
+          args.input,
+          active,
+          owner,
+        );
+        check();
+        if (!active() && !input.canRetain?.())
+          throw { code: 'PLUGIN_CANCELLED', message: '页面已隐藏' };
+        return result;
       }
-      case 'ops_connections':
-        if (!hasAny('ssh.execute', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
-          throw denied();
-        await ops.sync();
-        return Object.values(ops.connections)
-          .filter((c) => c.state === 'connected')
-          .map((c) => c.session);
-      case 'ops_close': {
-        if (!hasAny('ssh.execute', 'assistant.use', 'system.read', 'metrics.read', 'logs.read'))
-          throw denied();
-        const c = connectionForSession(String(args.id));
-        if (!c) throw denied();
+      case 'platform.request': {
+        if (!primitive || typeof primitive.kind !== 'string') throw new Error('平台请求无效');
+        return pluginPlatformRequest(input.id, primitive, active, owner);
+      }
+      case 'actions.cancel':
+        plugins.cancelPrompt(owner);
+        await pluginsApi.cancelScope(input.id, owner);
+        return null;
+      case 'connections.ensure':
         if (
-          !ownedConnections.has(String(args.id)) &&
-          !(await plugins.ask(
-            '断开共享连接',
-            `${c.host.username}@${c.host.hostname}:${c.host.port}\n此连接也可能被其他工作区使用。`,
-          ))
+          typeof args.hostId !== 'string' ||
+          (args.files !== undefined && typeof args.files !== 'boolean')
         )
-          throw denied();
-        check();
-        await ops.close(c.host.id);
-        return;
-      }
-      case 'connections.fileOpen': {
-        if (!hasAny('sftp.read', 'sftp.write')) throw denied();
-        const host = hosts.catalog?.hosts.find((h) => h.id === args.hostId);
-        if (!host) throw denied();
-        await files.open(host);
-        const c = files.connections[host.id];
-        if (!c) throw denied();
-        return {
-          host: publicHost(c.host),
-          id: c.id,
-          state: c.state,
-          error: c.error,
-          trust: c.trust,
-        };
-      }
-      case 'connections.trust': {
-        const id = String(args.id),
-          c = connectionForSession(id),
-          file = Object.values(files.connections).find((c) => c.id === id);
-        const trust = c?.trust ?? file?.trust;
-        if (!trust) throw denied();
-        const accepted =
-          args.accept === true &&
-          (await plugins.ask(
-            '核验 SSH 主机指纹',
-            `${trust.hostname}:${trust.port} · ${trust.algorithm}\n${trust.fingerprint}\n请通过可信渠道核对此真实指纹。`,
-          ));
-        check();
-        await terminalApi.trust(id, accepted);
-        return;
-      }
+          throw new Error('连接目标无效');
+        return ensure(args.hostId, args.files === true);
+      case 'terminal.open':
+        if (
+          !input.terminal ||
+          typeof args.ticket !== 'string' ||
+          typeof args.hostId !== 'string' ||
+          !has('ssh.execute')
+        )
+          throw new Error('终端票据无效');
+        input.terminal(args.ticket, args.hostId);
+        return null;
+      case 'workspace.draft':
+        if (typeof args.dirty !== 'boolean' || !input.contextKey) throw new Error('草稿作用域无效');
+        plugins.setDraftDirty(input.contextKey, input.id, args.dirty);
+        return null;
       case 'clipboard.write':
-        if (typeof args.text !== 'string' || args.text.length > 1024 * 1024) throw denied();
-        return clipboardApi.writeText(args.text);
+        if (typeof args.text !== 'string' || args.text.length > 1024 * 1024)
+          throw new Error('复制内容超过限制');
+        await clipboardApi.writeText(args.text);
+        return null;
       case 'workspace.navigate':
-        if (args.view !== 'models') throw denied();
+        if (args.view !== 'models') throw new Error('导航目标无效');
         if (input.settingsAction) input.settingsAction('models');
         else workspace.navigate('models');
-        return;
+        return null;
       case 'settings.close':
-        if (
-          !input.settingsAction ||
-          input.page.id !== 'settings' ||
-          !isBuiltinAssistant(plugins.installed.find((plugin) => plugin.manifest.id === input.id))
-        )
-          throw denied();
+        if (!input.settingsAction) throw new Error('当前页面不是插件设置');
         input.settingsAction('close');
-        return;
+        return null;
       case 'ui.notify':
-        if (typeof args.message !== 'string' || args.message.length > 2048) throw denied();
+        if (typeof args.message !== 'string' || args.message.length > 2048)
+          throw new Error('通知超过限制');
         notifications.push(args.message, args.error === true);
-        return;
+        return null;
       case 'ui.export':
-        if (typeof args.name !== 'string' || !/^[\w.-]{1,120}$/.test(args.name)) throw denied();
+        if (typeof args.name !== 'string' || !/^[\w.-]{1,120}$/.test(args.name))
+          throw new Error('导出文件名无效');
         downloadResult(args.name, args.value);
-        return;
-      case 'ops_query': {
-        const request = args.request as OpsRequest;
-        if (!request || request.kind === 'diagnostic') throw denied();
-        const publicRequest = { ...request };
-        if ('confirmed' in publicRequest)
-          delete (publicRequest as { confirmed?: boolean }).confirmed;
-        return server({ kind: 'system_query', request: publicRequest });
-      }
-      case 'ops_feedback':
-        return server({ kind: 'system_feedback' });
-      case 'monitor_open': {
-        if (args.hostId !== input.hostId) throw denied();
-        const value = await server<{ id: string }>({
-          kind: 'metrics_open',
-          intervalSecs: application.state?.config.monitorIntervalSecs ?? 3,
-        });
-        monitor = value.id;
-        return {
-          id: monitor,
-          hostId: input.hostId,
-          transportId: 'plugin-owned',
-          routeHostIds: [input.hostId],
-        };
-      }
-      case 'monitor_snapshot':
-        return monitor
-          ? server({
-              kind: 'metrics_snapshot',
-              monitorId: monitor,
-              afterRevision: typeof args.after === 'number' ? args.after : null,
-            })
-          : null;
-      case 'monitor_visible':
-        if (monitor)
-          await server({
-            kind: 'metrics_visible',
-            monitorId: monitor,
-            visible: args.visible === true,
-          });
-        return;
-      case 'monitor_stop':
-        if (monitor) {
-          await server({ kind: 'metrics_close', monitorId: monitor });
-          monitor = '';
-        }
-        return;
-      case 'ops_log_open': {
-        const value = args.input as LogInput,
-          eventStream = args.events;
-        if (!value || typeof eventStream !== 'string') throw denied();
-        const result = await server<{ id: string }>({ kind: 'system_log_start', ...value });
-        const control = { stopped: false, eventStream };
-        streams.set(result.id, control);
-        void (async () => {
-          try {
-            while (!disposed && !control.stopped) {
-              const value = await server<{
-                events: (
-                  | {
-                      type: 'data';
-                      dataBase64: string;
-                      sequence: number;
-                      stream: string;
-                      at: number;
-                    }
-                  | Exclude<LogEvent, { type: 'data' }>
-                )[];
-              }>({ kind: 'system_log_poll', logId: result.id });
-              if (disposed || control.stopped) return;
-              for (const event of value.events)
-                input.stream(
-                  eventStream,
-                  event.type === 'data'
-                    ? {
-                        ...event,
-                        data: [...Uint8Array.from(atob(event.dataBase64), (c) => c.charCodeAt(0))],
-                      }
-                    : event,
-                );
-              await new Promise((resolve) => setTimeout(resolve, 200));
-            }
-          } catch (error) {
-            if (!disposed && !control.stopped)
-              input.stream(eventStream, {
-                type: 'state',
-                state: 'failed',
-                code: 'PLUGIN_LOG',
-                message:
-                  typeof error === 'object' && error && 'message' in error
-                    ? String(error.message)
-                    : '日志读取失败',
-              });
-          }
-        })();
-        return { id: result.id, hostId: input.hostId, sessionId: 'plugin-owned' };
-      }
-      case 'ops_log_pause':
-        if (!streams.has(String(args.id))) throw denied();
-        return server({
-          kind: 'system_log_pause',
-          logId: String(args.id),
-          paused: args.paused === true,
-        });
-      case 'ops_log_ack':
-        if (!streams.has(String(args.id))) throw denied();
-        return;
-      case 'ops_log_close': {
-        const id = String(args.id),
-          control = streams.get(id);
-        if (!control) throw denied();
-        control.stopped = true;
-        streams.delete(id);
-        return server({ kind: 'system_log_stop', logId: id });
-      }
+        return null;
       default:
-        throw denied();
+        throw { code: 'PLUGIN_PERMISSION_DENIED', message: '未公开的平台能力' };
     }
   }
-  function snapshotCatalog() {
-    return hosts.catalog
-      ? {
-          ...hosts.catalog,
-          hosts: hosts.catalog.hosts.map(publicHost),
-          credentials: [],
-          pendingSecretDeletions: 0,
-        }
-      : null;
+  function suspend() {
+    plugins.cancelPrompt(owner);
+    for (const stop of cleanup) stop();
+    void pluginsApi
+      .scopeVisibility(input.id, owner, false)
+      .catch((error) => notifications.push(errorMessage(error), true));
   }
-  return {
-    snapshot,
-    suspend() {
-      if (!retained()) {
-        for (const request of requests) request.abort();
-        for (const stop of listeners) stop();
-        listeners.clear();
-      }
-      for (const control of streams.values()) {
-        control.stopped = true;
-        input.stream(control.eventStream, {
-          type: 'state',
-          state: 'closed',
-          code: 'PLUGIN_CANCELLED',
-          message: '页面已切换，日志流已停止。',
-        });
-      }
-      streams.clear();
-      monitor = '';
-    },
-    async call(method: string, args: Record<string, unknown>) {
-      const version = plugins.contextVersion(input.id);
-      const value = await call(method, args);
-      // Authorized navigation hides its own caller and returns no data or resource.
-      if (method === 'workspace.navigate' || method === 'settings.close') return null;
-      check(!background(method, true));
-      if (plugins.contextVersion(input.id) !== version) throw denied();
-      return value === undefined ? null : publicValue(value);
-    },
-    async dispose() {
-      for (const request of requests) request.abort();
-      for (const stop of listeners) stop();
-      const cleanup: Promise<unknown>[] = [...aiRoots].map(cancelRoot);
-      aiRoots.clear();
-      continuing = false;
-      const close = (operation: PluginCapability) =>
-        pluginServerRequest(input.id, operation, input.page).catch((error) => {
-          if (
-            error &&
-            typeof error === 'object' &&
-            'code' in error &&
-            ['PLUGIN_CANCELLED', 'PLUGIN_PERMISSION_DENIED', 'NOT_FOUND'].includes(
-              String(error.code),
-            )
-          )
-            return;
-          throw error;
-        });
-      const active = !input.isActive || input.isActive();
-      for (const [id, control] of streams) {
-        control.stopped = true;
-        if (active) cleanup.push(close({ kind: 'system_log_stop', logId: id }));
-      }
-      if (active && monitor) cleanup.push(close({ kind: 'metrics_close', monitorId: monitor }));
-      disposed = true;
-      listeners.clear();
-      streams.clear();
-      leases.clear();
-      originals.clear();
-      references.clear();
-      const results = await Promise.allSettled(cleanup);
-      const failures = results
-        .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-        .map((r) => r.reason);
-      if (failures.length) throw new AggregateError(failures, '插件界面资源释放失败');
-    },
-  };
+  async function resume() {
+    check();
+    await pluginsApi.scopeVisibility(input.id, owner, true);
+  }
+  async function dispose() {
+    if (disposed) return;
+    plugins.cancelPrompt(owner);
+    disposed = true;
+    for (const stop of cleanup) stop();
+    await pluginsApi.closeScope(input.id, owner);
+  }
+  return { snapshot, call, suspend, resume, dispose };
 }

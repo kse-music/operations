@@ -7,7 +7,6 @@ import type {
   PluginReply,
   PluginGrantInput,
   PluginGrant,
-  PluginContextInput,
   PluginRequest,
   PluginResponse,
   PluginEvent,
@@ -16,43 +15,58 @@ import type {
 } from '../types/plugins';
 
 export const pluginsApi = {
-  toolAbortInput(id: string, inputId: string): Promise<void> {
+  inventory(): Promise<import('../types/plugins').PluginInventory> {
     ensureDesktop();
-    return invoke('plugin_tool_abort_input', { id, inputId });
+    return invoke('plugin_inventory');
   },
-  toolStage(
+  reinstallBundled(
     id: string,
-    input: {
-      operation: import('../types/plugins').PluginToolOperation;
-      args: Record<string, unknown>;
-    },
-  ): Promise<import('../types/plugins').PluginToolTicket> {
+    expectedRecordDigest: string,
+    confirmed: boolean,
+  ): Promise<InstalledPlugin> {
     ensureDesktop();
-    return invoke('plugin_tool_stage', { id, input });
+    return invoke('plugin_reinstall_bundled', { id, expectedRecordDigest, confirmed });
   },
-  toolCancelRequest(id: string, request: string): Promise<void> {
-    ensureDesktop();
-    return invoke('plugin_tool_cancel_request', { id, request });
-  },
-  terminalOpen(
+  platformTerminalOpen(
     id: string,
+    owner: string,
     ticket: string,
     expectedHost: string,
-    expected: import('../types/ops').ContainerShell,
     size: import('../types/terminal').TerminalSize,
     receive: (event: import('../types/terminal').TerminalEvent) => void,
   ): Promise<import('../types/terminal').TerminalSession> {
     ensureDesktop();
     const events = new Channel<import('../types/terminal').TerminalEvent>();
     events.onmessage = receive;
-    return invoke('plugin_terminal_open', {
+    return invoke('plugin_platform_terminal_open', {
       id,
+      owner,
       ticket,
       expectedHost,
-      expected: { id: expected.id, bash: expected.bash, confirmed: true },
       size,
       events,
     });
+  },
+  continue(
+    id: string,
+    continuation: string,
+    owner = 'default',
+    cancelled = false,
+  ): Promise<PluginReply> {
+    ensureDesktop();
+    return invoke('plugin_continue', { id, owner, continuation, cancelled });
+  },
+  cancelScope(id: string, owner: string): Promise<void> {
+    ensureDesktop();
+    return invoke('plugin_cancel_scope', { id, owner });
+  },
+  closeScope(id: string, owner: string): Promise<void> {
+    ensureDesktop();
+    return invoke('plugin_close_scope', { id, owner });
+  },
+  scopeVisibility(id: string, owner: string, visible: boolean): Promise<void> {
+    ensureDesktop();
+    return invoke('plugin_scope_visibility', { id, owner, visible });
   },
   previewInfo(path: string): Promise<PluginPackagePreview> {
     ensureDesktop();
@@ -82,9 +96,9 @@ export const pluginsApi = {
     ensureDesktop();
     return invoke('plugin_revoke', { id });
   },
-  context(id: string, input: PluginContextInput | null): Promise<void> {
+  reset(id: string): Promise<void> {
     ensureDesktop();
-    return invoke('plugin_context', { id, input });
+    return invoke('plugin_reset', { id });
   },
   approve(id: string, confirmed: boolean): Promise<void> {
     ensureDesktop();
@@ -94,9 +108,9 @@ export const pluginsApi = {
     ensureDesktop();
     return invoke('plugin_events');
   },
-  capability(id: string, request: PluginRequest): Promise<PluginResponse> {
+  capability(id: string, request: PluginRequest, owner = 'default'): Promise<PluginResponse> {
     ensureDesktop();
-    return invoke('plugin_capability', { id, request });
+    return invoke('plugin_capability', { id, owner, request });
   },
   statuses(): Promise<PluginRuntimeStatus[]> {
     ensureDesktop();
@@ -106,9 +120,9 @@ export const pluginsApi = {
     ensureDesktop();
     return invoke('plugin_activate', { id });
   },
-  call(id: string, payload: unknown): Promise<PluginReply> {
+  call(id: string, payload: unknown, owner = 'default'): Promise<PluginReply> {
     ensureDesktop();
-    return invoke('plugin_call', { id, payload });
+    return invoke('plugin_call', { id, owner, payload });
   },
   health(id: string): Promise<PluginReply> {
     ensureDesktop();

@@ -1,36 +1,15 @@
-use super::state::{self, Call, Document, Log, Pending, failure};
-use super::*;
-use serde_json::{Value, json};
-use serverdeck_core::{
-    files::SaveText,
-    ops::{LogEvent, LogInput, LogSource},
+use super::{
+    state::{Call, Pending, failure},
+    *,
 };
+use serde_json::Value;
 use serverdeck_plugin_core::{
+    InstalledPlugin,
     package::digest,
     permissions::{Grant, GrantInput, denied},
-    repository::PluginSource,
 };
-use serverdeck_plugin_sdk::{ApiError, Capability, Request, Response, server::Query};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-
-fn requires_confirmation(source: &PluginSource, plugin_id: &str, operation: &Capability) -> bool {
-    operation.needs_confirmation()
-        && !(matches!(
-            operation,
-            Capability::ContainerShell { .. }
-                | Capability::SystemQuery {
-                    request: Query::ContainerDetails {
-                        reveal_env: true,
-                        ..
-                    },
-                }
-        ) && *source == PluginSource::System
-            && plugin_id == "cn.hiboot.plugins.docker")
-}
-
+use serverdeck_plugin_sdk::{ApiError, Capability, Request, Response};
+use std::time::{Duration, Instant};
 impl Application {
     pub async fn plugin_grant(&self, id: String, input: GrantInput) -> Result<Grant, Error> {
         if self.plugin_detail(id.clone()).await?.source
@@ -43,7 +22,7 @@ impl Application {
         let grant = self
             .blocking(move |_| repository.set_grant(&id, input))
             .await?;
-        self.plugin_host.resume(&grant.plugin_id, None)?;
+        self.plugin_host.resume(&grant.plugin_id)?;
         Ok(grant)
     }
     pub async fn plugin_permissions(&self, id: String) -> Result<Option<Grant>, Error> {
@@ -61,35 +40,6 @@ impl Application {
         self.plugin_stop_resources(&id).await?;
         let repository = self.plugins.clone();
         self.blocking(move |_| repository.revoke_grant(&id)).await
-    }
-    pub async fn plugin_context(&self, id: String, input: ContextInput) -> Result<(), Error> {
-        self.plugin_detail(id.clone()).await?;
-        self.plugin_stop_resources(&id).await?;
-        let host_id = input.host_id.clone();
-        let engine = self.terminals.clone();
-        let profile = self
-            .blocking(move |db| {
-                db.host(&host_id)?;
-                engine.profile_signature(&host_id)
-            })
-            .await?;
-        for (session, operations) in [(&input.ops_session, true), (&input.file_session, false)] {
-            if let Some(session) = session {
-                let info = self.terminals.session_info(session)?;
-                let connections = if operations {
-                    self.terminals.ops_connections()?
-                } else {
-                    self.terminals.file_connections()?
-                };
-                if info.host_id != input.host_id
-                    || !connections.iter().any(|c| &c.id == session)
-                    || self.terminals.lease_profile(session)? != profile
-                {
-                    return Err(denied());
-                }
-            }
-        }
-        self.plugin_host.resume(&id, Some((input, profile)))
     }
     pub fn plugin_events(&self) -> Result<Vec<Event>, Error> {
         Ok(self.plugin_host.lock()?.events.iter().cloned().collect())
@@ -115,11 +65,19 @@ impl Application {
         Ok(())
     }
     pub async fn plugin_capability(&self, id: &str, request: Request) -> Result<Response, Error> {
+        self.plugin_capability_scoped(id, "default", request).await
+    }
+    pub async fn plugin_capability_scoped(
+        &self,
+        id: &str,
+        owner: &str,
+        request: Request,
+    ) -> Result<Response, Error> {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
         self.plugin_detail(id.to_owned()).await?;
-        let call = self.plugin_host.start(id)?;
+        let call = self.plugin_host.start_scoped(id, owner)?;
         self.plugin_dispatch(&call, request).await
     }
     pub(super) async fn plugin_dispatch(
@@ -192,274 +150,11 @@ impl Application {
             ));
         }
         self.plugin_host.verify(call)?;
-        let recheck = request.operation.clone();
+
         let (plugin, grant) = self.plugin_authorize(call, &request.operation).await?;
-        match &request.operation {
-            Capability::SystemQuery { request } => {
-                super::server::core_query(request)?.command()?;
-                self.plugin_ops_session(call)?;
-            }
-            Capability::ContainerShell { id, bash } => {
-                serverdeck_core::ops::ContainerShell {
-                    id: id.clone(),
-                    bash: *bash,
-                    confirmed: true,
-                }
-                .command()?;
-                self.plugin_ops_session(call)?;
-            }
-            Capability::Execute {
-                command,
-                timeout_secs,
-            } => {
-                validate_command(command, *timeout_secs)?;
-                self.plugin_ops_session(call)?;
-            }
-            Capability::SaveFile {
-                document_id,
-                content,
-            } => {
-                if content.len() > 32 * 1024 {
-                    return Err(failure("PLUGIN_FILE_LIMIT", "插件文本保存超过 32 KiB"));
-                }
-                let (_, path) = self.plugin_document(call, document_id)?;
-                grant.path(&path, true)?;
-                self.plugin_file_session(call)?;
-            }
-            _ => (),
-        }
-        if requires_confirmation(&plugin.source, &plugin.manifest.id, &request.operation)
-            && let Some(approval) = self.plugin_confirmation(call, &plugin, &request.operation)?
-        {
-            return Ok(json!({"confirmationRequired":approval}));
-        }
-        let value = match request.operation {
-            Capability::ToolInvoke {
-                input_id,
-                operation,
-            } => {
-                self.plugin_tool_invoke(call, &plugin, &input_id, operation)
-                    .await?
-            }
-            Capability::HostsRead => {
-                let host_id = context(call)?.input.host_id.clone();
-                self.blocking(move |db| { let host=db.host(&host_id)?; Ok(json!({"id":host.id,"name":host.config.name,"hostname":host.config.hostname,"port":host.config.port,"username":host.config.username})) }).await?
-            }
-            Capability::Execute {
-                command,
-                timeout_secs,
-            } => self.plugin_execute(call, command, timeout_secs).await?,
-            Capability::ReadFile { path } => {
-                let session = self.plugin_file_session(call)?;
-                let path = self.files.canonical_path(&session, &path).await?;
-                grant.path(&path, false)?;
-                self.plugin_host.verify(call)?;
-                let properties = self.files.properties(&session, &path).await?;
-                if properties.size.is_none_or(|n| n > 32 * 1024) {
-                    return Err(failure(
-                        "PLUGIN_FILE_LIMIT",
-                        "插件只可读取不超过 32 KiB 的文本文件",
-                    ));
-                }
-                if self.plugin_host.lock()?.documents.len() >= 8 {
-                    return Err(Error::Busy);
-                }
-                let document = self.files.read_text(&session, &path).await?;
-                let id = uuid::Uuid::new_v4().to_string();
-                let public = json!({"id":id,"path":document.path,"content":document.content,"sha256":document.sha256,"atomicSave":document.atomic_save,"permissions":document.permissions});
-                if call.cancel.is_cancelled()
-                    || serde_json::to_vec(&public)
-                        .map_err(|e| Error::Worker(Box::new(e)))?
-                        .len()
-                        > 60 * 1024
-                {
-                    self.files.close_editor(&document.token, true)?;
-                    return Err(failure(
-                        "PLUGIN_FILE_LIMIT",
-                        "插件读取已取消或文本超出消息配额",
-                    ));
-                }
-                self.plugin_host.lock()?.documents.insert(
-                    id,
-                    Document {
-                        plugin: call.id.clone(),
-                        generation: call.generation.clone(),
-                        internal_token: document.token,
-                        path,
-                    },
-                );
-                public
-            }
-            Capability::SaveFile {
-                document_id,
-                content,
-            } => {
-                if content.len() > 32 * 1024 {
-                    return Err(failure("PLUGIN_FILE_LIMIT", "插件文本保存超过 32 KiB"));
-                }
-                self.plugin_file_session(call)?;
-                let (token, path) = self.plugin_document(call, &document_id)?;
-                grant.path(&path, true)?;
-                // Once the confirmed atomic editor transaction starts, drain it instead of dropping a write future.
-                let result = self
-                    .files
-                    .save_text(SaveText {
-                        token,
-                        content,
-                        confirm_replace: true,
-                    })
-                    .await?;
-                if call.cancel.is_cancelled() {
-                    return Err(failure(
-                        "PLUGIN_SAVE_CANCELLED",
-                        "插件已停止；已开始的保存已安全收尾，请重新读取文件核对结果",
-                    ));
-                }
-                if let Some(document) = result.document {
-                    json!({"saved":true,"document":{"id":document_id,"path":document.path,"sha256":document.sha256,"atomicSave":document.atomic_save,"permissions":document.permissions},"recoveryPath":null,"message":null})
-                } else {
-                    json!({"saved":false,"document":null,"recoveryPath":result.recovery_path,"message":result.message})
-                }
-            }
-            Capability::CloseFile {
-                document_id,
-                discard,
-            } => {
-                let (token, _) = self.plugin_document(call, &document_id)?;
-                self.files.close_editor(&token, discard)?;
-                self.plugin_host.lock()?.documents.remove(&document_id);
-                Value::Null
-            }
-            Capability::FileDirty { document_id, dirty } => {
-                let (token, path) = self.plugin_document(call, &document_id)?;
-                grant.path(&path, true)?;
-                self.files.editor_dirty(&token, dirty)?;
-                Value::Null
-            }
-            Capability::SettingsRead => {
-                let repo = self.plugins.clone();
-                let id = call.id.clone();
-                self.blocking(move |_| repo.settings_read(&id)).await?
-            }
-            Capability::SettingsWrite { value } => {
-                let repo = self.plugins.clone();
-                let id = call.id.clone();
-                if super::review::builtin_assistant(&plugin) {
-                    let previous = self
-                        .blocking({
-                            let repo = repo.clone();
-                            let id = id.clone();
-                            move |_| repo.settings_read(&id)
-                        })
-                        .await?;
-                    let model_id = super::tools::assistant_model_id(&value)?.map(str::to_owned);
-                    if let Some(model_id) = model_id {
-                        self.blocking(move |db| {
-                            if let Some(provider) = serverdeck_core::ai::local_provider(&model_id) {
-                                if !db.ai_local_consent(provider)?.authorized {
-                                    return Err(Error::Validation("请先授权使用所选本地智能体"));
-                                }
-                                Ok(())
-                            } else {
-                                db.ai_model(&model_id).map(|_| ())
-                            }
-                        })
-                        .await?;
-                    }
-                    if previous.get("modelId") != value.get("modelId") {
-                        self.plugin_cancel_tool_requests(&id)?;
-                    }
-                }
-                self.blocking(move |_| repo.settings_write(&id, &value))
-                    .await?;
-                Value::Null
-            }
-            Capability::Notify { message } => {
-                if message.is_empty() || message.len() > 1024 {
-                    return Err(Error::Validation("插件通知须为 1–1024 字节"));
-                }
-                self.plugin_host.event(Event {
-                    plugin_id: call.id.clone(),
-                    kind: "notification".into(),
-                    operation: "ui.notify".into(),
-                    message,
-                })?;
-                Value::Null
-            }
-            Capability::LogStart { path, lines } => {
-                if !(1..=200).contains(&lines) {
-                    return Err(Error::Validation("插件日志行数须为 1–200"));
-                }
-                let file_session = self.plugin_file_session(call)?;
-                let path = self.files.canonical_path(&file_session, &path).await?;
-                grant.path(&path, false)?;
-                let session = self.plugin_ops_session(call)?;
-                {
-                    let data = self.plugin_host.lock()?;
-                    if data.logs.len() >= 8
-                        || data.logs.values().filter(|l| l.plugin == call.id).count() >= 2
-                    {
-                        return Err(Error::Busy);
-                    }
-                }
-                let (sender, receiver) = tokio::sync::mpsc::channel(8);
-                let log=self.operations_host.log_open(&session,LogInput {source:LogSource::File {path:path.clone()},lines,follow:true},Arc::new(move|event|{
-                    let value=match event {
-                        LogEvent::State {state,code,message}=>json!({"type":"state","state":state,"code":code,"message":message}),
-                        LogEvent::Data {sequence,stream,data,at}=> {use base64::Engine as _;json!({"type":"data","sequence":sequence,"stream":stream,"dataBase64":base64::engine::general_purpose::STANDARD.encode(data),"at":at})}
-                    }; sender.try_send(value).is_ok()
-                }))?;
-                self.plugin_host.lock()?.logs.insert(
-                    log.id.clone(),
-                    Log {
-                        plugin: call.id.clone(),
-                        generation: call.generation.clone(),
-                        path,
-                        receiver,
-                    },
-                );
-                json!({"id":log.id})
-            }
-            Capability::LogPoll { log_id } => {
-                self.plugin_ops_session(call)?;
-                let mut values = Vec::new();
-                {
-                    let mut data = self.plugin_host.lock()?;
-                    let log = data.logs.get_mut(&log_id).ok_or(Error::NotFound)?;
-                    if log.plugin != call.id || log.generation != call.generation {
-                        return Err(denied());
-                    }
-                    grant.path(&log.path, false)?;
-                    while let Ok(value) = log.receiver.try_recv() {
-                        values.push(value);
-                    }
-                }
-                for value in &values {
-                    if let Some(sequence) = value["sequence"].as_u64() {
-                        self.operations_host.log_ack(&log_id, sequence)?;
-                    }
-                }
-                json!({"events":values})
-            }
-            Capability::LogPause { log_id, paused } => {
-                self.plugin_log_owner(call, &log_id, &grant)?;
-                self.operations_host.log_pause(&log_id, paused)?;
-                Value::Null
-            }
-            Capability::LogStop { log_id } => {
-                self.plugin_log_owner(call, &log_id, &grant)?;
-                self.operations_host.log_close(&log_id).await?;
-                self.plugin_host.lock()?.logs.remove(&log_id);
-                Value::Null
-            }
-            operation => {
-                self.plugin_server_capability(call, operation, &plugin, &grant)
-                    .await?
-            }
-        };
-        self.plugin_host.verify(call)?;
-        self.plugin_authorize(call, &recheck).await?;
-        Ok(value)
+        let Capability::Platform { request, bindings } = request.operation;
+        self.plugin_platform_capability(call, &plugin, &grant, request, bindings)
+            .await
     }
     pub(super) async fn plugin_authorize(
         &self,
@@ -469,76 +164,77 @@ impl Application {
         self.plugin_host.verify(call)?;
         let repo = self.plugins.clone();
         let id = call.id.clone();
-        let host = call.context.as_ref().map(|c| c.input.host_id.clone());
-        let context = call.context.clone();
         let operation = operation.clone();
-        let engine = self.terminals.clone();
         self.blocking(move |_| {
             let plugin = repo.detail(&id)?;
             let grant = repo.grant(&id)?.ok_or_else(denied)?;
-            grant.authorize(&plugin, host.as_deref(), &operation)?;
-            if operation.uses_host() {
-                let context = context.ok_or_else(denied)?;
-                if engine.profile_signature(&context.input.host_id)? != context.profile {
-                    return Err(Error::Conflict);
-                }
-            }
+            grant.authorize(&plugin, &operation)?;
             Ok((plugin, grant))
         })
         .await
     }
-    pub(super) fn plugin_confirmation(
+    pub(super) fn plugin_confirmation_bound(
         &self,
         call: &Call,
         plugin: &InstalledPlugin,
         operation: &Capability,
+        binding: Option<&str>,
+        target: Option<&str>,
     ) -> Result<Option<Approval>, Error> {
-        let bytes = serde_json::to_vec(&(
-            plugin.revision.as_str(),
-            call.generation.as_str(),
-            operation,
-        ))
-        .map_err(|e| Error::Worker(Box::new(e)))?;
-        let hash = digest(&bytes);
+        if !operation.needs_confirmation() {
+            return Ok(None);
+        }
+        let hash = digest(
+            &serde_json::to_vec(&(
+                plugin.revision.as_str(),
+                call.generation.as_str(),
+                call.owner.as_str(),
+                operation,
+                binding,
+            ))
+            .map_err(|e| Error::Worker(Box::new(e)))?,
+        );
         let mut data = self.plugin_host.lock()?;
         data.approvals
-            .retain(|_, p| p.at.elapsed() <= Duration::from_secs(60));
-        if let Some((id, pending)) = data.approvals.iter().find(|(_, p)| {
-            p.digest == hash && p.generation == call.generation && p.revision == plugin.revision
-        }) {
-            if pending.approved {
-                let id = id.clone();
-                data.approvals.remove(&id);
-                return Ok(None);
-            }
-            return Ok(Some(pending.public.clone()));
+            .retain(|_, pending| pending.at.elapsed() <= Duration::from_secs(60));
+        if let Some(key) = data
+            .approvals
+            .iter()
+            .find(|(_, pending)| pending.digest == hash && pending.approved)
+            .map(|(key, _)| key.clone())
+        {
+            data.approvals.remove(&key);
+            return Ok(None);
         }
-        if data.approvals.len() >= 32
+        if data.approvals.len() >= 16
             || data
                 .approvals
                 .values()
-                .filter(|p| p.public.plugin_id == call.id)
+                .filter(|pending| pending.public.plugin_id == call.id)
                 .count()
                 >= 4
         {
             return Err(Error::Busy);
         }
-        let description = match operation {
-            Capability::SystemQuery { request } => format!(
-                "服务器操作：{}",
-                serde_json::to_string(request).map_err(|e| Error::Worker(Box::new(e)))?
-            ),
-            Capability::ContainerShell { id, bash } => format!(
-                "打开容器 {id} 的 {} 终端",
-                if *bash { "bash" } else { "sh" }
-            ),
-            Capability::Execute { command, .. } => command.clone(),
-            Capability::SaveFile {
+        let Capability::Platform { request, .. } = operation;
+        let description = match request {
+            serverdeck_plugin_sdk::platform::Request::Execute { command, .. }
+            | serverdeck_plugin_sdk::platform::Request::StreamOpen { command, .. }
+            | serverdeck_plugin_sdk::platform::Request::Terminal { command, .. } => command
+                .shell()
+                .map_err(|_| Error::Validation("远程命令参数无效"))?,
+            serverdeck_plugin_sdk::platform::Request::TcpConnect { target, port } => {
+                format!("从本机建立 TCP 连接：{target}:{port}（超时 3 秒）")
+            }
+            serverdeck_plugin_sdk::platform::Request::SaveFile {
                 document_id,
                 content,
             } => {
                 let doc = data.documents.get(document_id).ok_or(Error::NotFound)?;
-                if doc.plugin != call.id || doc.generation != call.generation {
+                if doc.plugin != call.id
+                    || doc.generation != call.generation
+                    || doc.owner != call.owner
+                {
                     return Err(denied());
                 }
                 format!(
@@ -550,186 +246,92 @@ impl Application {
             }
             _ => return Ok(None),
         };
+        let host_id = match request {
+            serverdeck_plugin_sdk::platform::Request::SaveFile { document_id, .. } => data
+                .documents
+                .get(document_id)
+                .map(|doc| doc.host.clone())
+                .unwrap_or_default(),
+            _ => request.host().map(str::to_owned).unwrap_or_default(),
+        };
+        let description = if let Some(target) = target {
+            format!("目标：{target}\n{description}")
+        } else {
+            description
+        };
         let public = Approval {
             id: uuid::Uuid::new_v4().to_string(),
             plugin_id: call.id.clone(),
             plugin_name: plugin.manifest.name.clone(),
             plugin_version: plugin.manifest.version.clone(),
-            host_id: context(call)?.input.host_id.clone(),
+            host_id,
             operation: operation.operation().into(),
             description,
-            image_id: match operation {
-                Capability::SystemQuery {
-                    request: serverdeck_plugin_sdk::server::Query::ImageRemove { id },
-                } => Some(id.clone()),
-                _ => None,
-            },
         };
         data.approvals.insert(
             public.id.clone(),
             Pending {
+                owner: call.owner.clone(),
                 public: public.clone(),
                 digest: hash,
-                generation: call.generation.clone(),
-                revision: plugin.revision.clone(),
                 at: Instant::now(),
                 approved: false,
             },
         );
         Ok(Some(public))
     }
-    pub(super) fn plugin_ops_session(&self, call: &Call) -> Result<String, Error> {
-        let ctx = context(call)?;
-        let id = ctx
-            .input
-            .ops_session
-            .as_ref()
-            .ok_or_else(|| failure("PLUGIN_SESSION_CLOSED", "当前主机没有已验证的运维连接"))?;
-        let ready = match self.terminals.ops_ready(id) {
-            Err(Error::NotFound) => {
-                return Err(failure("PLUGIN_SESSION_CLOSED", "插件绑定的运维连接已关闭"));
-            }
-            other => other?,
-        };
-        if !ready
-            || self.terminals.session_info(id)?.host_id != ctx.input.host_id
-            || self.terminals.lease_profile(id)? != ctx.profile
-        {
-            return Err(denied());
-        }
-        Ok(id.clone())
-    }
-    pub(super) fn plugin_file_session(&self, call: &Call) -> Result<String, Error> {
-        let ctx = context(call)?;
-        let id =
-            ctx.input.file_session.as_ref().ok_or_else(|| {
-                failure("PLUGIN_SESSION_CLOSED", "当前主机没有已验证的 SFTP 连接")
-            })?;
-        if !self
-            .terminals
-            .file_connections()?
-            .iter()
-            .any(|s| &s.id == id && s.host_id == ctx.input.host_id)
-        {
-            return Err(failure(
-                "PLUGIN_SESSION_CLOSED",
-                "插件绑定的 SFTP 连接已关闭",
-            ));
-        }
-        if self.terminals.lease_profile(id)? != ctx.profile {
-            return Err(denied());
-        }
-        Ok(id.clone())
-    }
-    fn plugin_document(&self, call: &Call, id: &str) -> Result<(String, String), Error> {
-        let data = self.plugin_host.lock()?;
-        let d = data.documents.get(id).ok_or(Error::NotFound)?;
-        if d.plugin != call.id || d.generation != call.generation {
-            return Err(denied());
-        }
-        Ok((d.internal_token.clone(), d.path.clone()))
-    }
-    fn plugin_log_owner(&self, call: &Call, id: &str, grant: &Grant) -> Result<(), Error> {
-        let data = self.plugin_host.lock()?;
-        let log = data.logs.get(id).ok_or(Error::NotFound)?;
-        if log.plugin != call.id || log.generation != call.generation {
-            return Err(denied());
-        }
-        grant.path(&log.path, false)
-    }
-    async fn plugin_execute(
-        &self,
-        call: &Call,
-        command: String,
-        timeout_secs: u16,
-    ) -> Result<Value, Error> {
-        validate_command(&command, timeout_secs)?;
-        let session = self.plugin_ops_session(call)?;
-        let cancel = call.cancel.child_token();
-        let slot = self.tasks.command_slot(&cancel).await?;
-        let mut stdout = String::new();
-        let mut stderr = String::new();
-        let mut truncated = false;
-        let outcome = self
-            .tasks
-            .execute_command(
-                &session,
-                &command,
-                timeout_secs,
-                &cancel,
-                slot,
-                |chunk, error| {
-                    let target = if error { &mut stderr } else { &mut stdout };
-                    let remaining = 4096_usize.saturating_sub(target.len());
-                    let part = prefix(chunk, remaining);
-                    target.push_str(part);
-                    if part.len() != chunk.len() {
-                        truncated = true;
-                        cancel.cancel();
-                    }
-                },
-            )
-            .await;
-        Ok(
-            json!({"state":outcome.state,"exitCode":outcome.code,"message":outcome.message,"stdout":stdout,"stderr":stderr,"truncated":truncated}),
-        )
-    }
     pub(crate) async fn plugin_stop_resources(&self, id: &str) -> Result<(), Error> {
-        self.plugin_cancel_tool_requests(id)?;
         self.plugin_host.stop(id).await?;
-        // Drain may finish creating an AI preview after the initial revocation.
-        self.plugin_cancel_tool_requests(id)?;
-        let monitors = {
+        let (documents, streams, terminals) = {
             let mut data = self.plugin_host.lock()?;
-            let keys: Vec<_> = data
-                .monitors
-                .iter()
-                .filter(|(_, m)| m.plugin == id)
-                .map(|(key, _)| key.clone())
-                .collect();
-            let monitors: Vec<_> = keys
-                .iter()
-                .filter_map(|key| data.monitors.remove(key))
-                .collect();
-            data.results.retain(|_, result| result.plugin != id);
-            data.shells.retain(|_, ticket| ticket.plugin != id);
-            monitors
-        };
-        for monitor in monitors {
-            monitor.backend.shutdown().await;
-        }
-        let (documents, logs) = {
-            let mut data = self.plugin_host.lock()?;
-            let docs = data
-                .documents
-                .iter()
-                .filter(|(_, d)| d.plugin == id)
-                .map(|(k, d)| (k.clone(), d.internal_token.clone()))
-                .collect::<Vec<_>>();
-            let logs = data
-                .logs
-                .iter()
-                .filter(|(_, l)| l.plugin == id)
-                .map(|(k, _)| k.clone())
-                .collect::<Vec<_>>();
-            for (key, _) in &docs {
-                data.documents.remove(key);
-            }
-            for key in &logs {
-                data.logs.remove(key);
-            }
+            data.continuations.retain(|_, p| p.plugin != id);
             data.approvals.retain(|_, p| p.public.plugin_id != id);
-            (docs, logs)
+            data.results.retain(|_, r| r.plugin != id);
+            data.outputs.retain(|_, r| r.plugin != id);
+            data.bindings.retain(|_, r| r.plugin != id);
+            data.platform_terminals.retain(|_, r| r.plugin != id);
+            data.visible_owners.retain(|(plugin, _), _| plugin != id);
+            (
+                data.documents
+                    .iter()
+                    .filter(|(_, r)| r.plugin == id)
+                    .map(|(key, r)| (key.clone(), r.internal_token.clone()))
+                    .collect::<Vec<_>>(),
+                data.logs
+                    .iter()
+                    .filter(|(_, r)| r.plugin == id)
+                    .map(|(key, _)| key.clone())
+                    .collect::<Vec<_>>(),
+                data.open_terminals
+                    .iter()
+                    .filter(|(_, r)| r.plugin == id)
+                    .map(|(key, _)| key.clone())
+                    .collect::<Vec<_>>(),
+            )
         };
-        let mut errors = Vec::new();
-        for (_, token) in documents {
-            if let Err(e) = self.files.close_editor(&token, true) {
-                errors.push(e);
+        let mut errors = vec![];
+        for (key, token) in documents {
+            match self.files.close_editor(&token, true) {
+                Ok(()) => {
+                    self.plugin_host.lock()?.documents.remove(&key);
+                }
+                Err(error) => errors.push(error),
             }
         }
-        for log in logs {
-            if let Err(e) = self.operations_host.log_close(&log).await {
-                errors.push(e);
+        for key in streams {
+            match self.operations_host.log_close(&key).await {
+                Ok(()) => {
+                    self.plugin_host.lock()?.logs.remove(&key);
+                }
+                Err(error) => errors.push(error),
+            }
+        }
+        for key in terminals {
+            match self.terminals.close(&key).await {
+                Ok(()) => {
+                    self.plugin_host.lock()?.open_terminals.remove(&key);
+                }
+                Err(error) => errors.push(error),
             }
         }
         if errors.is_empty() {
@@ -743,28 +345,6 @@ impl Application {
         }
     }
 }
-fn context(call: &Call) -> Result<&state::Context, Error> {
-    call.context
-        .as_ref()
-        .ok_or_else(|| failure("PLUGIN_CONTEXT_REQUIRED", "请先选择并绑定插件工作区主机"))
-}
-fn validate_command(command: &str, seconds: u16) -> Result<(), Error> {
-    if command.is_empty()
-        || command.len() > 8192
-        || command.contains('\0')
-        || !(1..=30).contains(&seconds)
-    {
-        return Err(Error::Validation("插件命令须为 1–8192 字节，超时 1–30 秒"));
-    }
-    Ok(())
-}
-fn prefix(value: &str, limit: usize) -> &str {
-    let mut end = value.len().min(limit);
-    while !value.is_char_boundary(end) {
-        end -= 1;
-    }
-    &value[..end]
-}
 #[derive(Debug)]
 struct CleanupErrors(Vec<Error>);
 impl std::fmt::Display for CleanupErrors {
@@ -774,81 +354,6 @@ impl std::fmt::Display for CleanupErrors {
 }
 impl std::error::Error for CleanupErrors {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.0.first().map(|e| e as &dyn std::error::Error)
-    }
-}
-
-#[cfg(test)]
-mod confirmation_policy_tests {
-    use super::*;
-
-    #[test]
-    fn direct_shell_is_limited_to_the_builtin_docker_identity() {
-        let shell = Capability::ContainerShell {
-            id: "a".repeat(64),
-            bash: false,
-        };
-        assert!(!requires_confirmation(
-            &PluginSource::System,
-            "cn.hiboot.plugins.docker",
-            &shell
-        ));
-        assert!(requires_confirmation(
-            &PluginSource::User,
-            "cn.hiboot.plugins.docker",
-            &shell
-        ));
-        assert!(requires_confirmation(
-            &PluginSource::System,
-            "dev.other-system-plugin",
-            &shell
-        ));
-        let write = Capability::SaveFile {
-            document_id: "owned".into(),
-            content: "changed".into(),
-        };
-        assert!(requires_confirmation(
-            &PluginSource::System,
-            "cn.hiboot.plugins.docker",
-            &write
-        ));
-    }
-
-    #[test]
-    fn direct_environment_reads_keep_the_manage_permission_and_require_builtin_docker() {
-        let read = Capability::SystemQuery {
-            request: Query::ContainerDetails {
-                id: "a".repeat(64),
-                reveal_env: true,
-            },
-        };
-        assert_eq!(
-            read.permission(),
-            serverdeck_plugin_sdk::Permission::SystemManage
-        );
-        assert_eq!(read.operation(), "system.manage");
-        assert!(!requires_confirmation(
-            &PluginSource::System,
-            "cn.hiboot.plugins.docker",
-            &read
-        ));
-        assert!(requires_confirmation(
-            &PluginSource::User,
-            "cn.hiboot.plugins.docker",
-            &read
-        ));
-        assert!(requires_confirmation(
-            &PluginSource::System,
-            "dev.other-system-plugin",
-            &read
-        ));
-        let delete = Capability::SystemQuery {
-            request: Query::ImageRemove { id: "a".repeat(64) },
-        };
-        assert!(requires_confirmation(
-            &PluginSource::System,
-            "cn.hiboot.plugins.docker",
-            &delete
-        ));
+        self.0.first().map(|error| error as &dyn std::error::Error)
     }
 }

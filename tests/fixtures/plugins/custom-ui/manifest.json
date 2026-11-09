@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ServerDeck QA",
   "description": "Generic package-owned UI and Wasm fixture",
-  "apiVersion": "^4.0.0",
+  "apiVersion": "^5.0.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"

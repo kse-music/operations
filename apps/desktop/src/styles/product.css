@@ -362,6 +362,7 @@ kbd {
 .toast > span {
   flex: 1;
   pointer-events: auto;
+  -webkit-user-select: text;
   user-select: text;
   cursor: text;
 }

@@ -227,6 +227,11 @@
   gap: 9px;
   align-items: center;
 }
+.plugin-toggle-button {
+  min-height: 28px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
 .plugin-remove-button {
   border: 0;
   color: var(--muted);
@@ -274,12 +279,16 @@
   }
   .plugin-card-content {
     padding: 16px 12px;
-    grid-template-columns: 36px minmax(0, 1fr) 30px;
+    grid-template-columns: 36px minmax(0, 1fr);
     gap: 10px;
   }
   .plugin-card-content > .plugin-row-icon {
     width: 36px;
     height: 36px;
+  }
+  .plugin-row-actions {
+    grid-column: 2;
+    justify-self: end;
   }
   .plugin-card-footer {
     padding-inline: 12px;
@@ -390,14 +399,14 @@
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
-.assistant-config-body:has(> .plugin-settings-workspace) {
+.plugin-settings-body:has(> .plugin-settings-workspace) {
   overflow: hidden;
 }
-.assistant-config-body .plugin-config-nav {
+.plugin-settings-body .plugin-config-nav {
   gap: 20px;
   padding: 0 24px;
 }
-.assistant-config-body .plugin-config-nav .button {
+.plugin-settings-body .plugin-config-nav .button {
   position: relative;
   padding: 10px 0;
   border: 0;
@@ -405,10 +414,10 @@
   background: transparent;
   color: var(--muted);
 }
-.assistant-config-body .plugin-config-nav .button[aria-pressed='true'] {
+.plugin-settings-body .plugin-config-nav .button[aria-pressed='true'] {
   color: var(--accent);
 }
-.assistant-config-body .plugin-config-nav .button[aria-pressed='true']::after {
+.plugin-settings-body .plugin-config-nav .button[aria-pressed='true']::after {
   content: '';
   position: absolute;
   bottom: -1px;
@@ -479,24 +488,9 @@
   background: var(--panel);
   min-width: 0;
 }
-.plugin-state-section {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
-}
-.plugin-state-section p {
-  margin: 6px 0 0;
-  line-height: 1.6;
-}
 .plugin-settings h2 {
   font-size: var(--font-size-section);
   gap: 7px;
-}
-.plugin-state-section .button {
-  min-height: 28px;
-  font-size: var(--font-size-body);
-  padding: 3px 9px;
 }
 .plugin-permissions-summary {
   display: flex;
@@ -773,10 +767,6 @@
   .plugin-settings-section {
     padding: 16px;
   }
-  .plugin-state-section {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
 }
 .plugin-frame-container {
   display: flex;
@@ -825,5 +815,25 @@
   font-size: var(--font-size-body);
   min-height: 29px;
   background: transparent;
+  color: var(--muted);
+}
+.plugin-problems {
+  margin: 0 0 20px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.plugin-problems h2 {
+  margin-top: 0;
+  font-size: var(--font-size-section);
+}
+.plugin-problem {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+.plugin-problem code {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
   color: var(--muted);
 }

@@ -14,6 +14,17 @@ pub(crate) struct LogControl {
 impl Operations {
     pub fn log_open(&self, id: &str, input: LogInput, sink: LogSink) -> Result<LogSession, Error> {
         let command = input.command()?;
+        self.command_stream(id, command, sink)
+    }
+    pub fn command_stream(
+        &self,
+        id: &str,
+        command: String,
+        sink: LogSink,
+    ) -> Result<LogSession, Error> {
+        if command.is_empty() || command.len() > 64 * 1024 || command.contains('\0') {
+            return Err(Error::Validation("远程流命令无效"));
+        }
         if self.stop.is_cancelled() {
             return Err(Error::ShuttingDown);
         }

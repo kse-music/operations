@@ -4,49 +4,197 @@ impl Application {
     /// Startup-only standard package distribution with fixed system grants.
     /// A tombstone preserves uninstall; existing enable choices remain unchanged.
     pub fn provision_bundled_plugins(&self) -> Result<(), Error> {
+        // Root/DB failures remain fatal; an individual plugin cannot block the host.
+        self.plugins.inventory()?;
+        let mut problems = Vec::new();
         for (id, bytes) in PACKAGES {
             let configured = self.database.bundled_plugin_provisioned(id)?;
-            if !configured {
-                match self.plugins.detail(id) {
-                    Ok(_) => (),
-                    Err(Error::NotFound) => {
-                        self.plugins.install_bundled(bytes, id)?;
-                        self.plugins.set_enabled(id, true)?;
-                    }
-                    Err(error) => return Err(error),
+            match self.provision_bundled_plugin(id, bytes, configured) {
+                Ok(()) => self.database.mark_bundled_plugin_provisioned(id)?,
+                Err(error) => {
+                    let problem = self.plugins.problem(id, error);
+                    tracing::error!(operation="plugin_provision", plugin_id=%problem.id, code=%problem.code, message=%problem.message, "plugin unavailable; application startup continues");
+                    problems.push(problem);
                 }
             }
+        }
+        *self
+            .plugin_startup_problems
+            .lock()
+            .map_err(|_| Error::Busy)? = problems;
+        Ok(())
+    }
+    fn provision_bundled_plugin(
+        &self,
+        id: &str,
+        bytes: &[u8],
+        configured: bool,
+    ) -> Result<(), Error> {
+        if !configured {
             match self.plugins.detail(id) {
-                Ok(plugin)
-                    if plugin.source
-                        == serverdeck_plugin_core::repository::PluginSource::System =>
-                {
-                    let plugin = self.plugins.install_bundled(bytes, id)?;
-                    let grant = bundled_grant(&plugin)?;
-                    if self
-                        .plugins
-                        .grant(id)?
-                        .is_none_or(|current| current != grant)
-                    {
-                        self.plugins.set_grant(
-                            id,
-                            serverdeck_plugin_core::permissions::GrantInput {
-                                expected_revision: plugin.revision,
-                                permissions: grant.permissions,
-                                operations: grant.operations,
-                                read_roots: grant.read_roots,
-                                write_roots: grant.write_roots,
-                                confirmed: true,
-                            },
-                        )?;
-                    }
+                Ok(_) => (),
+                Err(Error::NotFound) => {
+                    self.plugins.install_bundled(bytes, id)?;
+                    self.plugins.set_enabled(id, true)?;
                 }
-                Ok(_) | Err(Error::NotFound) => (),
                 Err(error) => return Err(error),
             }
-            self.database.mark_bundled_plugin_provisioned(id)?;
+        }
+        match self.plugins.detail(id) {
+            Ok(plugin)
+                if plugin.source == serverdeck_plugin_core::repository::PluginSource::System =>
+            {
+                let plugin = self.plugins.install_bundled(bytes, id)?;
+                let grant = bundled_grant(&plugin)?;
+                if self
+                    .plugins
+                    .grant(id)?
+                    .is_none_or(|current| current != grant)
+                {
+                    self.plugins.set_grant(
+                        id,
+                        serverdeck_plugin_core::permissions::GrantInput {
+                            expected_revision: plugin.revision,
+                            permissions: grant.permissions,
+                            operations: grant.operations,
+                            read_roots: grant.read_roots,
+                            write_roots: grant.write_roots,
+                            confirmed: true,
+                        },
+                    )?;
+                }
+            }
+            Ok(_) | Err(Error::NotFound) => (),
+            Err(error) => return Err(error),
         }
         Ok(())
+    }
+    pub async fn plugin_reinstall_bundled(
+        &self,
+        id: String,
+        expected_record_digest: String,
+        confirmed: bool,
+    ) -> Result<serverdeck_plugin_core::InstalledPlugin, Error> {
+        if !confirmed {
+            return Err(Error::Validation("重新安装问题插件需要明确确认"));
+        }
+        let bytes = PACKAGES
+            .iter()
+            .find(|(key, _)| *key == id)
+            .map(|(_, bytes)| *bytes)
+            .ok_or(Error::Validation(
+                "此插件没有随应用分发的安装包，请重新上传当前版本",
+            ))?;
+        self.plugin_stop_resources(&id).await?;
+        self.plugin_runtime.remove(&id).await?;
+        let repository = self.plugins.clone();
+        let target = id.clone();
+        let plugin = self
+            .blocking(move |_| {
+                repository.reinstall_bundled(bytes, &target, &expected_record_digest, confirmed)
+            })
+            .await?;
+        let grant = bundled_grant(&plugin)?;
+        let repository = self.plugins.clone();
+        let target = id.clone();
+        self.blocking(move |_| {
+            repository.set_grant(
+                &target,
+                serverdeck_plugin_core::permissions::GrantInput {
+                    expected_revision: grant.revision,
+                    permissions: grant.permissions,
+                    operations: grant.operations,
+                    read_roots: grant.read_roots,
+                    write_roots: grant.write_roots,
+                    confirmed: true,
+                },
+            )
+        })
+        .await?;
+        self.plugin_startup_problems
+            .lock()
+            .map_err(|_| Error::Busy)?
+            .retain(|problem| problem.id != id);
+        Ok(plugin)
+    }
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInventory {
+    pub installed: Vec<serverdeck_plugin_core::InstalledPlugin>,
+    pub problems: Vec<PluginProblem>,
+}
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginProblem {
+    #[serde(flatten)]
+    pub problem: serverdeck_plugin_core::repository::PluginProblem,
+    pub replacement: Option<PluginReplacement>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginReplacement {
+    pub name: String,
+    pub version: String,
+}
+impl Application {
+    pub async fn plugin_inventory(&self) -> Result<PluginInventory, Error> {
+        let repository = self.plugins.clone();
+        let startup = self
+            .plugin_startup_problems
+            .lock()
+            .map_err(|_| Error::Busy)?
+            .clone();
+        self.blocking(move |_| {
+            let mut inventory = repository.inventory()?;
+            let invalid = inventory
+                .problems
+                .iter()
+                .map(|problem| problem.id.clone())
+                .collect::<std::collections::BTreeSet<_>>();
+            for problem in startup {
+                if !inventory
+                    .problems
+                    .iter()
+                    .any(|existing| existing.id == problem.id)
+                {
+                    inventory.problems.push(problem);
+                }
+            }
+            let problems = inventory
+                .problems
+                .into_iter()
+                .map(|problem| {
+                    let replacement =
+                        if problem.record_digest.is_some() && invalid.contains(&problem.id) {
+                            PACKAGES
+                                .iter()
+                                .find(|(id, _)| *id == problem.id)
+                                .map(|(_, bytes)| {
+                                    #[derive(serde::Deserialize)]
+                                    struct Metadata {
+                                        manifest: PluginReplacement,
+                                    }
+                                    let package: Metadata = serde_json::from_slice(bytes)
+                                        .map_err(|error| Error::Worker(Box::new(error)))?;
+                                    Ok::<_, Error>(package.manifest)
+                                })
+                                .transpose()?
+                        } else {
+                            None
+                        };
+                    Ok(PluginProblem {
+                        problem,
+                        replacement,
+                    })
+                })
+                .collect::<Result<Vec<_>, Error>>()?;
+            Ok(PluginInventory {
+                installed: inventory.installed,
+                problems,
+            })
+        })
+        .await
     }
 }
 fn bundled_grant(
@@ -61,13 +209,10 @@ fn bundled_grant(
         .permissions
         .iter()
         .flat_map(|p| match p {
-            Permission::AssistantUse => &["assistant.use"][..],
-            Permission::MetricsRead => &["metrics.read"][..],
-            Permission::SystemRead => &["system.read"],
-            Permission::SystemManage => &["system.manage", "system.shell"],
-            Permission::LogsRead => &["logs.read"],
+            Permission::NetworkConnect => &["network.connect"][..],
+            Permission::ModelsUse => &["models.use"][..],
             Permission::HostsRead => &["hosts.read"],
-            Permission::SshExecute => &["ssh.read_only", "ssh.execute"],
+            Permission::SshExecute => &["ssh.execute"],
             Permission::SftpRead => &["sftp.read"],
             Permission::SftpWrite => &["sftp.write"],
             Permission::UiContribute => &["ui.contribute", "ui.notify"],
@@ -112,6 +257,66 @@ mod tests {
             .find(|(key, _)| *key == id)
             .unwrap()
     }
+    #[tokio::test]
+    async fn old_or_corrupt_plugin_records_do_not_block_startup_and_reinstall_is_explicit() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        app.provision_bundled_plugins().unwrap();
+        let id = "cn.hiboot.plugins.assistant";
+        let record = dir
+            .path()
+            .join("data/plugins/packages")
+            .join(id)
+            .join("record.json");
+        app.plugins
+            .settings_write(id, &json!({"modelId":"preserved-model"}))
+            .unwrap();
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&record).unwrap()).unwrap();
+        raw["current"]["manifest"]["apiVersion"] = json!("^4.0.0");
+        raw["current"]["manifest"]["permissions"] = json!(["assistant.use"]);
+        let original = serde_json::to_vec(&raw).unwrap();
+        std::fs::write(&record, &original).unwrap();
+        let config = app.bootstrap().await.unwrap().config;
+        app.provision_bundled_plugins().unwrap();
+        let inventory = app.plugin_inventory().await.unwrap();
+        assert_eq!(inventory.installed.len(), PACKAGES.len() - 1);
+        assert_eq!(inventory.problems.len(), 1);
+        let issue = &inventory.problems[0];
+        assert_eq!(issue.problem.id, id);
+        assert_eq!(issue.replacement.as_ref().unwrap().name, "AI 运维助手");
+        assert_eq!(std::fs::read(&record).unwrap(), original);
+        assert!(app.plugin_activate(id).await.is_err());
+        assert_eq!(app.bootstrap().await.unwrap().config, config);
+        let token = issue.problem.record_digest.clone().unwrap();
+        assert!(
+            app.plugin_reinstall_bundled(id.into(), token.clone(), false)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&record).unwrap(), original);
+        let installed = app
+            .plugin_reinstall_bundled(id.into(), token, true)
+            .await
+            .unwrap();
+        assert!(!installed.enabled);
+        assert_eq!(installed.manifest.api_version, "^5.0.0");
+        assert!(app.plugin_inventory().await.unwrap().problems.is_empty());
+        assert_eq!(
+            app.plugins.settings_read(id).unwrap()["modelId"],
+            "preserved-model"
+        );
+        let grant = app.plugin_permissions(id.into()).await.unwrap().unwrap();
+        assert_eq!(grant.revision, installed.revision);
+        assert!(
+            !grant
+                .operations
+                .iter()
+                .any(|operation| operation == "assistant.use")
+        );
+        app.shutdown().await;
+    }
 
     #[tokio::test]
     async fn releasing_pages_allows_both_guests_to_run_and_reactivate_without_disabling() {
@@ -131,7 +336,7 @@ mod tests {
                     .count(),
                 1,
             );
-            app.plugin_clear_context((*id).into()).await.unwrap();
+            app.plugin_reset((*id).into()).await.unwrap();
             assert!(app.plugin_detail((*id).into()).await.unwrap().enabled);
             assert!(
                 app.plugin_statuses()
@@ -263,18 +468,12 @@ mod tests {
             let defaults = app.plugin_permissions(id.clone()).await.unwrap().unwrap();
             assert_eq!(defaults.permissions, plugin.manifest.permissions);
             assert_eq!(defaults, bundled_grant(&plugin).unwrap());
-            if !matches!(
-                id.as_str(),
-                "cn.hiboot.plugins.docker" | "cn.hiboot.plugins.assistant"
-            ) {
-                continue;
-            }
             if id.ends_with("docker") {
-                assert!(defaults.operations.contains(&"system.shell".into()));
+                assert!(defaults.operations.contains(&"ssh.execute".into()));
                 assert!(
                     defaults
                         .permissions
-                        .contains(&serverdeck_plugin_core::Permission::LogsRead)
+                        .contains(&serverdeck_plugin_core::Permission::SshExecute)
                 );
             }
             assert!(
@@ -304,33 +503,9 @@ mod tests {
                 )
                 .await
                 .unwrap();
-            if id == "cn.hiboot.plugins.assistant" {
-                assert!(
-                    denied.error.is_none(),
-                    "assistant owns its model binding settings"
-                );
-                assert_eq!(denied.result, json!({}));
-            } else {
-                assert_eq!(denied.error.unwrap().code, "CAPABILITY");
-            }
-            let capability = json!({"kind":"system_query","request":{"kind":"capabilities"}});
-            let host_denied = app
-                .plugin_call(
-                    &id,
-                    json!({"action":"bridge","values":{"request":capability.to_string()}}),
-                )
-                .await
-                .unwrap();
-            assert_eq!(
-                host_denied.error.unwrap().code,
-                if matches!(
-                    ui.pages[0].surface,
-                    Some(serverdeck_plugin_sdk::ui::Surface::Tool { .. })
-                ) {
-                    "CAPABILITY"
-                } else {
-                    "PLUGIN_PERMISSION_DENIED"
-                }
+            assert!(
+                denied.error.is_some(),
+                "unknown business actions must not become platform passthrough"
             );
             assert!(app.plugin_revoke(id.clone()).await.is_err());
             assert_eq!(
@@ -353,7 +528,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .operations
-                .contains(&"system.shell".into())
+                .contains(&"ssh.execute".into())
         );
         assert!(!app.plugins.detail(docker.0).unwrap().enabled);
         let id = docker.0;

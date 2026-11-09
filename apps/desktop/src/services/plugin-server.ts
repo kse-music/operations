@@ -1,9 +1,7 @@
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from './plugins';
 import { actionPayload } from './plugin-ui';
-import type { PluginApproval, PluginCapability, PluginUiPage } from '../types/plugins';
-import { useHostsStore } from '../stores/hosts';
-import { hostDisplayName } from '../types/hosts';
+import type { PluginApproval, PluginUiPage } from '../types/plugins';
 
 interface Queue {
   tail: Promise<unknown>;
@@ -11,6 +9,49 @@ interface Queue {
   last: number;
 }
 const queues = new Map<string, Queue>();
+export async function pluginPlatformRequest<T>(
+  id: string,
+  request: import('@serverdeck/plugin-sdk/types/platform').PlatformRequest,
+  isActive: () => boolean,
+  owner = 'default',
+): Promise<T> {
+  const plugins = usePluginsStore();
+  const version = plugins.contextVersion(id);
+  return queued(id, async () => {
+    if (plugins.contextVersion(id) !== version)
+      throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
+    if (!isActive() && !['stream_stop', 'close_file', 'result_close'].includes(request.kind))
+      throw { code: 'PLUGIN_CANCELLED', message: '插件页面已隐藏' };
+    const operation = { kind: 'platform' as const, request, bindings: [] };
+    const run = () =>
+      pluginsApi.capability(
+        id,
+        { apiVersion: 1, requestId: crypto.randomUUID(), operation },
+        owner,
+      );
+    let reply = await run();
+    if (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
+      const approval = (reply.result as { confirmationRequired: PluginApproval })
+        .confirmationRequired;
+      if (!isActive() || plugins.contextVersion(id) !== version)
+        throw { code: 'PLUGIN_CANCELLED', message: '页面已隐藏或上下文已变化' };
+      const accepted = await plugins.ask(
+        '插件操作需要单独确认',
+        `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
+        undefined,
+        owner,
+      );
+      const confirmed = accepted && isActive() && plugins.contextVersion(id) === version;
+      await pluginsApi.approve(approval.id, confirmed);
+      if (!confirmed) throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
+      reply = await run();
+    }
+    if (reply.error) throw reply.error;
+    if (plugins.contextVersion(id) !== version)
+      throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
+    return (await expanded(id, reply.result, owner)) as T;
+  });
+}
 async function queued<T>(id: string, work: () => Promise<T>): Promise<T> {
   let queue = queues.get(id);
   if (!queue) {
@@ -42,7 +83,7 @@ async function queued<T>(id: string, work: () => Promise<T>): Promise<T> {
   }
 }
 
-async function expanded(id: string, value: unknown): Promise<unknown> {
+async function expanded(id: string, value: unknown, owner = 'default'): Promise<unknown> {
   if (!value || typeof value !== 'object' || !('__pluginResult' in value)) return value;
   const resource = (value as { __pluginResult: { id: string; bytes: number; chunks: number } })
     .__pluginResult;
@@ -52,7 +93,7 @@ async function expanded(id: string, value: unknown): Promise<unknown> {
     resource.id.length > 80 ||
     !Number.isInteger(resource.bytes) ||
     resource.bytes < 1 ||
-    resource.bytes > 4 * 1024 * 1024 ||
+    resource.bytes > 1024 * 1024 ||
     resource.chunks !== Math.ceil(resource.bytes / 32768)
   )
     throw new Error('插件结果描述无效');
@@ -63,11 +104,19 @@ async function expanded(id: string, value: unknown): Promise<unknown> {
   try {
     for (let chunk = 0; chunk < resource.chunks; chunk++) {
       await new Promise((resolve) => setTimeout(resolve, 65));
-      const reply = await pluginsApi.capability(id, {
-        apiVersion: 1,
-        requestId: crypto.randomUUID(),
-        operation: { kind: 'result_read', resultId: resource.id, chunk },
-      });
+      const reply = await pluginsApi.capability(
+        id,
+        {
+          apiVersion: 1,
+          requestId: crypto.randomUUID(),
+          operation: {
+            kind: 'platform',
+            bindings: [],
+            request: { kind: 'result_read', resultId: resource.id, chunk },
+          },
+        },
+        owner,
+      );
       if (reply.error) throw reply.error;
       const data = reply.result as { chunk: number; dataBase64: string };
       if (data.chunk !== chunk || typeof data.dataBase64 !== 'string')
@@ -84,11 +133,19 @@ async function expanded(id: string, value: unknown): Promise<unknown> {
     failure = cause;
   }
   try {
-    const closed = await pluginsApi.capability(id, {
-      apiVersion: 1,
-      requestId: crypto.randomUUID(),
-      operation: { kind: 'result_close', resultId: resource.id },
-    });
+    const closed = await pluginsApi.capability(
+      id,
+      {
+        apiVersion: 1,
+        requestId: crypto.randomUUID(),
+        operation: {
+          kind: 'platform',
+          bindings: [],
+          request: { kind: 'result_close', resultId: resource.id },
+        },
+      },
+      owner,
+    );
     if (
       closed.error &&
       !['PLUGIN_CANCELLED', 'PLUGIN_PERMISSION_DENIED', 'NOT_FOUND'].includes(closed.error.code)
@@ -107,202 +164,44 @@ export async function pluginInvokeRequest<T>(
   id: string,
   page: PluginUiPage,
   action: string,
-  values: import('../types/plugins').PluginValues,
+  values: unknown,
+  isActive: () => boolean = () => true,
+  owner = 'default',
 ): Promise<T> {
   const plugins = usePluginsStore();
   const version = plugins.contextVersion(id);
+  const payload = actionPayload(page, action, values);
   const verify = () => {
     if (plugins.contextVersion(id) !== version)
       throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
   };
   return queued(id, async () => {
     verify();
-    const payload = actionPayload(page, action, values);
-    let reply = await pluginsApi.call(id, payload);
-    if (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
-      const approval = reply.result as PluginApproval;
+    if (!isActive()) throw { code: 'PLUGIN_CANCELLED', message: '插件页面已隐藏或关闭' };
+    let reply = await pluginsApi.call(id, payload, owner);
+    while (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
+      const approval = reply.result as PluginApproval & { continuation: string };
+      if (!isActive() || typeof approval.continuation !== 'string') {
+        if (typeof approval.continuation !== 'string')
+          throw { code: 'PLUGIN_CANCELLED', message: '审批续接无效' };
+        await pluginsApi.approve(approval.id, false);
+        reply = await pluginsApi.continue(id, approval.continuation, owner, true);
+        continue;
+      }
       const accepted = await plugins.ask(
         '插件操作需要单独确认',
         `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
+        undefined,
+        owner,
       );
-      await pluginsApi.approve(approval.id, accepted);
-      if (!accepted) throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
+      const confirmed = accepted && isActive();
+      await pluginsApi.approve(approval.id, confirmed);
       verify();
-      reply = await pluginsApi.call(id, payload);
+      reply = await pluginsApi.continue(id, approval.continuation, owner, !confirmed);
     }
     if (reply.error) throw reply.error;
-    const value = await expanded(id, reply.result);
+    const value = await expanded(id, reply.result, owner);
     verify();
     return value as T;
   });
-}
-
-async function surfaceRequest<T>(
-  id: string,
-  operation: PluginCapability | (() => Promise<PluginCapability>),
-  page?: PluginUiPage,
-  signal?: AbortSignal,
-): Promise<T> {
-  const plugins = usePluginsStore();
-  const version = plugins.contextVersion(id);
-  const verifyContext = () => {
-    if (signal?.aborted) throw new DOMException('已停止', 'AbortError');
-    if (plugins.contextVersion(id) !== version)
-      throw { code: 'PLUGIN_CANCELLED', message: '插件主机或连接已变化，请重新操作' };
-  };
-  return queued(id, async () => {
-    verifyContext();
-    const selected = page ?? (await plugins.schema(id)).pages.find((page) => page.surface);
-    if (!selected?.surface) throw new Error('插件没有标准视图');
-    // Old host UI confirmations are local intent, never part of a guest capability.
-    const encoded = JSON.parse(
-      JSON.stringify(typeof operation === 'function' ? await operation() : operation),
-    );
-    if (encoded.kind === 'system_query') delete encoded.request.confirmed;
-    const payload = actionPayload(selected, 'bridge', { request: JSON.stringify(encoded) });
-    verifyContext();
-    let reply = await pluginsApi.call(id, payload);
-    if (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
-      const approval = reply.result as PluginApproval;
-      const target = useHostsStore().catalog?.hosts.find((host) => host.id === approval.hostId);
-      const accepted = approval.imageId
-        ? await plugins.ask(
-            '删除镜像？',
-            '不强制删除，不删除卷。正在使用的镜像可能无法删除；超时后请刷新核对结果。',
-            undefined,
-            {
-              imageId: approval.imageId,
-              hostName: target ? hostDisplayName(target) : approval.hostId,
-              hostAddress: target ? `${target.username}@${target.hostname}:${target.port}` : '',
-              pluginName: approval.pluginName,
-              pluginVersion: approval.pluginVersion,
-            },
-          )
-        : await plugins.ask(
-            '插件操作需要单独确认',
-            `${approval.pluginName} ${approval.pluginVersion}\n${target ? `${target.username}@${target.hostname}:${target.port}` : approval.hostId}\n${approval.description}\n\n本次确认 60 秒内有效。`,
-          );
-      await pluginsApi.approve(approval.id, accepted);
-      if (!accepted) throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
-      verifyContext();
-      reply = await pluginsApi.call(id, payload);
-    }
-    if (reply.error) throw reply.error;
-    const result = await expanded(id, reply.result);
-    verifyContext();
-    return result as T;
-  });
-}
-export function pluginServerRequest<T>(
-  id: string,
-  operation: PluginCapability,
-  page?: PluginUiPage,
-): Promise<T> {
-  return surfaceRequest<T>(id, operation, page);
-}
-export function pluginToolRequest<T>(
-  id: string,
-  operation: import('../types/plugins').PluginToolOperation,
-  args: Record<string, unknown>,
-  page: PluginUiPage,
-  signal?: AbortSignal,
-  trustedApproval = false,
-  canApprove: () => boolean = () => true,
-): Promise<T> {
-  const frozen = JSON.parse(JSON.stringify(args)) as Record<string, unknown>;
-  let inputId = '',
-    cancelError: unknown,
-    cancelling: Promise<void> | undefined;
-  const abort = () => {
-    if (inputId && !cancelling)
-      cancelling = pluginsApi.toolAbortInput(id, inputId).catch((error) => {
-        if (!(
-          error &&
-          typeof error === 'object' &&
-          'code' in error &&
-          ['NOT_FOUND', 'PLUGIN_PERMISSION_DENIED', 'PLUGIN_CANCELLED'].includes(String(error.code))
-        ))
-          cancelError = error;
-      });
-  };
-  signal?.addEventListener('abort', abort, { once: true });
-  const job = surfaceRequest<T>(
-    id,
-    async () => {
-      const ticket = await pluginsApi.toolStage(id, { operation, args: frozen });
-      inputId = ticket.inputId;
-      if (signal?.aborted) abort();
-      if (ticket.operation !== operation) throw new Error('运维工具请求票据类型不匹配');
-      if (trustedApproval && ticket.review) {
-        if (!canApprove()) {
-          abort();
-          throw { code: 'PLUGIN_CANCELLED', message: '请返回 AI 页面审核后再执行变更' };
-        }
-        const review = ticket.review;
-        if (signal?.aborted) throw new DOMException('已停止', 'AbortError');
-        const store = usePluginsStore();
-        const answer = store.ask(review.title, review.message, review.confirmationText);
-        const ownPrompt = store.prompt;
-        const cancelPrompt = () => {
-          if (ownPrompt && store.prompt === ownPrompt) store.decide(false);
-        };
-        signal?.addEventListener('abort', cancelPrompt, { once: true });
-        let accepted: boolean;
-        try {
-          accepted = await answer;
-        } finally {
-          signal?.removeEventListener('abort', cancelPrompt);
-        }
-        if (!accepted || !canApprove()) {
-          abort();
-          await cancelling;
-          inputId = '';
-          throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
-        }
-      }
-      return { kind: 'tool_invoke', inputId: ticket.inputId, operation };
-    },
-    page,
-    signal,
-  );
-  const cleanup = async () => {
-    signal?.removeEventListener('abort', abort);
-    await cancelling;
-  };
-  return job.then(
-    async (result) => {
-      await cleanup();
-      if (cancelError) throw cancelError;
-      return result;
-    },
-    async (cause) => {
-      await cleanup();
-      if (cancelError)
-        throw new AggregateError([cause, cancelError], '插件请求和取消清理失败', { cause });
-      throw cause;
-    },
-  );
-}
-
-export async function pluginContainerShell(
-  hostId: string,
-  size: import('../types/terminal').TerminalSize,
-  shell: import('../types/ops').ContainerShell,
-  receive: (event: import('../types/terminal').TerminalEvent) => void,
-): Promise<import('../types/terminal').TerminalSession> {
-  if (!shell.pluginId) throw new Error('缺少插件身份');
-  const authorization = await pluginServerRequest<{ shellTicket: string }>(shell.pluginId, {
-    kind: 'container_shell',
-    id: shell.id,
-    bash: shell.bash,
-  });
-  if (typeof authorization?.shellTicket !== 'string') throw new Error('插件未返回有效终端凭证');
-  return pluginsApi.terminalOpen(
-    shell.pluginId,
-    authorization.shellTicket,
-    hostId,
-    shell,
-    size,
-    receive,
-  );
 }

@@ -2,269 +2,136 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { h, nextTick, reactive } from 'vue';
 import { mountPlugin } from './runtime';
 import { request } from './transport';
-import ResourceView from './ui/ResourceView.vue';
-import { hostInput } from './types/hosts';
-import { useModelsStore } from './stores/models';
-
+import { usePlatformContext } from './context';
+import { usePluginVisibility } from './visibility';
 afterEach(() => {
   window.dispatchEvent(new Event('pagehide'));
   document.body.innerHTML = '';
   document.documentElement.style.removeProperty('--interface-font-scale');
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
-
-it('updates plugin font scale without remounting and accepts older contexts without a scale', async () => {
+function mount() {
+  const sent: Record<string, unknown>[] = [];
+  const rendered = vi.fn();
+  const announce = vi.spyOn(window, 'postMessage').mockImplementation(() => {});
   const port = {
     onmessage: null as ((event: { data: Record<string, unknown> }) => void) | null,
-    start() {},
-    close() {},
-    postMessage() {},
+    start: vi.fn(),
+    close: vi.fn(),
+    postMessage: (value: Record<string, unknown>) => sent.push(structuredClone(value)),
   };
-  const mounted = vi.fn();
   document.body.innerHTML = '<div id="app"></div>';
-  vi.spyOn(window, 'postMessage').mockImplementation(() => {});
   mountPlugin({
     setup() {
-      mounted();
-      return () => h('p', 'Plugin');
+      const state = usePlatformContext(),
+        visible = usePluginVisibility();
+      rendered();
+      return () => h('p', state.hostId + ':' + state.hosts.length + ':' + visible.value);
     },
   });
-  window.dispatchEvent(
-    new MessageEvent('message', {
-      source: window,
-      data: { kind: 'serverdeck-sdk-connect' },
-      ports: [port as unknown as MessagePort],
-    }),
-  );
-  for (const scale of [1, 1.45, 0.95, undefined, -1]) {
+  const connect = (source: MessageEventSource = window) =>
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        source,
+        data: { kind: 'serverdeck-sdk-connect' },
+        ports: [port as unknown as MessagePort],
+      }),
+    );
+  const context = (state: Record<string, unknown> = {}, visible = true) =>
     port.onmessage!({
       data: {
         kind: 'context',
-        props: {},
-        state: {
-          models: [],
-          catalog: null,
-          hostId: '',
-          operations: {},
-          files: {},
-          theme: 'dark',
-          monitorIntervalSecs: 3,
-          interfaceFontScale: scale,
-        },
+        props: { hostId: 'h' },
+        visible,
+        state: { theme: 'dark', hosts: [], groups: [], connections: {}, models: [], ...state },
       },
     });
+  return { port, sent, connect, context, rendered, announce };
+}
+it('announces readiness after registering its listener and acknowledges the parent connection', () => {
+  const fixture = mount();
+  expect(fixture.announce).toHaveBeenCalledExactlyOnceWith(
+    { kind: 'serverdeck-sdk-ready', version: 1 },
+    '*',
+  );
+  fixture.connect();
+  expect(fixture.sent[0]).toEqual({ kind: 'connected' });
+  expect(fixture.rendered).not.toHaveBeenCalled();
+  fixture.context();
+  expect(fixture.rendered).toHaveBeenCalledOnce();
+});
+it('authenticates its parent channel and updates public context and font scale without remounting', async () => {
+  const fixture = mount();
+  fixture.connect({} as MessageEventSource);
+  expect(fixture.port.start).not.toHaveBeenCalled();
+  fixture.connect();
+  for (const scale of [1, 1.45, 0.95, undefined, -1]) {
+    fixture.context({ interfaceFontScale: scale, hosts: [{ id: 'h', name: 'host' }] });
     await nextTick();
     expect(document.documentElement.style.getPropertyValue('--interface-font-scale')).toBe(
       String(scale && scale > 0 ? scale : 1),
     );
+    expect(document.querySelector('#app')?.textContent).toBe('h:1:true');
   }
-  expect(mounted).toHaveBeenCalledOnce();
+  fixture.context({}, false);
+  await nextTick();
+  expect(document.querySelector('#app')?.textContent).toBe('h:0:false');
+  expect(fixture.rendered).toHaveBeenCalledOnce();
 });
-
-it('preserves a selected model on unchanged context but clears a removed model instead of showing a blank invalid selection', async () => {
-  const port = {
-    onmessage: null as ((event: { data: Record<string, unknown> }) => void) | null,
-    start() {},
-    close() {},
-    postMessage() {},
-  };
-  let models!: ReturnType<typeof useModelsStore>;
-  document.body.innerHTML = '<div id="app"></div>';
-  vi.spyOn(window, 'postMessage').mockImplementation(() => {});
-  mountPlugin({
-    setup() {
-      models = useModelsStore();
-      return () => h('p', models.selectedId || 'none');
-    },
-  });
-  window.dispatchEvent(
-    new MessageEvent('message', {
-      source: window,
-      data: { kind: 'serverdeck-sdk-connect' },
-      ports: [port as unknown as MessagePort],
-    }),
-  );
-  const context = (ids: string[]) =>
-    port.onmessage!({
-      data: {
-        kind: 'context',
-        props: {},
-        state: {
-          models: ids.map((id) => ({ id })),
-          catalog: null,
-          hostId: '',
-          operations: {},
-          files: {},
-          theme: 'dark',
-          monitorIntervalSecs: 3,
-        },
-      },
+it('does not generate business queries from unchanged metadata snapshots', async () => {
+  const fixture = mount();
+  fixture.connect();
+  for (let i = 0; i < 4; i++) {
+    fixture.context({
+      hosts: [{ id: 'h', name: 'host' }],
+      connections: { h: { hostId: 'h', state: 'connected', error: null } },
     });
-  context(['a']);
-  await nextTick();
-  expect(models.selectedId).toBe('a');
-  context(['a', 'b']);
-  models.selectedId = 'b';
-  context(['a', 'b']);
-  await nextTick();
-  expect(models.selectedId).toBe('b');
-  context(['a']);
-  await nextTick();
-  expect(models.selectedId).toBe('');
-  expect(document.querySelector('#app')?.textContent).toBe('none');
-});
-
-it('does not turn unchanged host snapshots into a repeating server request loop', async () => {
-  const calls: string[] = [];
-  const host = {
-    ...hostInput(),
-    id: 'a',
-    name: 'Host A',
-    hostname: 'a.example',
-    createdAt: '',
-    updatedAt: '',
-  };
-  const context = {
-    kind: 'context',
-    visible: true,
-    props: { hostId: 'a' },
-    state: {
-      models: [],
-      catalog: { hosts: [host], groups: [], credentials: [], pendingSecretDeletions: 0 },
-      hostId: 'a',
-      operations: {
-        a: {
-          host,
-          state: 'connected',
-          error: null,
-          trust: null,
-          session: { id: 'ops-a', hostId: 'a', transportId: 'transport-a', routeHostIds: ['a'] },
-        },
-      },
-      files: {},
-      theme: 'dark',
-      monitorIntervalSecs: 3,
-    },
-  };
-  const port = {
-    onmessage: null as ((event: { data: Record<string, unknown> }) => void) | null,
-    start() {},
-    close() {},
-    postMessage(message: Record<string, unknown>) {
-      if (message.kind !== 'request') return;
-      const args = message.args as { request?: { kind?: string } };
-      calls.push(`${message.method}:${args.request?.kind ?? ''}`);
-      queueMicrotask(() => {
-        port.onmessage?.({
-          data: {
-            kind: 'response',
-            id: message.id,
-            result:
-              message.method === 'ops_query'
-                ? {
-                    success: true,
-                    records: [],
-                    detail: { dockerInstalled: true, dockerState: 'running' },
-                  }
-                : [],
-          },
-        });
-        if (calls.length < 40) port.onmessage?.({ data: structuredClone(context) });
-      });
-    },
-  };
-  document.body.innerHTML = '<div id="app"></div>';
-  vi.spyOn(window, 'postMessage').mockImplementation(() => {});
-  mountPlugin({
-    render: () =>
-      h(ResourceView, {
-        hostId: 'a',
-        listRequest: { kind: 'containers' },
-        columns: [],
-        rowKey: 'ID',
-      }),
-  });
-  window.dispatchEvent(
-    new MessageEvent('message', {
-      source: window,
-      data: { kind: 'serverdeck-sdk-connect' },
-      ports: [port as unknown as MessagePort],
-    }),
-  );
-  port.onmessage!({ data: structuredClone(context) });
-  for (let i = 0; i < 100; i++) {
-    await Promise.resolve();
     await nextTick();
   }
-  expect(calls.filter((method) => method === 'ops_query:capabilities')).toHaveLength(1);
-  expect(calls.filter((method) => method === 'ops_query:containers')).toHaveLength(1);
-  expect(calls.length).toBeLessThanOrEqual(3);
+  expect(fixture.sent.filter((packet) => packet.kind === 'request')).toHaveLength(0);
 });
-
-it('serializes reactive requests and releases failed or closed event streams so they can be reopened', async () => {
-  let failOpen = true;
-  const calls: Record<string, unknown>[] = [];
-  const port = {
-    onmessage: null as ((event: { data: Record<string, unknown> }) => void) | null,
-    start() {},
-    close() {},
-    postMessage(message: Record<string, unknown>) {
-      // Mirrors the browser boundary: reactive proxies cannot be cloned.
-      const cloned = structuredClone(message);
-      if (cloned.kind !== 'request') return;
-      calls.push(cloned);
-      queueMicrotask(() =>
-        port.onmessage?.({
-          data: {
-            kind: 'response',
-            id: cloned.id,
-            ...(cloned.method === 'ops_log_open' && failOpen
-              ? { error: { code: 'UNAVAILABLE', message: 'fixture unavailable' } }
-              : { result: cloned.method === 'ops_log_open' ? { id: `log-${cloned.id}` } : null }),
-          },
-        }),
-      );
-    },
-  };
-  document.body.innerHTML = '<div id="app"></div>';
-  vi.spyOn(window, 'postMessage').mockImplementation(() => {});
-  mountPlugin({ render: () => h('p', 'SDK fixture') });
-  window.dispatchEvent(
-    new MessageEvent('message', {
-      source: window,
-      data: { kind: 'serverdeck-sdk-connect' },
-      ports: [port as unknown as MessagePort],
-    }),
-  );
-  port.onmessage!({
-    data: {
-      kind: 'context',
-      props: {},
-      state: {
-        models: [],
-        catalog: null,
-        hostId: '',
-        operations: {},
-        files: {},
-        theme: 'dark',
-        monitorIntervalSecs: 3,
-      },
-    },
+it('serializes reactive nested JSON and resolves only the matching response', async () => {
+  const fixture = mount();
+  fixture.connect();
+  fixture.context();
+  const input = reactive({ target: { kind: 'host' }, sections: ['one', 'two'] });
+  const pending = request<{ value: number }>('invoke', { action: 'inspect', input });
+  const packet = fixture.sent.at(-1)!;
+  expect(packet.args).toEqual({
+    action: 'inspect',
+    input: { target: { kind: 'host' }, sections: ['one', 'two'] },
   });
-  const input = reactive({ kind: 'file', path: '/var/log/qa' });
-  for (let i = 0; i < 80; i++) {
-    await expect(
-      request('ops_log_open', { input, events: { onmessage: vi.fn() } }),
-    ).rejects.toMatchObject({ code: 'UNAVAILABLE' });
-  }
-  failOpen = false;
-  for (let i = 0; i < 80; i++) {
-    const result = await request<{ id: string }>('ops_log_open', {
-      input,
-      events: { onmessage: vi.fn() },
-    });
-    await request('ops_log_close', { id: result.id });
-  }
-  expect(calls).toHaveLength(240);
-  expect(calls[0]).toMatchObject({ args: { input: { path: '/var/log/qa' } } });
+  fixture.port.onmessage!({ data: { kind: 'response', id: 999, result: 'forged' } });
+  fixture.port.onmessage!({ data: { kind: 'response', id: packet.id, result: { value: 42 } } });
+  await expect(pending).resolves.toEqual({ value: 42 });
+});
+it('rejects cycles and oversized messages before the channel and bounds outstanding requests', async () => {
+  const fixture = mount();
+  fixture.connect();
+  fixture.context();
+  const cycle: Record<string, unknown> = {};
+  cycle.self = cycle;
+  await expect(request('invoke', cycle)).rejects.toBeDefined();
+  await expect(request('invoke', { text: 'x'.repeat(1024 * 1024) })).rejects.toThrow('超过');
+  const tasks = Array.from({ length: 32 }, () => request('invoke', { action: 'held' }));
+  const settled = Promise.allSettled(tasks);
+  await expect(request('invoke', { action: 'overflow' })).rejects.toThrow('请求过多');
+  window.dispatchEvent(new Event('pagehide'));
+  expect((await settled).every((value) => value.status === 'rejected')).toBe(true);
+  expect(fixture.port.close).toHaveBeenCalledOnce();
+});
+it('does not provide a native IPC fallback and times out a missing parent response', async () => {
+  vi.useFakeTimers();
+  const fixture = mount();
+  fixture.connect();
+  fixture.context();
+  const native = vi.fn();
+  vi.stubGlobal('__TAURI_INTERNALS__', { invoke: native });
+  const pending = request('ai_execute', { input: { command: 'untrusted' } });
+  const outcome = expect(pending).rejects.toThrow('平台请求超时');
+  await vi.advanceTimersByTimeAsync(180000);
+  await outcome;
+  expect(native).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
 });

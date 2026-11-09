@@ -53,7 +53,7 @@ impl Fixture {
                 version: "1.0.0".into(),
                 author: "Local".into(),
                 description: "Actual WASM".into(),
-                api_version: "^4.0.0".into(),
+                api_version: "^5.0.0".into(),
                 publisher: None,
                 entry: Entry {
                     backend: Some("backend.wasm".into()),

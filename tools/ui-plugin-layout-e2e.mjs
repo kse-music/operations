@@ -500,7 +500,7 @@ try {
         exact: true,
       });
       assert.equal(await page.locator('.workspace-tab').count(), 0);
-      await dockerDetails.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
+      assert.equal(await dockerDetails.locator('.plugin-state-section').count(), 0);
       assert(await dockerDetails.getByLabel('ui.contribute', { exact: true }).isDisabled());
       await capture('docker-settings', 'dialog:has(.plugin-config-body)');
       await dockerConfiguration.screenshot({
@@ -729,7 +729,7 @@ try {
       await chat.getByText('绑定模型未配置 Key，请在模型管理中补充', { exact: true }).waitFor();
       await gear.click();
       await configuration.getByRole('button', { name: '权限与详情', exact: true }).click();
-      await configuration.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
+      assert.equal(await configuration.locator('.plugin-state-section').count(), 0);
       assert.equal(await configuration.locator('iframe').count(), 0);
       await configuration.getByRole('button', { name: '插件配置', exact: true }).click();
       await settings.locator('label:has(input[value="layout-model-0"])').click();
@@ -799,6 +799,7 @@ try {
       });
       assert.equal(await page.locator('.plugin-installed-row').count(), 3);
       const upload = manager.locator('.plugin-installed-row').last();
+      await upload.getByRole('button', { name: /^启用 / }).waitFor();
       const uploadTabs = await page.locator('.workspace-tab').count();
       await upload.locator('.plugin-name-button').click();
       const uploadDialog = page.getByRole('dialog', { name: '设置', exact: true });
@@ -808,7 +809,7 @@ try {
         .waitFor();
       assert.equal(await page.locator('.workspace-tab').count(), uploadTabs);
       assert.equal(await uploadDialog.locator('iframe').count(), 0);
-      await uploadDialog.getByRole('button', { name: '启用插件', exact: true }).waitFor();
+      assert.equal(await uploadDialog.locator('.plugin-toggle-button').count(), 0);
       assert.equal(
         await uploadDialog.getByLabel('ui.contribute', { exact: true }).isEnabled(),
         true,

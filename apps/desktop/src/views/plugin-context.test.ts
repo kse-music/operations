@@ -79,7 +79,10 @@ beforeEach(() => {
     writeRoots: [],
   };
   plugins.schemas[id] = { revision: plugin.revision, ui: resourceUi as PluginUi };
-  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
   vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
 });
 afterEach(() => {
@@ -115,11 +118,7 @@ it('automatically connects the entry host and retries a failed connection withou
     .click();
   await settle();
   expect(root.querySelector('[data-frame]')).not.toBeNull();
-  expect(pluginsApi.context).toHaveBeenLastCalledWith(id, {
-    hostId: 'a',
-    opsSession: 'ops-a',
-    fileSession: null,
-  });
+  expect(pluginsApi.reset).toHaveBeenLastCalledWith(id);
 });
 
 it('retains fingerprint review and removes its dialog when the host page becomes inactive', async () => {
@@ -151,7 +150,7 @@ it('retains fingerprint review and removes its dialog when the host page becomes
   state.active = false;
   await settle();
   expect(document.querySelector('dialog[aria-label="核验 SSH 主机指纹"]')).toBeNull();
-  expect(pluginsApi.context).toHaveBeenLastCalledWith(id, null);
+  expect(pluginsApi.reset).toHaveBeenLastCalledWith(id);
 });
 
 it('keeps the cached frame inactive until its released runtime has been reactivated', async () => {
@@ -170,7 +169,7 @@ it('keeps the cached frame inactive until its released runtime has been reactiva
   state.active = false;
   await settle();
   expect(frame?.getAttribute('data-active')).toBe('false');
-  expect(pluginsApi.context).toHaveBeenLastCalledWith(id, null);
+  expect(pluginsApi.reset).toHaveBeenLastCalledWith(id);
   let activated!: (value: never) => void;
   vi.mocked(pluginsApi.activate).mockImplementationOnce(
     () =>
@@ -216,13 +215,13 @@ it('keeps the built-in assistant frame and native generation while its host work
   app.mount(root);
   await settle();
   const version = plugins.contextVersion(assistant);
-  const calls = vi.mocked(pluginsApi.context).mock.calls.length;
+  const calls = vi.mocked(pluginsApi.reset).mock.calls.length;
   const frame = root.querySelector('[data-frame]');
   expect(frame).not.toBeNull();
   state.active = false;
   await settle();
   expect(plugins.contextVersion(assistant)).toBe(version);
-  expect(pluginsApi.context).toHaveBeenCalledTimes(calls);
+  expect(pluginsApi.reset).toHaveBeenCalledTimes(calls);
   expect((frame as HTMLElement).style.display).toBe('');
   state.active = true;
   await settle();

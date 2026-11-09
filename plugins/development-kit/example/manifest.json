@@ -1,15 +1,29 @@
 {
   "schemaVersion": 1,
   "id": "dev.example.hello",
-  "name": "问候示例",
+  "name": "插件闭环示例",
   "icon": "rocket",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "ServerDeck",
-  "description": "通过插件页面调用本包的 Rust WASM 动作。",
-  "apiVersion": "^4.0.0",
-  "entry": { "backend": "backend.wasm", "ui": "ui.json" },
-  "permissions": ["ui.contribute"],
-  "contributions": [{ "id": "hello", "label": "问候示例", "kind": "settings" }],
+  "description": "本地问候与远程内存巡检：业务命令、解析和判断都包含在插件中。",
+  "apiVersion": "^5.0.0",
+  "entry": {
+    "backend": "backend.wasm",
+    "ui": "ui.json"
+  },
+  "permissions": ["ui.contribute", "ssh.execute"],
+  "contributions": [
+    {
+      "id": "hello",
+      "label": "问候示例",
+      "kind": "settings"
+    },
+    {
+      "id": "host",
+      "label": "样例内存巡检",
+      "kind": "server"
+    }
+  ],
   "platforms": ["windows", "linux", "macos"],
   "files": [],
   "publisher": null

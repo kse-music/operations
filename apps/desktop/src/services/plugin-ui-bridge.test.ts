@@ -3,16 +3,14 @@ import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import { createPluginUiBridge } from './plugin-ui-bridge';
 import { usePluginsStore } from '../stores/plugins';
 import { useOpsStore } from '../stores/ops';
-import { useWorkspaceStore } from '../stores/workspace';
 import { useNotificationsStore } from '../stores/notifications';
 import { hostInput } from '../types/hosts';
 import { pluginsApi } from './plugins';
 import type { PluginPermission, PluginUiPage } from '../types/plugins';
-const api = vi.hoisted(() => ({ invoke: vi.fn(), tool: vi.fn(), server: vi.fn() }));
+const api = vi.hoisted(() => ({ invoke: vi.fn(), platform: vi.fn() }));
 vi.mock('./plugin-server', () => ({
   pluginInvokeRequest: api.invoke,
-  pluginToolRequest: api.tool,
-  pluginServerRequest: api.server,
+  pluginPlatformRequest: api.platform,
 }));
 let pinia: Pinia;
 const id = 'dev.qa.independent';
@@ -39,7 +37,7 @@ beforeEach(() => {
         version: '1.0.0',
         author: 'QA',
         description: 'QA',
-        apiVersion: '^1.4.0',
+        apiVersion: '^5.0.0',
         entry: { backend: 'backend.wasm', ui: 'ui.json' },
         permissions: ['ui.contribute'],
         contributions: [],
@@ -55,9 +53,13 @@ beforeEach(() => {
     },
   ];
   grant('ui.contribute');
+  vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
 });
 afterEach(() => {
   disposePinia(pinia);
+  vi.restoreAllMocks();
   vi.resetAllMocks();
 });
 function grant(...permissions: PluginPermission[]) {
@@ -77,452 +79,313 @@ function grant(...permissions: PluginPermission[]) {
 function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
-it('shares the previewed interface font scale with plugin pages and resets to standard', () => {
-  const client = bridge();
-  try {
-    document.documentElement.style.setProperty('--interface-font-scale', '1.45');
-    expect(client.snapshot()).toMatchObject({ interfaceFontScale: 1.45 });
-    document.documentElement.style.setProperty('--interface-font-scale', '1');
-    expect(client.snapshot()).toMatchObject({ interfaceFontScale: 1 });
-    document.documentElement.style.removeProperty('--interface-font-scale');
-    expect(client.snapshot()).toMatchObject({ interfaceFontScale: 1 });
-  } finally {
-    document.documentElement.style.removeProperty('--interface-font-scale');
-  }
-});
-it('lets an assistant settings page list public model metadata only with assistant permission', async () => {
-  const { useModelsStore } = await import('../stores/models');
-  const { aiApi } = await import('./ai');
-  const { defaultAiConfig } = await import('../types/ai');
-  const models = [
-    { id: 'model-a', name: 'Bound model', revision: 'r1', hasKey: true, config: defaultAiConfig() },
-  ];
-  const list = vi.spyOn(aiApi, 'models').mockResolvedValue(models);
-  const ui = bridge();
-  await expect(ui.call('ai_models', {})).rejects.toMatchObject({
-    code: 'PLUGIN_PERMISSION_DENIED',
-  });
-  grant('ui.contribute', 'assistant.use');
-  expect(await ui.call('ai_models', {})).toEqual(models);
-  expect(useModelsStore().models).toEqual(models);
-  expect(ui.snapshot()).toMatchObject({ models });
-  expect(list).toHaveBeenCalledOnce();
-});
 
-it.each([
-  { method: 'ai_local_codex_authorize', api: 'localCodexAuthorize', code: 'AI_CODEX_CONSENT' },
-  {
-    method: 'ai_local_claude_code_authorize',
-    api: 'localClaudeCodeAuthorize',
-    code: 'AI_CLAUDE_CONSENT',
-  },
-] as const)(
-  'restricts $method to the system assistant and requires host confirmation',
-  async (source) => {
-    const { aiApi } = await import('./ai');
-    const authorize = vi.spyOn(aiApi, source.api).mockResolvedValue(undefined);
-    const plugins = usePluginsStore();
-    grant('ui.contribute', 'assistant.use');
-    const assistant = 'cn.hiboot.plugins.assistant';
-    const plugin = plugins.installed[0]!;
-    plugin.manifest.id = assistant;
-    plugins.grants[assistant] = { ...plugins.grants[id]!, pluginId: assistant };
-    const client = createPluginUiBridge({
-      id: assistant,
-      revision: 'revision',
-      page,
-      hostId: '',
-      stream: vi.fn(),
-    });
-    await expect(client.call(source.method, { authorized: true })).rejects.toMatchObject({
-      code: 'PLUGIN_PERMISSION_DENIED',
-    });
-    plugin.source = 'system';
-    const ask = vi.spyOn(plugins, 'ask').mockResolvedValue(false);
-    await expect(client.call(source.method, { authorized: true })).rejects.toMatchObject({
-      code: source.code,
-    });
-    expect(authorize).not.toHaveBeenCalled();
-    ask.mockResolvedValue(true);
-    await client.call(source.method, { authorized: true });
-    expect(authorize).toHaveBeenCalledWith(true);
-    await client.call(source.method, { authorized: false });
-    expect(authorize).toHaveBeenLastCalledWith(false);
-    expect(ask).toHaveBeenCalledTimes(2);
-    client.dispose();
-  },
-);
-it('lets only the active builtin assistant settings surface request dialog close', async () => {
-  const plugins = usePluginsStore();
-  const assistant = 'cn.hiboot.plugins.assistant';
-  const plugin = plugins.installed[0]!;
-  plugin.manifest.id = assistant;
-  plugins.grants[assistant] = { ...plugins.grants[id]!, pluginId: assistant };
-  const settingsAction = vi.fn();
-  let active = true;
-  const options = {
-    id: assistant,
-    revision: plugin.revision,
-    page: { ...page, id: 'settings' },
-    hostId: '',
-    isActive: () => active,
-    settingsAction,
-    stream: vi.fn(),
-  };
-  const ui = createPluginUiBridge(options);
-  await expect(ui.call('settings.close', {})).rejects.toMatchObject({
-    code: 'PLUGIN_PERMISSION_DENIED',
-  });
-  plugin.source = 'system';
-  active = false;
-  await expect(ui.call('settings.close', {})).rejects.toMatchObject({
-    code: 'PLUGIN_PERMISSION_DENIED',
-  });
-  expect(settingsAction).not.toHaveBeenCalled();
-  active = true;
-  await expect(ui.call('settings.close', {})).resolves.toBeNull();
-  expect(settingsAction).toHaveBeenCalledExactlyOnceWith('close');
-});
-
-it('only lets the builtin assistant install fixed tools and cancels its own download on close', async () => {
-  const { aiApi } = await import('./ai');
-  const fixture = retainedAssistant('user');
-  const install = vi.spyOn(aiApi, 'localToolInstall');
-  const cancel = vi.spyOn(aiApi, 'localToolInstallCancel').mockResolvedValue();
-  const ui = createPluginUiBridge({
-    ...fixture,
-    revision: 'revision',
-    hostId: '',
-    stream: vi.fn(),
-  });
-  const requestId = crypto.randomUUID();
-  await expect(
-    ui.call('ai_local_tool_install', { modelId: 'local-codex', requestId }),
-  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  usePluginsStore().installed[0]!.source = 'system';
-  await expect(
-    ui.call('ai_local_tool_install', { modelId: 'https://evil.test/cli', requestId }),
-  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  expect(install).not.toHaveBeenCalled();
-  let finish!: () => void;
-  install.mockImplementationOnce(
-    () =>
-      new Promise<void>((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const pending = ui.call('ai_local_tool_install', { modelId: 'local-codex', requestId });
-  await expect(
-    ui.call('ai_local_tool_install_cancel', { requestId: crypto.randomUUID() }),
-  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  await ui.call('ai_local_tool_install_cancel', { requestId });
-  expect(cancel).toHaveBeenCalledWith(requestId);
-  await ui.dispose();
-  expect(cancel).toHaveBeenCalledTimes(2);
-  finish();
-  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-});
-it('rejects hidden frame requests and late results before a different host can receive them', async () => {
+it('binds draft ownership to the trusted page key and rejects invalid or hidden input', async () => {
   let active = true;
   const ui = createPluginUiBridge({
     id,
     revision: 'revision',
     page,
-    hostId: 'a',
+    hostId: 'host',
+    contextKey: 'owner',
     isActive: () => active,
-    stream: vi.fn(),
   });
-  let finish!: (value: unknown) => void;
-  api.invoke.mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const pending = ui.call('invoke', { action: 'greet', values: {} });
+  await ui.call('workspace.draft', { dirty: true, contextKey: 'forged' });
+  expect(usePluginsStore().dirtyPages).toEqual({ owner: id });
+  await expect(ui.call('workspace.draft', { dirty: 'true' })).rejects.toThrow('草稿作用域');
   active = false;
-  ui.suspend();
-  finish({ output: 'late result for a' });
-  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  await expect(ui.call('invoke', { action: 'greet', values: {} })).rejects.toMatchObject({
+  await expect(ui.call('workspace.draft', { dirty: false })).rejects.toMatchObject({
     code: 'PLUGIN_PERMISSION_DENIED',
   });
-  expect(api.invoke).toHaveBeenCalledOnce();
-  expect(ui.snapshot()).toMatchObject({ hostId: 'a' });
+  expect(usePluginsStore().dirty).toBe(true);
 });
-it('permits only declared Wasm actions and does not expose native commands or host inventory to a UI-only grant', async () => {
-  const ui = bridge();
-  api.invoke.mockResolvedValue({ output: 'from Wasm' });
-  await expect(
-    ui.call('invoke', { action: 'greet', values: { name: 'safe' }, id: 'another-plugin' }),
-  ).resolves.toEqual({ output: 'from Wasm' });
-  expect(api.invoke).toHaveBeenCalledWith(id, page, 'greet', { name: 'safe' });
-  for (const method of [
-    'hosts.list',
-    'credential_save',
-    'ai_model_save',
-    'plugin_grant',
-    'ops_open',
-  ])
-    await expect(ui.call(method, { id: 'another-plugin', hostId: 'host' })).rejects.toMatchObject({
-      code: 'PLUGIN_PERMISSION_DENIED',
-    });
-  expect(ui.snapshot()).toMatchObject({ catalog: null, operations: {}, files: {}, models: [] });
+it.each([
+  'ai_models',
+  'ai_prepare',
+  'ai_execute',
+  'ai_local_codex_authorize',
+  'ops_query',
+  'system_query',
+  'plugin_tool_stage',
+  'invoke_native',
+  'terminal_trust',
+])('denies private/old method %s', async (method) => {
+  await expect(bridge().call(method, {})).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  expect(api.invoke).not.toHaveBeenCalled();
+  expect(api.platform).not.toHaveBeenCalled();
 });
-it('rejects stale results and all later calls after an installation generation changes', async () => {
-  const ui = bridge();
-  let finish!: (value: unknown) => void;
-  api.invoke.mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
+it('passes action and platform requests through the same owner-bound helpers', async () => {
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: 'host',
+    contextKey: 'trusted',
+  });
+  api.invoke.mockResolvedValue({ ok: true });
+  expect(
+    await ui.call('invoke', { action: 'greet', input: { name: 'Ada' }, owner: 'forged' }),
+  ).toEqual({ ok: true });
+  expect(api.invoke).toHaveBeenCalledWith(
+    id,
+    page,
+    'greet',
+    { name: 'Ada' },
+    expect.any(Function),
+    'trusted',
   );
-  const request = ui.call('invoke', { action: 'greet', values: {} });
-  usePluginsStore().installed[0]!.revision = 'replacement';
-  finish({ output: 'stale' });
-  await expect(request).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  await expect(ui.call('invoke', { action: 'greet', values: {} })).rejects.toMatchObject({
-    code: 'PLUGIN_PERMISSION_DENIED',
-  });
+  await ui.call('platform.request', { operation: { kind: 'hosts' } });
+  expect(api.platform).toHaveBeenCalledWith(id, { kind: 'hosts' }, expect.any(Function), 'trusted');
 });
-it('keeps connection leases opaque and freezes approved input before dispatching through Wasm', async () => {
-  grant('ui.contribute', 'assistant.use');
-  const host = {
-    ...hostInput(),
-    credentialId: 'private-credential-reference',
-    id: 'host',
-    hostname: 'qa.example',
-    username: 'qa',
-    createdAt: '',
-    updatedAt: '',
+it('does not expose host inventory or lease metadata to a UI-only grant', async () => {
+  const { useHostsStore } = await import('../stores/hosts');
+  useHostsStore().catalog = {
+    hosts: [
+      {
+        ...hostInput(),
+        id: 'host',
+        name: 'Server',
+        credentialId: 'private-key',
+        createdAt: '',
+        updatedAt: '',
+      },
+    ],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
   };
   useOpsStore().connections.host = {
-    host,
+    host: useHostsStore().catalog!.hosts[0]!,
     state: 'connected',
     error: null,
     trust: null,
     session: {
-      id: 'private-session',
+      id: 'secret-lease',
       hostId: 'host',
-      transportId: 'private-transport',
+      transportId: 'secret-transport',
       routeHostIds: ['host'],
     },
   };
-  const ui = bridge();
-  const snapshot = ui.snapshot() as { operations: Record<string, { session: { id: string } }> };
-  expect(JSON.stringify(snapshot)).not.toContain('private-session');
-  expect(JSON.stringify(snapshot)).not.toContain('private-transport');
-  expect(JSON.stringify(snapshot)).not.toContain('private-credential-reference');
-  const input = {
-    input: {
-      sessionId: snapshot.operations.host!.session.id,
-      question: 'original question',
-    },
-  };
-  let finish!: (value: unknown) => void;
-  api.tool.mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const request = ui.call('ai_prepare', input);
-  input.input.question = 'changed question';
-  finish({ id: 'task' });
-  await request;
-  expect(api.tool).toHaveBeenCalledWith(
-    id,
-    'ai_prepare',
-    expect.objectContaining({
-      input: expect.objectContaining({
-        sessionId: 'private-session',
-        question: 'original question',
-      }),
-    }),
-    page,
-    expect.any(AbortSignal),
-    true,
-    expect.any(Function),
-  );
-});
-function retainedAssistant(source: 'system' | 'user' = 'system') {
-  const plugins = usePluginsStore();
-  const plugin = plugins.installed[0]!;
-  plugin.manifest.id = 'cn.hiboot.plugins.assistant';
-  plugin.source = source;
-  grant('ui.contribute', 'assistant.use');
-  plugins.grants[plugin.manifest.id] = { ...plugins.grants[id]!, pluginId: plugin.manifest.id };
-  return {
-    id: plugin.manifest.id,
-    page: {
-      ...page,
-      id: 'assistant',
-      surface: { kind: 'tool', tool: 'assistant' },
-    } as PluginUiPage,
-  };
-}
-it('keeps only an already-started built-in assistant flow running in the hidden open workspace', async () => {
-  const fixture = retainedAssistant();
-  let active = true;
-  let alive = true;
-  const ui = createPluginUiBridge({
-    ...fixture,
-    revision: 'revision',
-    hostId: 'a',
-    isActive: () => active,
-    canRetain: () => alive,
-    stream: vi.fn(),
-  });
-  const cancel = vi.spyOn(pluginsApi, 'toolCancelRequest').mockResolvedValue();
-  await ui.call('ai_begin', {});
-  api.tool.mockResolvedValueOnce({ id: 'root-a' });
-  await ui.call('ai_prepare', { input: {} });
-  let finish!: (value: unknown) => void;
-  api.tool.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const pending = ui.call('ai_send', { id: 'root-a', confirmed: true });
-  const signal = api.tool.mock.lastCall![4] as AbortSignal;
-  active = false;
-  ui.suspend();
-  expect(signal.aborted).toBe(false);
-  await expect(
-    ui.call('ai_execute', { input: { proposalId: 'plan', confirmed: true } }),
-  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  finish({ text: 'background answer' });
-  await expect(pending).resolves.toMatchObject({ text: 'background answer' });
-  await ui.call('ai_end', {});
-  await expect(ui.call('ai_begin', {})).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  await expect(ui.call('ai_send', { id: 'root-a', confirmed: true })).rejects.toMatchObject({
-    code: 'PLUGIN_PERMISSION_DENIED',
-  });
-  alive = false;
-  await ui.dispose();
-  expect(cancel).toHaveBeenCalledWith(fixture.id, 'root-a');
-});
-it('cancels only the closing assistant frame roots and does not abort another host flow', async () => {
-  const fixture = retainedAssistant();
-  const cancel = vi.spyOn(pluginsApi, 'toolCancelRequest').mockResolvedValue();
-  const first = createPluginUiBridge({
-    ...fixture,
-    revision: 'revision',
-    hostId: 'a',
-    isActive: () => true,
-    canRetain: () => true,
-    stream: vi.fn(),
-  });
-  const second = createPluginUiBridge({
-    ...fixture,
-    revision: 'revision',
-    hostId: 'b',
-    isActive: () => true,
-    canRetain: () => true,
-    stream: vi.fn(),
-  });
-  await first.call('ai_begin', {});
-  api.tool.mockResolvedValueOnce({ id: 'root-a' });
-  await first.call('ai_prepare', { input: {} });
-  await second.call('ai_begin', {});
-  api.tool.mockResolvedValueOnce({ id: 'root-b' });
-  await second.call('ai_prepare', { input: {} });
-  let finish!: (value: unknown) => void;
-  api.tool.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const pending = second.call('ai_send', { id: 'root-b', confirmed: true });
-  const signal = api.tool.mock.lastCall![4] as AbortSignal;
-  await first.dispose();
-  expect(cancel).toHaveBeenCalledExactlyOnceWith(fixture.id, 'root-a');
-  expect(signal.aborted).toBe(false);
-  finish({ text: 'host b' });
-  await expect(pending).resolves.toMatchObject({ text: 'host b' });
-  await second.call('ai_end', {});
-  await second.dispose();
-  expect(cancel).toHaveBeenCalledWith(fixture.id, 'root-b');
-});
-it('never gives an uploaded same-ID assistant background access', async () => {
-  const fixture = retainedAssistant('user');
-  let active = true;
-  const ui = createPluginUiBridge({
-    ...fixture,
-    revision: 'revision',
-    hostId: 'a',
-    isActive: () => active,
-    canRetain: () => true,
-    stream: vi.fn(),
-  });
-  await ui.call('ai_begin', {});
-  let finish!: (value: unknown) => void;
-  api.tool.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const pending = ui.call('ai_send', { id: 'root', confirmed: true });
-  const signal = api.tool.mock.lastCall![4] as AbortSignal;
-  active = false;
-  ui.suspend();
-  expect(signal.aborted).toBe(true);
-  finish({ text: 'stale' });
-  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
-  await ui.dispose();
-});
-it('rejects removed tool operations before dispatch', async () => {
-  grant('ui.contribute', 'assistant.use');
-  for (const method of [
-    'batch_start',
-    'automation_catalog',
-    'diagnostic_start',
-    'diagnostic_list',
-    'diagnostic_cancel',
-    'files.pick',
+  expect(bridge().snapshot()).toMatchObject({ hosts: [], connections: {} });
+  grant('ui.contribute', 'hosts.read');
+  const snapshot = bridge().snapshot(),
+    json = JSON.stringify(snapshot);
+  expect(snapshot.hosts).toHaveLength(1);
+  expect(snapshot.connections.host).toEqual({ hostId: 'host', state: 'connected', error: null });
+  for (const secret of [
+    'private-key',
+    'secret-lease',
+    'secret-transport',
+    'credentialId',
+    'authMethod',
+    'proxyCommand',
   ])
-    await expect(bridge().call(method, {})).rejects.toMatchObject({
+    expect(json).not.toContain(secret);
+  grant('ui.contribute', 'ssh.execute');
+  const selected = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: 'host',
+  }).snapshot();
+  expect(selected.hosts).toEqual([]);
+  expect(Object.keys(selected.connections)).toEqual(['host']);
+});
+it('exports only public model metadata under the models.use grant', async () => {
+  const { useModelsStore } = await import('../stores/models');
+  const { defaultAiConfig } = await import('../types/ai');
+  useModelsStore().models = [
+    {
+      id: 'model',
+      name: 'Model',
+      revision: 'r1',
+      hasKey: true,
+      config: { ...defaultAiConfig(), baseUrl: 'https://private-endpoint' },
+    },
+  ];
+  expect(bridge().snapshot().models).toEqual([]);
+  grant('ui.contribute', 'models.use');
+  expect(bridge().snapshot().models).toMatchObject([{ id: 'model', revision: 'r1', hasKey: true }]);
+  expect(JSON.stringify(bridge().snapshot())).not.toContain('private-endpoint');
+});
+it.each(['system', 'user'] as const)(
+  'lets any declared settings UI navigate and close: %s',
+  async (source) => {
+    usePluginsStore().installed[0]!.source = source;
+    const settingsAction = vi.fn();
+    const ui = createPluginUiBridge({
+      id,
+      revision: 'revision',
+      page,
+      hostId: '',
+      contextKey: 'settings',
+      settingsAction,
+    });
+    await ui.call('workspace.navigate', { view: 'models' });
+    await ui.call('settings.close', {});
+    expect(settingsAction.mock.calls).toEqual([['models'], ['close']]);
+    await expect(ui.call('workspace.navigate', { view: 'terminal' })).rejects.toThrow('导航目标');
+  },
+);
+it.each(['system', 'user'] as const)(
+  'retains only started work for an open hidden workspace: %s',
+  async (source) => {
+    usePluginsStore().installed[0]!.source = source;
+    let active = true;
+    let finish!: (v: unknown) => void;
+    api.invoke.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    const ui = createPluginUiBridge({
+      id,
+      revision: 'revision',
+      page,
+      hostId: 'host',
+      contextKey: 'a',
+      isActive: () => active,
+      canRetain: () => true,
+    });
+    const job = ui.call('invoke', { action: 'greet', input: {} });
+    active = false;
+    ui.suspend();
+    finish({ answer: 'complete' });
+    expect(await job).toEqual({ answer: 'complete' });
+    await expect(ui.call('invoke', { action: 'greet', input: {} })).rejects.toMatchObject({
       code: 'PLUGIN_PERMISSION_DENIED',
     });
-  expect(api.tool).not.toHaveBeenCalled();
-});
-
-it('retains model navigation and notifications used by the remaining plugins', async () => {
-  grant('ui.contribute');
-  const ui = bridge();
-  await ui.call('workspace.navigate', { view: 'models' });
-  expect(useWorkspaceStore().settingsView).toBe('models');
-  expect(useWorkspaceStore().tabs).toEqual([]);
-  await ui.call('ui.notify', { message: 'Retained plugin notification', error: true });
-  expect(
-    useNotificationsStore().items.some((item) => item.text === 'Retained plugin notification'),
-  ).toBe(true);
-  await expect(ui.call('workspace.navigate', { view: 'settings' })).rejects.toMatchObject({
+    expect(pluginsApi.scopeVisibility).toHaveBeenCalledWith(id, 'a', false);
+  },
+);
+it('rejects late results from replaced packages and disposed scopes', async () => {
+  let finish!: (v: unknown) => void;
+  api.invoke.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+  const ui = createPluginUiBridge({ id, revision: 'revision', page, hostId: '', contextKey: 'a' });
+  const checked = expect(ui.call('invoke', { action: 'greet', input: {} })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  usePluginsStore().installed[0]!.revision = 'new';
+  finish('stale');
+  await checked;
+  usePluginsStore().installed[0]!.revision = 'revision';
+  await ui.dispose();
+  expect(pluginsApi.closeScope).toHaveBeenCalledWith(id, 'a');
+  await expect(ui.call('invoke', { action: 'greet', input: {} })).rejects.toMatchObject({
     code: 'PLUGIN_PERMISSION_DENIED',
   });
 });
-
-it('acknowledges approved model navigation when it hides its caller and denies subsequent hidden requests', async () => {
-  let active = true;
-  const navigate = vi.spyOn(useWorkspaceStore(), 'navigate').mockImplementation(() => {
-    active = false;
-    usePluginsStore().clearPlugin(id);
+it('cancels prompts and requests only for its owner', async () => {
+  const p = usePluginsStore();
+  const a = createPluginUiBridge({ id, revision: 'revision', page, hostId: '', contextKey: 'a' });
+  const answer = p.ask('Other page', 'Frozen operation', undefined, 'b');
+  await a.call('actions.cancel', {});
+  await a.dispose();
+  expect(p.prompt?.owner).toBe('b');
+  expect(pluginsApi.cancelScope).toHaveBeenCalledWith(id, 'a');
+  p.decide(false);
+  await answer;
+});
+it('reports interface font scale and bounded notifications', async () => {
+  const ui = bridge();
+  document.documentElement.style.setProperty('--interface-font-scale', '1.25');
+  expect(ui.snapshot().interfaceFontScale).toBe(1.25);
+  document.documentElement.style.removeProperty('--interface-font-scale');
+  const push = vi.spyOn(useNotificationsStore(), 'push');
+  await ui.call('ui.notify', { message: 'Done' });
+  expect(push).toHaveBeenCalledWith('Done', false);
+  await expect(ui.call('ui.notify', { message: 'x'.repeat(2049) })).rejects.toThrow('通知超过');
+});
+it('waits for late SSH fingerprint metadata and only the trusted parent can accept it', async () => {
+  const { useHostsStore } = await import('../stores/hosts');
+  const { terminalApi } = await import('./terminal');
+  const host = { ...hostInput(), id: 'host', hostname: 'fixture', createdAt: '', updatedAt: '' };
+  useHostsStore().catalog = {
+    hosts: [host],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  };
+  grant('ui.contribute', 'ssh.execute');
+  const ops = useOpsStore();
+  vi.spyOn(ops, 'open').mockImplementation(async () => {
+    ops.connections.host = {
+      host,
+      state: 'awaiting_trust',
+      trust: null,
+      error: null,
+      session: {
+        id: 'native-lease',
+        hostId: 'host',
+        transportId: 'private',
+        routeHostIds: ['host'],
+      },
+    };
+  });
+  const trust = vi.spyOn(terminalApi, 'trust').mockImplementation(async () => {
+    ops.connections.host!.state = 'connected';
+    ops.connections.host!.trust = null;
   });
   const ui = createPluginUiBridge({
     id,
     revision: 'revision',
     page,
-    hostId: '',
-    isActive: () => active,
-    stream: vi.fn(),
+    hostId: 'host',
+    contextKey: 'owner',
   });
-  await expect(ui.call('workspace.navigate', { view: 'models' })).resolves.toBeNull();
-  await expect(ui.call('workspace.navigate', { view: 'models' })).rejects.toMatchObject({
-    code: 'PLUGIN_PERMISSION_DENIED',
+  const pending = ui.call('connections.ensure', { hostId: 'host' });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(trust).not.toHaveBeenCalled();
+  expect(usePluginsStore().prompt).toBeNull();
+  ops.connections.host!.trust = {
+    hostname: 'fixture',
+    port: 22,
+    algorithm: 'ssh-ed25519',
+    fingerprint: 'SHA256:fixture',
+    status: 'unknown',
+  } as never;
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(usePluginsStore().prompt?.message).toContain('SHA256:fixture');
+  expect(trust).not.toHaveBeenCalled();
+  usePluginsStore().decide(true);
+  expect(await pending).toEqual({ hostId: 'host', state: 'connected' });
+  expect(trust).toHaveBeenCalledExactlyOnceWith('native-lease', true);
+});
+it('preserves connection failure diagnostics and stops waiting when its page hides', async () => {
+  const { useHostsStore } = await import('../stores/hosts');
+  const host = { ...hostInput(), id: 'host', createdAt: '', updatedAt: '' };
+  useHostsStore().catalog = {
+    hosts: [host],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  };
+  grant('ui.contribute', 'ssh.execute');
+  const ops = useOpsStore();
+  vi.spyOn(ops, 'open').mockImplementation(async () => {
+    ops.connections.host = {
+      host,
+      state: 'connecting',
+      trust: null,
+      error: null,
+      session: undefined,
+    };
   });
-  expect(navigate).toHaveBeenCalledTimes(1);
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: 'host',
+    contextKey: 'owner',
+  });
+  const failed = expect(ui.call('connections.ensure', { hostId: 'host' })).rejects.toThrow(
+    '异步认证失败',
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  Object.assign(ops.connections.host!, { state: 'failed', error: '异步认证失败' });
+  await failed;
+  const cancelled = expect(ui.call('connections.ensure', { hostId: 'host' })).rejects.toMatchObject(
+    { code: 'PLUGIN_CANCELLED' },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  ui.suspend();
+  await cancelled;
 });

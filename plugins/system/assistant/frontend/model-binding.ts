@@ -1,98 +1,71 @@
-import { computed, onScopeDispose, ref, watch } from 'vue';
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue';
+import { call } from '@serverdeck/plugin-sdk/platform';
+import { request } from '@serverdeck/plugin-sdk/transport';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
-import { useModelsStore } from '@serverdeck/plugin-sdk/stores/models';
-import { requestCapability } from '@serverdeck/plugin-sdk/services/capability';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
-import { aiApi } from '@serverdeck/plugin-sdk/services/ai';
-import {
-  LOCAL_CODEX_MODEL_ID,
-  LOCAL_CLAUDE_CODE_MODEL_ID,
-  isLocalModel,
-  type LocalCodexStatus,
-} from '@serverdeck/plugin-sdk/types/ai';
-
+import { usePlatformContext } from '@serverdeck/plugin-sdk/context';
+import type { AiModel, LocalCodexStatus } from './types';
 export function useModelBinding() {
-  const models = useModelsStore();
-  const visible = usePluginVisibility();
+  const visible = usePluginVisibility(),
+    context = usePlatformContext();
   const modelId = ref(''),
     loaded = ref(false),
     loading = ref(false),
-    saving = ref(false);
-  const error = ref(''),
+    saving = ref(false),
+    error = ref(''),
     message = ref('');
-  const installing = ref('');
-  let installRequest = '';
-  const sources = [
-    {
-      id: LOCAL_CODEX_MODEL_ID,
-      name: '本地 Codex',
-      description: '使用本机 Codex 已有的模型配置和登录信息',
-      state: ref<LocalCodexStatus>({ authorized: false, model: null, message: '' }),
-      read: () => aiApi.localCodexStatus(),
-      authorize: (authorized: boolean) => aiApi.localCodexAuthorize(authorized),
+  const localSources = ref<
+    { id: string; name: string; description: string; status: LocalCodexStatus }[]
+  >([]);
+  const models = reactive({
+    models: [] as AiModel[],
+    loaded: false,
+    loading: false,
+    error: '',
+    async refresh() {
+      models.loading = true;
+      models.error = '';
+      try {
+        const catalog = await call<{
+          models: AiModel[];
+          sources: { id: string; name: string; status: LocalCodexStatus }[];
+        }>({ kind: 'models' });
+        models.models = catalog.models;
+        localSources.value = catalog.sources.map((source) => ({
+          ...source,
+          description: '使用平台管理的本地模型配置和登录状态',
+        }));
+        models.loaded = true;
+      } catch (cause) {
+        models.error = errorMessage(cause);
+        throw cause;
+      } finally {
+        models.loading = false;
+      }
     },
-    {
-      id: LOCAL_CLAUDE_CODE_MODEL_ID,
-      name: '本地 Claude Code',
-      description: '使用本机 Claude Code 已有的模型配置和登录信息',
-      state: ref<LocalCodexStatus>({ authorized: false, model: null, message: '' }),
-      read: () => aiApi.localClaudeCodeStatus(),
-      authorize: (authorized: boolean) => aiApi.localClaudeCodeAuthorize(authorized),
-    },
-  ];
-  const localSources = computed(() =>
-    sources.map((source) => ({
-      id: source.id,
-      name: source.name,
-      description: source.description,
-      status: source.state.value,
-    })),
-  );
+  });
+  const selected = computed(() => models.models.find((model) => model.id === modelId.value));
   const localSelected = computed(() =>
     localSources.value.find((source) => source.id === modelId.value),
   );
-  const selected = computed(() =>
-    isLocalModel(modelId.value)
-      ? (localSelected.value?.status.model ?? undefined)
-      : models.models.find((model) => model.id === modelId.value),
-  );
-  async function loadLocal(source: (typeof sources)[number]) {
-    try {
-      return await source.read();
-    } catch (cause) {
-      return {
-        installed: source.state.value.installed,
-        installSupported: source.state.value.installSupported,
-        authorized: source.state.value.authorized,
-        model: null,
-        message: errorMessage(cause),
-      };
-    }
-  }
-  let settings: Record<string, unknown> = {};
-  let version = 0;
+  let settings: Record<string, import('@serverdeck/plugin-sdk/types/platform').JsonValue> = {},
+    version = 0;
   async function load() {
     const current = ++version;
     loading.value = true;
-    loaded.value = false;
     error.value = '';
     try {
-      const [value, , local] = await Promise.all([
-        requestCapability<unknown>({ kind: 'settings_read' }),
+      const [value] = await Promise.all([
+        call<unknown>({ kind: 'settings_read' }),
         models.refresh(),
-        Promise.all(sources.map(loadLocal)),
       ]);
       if (current !== version || !visible.value) return;
       if (!value || typeof value !== 'object' || Array.isArray(value))
-        throw new Error('插件模型绑定配置无效');
-      const record = value as Record<string, unknown>;
-      if (record.modelId != null && typeof record.modelId !== 'string')
-        throw new Error('插件模型绑定配置无效');
-      settings = record;
-      sources.forEach((source, index) => {
-        source.state.value = local[index]!;
-      });
-      modelId.value = typeof record.modelId === 'string' ? record.modelId : '';
+        throw new Error('插件设置无效');
+      settings = value as typeof settings;
+      if (settings.modelId != null && typeof settings.modelId !== 'string')
+        throw new Error('模型绑定无效');
+      modelId.value = typeof settings.modelId === 'string' ? settings.modelId : '';
       loaded.value = true;
     } catch (cause) {
       if (current === version) error.value = errorMessage(cause);
@@ -101,120 +74,41 @@ export function useModelBinding() {
     }
   }
   async function save(id: string) {
-    if (!loaded.value || loading.value || saving.value || installing.value || !visible.value)
-      return;
-    const source = localSources.value.find((source) => source.id === id);
-    if (source && !source.status.model) {
-      error.value = source.status.message || `${source.name}尚未就绪`;
-      return;
+    if (!loaded.value || loading.value || saving.value || !visible.value) return false;
+    if (id && !models.models.some((model) => model.id === id && model.hasKey)) {
+      error.value = '模型未就绪，请在平台模型设置中检查';
+      return false;
     }
-    if (id && !isLocalModel(id) && !models.models.some((model) => model.id === id)) {
-      error.value = '所选模型已删除，请重新选择';
-      return;
-    }
-    const current = version;
     saving.value = true;
     error.value = '';
-    message.value = '';
     try {
       const value = { ...settings, modelId: id || null };
-      await requestCapability({ kind: 'settings_write', value });
-      if (current !== version || !visible.value) return;
+      await call({ kind: 'settings_write', value });
       settings = value;
       modelId.value = id;
       message.value = id ? '模型绑定已保存' : '已解除模型绑定';
       return true;
     } catch (cause) {
-      if (current === version) error.value = errorMessage(cause);
-    } finally {
-      saving.value = false;
-    }
-  }
-  async function authorizeLocal(id: string, authorized: boolean) {
-    if (loading.value || saving.value || installing.value || !visible.value) return;
-    const source = sources.find((source) => source.id === id);
-    if (!source) return;
-    saving.value = true;
-    error.value = '';
-    const current = version;
-    try {
-      await source.authorize(authorized);
-      const local = await loadLocal(source);
-      if (current !== version || !visible.value) return;
-      source.state.value = local;
-      message.value = authorized ? `${source.name} 授权已保存` : `已撤销${source.name} 授权`;
-    } catch (cause) {
-      if (current === version) error.value = errorMessage(cause);
-    } finally {
-      saving.value = false;
-    }
-  }
-  async function installLocal(id: string) {
-    if (!loaded.value || loading.value || saving.value || installing.value || !visible.value)
-      return;
-    const source = sources.find((source) => source.id === id);
-    if (!source || source.state.value.installed !== false) return;
-    const requestId = crypto.randomUUID();
-    installRequest = requestId;
-    installing.value = id;
-    error.value = '';
-    message.value = '';
-    const current = version;
-    try {
-      await aiApi.localToolInstall(id, requestId);
-      const state = await loadLocal(source);
-      if (current !== version || !visible.value) return;
-      source.state.value = state;
-      message.value = state.installed ? '安装完成，请继续授权或使用已有登录' : state.message;
-    } catch (cause) {
-      if (current !== version || !visible.value) return;
-      if (
-        typeof cause === 'object' &&
-        cause &&
-        'code' in cause &&
-        cause.code === 'AI_INSTALL_CANCELLED'
-      )
-        message.value = '已取消下载';
-      else error.value = errorMessage(cause);
-    } finally {
-      if (installRequest === requestId) {
-        installRequest = '';
-        installing.value = '';
-      }
-    }
-  }
-  async function refreshLocal(id: string) {
-    if (loading.value || saving.value || installing.value || !visible.value) return;
-    const source = sources.find((source) => source.id === id);
-    if (!source) return;
-    const current = version;
-    loading.value = true;
-    error.value = '';
-    try {
-      const state = await loadLocal(source);
-      if (current === version && visible.value) source.state.value = state;
-    } finally {
-      if (current === version) loading.value = false;
-    }
-  }
-  async function cancelInstall() {
-    if (!installRequest) return;
-    try {
-      await aiApi.localToolInstallCancel(installRequest);
-    } catch (cause) {
       error.value = errorMessage(cause);
+      return false;
+    } finally {
+      saving.value = false;
     }
   }
+  const manageModels = () => request<void>('workspace.navigate', { view: 'models' });
   watch(
     visible,
     (active) => {
       if (active) void load();
-      else {
-        ++version;
-        loading.value = false;
-      }
+      else ++version;
     },
     { immediate: true },
+  );
+  watch(
+    () => context.models.map((model) => model.id + ':' + model.revision).join(','),
+    () => {
+      if (visible.value) void load();
+    },
   );
   onScopeDispose(() => {
     ++version;
@@ -226,16 +120,12 @@ export function useModelBinding() {
     loaded,
     loading,
     saving,
-    installing,
     error,
     message,
     localSources,
     localSelected,
-    authorizeLocal,
-    installLocal,
-    refreshLocal,
-    cancelInstall,
     load,
     save,
+    manageModels,
   };
 }

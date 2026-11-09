@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { HistoryPoint } from '../types/monitor';
 const props = defineProps<{
-  points: HistoryPoint[];
-  field: 'cpu' | 'memory' | 'receiveRate' | 'sendRate';
+  points: { sampledAt: number; [field: string]: number | null }[];
+  field: string;
   label: string;
   unit: string;
   max?: number;
@@ -54,8 +53,7 @@ const segments = computed(() => {
       /></svg
     ><small class="subtle"
       >{{ points[0] ? new Date(points[0].sampledAt).toLocaleTimeString() : '等待采样' }} —
-      {{ points.at(-1) ? new Date(points.at(-1)!.sampledAt).toLocaleTimeString() : '' }} · 最近 30
-      分钟 / 最多 600 点</small
+      {{ points.at(-1) ? new Date(points.at(-1)!.sampledAt).toLocaleTimeString() : '' }}</small
     >
   </figure>
 </template>

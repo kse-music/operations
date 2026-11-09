@@ -103,6 +103,10 @@ function loadSidebarConfig(): void {
   };
 }
 beforeEach(async () => {
+  vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
+    installed: await pluginsApi.list(),
+    problems: [],
+  }));
   vi.stubGlobal('matchMedia', () => ({
     matches: false,
     addEventListener: vi.fn(),
@@ -128,17 +132,16 @@ beforeEach(async () => {
   );
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'ui').mockImplementation(async (id) => pluginState.schemas[id]!.ui);
-  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
   vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
   vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
   vi.spyOn(filesApi, 'close').mockResolvedValue();
   vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
   vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
   vi.spyOn(aiApi, 'models').mockResolvedValue([]);
-  vi.spyOn(pluginsApi, 'toolStage').mockImplementation(async (_id, input) => ({
-    inputId: crypto.randomUUID(),
-    operation: input.operation,
-  }));
   vi.spyOn(pluginsApi, 'call').mockResolvedValue({ protocolVersion: 1, error: null, result: [] });
   vi.spyOn(useApplicationStore(), 'initialize').mockResolvedValue();
   useHostsStore().catalog = {
@@ -990,7 +993,7 @@ it('keeps host and plugin function tabs in one row while settings preserve the a
   });
   const open = vi.spyOn(terminals, 'open'),
     close = vi.spyOn(terminalApi, 'close');
-  workspace.navigate('assistant');
+  void workspace.openPlugin('cn.hiboot.plugins.assistant', 'assistant', '');
   await flush();
   document
     .querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] [role="tab"]')!
@@ -1304,7 +1307,7 @@ it('creates a shell in an existing empty workspace only after the host tree is c
 it('middle-click closes host sessions while closing global pages leaves them running', async () => {
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
-  workspace.navigate('assistant');
+  void workspace.openPlugin('cn.hiboot.plugins.assistant', 'assistant', '');
   terminals.open(useHostsStore().catalog!.hosts[0]!);
   workspace.navigate('terminals', 'a');
   await flush();
@@ -1815,7 +1818,7 @@ it.each([
     const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
     workspace.navigate('terminals', '');
     workspace.navigate('files', 'a');
-    workspace.navigate('assistant');
+    void workspace.openPlugin('cn.hiboot.plugins.assistant', 'assistant', '');
     const beforeMenu = 'host:';
     workspace.activate(beforeMenu);
     files.connections.a = {

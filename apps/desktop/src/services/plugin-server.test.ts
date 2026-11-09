@@ -1,381 +1,176 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
+import { createPinia, disposePinia, getActivePinia, setActivePinia } from 'pinia';
 import { pluginsApi } from './plugins';
-import { pluginContainerShell, pluginServerRequest, pluginToolRequest } from './plugin-server';
+import { pluginInvokeRequest, pluginPlatformRequest } from './plugin-server';
 import { usePluginsStore } from '../stores/plugins';
-import type { PluginUi, PluginUiPage } from '../types/plugins';
-import schema from '../../../../plugins/system/docker/ui.json';
-let pinia: Pinia;
-const page = schema.pages[0] as PluginUiPage;
+import type { PluginUiPage } from '../types/plugins';
+const page: PluginUiPage = {
+  id: 'custom',
+  title: 'Custom',
+  surface: { kind: 'frontend' },
+  initialAction: null,
+  fields: [],
+  actions: [{ id: 'run', label: 'Run', discardDirty: false, enabledWhen: null }],
+  log: null,
+};
+const ok = (result: unknown) => ({ protocolVersion: 1, result, error: null });
+const review = () => ({
+  protocolVersion: 1,
+  result: {
+    id: 'approval',
+    continuation: 'frozen-future',
+    hostId: 'host',
+    pluginName: 'Third party',
+    pluginVersion: '1.0.0',
+    description: 'ops@host:22\nexact command',
+  },
+  error: { code: 'PLUGIN_CONFIRMATION_REQUIRED', message: 'confirm' },
+});
 beforeEach(() => {
   vi.useFakeTimers();
-  pinia = createPinia();
-  setActivePinia(pinia);
+  setActivePinia(createPinia());
+  vi.spyOn(pluginsApi, 'approve').mockResolvedValue();
 });
 afterEach(() => {
-  disposePinia(pinia);
+  disposePinia(getActivePinia()!);
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-it('requires the frozen native review even when a package sends its own confirmed flag and cancels unused tickets', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
-  vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
-    inputId: 'reviewed',
-    operation: 'ai_execute',
-    review: {
-      title: 'Actual target',
-      message: 'Actual command',
-      confirmationText: 'approve target',
-    },
-  });
-  const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
-  const abort = vi.spyOn(pluginsApi, 'toolAbortInput').mockResolvedValue();
-  const call = vi.spyOn(pluginsApi, 'call');
-  const check = expect(
-    pluginToolRequest(
-      'review-test',
-      'ai_execute',
-      { input: { confirmed: true } },
-      toolPage,
-      undefined,
-      true,
-    ),
-  ).rejects.toMatchObject({ code: 'PLUGIN_USER_CANCELLED' });
-  await vi.runAllTimersAsync();
-  await check;
-  expect(ask).toHaveBeenCalledWith('Actual target', 'Actual command', 'approve target');
-  expect(abort).toHaveBeenCalledWith('review-test', 'reviewed');
-  expect(call).not.toHaveBeenCalled();
-});
-it('passes typed requests through WASM and requires host approval before retrying a mutation', async () => {
-  const call = vi
-    .spyOn(pluginsApi, 'call')
-    .mockResolvedValueOnce({
-      protocolVersion: 1,
-      result: {
-        id: 'approval',
-        hostId: 'host',
-        pluginName: 'Docker',
-        pluginVersion: '1.0.0',
-        description: 'stop exact container',
-      },
-      error: { code: 'PLUGIN_CONFIRMATION_REQUIRED', message: 'confirm' },
-    })
-    .mockResolvedValueOnce({ protocolVersion: 1, result: { success: true }, error: null });
-  const approve = vi.spyOn(pluginsApi, 'approve').mockResolvedValue();
-  const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
-  const request = {
-    kind: 'container_action' as const,
-    id: 'abc123',
-    action: 'stop' as const,
-    confirmed: true,
-  };
-  const job = pluginServerRequest('mutation-test', { kind: 'system_query', request }, page);
-  await vi.runAllTimersAsync();
-  expect(await job).toEqual({ success: true });
-  expect(ask).toHaveBeenCalledOnce();
-  expect(approve).toHaveBeenCalledWith('approval', true);
-  expect(call).toHaveBeenCalledTimes(2);
-  const payload = call.mock.calls[0]![1] as { action: string; values: { request: string } };
-  expect(payload.action).toBe('bridge');
-  expect(JSON.parse(payload.values.request).request).toEqual({
-    kind: 'container_action',
-    id: 'abc123',
-    action: 'stop',
-  });
-});
-
 it.each([true, false])(
-  'reviews the native image target once and executes only after approval=%s',
+  'resumes the original action once, without replay, approval=%s',
   async (accepted) => {
-    const call = vi
-      .spyOn(pluginsApi, 'call')
-      .mockResolvedValueOnce({
-        protocolVersion: 1,
-        result: {
-          id: 'image-approval',
-          hostId: 'native-host',
-          pluginName: 'Docker',
-          pluginVersion: '1.5.1',
-          imageId: 'native-frozen-image',
-          description: 'native image removal',
-        },
-        error: { code: 'PLUGIN_CONFIRMATION_REQUIRED', message: 'confirm' },
-      })
-      .mockResolvedValueOnce({ protocolVersion: 1, result: { success: true }, error: null });
-    const approve = vi.spyOn(pluginsApi, 'approve').mockResolvedValue();
-    const plugins = usePluginsStore();
-    const job = pluginServerRequest(
-      'image-review',
-      {
-        kind: 'system_query',
-        request: { kind: 'image_remove', id: 'untrusted-submitted-image' },
-      },
+    const call = vi.spyOn(pluginsApi, 'call').mockResolvedValue(review());
+    const resume = vi.spyOn(pluginsApi, 'continue').mockResolvedValue(ok({ cancelled: !accepted }));
+    const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(accepted);
+    const job = pluginInvokeRequest(
+      'resume-' + accepted,
       page,
+      'run',
+      { hostId: 'host' },
+      () => true,
+      'page-owner',
     );
-    const result = accepted
-      ? expect(job).resolves.toEqual({ success: true })
-      : expect(job).rejects.toMatchObject({ code: 'PLUGIN_USER_CANCELLED' });
     await vi.runAllTimersAsync();
-    expect(call).toHaveBeenCalledTimes(1);
-    expect(approve).not.toHaveBeenCalled();
-    expect(plugins.prompt).toMatchObject({
-      title: '删除镜像？',
-      confirmationText: undefined,
-      imageRemoval: { imageId: 'native-frozen-image', hostName: 'native-host' },
-    });
-    const firstPayload = call.mock.calls[0]![1];
-    plugins.decide(accepted);
-    await vi.runAllTimersAsync();
-    await result;
-    expect(approve).toHaveBeenCalledExactlyOnceWith('image-approval', accepted);
-    expect(call).toHaveBeenCalledTimes(accepted ? 2 : 1);
-    if (accepted) expect(call.mock.calls[1]![1]).toEqual(firstPayload);
-    expect(plugins.prompt).toBeNull();
+    expect(await job).toEqual({ cancelled: !accepted });
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      'resume-' + accepted,
+      { action: 'run', input: { hostId: 'host' } },
+      'page-owner',
+    );
+    expect(ask.mock.calls[0]?.[1]).toContain('exact command');
+    expect(pluginsApi.approve).toHaveBeenCalledWith('approval', accepted);
+    expect(resume).toHaveBeenCalledExactlyOnceWith(
+      'resume-' + accepted,
+      'frozen-future',
+      'page-owner',
+      !accepted,
+    );
   },
 );
-it('does not show or execute a queued destructive approval after its page becomes hidden', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
-  vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
-    inputId: 'hidden-review',
-    operation: 'ai_execute',
-    review: { title: 'Plan', message: 'Frozen targets', confirmationText: 'approve' },
-  });
-  const abort = vi.spyOn(pluginsApi, 'toolAbortInput').mockResolvedValue();
-  const ask = vi.spyOn(usePluginsStore(), 'ask');
-  const call = vi.spyOn(pluginsApi, 'call');
-  const pending = expect(
-    pluginToolRequest(
-      'hidden-plan',
-      'ai_execute',
-      { input: { confirmed: true } },
-      toolPage,
-      undefined,
-      true,
-      () => false,
-    ),
-  ).rejects.toMatchObject({ code: 'PLUGIN_CANCELLED' });
+it('freezes structured input before waiting in the queue', async () => {
+  const call = vi.spyOn(pluginsApi, 'call').mockResolvedValue(ok(null));
+  const input = { target: { id: 'original' } };
+  const job = pluginInvokeRequest('frozen', page, 'run', input);
+  input.target.id = 'changed';
   await vi.runAllTimersAsync();
-  await pending;
-  expect(ask).not.toHaveBeenCalled();
-  expect(call).not.toHaveBeenCalled();
-  expect(abort).toHaveBeenCalledWith('hidden-plan', 'hidden-review');
+  await job;
+  expect(call.mock.calls[0]?.[1]).toEqual({ action: 'run', input: { target: { id: 'original' } } });
 });
-it('reassembles UTF-8 result chunks without truncation and releases the host resource', async () => {
-  const bytes = new TextEncoder().encode(JSON.stringify({ text: '中文'.repeat(20_000) }));
-  vi.spyOn(pluginsApi, 'call').mockResolvedValue({
-    protocolVersion: 1,
-    result: {
+it('declines a late hidden approval and lets the original future clean up', async () => {
+  let active = true;
+  vi.spyOn(pluginsApi, 'call').mockImplementation(async () => {
+    active = false;
+    return review();
+  });
+  const ask = vi.spyOn(usePluginsStore(), 'ask');
+  const resume = vi.spyOn(pluginsApi, 'continue').mockResolvedValue(ok({ partial: true }));
+  const job = pluginInvokeRequest('hidden', page, 'run', {}, () => active, 'owner');
+  await vi.runAllTimersAsync();
+  expect(await job).toEqual({ partial: true });
+  expect(ask).not.toHaveBeenCalled();
+  expect(resume).toHaveBeenCalledWith('hidden', 'frozen-future', 'owner', true);
+});
+it('rejects queued requests from an invalidated package before native dispatch', async () => {
+  const call = vi.spyOn(pluginsApi, 'call').mockResolvedValue(ok(null));
+  const cap = vi.spyOn(pluginsApi, 'capability');
+  const a = expect(pluginInvokeRequest('stale', page, 'run', {})).rejects.toMatchObject({
+    code: 'PLUGIN_CANCELLED',
+  });
+  const b = expect(
+    pluginPlatformRequest('stale', { kind: 'hosts' }, () => true),
+  ).rejects.toMatchObject({ code: 'PLUGIN_CANCELLED' });
+  usePluginsStore().clearPlugin('stale');
+  await vi.runAllTimersAsync();
+  await Promise.all([a, b]);
+  expect(call).not.toHaveBeenCalled();
+  expect(cap).not.toHaveBeenCalled();
+});
+it('reassembles split UTF-8 and closes only the owned result', async () => {
+  const expected = { text: '中文'.repeat(20000) },
+    bytes = new TextEncoder().encode(JSON.stringify(expected));
+  vi.spyOn(pluginsApi, 'call').mockResolvedValue(
+    ok({
       __pluginResult: {
         id: 'result',
         bytes: bytes.length,
         chunks: Math.ceil(bytes.length / 32768),
       },
-    },
-    error: null,
-  });
-  const capability = vi.spyOn(pluginsApi, 'capability').mockImplementation(async (_id, request) => {
-    const operation = request.operation;
+    }),
+  );
+  const cap = vi.spyOn(pluginsApi, 'capability').mockImplementation(async (_id, request) => {
+    const r = request.operation.request;
     return {
       requestId: request.requestId,
       error: null,
       result:
-        operation.kind === 'result_read'
+        r.kind === 'result_read'
           ? {
-              chunk: operation.chunk,
+              chunk: r.chunk,
               dataBase64: btoa(
-                String.fromCharCode(
-                  ...bytes.slice(operation.chunk * 32768, (operation.chunk + 1) * 32768),
-                ),
+                String.fromCharCode(...bytes.slice(r.chunk * 32768, (r.chunk + 1) * 32768)),
               ),
             }
           : null,
     };
   });
-  const job = pluginServerRequest('chunks-test', { kind: 'system_feedback' }, page);
+  const job = pluginInvokeRequest('chunks', page, 'run', {}, () => true, 'owner');
   await vi.runAllTimersAsync();
-  expect(await job).toEqual({ text: '中文'.repeat(20_000) });
-  expect(capability.mock.calls.at(-1)?.[1].operation).toEqual({
-    kind: 'result_close',
-    resultId: 'result',
-  });
+  expect(await job).toEqual(expected);
+  expect(cap.mock.calls.at(-1)?.slice(1)).toEqual([
+    expect.objectContaining({
+      operation: {
+        kind: 'platform',
+        bindings: [],
+        request: { kind: 'result_close', resultId: 'result' },
+      },
+    }),
+    'owner',
+  ]);
 });
-it('keeps read and cleanup failure causes together', async () => {
-  vi.spyOn(pluginsApi, 'call').mockResolvedValue({
-    protocolVersion: 1,
-    result: { __pluginResult: { id: 'broken', bytes: 40000, chunks: 2 } },
-    error: null,
-  });
-  vi.spyOn(pluginsApi, 'capability').mockResolvedValue({
-    requestId: 'test',
+it('preserves both read and cleanup failures', async () => {
+  vi.spyOn(pluginsApi, 'call').mockResolvedValue(
+    ok({ __pluginResult: { id: 'broken', bytes: 40000, chunks: 2 } }),
+  );
+  vi.spyOn(pluginsApi, 'capability').mockImplementation(async (_id, req) => ({
+    requestId: req.requestId,
     result: null,
-    error: { code: 'BROKEN', message: 'failed chunk or cleanup' },
+    error: { code: 'FAILED', message: req.operation.request.kind },
+  }));
+  const checked = expect(pluginInvokeRequest('broken', page, 'run', {})).rejects.toMatchObject({
+    errors: [{ message: 'result_read' }, { message: 'result_close' }],
   });
-  const check = expect(
-    pluginServerRequest('failed-chunks', { kind: 'system_feedback' }, page),
-  ).rejects.toBeInstanceOf(AggregateError);
   await vi.runAllTimersAsync();
-  await check;
+  await checked;
 });
-it('never executes a queued old-context request after a connection or plugin change', async () => {
-  let release!: (reply: { protocolVersion: number; result: null; error: null }) => void;
-  const call = vi.spyOn(pluginsApi, 'call').mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        release = resolve;
-      }),
+it.each([0, 1048577])('rejects an unbounded result descriptor: %s', async (bytes) => {
+  vi.spyOn(pluginsApi, 'call').mockResolvedValue(
+    ok({ __pluginResult: { id: 'invalid', bytes, chunks: Math.ceil(bytes / 32768) } }),
   );
-  const first = pluginServerRequest('context-test', { kind: 'system_feedback' }, page);
-  const firstCheck = expect(first).rejects.toMatchObject({ code: 'PLUGIN_CANCELLED' });
-  await Promise.resolve();
-  await Promise.resolve();
-  const second = expect(
-    pluginServerRequest('context-test', { kind: 'system_feedback' }, page),
-  ).rejects.toMatchObject({ code: 'PLUGIN_CANCELLED' });
-  usePluginsStore().clearPlugin('context-test');
-  release({ protocolVersion: 1, result: null, error: null });
-  await vi.runAllTimersAsync();
-  await firstCheck;
-  await second;
-  expect(call).toHaveBeenCalledOnce();
-});
-it('freezes confirmed tool inputs before queuing and gives WASM only an opaque typed ticket', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
-  const stage = vi
-    .spyOn(pluginsApi, 'toolStage')
-    .mockResolvedValue({ inputId: 'immutable', operation: 'ai_execute' });
-  const call = vi
-    .spyOn(pluginsApi, 'call')
-    .mockResolvedValue({ protocolVersion: 1, result: { id: 'job' }, error: null });
-  const args = { input: { confirmed: true, command: 'exact approved command' } };
-  const job = pluginToolRequest('upload-any-id', 'ai_execute', args, toolPage);
-  args.input.command = 'changed after confirmation';
-  await vi.runAllTimersAsync();
-  expect(await job).toEqual({ id: 'job' });
-  expect(stage).toHaveBeenCalledWith('upload-any-id', {
-    operation: 'ai_execute',
-    args: { input: { confirmed: true, command: 'exact approved command' } },
-  });
-  const payload = call.mock.calls[0]![1] as { values: { request: string } };
-  expect(JSON.parse(payload.values.request)).toEqual({
-    kind: 'tool_invoke',
-    inputId: 'immutable',
-    operation: 'ai_execute',
-  });
-  expect(payload.values.request).not.toContain('approved command');
-});
-it('aborts exactly the staged AI input and allows the next request without cancelling the VM', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
-  let staged!: (ticket: { inputId: string; operation: 'ai_prepare' }) => void;
-  vi.spyOn(pluginsApi, 'toolStage')
-    .mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          staged = resolve;
-        }),
-    )
-    .mockResolvedValue({ inputId: 'next', operation: 'ai_prepare' });
-  const abort = vi.spyOn(pluginsApi, 'toolAbortInput').mockResolvedValue();
-  const cancel = vi.spyOn(pluginsApi, 'cancel');
-  const call = vi
-    .spyOn(pluginsApi, 'call')
-    .mockResolvedValue({ protocolVersion: 1, result: { id: 'next-preview' }, error: null });
-  const controller = new AbortController();
-  const check = expect(
-    pluginToolRequest('cancel-ai', 'ai_prepare', { input: {} }, toolPage, controller.signal),
-  ).rejects.toMatchObject({ name: 'AbortError' });
-  await vi.advanceTimersByTimeAsync(65);
-  controller.abort();
-  staged({ inputId: 'cancelled-ticket', operation: 'ai_prepare' });
-  await vi.runAllTimersAsync();
-  await check;
-  expect(abort).toHaveBeenCalledExactlyOnceWith('cancel-ai', 'cancelled-ticket');
-  expect(call).not.toHaveBeenCalled();
-  const next = pluginToolRequest('cancel-ai', 'ai_prepare', { input: {} }, toolPage);
-  await vi.runAllTimersAsync();
-  expect(await next).toEqual({ id: 'next-preview' });
-  expect(cancel).not.toHaveBeenCalled();
-});
-it('revokes an active AI ticket and rejects a late answer after cancellation', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
-  vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
-    inputId: 'in-flight',
-    operation: 'ai_send',
-  });
-  let finish!: (reply: { protocolVersion: number; result: unknown; error: null }) => void;
-  vi.spyOn(pluginsApi, 'call').mockImplementation(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
+  const cap = vi.spyOn(pluginsApi, 'capability');
+  const checked = expect(pluginInvokeRequest('invalid-' + bytes, page, 'run', {})).rejects.toThrow(
+    '描述无效',
   );
-  const abort = vi.spyOn(pluginsApi, 'toolAbortInput').mockResolvedValue();
-  const controller = new AbortController();
-  const check = expect(
-    pluginToolRequest(
-      'late-ai',
-      'ai_send',
-      { id: 'preview', confirmed: true },
-      toolPage,
-      controller.signal,
-    ),
-  ).rejects.toMatchObject({ name: 'AbortError' });
-  await vi.advanceTimersByTimeAsync(65);
-  controller.abort();
-  expect(abort).toHaveBeenCalledWith('late-ai', 'in-flight');
-  finish({ protocolVersion: 1, result: { answer: 'late' }, error: null });
   await vi.runAllTimersAsync();
-  await check;
-});
-it('retains the request failure and an unexpected abort cleanup failure together', async () => {
-  const toolPage = { ...page, surface: { kind: 'tool', tool: 'assistant' } } as PluginUiPage;
-  vi.spyOn(pluginsApi, 'toolStage').mockResolvedValue({
-    inputId: 'cleanup-failure',
-    operation: 'ai_send',
-  });
-  let reject!: (cause: unknown) => void;
-  vi.spyOn(pluginsApi, 'call').mockImplementation(
-    () =>
-      new Promise((_resolve, fail) => {
-        reject = fail;
-      }),
-  );
-  const failure = { code: 'MODEL_ERROR', message: 'request failed' },
-    cleanup = { code: 'IO', message: 'cleanup failed' };
-  vi.spyOn(pluginsApi, 'toolAbortInput').mockRejectedValue(cleanup);
-  const controller = new AbortController();
-  const check = expect(
-    pluginToolRequest(
-      'cleanup-ai',
-      'ai_send',
-      { id: 'preview', confirmed: true },
-      toolPage,
-      controller.signal,
-    ),
-  ).rejects.toMatchObject({ errors: [failure, cleanup], cause: failure });
-  await vi.advanceTimersByTimeAsync(65);
-  controller.abort();
-  reject(failure);
-  await vi.runAllTimersAsync();
-  await check;
-});
-it('obtains a fresh WASM shell ticket and binds the trusted terminal launch to its exact host and target', async () => {
-  vi.spyOn(usePluginsStore(), 'schema').mockResolvedValue(schema as PluginUi);
-  const call = vi
-    .spyOn(pluginsApi, 'call')
-    .mockResolvedValue({ protocolVersion: 1, result: { shellTicket: 'one-use' }, error: null });
-  const terminal = vi.spyOn(pluginsApi, 'terminalOpen').mockResolvedValue({
-    id: 'terminal',
-    hostId: 'host',
-    transportId: 'transport',
-    routeHostIds: ['host'],
-  });
-  const shell = { id: 'abc123', bash: false, confirmed: true, pluginId: 'shell-test' };
-  const receive = vi.fn();
-  const size = { cols: 80, rows: 24 };
-  const job = pluginContainerShell('host', size, shell, receive);
-  await vi.runAllTimersAsync();
-  await job;
-  expect(call).toHaveBeenCalledOnce();
-  expect(terminal).toHaveBeenCalledWith('shell-test', 'one-use', 'host', shell, size, receive);
+  await checked;
+  expect(cap).not.toHaveBeenCalled();
 });

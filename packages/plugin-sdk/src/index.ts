@@ -1,10 +1,10 @@
 export { request } from './transport';
 export { errorMessage } from './services/ipc';
-export type { Host } from './types/hosts';
+export type { HostMetadata, ModelMetadata, PlatformContext } from './context';
 export type { PluginCapability, PluginUiPage } from './types/plugins';
 import { request } from './transport';
-import type { PluginValues } from './types/plugins';
+import type { JsonValue } from './types/platform';
 /** Invoke a declared action on this plugin's Wasm backend. */
-export function invoke<T>(action: string, values: PluginValues = {}): Promise<T> {
-  return request<T>('invoke', { action, values });
+export function invoke<T>(action: string, input: JsonValue = null): Promise<T> {
+  return request<T>('invoke', { action, input });
 }

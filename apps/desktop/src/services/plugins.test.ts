@@ -43,10 +43,14 @@ describe('plugin IPC boundary', () => {
     const request = {
       apiVersion: 1,
       requestId: 'read',
-      operation: { kind: 'hosts_read' as const },
+      operation: { kind: 'platform' as const, request: { kind: 'hosts' as const }, bindings: [] },
     };
     await pluginsApi.capability('dev.example', request);
-    expect(invoke).toHaveBeenLastCalledWith('plugin_capability', { id: 'dev.example', request });
+    expect(invoke).toHaveBeenLastCalledWith('plugin_capability', {
+      id: 'dev.example',
+      owner: 'default',
+      request,
+    });
     await pluginsApi.approve('one-shot-token', false);
     expect(invoke).toHaveBeenLastCalledWith('plugin_approve', {
       id: 'one-shot-token',
@@ -57,24 +61,24 @@ describe('plugin IPC boundary', () => {
   });
   it('binds the shell ticket and exact target while excluding host-only plugin attribution from the native DTO', async () => {
     const receive = vi.fn();
-    await pluginsApi.terminalOpen(
+    await pluginsApi.platformTerminalOpen(
       'dev.example',
+      'owner',
       'ticket',
       'host',
-      { id: 'abc123', bash: false, confirmed: true, pluginId: 'dev.example' },
       { cols: 80, rows: 24 },
       receive,
     );
     const args = invoke.mock.calls.at(-1)!;
-    expect(args[0]).toBe('plugin_terminal_open');
+    expect(args[0]).toBe('plugin_platform_terminal_open');
     expect(args[1]).toMatchObject({
       id: 'dev.example',
+      owner: 'owner',
       ticket: 'ticket',
       expectedHost: 'host',
-      expected: { id: 'abc123', bash: false, confirmed: true },
       size: { cols: 80, rows: 24 },
     });
-    expect(args[1].expected).not.toHaveProperty('pluginId');
+    expect(args[1]).not.toHaveProperty('expected');
     expect(args[1].events.onmessage).toBe(receive);
   });
 });

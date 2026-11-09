@@ -5,9 +5,6 @@ export async function serverPluginFor(hostId: string, section: ServerSection) {
   const plugins = usePluginsStore();
   for (const entry of plugins.extensions.filter((entry) => entry.kind === 'server')) {
     if (!hostId) continue;
-    const ui = await plugins.schema(entry.pluginId);
-    const surface = ui.pages.find((page) => page.id === entry.id)?.surface;
-    if (surface && surface.kind === 'operations' && surface.sections.includes(section))
-      return entry;
+    if (entry.routes?.includes(section)) return entry;
   }
 }

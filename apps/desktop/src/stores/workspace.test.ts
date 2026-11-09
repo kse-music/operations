@@ -13,12 +13,35 @@ import { useFilesStore } from './files';
 beforeEach(async () => {
   setActivePinia(createPinia());
   Object.assign(usePluginsStore(), toolPluginState());
-  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
   vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
   vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
   vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
 });
 afterEach(() => disposePinia(getActivePinia()!));
+
+it('protects hidden plugin drafts before closing a host and clears them only after an accepted close', async () => {
+  const workspace = useWorkspaceStore(),
+    plugins = usePluginsStore(),
+    files = useFilesStore();
+  await workspace.openPlugin('cn.hiboot.plugins.docker', 'server', 'a');
+  const page = workspace.pluginPages[0]!;
+  plugins.setDraftDirty(page.key, page.pluginId!, true);
+  workspace.navigate('terminals', 'a');
+  const prepare = vi.spyOn(files, 'prepareHostClose').mockResolvedValue(true);
+  const ask = vi.spyOn(plugins, 'ask').mockResolvedValue(false);
+  await workspace.close('host:a');
+  expect(workspace.tabs).toHaveLength(1);
+  expect(plugins.dirty).toBe(true);
+  expect(prepare).not.toHaveBeenCalled();
+  ask.mockResolvedValue(true);
+  await workspace.close('host:a');
+  expect(workspace.tabs).toHaveLength(0);
+  expect(plugins.dirty).toBe(false);
+});
 
 it('keeps the host and terminal intact when transfer cancellation is declined', async () => {
   const workspace = useWorkspaceStore(),
@@ -151,7 +174,7 @@ function openTabs() {
   const workspace = useWorkspaceStore();
   workspace.navigate('terminals', '');
   workspace.navigate('files', 'a');
-  workspace.navigate('assistant');
+  void workspace.openPlugin('cn.hiboot.plugins.assistant', 'assistant', '');
   workspace.navigate('plugins');
   return workspace;
 }

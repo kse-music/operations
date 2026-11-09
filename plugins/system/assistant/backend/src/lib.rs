@@ -1,43 +1,78 @@
-use serverdeck_plugin_sdk::{Capability, serde_json::Value, server::SurfaceState, tools::Tool};
-use std::sync::Mutex;
-static STATE: Mutex<Option<SurfaceState>> = Mutex::new(None);
-fn allows(cap: &Capability) -> bool {
-    match cap {
-        Capability::SettingsRead | Capability::SettingsWrite { .. } => true,
-        Capability::ToolInvoke { operation, .. } => operation.tool() == Tool::Assistant,
-        _ => false,
-    }
+use serverdeck_plugin_sdk::{
+    ApiError,
+    backend::{Action, Context, Runtime},
+    serde_json::Value,
+};
+mod agent;
+mod collection;
+mod disk;
+mod metrics;
+mod metrics_types;
+mod ops;
+mod parse;
+mod prompts;
+mod redact;
+mod routing;
+mod summary;
+mod types;
+mod workflow;
+#[derive(Debug)]
+pub enum Error {
+    Validation(&'static str),
+    Conflict,
+    NotFound,
+    Busy,
+    Worker(Box<dyn std::error::Error>),
+    Connection {
+        code: &'static str,
+        message: &'static str,
+        source: Option<Box<dyn std::error::Error>>,
+    },
+    Platform(ApiError),
 }
-fn handle(operation: i32, payload: Value) -> Value {
-    let Ok(mut guard) = STATE.lock() else {
-        return serverdeck_plugin_sdk::json_error("STATE", "Plugin state is unavailable");
-    };
-    guard
-        .get_or_insert_with(SurfaceState::default)
-        .handle(operation, payload, allows)
-}
-serverdeck_plugin_sdk::export_plugin!(handle);
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn limits_calls_to_its_public_tool_domain() {
-        assert!(allows(&Capability::SettingsRead));
-        assert!(allows(&Capability::SettingsWrite {
-            value: serverdeck_plugin_sdk::serde_json::json!({"modelId":null})
-        }));
-        assert!(!allows(&Capability::HostsRead));
-        for operation in [
-            serverdeck_plugin_sdk::tools::Operation::AiPrepare,
-            serverdeck_plugin_sdk::tools::Operation::AiSend,
-        ] {
-            assert_eq!(
-                allows(&Capability::ToolInvoke {
-                    input_id: "owned-ticket".into(),
-                    operation
-                }),
-                operation.tool() == Tool::Assistant
-            );
+impl Error {
+    pub fn message(&self) -> String {
+        match self {
+            Self::Validation(message) => message.to_string(),
+            Self::Conflict => "模型或目标配置已变化，请重新查询确认".into(),
+            Self::NotFound => "请求不存在、已消费或已过期".into(),
+            Self::Busy => "助手请求资源已满".into(),
+            Self::Worker(error) => format!("业务处理失败：{error}"),
+            Self::Connection { message, .. } => message.to_string(),
+            Self::Platform(error) => error.message.clone(),
         }
     }
 }
+impl From<ApiError> for Error {
+    fn from(value: ApiError) -> Self {
+        Self::Platform(value)
+    }
+}
+impl From<Error> for ApiError {
+    fn from(value: Error) -> Self {
+        if let Error::Platform(error) = value {
+            return error;
+        }
+        let code = match &value {
+            Error::Validation(_) => "AI_INPUT",
+            Error::Conflict => "AI_CONTEXT_CHANGED",
+            Error::NotFound => "NOT_FOUND",
+            Error::Busy => "BUSY",
+            Error::Connection { code, .. } => code,
+            _ => "AI_BUSINESS",
+        };
+        ApiError::new(code, value.message())
+    }
+}
+fn dispatch(context: Context, action: String, input: Value) -> Action {
+    Box::pin(async move {
+        workflow::dispatch(context, action, input)
+            .await
+            .map_err(Into::into)
+    })
+}
+std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
+fn handle(opcode: i32, payload: Value) -> Value {
+    RUNTIME.with_borrow_mut(|runtime| runtime.handle(opcode, payload))
+}
+serverdeck_plugin_sdk::export_plugin!(handle);

@@ -5,13 +5,9 @@ use serverdeck_plugin_sdk::Capability;
 use std::collections::BTreeSet;
 
 pub const OPERATIONS: &[&str] = &[
-    "assistant.use",
-    "metrics.read",
-    "system.read",
-    "system.manage",
-    "system.shell",
+    "models.use",
+    "network.connect",
     "hosts.read",
-    "ssh.read_only",
     "ssh.execute",
     "sftp.read",
     "sftp.write",
@@ -19,7 +15,6 @@ pub const OPERATIONS: &[&str] = &[
     "settings.write",
     "ui.notify",
     "ui.contribute",
-    "logs.read",
 ];
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -96,12 +91,7 @@ impl Grant {
             && self.package_digest == plugin.package_digest
             && self.revision == plugin.revision
     }
-    pub fn authorize(
-        &self,
-        plugin: &InstalledPlugin,
-        host: Option<&str>,
-        operation: &Capability,
-    ) -> Result<(), Error> {
+    pub fn authorize(&self, plugin: &InstalledPlugin, operation: &Capability) -> Result<(), Error> {
         if !plugin.enabled
             || !self.matches(plugin)
             || !plugin
@@ -110,15 +100,8 @@ impl Grant {
                 .contains(&operation.permission())
             || !self.permissions.contains(&operation.permission())
             || !self.operations.iter().any(|o| o == operation.operation())
-            || (operation.uses_host() && host.is_none())
         {
             return Err(denied());
-        }
-        match operation {
-            Capability::ReadFile { path } | Capability::LogStart { path, .. } => {
-                self.path(path, false)?
-            }
-            _ => (),
         }
         Ok(())
     }

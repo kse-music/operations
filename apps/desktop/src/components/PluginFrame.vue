@@ -13,13 +13,8 @@ import { useWorkspaceStore } from '../stores/workspace';
 import { errorMessage } from '../services/ipc';
 import type { PluginUiPage } from '../types/plugins';
 import type { ServerSection } from '../types/server';
-import type { LogInput, ContainerShell } from '../types/ops';
 import type { Host } from '../types/hosts';
-import type { LogEvent, LogSession } from '../types/ops';
-import { opsApi } from '../services/ops';
-import { clipboardApi } from '../services/clipboard';
-import ResourceLogDialog from '@serverdeck/plugin-sdk/ui/ResourceLogDialog.vue';
-import ContainerTerminalDialog from './ContainerTerminalDialog.vue';
+import PluginTerminalDialog from './PluginTerminalDialog.vue';
 const props = withDefaults(
   defineProps<{
     pluginId: string;
@@ -60,10 +55,7 @@ const application = useApplicationStore(),
   notifications = useNotificationsStore();
 const plugins = usePluginsStore(),
   workspace = useWorkspaceStore();
-const shell = ref<{ host: Host; value: ContainerShell }>();
-const log = ref<{ input: LogInput; title: string; sessionId: string }>();
-const logListeners = new Map<string, (event: LogEvent) => void>();
-const logStreams = new Map<string, string>();
+const terminal = ref<{ host: Host; ticket: string }>();
 const active = computed(
   () =>
     props.active &&
@@ -94,41 +86,16 @@ const bridge = createPluginUiBridge({
   revision: props.revision,
   page: props.page,
   hostId: props.hostId,
+  contextKey: props.contextKey,
   isActive: () => active.value,
   canRetain: () => props.retainRequests,
   settingsAction: props.settingsPage ? (action) => emit('settingsAction', action) : undefined,
-  stream: (id, event) => {
-    const listener = logListeners.get(id);
-    if (listener) listener(event as LogEvent);
-    else port?.postMessage(JSON.parse(JSON.stringify({ kind: 'stream', id, event })));
+  terminal: (ticket, hostId) => {
+    const host = hosts.catalog?.hosts.find((h) => h.id === hostId);
+    if (!host) throw new Error('终端目标主机已删除');
+    terminal.value = { host, ticket };
   },
 });
-const logApi: Pick<typeof opsApi, 'logOpen' | 'logAck' | 'logPause' | 'logClose'> = {
-  async logOpen(_session, input, receive) {
-    const stream = `dialog-${crypto.randomUUID()}`;
-    logListeners.set(stream, receive);
-    try {
-      const result = (await bridge.call('ops_log_open', { input, events: stream })) as LogSession;
-      logStreams.set(result.id, stream);
-      return result;
-    } catch (cause) {
-      logListeners.delete(stream);
-      throw cause;
-    }
-  },
-  async logAck(id, sequence) {
-    await bridge.call('ops_log_ack', { id, sequence });
-  },
-  async logPause(id, paused) {
-    await bridge.call('ops_log_pause', { id, paused });
-  },
-  async logClose(id) {
-    if (active.value) await bridge.call('ops_log_close', { id });
-    const stream = logStreams.get(id);
-    if (stream) logListeners.delete(stream);
-    logStreams.delete(id);
-  },
-};
 watch(
   [
     active,
@@ -137,8 +104,7 @@ watch(
     () => ops.connections[props.hostId]?.session?.id,
   ],
   () => {
-    shell.value = undefined;
-    log.value = undefined;
+    terminal.value = undefined;
   },
 );
 function context() {
@@ -173,30 +139,14 @@ function uiEvent(name: string, args: unknown[]) {
   if (!active.value) return;
   if (Date.now() - lastEvent < 40) return;
   lastEvent = Date.now();
-  const sections = ['containers', 'images'];
+  const sections =
+    plugins.installed
+      .find((p) => p.manifest.id === props.pluginId)
+      ?.manifest.contributions.find((entry) => entry.id === props.page.id)?.routes ?? [];
   if (name === 'section' && sections.includes(String(args[0])))
     emit('section', args[0] as ServerSection);
   else if (name === 'navigate' && sections.includes(String(args[0])))
     emit('navigate', args[0] as ServerSection);
-  else if (name === 'log') {
-    const input = args[0] as LogInput;
-    const sessionId = ops.connections[props.hostId]?.session?.id;
-    if (input && sessionId && typeof args[1] === 'string')
-      log.value = { input, title: args[1].slice(0, 1024), sessionId };
-  } else if (name === 'shell') {
-    const host = hosts.catalog?.hosts.find((h) => h.id === props.hostId);
-    const request = args[1] as ContainerShell;
-    if (host && request && typeof request.id === 'string' && request.id.length <= 128)
-      shell.value = {
-        host,
-        value: {
-          id: request.id,
-          bash: request.bash === true,
-          confirmed: false,
-          pluginId: props.pluginId,
-        },
-      };
-  }
 }
 function connect(event: MessageEvent) {
   if (
@@ -262,7 +212,7 @@ function connect(event: MessageEvent) {
     const saving =
       props.settingsPage &&
       (data.method === 'invoke' ||
-        (data.method === 'capability' && data.args.operation?.kind === 'settings_write'));
+        (data.method === 'platform.request' && data.args.operation?.kind === 'settings_write'));
     if (saving && ++settingsWrites === 1) emit('saving', true);
     try {
       const result = await bridge.call(data.method, data.args);
@@ -293,8 +243,7 @@ watch(
   () => active.value,
   (value) => {
     if (!value) bridge.suspend();
-    else if (props.page.surface?.kind === 'tool' && props.page.surface.tool === 'assistant')
-      void models.refresh();
+    else void bridge.resume().catch((cause) => notifications.push(errorMessage(cause), true));
     context();
   },
   { flush: 'sync' },
@@ -331,8 +280,7 @@ onMounted(() => {
   loadingTimer = setTimeout(() => {
     if (!ready.value) error.value = '插件界面加载超时，请重新加载。';
   }, 15000);
-  if (props.page.surface?.kind === 'tool' && props.page.surface.tool === 'assistant')
-    void models.refresh();
+  void models.refresh();
 });
 onBeforeUnmount(() => {
   disposed = true;
@@ -345,11 +293,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div
-    class="plugin-frame-container"
-    :data-plugin-id="pluginId"
-    :data-tool="page.surface?.kind === 'tool' ? page.surface.tool : undefined"
-  >
+  <div class="plugin-frame-container" :data-plugin-id="pluginId">
     <div v-if="error" class="banner error" role="alert">
       {{ error }}<button class="button" @click="emit('retry')">重新加载界面</button>
     </div>
@@ -363,21 +307,13 @@ onBeforeUnmount(() => {
       referrerpolicy="no-referrer"
       class="plugin-frame"
     />
-    <ContainerTerminalDialog
-      v-if="shell && active"
-      :host="shell.host"
-      :shell="shell.value"
-      @close="shell = undefined"
-    />
-    <ResourceLogDialog
-      v-if="log && active"
-      :session-id="log.sessionId"
-      :input="log.input"
-      :title="log.title"
-      :api="logApi"
-      :copy="clipboardApi.writeText"
-      :report-error="(message) => notifications.push(message, true)"
-      @close="log = undefined"
+    <PluginTerminalDialog
+      v-if="terminal && active"
+      :host="terminal.host"
+      :ticket="terminal.ticket"
+      :plugin-id="pluginId"
+      :owner="contextKey || 'default'"
+      @close="terminal = undefined"
     />
   </div>
 </template>

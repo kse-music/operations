@@ -24,7 +24,7 @@ pub(super) struct TestReceipt {
     pub at: Instant,
     binding: ModelTestBinding,
 }
-impl Assistant {
+impl Models {
     pub async fn test_model(
         &self,
         config: &Config,
@@ -107,7 +107,7 @@ mod tests {
     }
     #[test]
     fn receipts_expire_and_do_not_accept_another_binding_or_replay() {
-        let assistant = Assistant::default();
+        let assistant = Models::default();
         let input = input(Config {
             model: "fixture".into(),
             ..Default::default()
@@ -157,7 +157,7 @@ mod tests {
                 r#"{"choices":[{"message":{"content":"OK","tool_calls":[{}]},"finish_reason":"stop"}]}"#,
             ),
         ] {
-            let assistant = Assistant::default();
+            let assistant = Models::default();
             let (config, http, _) = crate::tests::http_fixture(status, body.into(), false).await;
             let input = input(config);
             assert!(
@@ -172,7 +172,6 @@ mod tests {
             );
             http.await.unwrap();
             assert!(lock(&assistant.state).unwrap().tests.is_empty());
-            assert!(lock(&assistant.state).unwrap().commands.is_empty());
         }
     }
 }

@@ -19,7 +19,7 @@ fn package(version: &str) -> Package {
             version: version.into(),
             author: "Local developer".into(),
             description: "No executable entry".into(),
-            api_version: "^4.0".into(),
+            api_version: "^5.0".into(),
             entry: Entry {
                 backend: None,
                 ui: None,
@@ -55,11 +55,134 @@ fn input(path: &Path, old: Option<&str>) -> InstallInput {
 }
 
 #[test]
+fn invalid_records_are_reported_without_hiding_healthy_plugins_or_blocking_new_installs() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Repository::open(dir.path().join("plugins")).unwrap();
+    let installed = repo
+        .install(input(&save(dir.path(), &package("1.0.0")), None))
+        .unwrap();
+    let record = repo
+        .folder(&installed.manifest.id)
+        .unwrap()
+        .join("record.json");
+    let mut raw: Value = serde_json::from_slice(&fs::read(&record).unwrap()).unwrap();
+    raw["current"]["manifest"]["permissions"] =
+        serde_json::json!(["removed-permission-sensitive-fixture"]);
+    let bytes = serde_json::to_vec(&raw).unwrap();
+    fs::write(&record, &bytes).unwrap();
+    let inventory = repo.inventory().unwrap();
+    assert!(inventory.installed.is_empty());
+    assert_eq!(inventory.problems.len(), 1);
+    assert_eq!(inventory.problems[0].id, "dev.example");
+    assert_eq!(inventory.problems[0].record_digest, Some(digest(&bytes)));
+    assert!(!inventory.problems[0].message.contains("sensitive-fixture"));
+    assert!(repo.detail("dev.example").is_err());
+    let mut healthy = package("1.0.0");
+    healthy.manifest.id = "dev.healthy".into();
+    repo.install(input(&save(dir.path(), &healthy), None))
+        .unwrap();
+    let inventory = repo.inventory().unwrap();
+    assert_eq!(inventory.installed[0].manifest.id, "dev.healthy");
+    assert_eq!(inventory.problems.len(), 1);
+    assert_eq!(fs::read(&record).unwrap(), bytes);
+}
+#[test]
+fn explicit_reinstall_freezes_and_backs_up_bad_record_without_migrating_or_deleting_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Repository::open(dir.path().join("plugins")).unwrap();
+    let installed = repo
+        .install(input(&save(dir.path(), &package("1.0.0")), None))
+        .unwrap();
+    repo.settings_write("dev.example", &serde_json::json!({"preserve":"settings"}))
+        .unwrap();
+    let original_payload = repo
+        .payload_folder(PluginSource::User, "dev.example")
+        .unwrap()
+        .join("versions")
+        .join(&installed.revision)
+        .join("readme.txt");
+    let record = repo.folder("dev.example").unwrap().join("record.json");
+    fs::write(&record, b"{ invalid record }").unwrap();
+    let original = fs::read(&record).unwrap();
+    let token = digest(&original);
+    let bytes = serde_json::to_vec(&package("2.0.0")).unwrap();
+    assert!(
+        repo.reinstall_bundled(&bytes, "dev.example", &token, false)
+            .is_err()
+    );
+    assert!(
+        repo.reinstall_bundled(&bytes, "dev.example", "stale", true)
+            .is_err()
+    );
+    assert_eq!(fs::read(&record).unwrap(), original);
+    let repaired = repo
+        .reinstall_bundled(&bytes, "dev.example", &token, true)
+        .unwrap();
+    assert!(!repaired.enabled);
+    assert_eq!(repaired.source, PluginSource::System);
+    assert_eq!(repaired.manifest.api_version, "^5.0");
+    assert_eq!(repaired.manifest.version, "2.0.0");
+    assert!(repo.inventory().unwrap().problems.is_empty());
+    assert!(original_payload.is_file());
+    assert_eq!(
+        repo.settings_read("dev.example").unwrap()["preserve"],
+        "settings"
+    );
+    let backups = fs::read_dir(record.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("record-backup-")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(backups.len(), 1);
+    assert_eq!(fs::read(&backups[0]).unwrap(), original);
+    assert!(
+        repo.reinstall_bundled(
+            &bytes,
+            "dev.example",
+            &digest(&fs::read(&record).unwrap()),
+            true
+        )
+        .is_err()
+    );
+}
+#[test]
+fn failed_reinstall_commit_preserves_the_exact_record_and_original_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Repository::open(dir.path().join("plugins")).unwrap();
+    let installed = repo
+        .install(input(&save(dir.path(), &package("1.0.0")), None))
+        .unwrap();
+    let record = repo.folder("dev.example").unwrap().join("record.json");
+    let raw = b"{ damaged record }";
+    fs::write(&record, raw).unwrap();
+    let candidate =
+        Package::read(&save(dir.path(), &package("2.0.0")), std::env::consts::OS).unwrap();
+    assert!(
+        repo.commit_package(candidate, PluginSource::System, None, true, Some(raw))
+            .is_err()
+    );
+    assert_eq!(fs::read(&record).unwrap(), raw);
+    assert!(
+        repo.payload_folder(PluginSource::User, "dev.example")
+            .unwrap()
+            .join("versions")
+            .join(installed.revision)
+            .join("readme.txt")
+            .is_file()
+    );
+}
+
+#[test]
 fn independent_ui_assets_require_current_grants_declared_entries_and_matching_digests() {
     let dir = tempfile::tempdir().unwrap();
     let repo = Repository::open(dir.path().join("plugins")).unwrap();
     let mut p = package("1.0.0");
-    p.manifest.api_version = "^4.0.0".into();
+    p.manifest.api_version = "^5.0.0".into();
     p.manifest.entry.backend = Some("backend.wasm".into());
     p.manifest.entry.ui = Some("ui.json".into());
     p.manifest.permissions = vec![Permission::UiContribute];
@@ -67,7 +190,7 @@ fn independent_ui_assets_require_current_grants_declared_entries_and_matching_di
         id: "custom".into(),
         label: "Custom".into(),
         kind: ContributionKind::Workspace,
-        tool: None,
+        routes: vec![],
     }];
     let ui = include_bytes!("../../../../tests/fixtures/plugins/custom-ui/ui.json");
     for (path, bytes) in [
@@ -172,7 +295,7 @@ fn optional_plugin_icon_survives_preview_install_and_restart() {
     );
     assert!(Package::validate_bytes(&without_icon, std::env::consts::OS).is_ok());
     p.manifest.icon = Some("rocket".into());
-    p.manifest.api_version = "^4.0.0".into();
+    p.manifest.api_version = "^5.0.0".into();
     let path = save(dir.path(), &p);
     assert_eq!(
         repo.preview_info(&path).unwrap().manifest.icon.as_deref(),
@@ -234,7 +357,7 @@ fn preview_digest_and_ui_grant_are_enforced_and_unknown_fields_rejected() {
         id: "host".into(),
         label: "Host".into(),
         kind: ContributionKind::Workspace,
-        tool: None,
+        routes: vec![],
     }];
     for (path, bytes) in [
         ("ui.json", ui.as_slice()),
@@ -490,7 +613,7 @@ fn rejects_incompatible_versions_permissions_unknown_fields_links_and_corruption
         id: "view".into(),
         label: "View".into(),
         kind: ContributionKind::Workspace,
-        tool: None,
+        routes: vec![],
     }];
     assert!(validate(&p).is_err());
     let mut p = package("1.0.0");
@@ -519,7 +642,7 @@ fn rejects_incompatible_versions_permissions_unknown_fields_links_and_corruption
 }
 
 #[test]
-fn tool_packages_require_matching_contributions_and_standard_views() {
+fn contribution_pages_and_frontend_contracts_are_validated_without_business_tool_types() {
     let original: Value = serde_json::from_slice(include_bytes!(
         "../../../../plugins/system/packages/assistant.sdplugin"
     ))
@@ -531,19 +654,19 @@ fn tool_packages_require_matching_contributions_and_standard_views() {
     p["manifest"]["contributions"][0]["tool"] = serde_json::json!("network");
     assert!(
         validate_json(&p).is_err(),
-        "manifest and UI tool types must match"
+        "business tool fields are not part of the platform manifest"
     );
     let mut p = original.clone();
-    p["manifest"]["contributions"][0]
-        .as_object_mut()
-        .unwrap()
-        .remove("tool");
-    assert!(validate_json(&p).is_err(), "tool type is required");
+    p["manifest"]["contributions"][0]["routes"] = serde_json::json!(["duplicate", "duplicate"]);
+    assert!(
+        validate_json(&p).is_err(),
+        "routes must be unique identifiers"
+    );
     let mut p = original.clone();
     p["manifest"]["contributions"][0]["kind"] = serde_json::json!("navigation");
     assert!(
-        validate_json(&p).is_err(),
-        "other contributions cannot impersonate a tool"
+        validate_json(&p).is_ok(),
+        "generic frontend pages may use any supported contribution point"
     );
     let mut p = original.clone();
     p["manifest"]["entry"]["backend"] = Value::Null;

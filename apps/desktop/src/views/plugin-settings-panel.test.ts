@@ -56,7 +56,7 @@ it.each(['system', 'user'] as const)(
         packageDigest: plugin.packageDigest,
         revision: plugin.revision,
         permissions: plugin.manifest.permissions,
-        operations: ['ui.contribute', 'ui.notify', 'system.read', 'system.manage', 'system.shell'],
+        operations: ['ui.contribute', 'ui.notify', 'hosts.read', 'ssh.execute', 'network.connect'],
         readRoots: [],
         writeRoots: [],
       };
@@ -68,6 +68,9 @@ it.each(['system', 'user'] as const)(
     expect(useWorkspaceStore().tabs).toEqual([]);
     expect(root.textContent).toContain(source === 'system' ? '系统内置' : '用户上传');
     expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
+    expect(root.querySelector('.plugin-state-section')).toBeNull();
+    expect(root.textContent).not.toContain('启用插件');
+    expect(root.textContent).not.toContain('禁用插件');
     expect(root.querySelector('.plugin-management-header svg.lucide-container')).not.toBeNull();
     expect(ui).not.toHaveBeenCalled();
     expect(root.querySelector('.plugin-workspace')).toBeNull();
@@ -87,7 +90,7 @@ it.each(['system', 'user'] as const)(
       expect(grant).not.toHaveBeenCalled();
       return;
     }
-    for (const permission of ['ui.contribute', 'system.read', 'system.manage']) {
+    for (const permission of ['ui.contribute', 'hosts.read', 'ssh.execute']) {
       const field = root.querySelector<HTMLInputElement>(`[aria-label="${permission}"]`)!;
       field.checked = true;
       field.dispatchEvent(new Event('change'));
@@ -101,12 +104,12 @@ it.each(['system', 'user'] as const)(
       plugin.manifest.id,
       expect.objectContaining({
         expectedRevision: plugin.revision,
-        permissions: ['ui.contribute', 'system.read', 'system.manage'],
-        operations: ['ui.contribute', 'ui.notify', 'system.read', 'system.manage'],
+        permissions: ['ui.contribute', 'hosts.read', 'ssh.execute'],
+        operations: ['ui.contribute', 'ui.notify', 'hosts.read', 'ssh.execute'],
         confirmed: true,
       }),
     );
-    expect(grant.mock.calls[0]![1].operations).not.toContain('system.shell');
+    expect(grant.mock.calls[0]![1].operations).not.toContain('network.connect');
     expect(grant.mock.calls[0]![1]).not.toHaveProperty('hostIds');
   },
 );
@@ -118,14 +121,14 @@ it('does not overwrite permission edits when the installed list refreshes with u
   plugins.installed = [plugin];
   plugins.grants[plugin.manifest.id] = null;
   await mount(plugin.manifest.id);
-  const check = root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!;
+  const check = root.querySelector<HTMLInputElement>('[aria-label="hosts.read"]')!;
   check.checked = true;
   check.dispatchEvent(new Event('change'));
   await nextTick();
   plugins.installed = [{ ...plugin }];
   plugins.grants = { ...plugins.grants };
   await settle();
-  expect(root.querySelector<HTMLInputElement>('[aria-label="system.read"]')!.checked).toBe(true);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="hosts.read"]')!.checked).toBe(true);
 });
 
 it('opens an independent settings frontend without a host and returns to the plugin list on cancel', async () => {
@@ -179,7 +182,10 @@ it('opens an independent settings frontend without a host and returns to the plu
       ],
     },
   };
-  vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
   vi.spyOn(pluginsApi, 'activate').mockResolvedValue({ state: 'active' } as never);
   const workspace = useWorkspaceStore();
   workspace.navigate('plugins');
@@ -190,7 +196,7 @@ it('opens an independent settings frontend without a host and returns to the plu
   expect(workspace.settingsView).toBe('plugins');
   expect(workspace.current).toBeUndefined();
   expect(workspace.tabs).toHaveLength(0);
-  expect(pluginsApi.context).toHaveBeenCalledWith(plugin.manifest.id, null);
+  expect(pluginsApi.reset).toHaveBeenCalledWith(plugin.manifest.id);
   root.querySelector<HTMLButtonElement>('[data-start-saving]')!.click();
   await settle();
   expect(workspace.pluginSettingsBusy).toBe(true);

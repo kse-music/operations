@@ -1,28 +1,21 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import ResourceView from '@serverdeck/plugin-sdk/ui/ResourceView.vue';
-import ServerTabs from '@serverdeck/plugin-sdk/ui/ServerTabs.vue';
-import OpsDetails from '@serverdeck/plugin-sdk/ui/OpsDetails.vue';
+import ResourceView from './ResourceView.vue';
+import ServerTabs from './ServerTabs.vue';
+import OpsDetails from './OpsDetails.vue';
 import { Container, Layers, CircleCheck, Box } from '@lucide/vue';
 import ContainerDetails from './ContainerDetails.vue';
 import './docker.css';
-import type { ContainerShell } from '@serverdeck/plugin-sdk/types/ops';
-import type { Host } from '@serverdeck/plugin-sdk/types/hosts';
-import type { ServerSection } from '@serverdeck/plugin-sdk/types/server';
+import type { ServerSection } from './types';
 import type { PluginUiPage } from '@serverdeck/plugin-sdk/types/plugins';
 const props = defineProps<{
   hostId?: string;
   initialSection?: ServerSection;
   page?: PluginUiPage;
 }>();
-const sections = computed<ServerSection[]>(() =>
-  props.page?.surface?.kind === 'operations'
-    ? props.page.surface.sections
-    : ['containers', 'images'],
-);
+const sections = computed<ServerSection[]>(() => ['containers', 'images']);
 const emit = defineEmits<{
   section: [section: ServerSection];
-  shell: [host: Host, shell: ContainerShell];
 }>();
 const section = ref<ServerSection>(
   props.initialSection && sections.value.includes(props.initialSection)
@@ -65,7 +58,6 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
         :list-request="{ kind: section === 'images' ? 'images' : 'containers' }"
         :columns="columns"
         row-key="ID"
-        @shell="(host, shell) => emit('shell', host, shell)"
       >
         <template #summary="{ rows, loading, error }">
           <div class="docker-summary">

@@ -1,0 +1,46 @@
+{
+  "uiVersion": 4,
+  "title": "Nginx 管理",
+  "frontend": {
+    "script": "frontend.js",
+    "style": "frontend.css"
+  },
+  "pages": [
+    {
+      "id": "nginx",
+      "title": "Nginx 管理",
+      "surface": {
+        "kind": "frontend"
+      },
+      "fields": [],
+      "actions": [
+        {
+          "id": "nginx",
+          "label": "nginx",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "containers",
+          "label": "containers",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "mounts",
+          "label": "mounts",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "logs",
+          "label": "logs",
+          "discardDirty": false,
+          "enabledWhen": null
+        }
+      ],
+      "initialAction": null,
+      "log": null
+    }
+  ]
+}

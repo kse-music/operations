@@ -439,7 +439,7 @@ onMounted(async () => {
   }
 });
 function protectDraft(event: BeforeUnloadEvent): void {
-  if (files.dirty) {
+  if (files.dirty || plugins.dirty) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -466,7 +466,7 @@ function openPlugin(
 ): void {
   const installed = plugins.installed.find((p) => p.manifest.id === id);
   const entry = installed?.manifest.contributions.find((entry) => entry.id === contribution);
-  if (installed && entry && !hostId && !['tool', 'settings'].includes(entry.kind)) {
+  if (installed && entry && !hostId && ['server', 'host_menu'].includes(entry.kind)) {
     pluginTarget.value = { id, contribution };
     return;
   }

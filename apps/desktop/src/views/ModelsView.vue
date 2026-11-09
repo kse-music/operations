@@ -4,6 +4,7 @@ import { useModelsStore } from '../stores/models';
 import type { AiModel } from '../types/ai';
 import ModelDialog from '../components/ModelDialog.vue';
 import Modal from '../components/Modal.vue';
+import LocalModelSources from '../components/LocalModelSources.vue';
 import { Boxes, Plus, RefreshCw, Pencil, Trash2, ShieldCheck, KeyRound } from '@lucide/vue';
 import '../styles/models.css';
 const store = useModelsStore();
@@ -27,7 +28,9 @@ onMounted(() => void store.refresh());
         <h1 class="asset-title">
           模型管理 <span v-if="store.loaded" class="asset-count">{{ store.models.length }}</span>
         </h1>
-        <p class="section-description">管理 AI 运维助手使用的模型服务和 API Key。</p>
+        <p class="section-description">
+          管理平台模型服务、API Key 与本地模型来源，供已授权插件调用。
+        </p>
       </div>
       <div class="toolbar">
         <button class="button" :disabled="store.loading || store.busy" @click="store.refresh">
@@ -59,6 +62,7 @@ onMounted(() => void store.refresh());
         </div>
       </div>
     </div>
+    <LocalModelSources />
     <div v-if="store.models.length" class="model-catalog">
       <div class="model-list-heading">
         <span>模型 / 提供商</span><span>连接地址</span><span>Token 限制</span><span>操作</span>

@@ -53,6 +53,20 @@ pub struct PackagePreview {
     pub trust: Trust,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginProblem {
+    pub id: String,
+    pub code: String,
+    pub message: String,
+    pub record_digest: Option<String>,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Inventory {
+    pub installed: Vec<InstalledPlugin>,
+    pub problems: Vec<PluginProblem>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Record {
     version: u32,
@@ -203,7 +217,8 @@ impl Repository {
                 if input.expected_version.is_some() {
                     return Err(Error::Conflict);
                 }
-                if self.list()?.len() >= 64 {
+                let inventory = self.inventory()?;
+                if inventory.installed.len() + inventory.problems.len() >= 64 {
                     return Err(invalid("已安装插件数量达到 64 个上限"));
                 }
             }
@@ -211,6 +226,18 @@ impl Repository {
         if let Some(record) = &old {
             self.clean_versions(id, record)?;
         }
+        self.commit_package(package, source, old, fail_commit, None)
+    }
+    fn commit_package(
+        &self,
+        package: crate::ValidatedPackage,
+        source: PluginSource,
+        old: Option<Record>,
+        fail_commit: bool,
+        replaced_record: Option<&[u8]>,
+    ) -> Result<InstalledPlugin, Error> {
+        let id = &package.manifest.id;
+        let folder = self.folder(id)?;
         ensure_directory(&folder)?;
         let versions = self.payload_folder(source, id)?.join("versions");
         ensure_directory(&versions)?;
@@ -256,9 +283,94 @@ impl Repository {
         if fail_commit {
             return Err(invalid("安装提交故障（测试注入）"));
         }
+        if let Some(original) = replaced_record {
+            // Keep the exact unreadable record. Old payloads and plugin data are untouched.
+            if read_bounded(&folder.join("record.json"), 128 * 1024)? != original {
+                return Err(Error::Conflict);
+            }
+            let mut backup = tempfile::Builder::new()
+                .prefix("record-backup-")
+                .suffix(".json")
+                .tempfile_in(&folder)
+                .map_err(io)?;
+            backup.write_all(original).map_err(io)?;
+            backup.as_file().sync_all().map_err(io)?;
+            backup.keep().map_err(|error| io(error.error))?;
+        }
         write_json(&folder.join("record.json"), &record)?;
         let _committed = candidate.keep();
         Ok(plugin)
+    }
+    /// Inspect each record independently. Invalid records never enter the executable list.
+    pub fn inventory(&self) -> Result<Inventory, Error> {
+        check_directory(&self.root.join("packages"))?;
+        let mut inventory = Inventory {
+            installed: Vec::new(),
+            problems: Vec::new(),
+        };
+        for entry in fs::read_dir(self.root.join("packages")).map_err(io)? {
+            let entry = entry.map_err(io)?;
+            let id = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| invalid("插件仓库目录名无效"))?;
+            validate_id(&id)?;
+            check_directory(&entry.path())?;
+            match self.detail(&id) {
+                Ok(plugin) => inventory.installed.push(plugin),
+                Err(Error::NotFound) => (),
+                Err(error) => inventory.problems.push(self.problem(&id, error)),
+            }
+            if inventory.installed.len() + inventory.problems.len() > 64 {
+                return Err(invalid("插件仓库数量超限"));
+            }
+        }
+        inventory
+            .installed
+            .sort_by(|a, b| a.manifest.id.cmp(&b.manifest.id));
+        inventory.problems.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(inventory)
+    }
+    pub fn problem(&self, id: &str, error: Error) -> PluginProblem {
+        let record_digest = self
+            .folder(id)
+            .and_then(|folder| read_bounded(&folder.join("record.json"), 128 * 1024))
+            .ok()
+            .map(|bytes| digest(&bytes));
+        let error = serverdeck_core::IpcError::from(error);
+        PluginProblem {
+            id: id.into(),
+            code: error.code.into(),
+            message: error.message,
+            record_digest,
+        }
+    }
+    /// Explicit reinstall, never a compatibility decoder or automatic migration.
+    pub fn reinstall_bundled(
+        &self,
+        bytes: &[u8],
+        id: &str,
+        expected_record_digest: &str,
+        confirmed: bool,
+    ) -> Result<InstalledPlugin, Error> {
+        if !confirmed {
+            return Err(invalid("重新安装问题插件需要明确确认"));
+        }
+        let folder = self.folder(id)?;
+        let original = read_bounded(&folder.join("record.json"), 128 * 1024)?;
+        if digest(&original) != expected_record_digest {
+            return Err(Error::Conflict);
+        }
+        if self.record(id).is_ok() {
+            return Err(invalid("插件记录已可用，请刷新列表"));
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(self.root.join("cache")).map_err(io)?;
+        temporary.write_all(bytes).map_err(io)?;
+        let package = Package::read(temporary.path(), &self.platform)?;
+        if package.manifest.id != id {
+            return Err(invalid("随应用分发的插件身份不匹配"));
+        }
+        self.commit_package(package, PluginSource::System, None, false, Some(&original))
     }
     pub fn list(&self) -> Result<Vec<InstalledPlugin>, Error> {
         check_directory(&self.root.join("packages"))?;
@@ -459,8 +571,14 @@ impl Repository {
         if !path.try_exists().map_err(io)? {
             return Err(Error::NotFound);
         }
-        let record: Record = serde_json::from_slice(&read_bounded(&path, 128 * 1024)?)
-            .map_err(|e| Error::Storage(Box::new(e)))?;
+        let record: Record =
+            serde_json::from_slice(&read_bounded(&path, 128 * 1024)?).map_err(|e| {
+                Error::Connection {
+                    code: "PLUGIN_RECORD_INVALID",
+                    message: "插件安装记录格式不受当前版本支持或已损坏，请备份后重新安装",
+                    source: Some(Box::new(e)),
+                }
+            })?;
         if record.version != 1 || record.current.manifest.id != id {
             return Err(invalid("插件仓库状态损坏"));
         }

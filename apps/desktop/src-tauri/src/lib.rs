@@ -41,11 +41,11 @@ pub fn run() {
                 )?;
                 let locations = profile.locations().clone();
                 let application = Application::initialize(locations.data, locations.logs.clone())?;
-                application.provision_bundled_plugins()?;
                 profile.record_initialized()?;
                 let config = tauri::async_runtime::block_on(application.bootstrap())?.config;
                 let guard = logging::initialize(&locations.logs, config.log_level)?;
                 app.manage(guard);
+                application.provision_bundled_plugins()?;
                 app.manage(storage_commands::StorageState::new(profile));
                 app.manage(application);
                 let window_config = app.config().app.windows.iter().find(|w| w.label == "main")
@@ -145,9 +145,6 @@ pub fn command_handler<R: tauri::Runtime>()
         storage_commands::app_storage_preview,
         storage_commands::app_storage_migrate,
         storage_commands::app_storage_ready,
-        plugin_commands::plugin_tool_stage,
-        plugin_commands::plugin_tool_abort_input,
-        plugin_commands::plugin_tool_cancel_request,
         plugin_commands::plugin_preview,
         plugin_commands::plugin_preview_info,
         plugin_commands::plugin_ui,
@@ -156,18 +153,24 @@ pub fn command_handler<R: tauri::Runtime>()
         plugin_commands::plugin_statuses,
         plugin_commands::plugin_activate,
         plugin_commands::plugin_call,
+        plugin_commands::plugin_continue,
+        plugin_commands::plugin_close_scope,
+        plugin_commands::plugin_cancel_scope,
+        plugin_commands::plugin_scope_visibility,
+        plugin_commands::plugin_platform_terminal_open,
         plugin_commands::plugin_health,
         plugin_commands::plugin_cancel,
         plugin_commands::plugin_grant,
         plugin_commands::plugin_permissions,
         plugin_commands::plugin_revoke,
-        plugin_commands::plugin_context,
+        plugin_commands::plugin_reset,
         plugin_commands::plugin_approve,
         plugin_commands::plugin_events,
         plugin_commands::plugin_capability,
         plugin_commands::plugin_install,
         plugin_commands::plugin_list,
-        plugin_commands::plugin_terminal_open,
+        plugin_commands::plugin_inventory,
+        plugin_commands::plugin_reinstall_bundled,
         plugin_commands::plugin_detail,
         plugin_commands::plugin_set_enabled,
         plugin_commands::plugin_uninstall,
@@ -181,11 +184,6 @@ pub fn command_handler<R: tauri::Runtime>()
         ai_commands::ai_model_save,
         ai_commands::ai_model_test,
         ai_commands::ai_model_delete,
-        ai_commands::ai_prepare,
-        ai_commands::ai_resolve_hosts,
-        ai_commands::ai_send,
-        ai_commands::ai_execute,
-        ai_commands::ai_cancel,
         product_commands::background_tasks,
         ops_commands::ops_open,
         ops_commands::ops_connections,

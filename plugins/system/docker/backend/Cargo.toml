@@ -6,5 +6,6 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 [dependencies]
+serde = { version = "1", features = ["derive"] }
 serverdeck-plugin-sdk = { path = "../../../../crates/plugin-sdk" }
 [workspace]

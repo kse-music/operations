@@ -18,13 +18,10 @@ import {
   UserRound,
 } from '@lucide/vue';
 import { useAssistant } from './assistant';
-import { useHostsStore } from '@serverdeck/plugin-sdk/stores/hosts';
-import { useOpsStore } from '@serverdeck/plugin-sdk/stores/ops';
-import { hostDisplayName } from '@serverdeck/plugin-sdk/types/hosts';
+import { useHostCatalog } from './platform-state';
+import { hostDisplayName } from './platform-state';
 import { useModelBinding } from './model-binding';
-import { isLocalModel } from '@serverdeck/plugin-sdk/types/ai';
-import AssistantTargets from './AssistantTargets.vue';
-import LocalToolInstallNotice from './LocalToolInstallNotice.vue';
+import { isLocalModel } from './types';
 import AssistantMarkdown from './AssistantMarkdown';
 import AssistantAgent from './AssistantAgent.vue';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
@@ -50,13 +47,14 @@ const suggestions = [
     question: '帮我整理服务响应缓慢的排查步骤。',
   },
 ];
-const ops = useOpsStore();
-const hosts = useHostsStore();
+const hosts = useHostCatalog();
 const ai = useAssistant(computed(() => props.keepRunning ?? false));
 const binding = useModelBinding();
 const { models, modelId, selected, loaded, loading, error: bindingError, localSelected } = binding;
 onMounted(() => {
-  if (!hosts.catalog) void hosts.load();
+  void hosts.load().catch(() => {
+    // The catalog exposes the failure in its visible error state.
+  });
 });
 const { turns, busy, error, review, outputs, attempted, expired } = ai;
 const messages = ref<HTMLElement>(),
@@ -69,9 +67,6 @@ watch(
   { flush: 'post' },
 );
 const question = ref('');
-const trustRequired = computed(() =>
-  ai.hostContext.matched.value.some((host) => ops.connections[host.id]?.trust),
-);
 const commandApproved = ref(false),
   changeConfirmation = ref('');
 const ready = computed(
@@ -167,17 +162,10 @@ const readinessHint = computed(() => {
           aria-label="对话消息"
           aria-live="polite"
         >
-          <LocalToolInstallNotice
-            v-if="localSelected?.status.installed === false"
-            :name="localSelected.name"
-            :model-id="localSelected.id"
-            :installing="!!binding.installing.value"
-            :supported="localSelected.status.installSupported !== false"
-            :disabled="loading"
-            @install="binding.installLocal(modelId)"
-            @cancel="binding.cancelInstall"
-            @refresh="binding.refreshLocal(modelId)"
-          />
+          <p v-if="localSelected && !localSelected.status.model" class="banner">
+            {{ localSelected.status.message }}
+            <button class="button" @click="binding.manageModels">打开平台模型设置</button>
+          </p>
           <p
             v-if="bindingError || (!isLocalModel(modelId) && models.error)"
             class="error-text"
@@ -189,12 +177,6 @@ const readinessHint = computed(() => {
           <p v-if="ai.hostContext.cleanupError.value" class="error-text" role="alert">
             {{ ai.hostContext.cleanupError.value }}
           </p>
-          <AssistantTargets
-            v-if="trustRequired"
-            :hosts="ai.hostContext.matched.value"
-            :total="hosts.catalog?.hosts.length ?? 0"
-            :busy="!!busy"
-          />
           <div v-if="!turns.length" class="ai-chat-empty">
             <div class="ai-empty-icon"><Bot :size="28" aria-hidden="true" /></div>
             <h3>有什么需要一起排查？</h3>

@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serverdeck_core::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{Arc, Mutex},
@@ -9,77 +10,70 @@ use std::{
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ContextInput {
-    pub host_id: String,
-    pub ops_session: Option<String>,
-    pub file_session: Option<String>,
-}
-#[derive(Clone)]
-pub(super) struct Context {
-    pub input: ContextInput,
-    pub profile: String,
-}
 struct Control {
-    context: Option<Context>,
     generation: String,
     cancel: CancellationToken,
     window: Instant,
     messages: usize,
 }
 pub(super) struct Document {
+    pub profile: String,
+    pub owner: String,
     pub plugin: String,
     pub generation: String,
     pub internal_token: String,
     pub path: String,
+    pub host: String,
 }
 pub(super) struct Log {
-    pub plugin: String,
-    pub generation: String,
-    pub path: String,
-    pub receiver: mpsc::Receiver<Value>,
-}
-pub(super) struct Monitor {
+    pub profile: String,
+    pub owner: String,
     pub plugin: String,
     pub generation: String,
     pub host: String,
-    pub backend: serverdeck_monitor::Monitors,
+    pub receiver: mpsc::Receiver<Value>,
 }
 pub(super) struct ResultData {
+    pub owner: String,
     pub plugin: String,
     pub generation: String,
     pub bytes: Vec<u8>,
     pub at: Instant,
 }
-pub(super) struct ShellTicket {
+pub(super) struct OutputData {
     pub plugin: String,
+    pub owner: String,
+    pub generation: String,
+    pub expected: usize,
+    pub bytes: Vec<u8>,
+    pub at: Instant,
+}
+#[derive(Clone, PartialEq)]
+pub(super) enum RevisionTarget {
+    Model { id: String, revision: String },
+    Host { id: String, profile: String },
+}
+pub(super) struct RevisionBinding {
+    pub plugin: String,
+    pub owner: String,
+    pub generation: String,
+    pub target: RevisionTarget,
+    pub at: Instant,
+}
+pub(super) struct PlatformTerminalTicket {
+    pub plugin: String,
+    pub owner: String,
     pub generation: String,
     pub revision: String,
     pub host: String,
-    pub container: String,
-    pub bash: bool,
+    pub profile: String,
+    pub command: serverdeck_plugin_sdk::platform::Command,
+    pub bindings: Vec<String>,
     pub at: Instant,
 }
-pub(super) struct ToolInputResource {
+pub(super) struct PlatformTerminalOwner {
     pub plugin: String,
-    pub generation: String,
-    pub revision: String,
-    pub input: super::tools::ToolInput,
-    pub bytes: usize,
-    pub at: Instant,
-}
-pub(super) struct ToolAiResource {
-    pub plugin: String,
-    pub generation: String,
-    pub root: String,
-    pub at: Instant,
-    pub input_id: String,
-}
-pub(super) struct ActiveToolInput {
-    pub input_id: String,
-    pub generation: String,
-    pub ai_request: Option<String>,
+    pub owner: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,16 +85,22 @@ pub struct Approval {
     pub host_id: String,
     pub operation: String,
     pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_id: Option<String>,
 }
 pub(super) struct Pending {
+    pub owner: String,
     pub public: Approval,
     pub digest: String,
-    pub generation: String,
-    pub revision: String,
     pub at: Instant,
     pub approved: bool,
+}
+pub(super) struct Continuation {
+    pub owner: String,
+    pub plugin: String,
+    pub generation: String,
+    pub revision: String,
+    pub request: serverdeck_plugin_sdk::Request,
+    pub remaining: usize,
+    pub started: Instant,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,12 +112,17 @@ pub struct Event {
 }
 #[derive(Default)]
 pub(super) struct Data {
-    pub tool_inputs: BTreeMap<String, ToolInputResource>,
-    pub tool_ai: BTreeMap<String, ToolAiResource>,
-    pub tool_active: BTreeMap<String, ActiveToolInput>,
-    pub monitors: BTreeMap<String, Monitor>,
+    pub lifecycle_requests: BTreeMap<String, CancellationToken>,
+    pub user_cancellations: BTreeMap<String, Arc<AtomicBool>>,
+    pub closed_owners: BTreeSet<(String, String)>,
+    pub bindings: BTreeMap<String, RevisionBinding>,
+    pub outputs: BTreeMap<String, OutputData>,
+    pub platform_terminals: BTreeMap<String, PlatformTerminalTicket>,
+    pub open_terminals: BTreeMap<String, PlatformTerminalOwner>,
+    pub visible_owners: BTreeMap<(String, String), bool>,
+    pub request_owners: BTreeMap<String, String>,
+    pub continuations: BTreeMap<String, Continuation>,
     pub results: BTreeMap<String, ResultData>,
-    pub shells: BTreeMap<String, ShellTicket>,
     controls: BTreeMap<String, Control>,
     busy: BTreeSet<String>,
     requests: BTreeMap<String, CancellationToken>,
@@ -142,9 +147,11 @@ impl Default for Host {
     }
 }
 pub(super) struct Call {
+    pub lifecycle: CancellationToken,
+    pub user_cancelled: Arc<AtomicBool>,
+    pub owner: String,
     host: Host,
     pub id: String,
-    pub context: Option<Context>,
     pub generation: String,
     pub cancel: CancellationToken,
     _permit: OwnedSemaphorePermit,
@@ -154,6 +161,9 @@ impl Drop for Call {
         if let Ok(mut data) = self.host.data.lock() {
             data.busy.remove(&self.id);
             data.requests.remove(&self.id);
+            data.lifecycle_requests.remove(&self.id);
+            data.user_cancellations.remove(&self.id);
+            data.request_owners.remove(&self.id);
         } else {
             tracing::error!(
                 operation = "plugin_call_release",
@@ -164,47 +174,25 @@ impl Drop for Call {
     }
 }
 impl Host {
-    pub(super) fn current(data: &Data, id: &str, generation: &str) -> bool {
-        data.controls.get(id).is_some_and(|control| {
-            control.generation == generation && !control.cancel.is_cancelled()
-        })
-    }
-    pub(super) fn cancel_tool_input(
-        &self,
-        id: &str,
-        input_id: &str,
-        generation: &str,
-    ) -> Result<(), Error> {
-        let data = self.lock()?;
-        if Self::current(&data, id, generation)
-            && data
-                .tool_active
-                .get(id)
-                .is_some_and(|a| a.input_id == input_id && a.generation == generation)
-            && let Some(cancel) = data.requests.get(id)
-        {
-            cancel.cancel();
-        }
-        Ok(())
-    }
-    pub(super) fn generation(&self, id: &str) -> Result<String, Error> {
-        let data = self.lock()?;
-        let control = data.controls.get(id).ok_or(Error::NotFound)?;
-        if control.cancel.is_cancelled() {
-            return Err(failure("PLUGIN_CANCELLED", "插件能力已停止"));
-        }
-        Ok(control.generation.clone())
-    }
     pub(super) fn lock(&self) -> Result<std::sync::MutexGuard<'_, Data>, Error> {
         self.data.lock().map_err(|_| Error::Busy)
     }
-    pub(super) fn start(&self, id: &str) -> Result<Call, Error> {
+    pub(super) fn start_scoped(&self, id: &str, owner: &str) -> Result<Call, Error> {
+        if owner.is_empty() || owner.len() > 512 || owner.contains('\0') {
+            return Err(Error::Validation("插件页面标识无效"));
+        }
         let permit = self
             .slots
             .clone()
             .try_acquire_owned()
             .map_err(|_| Error::Busy)?;
         let mut data = self.lock()?;
+        if data
+            .closed_owners
+            .contains(&(id.to_owned(), owner.to_owned()))
+        {
+            return Err(failure("PLUGIN_CANCELLED", "插件页面已关闭"));
+        }
         if data.busy.contains(id) {
             return Err(Error::Busy);
         }
@@ -212,7 +200,6 @@ impl Host {
             return Err(Error::Busy);
         }
         let control = data.controls.entry(id.into()).or_insert_with(|| Control {
-            context: None,
             generation: uuid::Uuid::new_v4().to_string(),
             cancel: CancellationToken::new(),
             window: Instant::now(),
@@ -232,29 +219,36 @@ impl Host {
             return Err(failure("PLUGIN_RATE_LIMIT", "插件能力请求超过每秒二十次"));
         }
         control.messages += 1;
+        let lifecycle = control.cancel.child_token();
         let call = Call {
+            lifecycle: lifecycle.clone(),
+            user_cancelled: Arc::new(AtomicBool::new(false)),
+            owner: owner.to_owned(),
             host: self.clone(),
             id: id.into(),
-            context: control.context.clone(),
             generation: control.generation.clone(),
-            cancel: control.cancel.child_token(),
+            cancel: lifecycle.child_token(),
             _permit: permit,
         };
         data.requests.insert(id.into(), call.cancel.clone());
+        data.lifecycle_requests
+            .insert(id.into(), call.lifecycle.clone());
+        data.user_cancellations
+            .insert(id.into(), call.user_cancelled.clone());
+        data.request_owners.insert(id.into(), owner.to_owned());
         data.busy.insert(id.into());
         Ok(call)
     }
-    pub fn resume(&self, id: &str, context: Option<(ContextInput, String)>) -> Result<(), Error> {
+    pub fn resume(&self, id: &str) -> Result<(), Error> {
         let mut data = self.lock()?;
         if data.busy.contains(id) {
             return Err(Error::Busy);
         }
         let generation = uuid::Uuid::new_v4().to_string();
-        let context = context.map(|(input, profile)| Context { input, profile });
+        data.closed_owners.retain(|(plugin, _)| plugin != id);
         data.controls.insert(
             id.into(),
             Control {
-                context,
                 generation,
                 cancel: CancellationToken::new(),
                 window: Instant::now(),
@@ -288,9 +282,60 @@ impl Host {
                 )
             })?
     }
+    pub async fn stop_scope(&self, id: &str, owner: &str) -> Result<(), Error> {
+        {
+            let data = self.lock()?;
+            if data
+                .request_owners
+                .get(id)
+                .is_some_and(|current| current == owner)
+                && let Some(token) = data.lifecycle_requests.get(id)
+            {
+                token.cancel();
+            }
+        }
+        let draining = async {
+            loop {
+                let notified = self.idle.notified();
+                if !self
+                    .lock()?
+                    .request_owners
+                    .get(id)
+                    .is_some_and(|current| current == owner)
+                {
+                    return Ok(());
+                }
+                notified.await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(40), draining)
+            .await
+            .map_err(|_| {
+                failure(
+                    "PLUGIN_COMMIT_PENDING",
+                    "插件保存仍在安全收尾，请等待后再关闭页面",
+                )
+            })?
+    }
     pub fn cancel(&self, id: &str) -> Result<(), Error> {
         if let Some(token) = self.lock()?.requests.get(id) {
             token.cancel();
+        }
+        Ok(())
+    }
+    pub fn cancel_scope(&self, id: &str, owner: &str) -> Result<(), Error> {
+        let data = self.lock()?;
+        if data
+            .request_owners
+            .get(id)
+            .is_some_and(|current| current == owner)
+        {
+            if let Some(flag) = data.user_cancellations.get(id) {
+                flag.store(true, Ordering::Release);
+            }
+            if let Some(token) = data.requests.get(id) {
+                token.cancel();
+            }
         }
         Ok(())
     }
@@ -304,7 +349,8 @@ impl Host {
     }
     pub(super) fn verify(&self, call: &Call) -> Result<(), Error> {
         let data = self.lock()?;
-        if call.cancel.is_cancelled()
+        if call.lifecycle.is_cancelled()
+            || (call.cancel.is_cancelled() && !call.user_cancelled.load(Ordering::Acquire))
             || !data
                 .controls
                 .get(&call.id)
@@ -343,12 +389,15 @@ mod tests {
     #[tokio::test]
     async fn call_cancel_does_not_cancel_future_calls_and_stop_drains_before_rebind() {
         let host = Host::default();
-        let call = host.start("dev.one").unwrap();
-        assert!(matches!(host.start("dev.one"), Err(Error::Busy)));
+        let call = host.start_scoped("dev.one", "default").unwrap();
+        assert!(matches!(
+            host.start_scoped("dev.one", "default"),
+            Err(Error::Busy)
+        ));
         host.cancel("dev.one").unwrap();
         assert!(call.cancel.is_cancelled());
         drop(call);
-        let next = host.start("dev.one").unwrap();
+        let next = host.start_scoped("dev.one", "default").unwrap();
         assert!(!next.cancel.is_cancelled());
         let old = next.generation.clone();
         let stop = host.stop("dev.one");
@@ -364,19 +413,22 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(host.start("dev.one").is_err());
-        host.resume("dev.one", None).unwrap();
-        let rebound = host.start("dev.one").unwrap();
+        assert!(host.start_scoped("dev.one", "default").is_err());
+        host.resume("dev.one").unwrap();
+        let rebound = host.start_scoped("dev.one", "default").unwrap();
         assert_ne!(old, rebound.generation);
     }
     #[test]
     fn global_concurrency_is_bounded_without_an_unbounded_queue() {
         let host = Host::default();
         let calls = (0..4)
-            .map(|n| host.start(&format!("dev.p{n}")).unwrap())
+            .map(|n| host.start_scoped(&format!("dev.p{n}"), "default").unwrap())
             .collect::<Vec<_>>();
-        assert!(matches!(host.start("dev.excess"), Err(Error::Busy)));
+        assert!(matches!(
+            host.start_scoped("dev.excess", "default"),
+            Err(Error::Busy)
+        ));
         drop(calls);
-        assert!(host.start("dev.excess").is_ok());
+        assert!(host.start_scoped("dev.excess", "default").is_ok());
     }
 }

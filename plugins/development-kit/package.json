@@ -9,14 +9,19 @@
     "packages/plugin-sdk"
   ],
   "scripts": {
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
     "package": "node tools/build-plugin.mjs ./example ./example.sdplugin"
   },
   "dependencies": {
-    "@serverdeck/plugin-sdk": "4.0.0",
-    "pinia": "3.0.4",
+    "@serverdeck/plugin-sdk": "5.0.0",
     "vue": "3.5.44"
   },
   "devDependencies": {
+    "typescript": "5.9.3",
+    "vue-tsc": "3.3.14",
+    "vitest": "4.1.12",
+    "jsdom": "27.4.0",
     "@vitejs/plugin-vue": "6.0.10",
     "vite": "8.3.5"
   }

@@ -1,9 +1,6 @@
 export type PluginPermission =
-  | 'assistant.use'
-  | 'metrics.read'
-  | 'system.read'
-  | 'system.manage'
-  | 'logs.read'
+  | 'network.connect'
+  | 'models.use'
   | 'hosts.read'
   | 'ssh.execute'
   | 'sftp.read'
@@ -25,8 +22,8 @@ export interface PluginManifest {
   contributions: {
     id: string;
     label: string;
-    kind: 'workspace' | 'navigation' | 'host_menu' | 'command' | 'settings' | 'server' | 'tool';
-    tool?: PluginTool;
+    kind: 'workspace' | 'navigation' | 'host_menu' | 'command' | 'settings' | 'server';
+    routes?: string[];
   }[];
   platforms: string[];
   files: { path: string; size: number; sha256: string }[];
@@ -69,43 +66,12 @@ export interface PluginGrant extends Omit<PluginGrantInput, 'expectedRevision' |
   packageDigest: string;
   revision: string;
 }
-export interface PluginContextInput {
-  hostId: string;
-  opsSession: string | null;
-  fileSession: string | null;
-}
-type PublicQuery<T> = T extends { kind: 'diagnostic' }
-  ? never
-  : T extends object
-    ? Omit<T, 'confirmed'>
-    : never;
-export type PluginSystemQuery = PublicQuery<import('./ops').OpsRequest>;
-export type PluginCapability =
-  | { kind: 'tool_invoke'; inputId: string; operation: PluginToolOperation }
-  | { kind: 'system_query'; request: PluginSystemQuery }
-  | { kind: 'system_feedback' }
-  | { kind: 'metrics_open'; intervalSecs: number }
-  | { kind: 'metrics_snapshot'; monitorId: string; afterRevision: number | null }
-  | { kind: 'metrics_visible'; monitorId: string; visible: boolean }
-  | { kind: 'metrics_close'; monitorId: string }
-  | { kind: 'system_log_start'; source: import('./ops').LogSource; lines: number; follow: boolean }
-  | { kind: 'system_log_poll' | 'system_log_stop'; logId: string }
-  | { kind: 'system_log_pause'; logId: string; paused: boolean }
-  | { kind: 'container_shell'; id: string; bash: boolean }
-  | { kind: 'result_read'; resultId: string; chunk: number }
-  | { kind: 'result_close'; resultId: string }
-  | { kind: 'hosts_read' }
-  | { kind: 'execute'; command: string; timeoutSecs: number }
-  | { kind: 'read_file'; path: string }
-  | { kind: 'save_file'; documentId: string; content: string }
-  | { kind: 'close_file'; documentId: string; discard: boolean }
-  | { kind: 'file_dirty'; documentId: string; dirty: boolean }
-  | { kind: 'settings_read' }
-  | { kind: 'settings_write'; value: unknown }
-  | { kind: 'notify'; message: string }
-  | { kind: 'log_start'; path: string; lines: number }
-  | { kind: 'log_poll' | 'log_stop'; logId: string }
-  | { kind: 'log_pause'; logId: string; paused: boolean };
+
+export type PluginCapability = {
+  kind: 'platform';
+  request: import('./platform').PlatformRequest;
+  bindings: string[];
+};
 export interface PluginRequest {
   apiVersion: number;
   requestId: string;
@@ -124,7 +90,6 @@ export interface PluginApproval {
   hostId: string;
   operation: string;
   description: string;
-  imageId?: string;
 }
 export interface PluginEvent {
   pluginId: string;
@@ -141,10 +106,7 @@ export interface PluginUi {
   frontend: { script: string; style: string };
 }
 export interface PluginUiPage {
-  surface:
-    | { kind: 'frontend' }
-    | { kind: 'operations'; sections: import('./server').ServerSection[] }
-    | { kind: 'tool'; tool: PluginTool };
+  surface: { kind: 'frontend' };
   id: string;
   title: PluginLabel;
   initialAction: string | null;
@@ -170,10 +132,3 @@ export interface PluginUiResult {
   output?: unknown;
   saved?: boolean;
 }
-export type PluginTool = 'assistant';
-export interface PluginToolTicket {
-  inputId: string;
-  operation: PluginToolOperation;
-  review?: { title: string; message: string; confirmationText?: string | null } | null;
-}
-export type PluginToolOperation = 'ai_resolve_hosts' | 'ai_prepare' | 'ai_send' | 'ai_execute';

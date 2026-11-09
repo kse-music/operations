@@ -263,6 +263,19 @@ impl Engine {
         let command = shell.command()?;
         self.open_internal(host, plan, size, sink, SessionKind::Terminal, Some(command))
     }
+    pub fn open_command_terminal_plan(
+        &self,
+        host: Host,
+        plan: ConnectionPlan,
+        size: TerminalSize,
+        sink: Sink,
+        command: String,
+    ) -> Result<TerminalSession, Error> {
+        if command.is_empty() || command.len() > 64 * 1024 || command.contains('\0') {
+            return Err(Error::Validation("远程终端命令无效"));
+        }
+        self.open_internal(host, plan, size, sink, SessionKind::Terminal, Some(command))
+    }
     pub fn open_file_terminal_plan(
         &self,
         host: Host,

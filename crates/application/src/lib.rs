@@ -11,11 +11,9 @@ mod product;
 pub mod storage_location;
 mod terminal;
 mod terminal_upload;
+pub use bundled_plugins::PluginInventory;
 pub use hosts::{HostTestResult, SecureStatus};
-pub use plugins::{
-    Approval as PluginApproval, ContextInput as PluginContextInput, Event as PluginEvent,
-    ToolInput, ToolTicket,
-};
+pub use plugins::{Approval as PluginApproval, Event as PluginEvent};
 
 use std::{
     path::PathBuf,
@@ -33,9 +31,11 @@ use tokio::sync::Semaphore;
 #[derive(Clone)]
 pub struct Application {
     plugins: serverdeck_plugin_core::Repository,
+    plugin_startup_problems:
+        Arc<std::sync::Mutex<Vec<serverdeck_plugin_core::repository::PluginProblem>>>,
     plugin_runtime: serverdeck_plugin_runtime::Runtime,
     plugin_host: plugins::state::Host,
-    assistant: serverdeck_ai::Assistant,
+    models_runtime: serverdeck_ai::Models,
     local_tool_installer: Arc<serverdeck_ai::local_tools::Installer>,
     terminal_uploads: terminal_upload::TerminalUploads,
     local_terminals: local_terminal::LocalTerminals,
@@ -74,7 +74,8 @@ impl Application {
             plugin_runtime: serverdeck_plugin_runtime::Runtime::new(plugins.clone()),
             plugin_host: plugins::state::Host::default(),
             plugins,
-            assistant: serverdeck_ai::Assistant::default(),
+            plugin_startup_problems: Arc::default(),
+            models_runtime: serverdeck_ai::Models::default(),
             local_tool_installer: Arc::default(),
             terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
@@ -161,7 +162,7 @@ impl Application {
             })
             .await?;
         self.files.transfers.configure(concurrency);
-        self.configure_monitors(interval)?;
+        self.monitors.configure(interval);
         Ok(saved)
     }
 
@@ -182,7 +183,7 @@ impl Application {
         if let Err(error) = self.plugin_runtime.shutdown().await {
             tracing::error!(operation = "plugin_shutdown", error = %error);
         }
-        self.assistant.shutdown().await;
+        self.models_runtime.shutdown().await;
         if let Err(error) = self.terminal_uploads.clear() {
             tracing::error!(operation = "terminal_upload_shutdown", error = %error);
         }

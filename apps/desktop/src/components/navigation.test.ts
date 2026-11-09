@@ -55,6 +55,6 @@ it('routes all seven settings entries to the dialog while keeping host and plugi
     '关于',
   ]);
   for (const item of settingsNavigation) expect(isSettingsView(item.view)).toBe(true);
-  for (const view of ['terminals', 'files', 'server', 'assistant', 'extension'] as const)
+  for (const view of ['terminals', 'files', 'server', 'extension'] as const)
     expect(isSettingsView(view)).toBe(false);
 });

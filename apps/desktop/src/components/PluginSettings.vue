@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ShieldCheck, Power, FolderKey } from '@lucide/vue';
+import { ShieldCheck, FolderKey } from '@lucide/vue';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from '../services/plugins';
-import { togglePlugin } from '../services/plugin-lifecycle';
 import type { InstalledPlugin, PluginPermission } from '../types/plugins';
 const props = defineProps<{ plugin: InstalledPlugin }>();
 const plugins = usePluginsStore();
@@ -11,17 +10,12 @@ const builtin = computed(() => props.plugin.source === 'system');
 const grant = computed(() => plugins.grants[props.plugin.manifest.id]);
 const permissions = ref<PluginPermission[]>([]),
   readRoots = ref(''),
-  writeRoots = ref(''),
-  allowExecute = ref(false),
-  allowShell = ref(false);
+  writeRoots = ref('');
 const labels: Record<PluginPermission, [string, string]> = {
-  'assistant.use': ['AI 运维助手', '使用已配置模型分析脱敏上下文，命令执行仍需明确确认'],
-  'metrics.read': ['资源监控', '读取 CPU、内存、磁盘和网络采样'],
-  'system.read': ['系统信息', '读取容器、进程、端口和服务状态'],
-  'system.manage': ['系统操作', '修改状态、发送信号或查看敏感信息，逐次确认'],
-  'logs.read': ['日志读取', '读取主动选择的文件、容器或服务日志'],
+  'network.connect': ['本机 TCP 连接', '从本机探测指定地址与端口，逐次确认'],
+  'models.use': ['模型调用', '使用平台已配置模型发送插件提供的消息，凭据保留在宿主'],
   'hosts.read': ['主机信息', '读取当前主机的基本信息'],
-  'ssh.execute': ['SSH 命令', '执行只读命令，其他命令另行授权和确认'],
+  'ssh.execute': ['SSH 命令与终端', '执行插件提供的远程命令，启动前逐次确认真实命令和目标'],
   'sftp.read': ['读取远程文件', '仅限下方可读目录'],
   'sftp.write': ['写入远程文件', '仅限下方可写目录，写入逐次确认'],
   'ui.contribute': ['插件界面', '显示插件功能和通知'],
@@ -29,14 +23,11 @@ const labels: Record<PluginPermission, [string, string]> = {
   'settings.write': ['保存插件配置', '仅限这个插件自己的配置'],
 };
 const operationMap: Record<PluginPermission, string[]> = {
-  'assistant.use': ['assistant.use'],
-  'metrics.read': ['metrics.read'],
-  'system.read': ['system.read'],
-  'system.manage': ['system.manage'],
-  'logs.read': ['logs.read'],
+  'network.connect': ['network.connect'],
+  'models.use': ['models.use'],
   'hosts.read': ['hosts.read'],
-  'ssh.execute': ['ssh.read_only'],
-  'sftp.read': ['sftp.read', 'logs.read'],
+  'ssh.execute': ['ssh.execute'],
+  'sftp.read': ['sftp.read'],
   'sftp.write': ['sftp.write'],
   'ui.contribute': ['ui.contribute', 'ui.notify'],
   'settings.read': ['settings.read'],
@@ -48,8 +39,6 @@ watch(
     permissions.value = [...(grant.value?.permissions ?? [])];
     readRoots.value = grant.value?.readRoots.join('\n') ?? '';
     writeRoots.value = grant.value?.writeRoots.join('\n') ?? '';
-    allowExecute.value = grant.value?.operations.includes('ssh.execute') ?? false;
-    allowShell.value = grant.value?.operations.includes('system.shell') ?? false;
   },
   { immediate: true },
 );
@@ -58,10 +47,7 @@ async function save() {
   const operations = [
     ...new Set(permissions.value.flatMap((permission) => operationMap[permission])),
   ];
-  if (permissions.value.includes('ssh.execute') && allowExecute.value)
-    operations.push('ssh.execute');
-  if (permissions.value.includes('system.manage') && allowShell.value)
-    operations.push('system.shell');
+
   const roots = (value: string) =>
     value
       .split('\n')
@@ -86,21 +72,6 @@ async function revoke() {
 </script>
 <template>
   <div class="plugin-settings" aria-label="插件设置">
-    <section class="plugin-settings-section plugin-state-section">
-      <div>
-        <h2><Power :size="17" aria-hidden="true" />运行状态</h2>
-        <p class="subtle">
-          {{
-            plugin.enabled
-              ? '插件已启用，能力由下方授权范围控制。'
-              : '插件已禁用，启用后可使用已授权的功能。'
-          }}
-        </p>
-      </div>
-      <button class="button" :disabled="plugins.busy" @click="togglePlugin(plugin)">
-        {{ plugin.enabled ? '禁用插件' : '启用插件' }}
-      </button>
-    </section>
     <details class="plugin-settings-section plugin-permissions" :open="!builtin">
       <summary class="plugin-permissions-summary">
         <span><ShieldCheck :size="16" aria-hidden="true" />权限与访问范围</span>
@@ -135,25 +106,6 @@ async function revoke() {
               ><strong>{{ labels[permission][0] }}</strong
               ><small>{{ labels[permission][1] }}</small></span
             ></label
-          >
-        </div>
-        <div
-          v-if="permissions.some((p) => ['ssh.execute', 'system.manage'].includes(p))"
-          class="plugin-extra-scopes"
-        >
-          <label v-if="permissions.includes('ssh.execute')" class="checkbox-label"
-            ><input
-              v-model="allowExecute"
-              type="checkbox"
-              :disabled="builtin || plugins.busy"
-            />允许请求其他命令（仍逐次确认）</label
-          >
-          <label v-if="permissions.includes('system.manage')" class="checkbox-label"
-            ><input
-              v-model="allowShell"
-              type="checkbox"
-              :disabled="builtin || plugins.busy"
-            />允许请求容器终端（仍逐次确认）</label
           >
         </div>
         <p class="plugin-all-hosts subtle">

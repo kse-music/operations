@@ -1,5 +1,149 @@
 # 插件阶段验证记录
 
+## 2026-11-09 插件列表启停
+
+### 完成范围
+
+“设置 → 插件”的每个列表项直接提供“启用／禁用”，详情页移除运行状态操作。复用 `togglePlugin` 及既有 Store/IPC，保留禁用确认、资源清理、权限边界、处理中禁用按钮和错误通知；启用上传插件不自动授权。列表状态、已启用数量和筛选同步刷新。窄容器内操作区换行，避免挤出卡片。原生验收脚本与共享导航辅助函数同步使用列表入口。
+
+主要文件：`apps/desktop/src/views/PluginsView.vue`、`components/PluginSettings.vue`、`styles/plugins.css`、列表/详情回归测试，以及 `tools/ui-navigation.mjs` 和相关插件验收脚本。产品需求、实施计划与使用说明同步；现有其他开发修改保留。
+
+### 实际验证
+
+- `npm test -- --run src/views/plugin-manager.test.ts src/views/plugin-settings-panel.test.ts src/stores/plugins.test.ts src/components/plugin-dialogs.test.ts`：4 个文件、30 项通过。新增覆盖内置/上传插件列表启用不改授权、禁用取消与确认、确认后清理草稿、状态筛选刷新、处理中防重复点击和启用失败保留状态并反馈错误。现有权限编辑与弹窗行为继续通过。
+- `npm run typecheck`、修改的 Vue/TypeScript 文件 ESLint、修改脚本的 `node --check` 通过；本次代码格式及差异检查通过。
+- `npm run build`：三个内置插件生成、Vue 类型检查及 Vite 生产前端构建通过，保留既有大 chunk 提醒。构建前磁盘约 245 GiB 可用，原生/WASM 输出沿用项目约定。
+- 四组隔离 Edge 浏览器检查通过：1440×900 深浅主题标准字号、900×600 深色最大字号、390×844 浅色最大字号。使用真实 Vue 设置窗口与插件列表，仅插件服务为测试夹具；验证列表启用、禁用取消/确认、详情无重复入口、处理中阻止切换分类、失败提示和状态保留。四组均无横向溢出，按钮处于卡片范围内且不重叠，无页面异常；人工查看桌面与窄屏截图。首次沙箱内 Edge 启动退出，获准在沙箱外使用独立临时目录重试后通过。
+- 浏览器脚本、四张截图及结构化结果保留在 `.local/qa/plugin-list-toggle/`，任务开始时相关文件快照保留在其 `before/` 子目录，用于区分已有修改。
+
+### 限制与下一步依赖
+
+未重建原生桌面可执行文件或安装器，未执行更新后的原生 E2E、真实插件 IPC、远端业务或跨平台客户端验收。浏览器夹具不作为真实后端验证。无 Rust、IPC、SDK、数据库或权限契约变化；已构建的旧桌面程序需重新构建并启动后显示新入口。无新增实现依赖，本阶段完成后停止。
+
+## 2026-11-09 插件界面握手超时修复
+
+### 原因与完成内容
+
+SDK5 前端 Runtime 遗漏 `serverdeck-sdk-ready` 通知，并将端口确认误写成 `ready`，宿主实际等待 `connected`，所以页面没有收到首个 context，重试仍然超时。修复公开 SDK 的这两处通用加载实现，恢复既有 wire1 握手；没有新增业务能力、宿主特例或 Rust SDK 接口。
+
+内置 Nginx 1.1.1、Docker/助手 2.0.1 重新打包以更新实际载荷，沿用现有系统版本升级，保留启停和配置。开发包及独立 MySQL 2.0.1 同步修复，旧 ZIP 和旧上传包保留；未改 MySQL SQL/业务。50 个 SDK/工具/文档文件从当前应用下载资源逐字解压到外部工程，来源记录保留最初真实界面下载的 provenance，不将本次直接取构建资源说成再次操作保存对话框。
+
+主要修改：`packages/plugin-sdk/src/runtime{.ts,.test.ts}`、三个内置 manifest；新增 `tools/plugin-handshake{,-native}-e2e.mjs` 联通回归；UI 协议文档、开发包说明及外部 MySQL vendor/版本/来源记录同步更新。SDK API/UI/ABI 版本和业务边界不变。
+
+### 实际验证
+
+- 新增 SDK 回归在修复前真实失败（未发送就绪通知）；修复后 SDK/PluginFrame 8 项通过。完整前端 54 文件、479 项通过，类型、ESLint、相关 Prettier、脚本语法检查通过。
+- `plugin-handshake-e2e.mjs --before` 用归档原 Nginx 包与真实宿主组件复现 15 秒超时，SDK 未挂载。相同完整测试授权下，新 Nginx/Docker/助手各打开两次共 6 项通过；独立 MySQL 两次通过。测试使用包内生产 JS、真实 SDK 和 PluginFrame，受限 CSP 与 opaque iframe；未用单独模拟的两端消息代替联通。
+- 独立 Windows QA 客户端实际走原生包校验、资源协议、WASM 激活及生产 PluginView/PluginFrame：三个系统包各两次、原生导入授权启用的 MySQL 两次，共 8 项通过。记录 UI 挂载、父 DOM 拒绝、私有 IPC 被 CSP/ACL 阻断；SFTP/Operations 连接列表均为空。选择空主机是界面夹具，不属于远端业务验收。每次通过正常退出 IPC 排空，未强杀进程。
+- 外部 MySQL 类型检查、3 项前端业务测试和独立 WASM/UI 打包通过；旧 2.0.0 保留，新包 `D:/CodexProjects/op_plugins/mysql-inspector/dist/mysql-inspector-2.0.1.sdplugin`，663594 字节，SHA256 `ad869a25be38d1132353ba8e4345baab7af0c1e492d0b407ed1d5c7b233cdcc5`。新 SDK 资源 `serverdeck-plugin-development-kit-sdk5-ui-fix.zip`，SHA256 `903a3634f2dbf940568c2b078ad76aa7b43a70084d1a95a87a977e6f3fa17832`，与最终应用下载资源一致。
+- Windows QA 及最终普通配置 debug/no-bundle 构建通过。早期构建因日常程序占用输出 EXE 失败，用户正常退出后重建成功。最终程序 `target/debug/serverdeck-desktop.exe`；没有启动最终日常配置或改写日常插件数据，没有生成安装器。
+
+原始证据位于 `.local/qa/plugin-handshake/`：runtime-before.log、unit-after.log、frontend.log、browser-before-final.log、browser-builtins.json、browser-mysql.json、native-results.json、native-upload-results.json、mysql-sdk-update.log、mysql-package.log、desktop-normal-build.log 与 native-nginx 截图。回归工具可对后续包重复使用，所有测试状态限定于 QA。
+
+### 限制与下一步
+
+未在用户真实 SSH/Nginx/MySQL 上执行检测、编辑、重载或巡检，没有重跑远端业务测试，也未验证 macOS/Linux 客户端。用户重启普通配置修复版后，当前有效的内置包按现有分发逻辑更新；被 SDK4 隔离的旧助手/Docker 仍需在管理页显式备份重装。外部 MySQL 通过界面上传 2.0.1 升级并按现有规则检查授权。使用修复前开发包构建的其他第三方 UI 需要更新 SDK 后重新打包，不提供旧故障行为兼容层。本阶段完成，无新的功能开发阶段依赖。
+
+## 2026-11-09 旧插件记录导致启动失败修复
+
+### 原因与完成内容
+
+日常目录仍有 SDK4 助手 1.6.1/Docker 1.5.3 记录，已删除权限枚举无法按 SDK5 反序列化，原流程以通用存储错误终止 Tauri setup。只读核对后复制两个原始记录到专用 QA 数据目录；没有修改日常记录、包、主机、凭据或配置。
+
+仓库新增逐项 inventory：无效插件保留原始数据并报告安全原因，不进入执行列表，不妨碍健康插件和新安装。系统分发逐包隔离错误，日志提前初始化，根目录安全和数据库错误仍传播。插件页显示未加载原因，有对应内置包时可显式“备份并重装”：绑定并复验原记录摘要，持久保存逐字备份后原子提交当前包，保留原载荷/配置，新版禁用且不继承旧权限。管理接口仅允许可信主窗口，不修改公开 SDK、下载开发包或外部 MySQL 工程。修复了管理操作失败后刷新列表将错误清空的问题。
+
+主要文件：`crates/plugin-core/src/repository{.rs,/tests.rs}`、`crates/application/src/{bundled_plugins,plugins,lib}.rs`、Tauri setup/插件命令/ACL/IPC 测试，桌面 plugins 服务/store/types、PluginsView/样式与回归。
+
+### 实际验证
+
+- 前端完整 Vitest：54 文件、474 项通过；类型检查、ESLint、相关 Prettier、Cargo fmt 和相关包严格 Clippy 通过。
+- 最终复制到 QA 的测试 EXE：application 53 项通过、1 项外部包按需用例 ignored；plugin-core 可用 22 项通过；桌面真实 IPC 6 项通过。新增测试覆盖坏记录旁仍有健康插件/可安装新包、拒绝未确认及过期摘要、逐字备份、默认禁用、配置与载荷保留、提交失败保留原记录，以及启动/重装后的当前系统授权。
+- plugin-core 全量实际运行 22 通过、1 失败：既有 `windows_junction_escape_is_rejected_and_cleanup_preserves_target` 在 PowerShell 创建测试 junction 时被 Windows 拒绝访问，未到安全断言。独立复跑同样失败；测试和有效断言保持原样，最终可用组显式跳过此环境失败项，不宣称全量通过。原始失败及独立日志保留。
+- 真实 WebView2 隔离客户端加载两个日常旧记录副本：欢迎页及 bootstrap 成功，管理页显示两个问题和正常 Nginx。分别经界面确认重装助手/Docker 2.0.0，问题消失、三插件可见、两者禁用。磁盘核对两个 `record-backup-*.json` 均与原始字节摘要一致，日常记录摘要未变。退出通过正常确认，日志记录 shutdown drained。
+- QA debug/no-bundle 与最终普通配置 Windows debug/no-bundle 构建通过，最终程序为 `target/debug/serverdeck-desktop.exe`。证据位于 `.local/qa/plugin-startup/`：frontend-full.log、unit-final.jsonl、application-latest-final.log、core-available-final.log、ipc.exe.log、serverdeck_plugin_core.exe.log、ui-reinstall-verification.json、desktop-normal-build.log。
+
+### 限制与下一步
+
+没有在日常目录执行重装或自动迁移，没有生成安装器、验证 macOS/Linux 客户端或重跑远端业务操作。上述 Windows junction 测试环境问题未解决；本轮实际桌面验证限定为旧记录副本。用户重启当前程序后，可在“设置 → 插件”备份重装两个问题插件，检查配置再启用。第三方旧包仍须用当前 SDK 重构，故障隔离不提供旧契约兼容。本阶段完成，无新的插件开发阶段依赖。
+
+## 2026-11-09 SDK5 平台边界与插件闭环
+
+### 实际完成
+
+Rust/TypeScript SDK与Host API同步5.0.0。移除公开领域server/tools、Docker/助手专用接口、桌面Store和原生业务桥；平台仅保留通用执行/流/PTY、文件、模型消息、公开元数据、配置、权限与审批。Docker、AI助手、Nginx及外部MySQL业务全部在各自插件，内置/上传无按ID执行特权。完整系统目录自动发现和生成注册继续有效。
+
+新增顺序async Runtime、显式hostId、不透明SSH/模型修订绑定、可信owner资源隔离、原Future审批续接、透明有界分块。真实目标与命令逐次审核；隐藏/关闭/撤权清理资源，取消不重放动作，错误与清理原因保留。样例包含本地问候与真实free内存巡检；开发规范、接口/安全/架构/版本/使用文档同步。
+
+主要文件：crates/plugin-sdk/src/{backend,platform}.rs、packages/plugin-sdk/src/、crates/application/src/plugins/、plugins/system/{assistant,docker,nginx}、plugins/development-kit/、apps/desktop/plugin-development-kit.ts。外部工程仍在D:/CodexProjects/op_plugins/mysql-inspector，不把其业务接入宿主。
+
+### 验证证据
+
+- 全工作区原生测试：34个QA测试EXE，221项通过、4项按原设置忽略；含真实loopback SSH的审批前不执行、字面参数、目标漂移拒绝、失败/256KiB输出限额、流/票据owner隔离，以及6项真实Tauri IPC/ACL。测试复制到.local/qa/sdk-platform/native-run执行。旧业务IPC本地主窗口同样拒绝，未恢复旧接口使测试通过。
+- 前端：54文件/472项通过；覆盖通用桥元数据保护、旧API拒绝、审批原地续接、队列失效、输入冻结、分块清理、PTY迟到关闭、Nginx草稿/挂载、Docker详情/环境/确认、助手对话/模型/计划与平台CLI授权。类型检查（含测试）和ESLint通过，自动发现/构建工具21项通过。
+- 三个内置后端分别8/2/4项、独立样例后端1项、外部MySQL后端7项通过。各插件独立clippy及工作区all-targets clippy（-D warnings）通过；WASM和桌面真实构建通过。各轮日志位于.local/qa/sdk-platform；早期测试夹具迁移失败和npm/沙箱错误保留，不伪装全程成功。
+- 真实UI下载：隔离WebView2客户端显示3个自动分发内置包，点击下载并使用原生保存对话框生成 `serverdeck-plugin-development-kit-sdk5.zip`，90371字节，SHA256 `23d91ccdfafb5d245ab233547e0db0d5d4c99a44a9b87177ba97d30a2098175d`。48个SDK/工具/文档vendor文件与外部工程逐字节一致；源码/工具与本仓库也一致。实际下载ZIP解压后标准npm ci、typecheck、13项前端测试及独立WASM打包通过。
+- 最终外部包 `mysql-inspector-2.0.0.sdplugin`，663502字节，SHA256 `202ab3c6de264636109ca7706652fd93aff0662f543da5b7d0463fa3398f13e0`；旧1.0.0/1.0.1保留。临时应用仓库原生导入、默认禁用/未授权、授权/UI校验、WASM调用与未连接错误路径通过；实际下载样例原生导入后问候动作通过。未安装到用户日常仓库。
+- 实际生产WASM服务验证1项通过：任务专属network-none Nginx1.14.2/MySQL8.4容器；两种部署模式、Nginx检测/校验/重载（HTTP响应实际变化）、坏配置保留原服务；MySQL七类查询、非复制类真实非空观测、session_read_only=1、默认/配置文件登录及错误配置。固定SQL、参数转义、复制字段脱敏由插件测试覆盖。最终包仅将主机贡献改为server，载荷与实测包完全相同。夹具已由标签校验后清理，不影响用户容器。
+
+### 限制、风险与后续依赖
+
+未运行的4项为授权Linux真实PTY、OS凭据库写删、两个真实CLI模型账号调用；另有通用外部包/真实服务按需用例已显式运行。SSH协议测试用本机真实协议服务，服务行为测试用WSL中的真实工具；未宣称单一UI→SSH→SFTP→所有服务全链实机验收。MySQL login_path/mysql_config_editor、复制拓扑、其他MySQL/MariaDB版本、真实用户模型账号及macOS/Linux客户端未验证。Nginx配置编辑受32KiB/SFTP授权根/目录bind约束；文件提交和远端命令中断不承诺回滚。未生成安装器。
+
+用户应用数据与已有包/配置不重置；SDK4开发期包需用SDK5重新构建。此轮最初遗漏旧记录阻断启动的问题，现已通过上方“旧插件记录导致启动失败修复”隔离并提供显式重装，不需要重建整个仓库；未自动迁移、清理或重置日常目录。运行依赖目标主机已安装nginx/mysql/docker及对应权限，模型依赖平台配置和授权。当前阶段至此，未启动新的插件开发阶段。
+
+下方日期章节保留历史证据；其SDK4/旧领域契约不代表当前接口。
+
+## 2026-11-08 插件业务归属修正
+
+### 完成内容与范围
+
+初版为两个插件新增服务专用 SDK 和宿主业务，不符合第三方独立开发要求，已撤回。Core/Ops、应用 server 桥、Rust SDK server 类型/测试和 TS ops 类型七个文件恢复任务前版本；未保留服务专用请求或兼容层。新增插件的命令/SQL、目标校验、输入类型和解析全部迁入各自 backend/frontend，公开 `invoke` → 插件 WASM → 已有 Execute → 插件解析返回；文件、日志和容器发现继续复用原能力。SDK/宿主只保留通用草稿保护，不包含服务分支。
+
+当前 Nginx 和 MySQL 包均为 1.0.1；MySQL 路径 `D:/CodexProjects/op_plugins/mysql-inspector/dist/mysql-inspector-1.0.1.sdplugin`，1046550 字节，SHA-256 `786dc3f479431def500be983188766c13cbac5b69e5afc8c1f6d3a52e5f777ff`。MySQL 声明 `ui.contribute`、`system.read`、`ssh.execute`；Nginx 不再声明 system.manage，命令同样走原有 SSH 权限/审核。旧 1.0.0 包保留，仅作历史产物。SDK 与宿主未新增 Nginx/MySQL 免审白名单。
+
+### 实际验证
+
+证据位于 `.local/qa/plugin-isolation/`，Cargo 继续使用根 target、QA 复制 EXE 和既有 WASM 缓存，构建盘空间充足。
+
+- 插件自有 Nginx 原生 4 项、MySQL 原生 7 项通过：自有动作生成 Execute、拒绝前端任意 SQL/命令与越权桥、输入转义、完整容器 ID、错误/截断/伪造响应拒绝、batch 格式及复制敏感字段过滤。原 Core 有效的重载目标、只读 SQL 和认证注入断言一并迁入插件。外部前端类型与 Node 模型 3 项通过，独立 Vite/WASM 打包通过。
+- 插件自有真实服务测试各 1 项通过，均使用 task-owned、network-none、无端口发布的 WSL Docker 夹具。测试插件自己的命令/解析及既有 Execute 响应格式、4 KiB 限额，不再调用 Core 服务业务。宿主机分支在隔离 Linux 服务环境直接执行，Docker 分支在宿主 d exec；Nginx 错误配置阻止重载且 HTTP 继续响应，MySQL 8.4 七类结果含实际锁等待/事务、只读会话、默认/指定配置认证，缺失配置明确失败。夹具正常清理，仅影响本任务标签容器。
+- 前端专项 3 文件/52 项通过；应用内置分发 4 项、通用命令审批冻结和单次消费 1 项、实际 MySQL 1.0.1 包安装至临时仓库并经过真实 WASM/权限链 1 项通过。未将 MySQL 安装进用户日常仓库。没有重跑本轮前端全量，前次 478 项不冒充本轮结果。
+- 从修正后的隔离 WebView2 客户端重新通过原生保存对话框下载 `D:/CodexProjects/op_plugins/serverdeck-plugin-development-kit-independent.zip`，116135 字节，SHA-256 `8a770e0b68531d96aab661231f5d4340315794dad9f70f39079a047d223ecc0e`。SDK 中无 Nginx/MySQL 专用类型；外部项目使用此下载版本重新构建，63 个 SDK/工具文件与 ZIP 逐字节一致。下载时文档仍为上次构建快照，外部项目文档另行同步当前架构；源码未改。新的独立进程名自动化授权等待超时，改用既有获准 QA 入口完成；坐标几何不完整的索引点击未产生目标动作，刷新截图后完成下载。QA 客户端正常确认退出，未改用户连接与日常数据。
+- 主机/插件类型检查、ESLint、Prettier、Rustfmt、相关 Host/两个插件 all-targets 严格 Clippy（离线锁定，`-D warnings`）通过。`npm run plugins:build` 和 `node tools/tauri.mjs build --debug --no-bundle` 通过，最终正常 `target/debug/serverdeck-desktop.exe` 已重建；保留既有 Monaco 大 chunk 和 Windows 创建导入库提示，未启动用户客户端、未生成安装器。最后仅迁移测试断言，不改变已打包的运行时代码。只读比较确认上述七个业务接口/实现文件相对任务前无差异。
+
+### 限制与依赖
+
+现有通用 Execute 保持原安全策略：需 `ssh.execute` 授权和单次确认，命令最多 8192 字节、30 秒、stdout/stderr 每路 4 KiB；插件检测截断后明确报错，不用部分结果伪装成功，数据多时可能达到上限。Nginx 配置编辑仍受 32 KiB、目录 bind 与 SFTP 权限约束。MySQL 需目标客户端及现有只读账号配置。真实 SSH/SFTP 全流程、复制拓扑、登录路径认证、其他 MySQL/MariaDB 和非 Windows 客户端未验收；未生成安装器。下文初版服务专用 API 记录仅为历史证据，当前实现以本节为准。
+
+## 2026-11-08 Nginx 管理与独立 MySQL 巡检
+
+### 交付与主要文件
+
+- 内置 `plugins/system/nginx` 为完整 Rust/WASM + Vue UI v4 插件，1.0.0，自动发现进入第三项注册；支持 Linux 服务器与 Docker 的检测、配置校验、确认重载、SFTP 配置编辑和日志。Docker 目录 bind 映射到服务器 SFTP；单文件 bind 和只读挂载只读。保存不自动重载，错误配置阻止重载。
+- Core `ops/services.rs`、Ops `parse/services.rs`、公开 Rust/TS SDK 和应用能力桥同步提供固定 `nginx`/`mysql_inspect` 请求；无任意 SQL/程序/密码入口。MySQL 复制输出使用允许字段，其他巡检不返回原始 SQL；Nginx reload 沿用可信单次审批、完整容器 ID、配置冻结及即时复验。
+- Nginx 页面及 SDK `drafts.ts`、PluginFrame、可信 UI 桥、插件/工作区 store 和 App 关闭保护共同保留草稿。隐藏后旧文档句柄失效，返回保存核对规范路径与摘要；连续冲突不会把新版本误绑定为旧草稿的保存基线。
+- MySQL 项目位于 `D:/CodexProjects/op_plugins/mysql-inspector`，标准包 `dist/mysql-inspector-1.0.0.sdplugin`（963648 字节，SHA-256 `77f7a3aae4916e9a41254e962016fb8a607496ea55c5646b69a92bb9d5be5554`）。仅声明 `ui.contribute`/`system.read`，提供概览、连接、语句摘要、锁等待、事务、复制和库容量。外部项目自有 README、锁文件、类型/模型测试与 Rust 能力边界测试，不导入宿主私有源码。
+- PRD、架构/决策、实施计划、SDK、内置清单、开发/使用指南及索引同步。无数据库迁移、新 IPC、密码库或新增宿主依赖。
+
+### 实际执行与证据
+
+主要证据位于 `.local/qa/nginx-mysql/`。Cargo 遵守现有配置、原生输出复用根 `target/`，所有原生测试运行 QA 复制 EXE；WASM 使用各插件既有 `.local/plugin-build/<name>/`。最后构建前 D 盘约 248 GiB 空闲。
+
+1. 使用独立数据目录/标识的 Windows WebView2 QA 客户端，实际看到插件管理列出第三项 Nginx，从“设置 → 插件 → 下载插件开发包”经原生保存对话框下载 `D:/CodexProjects/op_plugins/serverdeck-plugin-development-kit.zip`（116641 字节）。ZIP SHA-256 为 `f189b18e90c0987f563371ef70394732a2ba85ddf9a75373e3e2fdf1e77c87fe`；从下载 ZIP 解压 SDK/打包器/文档后独立开发，最终核对 63 个 SDK/工具文件逐字节未变。QA 客户端正常确认退出，未接入用户主机或修改日常应用仓库。
+2. 外部项目 `npm ci --offline`、`npm run typecheck`、`npm test`（3 项）和 `npm run package` 通过，真实 Vite/WASM 打包为四个资源文件。外部 Rust 后端测试 1 项通过，Nginx 后端测试 1 项通过。最终包各资源长度/SHA-256 再次核对通过，见 `delivery-verification.json`；SDK 来源摘要随项目保存。
+3. 应用内置分发/升级/权限专项 4 项通过（`serverdeck_application-tests.log`）；Nginx reload 审批冻结主机/容器/配置、过期及单次消费 1 项通过（`nginx-review-tests.log`）；新 ignored 验收测试用最终外部包实际安装至临时仓库，验证上传默认禁用且未授权、授权启用后 UI/资源可读、真实 WASM 到达受控 Host，并拒绝任意 Execute，1 项通过（`mysql-package-host-tests.log`）。未在用户仓库安装 MySQL。
+4. 前端专项 3 文件/52 项通过；全量 53 文件/478 项通过（`frontend-final.log`、`frontend-all.log`）。覆盖挂载映射、完整 Docker ID、保存失败保留草稿、连续摘要冲突、切换取消、隐藏草稿关闭审核及可信页面身份。全量 jsdom 输出既有 Canvas getContext 未实现提示，测试无失败。
+5. 最终 Core 20 项、Ops 3 项、SDK 8 项通过（`*-final-tests.log`），覆盖安全参数、固定只读 SQL、输入与确认拒绝、batch 转义、畸形结果拒绝及复制敏感列剔除。宿主与 SDK 类型检查、ESLint、Rustfmt、相关 Core/Ops/SDK/Application/Desktop all-targets Clippy 离线锁定 `-D warnings` 通过。
+6. WSL Ubuntu Docker 中创建仅本任务标签的两台隔离测试容器：Nginx 1.14.2、官方 MySQL 8.4，均 `--network none`、无端口发布；MySQL 使用临时 tmpfs 数据、专属测试库/只读用户、持锁事务和等待事务。测试调用实际 Core 命令与 Ops 解析：Host 分支在隔离 Linux 服务环境直接执行，Container 分支从 Docker 宿主执行 `d exec`。两种分支均验证 Nginx info/test/reload、错误配置阻止重载且 HTTP 仍响应；MySQL 七类查询包含真实非空锁等待/事务/语句摘要，概览确认会话只读，默认配置和指定文件认证成功，缺失配置明确失败。最终 1 项集成通过（`real-services-tests.log`），夹具正常退出并只清理自身标签容器，不触碰现有工作负载。
+7. `node tools/tauri.mjs build --debug --no-bundle` 正常默认配置构建通过，自动打包三份内置插件和单独夹具并重建 `target/debug/serverdeck-desktop.exe`（`desktop-default-build.log`）。保留既有 Monaco 大 chunk 与 Windows 链接器创建导入库提示。未自动启动用户客户端，未生成本阶段安装器。
+
+### 发现的问题与验证限制
+
+- 首轮真实 MySQL 8.4 因空 `--init-command=` 返回 ERROR 1065，修正为显式只读会话命令后通过；原失败日志保留为 `real-services-first-failure.log`，未将失败计为通过。官方最小 MySQL 镜像没有 `mysql_config_editor`，登录路径构造/校验已单测，但未完成真实登录路径认证；没有为补测修改用户系统或虚构成功。
+- 首次 `npm run tauri -- ...` 参数被 npm 消费，未进入预期构建；改为直接执行工具后成功。外部首次类型检查误纳入下载 SDK 仓库自身测试（缺少其 Vitest 测试依赖），改为检查插件及实际导入的 SDK 源码；插件运行依赖未变。最初从错误 Vitest root 启动无法收集插件文件，改为桌面目录后专项及全量均通过。
+- 真实服务命令/解析、Windows WASM/权限链、原生下载和 Vue 行为分别验证；未将这些等同于生产 SSH/SFTP 全流程。尚未验证真实复制拓扑、Nginx 生产站点配置/日志、实际远端 SFTP 保存、MySQL 8.0/其他版本、MariaDB、macOS/Linux 客户端或签名安装器。
+- 使用依赖：启动本次新版客户端；Nginx 远端账号需具备文件和服务/Docker 权限，配置编辑最多 32 KiB，Docker 配置写入需目录 bind；MySQL 目标需已有兼容客户端、服务和合适只读账号的客户端配置。客户端不会自动提权、安装服务或保存数据库密码。本阶段实现完成，用户自行上传并授予 MySQL 两项权限。
+
 ## 2026-11-08 内置插件自动发现
 
 ### 范围与主要文件

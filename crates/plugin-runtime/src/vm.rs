@@ -13,7 +13,9 @@ use wasmi::{
     TypedFunc,
 };
 
-pub const FUEL: u64 = 2_000_000;
+// The same bounded allowance for every package, including plugin-owned JSON
+// processing and redaction. Wall-clock and memory limits remain independent.
+pub const FUEL: u64 = 20_000_000;
 pub const MEMORY: usize = 16 * 1024 * 1024;
 pub const TIMEOUT: Duration = Duration::from_secs(2);
 

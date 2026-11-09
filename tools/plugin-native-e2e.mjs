@@ -251,12 +251,12 @@ try {
   passed.push(
     'all five extension surfaces and isolated settings render hostile strings as inert text',
   );
-  const disabledSettings = await setPluginEnabled(page, 'Host Info', false);
+  const disabledCard = await setPluginEnabled(page, 'Host Info', false);
   await page.waitForFunction(
     () => !document.querySelector('.plugin-workspace:visible iframe.plugin-frame'),
   );
   assert.equal((await invoke('plugin_detail', { id: 'dev.serverdeck.host-info' })).enabled, false);
-  await disabledSettings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
+  await disabledCard.getByRole('button', { name: '启用 Host Info', exact: true }).waitFor();
   assert.equal(await page.locator('[data-module="plugins"]').count(), 0);
   await navigateWorkspace(page, '插件管理');
   assert.equal(await page.locator('.plugin-installed-row[data-plugin-id]').count(), 1);

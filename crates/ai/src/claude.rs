@@ -584,7 +584,7 @@ mod tests {
     #[ignore = "uses the user's installed Claude Code and may consume a small amount of account usage"]
     async fn local_claude_live_completion() {
         let snapshot = snapshot().await.unwrap();
-        let body = crate::provider::request(
+        let body = crate::tests::messages(
             &snapshot.config,
             "Reply using the required JSON with answer set to OK and commands set to an empty array.",
             json!({}),

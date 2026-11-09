@@ -8,6 +8,10 @@ import { pluginsApi } from '../services/plugins';
 import type { InstalledPlugin, PluginManifest } from '../types/plugins';
 import { systemPluginFixtures, toolPluginState } from '../services/system-plugins.fixture';
 beforeEach(() => {
+  vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
+    installed: await pluginsApi.list(),
+    problems: [],
+  }));
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -40,7 +44,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves schemas and 
     version: '1.0.0',
     author: 'Developer',
     description: '',
-    apiVersion: '^4.0.0',
+    apiVersion: '^5.0.0',
     entry: { backend: null, ui: null },
     permissions: [],
     contributions: [],
@@ -67,7 +71,10 @@ it('requires explicit upgrade approval; cancelled upgrade preserves schemas and 
   const install = vi
       .spyOn(pluginsApi, 'install')
       .mockRejectedValue({ code: 'STORAGE', message: 'Commit failed' }),
-    context = vi.spyOn(pluginsApi, 'context').mockResolvedValue();
+    context = vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
+  vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
   pinia = createPinia();
   mountManager();
   await settle();
@@ -102,7 +109,7 @@ it('requires explicit upgrade approval; cancelled upgrade preserves schemas and 
   await nextTick();
   plugins.decide(true);
   await settle();
-  expect(context).toHaveBeenCalledWith('dev.example', null);
+  expect(context).toHaveBeenCalledWith('dev.example');
   expect(install).toHaveBeenCalledWith('fixture.sdplugin', true, '1.0.0', 'preview-digest');
   expect(plugins.schemas['dev.example']).toBeUndefined();
   expect(plugins.installed[0]?.revision).toBe('old');
@@ -142,8 +149,9 @@ it('opens settings by name or gear for every installed plugin', async () => {
     );
   }
   const docker = root.querySelector('[data-plugin-id="cn.hiboot.plugins.docker"]')!;
-  expect([...docker.querySelectorAll('button')].map((b) => b.textContent?.trim())).not.toContain(
-    '禁用',
+  expect(docker.querySelector('.plugin-toggle-button')?.textContent?.trim()).toBe('禁用');
+  expect(docker.querySelector('.plugin-toggle-button')?.getAttribute('aria-label')).toBe(
+    '禁用 Docker 管理',
   );
   expect(change).not.toHaveBeenCalled();
   expect(docker.textContent).toContain('已启用');
@@ -155,6 +163,114 @@ it('opens settings by name or gear for every installed plugin', async () => {
     button.click();
     expect(settings).toHaveBeenLastCalledWith(items[index]!.manifest.id);
   }
+});
+
+it.each(['system', 'user'] as const)(
+  'enables a %s plugin from the list without opening settings or changing its permissions',
+  async (source) => {
+    let item = { ...systemPluginFixtures()[0]!, source };
+    vi.spyOn(pluginsApi, 'list').mockImplementation(async () => [{ ...item }]);
+    const { grants } = toolPluginState();
+    const grant = source === 'system' ? grants[item.manifest.id]! : null;
+    vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(grant);
+    vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+    const authorize = vi.spyOn(pluginsApi, 'grant');
+    const change = vi.spyOn(pluginsApi, 'setEnabled').mockImplementation(async (_id, enabled) => {
+      item = { ...item, enabled };
+      return item;
+    });
+    pinia = createPinia();
+    const settings = vi.fn();
+    mountManager(settings);
+    await settle();
+    const status = root.querySelector<HTMLSelectElement>('[aria-label="插件状态"]')!;
+    status.value = 'disabled';
+    status.dispatchEvent(new Event('change'));
+    await nextTick();
+    root.querySelector<HTMLButtonElement>(`[aria-label="启用 ${item.manifest.name}"]`)!.click();
+    await settle();
+    expect(change).toHaveBeenCalledExactlyOnceWith(item.manifest.id, true);
+    expect(settings).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+    expect(usePluginsStore(pinia).grants[item.manifest.id]).toEqual(grant);
+    expect(root.querySelector('[data-plugin-id]')).toBeNull();
+    expect(root.querySelector('.plugin-filter-summary')?.textContent).toContain('1 个已启用');
+    status.value = 'all';
+    status.dispatchEvent(new Event('change'));
+    await nextTick();
+    expect(root.querySelector('.plugin-status')?.textContent).toBe('已启用');
+    expect(root.querySelector(`[aria-label="禁用 ${item.manifest.name}"]`)).not.toBeNull();
+  },
+);
+
+it('confirms disabling from the list and only clears plugin drafts after an accepted change', async () => {
+  let item = { ...systemPluginFixtures()[0]!, enabled: true };
+  vi.spyOn(pluginsApi, 'list').mockImplementation(async () => [{ ...item }]);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const change = vi.spyOn(pluginsApi, 'setEnabled').mockImplementation(async (_id, enabled) => {
+    item = { ...item, enabled };
+    return item;
+  });
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  const plugins = usePluginsStore(pinia);
+  plugins.setDraftDirty('test-page', item.manifest.id, true);
+  const button = root.querySelector<HTMLButtonElement>('.plugin-toggle-button')!;
+  button.click();
+  await nextTick();
+  expect(plugins.prompt?.title).toBe('禁用插件？');
+  expect(change).not.toHaveBeenCalled();
+  plugins.decide(false);
+  await settle();
+  expect(change).not.toHaveBeenCalled();
+  expect(plugins.dirty).toBe(true);
+  expect(root.querySelector('.plugin-status')?.textContent).toBe('已启用');
+  button.click();
+  await nextTick();
+  plugins.decide(true);
+  await settle();
+  expect(change).toHaveBeenCalledExactlyOnceWith(item.manifest.id, false);
+  expect(plugins.dirty).toBe(false);
+  expect(root.querySelector('.plugin-status')?.textContent).toBe('已禁用');
+  expect(button.getAttribute('aria-label')).toBe(`启用 ${item.manifest.name}`);
+});
+
+it('blocks duplicate list actions while toggling and preserves state when enabling fails', async () => {
+  const items = systemPluginFixtures();
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(items);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  let reject!: (cause: unknown) => void;
+  const change = vi.spyOn(pluginsApi, 'setEnabled').mockImplementation(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  const plugins = usePluginsStore(pinia);
+  const clear = vi.spyOn(plugins, 'clearPlugin');
+  const buttons = [...root.querySelectorAll<HTMLButtonElement>('.plugin-toggle-button')];
+  buttons[0]!.click();
+  await nextTick();
+  expect(buttons.every((button) => button.disabled)).toBe(true);
+  buttons[0]!.click();
+  buttons[1]!.click();
+  expect(change).toHaveBeenCalledTimes(1);
+  expect(root.querySelector('.plugin-status')?.textContent).toBe('已禁用');
+  reject({ code: 'PERMISSION_DENIED', message: '启用插件失败' });
+  await settle();
+  expect(plugins.error).toBe('启用插件失败');
+  expect(plugins.installed.every((plugin) => !plugin.enabled)).toBe(true);
+  expect(clear).not.toHaveBeenCalled();
+  expect(buttons.every((button) => !button.disabled)).toBe(true);
+  expect(useNotificationsStore(pinia).items).toEqual(
+    expect.arrayContaining([expect.objectContaining({ text: '启用插件失败', error: true })]),
+  );
 });
 
 it('shows an additional system plugin from the host list without a built-in UI registration', async () => {
@@ -359,4 +475,85 @@ it('requires uninstall confirmation and preserves plugin data by default', async
   await settle();
   expect(uninstall).toHaveBeenCalledWith(item.manifest.id, false, true);
   expect(document.querySelector('dialog')).toBeNull();
+});
+
+it('shows invalid plugin records beside healthy plugins and requires explicit reinstall confirmation', async () => {
+  const healthy = systemPluginFixtures()[0]!;
+  const problem = {
+    id: 'cn.hiboot.plugins.assistant',
+    code: 'PLUGIN_RECORD_INVALID',
+    message: '安装记录格式不受当前版本支持',
+    recordDigest: 'frozen-digest',
+    replacement: { name: 'AI 运维助手', version: '2.0.0' },
+  };
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({ installed: [healthy], problems: [problem] });
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const reinstall = vi
+    .spyOn(pluginsApi, 'reinstallBundled')
+    .mockResolvedValue({ ...healthy, enabled: false });
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  expect(root.querySelectorAll('.plugin-installed-row')).toHaveLength(1);
+  expect(root.querySelector('[aria-label="未加载的插件"]')?.textContent).toContain('AI 运维助手');
+  expect(root.textContent).not.toContain('插件列表加载失败');
+  const click = async (text: string) => {
+    [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === text)!
+      .click();
+    await settle();
+  };
+  await click('备份并重装');
+  expect(document.querySelector('dialog')?.textContent).toContain('原版本文件和插件配置保留');
+  expect(reinstall).not.toHaveBeenCalled();
+  await click('取消');
+  expect(reinstall).not.toHaveBeenCalled();
+  await click('备份并重装');
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({ installed: [healthy], problems: [] });
+  await click('确认备份并重装');
+  expect(reinstall).toHaveBeenCalledExactlyOnceWith(problem.id, 'frozen-digest', true);
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(root.querySelector('[aria-label="未加载的插件"]')).toBeNull();
+});
+it('keeps a failed reinstall visible for retry and offers no bundled replacement for arbitrary uploads', async () => {
+  const problem = {
+    id: 'dev.invalid-upload',
+    code: 'PLUGIN_RECORD_INVALID',
+    message: '记录已损坏',
+    recordDigest: 'digest',
+    replacement: null,
+  };
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({ installed: [], problems: [problem] });
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  expect(root.textContent).toContain('dev.invalid-upload');
+  expect(root.textContent).toContain('重新构建插件');
+  expect(root.textContent).not.toContain('备份并重装');
+  expect(root.textContent).not.toContain('还没有安装插件');
+  const p = usePluginsStore(pinia);
+  p.problems = [
+    {
+      ...problem,
+      id: 'cn.hiboot.plugins.docker',
+      replacement: { name: 'Docker', version: '2.0.0' },
+    },
+  ];
+  await nextTick();
+  const reinstall = vi
+    .spyOn(pluginsApi, 'reinstallBundled')
+    .mockRejectedValue({ message: '记录已变化，请刷新' });
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '备份并重装')!
+    .click();
+  await nextTick();
+  [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
+    .find((button) => button.textContent?.trim() === '确认备份并重装')!
+    .click();
+  await settle();
+  expect(reinstall).toHaveBeenCalledOnce();
+  expect(document.querySelector('dialog')).not.toBeNull();
+  expect(document.querySelector('dialog [role="alert"]')?.textContent).toContain('记录已变化');
 });

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "4.0.0";
+pub const API_VERSION: &str = "5.0.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -42,7 +42,6 @@ pub enum ContributionKind {
     Command,
     Settings,
     Server,
-    Tool,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -50,8 +49,8 @@ pub struct Contribution {
     pub id: String,
     pub label: String,
     pub kind: ContributionKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool: Option<serverdeck_plugin_sdk::tools::Tool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -161,10 +160,13 @@ impl Manifest {
         }
         let mut contribution_ids = BTreeSet::new();
         for c in &self.contributions {
-            if (c.kind == ContributionKind::Tool) != c.tool.is_some() {
-                return Err(invalid(
-                    "运维工具贡献必须声明对应工具类型，其他贡献不能声明工具类型",
-                ));
+            if c.routes.len() > 32
+                || c.routes
+                    .iter()
+                    .any(|route| !serverdeck_plugin_sdk::ui::identifier(route))
+                || c.routes.iter().collect::<BTreeSet<_>>().len() != c.routes.len()
+            {
+                return Err(invalid("插件导航路由无效或重复"));
             }
             validate_path(&c.id)?;
             if !contribution_ids.insert(&c.id) || c.label.trim().is_empty() || c.label.len() > 120 {

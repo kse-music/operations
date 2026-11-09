@@ -8,7 +8,12 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { checkWorkspaceTools } from './plugin-workspace-checks.mjs';
-import { navigateWorkspace, openPluginDetails, previewPluginPackage } from './ui-navigation.mjs';
+import {
+  navigateWorkspace,
+  openPluginDetails,
+  previewPluginPackage,
+  setPluginEnabled,
+} from './ui-navigation.mjs';
 import { discoverSystemPlugins } from './system-plugins.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const expectedPluginIds = (await discoverSystemPlugins(root)).map((plugin) => plugin.id).sort();
@@ -141,17 +146,12 @@ try {
   assert.equal(await settings.getByRole('button', { name: '保存并授权', exact: true }).count(), 0);
   assert.equal(await settings.getByRole('button', { name: '撤销授权', exact: true }).count(), 0);
   await settings.getByText('已授权', { exact: true }).waitFor();
-  await settings.getByRole('button', { name: '禁用插件', exact: true }).click();
-  await page
-    .getByRole('dialog', { name: '禁用插件？', exact: true })
-    .getByRole('button', { name: '明确确认', exact: true })
-    .click();
-  await settings.getByRole('button', { name: '启用插件', exact: true }).waitFor();
-  await settings.getByRole('button', { name: '启用插件', exact: true }).click();
-  await settings.getByRole('button', { name: '禁用插件', exact: true }).waitFor();
+  assert.equal(await settings.locator('.plugin-toggle-button').count(), 0);
+  await setPluginEnabled(page, 'Docker 管理', false);
+  await setPluginEnabled(page, 'Docker 管理', true);
   assert.equal((await invoke('plugin_health', { id: 'cn.hiboot.plugins.docker' })).error, null);
   passed.push(
-    'system permissions are preset and read-only; enable controls stay in individual settings; real WASM health succeeds',
+    'system permissions are preset and read-only; enable controls work in the plugin list; real WASM health succeeds',
   );
   await navigateWorkspace(page, '插件管理');
   const manager = page.locator('.plugin-manager');

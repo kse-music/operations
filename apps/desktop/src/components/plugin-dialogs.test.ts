@@ -30,24 +30,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it.each(['确认删除', '取消', '关闭对话框'])(
-  'shows the frozen image and resolves %s without typing a target',
+it.each(['明确确认', '取消', '关闭对话框'])(
+  'shows the frozen real command and resolves %s without a plugin-specific host view',
   async (action) => {
     const plugins = usePluginsStore();
     const target = `sha256:${'a'.repeat(64)}`;
-    const review = plugins.ask('删除镜像？', '不强制删除，不删除卷。', undefined, {
-      imageId: target,
-      hostName: 'Production',
-      hostAddress: 'operator@192.0.2.10:22',
-      pluginName: 'Docker 管理',
-      pluginVersion: '1.5.1',
-    });
+    const review = plugins.ask(
+      '插件操作需要单独确认',
+      `Docker 管理 2.0.0\noperator@192.0.2.10:22\ndocker image rm ${target}\n本次确认 60 秒内有效`,
+    );
     await nextTick();
     const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
     expect(dialog.open).toBe(true);
     expect(dialog.textContent).toContain(target);
     expect(dialog.textContent).toContain('operator@192.0.2.10:22');
-    expect(dialog.textContent).toContain('Docker 管理 v1.5.1');
+    expect(dialog.textContent).toContain('Docker 管理 2.0.0');
     expect(dialog.textContent).toContain('60 秒内有效');
     expect(dialog.querySelector('input')).toBeNull();
     const button = [...dialog.querySelectorAll('button')].find(
@@ -55,7 +52,7 @@ it.each(['确认删除', '取消', '关闭对话框'])(
     )!;
     expect(button.disabled).toBe(false);
     button.click();
-    expect(await review).toBe(action === '确认删除');
+    expect(await review).toBe(action === '明确确认');
     await nextTick();
     expect(document.querySelector('dialog')).toBeNull();
   },

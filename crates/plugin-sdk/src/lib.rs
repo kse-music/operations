@@ -1,26 +1,14 @@
 //! Public API: no dependency on ServerDeck's private crates, Tauri, SSH or secret stores.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-pub mod server;
-#[cfg(test)]
-mod server_tests;
-pub mod tools;
+pub mod backend;
+pub mod platform;
 pub mod ui;
 pub const API_VERSION: u32 = 1;
 pub const MAX_MESSAGE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Permission {
-    #[serde(rename = "assistant.use")]
-    AssistantUse,
-    #[serde(rename = "metrics.read")]
-    MetricsRead,
-    #[serde(rename = "system.read")]
-    SystemRead,
-    #[serde(rename = "system.manage")]
-    SystemManage,
-    #[serde(rename = "logs.read")]
-    LogsRead,
     #[serde(rename = "hosts.read")]
     HostsRead,
     #[serde(rename = "ssh.execute")]
@@ -29,6 +17,10 @@ pub enum Permission {
     SftpRead,
     #[serde(rename = "sftp.write")]
     SftpWrite,
+    #[serde(rename = "models.use")]
+    ModelsUse,
+    #[serde(rename = "network.connect")]
+    NetworkConnect,
     #[serde(rename = "ui.contribute")]
     UiContribute,
     #[serde(rename = "settings.read")]
@@ -44,185 +36,24 @@ pub enum Permission {
     deny_unknown_fields
 )]
 pub enum Capability {
-    ToolInvoke {
-        input_id: String,
-        operation: tools::Operation,
-    },
-    SystemQuery {
-        request: server::Query,
-    },
-    SystemFeedback,
-    MetricsOpen {
-        interval_secs: u8,
-    },
-    MetricsSnapshot {
-        monitor_id: String,
-        after_revision: Option<u64>,
-    },
-    MetricsVisible {
-        monitor_id: String,
-        visible: bool,
-    },
-    MetricsClose {
-        monitor_id: String,
-    },
-    SystemLogStart {
-        source: server::LogSource,
-        lines: u16,
-        follow: bool,
-    },
-    SystemLogPoll {
-        log_id: String,
-    },
-    SystemLogPause {
-        log_id: String,
-        paused: bool,
-    },
-    SystemLogStop {
-        log_id: String,
-    },
-    ContainerShell {
-        id: String,
-        bash: bool,
-    },
-    ResultRead {
-        result_id: String,
-        chunk: u32,
-    },
-    ResultClose {
-        result_id: String,
-    },
-    HostsRead,
-    Execute {
-        command: String,
-        timeout_secs: u16,
-    },
-    ReadFile {
-        path: String,
-    },
-    SaveFile {
-        document_id: String,
-        content: String,
-    },
-    CloseFile {
-        document_id: String,
-        discard: bool,
-    },
-    FileDirty {
-        document_id: String,
-        dirty: bool,
-    },
-    SettingsRead,
-    SettingsWrite {
-        value: Value,
-    },
-    Notify {
-        message: String,
-    },
-    LogStart {
-        path: String,
-        lines: u16,
-    },
-    LogPoll {
-        log_id: String,
-    },
-    LogPause {
-        log_id: String,
-        paused: bool,
-    },
-    LogStop {
-        log_id: String,
+    Platform {
+        request: platform::Request,
+        bindings: Vec<String>,
     },
 }
 impl Capability {
     pub fn permission(&self) -> Permission {
-        match self {
-            Self::ToolInvoke { operation, .. } => operation.tool().permission(),
-            Self::SystemQuery { request } if request.sensitive() => Permission::SystemManage,
-            Self::SystemQuery { .. } | Self::SystemFeedback => Permission::SystemRead,
-            Self::ContainerShell { .. } => Permission::SystemManage,
-            Self::MetricsOpen { .. }
-            | Self::MetricsSnapshot { .. }
-            | Self::MetricsVisible { .. }
-            | Self::MetricsClose { .. } => Permission::MetricsRead,
-            Self::SystemLogStart { .. }
-            | Self::SystemLogPoll { .. }
-            | Self::SystemLogPause { .. }
-            | Self::SystemLogStop { .. } => Permission::LogsRead,
-            Self::ResultRead { .. } | Self::ResultClose { .. } => Permission::UiContribute,
-            Self::HostsRead => Permission::HostsRead,
-            Self::Execute { .. } => Permission::SshExecute,
-            Self::ReadFile { .. }
-            | Self::CloseFile { .. }
-            | Self::LogStart { .. }
-            | Self::LogPoll { .. }
-            | Self::LogPause { .. }
-            | Self::LogStop { .. } => Permission::SftpRead,
-            Self::SaveFile { .. } | Self::FileDirty { .. } => Permission::SftpWrite,
-            Self::SettingsRead => Permission::SettingsRead,
-            Self::SettingsWrite { .. } => Permission::SettingsWrite,
-            Self::Notify { .. } => Permission::UiContribute,
-        }
+        let Self::Platform { request, .. } = self;
+        request.permission()
     }
     pub fn operation(&self) -> &'static str {
-        match self {
-            Self::ToolInvoke { operation, .. } => operation.tool().operation(),
-            Self::SystemQuery { request } if request.sensitive() => "system.manage",
-            Self::SystemQuery { .. } | Self::SystemFeedback => "system.read",
-            Self::ContainerShell { .. } => "system.shell",
-            Self::MetricsOpen { .. }
-            | Self::MetricsSnapshot { .. }
-            | Self::MetricsVisible { .. }
-            | Self::MetricsClose { .. } => "metrics.read",
-            Self::SystemLogStart { .. }
-            | Self::SystemLogPoll { .. }
-            | Self::SystemLogPause { .. }
-            | Self::SystemLogStop { .. } => "logs.read",
-            Self::ResultRead { .. } | Self::ResultClose { .. } => "ui.contribute",
-            Self::HostsRead => "hosts.read",
-            Self::Execute { command, .. } if read_only(command) => "ssh.read_only",
-            Self::Execute { .. } => "ssh.execute",
-            Self::ReadFile { .. } | Self::CloseFile { .. } => "sftp.read",
-            Self::SaveFile { .. } | Self::FileDirty { .. } => "sftp.write",
-            Self::SettingsRead => "settings.read",
-            Self::SettingsWrite { .. } => "settings.write",
-            Self::Notify { .. } => "ui.notify",
-            Self::LogStart { .. }
-            | Self::LogPoll { .. }
-            | Self::LogPause { .. }
-            | Self::LogStop { .. } => "logs.read",
-        }
+        let Self::Platform { request, .. } = self;
+        request.operation()
     }
     pub fn needs_confirmation(&self) -> bool {
-        matches!(self, Self::SaveFile { .. })
-            || matches!(self, Self::SystemQuery { request } if request.sensitive())
-            || matches!(self, Self::ContainerShell { .. })
-            || matches!(self, Self::Execute { command, .. } if !read_only(command))
+        let Self::Platform { request, .. } = self;
+        request.needs_confirmation()
     }
-    pub fn uses_host(&self) -> bool {
-        !matches!(
-            self,
-            Self::SettingsRead
-                | Self::SettingsWrite { .. }
-                | Self::Notify { .. }
-                | Self::ToolInvoke { .. }
-                | Self::ResultRead { .. }
-                | Self::ResultClose { .. }
-        )
-    }
-}
-/// Exact allowlist only. Arguments, pipelines, env changes and alternate whitespace need approval.
-pub fn read_only(command: &str) -> bool {
-    [
-        "uname -a",
-        "uname -s",
-        "nginx -v",
-        "nginx -V",
-        "systemctl is-active nginx",
-        "systemctl status nginx --no-pager",
-        "command -v nginx",
-    ]
-    .contains(&command)
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -236,6 +67,14 @@ pub struct Request {
 pub struct ApiError {
     pub code: String,
     pub message: String,
+}
+impl ApiError {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -262,6 +101,29 @@ pub struct CommandResult {
     pub stderr: String,
     pub truncated: bool,
     pub message: Option<String>,
+}
+impl CommandResult {
+    pub fn checked(self) -> std::result::Result<Self, ApiError> {
+        if self.truncated {
+            return Err(ApiError::new(
+                "OUTPUT_LIMIT",
+                "命令输出超过平台限制，未返回不完整结果",
+            ));
+        }
+        if self.state != "completed" || self.exit_code != Some(0) {
+            let message = if !self.stderr.is_empty() {
+                self.stderr.clone()
+            } else if let Some(message) = &self.message {
+                message.clone()
+            } else if !self.stdout.is_empty() {
+                self.stdout.clone()
+            } else {
+                "命令未确认成功，请核对远端状态".into()
+            };
+            return Err(ApiError::new("REMOTE_COMMAND", message));
+        }
+        Ok(self)
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

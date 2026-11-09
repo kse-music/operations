@@ -5019,8 +5019,9 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-plugin-sdk"
-version = "4.0.0"
+version = "5.0.0"
 dependencies = [
+ "base64 0.22.1",
  "serde",
  "serde_json",
 ]

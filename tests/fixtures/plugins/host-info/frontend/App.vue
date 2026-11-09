@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { invoke, errorMessage } from '@serverdeck/plugin-sdk';
 import type { PluginUiPage, PluginUiResult } from '@serverdeck/plugin-sdk/types/plugins';
-const props = defineProps<{ page: PluginUiPage }>();
+const props = defineProps<{ page: PluginUiPage; hostId?: string }>();
 const settings = computed(() => props.page.id === 'settings');
 const note = ref(''),
   output = ref<unknown>(null),
@@ -15,7 +15,10 @@ async function run(action: string) {
   busy.value = true;
   error.value = '';
   try {
-    const result = await invoke<PluginUiResult>(action, { note: note.value });
+    const result = await invoke<PluginUiResult>(action, {
+      note: note.value,
+      hostId: props.hostId ?? '',
+    });
     if (typeof result.values?.note === 'string') note.value = result.values.note;
     if (result.output !== undefined) output.value = result.output;
   } catch (cause) {

@@ -6,8 +6,9 @@ import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
+import { togglePlugin } from '../services/plugin-lifecycle';
 import { errorMessage } from '../services/ipc';
-import type { InstalledPlugin, PluginPackagePreview } from '../types/plugins';
+import type { InstalledPlugin, PluginPackagePreview, PluginProblem } from '../types/plugins';
 const emit = defineEmits<{ settings: [id: string] }>();
 const plugins = usePluginsStore();
 const notifications = useNotificationsStore();
@@ -18,6 +19,18 @@ const path = ref(''),
   inspecting = ref(false);
 const deleting = ref<InstalledPlugin | null>(null),
   clearData = ref(false);
+const recovering = ref<PluginProblem | null>(null);
+async function reinstall() {
+  const problem = recovering.value;
+  if (!problem?.replacement || !problem.recordDigest) return;
+  if (
+    await plugins.mutate(() => pluginsApi.reinstallBundled(problem.id, problem.recordDigest!, true))
+  ) {
+    plugins.clearPlugin(problem.id);
+    recovering.value = null;
+    notifications.push('已备份原安装记录并重新安装，插件保持禁用；请检查配置后启用。');
+  }
+}
 const existing = computed(() =>
   plugins.installed.find((p) => p.manifest.id === preview.value?.manifest.id),
 );
@@ -109,7 +122,7 @@ async function install() {
   if (
     await plugins.mutate(async () => {
       if (old) {
-        await plugins.bind(old.manifest.id, null);
+        await plugins.bind(old.manifest.id);
         plugins.clearPlugin(old.manifest.id);
       }
       return pluginsApi.install(
@@ -163,6 +176,29 @@ onBeforeUnmount(() => {
         </button>
       </div>
     </header>
+    <section v-if="plugins.problems.length" class="plugin-problems" aria-label="未加载的插件">
+      <h2>部分插件未加载</h2>
+      <p>这些插件的安装记录无法使用，其他功能可继续使用。原记录和插件数据已保留。</p>
+      <article
+        v-for="problem in plugins.problems"
+        :key="problem.id"
+        class="plugin-problem"
+        role="alert"
+      >
+        <strong>{{ problem.replacement?.name || problem.id }}</strong>
+        <code>{{ problem.id }}</code>
+        <p>{{ problem.message }}</p>
+        <button
+          v-if="problem.replacement"
+          class="button"
+          :disabled="plugins.busy"
+          @click="recovering = problem"
+        >
+          备份并重装
+        </button>
+        <p v-else class="subtle">请备份原目录，检查文件权限或使用当前 SDK 重新构建插件。</p>
+      </article>
+    </section>
     <section class="plugin-installed" aria-label="已安装插件">
       <div class="plugin-filterbar" role="search" aria-label="筛选已安装插件">
         <select v-model="source" aria-label="插件来源">
@@ -204,8 +240,14 @@ onBeforeUnmount(() => {
       </div>
       <div v-else-if="!plugins.installed.length" class="plugin-empty">
         <Puzzle :size="32" aria-hidden="true" />
-        <h3>还没有安装插件</h3>
-        <p>点击右上角“安装插件”，或将插件包拖到上方开始安装。</p>
+        <h3>{{ plugins.problems.length ? '暂时没有可用插件' : '还没有安装插件' }}</h3>
+        <p>
+          {{
+            plugins.problems.length
+              ? '请先处理上方未加载的插件。'
+              : '点击右上角“安装插件”，或将插件包拖到上方开始安装。'
+          }}
+        </p>
       </div>
       <div v-else-if="!filtered.length" class="plugin-empty" role="status">
         <Search :size="28" aria-hidden="true" />
@@ -233,6 +275,14 @@ onBeforeUnmount(() => {
               <p>{{ plugin.manifest.description || '点击插件名称打开设置' }}</p>
             </div>
             <div class="plugin-row-actions">
+              <button
+                class="button plugin-toggle-button"
+                :disabled="plugins.busy"
+                :aria-label="`${plugin.enabled ? '禁用' : '启用'} ${plugin.manifest.name}`"
+                @click="togglePlugin(plugin)"
+              >
+                {{ plugin.enabled ? '禁用' : '启用' }}
+              </button>
               <button
                 class="tool-button"
                 :aria-label="`配置 ${plugin.manifest.name}`"
@@ -281,6 +331,28 @@ onBeforeUnmount(() => {
         <Download :size="16" aria-hidden="true" />下载插件开发包
       </button>
     </footer>
+    <Modal
+      v-if="recovering"
+      title="备份并重装内置插件"
+      :busy="plugins.busy"
+      @close="recovering = null"
+    >
+      <p>
+        将使用应用随带的 {{ recovering.replacement?.name }} v{{ recovering.replacement?.version }}
+        重新安装。
+      </p>
+      <p>
+        原安装记录会保存为
+        record-backup-*.json，原版本文件和插件配置保留。旧权限不沿用，新插件保持禁用。
+      </p>
+      <p v-if="plugins.error" class="error-text" role="alert">{{ plugins.error }}</p>
+      <div class="dialog-actions">
+        <button class="button" :disabled="plugins.busy" @click="recovering = null">取消</button
+        ><button class="button primary" :disabled="plugins.busy" @click="reinstall">
+          确认备份并重装
+        </button>
+      </div>
+    </Modal>
     <Modal v-if="preview" title="安装插件" wide :busy="plugins.busy" @close="cancelPreview">
       <div class="plugin-preview" aria-label="插件安装预览">
         <header class="plugin-preview-heading">

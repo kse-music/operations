@@ -9,16 +9,39 @@
       "fields": [],
       "actions": [
         {
-          "id": "bridge",
-          "label": "执行操作",
+          "id": "resolve_hosts",
+          "label": "resolve_hosts",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "prepare",
+          "label": "prepare",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "send",
+          "label": "send",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "execute",
+          "label": "execute",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "cancel",
+          "label": "cancel",
           "discardDirty": false,
           "enabledWhen": null
         }
       ],
       "log": null,
       "surface": {
-        "kind": "tool",
-        "tool": "assistant"
+        "kind": "frontend"
       }
     },
     {
@@ -26,14 +49,7 @@
       "title": "模型绑定",
       "initialAction": null,
       "fields": [],
-      "actions": [
-        {
-          "id": "bridge",
-          "label": "执行操作",
-          "discardDirty": false,
-          "enabledWhen": null
-        }
-      ],
+      "actions": [],
       "log": null,
       "surface": {
         "kind": "frontend"

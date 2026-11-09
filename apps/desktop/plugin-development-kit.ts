@@ -27,6 +27,8 @@ function createArchive(): Uint8Array {
     'README.md',
     'package.json',
     'package-lock.json',
+    'tsconfig.json',
+    'vitest.config.ts',
     'example/manifest.json',
     'example/ui.json',
     'example/backend/Cargo.toml',

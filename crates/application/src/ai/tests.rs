@@ -38,28 +38,6 @@ impl SecretStore for Store {
         Ok(())
     }
 }
-pub(super) fn input(id: &str, question: &str) -> PrepareInput {
-    PrepareInput {
-        model_id: id.into(),
-        session_id: None,
-        question: question.into(),
-        selection: ContextSelection {
-            server: false,
-            metrics: false,
-            processes: false,
-            docker: false,
-            log: None,
-            log_lines: 100,
-        },
-        mask_addresses: true,
-        redact_values: vec![],
-        history: vec![],
-        session_ids: vec![],
-        auto_hosts: false,
-        expected_model_revision: None,
-    }
-}
-
 #[test]
 fn managed_tool_login_hint_uses_a_quoted_native_executable_without_requiring_path() {
     let message = local_login_hint(
@@ -75,146 +53,40 @@ fn managed_tool_login_hint_uses_a_quoted_native_executable_without_requiring_pat
 }
 
 #[tokio::test]
-async fn local_codex_cannot_be_used_before_consent_or_after_revocation() {
-    let directory = tempfile::tempdir().unwrap();
-    let app = Application::initialize(directory.path().join("data"), directory.path().join("logs"))
-        .unwrap();
-    let status = app.ai_local_codex_status().await.unwrap();
-    assert!(!status.authorized);
-    assert!(status.model.is_none());
-    let error = app
-        .ai_prepare(input(LOCAL_CODEX_MODEL_ID, "test"))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(
-        serverdeck_core::IpcError::from(error).code,
-        "AI_CODEX_CONSENT"
-    );
-    app.ai_local_codex_authorize(true).await.unwrap();
-    assert!(app.database.ai_local_codex_consent().unwrap().authorized);
-    let preview = app
-        .assistant
-        .prepare(serverdeck_ai::PreparedContext {
-            related_bindings: vec![],
-            history: vec![],
-            model_id: LOCAL_CODEX_MODEL_ID.into(),
-            revision: "test-consent".into(),
-            config: Config {
-                provider: Provider::LocalCodex,
-                model: "fixture".into(),
-                ..Config::default()
-            },
-            question: "test".into(),
-            context: json!({}),
-            binding: None,
-            redactor: Redactor::new(true, vec![]).unwrap(),
-            warnings: vec![],
-        })
-        .unwrap();
-    app.ai_local_codex_authorize(false).await.unwrap();
-    assert!(app.assistant.preview_model_id(&preview.id).is_err());
-    assert!(!app.ai_local_codex_status().await.unwrap().authorized);
-    assert!(
-        app.ai_prepare(input(LOCAL_CODEX_MODEL_ID, "test"))
-            .await
-            .is_err()
-    );
-    app.shutdown().await;
-}
-
-#[tokio::test]
-async fn claude_revocation_blocks_new_requests_and_keeps_codex_previews_and_consent() {
-    let directory = tempfile::tempdir().unwrap();
-    let app = Application::initialize(directory.path().join("data"), directory.path().join("logs"))
-        .unwrap();
-    assert!(!app.ai_local_claude_code_status().await.unwrap().authorized);
-    let error = app
-        .ai_prepare(input(LOCAL_CLAUDE_CODE_MODEL_ID, "test"))
-        .await
-        .err()
-        .unwrap();
-    assert_eq!(
-        serverdeck_core::IpcError::from(error).code,
-        "AI_CLAUDE_CONSENT"
-    );
-    let mut previews = vec![];
-    for (id, provider) in [
-        (LOCAL_CODEX_MODEL_ID, Provider::LocalCodex),
-        (LOCAL_CLAUDE_CODE_MODEL_ID, Provider::LocalClaudeCode),
-    ] {
+async fn local_sources_require_platform_consent_and_revocation_cancels_only_that_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+    for id in [LOCAL_CODEX_MODEL_ID, LOCAL_CLAUDE_CODE_MODEL_ID] {
+        let error = app.ai_credentials(id.into()).await.err().unwrap();
+        assert!(matches!(
+            serverdeck_core::IpcError::from(error).code,
+            "AI_CODEX_CONSENT" | "AI_CLAUDE_CONSENT"
+        ));
         app.ai_local_authorize(id, true).await.unwrap();
-        let preview = app
-            .assistant
-            .prepare(serverdeck_ai::PreparedContext {
-                related_bindings: vec![],
-                history: vec![],
-                model_id: id.into(),
-                revision: "fixture-consent".into(),
-                config: Config {
-                    provider,
-                    model: "fixture".into(),
-                    ..Config::default()
-                },
-                question: "test".into(),
-                context: json!({}),
-                binding: None,
-                redactor: Redactor::new(true, vec![]).unwrap(),
-                warnings: vec![],
-            })
-            .unwrap();
-        previews.push(preview);
     }
+    let codex = app.models_runtime.begin(LOCAL_CODEX_MODEL_ID).unwrap();
+    let claude = app
+        .models_runtime
+        .begin(LOCAL_CLAUDE_CODE_MODEL_ID)
+        .unwrap();
     app.ai_local_claude_code_authorize(false).await.unwrap();
-    assert!(!app.ai_local_claude_code_status().await.unwrap().authorized);
-    assert!(app.assistant.preview_model_id(&previews[1].id).is_err());
-    assert_eq!(
-        app.assistant.preview_model_id(&previews[0].id).unwrap(),
-        LOCAL_CODEX_MODEL_ID
-    );
+    assert!(claude.cancel.is_cancelled());
+    assert!(!codex.cancel.is_cancelled());
     assert!(app.database.ai_local_codex_consent().unwrap().authorized);
     assert!(
-        app.ai_prepare(input(LOCAL_CLAUDE_CODE_MODEL_ID, "test"))
+        app.ai_credentials(LOCAL_CLAUDE_CODE_MODEL_ID.into())
             .await
             .is_err()
     );
-    assert!(app.ai_models().await.unwrap().is_empty());
-    app.shutdown().await;
-}
-
-#[tokio::test]
-#[ignore = "uses the user's installed Claude Code and may consume a small amount of account usage"]
-async fn local_claude_live_application_flow() {
-    live_local_application_flow(LOCAL_CLAUDE_CODE_MODEL_ID).await;
-}
-
-#[tokio::test]
-#[ignore = "uses the user's installed Codex and may consume a small amount of account usage"]
-async fn local_codex_live_application_flow() {
-    live_local_application_flow(LOCAL_CODEX_MODEL_ID).await;
-}
-
-async fn live_local_application_flow(id: &'static str) {
-    let directory = tempfile::tempdir().unwrap();
-    let app = Application::initialize(directory.path().join("data"), directory.path().join("logs"))
-        .unwrap();
-    app.ai_local_authorize(id, true).await.unwrap();
-    let status = app.ai_local_status(id).await.unwrap();
-    assert!(status.authorized);
-    assert!(status.model.is_some(), "{}", status.message);
-    let preview = app
-        .ai_prepare(input(
-            id,
-            "请严格按要求返回 JSON，answer 为 OK，commands 为空数组。",
-        ))
-        .await
-        .unwrap();
-    let answer = app.ai_send(preview.id, true).await.unwrap();
-    assert_eq!(answer.text, "OK");
-    assert!(answer.proposals.is_empty());
-    assert!(app.ai_models().await.unwrap().is_empty());
-    app.ai_local_authorize(id, false).await.unwrap();
-    assert!(app.ai_prepare(input(id, "test")).await.is_err());
+    app.ai_local_codex_authorize(false).await.unwrap();
+    assert!(codex.cancel.is_cancelled());
+    assert!(
+        app.ai_credentials(LOCAL_CODEX_MODEL_ID.into())
+            .await
+            .is_err()
+    );
+    drop(codex);
+    drop(claude);
     app.shutdown().await;
 }
 fn edit(model: &Model) -> ModelInput {
@@ -243,7 +115,7 @@ pub(super) fn create(name: &str, key: Option<&str>) -> ModelInput {
     }
 }
 #[tokio::test]
-async fn model_crud_keeps_secrets_independent_and_invalidates_only_its_own_previews() {
+async fn model_crud_keeps_secrets_independent_and_cancels_only_its_own_platform_calls() {
     let dir = tempfile::tempdir().unwrap();
     let mut app =
         Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
@@ -260,23 +132,25 @@ async fn model_crud_keeps_secrets_independent_and_invalidates_only_its_own_previ
     assert_ne!(a.id, b.id);
     assert_eq!(app.ai_models().await.unwrap().len(), 2);
     assert_eq!(store.values.lock().unwrap().len(), 2);
-    let preview_a = app
-        .ai_prepare(input(&a.id, "never-store-model-a-key explain"))
-        .await
-        .unwrap();
-    let preview_b = app.ai_prepare(input(&b.id, "second model")).await.unwrap();
-    assert_eq!(preview_a.model_id, a.id);
-    assert!(!preview_a.body.contains("never-store-model-a-key"));
-    assert!(preview_a.body.contains(&a.config.model));
-    assert!(!preview_a.body.contains(&b.config.model));
+    let call_a = app.models_runtime.begin(&a.id).unwrap();
+    let call_b = app.models_runtime.begin(&b.id).unwrap();
+    assert_eq!(
+        app.ai_credentials(a.id.clone())
+            .await
+            .unwrap()
+            .0
+            .config
+            .model,
+        a.config.model
+    );
     let mut update = edit(&a);
     update.name = "Renamed A".into();
     let renamed = app.ai_model_save(update).await.unwrap().value;
     assert_eq!(renamed.id, a.id);
     assert_ne!(renamed.revision, a.revision);
     assert!(renamed.has_key);
-    assert!(app.assistant.preview_model_id(&preview_a.id).is_err());
-    assert_eq!(app.assistant.preview_model_id(&preview_b.id).unwrap(), b.id);
+    assert!(call_a.cancel.is_cancelled());
+    assert!(!call_b.cancel.is_cancelled());
     assert!(matches!(
         app.ai_model_save(edit(&a)).await,
         Err(Error::Conflict)
@@ -333,12 +207,14 @@ async fn model_crud_keeps_secrets_independent_and_invalidates_only_its_own_previ
     .await
     .unwrap();
     assert!(matches!(
-        app.ai_prepare(input(&rotated.id, "deleted")).await,
+        app.ai_credentials(rotated.id.clone()).await,
         Err(Error::NotFound)
     ));
     assert_eq!(app.ai_models().await.unwrap().len(), 1);
     assert_eq!(store.values.lock().unwrap().len(), 1);
-    assert!(app.assistant.preview_model_id(&preview_b.id).is_ok());
+    assert!(!call_b.cancel.is_cancelled());
+    drop(call_a);
+    drop(call_b);
     app.shutdown().await;
 }
 #[tokio::test]
@@ -354,7 +230,7 @@ async fn unavailable_vault_preserves_other_modules_and_deletion_has_durable_clea
         .value;
     store.unavailable.store(true, Ordering::Release);
     assert!(matches!(
-        app.ai_prepare(input(&model.id, "test")).await,
+        app.ai_credentials(model.id.clone()).await,
         Err(Error::SecureStore(_))
     ));
     assert!(matches!(
@@ -381,73 +257,8 @@ async fn unavailable_vault_preserves_other_modules_and_deletion_has_durable_clea
     assert!(store.values.lock().unwrap().is_empty());
     app.shutdown().await;
 }
-#[tokio::test]
-async fn explicit_scope_and_model_identity_are_required() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut app =
-        Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-    app.secrets = Arc::new(Store::default());
-    // Seed an existing legacy model without credentials; new registrations require a test.
-    let without_key = app
-        .database
-        .ai_model_save(
-            ModelRecord {
-                id: "legacy-no-key".into(),
-                name: "No Key".into(),
-                config: create("No Key", None).config,
-                secret_ref: None,
-                revision: "legacy-r1".into(),
-            },
-            None,
-        )
-        .unwrap()
-        .public();
-    assert!(!without_key.has_key);
-    assert!(
-        app.ai_prepare(input(&without_key.id, "test"))
-            .await
-            .is_err()
-    );
-    assert!(matches!(
-        app.ai_prepare(input("forged", "test")).await,
-        Err(Error::NotFound)
-    ));
-    for field in ["server", "metrics", "processes", "docker", "log"] {
-        let mut request = input(&without_key.id, "test");
-        match field {
-            "server" => request.selection.server = true,
-            "metrics" => request.selection.metrics = true,
-            "processes" => request.selection.processes = true,
-            "docker" => request.selection.docker = true,
-            _ => {
-                request.selection.log = Some(serverdeck_core::ops::LogSource::File {
-                    path: "/var/log/syslog".into(),
-                })
-            }
-        }
-        assert!(matches!(
-            app.ai_prepare(request).await,
-            Err(Error::Validation(_))
-        ));
-    }
-    assert!(matches!(
-        app.ai_send("forged".into(), false).await,
-        Err(Error::Validation(_))
-    ));
-    assert!(
-        app.ai_execute(ExecuteInput {
-            proposal_id: "forged".into(),
-            confirmed: true,
-            change_confirmation: None
-        })
-        .await
-        .is_err()
-    );
-    app.shutdown().await;
-}
-
 async fn tested(app: &Application, mut input: ModelInput) -> Result<Mutation<Model>, Error> {
-    let (config, http) = super::protocol_tests::model_requests(1).await;
+    let (config, http) = super::model_fixture::model_requests(1).await;
     input.config.base_url = config.base_url;
     input.config.allow_insecure_http = true;
     input.test_id = Some(app.ai_model_test(clone_model_input(&input)).await?.id);
@@ -462,7 +273,7 @@ async fn registration_test_is_required_bound_to_configuration_and_key_and_single
         Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
     let store = Arc::new(Store::default());
     app.secrets = store.clone();
-    let (config, http) = super::protocol_tests::model_requests(4).await;
+    let (config, http) = super::model_fixture::model_requests(4).await;
     let mut input = create("Tested", Some("fixture-test-key"));
     input.config = config;
     assert!(app.ai_model_save(clone_model_input(&input)).await.is_err());
@@ -520,100 +331,4 @@ async fn registration_test_is_required_bound_to_configuration_and_key_and_single
     assert_eq!(request["store"], false);
     assert!(request.get("tools").is_none());
     app.shutdown().await;
-}
-
-async fn asset(app: &Application, name: &str, address: &str) -> serverdeck_core::hosts::Host {
-    app.host_save(None, serde_json::from_value(json!({"name":name,"hostname":address,"port":22,"username":"ops","authType":"agent","credentialId":null,"groupId":null,"description":"","favorite":false,"connectTimeoutSecs":1})).unwrap(), None).await.unwrap()
-}
-fn route_input(model: &Model, question: &str) -> ResolveHostsInput {
-    ResolveHostsInput {
-        model_id: model.id.clone(),
-        request_id: uuid::Uuid::new_v4().to_string(),
-        question: question.into(),
-        previous_host_ids: vec![],
-        mask_addresses: true,
-        redact_values: vec![],
-    }
-}
-#[tokio::test]
-async fn local_asset_resolution_uses_the_registered_inventory_without_model_or_ssh_calls() {
-    let dir = tempfile::tempdir().unwrap();
-    let mut app =
-        Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-    app.secrets = Arc::new(Store::default());
-    let model = tested(&app, create("local-route", Some("fixture-key")))
-        .await
-        .unwrap()
-        .value;
-    let a = asset(&app, "web-a", "10.0.0.1").await;
-    let b = asset(&app, "web-b", "10.0.0.10").await;
-    let resolved = app
-        .ai_resolve_hosts(route_input(&model, "web-a的状态"))
-        .await
-        .unwrap();
-    assert_eq!(resolved.host_ids, vec![a.id]);
-    assert_eq!(resolved.model_revision, model.revision);
-    let all = app
-        .ai_resolve_hosts(route_input(&model, "全部服务器的负载"))
-        .await
-        .unwrap();
-    assert_eq!(all.host_ids.len(), 2);
-    assert!(all.host_ids.contains(&b.id));
-    assert!(
-        app.ai_resolve_hosts(route_input(&model, "有哪些服务器"))
-            .await
-            .unwrap()
-            .host_ids
-            .is_empty()
-    );
-    let mut request = input(&model.id, "inventory");
-    request.auto_hosts = true;
-    request.expected_model_revision = Some("stale".into());
-    assert!(matches!(
-        app.ai_prepare(request).await,
-        Err(Error::Conflict)
-    ));
-    assert!(app.ops_connections().unwrap().is_empty());
-    app.shutdown().await;
-}
-#[tokio::test]
-async fn semantic_asset_routing_redacts_metadata_and_rejects_invented_ids() {
-    for forged in [false, true] {
-        let dir = tempfile::tempdir().unwrap();
-        let mut app =
-            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
-        app.secrets = Arc::new(Store::default());
-        let host = asset(&app, "database", "10.2.3.4").await;
-        let reply =
-            json!({"hostIds":[if forged {"invented"} else {&host.id}],"message":""}).to_string();
-        let (config, http) = super::protocol_tests::model_requests_reply(2, reply).await;
-        let mut registration = create("semantic-route", Some("route-model-secret"));
-        registration.config = config;
-        registration.test_id = Some(
-            app.ai_model_test(clone_model_input(&registration))
-                .await
-                .unwrap()
-                .id,
-        );
-        let model = app.ai_model_save(registration).await.unwrap().value;
-        let resolved = app
-            .ai_resolve_hosts(route_input(&model, "生产服务异常，route-model-secret"))
-            .await;
-        if forged {
-            assert!(matches!(resolved, Err(Error::Validation(_))));
-        } else {
-            assert_eq!(resolved.unwrap().host_ids, vec![host.id]);
-        }
-        let request = http.await.unwrap();
-        assert!(request.get("tools").is_none());
-        assert_eq!(request["store"], false);
-        let payload = request.to_string();
-        assert!(!payload.contains("route-model-secret"));
-        assert!(!payload.contains("10.2.3.4"));
-        assert!(!payload.contains("credentialId"));
-        assert!(!payload.contains("keyPath"));
-        assert!(!payload.contains("secretRef"));
-        assert!(app.ops_connections().unwrap().is_empty());
-        app.shutdown().await;
-    }
 }

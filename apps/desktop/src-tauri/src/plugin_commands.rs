@@ -5,61 +5,92 @@ use std::{io::Write, path::PathBuf};
 use tauri::{Manager, State};
 use tauri_plugin_dialog::DialogExt;
 #[tauri::command]
-pub fn plugin_tool_abort_input(
+pub async fn plugin_inventory(
     application: State<'_, Application>,
-    id: String,
-    input_id: String,
-) -> Result<(), IpcError> {
-    application
-        .plugin_tool_abort_input(&id, &input_id)
-        .map_err(Into::into)
+) -> Result<serverdeck_application::PluginInventory, IpcError> {
+    application.plugin_inventory().await.map_err(Into::into)
 }
 #[tauri::command]
-pub async fn plugin_tool_stage(
+pub async fn plugin_reinstall_bundled(
     application: State<'_, Application>,
     id: String,
-    input: serde_json::Value,
-) -> Result<serverdeck_application::ToolTicket, IpcError> {
+    expected_record_digest: String,
+    confirmed: bool,
+) -> Result<InstalledPlugin, IpcError> {
     application
-        .plugin_tool_stage(id, input)
+        .plugin_reinstall_bundled(id, expected_record_digest, confirmed)
         .await
         .map_err(Into::into)
 }
 #[tauri::command]
-pub fn plugin_tool_cancel_request(
+pub async fn plugin_continue(
     application: State<'_, Application>,
     id: String,
-    request: String,
-) -> Result<(), IpcError> {
+    owner: String,
+    continuation: String,
+    cancelled: bool,
+) -> Result<serverdeck_plugin_runtime::protocol::Reply, IpcError> {
     application
-        .plugin_tool_cancel_request(&id, &request)
+        .plugin_continue(&id, &owner, &continuation, cancelled)
+        .await
         .map_err(Into::into)
 }
-
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // Explicit IPC launch bindings are validated independently.
-pub async fn plugin_terminal_open(
+pub fn plugin_cancel_scope(
     application: State<'_, Application>,
     id: String,
+    owner: String,
+) -> Result<(), IpcError> {
+    application
+        .plugin_cancel_scope(&id, &owner)
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn plugin_close_scope(
+    application: State<'_, Application>,
+    id: String,
+    owner: String,
+) -> Result<(), IpcError> {
+    application
+        .plugin_close_scope(&id, &owner)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn plugin_scope_visibility(
+    application: State<'_, Application>,
+    id: String,
+    owner: String,
+    visible: bool,
+) -> Result<(), IpcError> {
+    application
+        .plugin_scope_visibility(&id, &owner, visible)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn plugin_platform_terminal_open(
+    application: State<'_, Application>,
+    id: String,
+    owner: String,
     ticket: String,
     expected_host: String,
-    expected: serverdeck_core::ops::ContainerShell,
     size: serverdeck_core::terminal::TerminalSize,
     events: tauri::ipc::Channel<serverdeck_core::terminal::TerminalEvent>,
 ) -> Result<serverdeck_core::terminal::TerminalSession, IpcError> {
     application
-        .plugin_terminal_open(
-            id,
-            ticket,
-            expected_host,
-            expected,
+        .plugin_platform_terminal_open(
+            &id,
+            &owner,
+            &ticket,
+            &expected_host,
             size,
             std::sync::Arc::new(move |event| events.send(event).is_ok()),
         )
         .await
         .map_err(Into::into)
 }
-
 #[tauri::command]
 pub async fn plugin_preview_info(
     application: State<'_, Application>,
@@ -217,10 +248,11 @@ pub async fn plugin_activate(
 pub async fn plugin_call(
     application: State<'_, Application>,
     id: String,
+    owner: String,
     payload: serde_json::Value,
 ) -> Result<serverdeck_plugin_runtime::protocol::Reply, IpcError> {
     application
-        .plugin_call(&id, payload)
+        .plugin_call_scoped(&id, &owner, payload)
         .await
         .map_err(Into::into)
 }
@@ -262,16 +294,8 @@ pub async fn plugin_revoke(
     application.plugin_revoke(id).await.map_err(Into::into)
 }
 #[tauri::command]
-pub async fn plugin_context(
-    application: State<'_, Application>,
-    id: String,
-    input: Option<serverdeck_application::PluginContextInput>,
-) -> Result<(), IpcError> {
-    match input {
-        Some(input) => application.plugin_context(id, input).await,
-        None => application.plugin_clear_context(id).await,
-    }
-    .map_err(Into::into)
+pub async fn plugin_reset(application: State<'_, Application>, id: String) -> Result<(), IpcError> {
+    application.plugin_reset(id).await.map_err(Into::into)
 }
 #[tauri::command]
 pub fn plugin_approve(
@@ -293,10 +317,11 @@ pub fn plugin_events(
 pub async fn plugin_capability(
     application: State<'_, Application>,
     id: String,
+    owner: String,
     request: serverdeck_plugin_sdk::Request,
 ) -> Result<serverdeck_plugin_sdk::Response, IpcError> {
     application
-        .plugin_capability(&id, request)
+        .plugin_capability_scoped(&id, &owner, request)
         .await
         .map_err(Into::into)
 }

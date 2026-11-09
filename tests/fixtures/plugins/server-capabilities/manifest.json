@@ -5,13 +5,23 @@
   "icon": "settings-2",
   "version": "1.0.0",
   "author": "ServerDeck",
-  "description": "Test-only public metrics, process, port, service and journal capability policy.",
-  "apiVersion": "^4.0.0",
+  "description": "Test-only public primitive, continuation, scope and bounded result probe.",
+  "apiVersion": "^5.0.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": null
   },
-  "permissions": ["ui.contribute", "system.read", "system.manage", "metrics.read", "logs.read"],
+  "permissions": [
+    "ui.contribute",
+    "hosts.read",
+    "ssh.execute",
+    "sftp.read",
+    "sftp.write",
+    "settings.read",
+    "settings.write",
+    "network.connect",
+    "models.use"
+  ],
   "contributions": [],
   "platforms": ["windows", "linux", "macos"],
   "files": [],

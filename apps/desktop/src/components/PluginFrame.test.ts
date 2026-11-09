@@ -8,6 +8,7 @@ import { useModelsStore } from '../stores/models';
 
 const bridge = vi.hoisted(() => ({
   suspend: vi.fn(),
+  resume: vi.fn(async () => {}),
   snapshot: vi.fn(() => ({ theme: 'dark' })),
   dispose: vi.fn(async () => {}),
   call: vi.fn(),
@@ -23,14 +24,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('refreshes shared models when a cached assistant becomes active again', async () => {
+it('resumes a cached plugin through the same generic owner path', async () => {
   pinia = createPinia();
   const refresh = vi.spyOn(useModelsStore(pinia), 'refresh').mockResolvedValue();
   const active = ref(true);
   const page: PluginUiPage = {
     id: 'assistant',
     title: 'Assistant',
-    surface: { kind: 'tool', tool: 'assistant' },
+    surface: { kind: 'frontend' },
     fields: [],
     actions: [],
     initialAction: null,
@@ -54,7 +55,7 @@ it('refreshes shared models when a cached assistant becomes active again', async
   await nextTick();
   active.value = true;
   await nextTick();
-  expect(refresh).toHaveBeenCalledTimes(2);
+  expect(bridge.resume).toHaveBeenCalledOnce();
 });
 
 it('keeps nested reactive context cloneable across the frame boundary and rejects an unrelated sender', async () => {

@@ -8,7 +8,6 @@ import { useFilesStore } from '../stores/files';
 import { pluginsApi } from '../services/plugins';
 import { filesApi } from '../services/files';
 import { sameHostConnection } from '../services/product-links';
-import { isBuiltinAssistant } from '../services/plugin-pages';
 import { useWorkspaceStore, isHostTab } from '../stores/workspace';
 import { errorMessage } from '../services/ipc';
 import { useErrorNotifications } from '../composables/error-notifications';
@@ -48,8 +47,7 @@ const plugin = computed(() => plugins.installed.find((p) => p.manifest.id === pr
 const workspace = useWorkspaceStore();
 const retainRequests = computed(
   () =>
-    isBuiltinAssistant(plugin.value) &&
-    props.contributionId === 'assistant' &&
+    !props.settingsPage &&
     workspace.tabs.some((tab) =>
       props.hostId ? isHostTab(tab) && tab.hostId === props.hostId : tab.key === props.tabKey,
     ),
@@ -107,19 +105,7 @@ async function bind() {
   if (!props.active || !available.value || disposed.value) return;
   contextReady.value = false;
   const ticket = ++generation;
-  await plugins.bind(
-    props.pluginId,
-    props.hostId
-      ? {
-          hostId: props.hostId,
-          opsSession:
-            operations.value?.state === 'connected' ? (operations.value.session?.id ?? null) : null,
-          fileSession:
-            connection.value?.state === 'connected' ? (connection.value.id ?? null) : null,
-        }
-      : null,
-    props.tabKey,
-  );
+  await plugins.bind(props.pluginId, props.tabKey);
   if (
     !disposed.value &&
     props.active &&
@@ -127,10 +113,7 @@ async function bind() {
     plugins.owns(props.pluginId, props.tabKey)
   ) {
     contextReady.value =
-      !props.hostId ||
-      !needsConnection.value ||
-      page.value?.surface?.kind === 'tool' ||
-      operations.value?.state === 'connected';
+      !props.hostId || !needsConnection.value || operations.value?.state === 'connected';
     if (contextReady.value && page.value) frameOpened.value = true;
   }
   return ticket;
@@ -174,7 +157,7 @@ async function connect() {
         ))
       )
         return;
-      if (!isBuiltinAssistant(plugin.value)) await plugins.bind(props.pluginId, null);
+      await plugins.release(props.pluginId, props.tabKey);
       await ops.close(host.value.id);
       if (connection.value?.id) await filesApi.close(connection.value.id, false);
       if (connection.value) connection.value.state = 'closed';

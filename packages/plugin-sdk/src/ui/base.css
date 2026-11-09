@@ -10,12 +10,3 @@ body {
   min-height: 100vh;
   padding: 0;
 }
-html[data-plugin-surface='tool'] .page-view > header h1,
-html[data-plugin-surface='tool'] .page-view > .section-heading h1 {
-  display: none;
-}
-html[data-plugin-surface='tool'] .page-view > header,
-html[data-plugin-surface='tool'] .page-view > .section-heading {
-  padding-bottom: 0;
-  border-bottom: 0;
-}

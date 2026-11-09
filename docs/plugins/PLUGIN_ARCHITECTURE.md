@@ -1,31 +1,18 @@
 # 插件架构
 
-## 当前：源码归属与 UI v4
+当前契约为 Host/Rust/TS SDK5、UI4、ABI/wire1。插件以独立 Vue UI + WASM 后端提供完整业务，内置与上传使用相同运行、审批和资源边界。
 
-Host API / Rust SDK / Vue SDK 当前为 4.0，两个标准插件的前端和测试位于各自 `plugins/system/<name>/frontend`，Guest 位于 `backend`。公开前端 SDK 为 `packages/plugin-sdk`；宿主提供桥接与公共原生服务，业务视图不再由宿主静态导入。新通用 frontend 贡献可以定义独立 WASM 动作，扩展新业务无需修改宿主工具枚举。
+```text
+插件 Vue 页面 → authenticated MessageChannel → 可信 UI 桥
+  → 本包声明 action → 本包 WASM async Runtime
+  → Platform request → Native 权限/目标/审批/配额
+  → 通用 SSH、SFTP、模型、配置等 → 同一 Future 续接 → 插件解析与展示
+```
 
-构建输出为标准包内的 WASM、ui.json、单一 JS 和 CSS。内置与上传共用该构建/校验/加载/调用链；资源进入不透明来源的 sandbox iframe，桥绑定安装代并保留现有逐请求授权。仅接受 UI v4 和当前 Host API；每个页面声明 surface 和包内前端，不提供宿主代渲染或旧协议回退。公共服务实现与 SDK 接口的职责、缓存生命周期见[总体架构](../architecture/ARCHITECTURE.md#2026-11-04插件源码归属与-ui-v4)，新边界见[安全](PLUGIN_SECURITY.md)。旧插件身份/目录/已删合同的自动迁移与退役归档已移除。
+SDK只有平台 DTO/客户端、async 续接、通用 UI/生命周期。Docker命令/环境变量策略在Docker插件；Nginx配置路径映射及操作在Nginx插件；MySQL查询及巡检规则在外部插件；助手提示词、脱敏、资产匹配、工具循环和变更计划在助手插件。Native不识别这些动作，不按插件ID提供业务后门。
 
-## 工作区工具标准化
+宿主私有功能可以继续复用自身 Operations/Monitor 等服务；它们不作为插件公开领域接口。平台层负责连接凭据、SSH主机指纹、文件提交、模型提供者传输、真实目标确认和资源归属，不选择业务命令或组装业务提示词。
 
-Docker 与 AI 助手独立分发，系统与上传插件使用相同的公开 ToolInvoke/UI v4 契约。App/workspace 只解析已安装且启用/授权的贡献，PluginFrame 持续挂载页面并通过 SDK 桥交互。主机功能归属当前主机工作区，管理与配置由插件管理和配置弹窗提供。票据及资源边界见[内置插件](BUILTIN_PLUGINS.md)。
+一个安装修订共享有界VM；每个打开页面具有可信owner。平台资源绑定插件/安装代/VM代/owner，目标额外绑定SSH配置或模型修订；关闭一个owner不会取消其他页面。原生审批保存原WASM请求，批准或拒绝后原地续接，不重新调用动作开头。
 
-2026-11-04：系统内置与上传插件统一为标准 WASM 包及运行时，来源由宿主记录。系统包预置声明权限和必要路径，grant/revoke IPC 不允许改写；上传包仍显式授权。全部插件使用当前主机，无主机白名单，授权拒绝 hostIds 字段。主机工具栏平铺显示已启用且有功能页面的插件，管理列表支持安装、配置、启停、授权和卸载。两个插件源码和完整契约见 [BUILTIN_PLUGINS.md](BUILTIN_PLUGINS.md)；下文 13A 为历史阶段，默认禁用只描述上传安装。
-
-13A-1：desktop → application → plugin-core → core。插件包、元数据、信任接口和仓库独立于 SSH、Agent 与 Tauri。13A-2 新增 application → plugin-runtime → plugin-core/core/Wasmi，带后端的包在启用或按需激活时真实执行 WASM。元数据包继续不执行代码。能力 API/UI 尚未实现，不能视为可用。ABI、配额与未实现的 OS 保障见 [PLUGIN_RUNTIME.md](PLUGIN_RUNTIME.md)。
-
-本地数据目录下 `plugins/packages/<id>/record.json` 为唯一当前状态指针，`plugins/system/<id>/versions/version-*/` 或 `plugins/upload/<id>/versions/version-*/` 按来源保存经过校验的独立内容代。`plugins/data/<id>/` 保存插件配置/用户数据，`plugins/cache/<id>/` 为可清缓存。仓库拒绝符号链接/Windows 重解析点，写入新代不覆盖旧入口。
-
-安装：有界读包 → 严格清单/平台/API/路径/摘要校验 → 新代写入并 sync 文件 → 同目录临时 record 写入并 sync → 原子替换 record。提交失败时临时代自动释放，原指针、启用状态、旧内容保持有效；旧当前代作为升级前备份。新安装/升级默认禁用。重复/降级拒绝，升级必须绑定当前 expectedVersion；升级增加权限后续必须重新授权。
-
-每次升级开始只清理不被当前指针/备份引用的内容代，成功升级保留上次当前代和之前备份，最多三代。异常退出可能留下候选代，后续升级清理；它们不会被发现或执行。没有宣称断电后文件系统级持久事务保证；正常错误返回不发生提交后再删除新代的问题。
-
-卸载需要 confirmed，先持久禁用，再移除代码目录和缓存；默认保留 data，只有 clearData=true 才删除本插件数据。清理先验证本插件专属绝对路径与全树类型，不跟随链接；失败传播，不伪装成功。包中没有远端数据删除语义。其他用户进程同时恶意改写同用户仓库的 TOCTOU 不属于此文件协议的隔离承诺。
-
-IPC：plugin_preview(path) → Manifest；plugin_install(input) → InstalledPlugin；plugin_list() → 数组；plugin_detail(id)；plugin_set_enabled(id, enabled)；plugin_uninstall(input)。输入见 Rust/TS 同名契约。错误使用现有 IpcError（PLUGIN_INVALID/CONFLICT/NOT_FOUND/STORAGE/BUSY/SHUTTING_DOWN），IO/JSON 原因链保留于 Rust，不跨 IPC 输出原始载荷。只有本地主 main 白名单允许调用；插件不能获得这些 IPC。
-
-应用层复用有界后台入口串行化元数据操作，不在 Tokio 执行器同步读写包。Repository 的写 API 要求调用者按仓库串行化；桌面只创建一个 Application，多进程由现有单实例机制限制。
-
-13A-3 增加公开 plugin-sdk（独立 1.0.0，仅 serde/serde_json），plugin-core 复用其权限枚举并持久化独立授权；application/plugins 的 Host 在现有 Engine/Files/Tasks/Operations 上执行受控能力。WASM 仍无导入，通过 invoke→yield HostCall→Rust 授权执行→专用 resume 返回，单次最多八项能力。Host Context 绑定主机、租约配置及不可复用的上下文代；取消、文档/任务/日志所有权和一次性操作批准都在 Rust。授权不与用户设置放在同一文件，升级/重装不继承旧安装代的授权。
-
-新增七项主窗口 IPC：plugin_grant/permissions/revoke/context/approve/events/capability。Guest 不能调用管理/批准接口，也不能在 Request 中指定其他插件身份或原始租约。SDK、错误/配额、权限与兼容性见 [PLUGIN_SDK.md](PLUGIN_SDK.md)、[PLUGIN_SECURITY.md](PLUGIN_SECURITY.md)、[PLUGIN_API_VERSIONING.md](PLUGIN_API_VERSIONING.md)。没有数据库结构迁移或第二套连接池。
+源码扫描自动发现 `plugins/system/<dir>`；发布产物仍使用统一校验/仓库导入。新增服务插件只增加目录或上传包，不修改SDK/宿主。详细请求、限额与生命周期见[SDK](PLUGIN_SDK.md)和[安全边界](PLUGIN_SECURITY.md)。

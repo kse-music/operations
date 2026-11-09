@@ -38,7 +38,7 @@ describe('product integration boundaries', () => {
     expect(workspace.settingsView).toBeNull();
     expect(workspace.tabs).toEqual([]);
   });
-  it('keeps one workspace per host, restores its tool and isolates global navigation', () => {
+  it('keeps one workspace per host, restores its tool and isolates global navigation', async () => {
     const w = useWorkspaceStore();
     w.navigate('files', 'a');
     const a = w.current!.key;
@@ -60,7 +60,7 @@ describe('product integration boundaries', () => {
     w.selectHost('b');
     w.navigate('server');
     expect(w.current).toMatchObject({ hostId: 'b', view: 'server', section: undefined });
-    w.navigate('assistant', 'a');
+    await w.openPlugin('cn.hiboot.plugins.assistant', 'assistant', '');
     expect(w.current).toMatchObject({
       hostId: '',
       view: 'extension',

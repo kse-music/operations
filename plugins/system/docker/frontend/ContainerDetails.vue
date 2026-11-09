@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId } from 'vue';
-import OpsDetails from '@serverdeck/plugin-sdk/ui/OpsDetails.vue';
-import type { OpsRequest, OpsResponse } from '@serverdeck/plugin-sdk/types/ops';
+import OpsDetails from './OpsDetails.vue';
+import type { OpsRequest, OpsResponse } from './types';
 import ContainerResources from './ContainerResources.vue';
 import ContainerEnvironment from './ContainerEnvironment.vue';
 

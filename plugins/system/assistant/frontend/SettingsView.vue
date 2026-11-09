@@ -1,302 +1,66 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
-import {
-  Bot,
-  CircleCheck,
-  RefreshCw,
-  Settings2,
-  ShieldCheck,
-  Sparkles,
-  Terminal,
-} from '@lucide/vue';
-import { useWorkspaceStore } from '@serverdeck/plugin-sdk/stores/workspace';
+import { ref, watch } from 'vue';
 import { request } from '@serverdeck/plugin-sdk/transport';
-import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
-import { isLocalModel } from '@serverdeck/plugin-sdk/types/ai';
 import { useModelBinding } from './model-binding';
-import LocalToolInstallNotice from './LocalToolInstallNotice.vue';
-
-const props = defineProps<{ settingsDialog?: boolean }>();
+defineProps<{ settingsDialog?: boolean }>();
 const binding = useModelBinding();
-const {
-  models,
-  modelId,
-  selected,
-  loaded,
-  loading,
-  saving,
-  installing,
-  error,
-  message,
-  localSources,
-  localSelected,
-} = binding;
-const workspace = useWorkspaceStore();
+const { modelId, models, loading, saving, error, message, loaded, localSources } = binding;
 const draft = ref('');
-const localDraft = computed(() => localSources.value.find((source) => source.id === draft.value));
-const localState = computed(() =>
-  localDraft.value?.status.installed === false
-    ? 'missing'
-    : localDraft.value?.status.model
-      ? 'ready'
-      : localDraft.value?.status.authorized
-        ? 'unavailable'
-        : 'unauthorized',
+watch(
+  modelId,
+  (id) => {
+    draft.value = id;
+  },
+  { immediate: true },
 );
-const localModel = computed(() => {
-  const model = localDraft.value?.status.model?.config.model;
-  return model === 'default' ? '跟随本机默认模型' : model;
-});
-const currentName = computed(
-  () =>
-    localSelected.value?.name ??
-    selected.value?.name ??
-    (modelId.value ? '原模型已删除' : '尚未绑定'),
-);
-watch([modelId, loaded], () => {
-  if (loaded.value) draft.value = modelId.value;
-});
 async function close() {
-  try {
-    await request<void>('settings.close');
-  } catch (cause) {
-    error.value = errorMessage(cause);
-  }
-}
-async function submit() {
-  if ((await binding.save(draft.value)) && props.settingsDialog) await close();
+  await request('settings.close');
 }
 </script>
-
 <template>
-  <section class="assistant-model-settings" aria-label="助手模型绑定">
-    <header class="binding-heading">
-      <span class="binding-heading-icon"><Bot :size="20" aria-hidden="true" /></span>
-      <div class="binding-intro">
-        <h2>绑定模型</h2>
-        <p>选择助手使用的模型来源。</p>
-      </div>
-      <button
-        type="button"
-        class="button binding-refresh"
-        aria-label="刷新模型列表"
-        title="刷新模型列表"
-        :disabled="loading || saving || !!installing"
-        @click="binding.load"
+  <section class="binding-view" aria-label="助手模型绑定">
+    <div class="binding-heading">
+      <h2>助手模型绑定</h2>
+      <p>选择平台已配置的模型。模型凭据、CLI 安装与授权统一在平台模型设置中管理。</p>
+    </div>
+    <div class="binding-content">
+      <p v-if="loading" role="status">正在读取模型配置…</p>
+      <p v-if="error" class="error-text" role="alert">{{ error }}</p>
+      <p v-if="message" role="status">{{ message }}</p>
+      <label
+        >当前模型<select v-model="draft" :disabled="loading || saving">
+          <option value="">不绑定模型</option>
+          <option
+            v-for="model in models.models"
+            :key="model.id"
+            :value="model.id"
+            :disabled="!model.hasKey"
+          >
+            {{ model.name }} · {{ model.config.model }}
+          </option>
+        </select></label
       >
-        <RefreshCw :size="16" :class="{ 'binding-spinning': loading }" aria-hidden="true" />
+      <p v-if="loaded && !models.models.length" class="host-empty">
+        暂无可用模型，请先完成平台配置。
+      </p>
+      <p v-for="source in localSources" :key="source.id">
+        {{ source.name }}：{{ source.status.message }}
+      </p>
+      <button class="button" @click="binding.manageModels">打开平台模型设置</button
+      ><button class="button" :disabled="loading || saving" @click="binding.load">刷新</button>
+    </div>
+    <footer>
+      <button v-if="settingsDialog" class="button" :disabled="saving" @click="close">关闭</button
+      ><button
+        class="button primary"
+        :disabled="!loaded || loading || saving"
+        @click="binding.save(draft)"
+      >
+        {{ saving ? '正在保存…' : '保存绑定' }}
       </button>
-    </header>
-    <form @submit.prevent="submit">
-      <div class="binding-content">
-        <fieldset :disabled="loading || saving || models.loading || !loaded">
-          <legend class="binding-sr-only">使用模型</legend>
-          <section class="binding-group" aria-labelledby="binding-local-title">
-            <div class="binding-group-heading">
-              <h3 id="binding-local-title">本地服务</h3>
-              <span>复用本机配置与登录</span>
-            </div>
-            <div class="binding-local-options">
-              <label
-                v-for="source in localSources"
-                :key="source.id"
-                class="binding-option binding-source"
-              >
-                <input
-                  v-model="draft"
-                  class="binding-sr-only"
-                  type="radio"
-                  name="assistant-model"
-                  :value="source.id"
-                  :disabled="!!installing"
-                />
-                <span class="binding-source-icon"
-                  ><component
-                    :is="source.id === 'local-codex' ? Terminal : Sparkles"
-                    :size="19"
-                    aria-hidden="true"
-                /></span>
-                <span class="binding-option-label"
-                  ><strong>{{ source.name }}</strong
-                  ><small
-                    ><i :class="{ ready: source.status.model }" aria-hidden="true" />{{
-                      source.status.installed === false
-                        ? '未安装'
-                        : source.status.model
-                          ? '已连接'
-                          : source.status.authorized
-                            ? '未就绪'
-                            : '未授权'
-                    }}</small
-                  ></span
-                >
-                <span class="binding-choice" aria-hidden="true" />
-              </label>
-            </div>
-            <LocalToolInstallNotice
-              v-if="localDraft && localState === 'missing'"
-              :name="localDraft.name"
-              :model-id="localDraft.id"
-              :installing="!!installing"
-              :supported="localDraft.status.installSupported !== false"
-              :disabled="loading || saving"
-              @install="binding.installLocal(draft)"
-              @cancel="binding.cancelInstall"
-              @refresh="binding.refreshLocal(draft)"
-            />
-            <div v-else-if="localDraft" class="binding-local" :data-state="localState">
-              <div class="binding-connection" role="status">
-                <CircleCheck v-if="localState === 'ready'" :size="18" aria-hidden="true" />
-                <ShieldCheck v-else :size="18" aria-hidden="true" />
-                <div>
-                  <strong>{{
-                    localState === 'ready'
-                      ? `已连接${localDraft.name}`
-                      : localState === 'unavailable'
-                        ? '连接未就绪'
-                        : '授权本地访问'
-                  }}</strong>
-                  <p>
-                    {{
-                      localState === 'ready'
-                        ? localModel
-                        : localDraft.status.message || '授权后使用已有配置，无需重复登录。'
-                    }}
-                  </p>
-                </div>
-              </div>
-              <button
-                v-if="!localDraft.status.authorized"
-                type="button"
-                class="button binding-authorize"
-                :disabled="loading || saving"
-                @click="binding.authorizeLocal(draft, true)"
-              >
-                授权使用{{ localDraft.name }}
-              </button>
-              <button
-                v-else
-                type="button"
-                class="button binding-link"
-                :disabled="loading || saving"
-                @click="binding.authorizeLocal(draft, false)"
-              >
-                撤销本地授权
-              </button>
-            </div>
-          </section>
-          <section class="binding-group" aria-labelledby="binding-managed-title">
-            <div class="binding-group-heading">
-              <h3 id="binding-managed-title">
-                模型管理 <span class="binding-count">{{ models.models.length }}</span>
-              </h3>
-              <button
-                type="button"
-                class="button binding-link"
-                :disabled="saving || !!installing"
-                @click="workspace.navigate('models')"
-              >
-                <Settings2 :size="14" aria-hidden="true" />管理模型
-              </button>
-            </div>
-            <div v-if="models.models.length" class="binding-registered">
-              <label
-                v-for="model in models.models"
-                :key="model.id"
-                class="binding-option binding-model"
-              >
-                <input
-                  v-model="draft"
-                  class="binding-sr-only"
-                  type="radio"
-                  name="assistant-model"
-                  :value="model.id"
-                  :disabled="!!installing"
-                />
-                <span class="binding-option-label"
-                  ><strong>{{ model.name }}</strong
-                  ><small>{{ model.config.model }}</small></span
-                >
-                <span class="binding-key" :class="{ missing: !model.hasKey }">{{
-                  model.hasKey ? 'Key 已配置' : '未设置 Key'
-                }}</span>
-                <span class="binding-choice" aria-hidden="true" />
-              </label>
-            </div>
-            <p v-else-if="!loading && !models.error" class="binding-empty">
-              暂无已注册模型，可前往模型管理添加。
-            </p>
-          </section>
-          <label class="binding-option binding-none">
-            <input
-              v-model="draft"
-              class="binding-sr-only"
-              type="radio"
-              name="assistant-model"
-              value=""
-              :disabled="!!installing"
-            />
-            <span class="binding-option-label"
-              ><strong>未绑定模型</strong><small>暂停助手，保留已有配置</small></span
-            >
-            <span class="binding-choice" aria-hidden="true" />
-          </label>
-        </fieldset>
-        <p v-if="loading" class="binding-feedback" role="status">正在读取模型绑定…</p>
-        <p
-          v-else-if="error || (!isLocalModel(draft) && models.error)"
-          class="binding-feedback error-text"
-          role="alert"
-        >
-          {{ error || models.error }}
-        </p>
-        <p
-          v-else-if="modelId && !isLocalModel(modelId) && !selected"
-          class="binding-feedback warning-text"
-          role="alert"
-        >
-          绑定模型已删除，请选择其他模型后保存。
-        </p>
-        <p v-else-if="selected && !selected.hasKey" class="binding-feedback warning-text">
-          绑定模型未设置 Key，请在模型管理中补充。
-        </p>
-      </div>
-      <footer>
-        <div class="binding-current">
-          <span
-            >当前绑定 <strong :title="currentName">{{ currentName }}</strong></span
-          ><small :class="{ 'binding-pending': draft !== modelId }" role="status">{{
-            draft !== modelId ? '有未保存的更改' : message || '适用于所有主机'
-          }}</small>
-        </div>
-        <button
-          v-if="settingsDialog"
-          type="button"
-          class="button"
-          :disabled="saving"
-          @click="close"
-        >
-          取消
-        </button>
-        <button
-          class="button primary"
-          :disabled="
-            !loaded ||
-            loading ||
-            saving ||
-            !!installing ||
-            (!isLocalModel(draft) && !!models.error) ||
-            (localDraft && !localDraft.status.model) ||
-            draft === modelId
-          "
-        >
-          {{ saving ? '保存中…' : '保存模型绑定' }}
-        </button>
-      </footer>
-    </form>
+    </footer>
   </section>
 </template>
-
 <style scoped>
 .assistant-model-settings {
   display: flex;
