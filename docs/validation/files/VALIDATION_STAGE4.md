@@ -21,7 +21,15 @@
 | 类型与静态检查           | 桌面/SDK TypeScript、相关 ESLint、Rust fmt、涉及四个 crate 的全目标 Clippy `-D warnings` 通过；修改代码 Prettier 和 Node 脚本语法检查通过                                                                                                                                                                                                                                                               |
 | 浏览器实际 Monaco 与布局 | `node tools/ui-file-open-e2e.mjs` 在 Edge 的 1280×820、960×600 两组通过：真实 `.ini` 编辑器打开/关闭、回传确认、冲突/重试、副本保留说明、弹窗边界和无页面/根组件异常。证据 `.local/sftp-external-editor/browser/result.json` 与两张截图；已查看最小窗口截图                                                                                                                                             |
 | Windows 原生 UI          | `tools/native-file-open-e2e.mjs` 启动复制的隔离 QA EXE，真实 IPC 读取专用本地文件，主机元数据仅用于显示离线文件页，未发起 SSH。通过 computer-use 实际双击 `config.ini`，观察到系统“选择一个应用以打开此 .ini 文件”；Escape 后等待态解除，文件及全局错误均为空，测试程序正常退出。证据路径由 `.local/sftp-external-editor/native-app-path.txt` 指向，含 `ready.json`、`result.json` 和关闭选择器后的截图 |
-| 桌面 Debug 构建          | `node tools/tauri.mjs build --debug --no-bundle` 通过，已恢复普通应用身份，产物为 `target/debug/serverdeck-desktop.exe`，日志 `.local/sftp-external-editor/final-debug-build.log`；保留既有 Monaco 大 chunk 和 Windows 链接器输出库文件提示，未打安装包                                                                                                                                                                                                           |
+| 桌面 Debug 构建          | `node tools/tauri.mjs build --debug --no-bundle` 通过，已恢复普通应用身份，产物为 `target/debug/serverdeck-desktop.exe`，日志 `.local/sftp-external-editor/final-debug-build.log`；保留既有 Monaco 大 chunk 和 Windows 链接器输出库文件提示，未打安装包                                                                                                                                                 |
+
+### 提交前合并复验
+
+提交前同步远端 `1813183` 的远程编辑器布局与安全保存改动，保留双方功能：新的 Modal 标题插槽、最大化/主题/状态栏、只读与忙碌保存门禁，以及本地 `ready` 事件、局部加载错误边界和系统应用打开/确认回传。合并双方 PRD、架构、实施状态与原始验证章节，没有替换或丢弃远端历史。
+
+合并后全量前端 56 文件、559 项通过，桌面/SDK 类型检查、全量 ESLint、相关格式及文档链接/差异检查通过；插件 Runtime/WASM 平台回归与 Docker 原生单测另有 25 项通过、2 项依赖真实外部环境的测试保持忽略。原生测试仍使用复制到 QA 的 EXE。浏览器用真实 Monaco 复验 1280×820、960×600 两组，内置打开/关闭、外部回传确认、冲突/重试和弹窗边界通过。日志及独立证据位于 `.local/git-submit-qa/`，含 `merged-frontend-test.log`、`native-results-path.txt`、`browser/result.json` 和 `merged-frontend-build.log`。
+
+`npm run build` 的系统插件/WASM、开发包、类型检查和前端生产构建通过。随后 `node tools/tauri.mjs build --debug --no-bundle` 已完成 Rust 编译、链接，但最终替换 `target/debug/serverdeck-desktop.exe` 时被 Windows 拒绝（OS 5）；不能宣称合并后的 EXE 已更新。未强制停止进程，需正常退出占用该路径的客户端后再重建，日志为 `.local/git-submit-qa/merged-debug-build.log`。未生成安装器或重新执行真实服务器/跨平台验收。
 
 ### 失败记录与限制
 
@@ -41,6 +49,14 @@
 - 本机无头 Edge 加载真实 Vue 组件及独立浏览器夹具：1280×820 深色标准字号、960×600 浅色 145% 字号、600×820 深色 145% 字号三组通过，验证控件顺序、切换目录、失败恢复及路径栏无水平溢出。首次沙箱阻止 Edge 启动，获准在沙箱外完成；结果、脚本和截图在 `.local/qa/local-drive-picker/`。浏览器夹具不替代原生 IPC，后者由上一项真实 Windows 测试覆盖。
 - `node tools/tauri.mjs build --debug --no-bundle` 最终通过，产物为 `target/debug/serverdeck-desktop.exe`，包含最新界面与原生后端；日志保留于 `.local/qa/local-drive-picker/desktop-build.log`。首次构建因同路径开发版正在运行而覆盖失败（Windows 5，进程 11360），用户正常退出后重建成功，未强制结束进程。保留既有 Monaco 大 chunk 和链接器输出库文件提示，未生成安装包。
 - 未测试可移动设备热插拔、断开的映射盘、物理键鼠操作、安装器和非 Windows 客户端。非 Windows 当前仅提供 `/` 文件系统入口，不枚举挂载点；磁盘名称展示类型，不查询卷标。未执行完整远程 SSH/SFTP 回归；本次不改变远程或传输协议。构建阻碍已解除，无本阶段剩余依赖，不启动其他功能工作。
+
+## 2026-11-10 远程编辑器布局
+
+- `RemoteEditor.vue` 改为文件标题、紧凑工具栏、可伸缩 Monaco 和状态栏；支持最大化/还原、查找、自动换行、真实行列/行数/换行格式及应用主题/字号。原子替换确认保留在短行，ACL/xattr/硬链接等限制可展开。失败保留草稿并在编辑器中显示，缺少原子扩展时真正只读，快捷键也无法绕过保存门禁。`Modal.vue` 增加可选标题插槽/面板样式，默认弹窗行为保留；`files.css` 只调整编辑器相关样式。
+- 前端全量 Vitest：55 文件、540 项通过；新增编辑器交互回归覆盖确认前不可保存、按钮/快捷键门禁、保存成功/失败、只读、dirty 关闭/重载审核、状态元数据、最大化不重建 model、主题/查找/换行。补充清洁文档关闭释放资源后，编辑器最终 8 项单独验证通过。桌面/SDK TypeScript、相关 ESLint、Prettier、差异检查及独立 Vite 生产构建通过，保留既有 Monaco 大 chunk 提示；未改后端，无新增依赖。
+- 通过浏览器使用真实 Monaco 组件验证暗色 1280×720、浅色长路径 900×600、145% 字号长路径 640×560。后两者无面板横向溢出，代码区高度分别约 356px/309px，状态栏可见；文件名/路径省略并保留完整悬停提示。实操验证修改状态/行列、最大化还原保留内容、未保存关闭确认、查找输入焦点、模拟保存成功/冲突、只读及清洁关闭。浏览器预览只使用 QA 文本和受控服务响应，没有修改远程用户文件。结果、五张截图及 Vite 构建在 `.local/qa/remote-editor/`，浏览器结果见 `browser-results.json`。
+- 初次预览受沙箱回环访问限制，改为仅监听本机回环的服务后访问成功；夹具内裸模块未经过 Vite 转换导致首次加载失败，改为独立模块入口后通过。失败记录不代表产品的 Monaco 加载故障；没有关闭主机密钥或其他安全验证。
+- 未运行 Rust、真实远程保存、原生 WebView2、安装器或 macOS/Linux 客户端；浏览器服务响应与 Monaco 单元测试替身不代替这些验收。现有原子替换的 inode/ACL/xattr/硬链接限制保留。本阶段完成，使用新版界面需重建并启动应用，原生验收依赖授权测试主机及新 EXE。
 
 ## 2026-11-09 SFTP 切换用户
 

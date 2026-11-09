@@ -6,6 +6,7 @@ const props = defineProps<{
   busy?: boolean;
   wide?: boolean;
   focusHeading?: boolean;
+  panelClass?: string;
 }>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -16,20 +17,26 @@ function close(): void {
 </script>
 <template>
   <Teleport to="body">
-    <dialog ref="dialog" :class="['modal', { wide }]" :aria-label="title" @cancel.prevent="close">
-      <header class="modal-heading">
-        <h2 :tabindex="focusHeading ? -1 : undefined" :autofocus="focusHeading">{{ title }}</h2>
-        <button
-          class="icon-button"
-          type="button"
-          aria-label="关闭对话框"
-          title="关闭对话框"
-          :disabled="busy"
-          @click="close"
-        >
-          <X :size="16" aria-hidden="true" />
-        </button>
-      </header>
+    <dialog
+      ref="dialog"
+      :class="['modal', panelClass, { wide }]"
+      :aria-label="title"
+      @cancel.prevent="close"
+    >
+      <slot name="header"
+        ><header class="modal-heading">
+          <h2 :tabindex="focusHeading ? -1 : undefined" :autofocus="focusHeading">{{ title }}</h2>
+          <button
+            class="icon-button"
+            type="button"
+            aria-label="关闭对话框"
+            title="关闭对话框"
+            :disabled="busy"
+            @click="close"
+          >
+            <X :size="16" aria-hidden="true" />
+          </button></header
+      ></slot>
       <slot />
     </dialog>
   </Teleport>
