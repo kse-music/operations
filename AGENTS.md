@@ -62,15 +62,13 @@
 
 ## 6. 文档
 
-重要架构变化更新 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)。
-
-需求状态变化更新 [IMPLEMENTATION_PLAN.md](docs/product/IMPLEMENTATION_PLAN.md)。
-
-接口发生变化时同步更新相关文档和前端类型。
-
-重要设计取舍记录到 [DECISIONS.md](docs/architecture/DECISIONS.md)。
-
-新增文档按 [文档维护约定](docs/README.md#维护约定) 归类；验证记录放入 docs/validation 对应模块并更新索引，同一主题优先补充已有文档。
+- 按[文档维护约定](docs/README.md#维护约定)分工维护：PRD 写当前有效需求，架构写当前实现和边界，实施计划写模块状态、剩余工作及依赖，决策索引只登记重要取舍，验证报告保留执行证据。
+- “更新文档”默认指直接修订对应功能/模块章节，合并重复内容并移除失效描述；禁止在 PRD、架构或实施计划顶部/末尾按日期追加逐次改动，或用“下方仅为历史”“以本节为准”覆盖矛盾正文。不要求每项变更都改四份文档，只更新实际受影响的内容。
+- 需求和需求状态变化分别更新 [PRD](docs/product/PRD.md) 与 [IMPLEMENTATION_PLAN.md](docs/product/IMPLEMENTATION_PLAN.md)；重要架构变化更新 [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)。接口变化同步当前 SDK、调用方、示例、测试、文档及前端类型，不在多份总览复制完整契约。
+- 只有影响架构、安全、数据或公开契约等重要设计取舍才记录 ADR，放入 `docs/architecture/decisions/` 并更新 [DECISIONS.md](docs/architecture/DECISIONS.md)。记录日期、状态、背景/选项、选择、后果和验证链接；实质变化新增替代记录，旧记录标明替代关系并保留原理由。普通修复、样式和测试流水不建 ADR。
+- 验证记录放入 `docs/validation/` 对应模块并更新索引，同一主题优先补充已有报告。可按日期/版本保留真实环境、命令、结果、失败及限制；历史通过不表示当前版本或所有平台已验收。实施计划只保留简短状态、缺口及证据链接，不复制完整报告。
+- 整理时核对现有实现，保留未完成需求、重要决策、必要验证历史和原始证据链接；不能把文档清理当成修改功能范围或关闭验收门禁。仅嵌在总览中的必要历史先归档到对应位置，普通逐次变更由 Git 追踪。
+- 内容增长时按功能/模块拆分并保留总览和相对链接，不按每次改动或每日创建文件。新增/移动/改名后检查索引、链接/锚点和许可资源引用；不夹带无关业务修改。
 
 ## 7. 每阶段结束
 

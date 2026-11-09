@@ -154,6 +154,9 @@
 
 ## 基础与配置
 
+- [文档结构与维护验证](foundation/VALIDATION_DOCUMENTATION.md)（目录迁移历史、当前文档整理与维护规则检查）
+- [旧实施计划中的独立验证记录归档](foundation/VALIDATION_IMPLEMENTATION_HISTORY.md)（固定历史；保留原环境与未执行项，不代表当前全量验收）
+
 - [本地构建缓存清理与磁盘保护验证](foundation/VALIDATION_BUILD_CACHE.md)
 - [cn.hiboot 应用身份统一验证](foundation/VALIDATION_IDENTITY.md)
 - [阶段一交付与验证记录](foundation/VALIDATION.md)
@@ -196,7 +199,7 @@
 
 ## SFTP 与文件
 
-- [SFTP 仅提示异常（2026-11-05）](files/VALIDATION_STAGE4.md#2026-11-05sftp仅提示异常)
+- [SFTP 仅提示异常（2026-11-05）](files/VALIDATION_STAGE4.md#2026-11-05sftp-仅提示异常)
 - [SFTP 权限与拥有者显示验收](files/VALIDATION_SFTP_METADATA.md)
 - [SFTP 文件管理阶段验收](files/VALIDATION_STAGE4.md)
 
