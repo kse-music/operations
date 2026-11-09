@@ -1,17 +1,7 @@
 <script setup lang="ts">
 import { useErrorNotifications } from '../composables/error-notifications';
 import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
-import {
-  FileCode2,
-  Save,
-  RotateCw,
-  Search,
-  WrapText,
-  Maximize2,
-  Minimize2,
-  X,
-  Info,
-} from '@lucide/vue';
+import { FileCode2, Save, RotateCw, Search, WrapText, Maximize2, Minimize2, X } from '@lucide/vue';
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/editor/contrib/find/browser/findController';
 import 'monaco-editor/languages/definitions/javascript/register';
@@ -28,15 +18,16 @@ import 'monaco-editor/languages/definitions/html/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import Modal from './Modal.vue';
 import { useFilesStore } from '../stores/files';
+import { useNotificationsStore } from '../stores/notifications';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 const store = useFilesStore();
+const notifications = useNotificationsStore();
 const emit = defineEmits<{ ready: [] }>();
 const shortcutModifier = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
 const container = ref<HTMLElement>(),
   error = ref<string | null>(null),
   busy = ref(false),
-  confirmed = ref(false),
   maximized = ref(false),
   wrap = ref(true),
   position = ref({ lineNumber: 1, column: 1 }),
@@ -193,7 +184,7 @@ onMounted(() => {
     }
   });
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-    if (confirmed.value && !busy.value && document.value.atomicSave) void save();
+    void save();
   });
   editor.focus();
   emit('ready');
@@ -204,7 +195,7 @@ onBeforeUnmount(() => {
   model?.dispose();
 });
 async function save(): Promise<void> {
-  if (busy.value || !confirmed.value || !document.value.atomicSave) return;
+  if (busy.value || !document.value.atomicSave) return;
   busy.value = true;
   error.value = null;
   editor.updateOptions({ readOnly: true });
@@ -212,7 +203,7 @@ async function save(): Promise<void> {
     const result = await filesApi.save(
       document.value.token,
       model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true),
-      confirmed.value,
+      true,
     );
     if (!result.document) {
       error.value = `${result.message ?? '保存失败'}；恢复路径：${result.recoveryPath ?? '无'}`;
@@ -220,7 +211,7 @@ async function save(): Promise<void> {
     }
     store.document = result.document;
     store.dirty = false;
-    store.notice = '远程文件已保存并校验。';
+    notifications.push('远程文件已保存并校验。');
     void store.refresh();
   } catch (cause) {
     error.value = errorMessage(cause);
@@ -308,7 +299,7 @@ useErrorNotifications(() => [
     <div class="editor-toolbar" role="toolbar" aria-label="编辑操作">
       <button
         class="button primary editor-save"
-        :disabled="busy || !confirmed || !document.atomicSave"
+        :disabled="busy || !document.atomicSave"
         @click="save"
       >
         <Save :size="15" aria-hidden="true" />{{ busy ? '处理中…' : '保存'
@@ -338,22 +329,6 @@ useErrorNotifications(() => [
         <WrapText :size="16" aria-hidden="true" />
       </button>
       <span class="editor-toolbar-label">远程文本编辑</span>
-    </div>
-    <div class="editor-save-policy">
-      <label class="checkbox-label"
-        ><input
-          v-model="confirmed"
-          type="checkbox"
-          :disabled="busy || !document.atomicSave"
-        />确认原子替换：改变 inode，保留基本权限与属主</label
-      >
-      <details class="editor-save-details">
-        <summary><Info :size="14" aria-hidden="true" />保存限制</summary>
-        <p>
-          原子替换不保留 ACL、扩展属性或硬链接关系。仅支持 UTF-8 文本，最大 2
-          MiB；保存前重新核对内容、权限及属主，外部修改时拒绝覆盖。
-        </p>
-      </details>
     </div>
     <p v-if="error || !document.atomicSave" class="editor-feedback" role="alert">
       {{ error || '服务器缺少原子替换扩展，此文件只可查看。' }}

@@ -19,6 +19,11 @@ export interface LocalDrive {
   path: string;
   name: string;
 }
+export interface FileLocation {
+  path: string;
+  name: string;
+  depth?: number;
+}
 export interface SftpUser {
   username: string;
   serverPath: string;
@@ -131,4 +136,16 @@ export function remoteJoin(parent: string, name: string): string {
   if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\0'))
     throw new Error('名称不能包含 / 或 NUL');
   return `${parent.replace(/\/+$/, '')}/${name}`;
+}
+export function remoteDirectoryLocations(path: string): FileLocation[] {
+  if (!path.startsWith('/')) return [];
+  const parts = path.split('/').filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..')) return [];
+  const items: FileLocation[] = [{ path: '/', name: '/ <root>', depth: 0 }];
+  let parent = '';
+  for (const [index, name] of parts.entries()) {
+    parent += `/${name}`;
+    items.push({ path: parent, name, depth: index + 1 });
+  }
+  return items;
 }

@@ -78,6 +78,7 @@ vi.mock('monaco-editor/languages/definitions/html/register', () => ({}));
 vi.mock('monaco-editor/editor/editor.worker?worker', () => ({ default: class {} }));
 import RemoteEditor from './RemoteEditor.vue';
 import { useFilesStore } from '../stores/files';
+import { useNotificationsStore } from '../stores/notifications';
 import { filesApi } from '../services/files';
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
@@ -133,9 +134,6 @@ function button(label: string): HTMLButtonElement {
 function saveButton(): HTMLButtonElement {
   return document.querySelector<HTMLButtonElement>('.editor-save')!;
 }
-function confirm() {
-  document.querySelector<HTMLInputElement>('.editor-save-policy input')!.click();
-}
 
 it('shows actual cursor, line endings and dirty state while maximizing preserves the model', async () => {
   await mount();
@@ -160,7 +158,7 @@ it('shows actual cursor, line endings and dirty state while maximizing preserves
   expect(mock.model.getValue()).toBe('one\r\ntwo\r\nthree');
 });
 
-it('requires explicit replacement consent for both save button and keyboard save', async () => {
+it.each(['button', 'keyboard'])('saves atomically by default via %s', async (action) => {
   const save = vi.spyOn(filesApi, 'save').mockResolvedValue({
     document: { ...doc, content: 'changed' },
     recoveryPath: null,
@@ -168,24 +166,46 @@ it('requires explicit replacement consent for both save button and keyboard save
   });
   await mount();
   mock.change('changed');
-  expect(saveButton().disabled).toBe(true);
-  const command = mock.editor.addCommand.mock.calls[0]![1] as () => void;
-  command();
-  expect(save).not.toHaveBeenCalled();
-  confirm();
   await nextTick();
+  expect(document.querySelector('.editor-save-policy')).toBeNull();
+  expect(document.querySelector('.editor-save-details')).toBeNull();
   expect(saveButton().disabled).toBe(false);
-  command();
+  if (action === 'button') saveButton().click();
+  else (mock.editor.addCommand.mock.calls[0]![1] as () => void)();
   await vi.waitFor(() => expect(useFilesStore().dirty).toBe(false));
   expect(save).toHaveBeenCalledExactlyOnceWith('file', 'changed', true);
   expect(document.querySelector('.editor-statusbar')?.textContent).toContain('已与远程文件同步');
+  expect(useNotificationsStore().items).toEqual([
+    expect.objectContaining({ text: '远程文件已保存并校验。', error: false }),
+  ]);
+});
+
+it('blocks repeated button and keyboard saves while a save is pending', async () => {
+  let finish!: (result: Awaited<ReturnType<typeof filesApi.save>>) => void;
+  const save = vi.spyOn(filesApi, 'save').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await mount();
+  mock.change('changed');
+  saveButton().click();
+  await nextTick();
+  expect(saveButton().disabled).toBe(true);
+  expect(mock.editor.updateOptions).toHaveBeenLastCalledWith({ readOnly: true });
+  saveButton().click();
+  (mock.editor.addCommand.mock.calls[0]![1] as () => void)();
+  expect(save).toHaveBeenCalledExactlyOnceWith('file', 'changed', true);
+  finish({ document: { ...doc, content: 'changed' }, recoveryPath: null, message: null });
+  await vi.waitFor(() => expect(saveButton().disabled).toBe(false));
+  expect(useFilesStore().dirty).toBe(false);
 });
 
 it('keeps failed content editable and displays the actual save error', async () => {
   vi.spyOn(filesApi, 'save').mockRejectedValue({ message: '远端内容已变化' });
   await mount();
   mock.change('my draft');
-  confirm();
   await nextTick();
   saveButton().click();
   await vi.waitFor(() =>

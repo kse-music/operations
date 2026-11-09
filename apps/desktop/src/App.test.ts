@@ -297,6 +297,15 @@ it('opens About inside the settings window and preserves the connected terminal'
   const page = document.querySelector('.about-view')!;
   expect(page.querySelector('h1')?.textContent).toBe('关于 ServerDeck');
   expect(page.textContent).toContain('v9.8.7-test.1');
+  expect(
+    [...page.querySelectorAll('[aria-label="产品信息"] dt')].map((label) => label.textContent),
+  ).toEqual(['应用版本', '发布时间']);
+  expect(page.textContent).not.toContain('Rust · Tauri 2 · Vue 3');
+  const releaseTime = page.querySelector('time')!;
+  expect(releaseTime.dateTime).toBe(import.meta.env.APP_RELEASE_TIME);
+  expect(Number.isFinite(Date.parse(releaseTime.dateTime))).toBe(true);
+  expect(releaseTime.textContent).toMatch(/^\d{4}年\d{1,2}月\d{1,2}日 \d{2}:\d{2}:\d{2}$/);
+  expect(releaseTime.parentElement?.textContent).toContain('北京时间');
   expect(page.textContent).toContain('schema v10');
   expect(page.querySelector('[data-testid="backend-ready"]')).not.toBeNull();
   expect(workspace.current).toMatchObject({ key: 'host:a', view: 'terminals', hostId: 'a' });
@@ -409,6 +418,8 @@ it('keeps the About page available before bootstrap and updates its real version
   await openNavigation('关于');
   const page = document.querySelector('.about-view')!;
   expect(page).not.toBeNull();
+  const releaseTime = page.querySelector('time')!.textContent;
+  expect(releaseTime).toBeTruthy();
   expect(page.textContent).toContain('暂不可用（本地后端未就绪）');
   expect(page.textContent).toContain('后端尚未就绪，暂无运行状态。');
   useApplicationStore().loading = true;
@@ -423,6 +434,16 @@ it('keeps the About page available before bootstrap and updates its real version
   expect(page.textContent).not.toContain('暂不可用');
   page.querySelector<HTMLButtonElement>('button')!.click();
   expect(useApplicationStore().initialize).toHaveBeenCalledTimes(2);
+  await useWorkspaceStore().closeSettings();
+  await flush();
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2099-01-01T00:00:00Z'));
+  try {
+    await openNavigation('关于');
+    expect(document.querySelector('.about-view time')!.textContent).toBe(releaseTime);
+  } finally {
+    vi.useRealTimers();
+  }
   expect(document.querySelector('dialog[aria-label="关于 ServerDeck"]')).toBeNull();
 });
 

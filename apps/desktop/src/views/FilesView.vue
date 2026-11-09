@@ -7,7 +7,6 @@ import {
   Copy,
   Eye,
   EyeOff,
-  HardDrive,
   FolderPlus,
   FileUp,
   FolderUp,
@@ -22,16 +21,19 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { isTauri } from '@tauri-apps/api/core';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import FilePane from '../components/FilePane.vue';
+import FileLocationPicker from '../components/FileLocationPicker.vue';
 import TransferPanel from '../components/TransferPanel.vue';
 import Modal from '../components/Modal.vue';
 import { useFilesStore } from '../stores/files';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
+import { useNotificationsStore } from '../stores/notifications';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 import {
   bytes,
   remoteJoin,
+  remoteDirectoryLocations,
   unfinished,
   type FileEntry,
   type LocalDrive,
@@ -47,7 +49,8 @@ const emit = defineEmits<{
   terminal: [host: Host, action: FileTerminalAction];
 }>();
 const store = useFilesStore(),
-  hosts = useHostsStore();
+  hosts = useHostsStore(),
+  notifications = useNotificationsStore();
 const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   localPath = ref(''),
   remotePath = ref(''),
@@ -178,9 +181,18 @@ async function loadLocalDrives(): Promise<void> {
     localDrivesLoading.value = false;
   }
 }
-async function selectLocalDrive(event: Event): Promise<void> {
-  const path = (event.target as HTMLSelectElement).value;
+async function selectLocalDrive(path: string): Promise<void> {
   if (localDrives.value.some((drive) => drive.path === path)) await store.localLoad(path);
+}
+const remoteFolders = computed(() => {
+  const current = store.current;
+  if (!current?.listing) return [];
+  const pending = remoteDirectoryLocations(current.pendingPath ?? '');
+  return pending.length ? pending : remoteDirectoryLocations(current.listing.path);
+});
+async function selectRemoteFolder(path: string): Promise<void> {
+  if (store.current?.state !== 'connected' || store.closingHosts.includes(chosen.value)) return;
+  if (remoteFolders.value.some((folder) => folder.path === path)) await store.navigate(path);
 }
 
 watch(
@@ -216,7 +228,7 @@ async function connect(): Promise<void> {
 async function copy(path: string): Promise<void> {
   try {
     await clipboardApi.writeText(path);
-    store.notice = '绝对路径已复制。';
+    notifications.push('绝对路径已复制。');
   } catch {
     store.error = '无法写入剪贴板。';
   }
@@ -423,7 +435,7 @@ async function startTransfer(): Promise<void> {
       });
     transfer.value = null;
     await store.poll();
-    store.notice = '任务已交给 Rust 后台队列，离开此页面后继续。';
+    notifications.push('任务已交给 Rust 后台队列，离开此页面后继续。');
   } catch (cause) {
     store.error = errorMessage(cause);
   } finally {
@@ -607,7 +619,6 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <p v-if="store.notice" class="banner success" role="status">{{ store.notice }}</p>
     <p v-if="store.editorBusy" class="banner" role="status">正在打开 {{ store.openingPath }}…</p>
     <p v-if="store.localOpening" class="banner" role="status">正在显示系统打开方式…</p>
     <p v-if="!chosen" class="banner" role="status">
@@ -631,32 +642,20 @@ onBeforeUnmount(() => {
           >
             <ArrowUp :size="15" aria-hidden="true" />
           </button>
-          <label class="local-drive-picker">
-            <HardDrive :size="15" aria-hidden="true" />
-            <select
-              aria-label="选择本地磁盘"
-              title="选择本地磁盘"
-              :value="selectedDrive"
-              :disabled="localDrivesLoading && !localDrives.length"
-              :aria-busy="localDrivesLoading"
-              @focus="loadLocalDrives"
-              @pointerdown="loadLocalDrives"
-              @change="selectLocalDrive"
-            >
-              <option v-if="!localDrives.length" value="" disabled>
-                {{
-                  localDrivesLoading
-                    ? '加载磁盘…'
-                    : localDrivesFailed
-                      ? '磁盘加载失败'
-                      : '无可用磁盘'
-                }}
-              </option>
-              <option v-for="drive in localDrives" :key="drive.path" :value="drive.path">
-                {{ drive.name }}
-              </option>
-            </select>
-          </label>
+          <FileLocationPicker
+            :items="localDrives"
+            :value="selectedDrive"
+            label="选择本地磁盘"
+            list-label="本地磁盘"
+            icon="drive"
+            :loading="localDrivesLoading"
+            :empty-text="
+              localDrivesLoading ? '加载磁盘…' : localDrivesFailed ? '磁盘加载失败' : '无可用磁盘'
+            "
+            :disabled="store.closingHosts.includes(chosen) || store.current?.switchingUser"
+            @refresh="loadLocalDrives"
+            @select="selectLocalDrive"
+          />
           <input v-model="localPath" aria-label="本地路径" required /><button
             class="tool-button"
             aria-label="前往"
@@ -740,8 +739,26 @@ onBeforeUnmount(() => {
             :disabled="!store.current?.listing?.parent"
             @click="store.current?.listing?.parent && store.navigate(store.current.listing.parent)"
           >
-            <ArrowUp :size="15" aria-hidden="true" /></button
-          ><input
+            <ArrowUp :size="15" aria-hidden="true" />
+          </button>
+          <FileLocationPicker
+            :key="`remote-${store.current?.id ?? chosen}`"
+            :items="remoteFolders"
+            :value="remoteFolders.at(-1)?.path ?? ''"
+            label="选择远程目录"
+            list-label="远程目录层级"
+            icon="folder"
+            :loading="store.current?.loading ?? false"
+            :empty-text="store.current?.state === 'connected' ? '加载目录…' : '未连接'"
+            :disabled="
+              store.current?.state !== 'connected' ||
+              !store.current?.listing ||
+              store.current?.switchingUser ||
+              store.closingHosts.includes(chosen)
+            "
+            @select="selectRemoteFolder"
+          />
+          <input
             v-model="remotePath"
             aria-label="远程路径"
             :disabled="store.current?.state !== 'connected'"

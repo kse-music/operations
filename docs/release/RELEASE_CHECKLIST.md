@@ -33,6 +33,8 @@
 
 产品发布只修改根目录 [Cargo.toml](../../Cargo.toml) 的 `[workspace.package].version`。平台 Rust 包继承工作区版本，Tauri 未声明 `version` 时使用 Cargo 包版本，关于页读取后端 `CARGO_PKG_VERSION`；两个私有 npm 工程不单独声明产品版本。SDK/API、插件包、数据库 schema 与配置格式独立管理，不能跟随产品版本批量替换。
 
+关于页的“发布时间”由 Vite 在本次前端打包时生成并嵌入，按北京时间显示，不需要手工维护日期；同一产物重新打开或检查后端不改变该时间。开发模式使用本次 Vite 启动时间。
+
 修改后继续按需使用原有命令，无需额外版本命令：
 
 ```powershell

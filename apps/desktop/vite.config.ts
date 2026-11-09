@@ -3,6 +3,9 @@ import vue from '@vitejs/plugin-vue';
 import { pluginDevelopmentKit } from './plugin-development-kit.ts';
 
 export default defineConfig({
+  define: {
+    'import.meta.env.APP_RELEASE_TIME': JSON.stringify(new Date().toISOString()),
+  },
   resolve: {
     alias: {
       '@serverdeck/plugin-sdk': decodeURIComponent(

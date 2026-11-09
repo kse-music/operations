@@ -4,6 +4,7 @@ import { createPinia, disposePinia, type Pinia } from 'pinia';
 import FilesView from './FilesView.vue';
 import { useFilesStore } from '../stores/files';
 import { useHostsStore } from '../stores/hosts';
+import { useNotificationsStore } from '../stores/notifications';
 import { clipboardApi } from '../services/clipboard';
 import { filesApi } from '../services/files';
 import { hostInput } from '../types/hosts';
@@ -81,6 +82,55 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
+const drivePicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择本地磁盘"]')!;
+const driveOptions = () => [
+  ...document.querySelectorAll<HTMLElement>('[aria-label="本地磁盘"] [role="option"]'),
+];
+const driveName = () => drivePicker().querySelector('.file-location-value')?.textContent?.trim();
+async function selectDrive(name: string): Promise<void> {
+  drivePicker().click();
+  await nextTick();
+  driveOptions()
+    .find((option) => option.textContent?.trim() === name)!
+    .click();
+  await nextTick();
+}
+async function driveKey(key: string): Promise<KeyboardEvent> {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+  drivePicker().dispatchEvent(event);
+  await nextTick();
+  await nextTick();
+  return event;
+}
+
+it('does not leave a finished external edit notice as a banner when the file page is reopened', async () => {
+  const files = useFilesStore(pinia);
+  const localPath = 'D:/app/external-edits/edit-1/config.ini';
+  files.externalDocument = {
+    token: 'external',
+    sessionId: 'sftp-a',
+    path: '/srv/api/config.ini',
+    localPath,
+    transferId: 'download',
+    ready: true,
+    atomicSave: true,
+  };
+  vi.spyOn(filesApi, 'closeEditor').mockResolvedValue(undefined);
+  await files.closeExternal();
+  await nextTick();
+  expect(root.querySelector('.banner.success')).toBeNull();
+  const notifications = useNotificationsStore(pinia);
+  expect(notifications.items).toEqual([
+    expect.objectContaining({ text: expect.stringContaining(localPath), error: false }),
+  ]);
+  notifications.dismiss(notifications.items[0]!.id);
+  app!.unmount();
+  await mountView();
+  expect(root.querySelector('.banner.success')).toBeNull();
+  expect(root.textContent).not.toContain(localPath);
+  expect(notifications.items).toEqual([]);
+});
+
 it('opens local ini files with the system application picker on double click and reports failures locally', async () => {
   const files = useFilesStore(pinia);
   files.local!.entries = [
@@ -104,15 +154,18 @@ it('opens local ini files with the system application picker on double click and
 it('replaces the folder browser with a drive selector immediately after the parent button', async () => {
   await vi.waitFor(() => expect(filesApi.localDrives).toHaveBeenCalled());
   const parent = root.querySelector('[aria-label="本地上级"]')!;
-  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  const picker = drivePicker();
   expect(root.querySelector('[aria-label="选择本地目录"]')).toBeNull();
-  expect(parent.nextElementSibling?.contains(picker)).toBe(true);
-  expect(picker.closest('label')?.nextElementSibling?.getAttribute('aria-label')).toBe('本地路径');
-  expect([...picker.options].map((option) => option.textContent?.trim())).toEqual([
+  expect(parent.nextElementSibling).toBe(picker);
+  expect(picker.nextElementSibling?.getAttribute('aria-label')).toBe('本地路径');
+  picker.click();
+  await nextTick();
+  expect(driveOptions().map((option) => option.textContent?.trim())).toEqual([
     'C: 本地磁盘',
     'D: 本地磁盘',
   ]);
-  expect(picker.value).toBe('D:\\');
+  expect(driveOptions().every((option) => option.firstElementChild?.tagName === 'svg')).toBe(true);
+  expect(driveName()).toBe('D: 本地磁盘');
   expect(root.querySelector('[aria-label="选择上传文件夹…"]')).not.toBeNull();
 });
 
@@ -123,16 +176,14 @@ it('navigates to the selected drive root and preserves local back navigation', a
     parent: null,
     entries: [],
   }));
-  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
-  picker.value = 'C:\\';
-  picker.dispatchEvent(new Event('change', { bubbles: true }));
+  await selectDrive('C: 本地磁盘');
   await vi.waitFor(() => expect(files.local?.path).toBe('C:\\'));
   expect(load).toHaveBeenCalledWith('C:\\');
   expect(root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe('C:\\');
   expect(files.current?.path).toBe('/srv/api');
   expect(files.stepHistory('local', 'back')).toBe(true);
   await vi.waitFor(() => expect(files.local?.path).toBe('D:/test'));
-  expect(picker.value).toBe('D:\\');
+  expect(driveName()).toBe('D: 本地磁盘');
 });
 
 it('restores the previous drive and list when a drive becomes unavailable', async () => {
@@ -142,30 +193,32 @@ it('restores the previous drive and list when a drive becomes unavailable', asyn
   vi.spyOn(filesApi, 'local').mockImplementation(
     () => new Promise((_resolve, fail) => (reject = fail)),
   );
-  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
-  picker.value = 'C:\\';
-  picker.dispatchEvent(new Event('change', { bubbles: true }));
-  await nextTick();
+  await selectDrive('C: 本地磁盘');
   expect(files.localLoading).toBe(true);
-  expect(picker.value).toBe('C:\\');
+  expect(driveName()).toBe('C: 本地磁盘');
   reject({ message: '磁盘不可用' });
   await vi.waitFor(() => expect(files.error).toBe('磁盘不可用'));
   expect(files.local).toBe(previous);
-  expect(picker.value).toBe('D:\\');
+  expect(driveName()).toBe('D: 本地磁盘');
   expect(root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe('D:/test');
 });
 
 it('matches canonical Windows drive paths and leaves UNC paths unselected', async () => {
   const files = useFilesStore(pinia);
-  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  const picker = drivePicker();
   files.local = { path: '\\\\?\\c:\\Users\\test', parent: null, entries: [] };
   await nextTick();
-  expect(picker.value).toBe('C:\\');
+  expect(driveName()).toBe('C: 本地磁盘');
   files.local = { path: '\\\\?\\UNC\\server\\share', parent: null, entries: [] };
   await nextTick();
-  expect(picker.value).toBe('');
-  expect(picker.selectedIndex).toBe(-1);
-  expect(picker.querySelector('option[value=""]')).toBeNull();
+  expect(driveName()).toBe('');
+  expect(picker.querySelector('.file-location-value svg')).toBeNull();
+  picker.click();
+  await nextTick();
+  expect(driveOptions()).toHaveLength(2);
+  expect(driveOptions().every((option) => option.getAttribute('aria-selected') === 'false')).toBe(
+    true,
+  );
   expect(root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe(
     '\\\\server\\share',
   );
@@ -178,7 +231,7 @@ it('shows loading and failure states and retries drive discovery on focus', asyn
     () => new Promise((_resolve, fail) => (reject = fail)),
   );
   await mountView();
-  const picker = root.querySelector<HTMLSelectElement>('[aria-label="选择本地磁盘"]')!;
+  const picker = drivePicker();
   expect(picker.disabled).toBe(true);
   expect(picker.textContent).toContain('加载磁盘');
   reject({ message: '无法读取磁盘列表' });
@@ -186,11 +239,263 @@ it('shows loading and failure states and retries drive discovery on focus', asyn
   expect(picker.textContent).toContain('磁盘加载失败');
   expect(useFilesStore(pinia).error).toBe('无法读取磁盘列表');
   picker.dispatchEvent(new FocusEvent('focus'));
-  await vi.waitFor(() => expect(picker.value).toBe('D:\\'));
+  await vi.waitFor(() => expect(driveName()).toBe('D: 本地磁盘'));
   vi.mocked(filesApi.localDrives).mockResolvedValueOnce([]);
-  picker.dispatchEvent(new PointerEvent('pointerdown'));
+  picker.click();
   await vi.waitFor(() => expect(picker.textContent).toContain('无可用磁盘'));
-  expect(picker.value).toBe('');
+  expect(driveOptions()).toHaveLength(0);
+});
+
+it('selects icon options by keyboard and cancels without changing drives', async () => {
+  const files = useFilesStore(pinia);
+  const load = vi.spyOn(filesApi, 'local').mockImplementation(async (path) => ({
+    path: path!,
+    parent: null,
+    entries: [],
+  }));
+  const picker = drivePicker();
+  picker.focus();
+  await driveKey('ArrowDown');
+  expect(picker.getAttribute('aria-expanded')).toBe('true');
+  expect(load).not.toHaveBeenCalled();
+  const activeName = () =>
+    document.getElementById(picker.getAttribute('aria-activedescendant')!)?.textContent?.trim();
+  expect(activeName()).toBe('D: 本地磁盘');
+  await driveKey('Home');
+  expect(activeName()).toBe('C: 本地磁盘');
+  await driveKey('ArrowDown');
+  expect(activeName()).toBe('D: 本地磁盘');
+  await driveKey('ArrowUp');
+  expect(activeName()).toBe('C: 本地磁盘');
+  await driveKey('End');
+  expect(activeName()).toBe('D: 本地磁盘');
+  await driveKey('c');
+  expect(activeName()).toBe('C: 本地磁盘');
+  await driveKey('Enter');
+  await vi.waitFor(() => expect(files.local?.path).toBe('C:\\'));
+  expect(driveOptions()).toHaveLength(0);
+  expect(document.activeElement).toBe(picker);
+  await driveKey(' ');
+  await driveKey('End');
+  expect((await driveKey('Escape')).defaultPrevented).toBe(true);
+  expect(picker.getAttribute('aria-expanded')).toBe('false');
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(files.local?.path).toBe('C:\\');
+});
+
+it('dismisses the drive menu on outside actions and while the file workspace is blocked', async () => {
+  const picker = drivePicker();
+  const input = root.querySelector<HTMLInputElement>('[aria-label="本地路径"]')!;
+  for (const dismiss of [
+    () => input.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+    () => input.focus(),
+    () => window.dispatchEvent(new Event('scroll')),
+    () => window.dispatchEvent(new Event('resize')),
+    () => window.dispatchEvent(new Event('blur')),
+  ]) {
+    picker.focus();
+    await driveKey('Enter');
+    expect(driveOptions()).toHaveLength(2);
+    dismiss();
+    await nextTick();
+    expect(driveOptions()).toHaveLength(0);
+  }
+  await driveKey('Enter');
+  expect((await driveKey('Tab')).defaultPrevented).toBe(false);
+  expect(driveOptions()).toHaveLength(0);
+  await driveKey('Enter');
+  useFilesStore(pinia).current!.switchingUser = true;
+  await nextTick();
+  expect(picker.disabled).toBe(true);
+  expect(driveOptions()).toHaveLength(0);
+});
+
+it('refreshes an open drive list and leaves navigation pending until an option is selected', async () => {
+  const files = useFilesStore(pinia);
+  const load = vi
+    .spyOn(filesApi, 'local')
+    .mockImplementation(async (path) => ({ path: path!, parent: null, entries: [] }));
+  let finish!: (drives: { path: string; name: string }[]) => void;
+  vi.mocked(filesApi.localDrives).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await driveKey('Enter');
+  await driveKey('Home');
+  finish([
+    { path: 'C:\\', name: 'C: 本地磁盘' },
+    { path: 'E:\\', name: 'E: 本地磁盘' },
+  ]);
+  await vi.waitFor(() =>
+    expect(driveOptions().map((option) => option.textContent?.trim())).toEqual([
+      'C: 本地磁盘',
+      'E: 本地磁盘',
+    ]),
+  );
+  expect(load).not.toHaveBeenCalled();
+  expect(driveName()).toBe('');
+  await driveKey('End');
+  await driveKey('Enter');
+  await vi.waitFor(() => expect(files.local?.path).toBe('E:\\'));
+});
+
+it('removes the teleported drive menu when its view is unmounted', async () => {
+  await driveKey('Enter');
+  expect(driveOptions()).toHaveLength(2);
+  app!.unmount();
+  app = undefined;
+  expect(document.querySelector('[aria-label="本地磁盘"]')).toBeNull();
+  window.dispatchEvent(new Event('scroll'));
+});
+
+const folderPicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择远程目录"]')!;
+const folderOptions = () => [
+  ...document.querySelectorAll<HTMLElement>('[aria-label="远程目录层级"] [role="option"]'),
+];
+const folderName = () => folderPicker().querySelector('.file-location-value')?.textContent?.trim();
+async function chooseFolder(name: string): Promise<void> {
+  folderPicker().click();
+  await nextTick();
+  folderOptions()
+    .find((option) => option.textContent?.trim() === name)!
+    .click();
+  await nextTick();
+}
+
+it('adds an indented ancestor folder menu immediately after the remote parent button', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.listing = { path: '/home/dh', parent: '/home', entries: [] };
+  files.current!.path = '/home/dh';
+  await nextTick();
+  expect(root.querySelector('[aria-label="远程上级"]')?.nextElementSibling).toBe(folderPicker());
+  expect(folderPicker().nextElementSibling?.getAttribute('aria-label')).toBe('远程路径');
+  expect(folderName()).toBe('dh');
+  folderPicker().click();
+  await nextTick();
+  const options = folderOptions();
+  expect(options.map((option) => option.textContent?.trim())).toEqual(['/ <root>', 'home', 'dh']);
+  expect(options.map((option) => option.style.getPropertyValue('--location-depth'))).toEqual([
+    '0',
+    '1',
+    '2',
+  ]);
+  expect(
+    options.every((option) =>
+      option.firstElementChild?.matches('.file-entry-icon[data-kind="directory"]'),
+    ),
+  ).toBe(true);
+  expect(options.map((option) => option.getAttribute('aria-selected'))).toEqual([
+    'false',
+    'false',
+    'true',
+  ]);
+});
+
+it('navigates to a selected ancestor through the current SFTP connection and records remote history', async () => {
+  const files = useFilesStore(pinia);
+  const local = files.local;
+  const list = vi.spyOn(filesApi, 'list').mockImplementation(async (_id, path) => ({
+    path,
+    parent: path === '/' ? null : '/',
+    entries: [],
+  }));
+  await chooseFolder('srv');
+  await vi.waitFor(() => expect(files.current?.path).toBe('/srv'));
+  expect(list).toHaveBeenCalledExactlyOnceWith('sftp-a', '/srv');
+  expect(root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')?.value).toBe('/srv');
+  expect(folderName()).toBe('srv');
+  expect(folderOptions()).toHaveLength(0);
+  expect(files.local).toBe(local);
+  expect(files.stepHistory('remote', 'back')).toBe(true);
+  await vi.waitFor(() => expect(files.current?.path).toBe('/srv/api'));
+  expect(folderName()).toBe('api');
+});
+
+it('shows a pending ancestor then restores the previous folder and list on a permission error', async () => {
+  const files = useFilesStore(pinia);
+  const previous = files.current!.listing;
+  let reject!: (cause: unknown) => void;
+  vi.spyOn(filesApi, 'list').mockImplementation(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  await chooseFolder('srv');
+  expect(folderName()).toBe('srv');
+  expect(files.current?.loading).toBe(true);
+  reject({ message: '目录无访问权限' });
+  await vi.waitFor(() => expect(files.current?.error).toBe('目录无访问权限'));
+  expect(files.current?.listing).toBe(previous);
+  expect(files.current?.path).toBe('/srv/api');
+  expect(folderName()).toBe('api');
+  expect(root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')?.value).toBe('/srv/api');
+});
+
+it('selects the remote root by keyboard and keeps a single root item at the root directory', async () => {
+  const files = useFilesStore(pinia);
+  const list = vi
+    .spyOn(filesApi, 'list')
+    .mockResolvedValue({ path: '/', parent: null, entries: [] });
+  folderPicker().focus();
+  for (const key of ['ArrowDown', 'Home', 'Enter']) {
+    folderPicker().dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+    );
+    await nextTick();
+    await nextTick();
+  }
+  await vi.waitFor(() => expect(files.current?.path).toBe('/'));
+  expect(list).toHaveBeenCalledWith('sftp-a', '/');
+  expect(folderName()).toBe('/ <root>');
+  folderPicker().click();
+  await nextTick();
+  expect(folderOptions()).toHaveLength(1);
+  expect(root.querySelector<HTMLButtonElement>('[aria-label="远程上级"]')?.disabled).toBe(true);
+});
+
+it('uses the verified folder chain while a relative path is unresolved and never follows unsubmitted text', async () => {
+  const files = useFilesStore(pinia);
+  const input = root.querySelector<HTMLInputElement>('[aria-label="远程路径"]')!;
+  input.value = '/typed/but/not/submitted';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  expect(folderName()).toBe('api');
+  files.current!.pendingPath = '../next';
+  await nextTick();
+  folderPicker().click();
+  await nextTick();
+  expect(folderOptions().map((option) => option.textContent?.trim())).toEqual([
+    '/ <root>',
+    'srv',
+    'api',
+  ]);
+});
+
+it('closes a stale folder menu when SFTP identity changes and disables it while disconnected', async () => {
+  const files = useFilesStore(pinia);
+  const list = vi.spyOn(filesApi, 'list');
+  folderPicker().click();
+  await nextTick();
+  expect(folderOptions()).toHaveLength(3);
+  files.current!.id = 'new-identity';
+  files.current!.listing = { path: '/home/new-user', parent: '/home', entries: [] };
+  files.current!.path = '/home/new-user';
+  await nextTick();
+  expect(folderOptions()).toHaveLength(0);
+  expect(folderName()).toBe('new-user');
+  folderPicker().click();
+  await nextTick();
+  files.current!.state = 'failed';
+  await nextTick();
+  expect(folderPicker().disabled).toBe(true);
+  expect(folderOptions()).toHaveLength(0);
+  files.current!.listing = null;
+  await nextTick();
+  expect(folderName()).toBe('未连接');
+  expect(list).not.toHaveBeenCalled();
 });
 
 it('confirms a sudo identity, clears the password immediately, and displays the verified user', async () => {
@@ -482,6 +787,11 @@ it.each([
     root.querySelector<HTMLButtonElement>('[aria-label="复制本地路径"]')!.click();
     expect(copy).toHaveBeenCalledExactlyOnceWith(display);
     expect(files.local.path).toBe(path);
+    await nextTick();
+    expect(useNotificationsStore(pinia).items).toEqual([
+      expect.objectContaining({ text: '绝对路径已复制。', error: false }),
+    ]);
+    expect(root.querySelector('.banner.success')).toBeNull();
   },
 );
 

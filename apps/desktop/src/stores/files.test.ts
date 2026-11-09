@@ -132,8 +132,43 @@ describe('file opening and external editing', () => {
     expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith('download');
     expect(mocks.closeEditor).toHaveBeenCalledExactlyOnceWith('external', true);
     expect(store.externalDocument).toBeNull();
-    expect(store.notice).toContain(external.localPath);
+    expect(useNotificationsStore().items).toEqual([
+      expect.objectContaining({ text: expect.stringContaining(external.localPath), error: false }),
+    ]);
   });
+  it.each(['timeout', 'dismiss'])(
+    'does not replay a finished edit notice after %s and host reopening',
+    async (action) => {
+      vi.useFakeTimers();
+      const store = connected();
+      const notifications = useNotificationsStore();
+      store.externalDocument = { ...external, ready: true };
+      await store.closeExternal();
+      expect(notifications.items).toHaveLength(1);
+      if (action === 'dismiss') notifications.dismiss(notifications.items[0]!.id);
+      else await vi.advanceTimersByTimeAsync(6000);
+      expect(notifications.items).toEqual([]);
+      expect(await store.prepareHostClose(host.id)).toBe(true);
+      expect(await store.clearHostTransfers(host.id)).toBe(true);
+      mocks.open.mockImplementationOnce(async (_host, callback) => {
+        callback({ type: 'state', state: 'connected' });
+        return { id: 'reopened' };
+      });
+      mocks.connections.mockResolvedValue([{ id: 'reopened', hostId: host.id }]);
+      mocks.list.mockResolvedValue({ path: '/', parent: null, entries: [] });
+      await store.open(host);
+      expect(store.current?.state).toBe('connected');
+      expect(notifications.items).toEqual([]);
+      store.externalDocument = { ...external, sessionId: 'reopened', ready: true };
+      await store.closeExternal();
+      expect(notifications.items).toEqual([
+        expect.objectContaining({
+          text: expect.stringContaining(external.localPath),
+          error: false,
+        }),
+      ]);
+    },
+  );
   it('cancels an in-flight external save without closing or losing its recovery copy', async () => {
     const store = connected();
     store.externalDocument = { ...external, ready: true };
@@ -530,7 +565,6 @@ describe('SFTP transfer notifications', () => {
     expect(mocks.list).toHaveBeenCalledWith('session', '/srv');
     expect(store.current?.listing).toEqual(listing);
     expect(store.tasks).toEqual([completed]);
-    expect(store.notice).toBeNull();
     expect(useNotificationsStore().items).toEqual([]);
   });
 

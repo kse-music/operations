@@ -32,11 +32,12 @@
 | [0004](decisions/0004-native-validation.md)     | 实际桌面 E2E 与数据隔离               | 有效；真实 IPC、隔离数据与复制测试 EXE，不把夹具当生产验收           |
 | [0005](decisions/0005-ssh-transport.md)         | russh 生产接入、独立 PTY 和应用层背压 | 有效；后续增加 SFTP 等独立租约，历史吞吐结果不代表当前基准           |
 | [0006](decisions/0006-terminal-routing.md)      | 日常终端、受管路由和会话归属转发      | 路由/转发保留；布局持久化由 0018 替代                                |
-| [0007](decisions/0007-safe-files.md)            | SFTP 租约、有界队列和保守文本替换     | 文件安全保留；目录联动和主机关闭行为由 0018 修订                     |
+| [0007](decisions/0007-safe-files.md)            | SFTP 租约、有界队列和保守文本替换     | 文件安全保留；目录联动和主机关闭行为由 0018 修订，内置编辑器额外勾选确认由 0032 替代 |
 | [0008](decisions/0008-monitoring.md)            | 固定采集、独立监控租约和有界历史      | 宿主内部实现依据；不代表当前存在独立内置监控页面                     |
 | [0026](decisions/0026-windows-file-drag.md)     | Windows 虚拟文件与链接下载            | 有效；区分 Shell 协议、窗口内拖动与完整实体手势验收                  |
 | [0029](decisions/0029-sftp-user.md)             | 文件页显式 sudo 与独立身份租约        | 有效；终端不联动，运行期密码不持久化，插件不继承 sudo 身份           |
 | [0031](decisions/0031-external-file-editing.md) | 系统应用选择与确认式远程外部编辑      | 有效；扩展 0007 的编辑范围，保留快照冲突检测、原子回传及本地恢复副本 |
+| [0032](decisions/0032-default-atomic-text-save.md) | 内置文本编辑默认原子保存 | 有效；替代 0007 的内置编辑器额外勾选确认，保留后端检查及外部回传确认 |
 
 ## 已替代或退出范围的决策
 

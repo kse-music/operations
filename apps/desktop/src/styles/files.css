@@ -43,30 +43,71 @@
   flex: 1;
   min-width: 50px;
 }
-.local-drive-picker {
+.file-location-picker {
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
+  width: 12em;
   max-width: 42%;
-  padding-left: 7px;
+  padding: 7px;
   border: 1px solid var(--border-strong);
   border-radius: 5px;
   background: var(--panel);
   color: var(--text);
-}
-.local-drive-picker svg {
-  flex: none;
-  color: var(--muted);
-}
-.local-drive-picker select {
-  min-width: 0;
-  width: 10em;
-  border: 0;
-  background: var(--panel);
-  color: inherit;
   font: inherit;
-  padding: 7px 2px;
+  text-align: left;
+}
+.file-location-value,
+.file-location-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.file-location-picker svg,
+.file-location-option svg {
+  flex: none;
+}
+.file-location-value > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-location-menu {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--font-size-body);
+  box-shadow: 0 6px 20px #0004;
+}
+.file-location-option,
+.file-location-status {
+  padding: 6px 7px;
+}
+.file-location-option {
+  cursor: pointer;
+  border-radius: 3px;
+  padding-inline-start: min(calc(7px + var(--location-depth, 0) * 16px), 40%);
+}
+.file-location-option.active {
+  background: var(--accent-bg);
+}
+.file-location-option > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.file-location-status {
+  color: var(--muted);
 }
 .path-bar input {
   background: var(--panel);
@@ -434,56 +475,6 @@
   color: var(--muted);
   font-size: var(--font-size-caption);
 }
-.editor-save-policy {
-  display: flex;
-  flex: none;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--border);
-  background: var(--panel-soft);
-}
-.editor-save-policy .checkbox-label {
-  align-items: center;
-  color: var(--muted);
-  font-size: var(--font-size-caption);
-  line-height: 1.5;
-}
-.editor-save-policy .checkbox-label input {
-  margin-top: 0;
-}
-.editor-save-details {
-  position: relative;
-  margin-left: auto;
-  color: var(--muted);
-  font-size: var(--font-size-caption);
-}
-.editor-save-details summary {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  list-style: none;
-}
-.editor-save-details summary::-webkit-details-marker {
-  display: none;
-}
-.editor-save-details p {
-  position: absolute;
-  z-index: 5;
-  right: 0;
-  width: min(360px, calc(100vw - 72px));
-  margin: 8px 0 0;
-  padding: 12px 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--raised);
-  color: var(--text);
-  line-height: 1.65;
-  box-shadow: 0 8px 24px #0003;
-}
 .editor-feedback {
   flex: none;
   max-height: 88px;
@@ -548,7 +539,6 @@
     gap: 8px;
   }
   .editor-toolbar,
-  .editor-save-policy,
   .editor-statusbar {
     padding-left: 12px;
     padding-right: 12px;

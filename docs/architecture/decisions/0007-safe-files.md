@@ -4,6 +4,8 @@
 
 外部编辑范围由 [ADR 0031](0031-external-file-editing.md) 扩展：小型 UTF-8 限制继续适用于内置编辑器，外部副本按字节流式回传，复用本记录的冲突检测和保守原子替换原则。
 
+内置编辑器的额外原子替换勾选确认由 [ADR 0032](0032-default-atomic-text-save.md) 替代：保存动作默认采用原子替换，保留后端安全检查及外部编辑回传确认。
+
 以下保留原决策正文和当时验证边界；当前接口及功能以[总体架构](../ARCHITECTURE.md)和[决策索引](../DECISIONS.md)为准。
 
 日期：2026-11-01；状态：已实现，验证见 [阶段四验收](../../validation/files/VALIDATION_STAGE4.md)。

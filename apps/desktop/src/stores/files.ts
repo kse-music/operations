@@ -16,6 +16,7 @@ import { useTerminalsStore } from './terminals';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import { usePluginsStore } from './plugins';
+import { useNotificationsStore } from './notifications';
 import type { TerminalSession } from '../types/terminal';
 export interface FileConnection {
   host: Host;
@@ -56,13 +57,13 @@ function recordDirectory(
 }
 
 export const useFilesStore = defineStore('files', () => {
+  const notifications = useNotificationsStore();
   const connections = ref<Record<string, FileConnection>>({}),
     active = ref(''),
     local = ref<DirectoryListing | null>(null),
     localLoading = ref(false),
     localPendingPath = ref<string | null>(null),
     error = ref<string | null>(null),
-    notice = ref<string | null>(null),
     tasks = ref<TransferInfo[]>([]),
     document = ref<TextDocument | null>(null),
     dirty = ref(false),
@@ -412,7 +413,7 @@ export const useFilesStore = defineStore('files', () => {
         externalError.value = `${result.message ?? '回传失败'}；恢复路径：${result.recoveryPath ?? '无'}`;
         return;
       }
-      notice.value = '外部编辑的文件已回传并校验；继续编辑后需再次确认回传。';
+      notifications.push('外部编辑的文件已回传并校验；继续编辑后需再次确认回传。');
       void refresh();
     } catch (cause) {
       externalError.value = errorMessage(cause);
@@ -447,7 +448,7 @@ export const useFilesStore = defineStore('files', () => {
       await filesApi.closeEditor(external.token, true);
       externalDocument.value = null;
       externalError.value = null;
-      notice.value = `已结束外部编辑，本地副本保留于：${external.localPath}`;
+      notifications.push(`已结束外部编辑，本地副本保留于：${external.localPath}`);
     } catch (cause) {
       externalError.value = errorMessage(cause);
     } finally {
@@ -598,7 +599,6 @@ export const useFilesStore = defineStore('files', () => {
     localLoading,
     localPendingPath,
     error,
-    notice,
     tasks,
     pending,
     document,

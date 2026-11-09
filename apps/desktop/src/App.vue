@@ -550,10 +550,6 @@ watch(
   () => store.notice,
   (v) => notifications.push(v),
 );
-watch(
-  () => files.notice,
-  (v) => notifications.push(v),
-);
 </script>
 
 <template>

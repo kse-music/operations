@@ -3,6 +3,13 @@ import { useApplicationStore } from '../stores/application';
 import { RefreshCw } from '@lucide/vue';
 
 const application = useApplicationStore();
+const releaseTimestamp = import.meta.env.APP_RELEASE_TIME;
+const releaseTime = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  dateStyle: 'medium',
+  timeStyle: 'medium',
+  hourCycle: 'h23',
+}).format(new Date(releaseTimestamp));
 </script>
 
 <template>
@@ -29,8 +36,11 @@ const application = useApplicationStore();
           <dd v-else>{{ application.loading ? '读取中…' : '暂不可用（本地后端未就绪）' }}</dd>
         </div>
         <div>
-          <dt>技术栈</dt>
-          <dd>Rust · Tauri 2 · Vue 3</dd>
+          <dt>发布时间</dt>
+          <dd>
+            <time :datetime="releaseTimestamp">{{ releaseTime }}</time
+            >（北京时间）
+          </dd>
         </div>
       </dl>
     </section>

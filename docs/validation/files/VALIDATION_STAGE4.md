@@ -1,5 +1,20 @@
 # SFTP 文件管理阶段验收
 
+## 2026-11-10 文件成功提示不再常驻
+
+- 根因：结束外部编辑把副本路径写入全局 `files.notice`，`FilesView` 将其渲染为无关闭/过期机制的成功横幅；关闭主机只清连接和传输，未清旧提示。`App` 同时监听该值再发通知，导致同一结果同时出现在通知和常驻横幅。
+- 移除全局文件成功消息状态、重复的 App 监听及文件页成功横幅；结束/回传外部编辑、内置文本保存、复制路径及提交传输直接复用有界通知 Store，支持关闭和 6 秒自动消失。副本文件、活动编辑保护、失败及恢复信息、后端/持久契约保持不变。
+- 先更新回归，在旧实现复现 4 项失败。修复后运行 `npm run test -w @serverdeck/desktop -- src/stores/files.test.ts src/views/files-view.test.ts src/stores/workspace.test.ts src/components/remote-editor.test.ts src/components/notification-toasts.test.ts`：5 文件、113 项通过。覆盖副本路径通知、手动关闭/自动过期后关闭与重开主机不重放、再次结束同一文件可再次通知、文件页重新挂载无成功横幅，以及原有安全关闭、错误和恢复路径行为。测试临时目录使用当前进程 `.local/qa/file-notices/temp`，未修改系统环境。
+- `npm run typecheck`（桌面与插件 SDK）、相关 ESLint、Prettier、`git diff --check` 通过。在 `apps/desktop` 运行 `npx vite build --outDir ../../.local/qa/file-notices/frontend` 通过，保留既有 Monaco 大 chunk 提示。构建前 D 盘空闲约 243 GiB。
+- 未运行 Rust、真实 SSH/SFTP、原生 WebView2、桌面 EXE/安装包或其他平台验收。单元/组件测试使用受控服务响应，不代表真实远端验收；未删除任何用户副本。已完成本阶段修复，生效依赖桌面重建及正常启动，无新增功能依赖。
+
+## 2026-11-10 内置编辑器默认原子保存
+
+- 移除 `RemoteEditor.vue` 的原子替换确认、保存限制展开项和整行布局，同时删除 `files.css` 的专用样式。保存按钮与 Ctrl+S/⌘+S 共用保存入口，默认传入现有 `confirmReplace: true`；不修改 Rust/IPC、数据库或配置。忙碌和缺少原子扩展时仍拒绝保存，失败保留草稿，未保存内容关闭/重载仍须确认。外部应用回传确认不变，取舍见 [ADR 0032](../../architecture/decisions/0032-default-atomic-text-save.md)。
+- 先更新目标行为回归，在旧实现复现 4 项失败；修复后执行 `npm run test -w @serverdeck/desktop -- src/components/remote-editor.test.ts src/components/remote-editor-host.test.ts src/views/files-view.test.ts src/stores/files.test.ts`，最终 4 个文件共 77 项通过，其中编辑器 10 项覆盖无确认栏、按钮/快捷键默认原子保存、忙碌防重复、冲突失败保留内容、缺少扩展只读、未保存内容确认及原有布局/状态行为。Monaco 使用单元测试替身，不代替真实协议验收。
+- `npm run typecheck`（桌面及插件 SDK）、相关 ESLint、代码和其余修改文档的 Prettier、`git diff --check` 通过；新增 ADR/验证章节及链接目标已核对。`DECISIONS.md` 的表格格式检查未通过，已对照 `HEAD` 确认原有格式也未通过，保留既有表格布局，未扩大格式整理范围。从 `apps/desktop` 执行 `npx vite build --outDir ../../.local/qa/remote-editor-save/frontend` 生产构建通过，保留既有 Monaco 大 chunk 提示。构建前 D 盘空闲约 243 GiB。
+- 首次测试因沙箱临时目录内缓存重命名 EPERM 而未运行任何用例；将本次进程 `TEMP`/`TMP` 指向 `.local/qa/remote-editor-save/temp` 后正常执行，无需提升权限。未运行 Rust、真实 SFTP 保存、原生 WebView2、桌面 EXE/安装器构建或其他平台验证。原子替换的 inode/ACL/xattr/硬链接及无服务端 CAS 限制不变；新版桌面生效依赖后续重建并正常启动应用。本阶段完成，无其他功能依赖。
+
 ## 2026-11-10 文件打开与外部编辑回传
 
 ### 完成范围
@@ -39,7 +54,23 @@
 
 本阶段实现完成后停止；真实服务器/外部应用组合及其他平台验收需要对应授权测试环境，不作为本轮已验证能力。
 
+## 2026-11-10 远程目录层级选择
+
+- 文件夹图标统一：`FileLocationPicker.vue` 的入口和选项直接复用文件列表的 `.file-entry-icon[data-kind='directory']`，移除 `files.css` 中单独的半透明填充规则；文件夹尺寸与列表一同按字号缩放，本地磁盘图标保持原样。相关既有断言同步为共享样式标识。Files view 与 FilePane 两文件共 59 项测试、桌面 TypeScript、相关 ESLint/Prettier 和差异检查通过；无头 Edge 在深色标准字号、浅色 145%、深色窄窗口 145% 三组核对入口/每个选项与实际文件列表的计算宽高、描边色、填充色及描边宽度，全部相同，截图已查看。证据脚本为 `.local/qa/local-drive-picker/ui-folder-icons.mjs`，结果与截图在 `.local/qa/file-location-picker/ui-folder-icons-*`。本次为图标样式调整，未重跑 Rust/IPC、真实服务器或原生交互，未发现新增问题；仍按用户选择暂不重建 EXE，后续构建依赖正常退出运行中的开发版。
+- 远程“上级”右侧加入 WinSCP 式目录层级选择：收起显示当前目录，展开按根到当前目录逐级缩进，每项带文件夹图标；点选根或任一祖先通过现有 SFTP 导航跳转。`LocalDrivePicker.vue` 提取为共用的 `FileLocationPicker.vue`，本地磁盘保持同一交互、每项图标及无占位项要求。主要文件为共用组件、`FilesView.vue`、`types/files.ts`、`files.css` 和关联测试。没有 Rust、IPC、SDK、数据库或持久格式变化。
+- `npm test -- src/views/files-view.test.ts src/stores/files.test.ts src/components/file-pane.test.ts src/services/files.test.ts`：4 文件、93 项通过。覆盖层级顺序/缩进/每项图标、根目录、祖先跳转及后退、本地状态隔离、权限失败恢复、相对目标与未提交草稿、连接身份变化关闭旧菜单、断开禁用，以及原本地磁盘交互。目录拆分保留中文、空格及反斜线，未解析的 `.`/`..` 沿用已确认路径。
+- 桌面 TypeScript、相关 ESLint/Prettier、差异与文档链接/锚点检查通过。静态检查初次因 Vue 属性顺序失败，调整后通过；没有删除有效断言。无头 Edge 的 1280×820 深色标准、960×600 浅色 145%、600×820 深色 145% 三组通过：核对实际 SVG 图标、逐级缩进、祖先跳转、失败恢复、键盘根目录选择、菜单与地址栏边界，同时复验本地盘符选项及 26 项滚动。截图已查看；脚本为 `.local/qa/local-drive-picker/ui-remote-folders.mjs`，结果及截图在 `.local/qa/file-location-picker/ui-remote-folders-*`。
+- 延续用户“保留运行，暂不构建”的选择，本次未重建桌面 EXE，未替换或关闭运行中的程序。浏览器验证使用独立夹具，不代表真实远程 SFTP、原生物理输入、安装器或跨平台已验收。未重跑 Rust/IPC，因为本次调用契约和后端不变；无本次新增已知故障，运行版更新依赖之后正常退出开发版再构建。
+
 ## 2026-11-10 本地磁盘选择
+
+### 每个磁盘选项显示图标
+
+- 磁盘选项图标：新增 `LocalDrivePicker.vue`，替换原生 select 和外置固定图标；每个 listbox 选项均显示 SVG 磁盘图标与名称，收起入口显示所选项。保留真实盘符、无占位项、目录/历史与失败恢复；加入方向键、Home/End、字母定位、Enter/空格确认、Esc/Tab/外部关闭、视口限位和长列表滚动。工作区忙碌时关闭弹出层，卸载清理 Teleport 与事件监听，不改变 Rust、IPC 或持久契约。
+- 本次 `npm test -- src/views/files-view.test.ts src/stores/files.test.ts src/components/file-pane.test.ts`：3 文件、81 项通过；覆盖每项图标、鼠标/键盘选择、取消不导航、刷新中的失效盘符、UNC 未匹配、失败恢复、忙碌关闭和卸载清理。桌面 TypeScript、相关 ESLint/Prettier 通过。本机无头 Edge 在 1280×820 深色标准、960×600 浅色 145%、600×820 深色 145% 三组完成展开菜单的每行 SVG、选择/失败/键盘流程、路径栏无溢出、弹层边界和 26 项列表 End 滚动断言；已查看截图，证据为 `.local/qa/local-drive-picker/ui-icons.mjs`、`ui-icons-results.json`、`ui-icons-*.png`。布局夹具不代替原生系统交互验收。
+- 本次用户明确选择“保留运行，暂不构建”，未运行桌面重建、未生成包含选项图标的新 EXE，当前运行版仍是之前的界面。未重跑原生 IPC/完整远程 SFTP、物理键鼠、安装器或跨平台验收；无本次新增已知故障。后续桌面更新依赖用户正常退出占用 `target/debug/serverdeck-desktop.exe` 的开发版后再构建。
+
+### 移除占位项与首版磁盘选择
 
 - 下拉列表已移除“选择磁盘”占位项，有盘符时只显示实际磁盘；UNC 等无匹配盘符的路径保持未选择，不自动切换磁盘。加载、读取失败和无可用磁盘的状态仅在列表为空时显示。相关修改为 `FilesView.vue`、`files-view.test.ts` 和 PRD 对应浏览章节；收紧既有选项集合与 UNC 未选择断言。`npm test -- src/views/files-view.test.ts` 32 项、桌面 TypeScript、相关 ESLint/Prettier 及 `node tools/tauri.mjs build --debug --no-bundle` 通过，构建日志为 `.local/qa/local-drive-picker/remove-placeholder-build.log`；产物仍为 `target/debug/serverdeck-desktop.exe`。本次未重跑原生 IPC、完整 SFTP 或物理键鼠验收，无新增已知问题及后续依赖，保留原有构建提示。
 - 移除本地工具栏“选择本地目录”按钮，在“本地上级”右侧增加带磁盘图标的下拉框。Windows 通过原生 GetLogicalDrives/GetDriveTypeW 返回实际盘符和磁盘类型；选择后复用目录读取、加载态、失败恢复与独立本地导航历史。上传选择器、远程文件操作和持久格式不变，无新增依赖。原生调用复用 `windows-file-drag` 的 Windows 互操作边界，在阻塞任务中执行；IPC 仅对本地主窗口开放。

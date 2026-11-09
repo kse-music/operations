@@ -1,8 +1,16 @@
 # 验证记录索引
 
+最新：[关于页移除技术栈，展示固定的北京时间发布时间](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-关于页发布时间)。
+
+最新：[SFTP 远程目录层级选择、图标缩进、跳转与失败恢复](files/VALIDATION_STAGE4.md#2026-11-10-远程目录层级选择)。
+
+最新：[修复外部编辑结束提示跨主机重开常驻，统一使用一次性成功通知](files/VALIDATION_STAGE4.md#2026-11-10-文件成功提示不再常驻)。
+
+最新：[内置远程编辑器移除确认栏，保存按钮及快捷键默认原子替换](files/VALIDATION_STAGE4.md#2026-11-10-内置编辑器默认原子保存)。
+
 最新：[SFTP 本地文件打开、远程外部编辑与确认回传](files/VALIDATION_STAGE4.md#2026-11-10-文件打开与外部编辑回传)。
 
-最新：[SFTP 本地磁盘选择、目录切换与权限/布局验证](files/VALIDATION_STAGE4.md#2026-11-10-本地磁盘选择)。
+最新：[SFTP 本地磁盘选择、选项图标、键盘操作与权限/布局验证](files/VALIDATION_STAGE4.md#2026-11-10-本地磁盘选择)。
 
 最新：[Docker 版本弹窗改为核心字段表单、缺失值及最小窗口验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-版本核心字段表单)。
 
