@@ -108,7 +108,7 @@ PTY 每块最多 16 KiB，经 Tauri Channel 交给 xterm，`xterm.write(callback
 
 `TerminalsView` 挂载会话新建、拖动排序、双击重命名、关闭、分屏快捷键及绑定目标 TabKey 的会话菜单；菜单复用 store 的重命名/关闭/按主机关闭所有，复制只调用普通 `open(host)`，不复制动作或票据。菜单支持右键和键盘、视口限位与焦点恢复。`TerminalPane` 不挂载底部操作栏、快捷键提示及其重连/转发/SFTP/导出界面，内容区菜单仅复制/粘贴，查找和字号快捷键保留；SFTP 使用主机工具栏入口。默认键位由 `core::terminal::default_shortcuts` 与前端偏好共同约束，关闭的是当前窗格而非整个工作区。
 
-纯文本复制粘贴使用受限 Tauri 原生剪贴板服务，只在用户动作后运行。异步读取绑定连接 generation，重连/卸载废弃旧读取及待确认粘贴；2 MiB 上限、大文本确认和 Bracketed Paste 保留。字号/行高变化适配当前 xterm 和 PTY，不重启 Shell。
+纯文本复制粘贴使用受限 Tauri 原生剪贴板服务，只在用户动作后运行。异步读取绑定连接 generation，重连/卸载废弃旧读取及待确认粘贴；2 MiB 上限、大文本确认和 Bracketed Paste 保留。字号/行高变化适配当前 xterm 和 PTY，不重启 Shell。终端容器使用 content-box，让 FitAddon 读取的高度不包含外层内边距，避免多计算一行而被容器裁切；容器背景同步当前终端主题。xterm 6 的旧 `.xterm-viewport` 保留 DOM，但覆盖其黑色背景和强制原生滚动条样式，实际滚动继续由 `.xterm-scrollable-element` 负责。窗口 resize 事件适配当前尺寸并明确请求强制滚到底部，覆盖最大化、还原和拖动调整窗口尺寸；强制标记保留至下一渲染帧，不因随后 ResizeObserver 的 fit 被覆盖。侧栏、分屏或显示偏好引发的普通 fit 仅在原本处于底部时同步滚动条，不覆盖历史阅读或用户随后滚动。两种路径均通过公开滚动 API 修正 xterm 6 的旧像素位置，仅作用于同一可见普通缓冲；合并连续 fit，卸载移除窗口监听并取消回调，不滚动隐藏或备用屏幕。
 
 Linux 本地 PTY 使用有效 `$SHELL`、账户 Shell 或 `/bin/sh` 的交互模式。AppImage 仅在子进程环境剔除 APPDIR 内 Python 和搜索路径，不修改应用全局环境或用户文件。Windows 使用 PowerShell。
 

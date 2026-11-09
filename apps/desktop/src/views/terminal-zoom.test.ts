@@ -15,6 +15,8 @@ const xterm = vi.hoisted(() => ({
   instances: [] as {
     options: { fontSize: number; fontFamily: string; lineHeight: number };
     keyHandler: (event: KeyboardEvent) => boolean;
+    buffer: { active: { type: string; baseY: number; viewportY: number; length: number } };
+    scrollLines: ReturnType<typeof vi.fn>;
   }[],
   fit: vi.fn(),
   open: vi.fn(),
@@ -23,6 +25,8 @@ const xterm = vi.hoisted(() => ({
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0, length: 24 } };
+    scrollLines = vi.fn();
     keyHandler: (event: KeyboardEvent) => boolean = () => true;
     parser = { registerOscHandler: vi.fn() };
     constructor(public options: { fontSize: number; fontFamily: string; lineHeight: number }) {
@@ -56,11 +60,19 @@ vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const visible = ref(true);
+const frames = new Map<number, FrameRequestCallback>();
 beforeEach(async () => {
   vi.clearAllMocks();
   xterm.instances.length = 0;
   xterm.observers.length = 0;
   visible.value = true;
+  frames.clear();
+  let nextFrame = 0;
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+    frames.set(++nextFrame, callback);
+    return nextFrame;
+  });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -109,11 +121,17 @@ beforeEach(async () => {
 });
 afterEach(() => {
   app.unmount();
+  expect(frames.size).toBe(0);
   disposePinia(pinia);
   root.remove();
   document.querySelectorAll('dialog').forEach((dialog) => dialog.remove());
   vi.unstubAllGlobals();
 });
+function flushFrames() {
+  const pending = [...frames.values()];
+  frames.clear();
+  pending.forEach((callback) => callback(0));
+}
 function wheel(init: WheelEventInit, target = root.querySelector('.test-terminal-screen')!) {
   const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
   target.dispatchEvent(event);
@@ -126,6 +144,94 @@ async function savedSize(size: number) {
     expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([size, size]);
   });
 }
+
+it('synchronizes a bottom-pinned scrollbar after resize and coalesces consecutive fits', () => {
+  const terminal = xterm.instances[0]!;
+  Object.assign(terminal.buffer.active, { baseY: 100, viewportY: 100, length: 124 });
+  xterm.observers[0]!();
+  xterm.observers[0]!();
+  expect(frames.size).toBe(1);
+  expect(terminal.scrollLines).not.toHaveBeenCalled();
+  terminal.buffer.active.length = 150;
+  flushFrames();
+  expect(terminal.scrollLines).toHaveBeenCalledExactlyOnceWith(150);
+  expect(xterm.instances[1]!.scrollLines).not.toHaveBeenCalled();
+});
+
+it('forces visible panes to the bottom on maximize and restore even while reading history', () => {
+  const [first, second] = xterm.instances;
+  Object.assign(first!.buffer.active, { baseY: 100, viewportY: 40, length: 124 });
+  Object.assign(second!.buffer.active, { baseY: 200, viewportY: 60, length: 224 });
+  for (const width of [1600, 800]) {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width);
+    window.dispatchEvent(new Event('resize'));
+    expect(frames.size).toBe(2);
+    flushFrames();
+    expect(first!.scrollLines).toHaveBeenLastCalledWith(124);
+    expect(second!.scrollLines).toHaveBeenLastCalledWith(224);
+  }
+  expect(first!.scrollLines).toHaveBeenCalledTimes(2);
+  expect(second!.scrollLines).toHaveBeenCalledTimes(2);
+});
+
+it('keeps the forced window scroll through subsequent layout fits but skips another buffer', () => {
+  const terminal = xterm.instances[0]!;
+  Object.assign(terminal.buffer.active, { baseY: 100, viewportY: 40, length: 124 });
+  window.dispatchEvent(new Event('resize'));
+  xterm.observers[0]!();
+  flushFrames();
+  expect(terminal.scrollLines).toHaveBeenCalledExactlyOnceWith(124);
+  window.dispatchEvent(new Event('resize'));
+  terminal.buffer.active = { type: 'alternate', baseY: 0, viewportY: 0, length: 24 };
+  flushFrames();
+  expect(terminal.scrollLines).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { type: 'normal', baseY: 100, viewportY: 40 },
+  { type: 'alternate', baseY: 0, viewportY: 0 },
+])('keeps history or the alternate buffer on a layout-only fit (%s)', (buffer) => {
+  const terminal = xterm.instances[0]!;
+  Object.assign(terminal.buffer.active, buffer);
+  xterm.observers[0]!();
+  flushFrames();
+  expect(terminal.scrollLines).not.toHaveBeenCalled();
+});
+
+it('does not override a user scroll or buffer switch before the next frame', () => {
+  const terminal = xterm.instances[0]!;
+  Object.assign(terminal.buffer.active, { baseY: 100, viewportY: 100 });
+  xterm.observers[0]!();
+  terminal.buffer.active.viewportY = 80;
+  flushFrames();
+  expect(terminal.scrollLines).not.toHaveBeenCalled();
+  terminal.buffer.active.viewportY = 100;
+  xterm.observers[0]!();
+  terminal.buffer.active = { type: 'alternate', baseY: 0, viewportY: 0, length: 24 };
+  flushFrames();
+  expect(terminal.scrollLines).not.toHaveBeenCalled();
+});
+
+it('discards pending scrollbar synchronization when the pane is hidden or removed', async () => {
+  const terminal = xterm.instances[0]!;
+  Object.assign(terminal.buffer.active, { baseY: 100, viewportY: 100 });
+  xterm.observers[0]!();
+  visible.value = false;
+  await nextTick();
+  flushFrames();
+  expect(terminal.scrollLines).not.toHaveBeenCalled();
+  visible.value = true;
+  await nextTick();
+  await nextTick();
+  expect(frames.size).toBe(1);
+  useTerminalsStore().tabs = [];
+  await nextTick();
+  expect(frames.size).toBe(0);
+  expect(terminal.scrollLines).not.toHaveBeenCalled();
+  xterm.fit.mockClear();
+  window.dispatchEvent(new Event('resize'));
+  expect(xterm.fit).not.toHaveBeenCalled();
+});
 
 it('zooms all terminal fonts with Ctrl+wheel, saves the setting and refits the panes', async () => {
   const original = { ...useApplicationStore().state!.config };

@@ -219,7 +219,7 @@
 - [移除会话菜单“关闭其它”验收](terminal/VALIDATION_REMOVE_CLOSE_OTHERS.md)
 - [会话栏精简与复制会话验证（2026-11-03）](terminal/VALIDATION_SESSION_TAB_DUPLICATE.md)
 - [终端会话标签菜单验证（2026-11-03）](terminal/VALIDATION_SESSION_TAB_MENU.md)
-- [SSH 日常使用增强验收](terminal/VALIDATION_SSH_USABILITY.md)
+- [SSH 日常使用增强验收](terminal/VALIDATION_SSH_USABILITY.md)（含[窗口缩放滚动与末行裁切修复](terminal/VALIDATION_SSH_USABILITY.md#2026-11-09-窗口缩放滚动与末行裁切修复)、[最大化/还原强制到底部](terminal/VALIDATION_SSH_USABILITY.md#窗口最大化还原强制到底部)）
 - [SSH 与交互式终端验收](terminal/VALIDATION_STAGE3.md)
 - [终端快捷复制粘贴验收（2026-11-02）](terminal/VALIDATION_TERMINAL_CLIPBOARD.md)
 - [终端常驻栏与操作入口验证](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md)（含[移除底部操作栏](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-09-移除终端底部操作栏)；早期入口补齐记录保留为历史）

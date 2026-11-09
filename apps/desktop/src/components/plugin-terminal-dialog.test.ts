@@ -16,6 +16,7 @@ vi.mock('../services/plugins', () => ({ pluginsApi: { platformTerminalOpen: api.
 vi.mock('../services/terminal', () => ({ terminalApi: { input: api.input, close: api.close } }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
     cols = 80;
     rows = 24;
     options = {};

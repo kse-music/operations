@@ -26,6 +26,7 @@ const terminals = vi.hoisted(() => ({
 vi.mock('../services/terminal', () => ({ terminalApi: native }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
     cols = 80;
     rows = 24;
     osc?: (value: string) => boolean;

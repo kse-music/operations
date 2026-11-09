@@ -24,6 +24,7 @@ const xterm = vi.hoisted(() => ({
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
     options = {};
     cols = 80;
     rows = 24;

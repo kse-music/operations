@@ -72,11 +72,18 @@ const inputQueue = new TerminalInputQueue(terminalApi.input, (error) => {
   message.value = errorMessage(error);
 });
 let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+let scrollFrame: number | undefined;
+let forceBottomScroll = false;
 const encoder = new TextEncoder();
 
-function fitTerminal(): void {
+function fitTerminal(forceBottom = false): void {
   if (!props.active || !container.value?.clientWidth || !container.value.clientHeight || !terminal)
     return;
+  const buffer = opened ? terminal.buffer.active : undefined;
+  const followBottom =
+    buffer?.type === 'normal' &&
+    buffer.baseY > 0 &&
+    (forceBottom || forceBottomScroll || buffer.viewportY === buffer.baseY);
   // Hidden DOM measurements poison xterm's character spacing cache.
   if (pendingDisplayOptions) {
     Object.assign(terminal.options, terminalOptions());
@@ -92,7 +99,30 @@ function fitTerminal(): void {
     opened = true;
   }
   fit.fit();
+  if (followBottom) {
+    forceBottomScroll ||= forceBottom;
+    if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = undefined;
+      const force = forceBottomScroll;
+      forceBottomScroll = false;
+      if (
+        !disposed &&
+        props.active &&
+        terminal.buffer.active === buffer &&
+        (force || buffer.viewportY === buffer.baseY)
+      ) {
+        // xterm 6 can retain the scrollbar's old pixel offset after reflow even at baseY.
+        // A relative scroll through the buffer also synchronizes that pixel offset.
+        terminal.scrollLines(buffer.length);
+      }
+    });
+  }
   if (firstOpen) focusTerminal();
+}
+function resizeTerminal(): void {
+  closeMenu();
+  fitTerminal(true);
 }
 function focusTerminal(): void {
   if (
@@ -513,9 +543,9 @@ onMounted(() => {
     }
     return true;
   });
-  observer = new ResizeObserver(fitTerminal);
+  observer = new ResizeObserver(() => fitTerminal());
   observer.observe(container.value!);
-  window.addEventListener('resize', closeMenu);
+  window.addEventListener('resize', resizeTerminal);
   fitTerminal();
   if (props.tab.connectRequested) void connect();
 });
@@ -564,8 +594,9 @@ onBeforeUnmount(() => {
   upload?.dispose();
   ++generation;
   clearTimeout(resizeTimer);
+  if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
   observer?.disconnect();
-  window.removeEventListener('resize', closeMenu);
+  window.removeEventListener('resize', resizeTerminal);
   container.value?.removeEventListener('paste', nativePaste, true);
   if (session)
     void terminalApi.close(session.id).catch((cause: unknown) => {
@@ -603,6 +634,7 @@ useErrorNotifications(message);
       class="xterm-container"
       aria-label="交互式 Shell"
       :data-state="tab.state"
+      :style="{ backgroundColor: terminalThemes[preferences.theme].background }"
       @wheel.capture="zoomWithWheel"
       @mousedown.capture="preventTerminalRightClick"
       @contextmenu.capture="terminalContextMenu"

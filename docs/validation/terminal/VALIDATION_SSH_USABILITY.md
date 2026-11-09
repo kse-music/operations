@@ -1,5 +1,72 @@
 # SSH 日常使用增强验收
 
+## 2026-11-09 窗口缩放滚动与末行裁切修复
+
+### 复现与实现
+
+在本机独立 Edge 中使用真实 Vue/TerminalsView/xterm 和应用样式、隔离内存 API，写入长行输出与末尾提示符；先手动滚动到底部，再在 1200×800 与最大尺寸之间往返。显示条件为 1920×1080、DPR 1，以及 2560×1440 CSS 视口、DPR 1.5（模拟 3840×2160 屏幕 150% 缩放），不连接 SSH 或读取用户配置。
+
+- 旧实现还原后缓冲的 `viewportY` 仍等于 `baseY`，滚动条却离底部约 241 / 373 CSS px。随后向上滚动 60 行实际跳回 555 / 813 行，复现用户无法留在最新位置的问题。xterm 6 的滚动条在重排后保留旧像素位置，单看缓冲坐标或提示符是否可见无法发现。
+- 全局 border-box 使 FitAddon 读取的父容器高度包含上下 12px 内边距；插件没有扣除父容器内边距，特定尺寸会多分配一行。DPR 1.5 的初始末行超出内容区约 4.69px，最大尺寸超出 3px；DPR 1 的另一个窗口高度超出 9px。
+- `styles/terminal.css` 仅对 `.xterm-container` 改用 content-box，保留原内边距，让 FitAddon 使用内容尺寸。`TerminalPane.vue` 在 fit 前记录普通缓冲是否在底部，下一渲染帧仍为同一活动缓冲且没有用户滚离底部时，调用公开 `scrollLines(buffer.length)` 同步实际滚动条位置；不用 xterm 私有字段，不重建终端或会话。连续 fit 合并回调，隐藏/备用缓冲不滚动，卸载取消待执行回调。
+- `terminal-zoom.test.ts` 补充底部同步、连续 fit 合并、历史/备用缓冲保护、排队期间用户滚动/切换缓冲、隐藏和卸载回归；其他四个终端组件测试仅补齐新增读取所需的公开缓冲夹具字段。
+
+### 实际验证
+
+| 检查 | 结果 |
+| --- | --- |
+| 终端组件定向测试 | 5 个文件、39 项通过 |
+| 全量 `npm test` | 54 个文件、513 项通过；保留既有 jsdom Canvas 未实现提示 |
+| `npm run build` | 插件准备、桌面 TypeScript 严格检查和 Vite 生产构建通过；保留既有 Monaco 大 chunk 提示 |
+| 全量 `npm run lint` | 通过 |
+| 修改源码/测试 Prettier、`git diff --check` | 通过 |
+| 真实 Vue/xterm 浏览器回归 | 两种显示条件共 78 组观测通过：各三次最大化/还原、24 个连续高度、10/14/18/32 字号、历史阅读及备用屏幕往返。底部滚动条间隙为 0，最后一行没有越过内容区，提示符和原 Session ID 保留；历史滚动保持原有距底部偏移，未被拉到底部 |
+
+已查看修复前后截图及两种显示条件的末行裁图，中文、下划线和 p/g/y 下伸字符均完整可见。证据位于 `.local/qa/terminal-resize/`：`browser-check.mjs`、`before.json`、`after.json`、`before-*.png`、`after-*.png`、`before.log`、`after-final.log`、`targeted-tests-final.log`、`frontend-tests.log`、`build.log`、`lint.log`、`format-check.log`。浏览器夹具曾因缺少应用的侧栏宽度 CSS 变量产生不正确的网格，补齐后重新记录复现；第一轮新增单测等待可见性监听的时机过早，补齐 Vue 更新等待后通过；最初历史检查要求绝对行号不变，调整为验证 xterm 原有的距底部偏移保持，未修改生产行为来满足该检查。
+
+### 底部黑条补充修复
+
+用户继续指出终端底部的黑色长条。上一轮截图确实已有该黑条，但检查只覆盖末行边界和滚动条位置，视觉验收漏掉了旧控件背景及原生箭头；原 78 组通过不能作为“没有黑条”的证据。
+
+隔离浏览器通过底部命中测试定位到空的 `.xterm-viewport`：默认背景为 `rgb(0, 0, 0)`，`overflow` 为 `auto scroll`，高度比实际整数终端行区域更大，露出黑色余带和系统滚动条。xterm 6 实际滚动由相邻的 `.xterm-scrollable-element` 处理。`terminal.css` 使用更高优先级的局部选择器将旧视口背景设为透明、overflow 设为 hidden，保留其 DOM；`TerminalPane.vue` 将容器内边距和末行余白的背景同步为当前终端主题，避免浅色/Nord/Solarized 仍露出深色带。没有隐藏实际的纵向滚动条或更改前述尺寸、滚动逻辑。
+
+补充验证：
+
+- 扩展同一真实 Vue/xterm 浏览器夹具，在每组观测检查旧视口透明且不产生原生滚动条、容器与实际终端背景相同；两种显示条件、四种终端主题及原窗口/字号/历史/备用屏幕回归共 86 组通过。已查看深色 DPR 1.5 和浅色 DPR 1 末行截图，黑带及旧箭头消失，中文/下划线/下伸字符完整可见。
+- `npm run test -w @serverdeck/desktop -- src/views/terminal-zoom.test.ts src/components/terminal-clipboard.test.ts`：2 个文件、28 项通过。
+- `npm run build`、本次组件 ESLint、两项生产文件 Prettier 及 `git diff --check` 通过；构建保留既有大 chunk 提示。本次样式补充未重复全量业务测试，前述 513 项记录属于此前窗口滚动修复的检查。
+- 同目录补充证据为 `probe-black-bar.mjs`、`black-bar-probe.json`、`black-bar-check.log`、更新后的 `after.json`、`black-bar-fixed-*.png`、`black-bar-tests.log`、`black-bar-build.log`、`black-bar-lint.log`、`black-bar-format.log`。仍未进行原生窗口/实际 DPI 切换或跨平台验收，未重建 EXE/安装器。
+
+### 移除终端绿色焦点边框
+
+用户要求移除终端内容区的绿色外框。仅删除 `styles/terminal.css` 中 `.split-pane.focused` 的 inset box-shadow；保留 focused 类及 store 的输入目标管理、会话标签选中样式和分屏分隔条，不调整布局尺寸。
+
+实际检查：独立 Edge 中真实 Vue/xterm 夹具，1280×820/DPR 1 深色、2560×1440/DPR 1.5 浅色，各检查单窗格和两个分屏的焦点切换，共 6 组通过。计算样式确认无 box-shadow、outline 或边框；点击两个窗格后分别成为真实 focused 目标，会话标签保留 aria-selected。已查看深色单窗格和浅色分屏截图。CSS Prettier 与 `git diff --check` 通过。
+
+本次仅删除样式，没有新增单元测试，也未重复业务构建、原生程序或真实 SSH 验收。分屏不再用绿色外框指示焦点，焦点管理行为已用浏览器验证；无其他已知阻断。证据为 `.local/qa/terminal-resize/no-border-check.mjs`、`no-border-check.log` 以及 `.local/qa/terminal-no-border/result.json` 和六张 PNG。开发模式加载新样式后生效，安装版依赖重新构建 EXE；本阶段结束后停止。
+
+### 窗口最大化/还原强制到底部
+
+用户进一步明确：即使先手动向上翻阅历史，每次最大化或还原窗口都应主动回到最新内容。此需求将窗口尺寸变化从原来的“仅在原本处于底部时跟随”改为强制滚到底部；仅侧栏、分屏、字体或字号变化继续保持原有历史阅读行为。
+
+修改前用真实鼠标滚轮向上翻阅，再扩大浏览器窗口，稳定复现 `viewportY=567`、`baseY=970`，新要求的底部断言失败。`TerminalPane.vue` 将窗口 resize 监听改为 `resizeTerminal`，先关闭菜单再 `fitTerminal(true)`；显式强制标记保留到滚动回调执行，随后 ResizeObserver 的普通 fit 不会丢掉该标记。只处理当前可见的同一普通缓冲，不切换备用屏幕、重建 xterm 或更换 Session，卸载移除窗口监听并取消回调。
+
+`terminal-zoom.test.ts` 增加手动历史位置下的最大化/还原、两个可见窗格均回到底部、后续布局 fit 保留强制请求、切换缓冲和卸载清理回归；保留普通布局 fit、字号调整、历史阅读及用户主动滚动的原断言。
+
+实际验证：
+
+- 定向终端测试 2 个文件、30 项通过；全量 `npm test` 54 个文件、515 项通过，保留既有 jsdom Canvas 提示。
+- `npm run build`、全量 `npm run lint`、修改组件/测试 Prettier、`git diff --check` 通过；生产构建保留既有 Monaco 大 chunk 提示。
+- 独立 Edge 中实际 Vue/xterm、鼠标滚轮及窗口 resize，1920×1080/DPR 1 与 2560×1440/DPR 1.5 两种显示条件，各进行三轮“滚到历史 → 最大化 → 再滚到历史 → 还原”。共 12 次窗口切换均满足缓冲在底部、滚动条间隙为 0、原 Session 和单个 xterm 实例保留；加入每次切换前历史位置、侧栏/字号仅布局变化、备用屏幕观测，共 30 组通过。已查看还原后的截图。
+
+证据：`.local/qa/terminal-resize/force-bottom-check.mjs`、`force-bottom-before.log`、`force-bottom-after.log`、`force-bottom-tests.log`、`force-bottom-full-tests.log`、`force-bottom-build.log`、`force-bottom-lint.log`、`force-bottom-format.log`；原始结果与截图位于 `.local/qa/terminal-window-bottom/before.json`、`after.json`、`after-*.png`。该夹具仅使用隔离的内存 API，没有连接 SSH 或修改用户配置。
+
+未重建 EXE/安装器，未做原生窗口按钮、真实显示器 DPI 切换或跨平台复验。窗口 resize 同时覆盖拖动调整窗口尺寸，这些动作会主动结束历史阅读位置并滚到底部，符合更新后的需求；无其他已知阻断。开发模式重载前端后生效，安装版依赖重新构建桌面程序，本阶段结束后停止。
+
+### 边界、风险与依赖
+
+没有修改 Rust、依赖、数据库或持久配置。浏览器验证模拟两种目标显示条件，不等同于用户原生窗口、实际显示器 DPI 切换、真实 SSH 全屏应用或 Linux/macOS 验收；未重建 EXE/安装器。整数终端行数下，底部可留不足一行的空白，以保证整行完整显示。当前无其他已知阻断，原生复验依赖新版桌面程序；开发模式重新加载前端后生效，本阶段结束后停止。
+
 ## 2026-11-06 Linux 终端下划线裁切修复
 
 ### 复现与实现

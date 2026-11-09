@@ -77,6 +77,8 @@
   white-space: nowrap;
 }
 .xterm-container {
+  /* FitAddon measures this element's computed content size, excluding its padding. */
+  box-sizing: content-box;
   flex: 1;
   min-height: 100px;
   background: #10141c;
@@ -85,6 +87,11 @@
 }
 .xterm-container .xterm {
   height: 100%;
+}
+.xterm-container .xterm > .xterm-viewport {
+  /* xterm 6 scrolls through .xterm-scrollable-element; this legacy layer is empty. */
+  background-color: transparent;
+  overflow: hidden;
 }
 .terminal-find {
   display: flex;
@@ -121,9 +128,6 @@
   position: absolute;
   overflow: hidden;
   padding: 3px;
-}
-.split-pane.focused {
-  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .split-pane > .terminal-pane {
   height: 100%;
