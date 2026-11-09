@@ -396,7 +396,7 @@ try {
         .locator('.binding-current strong')
         .getByText('默认模型', { exact: true })
         .waitFor();
-      assert(await settings.getByRole('button', { name: '保存模型绑定', exact: true }).isVisible());
+      assert(await settings.getByRole('button', { name: '保存绑定', exact: true }).isVisible());
       const settingsFrame = page.frames().find((f) => f.url().includes('/settings/index.html'));
       if (fontSizeOnly) {
         for (const preview of [0.95, scale]) {
@@ -467,7 +467,7 @@ try {
       await settings.locator('label:has(input[value="layout-model-1"])').click();
       const holdSave = theme === 'dark';
       if (holdSave) await page.evaluate(() => (window.holdLayoutSave = true));
-      await settings.getByRole('button', { name: '保存模型绑定', exact: true }).click();
+      await settings.getByRole('button', { name: '保存绑定', exact: true }).click();
       if (holdSave) {
         await page.waitForFunction(() => typeof window.releaseLayoutSave === 'function');
         assert(
@@ -726,9 +726,9 @@ try {
         .locator('.plugin-workspace[data-plugin-id="cn.hiboot.plugins.assistant"]:visible')
         .getByRole('button', { name: '插件设置', exact: true });
       const tabsBefore = await page.locator('.workspace-tab').count();
-      await chat.getByText('绑定模型未配置 Key，请在模型管理中补充', { exact: true }).waitFor();
+      await chat.getByText('绑定模型未配置 Key，请在模型中补充', { exact: true }).waitFor();
       await gear.click();
-      await configuration.getByRole('button', { name: '权限与详情', exact: true }).click();
+      await configuration.getByRole('tab', { name: '基本信息', exact: true }).click();
       assert.equal(await configuration.locator('.plugin-state-section').count(), 0);
       assert.equal(await configuration.locator('iframe').count(), 0);
       await configuration.getByRole('button', { name: '插件配置', exact: true }).click();
@@ -742,7 +742,7 @@ try {
       assert(await gear.evaluate((button) => document.activeElement === button));
       await gear.click();
       await settings.locator('label:has(input[value="layout-model-0"])').click();
-      const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
+      const save = settings.getByRole('button', { name: '保存绑定', exact: true });
       await page.evaluate(() => (window.layoutSaveError = true));
       await save.click();
       await settings.getByText('模型绑定写入失败', { exact: true }).waitFor();
@@ -776,7 +776,7 @@ try {
       await gear.click();
       await settings.getByRole('button', { name: '管理模型', exact: true }).click();
       await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
-      await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
+      await page.getByRole('region', { name: '模型', exact: true }).waitFor();
       await navigateWorkspace(page, '插件管理');
       const manager = page.locator('.plugin-manager');
       await manager.waitFor();

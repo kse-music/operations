@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Plus, X } from '@lucide/vue';
 import { useTerminalsStore, type TerminalTab } from '../stores/terminals';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { stateLabels } from '../types/terminal';
 import { hostDisplayName } from '../types/hosts';
+import { sameHostConnection } from '../services/product-links';
 import { geometry, type Divider } from '../services/layout';
 import TerminalPane from '../components/TerminalPane.vue';
 import Modal from '../components/Modal.vue';
@@ -44,6 +45,66 @@ const area = ref<HTMLElement>();
 const renaming = ref<string | null>(null),
   title = ref('');
 const tab = computed(() => store.tabs.find((t) => t.key === store.active));
+const menu = ref<{ key: string; x: number; y: number } | null>(null);
+const menuElement = ref<HTMLElement>();
+let menuTrigger: HTMLElement | null = null;
+function closeMenu(): void {
+  menu.value = null;
+  if (props.visible && menuTrigger?.isConnected) menuTrigger.focus({ preventScroll: true });
+}
+async function openMenu(key: string, event: MouseEvent | KeyboardEvent): Promise<void> {
+  if (!props.visible) return;
+  const target = event.currentTarget as HTMLElement;
+  menuTrigger = target.querySelector<HTMLElement>('[role=tab]') ?? target;
+  const bounds = target.getBoundingClientRect();
+  const keyboard = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  menu.value = {
+    key,
+    x: keyboard ? bounds.left : event.clientX,
+    y: keyboard ? bounds.bottom : event.clientY,
+  };
+  await nextTick();
+  if (!menu.value || !menuElement.value) return;
+  const size = menuElement.value.getBoundingClientRect();
+  menu.value.x = Math.max(8, Math.min(menu.value.x, window.innerWidth - size.width - 8));
+  menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - size.height - 8));
+  await nextTick();
+  menuElement.value?.querySelector<HTMLButtonElement>('button')?.focus();
+}
+function menuKey(event: KeyboardEvent): void {
+  if (['Escape', 'Tab'].includes(event.key)) {
+    event.preventDefault();
+    closeMenu();
+    return;
+  }
+  const buttons = [...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+  if (!buttons.length || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  buttons[
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length
+  ]?.focus();
+}
+function runMenu(action: 'duplicate' | 'rename' | 'all' | 'close'): void {
+  const target = store.tabs.find((item) => item.key === menu.value?.key);
+  closeMenu();
+  if (!target) return;
+  if (action === 'duplicate') {
+    const snapshot = target.panes[0]?.host;
+    const configured = snapshot && hosts.catalog?.hosts.find((item) => item.id === snapshot.id);
+    if (snapshot && (!configured || !sameHostConnection(snapshot, configured))) {
+      store.error = '主机连接配置已变更，请从主机树重新打开后再复制会话。';
+      return;
+    }
+    store.duplicate(target.key);
+  } else if (action === 'rename') rename(target.key);
+  else if (action === 'all') void store.closeAll(target.key);
+  else void store.close(target.key);
+}
 const paneViews = computed(() =>
   store.tabs.flatMap((t) => {
     const layout = geometry(t.layout);
@@ -72,6 +133,7 @@ function submitRename(): void {
   if (renaming.value && store.rename(renaming.value, title.value)) renaming.value = null;
 }
 function dragTab(event: DragEvent, key: string): void {
+  closeMenu();
   event.dataTransfer?.setData('text/plain', key);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
 }
@@ -157,7 +219,25 @@ function action(key: string, name: string): void {
 }
 onBeforeUnmount(() => {
   finishDrag?.();
+  window.removeEventListener('resize', closeMenu);
+  window.removeEventListener('blur', closeMenu);
 });
+onMounted(() => {
+  window.addEventListener('resize', closeMenu);
+  window.addEventListener('blur', closeMenu);
+});
+watch(
+  () => [props.visible, props.hostId],
+  () => {
+    menu.value = null;
+  },
+);
+watch(
+  () => store.tabs.map((item) => item.key),
+  (keys) => {
+    if (menu.value && !keys.includes(menu.value.key)) closeMenu();
+  },
+);
 </script>
 <template>
   <div class="terminals-view">
@@ -185,6 +265,9 @@ onBeforeUnmount(() => {
             @dragstart="dragTab($event, item.key)"
             @dragover.prevent
             @drop.prevent="dropTab($event, item.key)"
+            @contextmenu.prevent.stop="openMenu(item.key, $event)"
+            @keydown.shift.f10.prevent.stop="openMenu(item.key, $event)"
+            @keydown.context-menu.prevent.stop="openMenu(item.key, $event)"
           >
             <button
               role="tab"
@@ -252,6 +335,30 @@ onBeforeUnmount(() => {
       ></div>
     </div>
   </div>
+  <Teleport to="body">
+    <template v-if="menu">
+      <button
+        class="context-backdrop"
+        aria-label="关闭会话菜单"
+        @click="closeMenu"
+        @contextmenu.prevent="closeMenu"
+        @wheel.prevent="closeMenu"
+      ></button>
+      <div
+        ref="menuElement"
+        class="context-menu"
+        role="menu"
+        aria-label="终端会话操作"
+        :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+        @keydown="menuKey"
+      >
+        <button role="menuitem" @click="runMenu('duplicate')">复制</button>
+        <button role="menuitem" @click="runMenu('rename')">重命名</button>
+        <button role="menuitem" @click="runMenu('all')">关闭所有</button>
+        <button role="menuitem" @click="runMenu('close')">关闭</button>
+      </div>
+    </template>
+  </Teleport>
   <Modal v-if="renaming" title="重命名标签" @close="renaming = null"
     ><form @submit.prevent="submitRename">
       <label

@@ -5,7 +5,7 @@ const menuModules = {
   终端: 'system',
   快捷键: 'system',
   数据与存储: 'system',
-  模型管理: 'system',
+  模型: 'system',
   关于: 'system',
   插件管理: 'system',
 };
@@ -91,7 +91,7 @@ export async function previewPluginPackage(page, packagePath) {
 
 export async function openPluginDetails(page, name) {
   const dialog = await openPluginSettings(page, name);
-  const details = dialog.getByRole('button', { name: '权限与详情', exact: true });
+  const details = dialog.getByRole('tab', { name: '基本信息', exact: true });
   if (await details.isVisible()) await details.click();
   const settings = dialog.getByLabel('插件设置', { exact: true });
   await settings.waitFor();
@@ -209,7 +209,7 @@ export async function bindAssistantModel(page, modelId) {
   await settings
     .locator(`label:has(input[type="radio"][value=${JSON.stringify(modelId)}])`)
     .click();
-  const save = settings.getByRole('button', { name: '保存模型绑定', exact: true });
+  const save = settings.getByRole('button', { name: '保存绑定', exact: true });
   if (await save.isEnabled()) {
     await save.click();
     await dialog.locator('.plugin-configuration').waitFor({ state: 'hidden' });

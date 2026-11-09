@@ -286,7 +286,7 @@ const slotContext = {
           ><Search :size="15" aria-hidden="true" /><input
             v-model="filter"
             aria-label="运维项目搜索"
-            placeholder="搜索名称、PID、端口…"
+            placeholder="搜索名称、镜像、状态或端口…"
         /></label>
         <slot name="toolbar" />
         <button class="button" :disabled="busy" @click="load">

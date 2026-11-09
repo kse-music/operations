@@ -6,7 +6,7 @@ export const serverSections = [
 export type ContainerShell = { id: string; bash: boolean; confirmed: boolean };
 export type OpsRequest =
   | { kind: 'capabilities' | 'containers' | 'images' }
-  | { kind: 'container_details'; id: string; revealEnv: boolean; confirmed: boolean }
+  | { kind: 'container_details'; id: string; revealEnv: boolean }
   | { kind: 'container_stats'; id: string }
   | {
       kind: 'container_action';

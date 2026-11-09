@@ -65,6 +65,9 @@ it.each(['system', 'user'] as const)(
     vi.spyOn(plugins, 'refresh').mockResolvedValue();
     useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
     await mount(plugin.manifest.id);
+    expect(
+      [...root.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent?.trim()),
+    ).toEqual(['基本信息', '插件配置']);
     expect(useWorkspaceStore().tabs).toEqual([]);
     expect(root.textContent).toContain(source === 'system' ? '系统内置' : '用户上传');
     expect(root.querySelector('[aria-label="插件设置"]')).not.toBeNull();
@@ -76,11 +79,21 @@ it.each(['system', 'user'] as const)(
     expect(root.querySelector('.plugin-workspace')).toBeNull();
     expect(root.textContent).not.toContain('允许访问的主机');
     expect(root.textContent).toContain('适用于所有主机');
+    const settingsTab = root.querySelector<HTMLButtonElement>('#plugin-tab-settings')!;
+    settingsTab.click();
+    await settle();
+    expect(root.querySelector('#plugin-panel-settings')?.textContent).toContain('无需单独配置');
+    expect(root.querySelector<HTMLElement>('#plugin-panel-info')?.style.display).toBe('none');
+    settingsTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    await settle();
+    expect(document.activeElement).toBe(root.querySelector('#plugin-tab-info'));
+    expect(root.querySelector('#plugin-tab-info')?.getAttribute('aria-selected')).toBe('true');
     if (source === 'system') {
-      for (const field of root.querySelectorAll<HTMLInputElement>('form input')) {
-        expect(field.checked).toBe(true);
-        expect(field.disabled).toBe(true);
-      }
+      expect(root.querySelectorAll('form input')).toHaveLength(0);
+      expect(root.querySelectorAll('.plugin-capability-icon')).toHaveLength(
+        plugin.manifest.permissions.length,
+      );
+      expect(root.textContent).toContain('仅供查阅和排查权限问题');
       expect(root.textContent).not.toContain('保存并授权');
       expect(root.textContent).not.toContain('撤销授权');
       root
@@ -234,6 +247,7 @@ it('opens an independent settings frontend without a host and returns to the plu
   await mount(plugin.manifest.id);
   expect(root.querySelector('[data-frame]')?.getAttribute('data-host')).toBe('');
   expect(root.querySelector('[data-frame]')?.getAttribute('data-page')).toBe('settings');
+  expect(root.querySelector('.plugin-config-footer')).toBeNull();
   expect(root.querySelector<HTMLElement>('.plugin-management-panel')!.style.display).toBe('none');
   expect(workspace.settingsView).toBe('plugins');
   expect(workspace.current).toBeUndefined();
@@ -242,6 +256,9 @@ it('opens an independent settings frontend without a host and returns to the plu
   root.querySelector<HTMLButtonElement>('[data-start-saving]')!.click();
   await settle();
   expect(workspace.pluginSettingsBusy).toBe(true);
+  expect(
+    [...root.querySelectorAll<HTMLButtonElement>('[role="tab"]')].every((tab) => tab.disabled),
+  ).toBe(true);
   expect(root.querySelector<HTMLButtonElement>('[aria-label="返回插件列表"]')!.disabled).toBe(true);
   workspace.navigate('models');
   await workspace.closeSettings();
@@ -250,7 +267,7 @@ it('opens an independent settings frontend without a host and returns to the plu
   root.querySelector<HTMLButtonElement>('[data-finish-saving]')!.click();
   await settle();
   expect(workspace.pluginSettingsBusy).toBe(false);
-  root.querySelector<HTMLButtonElement>('.plugin-config-footer button')!.click();
+  root.querySelector<HTMLButtonElement>('[aria-label="返回插件列表"]')!.click();
   await settle();
   expect(document.querySelector('dialog[open]')).toBeNull();
   expect(workspace.pluginConfiguration).toBeUndefined();

@@ -5,7 +5,7 @@ export const settingsNavigation = [
   { view: 'settingsTerminal', label: '终端', icon: 'terminal' },
   { view: 'settingsShortcuts', label: '快捷键', icon: 'shortcuts' },
   { view: 'settingsStorage', label: '数据与存储', icon: 'storage' },
-  { view: 'models', label: '模型管理', icon: 'models' },
+  { view: 'models', label: '模型', icon: 'models' },
   { view: 'plugins', label: '插件', icon: 'plugins' },
   { view: 'about', label: '关于', icon: 'about' },
 ] as const satisfies readonly { view: WorkspaceView; label: string; icon: string }[];

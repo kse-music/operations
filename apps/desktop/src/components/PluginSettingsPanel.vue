@@ -7,7 +7,7 @@ import PluginView from '../views/PluginView.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
 
-const props = defineProps<{ pluginId: string }>();
+const props = defineProps<{ pluginId: string; standalone?: boolean }>();
 const plugins = usePluginsStore();
 const workspace = useWorkspaceStore();
 const opener = document.activeElement;
@@ -26,6 +26,7 @@ const contextKey = computed(
   () => `plugin-settings:${props.pluginId}:${workspace.pluginConfiguration?.contributionId}`,
 );
 const saving = ref(false);
+const activeTab = ref<'info' | 'settings'>(contribution.value ? 'settings' : 'info');
 const busy = computed(() => saving.value || plugins.busy);
 watch(saving, (value) => (workspace.pluginSettingsBusy = value), { flush: 'sync' });
 onBeforeUnmount(() => (workspace.pluginSettingsBusy = false));
@@ -36,21 +37,44 @@ watch(contribution, (value) => {
     workspace.pluginConfiguration.contributionId = null;
 });
 
-async function showPanel(id: string | null): Promise<void> {
+async function showPanel(tab: 'info' | 'settings', id?: string): Promise<void> {
   const configuration = workspace.pluginConfiguration;
-  if (!configuration || configuration.contributionId === id || busy.value) return;
-  configuration.contributionId = id;
+  if (!configuration || busy.value) return;
+  activeTab.value = tab;
+  configuration.contributionId =
+    tab === 'settings' ? (id ?? contribution.value?.id ?? pages.value[0]?.id ?? null) : null;
+}
+
+function navigateTabs(event: KeyboardEvent) {
+  if (busy.value || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const target =
+    event.key === 'Home'
+      ? 'info'
+      : event.key === 'End'
+        ? 'settings'
+        : activeTab.value === 'info'
+          ? 'settings'
+          : 'info';
+  void showPanel(target);
+  (event.currentTarget as HTMLElement)
+    .querySelector<HTMLButtonElement>(`#plugin-tab-${target}`)
+    ?.focus();
 }
 
 async function select(event: Event): Promise<void> {
   const field = event.target as HTMLSelectElement;
   const id = field.value;
   field.value = contribution.value?.id ?? '';
-  await showPanel(id);
+  await showPanel('settings', id);
 }
 
 async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
   if (busy.value) return;
+  if (props.standalone && action === 'close') {
+    workspace.closePluginSettings();
+    return;
+  }
   workspace.navigate(action === 'models' ? 'models' : 'plugins');
   if (action === 'close') {
     await nextTick();
@@ -70,56 +94,95 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
 
 <template>
   <section class="plugin-configuration" :aria-label="`${plugin?.manifest.name ?? '插件'} · 配置`">
-    <header class="plugin-configuration-heading">
+    <header v-if="!standalone" class="plugin-configuration-heading">
       <button class="button" aria-label="返回插件列表" :disabled="busy" @click="finish()">
         <ArrowLeft :size="16" aria-hidden="true" />插件
       </button>
       <h1>{{ plugin?.manifest.name ?? '插件' }}</h1>
     </header>
     <div class="plugin-config-body plugin-settings-body">
-      <div v-if="pages.length" class="plugin-config-nav" role="group" aria-label="插件设置分类">
+      <div class="plugin-config-nav" role="tablist" aria-label="插件详情" @keydown="navigateTabs">
         <button
+          id="plugin-tab-info"
           class="button"
-          :aria-pressed="!!contribution"
+          role="tab"
+          :aria-selected="activeTab === 'info'"
+          aria-controls="plugin-panel-info"
+          :tabindex="activeTab === 'info' ? 0 : -1"
           :disabled="busy"
-          @click="showPanel(contribution?.id ?? pages[0]!.id)"
+          @click="showPanel('info')"
+        >
+          基本信息
+        </button>
+        <button
+          id="plugin-tab-settings"
+          class="button"
+          role="tab"
+          :aria-selected="activeTab === 'settings'"
+          aria-controls="plugin-panel-settings"
+          :tabindex="activeTab === 'settings' ? 0 : -1"
+          :disabled="busy"
+          @click="showPanel('settings')"
         >
           插件配置
         </button>
-        <button
-          class="button"
-          :aria-pressed="!contribution"
-          :disabled="busy"
-          @click="showPanel(null)"
-        >
-          权限与详情
-        </button>
       </div>
-      <label v-if="contribution && pages.length > 1" class="plugin-contribution-select">
-        <span>配置页面</span>
-        <select
-          :value="contribution?.id"
-          aria-label="插件配置页面"
-          :disabled="busy"
-          @change="select"
-        >
-          <option v-for="entry in pages" :key="entry.id" :value="entry.id">
-            {{ entry.label }}
-          </option>
-        </select>
-      </label>
-      <PluginView
-        v-if="contribution"
-        :key="contextKey"
-        settings-page
-        :plugin-id="pluginId"
-        :contribution-id="contribution.id"
-        host-id=""
-        :tab-key="contextKey"
-        @busy="saving = $event"
-        @settings-action="finish($event)"
-      />
-      <section v-if="plugin" v-show="!contribution" class="plugin-management-panel">
+      <div
+        v-show="activeTab === 'settings'"
+        id="plugin-panel-settings"
+        class="plugin-config-content"
+        role="tabpanel"
+        aria-labelledby="plugin-tab-settings"
+      >
+        <label v-if="contribution && pages.length > 1" class="plugin-contribution-select">
+          <span>配置页面</span>
+          <select
+            :value="contribution?.id"
+            aria-label="插件配置页面"
+            :disabled="busy"
+            @change="select"
+          >
+            <option v-for="entry in pages" :key="entry.id" :value="entry.id">
+              {{ entry.label }}
+            </option>
+          </select>
+        </label>
+        <PluginView
+          v-if="contribution"
+          :key="contextKey"
+          settings-page
+          :plugin-id="pluginId"
+          :contribution-id="contribution.id"
+          host-id=""
+          :tab-key="contextKey"
+          @busy="saving = $event"
+          @settings-action="finish($event)"
+        />
+        <div v-else class="plugin-config-empty" role="status">
+          <h2>
+            {{
+              plugin?.manifest.contributions.some((entry) => entry.kind === 'settings')
+                ? '配置暂不可用'
+                : '无需单独配置'
+            }}
+          </h2>
+          <p>
+            {{
+              plugin?.manifest.contributions.some((entry) => entry.kind === 'settings')
+                ? '启用插件并授予所需权限后，可在此修改插件配置。'
+                : '此插件直接使用当前主机的连接与平台配置，可从主机工具栏打开使用。'
+            }}
+          </p>
+        </div>
+      </div>
+      <section
+        v-if="plugin"
+        v-show="activeTab === 'info'"
+        id="plugin-panel-info"
+        class="plugin-management-panel"
+        role="tabpanel"
+        aria-labelledby="plugin-tab-info"
+      >
         <header class="plugin-management-header">
           <span class="plugin-row-icon">
             <PluginIcon :manifest="plugin.manifest" :source="plugin.source" :size="23" />
@@ -140,8 +203,5 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       </section>
       <p v-else class="host-empty" role="status">插件已卸载。</p>
     </div>
-    <footer v-if="contribution" class="dialog-actions plugin-config-footer">
-      <button class="button" :disabled="busy" @click="finish()">取消</button>
-    </footer>
   </section>
 </template>

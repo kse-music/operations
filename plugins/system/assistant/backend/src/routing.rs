@@ -20,13 +20,9 @@ fn mentions(question: &str, value: &str) -> bool {
                     .is_none_or(|c| !word(c)))
     })
 }
-pub fn local_choice(
-    question: &str,
-    assets: &[HostAsset],
-    previous: &[String],
-) -> Option<HostChoice> {
+pub fn inventory_question(question: &str) -> bool {
     let q = question.to_lowercase();
-    if ["有哪些", "多少", "列表", "清单", "列出"]
+    ["有哪些", "多少", "列表", "清单", "列出"]
         .iter()
         .any(|s| q.contains(s))
         && ["服务器", "主机", "资产"].iter().any(|s| q.contains(s))
@@ -36,7 +32,14 @@ pub fn local_choice(
         ]
         .iter()
         .any(|s| q.contains(s))
-    {
+}
+pub fn local_choice(
+    question: &str,
+    assets: &[HostAsset],
+    previous: &[String],
+) -> Option<HostChoice> {
+    let q = question.to_lowercase();
+    if inventory_question(question) {
         return Some(HostChoice {
             host_ids: vec![],
             message: String::new(),

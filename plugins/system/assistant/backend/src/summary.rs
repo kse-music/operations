@@ -1,7 +1,7 @@
 use crate::ops::Response;
 use serde_json::{Value, json};
 
-pub fn summarize(key: &str, mut response: Response) -> Value {
+pub fn summarize(key: &str, mut response: Response, redactor: &crate::redact::Redactor) -> Value {
     let total = response.records.len();
     let mut summary = json!({"total":total});
     let fields: &[&str] = match key {
@@ -70,6 +70,7 @@ pub fn summarize(key: &str, mut response: Response) -> Value {
                 row[*field] = value.clone();
             }
         }
+        redactor.value(&mut row);
         truncated |= bound_strings(&mut row, 256);
         let bytes = row.to_string().len();
         if detail_bytes + bytes > 4096 {
@@ -78,7 +79,7 @@ pub fn summarize(key: &str, mut response: Response) -> Value {
         detail_bytes += bytes;
         records.push(row);
     }
-    json!({"available":true,"summary":summary,"omittedRecords":total-records.len(),"records":records,"truncatedFields":truncated,"message":response.message.map(|text| clipped(&text,512))})
+    json!({"available":true,"summary":summary,"omittedRecords":total-records.len(),"records":records,"truncatedFields":truncated,"message":response.message.map(|text| clipped(&redactor.text(&text),512))})
 }
 
 fn clipped(text: &str, limit: usize) -> String {

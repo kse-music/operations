@@ -26,6 +26,7 @@ export interface PlatformContext {
   groups: { id: string; name: string; parentId: string | null }[];
   connections: Record<string, ConnectionMetadata>;
   models: ModelMetadata[];
+  settingsRevision: number;
   visible: boolean;
 }
 const state = shallowReactive<PlatformContext>({
@@ -34,6 +35,7 @@ const state = shallowReactive<PlatformContext>({
   groups: [],
   connections: {},
   models: [],
+  settingsRevision: 0,
   visible: true,
 });
 export function usePlatformContext(): DeepReadonly<PlatformContext> {

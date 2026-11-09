@@ -93,7 +93,7 @@ it('opens remote models by default and scopes counts, actions and feedback to th
   expect(remoteTab.getAttribute('aria-selected')).toBe('true');
   expect(remoteTab.querySelector('.asset-count')?.textContent).toBe('2');
   expect(localTab.querySelector('.asset-count')).toBeNull();
-  expect(root.querySelector('h1')?.textContent).toBe('模型管理');
+  expect(root.querySelector('h1')?.textContent).toBe('模型');
   expect(localPanel.style.display).toBe('none');
   expect(remotePanel.style.display).not.toBe('none');
   expect(remotePanel.textContent).toContain('模型 A');

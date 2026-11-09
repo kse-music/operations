@@ -6,22 +6,18 @@ import type { AiExecution, AiPrepare, AiProposal, AiTurn } from './types';
 import { useAssistantHosts } from './assistant-hosts';
 
 const bytes = (value: string) => new TextEncoder().encode(value).length;
-function history(turns: AiTurn[]): NonNullable<AiPrepare['history']> {
+function history(turns: AiTurn[], input: AiPrepare): NonNullable<AiPrepare['history']> {
   const result: NonNullable<AiPrepare['history']> = [];
-  let size = 0;
-  for (const turn of turns
-    .filter((t) => t.state === 'complete' && t.answer)
-    .slice(-6)
-    .reverse()) {
-    // Bound oversized old answers, without ever forwarding command/execution payloads.
-    let content = turn.answer!.text;
-    if (bytes(content) > 24 * 1024) {
-      content = Array.from(content).slice(0, 6000).join('') + '\n[历史回答过长，后续内容已省略]';
-    }
-    const length = bytes(turn.question) + bytes(content);
-    if (size + length > 48 * 1024) break;
-    size += length;
-    result.unshift({ role: 'user', content: turn.question }, { role: 'assistant', content });
+  for (const turn of turns.filter((t) => t.state === 'complete' && t.answer).slice(-6)) {
+    result.push(
+      { role: 'user', content: turn.question },
+      { role: 'assistant', content: turn.answer!.text },
+    );
+  }
+  // Bound the actual encoded request, not character counts. Drop complete pairs;
+  // cutting a string here could split a sensitive value before backend redaction.
+  while (result.length && bytes(JSON.stringify({ ...input, history: result })) > 48 * 1024) {
+    result.splice(0, 2);
   }
   return result;
 }
@@ -85,7 +81,6 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   async function send(input: AiPrepare, initialHostIds: string[] = []) {
     if (busy.value) return;
     const current = version;
-    const previous = history(turns.value);
     const previousHostIds =
       [...turns.value].reverse().find((t) => t.hostIds.length)?.hostIds ?? initialHostIds;
     controller = new AbortController();
@@ -147,6 +142,10 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
           expectedModelRevision: route.modelRevision,
         };
       }
+      const previous = history(turns.value, targetInput);
+      const historyOmitted =
+        turns.value.filter((turn) => turn.state === 'complete' && turn.answer).length >
+        previous.length / 2;
       const prepared = await aiApi.prepare({ ...targetInput, history: previous });
       if (disposed || current !== version) {
         await revoke(prepared.id);
@@ -160,7 +159,13 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       if (!disposed && current === version) {
         entry.answer = {
           ...answer,
-          warnings: [...new Set([...prepared.warnings, ...answer.warnings])],
+          warnings: [
+            ...new Set([
+              ...prepared.warnings,
+              ...answer.warnings,
+              ...(historyOmitted ? ['已按请求预算省略较早的完整历史轮次。'] : []),
+            ]),
+          ],
         };
         entry.state = 'complete';
       }

@@ -307,12 +307,12 @@ try {
         throw new Error('closing a session must leave other hosts running');
     });
     await page.screenshot({ path: `${output}/${name}-closed-session.png` });
-    await nav('模型管理');
+    await nav('模型');
     assert.equal(
       await page
         .locator('.settings-dialog-navigation [aria-current="page"]')
         .getAttribute('aria-label'),
-      '模型管理',
+      '模型',
     );
     await page.screenshot({ path: `${output}/${name}-models-settings.png` });
     await nav('关于');

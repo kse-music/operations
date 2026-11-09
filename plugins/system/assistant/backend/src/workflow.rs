@@ -99,21 +99,8 @@ async fn completion(
     pending: &Pending,
     messages: Vec<platform::Message>,
 ) -> Result<Value, Error> {
-    let bytes = serde_json::to_vec(&messages)
-        .map_err(|e| Error::Worker(Box::new(e)))?
-        .len();
-    let max = pending.model["config"]["maxOutputTokens"]
-        .as_u64()
-        .unwrap_or(2048);
-    let window = pending.model["config"]["contextWindowTokens"]
-        .as_u64()
-        .unwrap_or(131072);
-    if bytes > 44 * 1024 || bytes as u64 + max + 64 > window {
-        return Err(Error::Validation(
-            "问题、历史和上下文超过模型请求预算，请缩小范围或开启新对话",
-        ));
-    }
-    Ok(context
+    let fitted = crate::budget::fit(messages, &pending.model, 44 * 1024)?;
+    let mut result = context
         .with_bindings(pending.bindings.clone())
         .request(platform::Request::ModelComplete {
             model_id: pending.model["id"]
@@ -121,9 +108,11 @@ async fn completion(
                 .ok_or(Error::Validation("模型 ID 无效"))?
                 .into(),
             expected_revision: pending.model["revision"].as_str().map(str::to_owned),
-            messages,
+            messages: fitted.messages,
         })
-        .await?)
+        .await?;
+    result["contextWarnings"] = json!(fitted.warnings);
+    Ok(result)
 }
 async fn assets(context: &Context) -> Result<(Vec<HostAsset>, Value), Error> {
     let value = context.request(platform::Request::Hosts).await?;
@@ -267,7 +256,7 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
             context: context.with_bindings(bindings.clone()),
             id: host.clone(),
         };
-        let mut data = json!({"server":if request.selection.server {bound["host"].clone()}else{Value::Null},"collection":{"sources":plan.sources(),"policy":"仅采集本轮相关证据，未采集或读取失败不等于零"}});
+        let mut data = json!({"hostId":host,"server":if request.selection.server {bound["host"].clone()}else{Value::Null},"collection":{"sources":plan.sources(),"policy":"仅采集本轮相关证据，未采集或读取失败不等于零"}});
         let mut queries = vec![];
         if plan.metrics || request.selection.metrics {
             match sample(&client).await {
@@ -276,6 +265,8 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
                     let network_total = sample.network.len();
                     data["system"] = json!(sample.system);
                     data["metrics"] = json!({"sampledAt":sample.sampled_at,"uptime":sample.uptime,"load":sample.load,"cpu":sample.cpus.iter().find(|cpu|cpu.name=="cpu"),"memory":sample.memory,"diskTotal":disk_total,"disks":sample.disks.into_iter().take(8).collect::<Vec<_>>(),"omittedDisks":disk_total.saturating_sub(8),"networkTotal":network_total,"network":sample.network.into_iter().take(8).collect::<Vec<_>>(),"omittedNetwork":network_total.saturating_sub(8),"warnings":sample.warnings});
+                    redactor.value(&mut data["system"]);
+                    redactor.value(&mut data["metrics"]);
                     crate::summary::bound_strings(&mut data["system"], 256);
                 }
                 Err(Error::Platform(error)) if error.code == "USER_CANCELLED" => {
@@ -309,9 +300,10 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
                 Ok(response) => {
                     if response.detail.is_some() {
                         data[key] = json!({"available":true,"detail":response.detail});
+                        redactor.value(&mut data[key]);
                         crate::summary::bound_strings(&mut data[key], 4096);
                     } else {
-                        data[key] = crate::summary::summarize(key, response);
+                        data[key] = crate::summary::summarize(key, response, &redactor);
                     }
                 }
                 Err(Error::Platform(error)) if error.code == "USER_CANCELLED" => {
@@ -353,6 +345,7 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
             {
                 Ok(result) => {
                     data["selectedLog"] = json!({"available":true,"output":result.stdout});
+                    redactor.value(&mut data["selectedLog"]);
                     crate::summary::bound_strings(&mut data["selectedLog"], 8192);
                 }
                 Err(error) if error.code == "USER_CANCELLED" => return Err(error.into()),
@@ -364,15 +357,25 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
         redactor.value(&mut data);
         collected.push(data);
     }
-    let (assets, _) = assets(&context).await?;
-    let mut evidence = json!({"hosts":collected,"assets":assets});
+    let mut evidence = json!({"hosts":collected});
+    // Asset matching has its own request. A diagnosis must not resend unrelated
+    // inventory; only an explicit inventory question needs directory metadata.
+    if hosts.is_empty() && crate::routing::inventory_question(&request.question) {
+        let (assets, _) = assets(&context).await?;
+        evidence["assets"] = json!({"total":assets.len(),"records":assets,"omittedRecords":0});
+    }
     redactor.value(&mut evidence);
     if crate::summary::has_omissions(&evidence) {
         warnings.push("上下文明细已限量，统计基于完整成功查询，不能将未采集视为零。".into());
     }
     let mut messages = vec![platform::Message {
         role: platform::Role::System,
-        content: crate::prompts::SYSTEM_PROMPT.into(),
+        content: if hosts.len() == 1 {
+            agent::PROMPT
+        } else {
+            crate::prompts::SYSTEM_PROMPT
+        }
+        .into(),
     }];
     for message in request.history {
         messages.push(platform::Message {
@@ -388,17 +391,11 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
         content: json!({"question":redactor.text(&request.question),"context":evidence})
             .to_string(),
     });
-    if serde_json::to_vec(&messages)
-        .map_err(|e| Error::Worker(Box::new(e)))?
-        .len()
-        > 40 * 1024
-    {
-        return Err(Error::Validation(
-            "上下文超过请求预算，请减少主机数量或开启新对话",
-        ));
-    }
+    let fitted = crate::budget::fit(messages, &model, 40 * 1024)?;
+    warnings.extend(fitted.warnings);
+    let messages = fitted.messages;
     let key = id(&info)?;
-    let preview = json!({"id":key,"modelId":request.model_id,"destination":model["config"]["baseUrl"],"model":model["config"]["model"],"body":serde_json::to_string(&messages).map_err(|e|Error::Worker(Box::new(e)))?,"estimatedInputTokens":messages.iter().map(|m|m.content.len()).sum::<usize>()+64,"maxOutputTokens":model["config"]["maxOutputTokens"],"warnings":warnings});
+    let preview = json!({"id":key,"modelId":request.model_id,"destination":model["config"]["baseUrl"],"model":model["config"]["model"],"body":serde_json::to_string(&messages).map_err(|e|Error::Worker(Box::new(e)))?,"estimatedInputTokens":fitted.input_tokens,"maxOutputTokens":model["config"]["maxOutputTokens"],"warnings":warnings});
     let pending = Pending {
         scope: scope(&info)?.into(),
         at: now(&info),
@@ -431,8 +428,19 @@ async fn send(context: Context, mut pending: Pending) -> Result<Value, Error> {
     let mut observations = vec![];
     let mut usage: Option<Usage> = None;
     let mut all_usage = true;
+    let mut warnings = Vec::<String>::new();
     for _ in 0..6 {
         let result = completion(&context, &pending, pending.messages.clone()).await?;
+        for warning in result["contextWarnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            if !warnings.iter().any(|current| current == warning) {
+                warnings.push(warning.to_owned());
+            }
+        }
         if result["incomplete"] == true {
             return Err(Error::Validation("智能体响应被截断，未开放变更"));
         }
@@ -500,7 +508,7 @@ async fn send(context: Context, mut pending: Pending) -> Result<Value, Error> {
             }
             agent::Decision::Answer { text } => {
                 return Ok(
-                    json!({"text":pending.redactor.text(&text),"proposals":[],"usage":usage,"warnings":[],"agent":{"observations":observations,"steps":[]}}),
+                    json!({"text":pending.redactor.text(&text),"proposals":[],"usage":usage,"warnings":warnings,"agent":{"observations":observations,"steps":[]}}),
                 );
             }
             agent::Decision::Plan { summary, actions } => {
@@ -544,7 +552,7 @@ async fn send(context: Context, mut pending: Pending) -> Result<Value, Error> {
                     })?;
                 }
                 return Ok(
-                    json!({"text":text,"proposals":proposals,"usage":usage,"warnings":[],"agent":{"observations":observations,"steps":public}}),
+                    json!({"text":text,"proposals":proposals,"usage":usage,"warnings":warnings,"agent":{"observations":observations,"steps":public}}),
                 );
             }
         }
@@ -565,6 +573,14 @@ async fn send_advice(context: Context, pending: Pending) -> Result<Value, Error>
     let structured = serde_json::from_str::<Advice>(raw);
     let mut warnings: Vec<String> =
         vec!["模型内容可能有误；执行输出仅在本地展示，不自动回传模型。".into()];
+    warnings.extend(
+        result["contextWarnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned),
+    );
     let (text, commands) = match structured {
         Ok(advice)
             if result["incomplete"] != true
@@ -760,6 +776,10 @@ mod tests {
         removed: bool,
         cancel_mutation: bool,
         decision: Option<Value>,
+        assets: Vec<Value>,
+        containers: Vec<Value>,
+        context_window: u64,
+        failed_host: Option<String>,
     }
     impl Default for Platform {
         fn default() -> Self {
@@ -772,6 +792,10 @@ mod tests {
                 removed: false,
                 cancel_mutation: false,
                 decision: None,
+                assets: vec![],
+                containers: vec![],
+                context_window: 131072,
+                failed_host: None,
             }
         }
     }
@@ -799,12 +823,12 @@ mod tests {
                     )
                 }
                 "model" => Ok(
-                    json!({"model":{"id":"model","revision":"r1","config":{"model":"fixture","baseUrl":"fixture://model","maxOutputTokens":2048,"contextWindowTokens":131072}},"binding":"model-binding"}),
+                    json!({"model":{"id":"model","revision":"r1","config":{"model":"fixture","baseUrl":"fixture://model","maxOutputTokens":2048,"contextWindowTokens":self.context_window}},"binding":"model-binding"}),
                 ),
                 "host" => {
                     Ok(json!({"host":{"id":"host","name":"fixture"},"binding":"host-binding"}))
                 }
-                "hosts" => Ok(json!({"hosts":[],"groups":[]})),
+                "hosts" => Ok(json!({"hosts":self.assets,"groups":[]})),
                 "model_complete" => {
                     self.model_calls += 1;
                     let value = if let Some(value) = self.decision.clone() {
@@ -821,13 +845,22 @@ mod tests {
                 "execute" => {
                     let command = request["command"]["args"][1].as_str().unwrap().to_owned();
                     self.commands.push(command.clone());
+                    if request["hostId"].as_str() == self.failed_host.as_deref() {
+                        return Err(ApiError::new("SSH_FIXTURE", "测试主机查询失败"));
+                    }
                     if command.contains("d image rm") {
                         if self.cancel_mutation {
                             return Err(ApiError::new("USER_CANCELLED", "用户取消"));
                         }
                         self.removed = true;
                     }
-                    let output = if command.contains("d image ls") && !self.removed {
+                    let output = if command.contains("d container ls") {
+                        self.containers
+                            .iter()
+                            .map(Value::to_string)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    } else if command.contains("d image ls") && !self.removed {
                         self.images
                             .iter()
                             .map(Value::to_string)
@@ -855,6 +888,129 @@ mod tests {
         let reply = platform.action(runtime, "send", json!({"id":id,"confirmed":true}));
         assert!(reply["error"].is_null(), "{reply}");
         reply["result"]["value"]["proposals"][0].clone()
+    }
+    fn context_input(hosts: Vec<String>, question: &str) -> Value {
+        json!({"modelId":"model","sessionId":null,"sessionIds":hosts,"question":question,"selection":{"server":true,"metrics":false,"processes":false,"docker":false,"log":null,"logLines":100},"maskAddresses":false,"redactValues":[],"history":[],"autoHosts":true,"expectedModelRevision":"r1"})
+    }
+    fn preview_body(reply: &Value) -> Vec<platform::Message> {
+        assert!(reply["error"].is_null(), "{reply}");
+        serde_json::from_str(reply["result"]["value"]["body"].as_str().unwrap()).unwrap()
+    }
+    fn evidence(messages: &[platform::Message]) -> Value {
+        serde_json::from_str::<Value>(&messages.last().unwrap().content).unwrap()["context"].clone()
+    }
+    #[test]
+    fn redacts_full_values_before_summary_and_excludes_unrelated_assets() {
+        STATE.with_borrow_mut(|s| *s = State::default());
+        let secret = "SENSITIVE_VALUE_".repeat(30);
+        let mut platform = Platform {
+            assets: vec![
+                json!({"id":"unrelated","name":"UNRELATED_ASSET","hostname":"unrelated.example","port":22,"username":"other"}),
+            ],
+            containers: vec![json!({"ID":"a".repeat(64),"Names":secret,"State":"running"})],
+            ..Default::default()
+        };
+        let mut request = context_input(vec!["host".into()], "查看 Docker 容器数量");
+        request["redactValues"] = json!([secret]);
+        let reply = platform.action(&mut Runtime::new(crate::dispatch), "prepare", request);
+        let messages = preview_body(&reply);
+        let body = serde_json::to_string(&messages).unwrap();
+        assert!(
+            !body.contains("SENSITIVE_VALUE_"),
+            "sensitive value was truncated before redaction"
+        );
+        assert!(body.contains("[REDACTED]"));
+        assert!(
+            !body.contains("UNRELATED_ASSET"),
+            "diagnosis leaked an unrelated asset"
+        );
+        assert_eq!(
+            evidence(&messages)["hosts"][0]["docker"]["summary"]["total"],
+            1
+        );
+    }
+    #[test]
+    fn budgets_encoded_multi_host_context_and_keeps_counts_failures_and_complete_turns() {
+        STATE.with_borrow_mut(|s| *s = State::default());
+        let mut platform = Platform {
+            context_window: 12000,
+            failed_host: Some("host-3".into()),
+            containers: (0..20).map(|i| json!({"ID":format!("{i:064x}"),"Names":"quoted\"\\中文".repeat(50),"State":"running"})).collect(),
+            ..Default::default()
+        };
+        let mut request = context_input(
+            (0..8).map(|i| format!("host-{i}")).collect(),
+            "查看全部主机 Docker 容器数量",
+        );
+        request["history"] = Value::Array((0..6).flat_map(|i| [json!({"role":"user","content":format!("旧问题{i}")}),json!({"role":"assistant","content":format!("旧回答{i} {}", "历史\"\\\n".repeat(500))})]).collect());
+        let reply = platform.action(&mut Runtime::new(crate::dispatch), "prepare", request);
+        let messages = preview_body(&reply);
+        assert!(serde_json::to_vec(&messages).unwrap().len() + 2048 + 64 <= 12000);
+        assert_eq!((messages.len() - 2) % 2, 0, "partial history turn survived");
+        assert!(messages.len() < 14, "old turns were not removed");
+        let context = evidence(&messages);
+        assert_eq!(context["hosts"].as_array().unwrap().len(), 8);
+        for (index, host) in context["hosts"].as_array().unwrap().iter().enumerate() {
+            if index == 3 {
+                assert_eq!(host["docker"]["available"], false);
+                assert!(!host["docker"]["message"].as_str().unwrap().is_empty());
+            } else {
+                assert_eq!(host["docker"]["summary"]["total"], 20);
+                assert_eq!(host["docker"]["summary"]["running"], 20);
+                assert!(host["docker"]["omittedRecords"].as_u64().unwrap() > 0);
+            }
+        }
+        assert!(
+            !reply["result"]["value"]["warnings"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            platform.model_calls, 0,
+            "budgeting unexpectedly called the model"
+        );
+    }
+    #[test]
+    fn mandatory_question_over_budget_fails_without_model_call() {
+        STATE.with_borrow_mut(|s| *s = State::default());
+        let mut platform = Platform {
+            context_window: 4096,
+            ..Default::default()
+        };
+        let reply = platform.action(
+            &mut Runtime::new(crate::dispatch),
+            "prepare",
+            context_input(vec![], &"q".repeat(8000)),
+        );
+        assert_eq!(reply["error"]["code"], "AI_INPUT");
+        assert_eq!(platform.model_calls, 0);
+    }
+    #[test]
+    fn includes_asset_catalog_only_for_an_explicit_inventory_question() {
+        STATE.with_borrow_mut(|s| *s = State::default());
+        let mut platform = Platform {
+            assets: vec![
+                json!({"id":"catalog-host","name":"CATALOG_ENTRY","hostname":"host.example","port":22,"username":"user"}),
+            ],
+            ..Default::default()
+        };
+        let mut runtime = Runtime::new(crate::dispatch);
+        let knowledge = platform.action(
+            &mut runtime,
+            "prepare",
+            context_input(vec![], "解释 Linux 进程状态"),
+        );
+        assert!(evidence(&preview_body(&knowledge))["assets"].is_null());
+        let inventory = platform.action(
+            &mut runtime,
+            "prepare",
+            context_input(vec![], "列出服务器资产列表"),
+        );
+        let context = evidence(&preview_body(&inventory));
+        assert_eq!(context["assets"]["total"], 1);
+        assert_eq!(context["assets"]["records"][0]["id"], "catalog-host");
+        assert_eq!(platform.model_calls, 0);
     }
     #[test]
     fn complete_evidence_single_use_confirmation_and_verified_execution() {

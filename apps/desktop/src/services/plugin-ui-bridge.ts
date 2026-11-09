@@ -64,6 +64,7 @@ export function createPluginUiBridge(input: {
       interfaceFontScale: Number(
         document.documentElement.style.getPropertyValue('--interface-font-scale') || 1,
       ),
+      settingsRevision: plugins.settingsRevisions[input.id] ?? 0,
       hostId: input.hostId,
       hosts: canRead
         ? (hosts.catalog?.hosts ?? []).map((h) => ({
@@ -208,7 +209,10 @@ export function createPluginUiBridge(input: {
       }
       case 'platform.request': {
         if (!primitive || typeof primitive.kind !== 'string') throw new Error('平台请求无效');
-        return pluginPlatformRequest(input.id, primitive, active, owner);
+        const result = await pluginPlatformRequest(input.id, primitive, active, owner);
+        if (primitive.kind === 'settings_write')
+          plugins.settingsRevisions[input.id] = (plugins.settingsRevisions[input.id] ?? 0) + 1;
+        return result;
       }
       case 'actions.cancel':
         plugins.cancelPrompt(owner);

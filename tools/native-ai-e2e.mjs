@@ -157,8 +157,8 @@ try {
   assert.equal(path.resolve(bootstrap.dataDirectory), output);
   safe = true;
   assert.equal((await rpc('ai_models')).length, 0, 'isolated empty model registry');
-  await navigateWorkspace(page, '模型管理');
-  await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
+  await navigateWorkspace(page, '模型');
+  await page.getByRole('region', { name: '模型', exact: true }).waitFor();
   async function register(name, modelId, secret) {
     await page.getByRole('button', { name: '注册模型', exact: true }).click();
     await page.getByLabel('模型名称', { exact: true }).fill(name);
@@ -395,7 +395,7 @@ try {
       redactValues: [],
     },
   });
-  await navigateWorkspace(page, '模型管理');
+  await navigateWorkspace(page, '模型');
   await page.getByRole('button', { name: '编辑模型 模型 A', exact: true }).click();
   assert.equal(
     await page.getByLabel('API Key（留空保留已有 Key）', { exact: true }).inputValue(),

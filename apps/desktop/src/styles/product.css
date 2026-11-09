@@ -77,18 +77,6 @@ kbd {
   border-bottom: 0;
   padding-top: 0;
 }
-.workspace-endpoint {
-  margin-left: auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font:
-    var(--font-size-caption) Consolas,
-    monospace;
-}
 .workspace-local-label {
   font-size: var(--font-size-body);
   font-weight: 500;

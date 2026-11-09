@@ -62,8 +62,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         entry.kind === 'settings' &&
         (!contributionId || entry.id === contributionId),
     );
-    settingsView.value = 'plugins';
+    if (settingsView.value) settingsView.value = 'plugins';
     pluginConfiguration.value = { pluginId, contributionId: settings?.id ?? null };
+  }
+  function closePluginSettings(): void {
+    if (pluginSettingsBusy.value || usePluginsStore().busy) return;
+    pluginConfiguration.value = undefined;
   }
   async function openPlugin(
     pluginId: string,
@@ -228,6 +232,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     close,
     openPlugin,
     openPluginSettings,
+    closePluginSettings,
     pluginConfiguration,
     pluginPages,
     activePluginKey,

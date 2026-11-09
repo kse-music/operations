@@ -2,7 +2,7 @@
 
 独立 UI v4 标准插件包。界面、交互业务与前端测试在 `frontend/`，WASM 能力策略与 Rust 测试在 `backend/`；分别只引用公开 `@serverdeck/plugin-sdk` 和 `serverdeck-plugin-sdk`，普通 Vue/测试依赖按工作区管理。宿主通过相同沙箱、SDK、WASM 和授权机制加载内置与上传包。
 
-2.0.2 在清单中预授权完整的版本检测、容器列表、镜像列表三条固定查询，进入及刷新页面无需逐次确认。内置包预置独立 `ssh.execute.preapproved` 授权；作为上传包安装时需在权限页核对命令后单独授予。停止、删除、Shell、日志及其他命令仍按原流程确认。
+2.0.4 在清单中预授权版本检测、容器列表、镜像列表、容器详情、环境变量和资源使用六条完整固定查询，进入、刷新及查看详情无需逐次确认。详情与资源使用读取当前主机快照，再按完整容器 ID 筛选；概览不读取环境变量，环境变量快照仅在打开对应标签时查询，前端只收到当前容器的数据，切换或关闭时清除明文。查询仍受平台输出和超时限制，容器数量或详情过大时会明确失败。内置包预置独立 `ssh.execute.preapproved` 授权；作为上传包安装时需在权限页核对命令后单独授予。停止、删除、Shell、日志及其他未声明命令仍按原流程确认，不扩展宿主匹配规则。
 
 验证：`npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend`；原生单测用 `cargo test --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --no-run` 编译，将生成的测试 EXE 复制到 QA 目录再运行。构建会同时打包 WASM、UI 声明和独立 JS/CSS，完整契约见 [开发指南](../../../docs/plugins/PLUGIN_DEVELOPMENT.md)。
 

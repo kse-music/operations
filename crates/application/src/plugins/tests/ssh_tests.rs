@@ -64,6 +64,30 @@ impl server::Handler for Handler {
                 br#"{"ID":"sha256:fixture-image","Repository":"fixture"}"#.to_vec(),
             )?;
             s.exit_status_request(id, 0)?;
+        } else if command.contains("d container inspect --format") {
+            let mut output = String::new();
+            for id in ["b".repeat(64), "a".repeat(64)] {
+                let row = if command.contains(".Config.Env") {
+                    json!({"Id":id,"Config":{"Env":["KEY=fixture-value"]}})
+                } else {
+                    json!({"Id":id,"Name":"/fixture","Config":{"Image":"fixture-image"}})
+                };
+                output.push_str(&row.to_string());
+                output.push('\n');
+            }
+            s.data(id, output.into_bytes())?;
+            s.exit_status_request(id, 0)?;
+        } else if command.contains("d stats --all --no-stream --no-trunc") {
+            s.data(
+                id,
+                format!(
+                    "{}\n{}\n",
+                    json!({"ID":"b".repeat(64),"CPUPerc":"99%"}),
+                    json!({"ID":"a".repeat(64),"CPUPerc":"12.34%"})
+                )
+                .into_bytes(),
+            )?;
+            s.exit_status_request(id, 0)?;
         } else {
             let value = if command.contains("fixture-large") {
                 vec![b'x'; 280000]
@@ -205,9 +229,21 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
     let id = "cn.hiboot.plugins.docker";
     app.plugin_activate(id).await.unwrap();
     for _ in 0..2 {
-        for kind in ["capabilities", "containers", "images"] {
+        for request in [
+            json!({"kind":"capabilities"}),
+            json!({"kind":"containers"}),
+            json!({"kind":"images"}),
+            json!({"kind":"container_details","id":"a".repeat(64),"revealEnv":false}),
+            json!({"kind":"container_details","id":"a".repeat(64),"revealEnv":true}),
+            json!({"kind":"container_stats","id":"a".repeat(64)}),
+        ] {
+            let kind = request["kind"].as_str().unwrap();
             let reply = app
-                .plugin_call_scoped(id, "docker-page", json!({"action":"query","input":{"hostId":ssh.host.id,"request":{"kind":kind}}}))
+                .plugin_call_scoped(
+                    id,
+                    "docker-page",
+                    json!({"action":"query","input":{"hostId":ssh.host.id,"request":request}}),
+                )
                 .await
                 .unwrap();
             assert!(reply.error.is_none(), "{kind}: {reply:?}");
@@ -215,11 +251,29 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
             match kind {
                 "capabilities" => assert_eq!(reply.result["detail"]["dockerState"], "running"),
                 "containers" => assert_eq!(reply.result["records"][0]["ID"], "fixture-container"),
-                _ => assert_eq!(reply.result["records"][0]["ID"], "sha256:fixture-image"),
+                "images" => assert_eq!(reply.result["records"][0]["ID"], "sha256:fixture-image"),
+                "container_details" => {
+                    assert_eq!(reply.result["detail"]["id"], "a".repeat(64));
+                    assert_eq!(reply.result["records"], json!([]));
+                    if request["revealEnv"] == true {
+                        assert_eq!(
+                            reply.result["detail"]["environment"],
+                            json!(["KEY=fixture-value"])
+                        );
+                    } else {
+                        assert_eq!(reply.result["detail"]["environment"], json!([]));
+                    }
+                }
+                "container_stats" => {
+                    assert_eq!(reply.result["records"].as_array().unwrap().len(), 1);
+                    assert_eq!(reply.result["records"][0]["ID"], "a".repeat(64));
+                    assert_eq!(reply.result["records"][0]["CPUPerc"], "12.34%");
+                }
+                _ => unreachable!(),
             }
         }
     }
-    assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    assert_eq!(ssh.calls.lock().unwrap().len(), 12);
     assert!(app.plugin_host.lock().unwrap().approvals.is_empty());
     let target = "a".repeat(64);
     for request in [
@@ -238,7 +292,7 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
             pending.error.as_ref().unwrap().code,
             "PLUGIN_CONFIRMATION_REQUIRED"
         );
-        assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+        assert_eq!(ssh.calls.lock().unwrap().len(), 12);
         app.plugin_approve(pending.result["id"].as_str().unwrap(), false)
             .unwrap();
         let cancelled = app
@@ -251,7 +305,7 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
             .await
             .unwrap();
         assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
-        assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+        assert_eq!(ssh.calls.lock().unwrap().len(), 12);
     }
     let command = app
         .plugin_detail(id.into())
@@ -271,7 +325,7 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
     )
     .await;
     assert_eq!(altered.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
-    assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    assert_eq!(ssh.calls.lock().unwrap().len(), 12);
     let mut changed = ssh.host.config.clone();
     changed.username = "changed-target".into();
     app.database.host_update(&ssh.host.id, changed).unwrap();
@@ -286,7 +340,7 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
     )
     .await;
     assert!(changed.error.is_some());
-    assert_eq!(ssh.calls.lock().unwrap().len(), 6);
+    assert_eq!(ssh.calls.lock().unwrap().len(), 12);
     app.plugin_close_scope(id, "docker-page").await.unwrap();
     assert!(
         app.plugin_capability_scoped(

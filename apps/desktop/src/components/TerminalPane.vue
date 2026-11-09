@@ -3,7 +3,7 @@ import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { opsApi } from '../services/ops';
 import { pluginsApi } from '../services/plugins';
-import { ArrowDown, ArrowUp } from '@lucide/vue';
+import { ArrowDown, ArrowUp, Ellipsis } from '@lucide/vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -11,6 +11,9 @@ import { SearchAddon } from '@xterm/addon-search';
 import { filesApi } from '../services/files';
 import { osc7Path } from '../services/osc7';
 import { hostDisplayName, type Host } from '../types/hosts';
+import { useHostsStore } from '../stores/hosts';
+import { sameHostConnection } from '../services/product-links';
+import { downloadResult } from '../services/download';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import {
@@ -26,6 +29,7 @@ import { TerminalInputQueue } from '../services/terminal-input';
 import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
 import { useApplicationStore } from '../stores/application';
 import Modal from './Modal.vue';
+import ForwardDialog from './ForwardDialog.vue';
 import '@xterm/xterm/css/xterm.css';
 
 const props = defineProps<{ tab: TerminalPaneModel; active: boolean; standalone?: boolean }>();
@@ -51,13 +55,38 @@ const preferences = computed(
 );
 const working = ref(false);
 const uploadProgress = ref<UploadProgress | null>(null);
+const reconnecting = ref(false);
+const exporting = ref(false);
+const forwardSession = ref<{ id: string; name: string } | null>(null);
 let upload: ZmodemUpload | undefined;
 const menu = ref<{ x: number; y: number } | null>(null);
+const menuKind = ref<'clipboard' | 'actions'>('clipboard');
 const menuElement = ref<HTMLElement>();
-const menuActions = computed(() => [
-  { key: 'copy', label: '复制', disabled: false },
-  { key: 'paste', label: '粘贴', disabled: props.tab.state !== 'connected' },
-]);
+const menuActions = computed(() =>
+  menuKind.value === 'clipboard'
+    ? [
+        { key: 'copy', label: '复制', disabled: false },
+        { key: 'paste', label: '粘贴', disabled: props.tab.state !== 'connected' },
+      ]
+    : [
+        {
+          key: 'reconnect',
+          label: '重新连接',
+          disabled: working.value || !!props.tab.pluginTerminal,
+        },
+        {
+          key: 'forward',
+          label: '端口转发',
+          disabled: !props.tab.host || props.tab.state !== 'connected',
+        },
+        {
+          key: 'files',
+          label: '打开 SFTP 文件',
+          disabled: !props.tab.host || props.tab.state !== 'connected',
+        },
+        { key: 'export', label: '导出终端文本', disabled: false },
+      ],
+);
 let terminal: Terminal;
 let fit: FitAddon;
 let search: SearchAddon;
@@ -153,13 +182,21 @@ async function connect(): Promise<void> {
   upload = undefined;
   uploadProgress.value = null;
   pendingPaste.value = null;
+  forwardSession.value = null;
   message.value = null;
   trust.value = null;
   inputQueue.reset();
   try {
     if (session) await terminalApi.close(session.id);
     session = undefined;
-    update({ sessionId: undefined, state: 'opening' });
+    update({
+      sessionId: undefined,
+      transportId: undefined,
+      routeHostIds: undefined,
+      cwd: undefined,
+      connectRequested: false,
+      state: 'opening',
+    });
     fitTerminal();
     const open = props.tab.pluginTerminal
       ? (
@@ -235,7 +272,12 @@ async function connect(): Promise<void> {
             });
         });
       } else if (event.type === 'state') {
-        if (['closed', 'failed', 'disconnected'].includes(event.state)) receiver?.dispose();
+        if (['closed', 'failed', 'disconnected'].includes(event.state)) {
+          receiver?.dispose();
+          forwardSession.value = null;
+          pendingPaste.value = null;
+          inputQueue.reset();
+        }
         update({ state: event.state });
         if (event.message) message.value = event.message;
         if (event.state !== 'awaiting_trust') trust.value = null;
@@ -270,6 +312,41 @@ async function connect(): Promise<void> {
     message.value = errorMessage(cause);
   } finally {
     working.value = false;
+  }
+}
+function currentHost(): boolean {
+  if (!props.tab.host) return true;
+  const configured = useHostsStore().catalog?.hosts.find((host) => host.id === props.tab.host!.id);
+  if (configured && sameHostConnection(props.tab.host, configured)) return true;
+  message.value = '主机连接配置已变更或无法核实，请从主机树重新打开，避免连接到不同目标。';
+  return false;
+}
+function requestReconnect(): void {
+  if (working.value || props.tab.pluginTerminal || !currentHost()) return;
+  if (props.tab.state === 'connected' || props.tab.fileAction || props.tab.containerShell) {
+    reconnecting.value = true;
+  } else void connect();
+}
+async function reconnect(): Promise<void> {
+  reconnecting.value = false;
+  if (currentHost()) await connect();
+}
+function openActions(event: MouseEvent): void {
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  void openMenu(bounds.left, bounds.bottom, 'actions');
+}
+function exportText(): void {
+  exporting.value = false;
+  try {
+    const buffer = terminal.buffer.normal;
+    const lines: string[] = [];
+    for (let index = 0; index < buffer.length; index++) {
+      lines.push(buffer.getLine(index)?.translateToString(true) ?? '');
+    }
+    const filename = name.value.replace(/[^\p{L}\p{N}._-]/gu, '_');
+    downloadResult(`ServerDeck-${filename}-${Date.now()}.txt`, lines.join('\n'));
+  } catch (cause) {
+    message.value = errorMessage(cause);
   }
 }
 async function confirm(accept: boolean): Promise<void> {
@@ -318,10 +395,15 @@ function terminalContextMenu(event: MouseEvent): void {
     void paste();
   } else void openMenu(event.clientX, event.clientY);
 }
-async function openMenu(x: number, y: number): Promise<void> {
+async function openMenu(
+  x: number,
+  y: number,
+  kind: 'clipboard' | 'actions' = 'clipboard',
+): Promise<void> {
   if (!props.active || dialogBlocksTerminal()) return;
   if (!props.standalone) store.focused = props.tab.key;
   if (trust.value) return;
+  menuKind.value = kind;
   menu.value = { x, y };
   await nextTick();
   if (!menu.value || !menuElement.value) return;
@@ -359,9 +441,21 @@ function menuKey(event: KeyboardEvent): void {
   buttons[index]?.focus();
 }
 function runMenuAction(key: string): void {
+  if (menuActions.value.find((item) => item.key === key)?.disabled) return;
   closeMenu();
   if (key === 'copy') void copy();
   else if (key === 'paste') void paste();
+  else if (key === 'reconnect') requestReconnect();
+  else if (key === 'forward' && session && props.tab.host && props.tab.state === 'connected') {
+    forwardSession.value = { id: session.id, name: name.value };
+  } else if (
+    key === 'files' &&
+    props.tab.host &&
+    props.tab.state === 'connected' &&
+    currentHost()
+  ) {
+    emit('files', props.tab.host, props.tab.cwd, props.tab.key);
+  } else if (key === 'export') exporting.value = true;
 }
 async function paste(): Promise<void> {
   if (props.tab.state !== 'connected') {
@@ -534,7 +628,12 @@ watch(
       await nextTick();
       fitTerminal();
       focusTerminal();
-    } else menu.value = null;
+    } else {
+      menu.value = null;
+      forwardSession.value = null;
+      reconnecting.value = false;
+      exporting.value = false;
+    }
   },
 );
 watch(
@@ -609,6 +708,29 @@ useErrorNotifications(message);
       <button class="button" @click="upload?.cancel()">取消上传</button>
     </div>
     <div class="terminal-footnote">
+      <button
+        class="tool-button"
+        type="button"
+        aria-label="打开终端操作"
+        title="终端操作"
+        :disabled="working || !!trust"
+        aria-haspopup="menu"
+        :aria-expanded="!!menu && menuKind === 'actions'"
+        @click="openActions"
+      >
+        <Ellipsis :size="14" aria-hidden="true" />
+      </button>
+      <button
+        v-if="
+          ['failed', 'closed', 'disconnected', 'idle'].includes(tab.state) && !tab.pluginTerminal
+        "
+        class="button"
+        type="button"
+        :disabled="working"
+        @click="requestReconnect"
+      >
+        重新连接
+      </button>
       <span v-if="tab.fileAction">此窗格是已确认的文件命令，手动重连将重新运行该命令。 · </span>
       {{ preferences.quickCopyPaste ? 'Shift+右键' : '右键' }} 打开终端操作 ·
       {{ preferences.shortcuts.copy }} / {{ preferences.shortcuts.paste }} 复制粘贴 ·
@@ -616,6 +738,33 @@ useErrorNotifications(message);
         tab.host ? '远端' : '本地终端'
       }}
     </div>
+    <ForwardDialog
+      v-if="forwardSession"
+      :session-id="forwardSession.id"
+      :host-name="forwardSession.name"
+      @close="forwardSession = null"
+    />
+    <Modal v-if="reconnecting" title="重新连接终端" @close="reconnecting = false">
+      <p>
+        将结束 {{ name }} 的当前 Shell
+        和所属转发，再创建新会话。不会恢复远端进程或重放输入。此窗格若为文件或容器命令，将重新运行该固定动作。
+      </p>
+      <footer class="dialog-actions">
+        <button class="button" @click="reconnecting = false">取消</button
+        ><button class="button primary" @click="reconnect">确认重新连接</button>
+      </footer>
+    </Modal>
+    <Modal v-if="exporting" title="导出终端文本" @close="exporting = false">
+      <p>
+        仅导出
+        {{ name }}
+        此窗格的普通屏幕与滚动历史，不包含其他会话。文本可能含敏感信息，请确认后保存；应用不会自动录制。
+      </p>
+      <footer class="dialog-actions">
+        <button class="button" @click="exporting = false">取消</button
+        ><button class="button primary" @click="exportText">确认导出</button>
+      </footer>
+    </Modal>
     <Modal
       v-if="trust && active && (standalone || store.focused === tab.key)"
       title="确认 SSH 主机指纹"
@@ -662,7 +811,7 @@ useErrorNotifications(message);
           ref="menuElement"
           class="context-menu terminal-context-menu"
           role="menu"
-          aria-label="终端操作"
+          :aria-label="menuKind === 'clipboard' ? '终端操作' : '终端功能'"
           :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
           @keydown="menuKey"
         >

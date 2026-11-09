@@ -120,7 +120,6 @@ it('shows container detail tabs, scopes environment values to their tab and pres
     kind: 'container_details',
     id: 'container',
     revealEnv: false,
-    confirmed: false,
   });
   const detail = () => document.querySelector('dialog[aria-label="容器详情"]');
   const panel = () => detail()?.querySelector('[role="tabpanel"]');
@@ -156,7 +155,6 @@ it('shows container detail tabs, scopes environment values to their tab and pres
     kind: 'container_details',
     id: 'container',
     revealEnv: true,
-    confirmed: false,
   });
   expect(panel()?.querySelector('dt')?.textContent).toBe('TOKEN');
   expect(panel()?.querySelector('code')?.textContent).toBe('fixture=value');

@@ -4,6 +4,7 @@ use serverdeck_plugin_sdk::{
     serde_json::Value,
 };
 mod agent;
+mod budget;
 mod collection;
 mod disk;
 mod metrics;

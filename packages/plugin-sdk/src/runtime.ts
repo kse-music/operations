@@ -96,6 +96,7 @@ export function mountPlugin(component: Component): void {
           groups: state.groups ?? [],
           connections: state.connections ?? {},
           models: state.models ?? [],
+          settingsRevision: state.settingsRevision,
           visible: data.visible !== false,
         };
         updatePlatformContext(context);

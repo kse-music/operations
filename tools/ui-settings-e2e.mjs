@@ -81,7 +81,7 @@ try {
       (await page.locator('.settings-dialog-navigation .nav-item').allTextContents()).map((text) =>
         text.trim(),
       ),
-      [...categories, '模型管理', '插件', '关于'],
+      [...categories, '模型', '插件', '关于'],
     );
     for (let index = 0; index < categories.length; index++) {
       await select(index);
@@ -264,10 +264,10 @@ try {
     await navigateWorkspace(page, '关于');
     assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 0);
     await page.screenshot({ path: `${output}/${name}-about.png` });
-    await navigateWorkspace(page, '模型管理');
-    await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
-    assert.equal(await activeMenu().getAttribute('aria-label'), '模型管理');
-    assert.equal(await activeMenu().getAttribute('aria-label'), '模型管理');
+    await navigateWorkspace(page, '模型');
+    await page.getByRole('region', { name: '模型', exact: true }).waitFor();
+    assert.equal(await activeMenu().getAttribute('aria-label'), '模型');
+    assert.equal(await activeMenu().getAttribute('aria-label'), '模型');
     assert.equal(await page.locator('.workspace-tab[data-view="models"]').count(), 0);
     await select(1);
     assert.equal(await quickCopyPaste.isChecked(), true);

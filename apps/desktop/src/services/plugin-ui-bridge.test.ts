@@ -80,6 +80,24 @@ function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
 
+it('notifies only this plugin after a successful settings write and keeps failures unchanged', async () => {
+  const subject = bridge(),
+    plugins = usePluginsStore();
+  plugins.settingsRevisions['dev.other'] = 7;
+  expect(subject.snapshot().settingsRevision).toBe(0);
+  api.platform.mockRejectedValueOnce(new Error('save failed'));
+  await expect(
+    subject.call('platform.request', { operation: { kind: 'settings_write', value: {} } }),
+  ).rejects.toThrow('save failed');
+  expect(subject.snapshot().settingsRevision).toBe(0);
+  api.platform.mockResolvedValue(null);
+  await subject.call('platform.request', { operation: { kind: 'settings_write', value: {} } });
+  expect(subject.snapshot().settingsRevision).toBe(1);
+  await subject.call('platform.request', { operation: { kind: 'settings_read' } });
+  expect(subject.snapshot().settingsRevision).toBe(1);
+  expect(plugins.settingsRevisions['dev.other']).toBe(7);
+});
+
 it('binds draft ownership to the trusted page key and rejects invalid or hidden input', async () => {
   let active = true;
   const ui = createPluginUiBridge({

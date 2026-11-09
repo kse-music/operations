@@ -47,10 +47,10 @@ function navigateTabs(event: KeyboardEvent) {
 onMounted(() => void store.refresh());
 </script>
 <template>
-  <section class="asset-view page-view models-view" aria-label="模型管理">
+  <section class="asset-view page-view models-view" aria-label="模型">
     <div class="section-heading">
       <div>
-        <h1 class="asset-title">模型管理</h1>
+        <h1 class="asset-title">模型</h1>
         <p class="section-description">
           管理平台模型服务、API Key 与本地模型来源，供已授权插件调用。
         </p>

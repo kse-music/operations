@@ -234,7 +234,7 @@ try {
     assert.equal(saved.theme, theme);
     assert.equal(saved.interfaceFontSize, size);
 
-    for (const category of ['通用', '终端', '快捷键', '数据与存储', '模型管理', '插件', '关于']) {
+    for (const category of ['通用', '终端', '快捷键', '数据与存储', '模型', '插件', '关于']) {
       await navigateWorkspace(page, category === '插件' ? '插件管理' : category);
       await reachable(
         settings
@@ -263,7 +263,7 @@ try {
     await navigateWorkspace(page, '插件管理');
     await settings.getByRole('button', { name: '配置 AI 运维助手', exact: true }).click();
     const cancel = settings
-      .locator('.plugin-config-footer')
+      .frameLocator('.plugin-configuration iframe')
       .getByRole('button', { name: '取消', exact: true });
     await reachable(cancel, `${name}: plugin cancel`);
     await page.screenshot({ path: path.join(artifacts, `${name}-plugin-settings.png`) });

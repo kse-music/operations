@@ -44,7 +44,15 @@ function mount() {
         kind: 'context',
         props: { hostId: 'h' },
         visible,
-        state: { theme: 'dark', hosts: [], groups: [], connections: {}, models: [], ...state },
+        state: {
+          theme: 'dark',
+          hosts: [],
+          groups: [],
+          connections: {},
+          models: [],
+          settingsRevision: 0,
+          ...state,
+        },
       },
     });
   return { port, sent, connect, context, rendered, announce };
@@ -77,6 +85,17 @@ it('authenticates its parent channel and updates public context and font scale w
   fixture.context({}, false);
   await nextTick();
   expect(document.querySelector('#app')?.textContent).toBe('h:0:false');
+  expect(fixture.rendered).toHaveBeenCalledOnce();
+});
+
+it('updates the settings revision without hiding or remounting the plugin', async () => {
+  const fixture = mount();
+  fixture.connect();
+  fixture.context({ settingsRevision: 0 });
+  fixture.context({ settingsRevision: 1 });
+  await nextTick();
+  expect(usePlatformContext().settingsRevision).toBe(1);
+  expect(usePluginVisibility().value).toBe(true);
   expect(fixture.rendered).toHaveBeenCalledOnce();
 });
 it('does not generate business queries from unchanged metadata snapshots', async () => {

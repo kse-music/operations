@@ -5,6 +5,9 @@ import { createPinia, disposePinia, type Pinia } from 'pinia';
 import PluginFrame from './PluginFrame.vue';
 import type { PluginUiPage } from '../types/plugins';
 import { useModelsStore } from '../stores/models';
+import { usePluginsStore } from '../stores/plugins';
+import { useWorkspaceStore } from '../stores/workspace';
+import { toolPluginState } from '../services/system-plugins.fixture';
 
 const bridge = vi.hoisted(() => ({
   suspend: vi.fn(),
@@ -57,6 +60,47 @@ it('resumes a cached plugin through the same generic owner path', async () => {
   await nextTick();
   expect(bridge.resume).toHaveBeenCalledOnce();
 });
+
+it.each([
+  [null, true, 'settings', false],
+  ['plugins', true, 'settings', false],
+  [null, false, 'settings', true],
+  [null, true, 'other-page', true],
+] as const)(
+  'validates the owner and contribution for settings frames with category=%s, owner=%s, page=%s',
+  async (category, owned, contributionId, inert) => {
+    pinia = createPinia();
+    const plugins = usePluginsStore(pinia),
+      workspace = useWorkspaceStore(pinia);
+    Object.assign(plugins, toolPluginState());
+    vi.spyOn(useModelsStore(pinia), 'refresh').mockResolvedValue();
+    vi.spyOn(plugins, 'owns').mockReturnValue(owned);
+    workspace.openPluginSettings('cn.hiboot.plugins.assistant', 'settings');
+    workspace.settingsView = category;
+    const page: PluginUiPage = {
+      id: contributionId,
+      title: '配置',
+      surface: { kind: 'frontend' },
+      fields: [],
+      actions: [],
+      initialAction: null,
+      log: null,
+    };
+    root = document.createElement('div');
+    document.body.append(root);
+    app = createApp(PluginFrame, {
+      pluginId: 'cn.hiboot.plugins.assistant',
+      revision: 'r1',
+      hostId: '',
+      contextKey: 'plugin-settings:cn.hiboot.plugins.assistant:settings',
+      page,
+      settingsPage: true,
+    }).use(pinia);
+    app.mount(root);
+    await nextTick();
+    expect(root.querySelector('iframe')?.getAttribute('inert')).toBe(String(inert));
+  },
+);
 
 it('keeps nested reactive context cloneable across the frame boundary and rejects an unrelated sender', async () => {
   const messages: Record<string, unknown>[] = [];

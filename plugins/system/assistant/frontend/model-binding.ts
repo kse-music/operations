@@ -54,6 +54,7 @@ export function useModelBinding() {
     const current = ++version;
     loading.value = true;
     error.value = '';
+    message.value = '';
     try {
       const [value] = await Promise.all([
         call<unknown>({ kind: 'settings_read' }),
@@ -75,18 +76,23 @@ export function useModelBinding() {
   }
   async function save(id: string) {
     if (!loaded.value || loading.value || saving.value || !visible.value) return false;
-    if (id && !models.models.some((model) => model.id === id && model.hasKey)) {
+    if (!id) {
+      error.value = '请选择已就绪的模型';
+      return false;
+    }
+    if (!models.models.some((model) => model.id === id && model.hasKey)) {
       error.value = '模型未就绪，请在平台模型设置中检查';
       return false;
     }
     saving.value = true;
     error.value = '';
+    message.value = '';
     try {
-      const value = { ...settings, modelId: id || null };
+      const value = { ...settings, modelId: id };
       await call({ kind: 'settings_write', value });
       settings = value;
       modelId.value = id;
-      message.value = id ? '模型绑定已保存' : '已解除模型绑定';
+      message.value = '模型绑定已保存';
       return true;
     } catch (cause) {
       error.value = errorMessage(cause);
@@ -105,9 +111,12 @@ export function useModelBinding() {
     { immediate: true },
   );
   watch(
-    () => context.models.map((model) => model.id + ':' + model.revision).join(','),
+    [
+      () => context.models.map((model) => model.id + ':' + model.revision).join(','),
+      () => context.settingsRevision,
+    ],
     () => {
-      if (visible.value) void load();
+      if (visible.value && !saving.value) void load();
     },
   );
   onScopeDispose(() => {

@@ -50,7 +50,7 @@ it('routes all seven settings entries to the dialog while keeping host and plugi
     '终端',
     '快捷键',
     '数据与存储',
-    '模型管理',
+    '模型',
     '插件',
     '关于',
   ]);

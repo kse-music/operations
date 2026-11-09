@@ -1,5 +1,24 @@
 # 设置导航与关于页面合并验证
 
+## 2026-11-09 工作区插件设置独立弹窗
+
+- 工作区功能页的「插件设置」由 `PluginSettingsDialog.vue` 独立承载，只展示当前插件的基本信息/插件配置，不挂载全局设置导航或偏好草稿。保留设置列表内的详情流程、保存/管理中的关闭保护、取消及关闭后恢复入口焦点；平台模型入口显式打开全局模型设置。
+- 根因是原入口设置 `settingsView = 'plugins'`，使底层插件暂停，恢复时 Docker 的可见性监听重新查询列表。现独立弹窗不改变底层 active/visibility，保持 iframe、筛选和滚动位置。前端配置成功写入后以插件隔离的 `settingsRevision` 通知同插件页面，助手按需重读绑定；不广播配置内容，失败和取消不通知，保存页保留自身反馈。
+- 主要文件：`App.vue`、`components/PluginSettingsDialog.vue`、`PluginSettingsPanel.vue`、`PluginFrame.vue`、`stores/workspace.ts`、`stores/plugins.ts`、`services/plugin-ui-bridge.ts`、SDK `context.ts/runtime.ts`、助手 `model-binding.ts`，以及对应回归和 `tools/ui-builtin-plugins-e2e.mjs`。
+- 回归先在旧实现检出仍打开全局设置。最终从 `apps/desktop` 运行 Vitest，完整 App、workspace、插件设置面板/Frame/上下文/桥、全局设置面板、助手和 SDK runtime 九文件 **206 项全部通过**，日志为 `.local/qa/plugin-settings-dialog/vitest-final.log`。覆盖未授权/不可用配置、成功与失败通知、owner 与贡献页面限制、保存中关闭拒绝、取消、模型导航、草稿与焦点恢复。
+- 初次扩展运行四文件为 116 项通过、5 项失败：新 Frame 测试将 jsdom 的 `inert="false"` 误认为启用 inert，已改为核验属性值，最终通过；另三项为现有终端右键菜单断言仍要求不显示菜单，与工作区终端会话菜单实现不一致。后续工作区已同步这些终端断言，最终完整 App 的 78 项全部通过；本次保留终端相关修改。第一次类型检查遇到已有 `terminal-actions.test.ts` 缺少 `code` 字段；本次未修改该文件，工作区更新后的最终 `npm run typecheck` 桌面和 SDK 均通过。
+- `node tools/build-system-plugins.mjs` 成功复用既有 WASM 缓存并重打包 Docker/助手；最终独立 Vite 生产构建、修改源文件 ESLint/Prettier、工具语法及差异空白检查通过。构建入口检查磁盘空间超过 10 GiB，沿用已有 Cargo 缓存；保留既有 Monaco 大 chunk 提醒。
+- 浏览器运行 `SERVERDECK_BUILTIN_LAYOUT_OUTPUT=.local/qa/plugin-settings-dialog/browser node tools/ui-builtin-plugins-e2e.mjs`，实际加载重打包插件与可信 iframe 桥，在 1440×900 深/浅色、960×600 标准/超大字号及 390×844 窄屏五组全部通过。检查独立弹窗无全局设置菜单，关闭和 Esc 后 Docker 查询次数不变、原 iframe/筛选/表格滚动保留、焦点恢复；助手保存绑定即时同步原聊天页且问题草稿保留，既有保存失败/重试与插件管理详情流程继续通过。结果和截图位于 `.local/qa/plugin-settings-dialog/browser/results.json` 及同目录，已查看宽屏和最小窗口超大字号的独立弹窗截图。
+- 首次浏览器受沙箱启动限制失败，改用沙箱外的隔离无头 Edge 后完成。新增助手同步检查曾错误读取固定 textarea placeholder，已改为等待实际模型就绪提示，最终五组通过。浏览器数据与调用为隔离夹具，不连接真实 Docker/模型服务；未运行 Rust 原生测试、WebView2/真实远程验收或跨平台检查，未重建桌面 EXE/安装器。相关实现无剩余依赖；桌面交付仍需正常构建及原生验收。
+
+## 2026-11-09 模型入口命名
+
+- 将设置侧栏、页面标题、可访问名称和全局搜索中的「模型管理」统一为「模型」。同步当前使用说明、PRD 及相关 UI/原生测试选择器；内部 `models` 路由与接口保持原契约，无持久数据变更或新增依赖。「数据与存储」继续涵盖数据目录、下载目录、传输并发与日志设置。
+- 主要文件：`types/navigation.ts`、`types/product.ts`、`views/ModelsView.vue`，以及导航/模型/App 测试和 `tools/ui-navigation.mjs` 等调用脚本。
+- 导航与模型两文件 **17 项通过**；直接运行 `npx vitest run src/App.test.ts -t 'opens model management|preserves settings drafts'`，模型全局搜索入口和设置草稿两项通过、75 项未选，共 **19 项直接相关检查通过**。扩展执行三文件时为 91 项通过、3 项失败：终端右键菜单测试仍断言不弹出菜单，与工作区现有终端会话菜单实现不一致；本轮未修改终端实现、删除断言或宣称这些测试通过。
+- 桌面/SDK 类型检查、修改源文件 ESLint、19 个命名关联文件 Prettier、13 个 UI 工具脚本语法及差异空白检查通过。`npx vite build` 前端生产构建通过，构建前 D 盘约 164 GiB 可用，保留既有 Monaco 大 chunk 提醒。
+- 本轮为显示文案调整，未运行浏览器/原生端到端、Rust 或跨平台测试，未重建桌面 EXE/安装包。命名相关检查无新增问题；终端三项回归仍待其对应改动同步，后续桌面分发需正常构建与原生验收。
+
 ## 2026-11-07 界面标准基数 14px
 
 - 共用 SDK `foundation.css` 提供 12/14/16/20/24px 五级字号变量；宿主各区域与内置 Docker、AI 助手引用对应层级。导航、表单、主机名、文件及运维表格采用 14px 主要文字，辅助信息 12px，分组/弹窗/页面标题分别为 16/20/24px。保留小/标准/大/特大/超大的 95%/100%/115%/130%/145%，主要文字为 13.3/14/16.1/18.2/20.3px。设置页说明基数和当前比例，行高与控件高度适配放大文字。

@@ -35,9 +35,10 @@ vi.mock('./components/PluginFrame.vue', async () => {
   const { ref } = await import('vue');
   return {
     default: {
-      props: ['page'],
+      props: ['page', 'active'],
+      emits: ['saving', 'settingsAction'],
       setup: () => ({ content: ref('') }),
-      template: `<textarea v-if="page.id === 'draft'" v-model="content" />`,
+      template: `<div data-plugin-frame :data-active="active"><textarea v-if="page.id === 'draft'" v-model="content" /><template v-if="page.id === 'settings'"><button data-save @click="$emit('saving', true)">开始保存</button><button data-save-failed @click="$emit('saving', false)">保存失败</button><button data-cancel @click="$emit('settingsAction', 'close')">取消配置</button><button data-models @click="$emit('settingsAction', 'models')">配置平台模型</button></template></div>`,
     },
   };
 });
@@ -435,7 +436,7 @@ it('preserves settings drafts across all categories and focuses invalid hidden f
   lineHeight.value = '99';
   lineHeight.dispatchEvent(new Event('input', { bubbles: true }));
   await openNavigation('关于');
-  await openNavigation('模型管理');
+  await openNavigation('模型');
   await openNavigation('插件管理');
   await openNavigation('通用');
   expect(document.querySelector('.settings-panel')).toBe(panel);
@@ -611,7 +612,11 @@ it('opens the host tree menu without connecting and closes sessions through thei
     .querySelector('.terminal-tab [role="tab"]')!
     .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await nextTick();
-  expect(document.querySelector('[role="menu"]')).toBeNull();
+  const sessionMenu = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
+  expect(sessionMenu).not.toBeNull();
+  expect(useTerminalsStore().panes).toHaveLength(1);
+  sessionMenu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await nextTick();
   await closeSession(0);
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
@@ -691,7 +696,7 @@ it('opens model management from global search in the shared settings window with
   document.querySelector<HTMLButtonElement>('.app-header [aria-label="全局搜索"]')!.click();
   await flush();
   const search = document.querySelector<HTMLInputElement>('[aria-label="全局搜索内容"]')!;
-  search.value = '模型管理';
+  search.value = '模型';
   search.dispatchEvent(new Event('input', { bubbles: true }));
   await nextTick();
   document.querySelector<HTMLButtonElement>('[role="option"]')!.click();
@@ -703,7 +708,7 @@ it('opens model management from global search in the shared settings window with
     document
       .querySelector('.settings-dialog-navigation [aria-current="page"]')
       ?.getAttribute('aria-label'),
-  ).toBe('模型管理');
+  ).toBe('模型');
 });
 
 it('confirms active transfer cancellation before closing a host and preserves the adjacent host', async () => {
@@ -1593,7 +1598,7 @@ it.each(['remote', 'local'])(
 );
 
 it.each(['remote', 'local'])(
-  'ignores right-click and opens a fresh single-pane %s session from the plus button',
+  'opens a session menu without selecting its target and creates a fresh single-pane %s session from plus',
   async (target) => {
     const terminals = useTerminalsStore();
     const host = target === 'remote' ? useHostsStore().catalog!.hosts[0]! : null;
@@ -1621,7 +1626,13 @@ it.each(['remote', 'local'])(
       .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await nextTick();
     expect(terminals.active).toBe(previous);
-    expect(document.querySelector('[role="menu"]')).toBeNull();
+    const menu = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
+    expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(
+      ['复制', '重命名', '关闭所有', '关闭'],
+    );
+    expect(JSON.stringify(terminals.tabs)).toBe(original);
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await nextTick();
     await newSession();
     expect(terminals.tabs).toHaveLength(3);
     const added = terminals.tabs[2]!;
@@ -2073,15 +2084,22 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   const settingsButton = root.querySelector<HTMLButtonElement>(
     '.plugin-workspace[data-host-id="a"] [aria-label="插件设置"]',
   )!;
+  const frameA = editorA.closest('[data-plugin-frame]')!;
+  expect(frameA.getAttribute('data-active')).toBe('true');
+  vi.mocked(pluginsApi.reset).mockClear();
   settingsButton.focus();
   settingsButton.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'extension', hostId: 'a' });
+  expect(workspace.settingsView).toBeNull();
+  expect(document.querySelector('.settings-dialog-navigation')).toBeNull();
+  expect(document.querySelector('.settings-panel')).toBeNull();
+  expect(frameA.getAttribute('data-active')).toBe('true');
   const configuration = document.querySelector('[aria-label="主机草稿工具 · 配置"]')!;
   expect(configuration.querySelector('.plugin-settings-workspace')).not.toBeNull();
   expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
   const closeSettings = document.querySelector<HTMLButtonElement>(
-    'dialog[aria-label="设置"] [aria-label="关闭对话框"]',
+    'dialog[aria-label="主机草稿工具 · 插件设置"] [aria-label="关闭对话框"]',
   )!;
   closeSettings.focus();
   closeSettings.click();
@@ -2089,6 +2107,9 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   expect(document.querySelector('[aria-label="主机草稿工具 · 配置"]')).toBeNull();
   expect(document.activeElement).toBe(settingsButton);
   expect(document.querySelector('.plugin-workspace[data-host-id="a"] textarea')).toBe(editorA);
+  expect(editorA.closest('[data-plugin-frame]')).toBe(frameA);
+  expect(frameA.getAttribute('data-active')).toBe('true');
+  expect(pluginsApi.reset).not.toHaveBeenCalled();
   document.querySelector<HTMLButtonElement>('.host-tools [aria-label="SSH 终端"]')!.click();
   await flush();
   expect(workspace.current?.view).toBe('terminals');
@@ -2097,6 +2118,50 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   expect(workspace.tabs.filter((tab) => tab.hostId === 'a')).toHaveLength(1);
   expect(editorA.value).toBe('draft for a');
   expect(editorB.value).toBe('draft for b');
+});
+
+it('protects standalone plugin settings while saving and routes cancel and model actions', async () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('terminals', 'a');
+  const current = workspace.current;
+  const open = async () => {
+    workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+    await flush();
+    return document.querySelector<HTMLDialogElement>(
+      'dialog[aria-label="AI 运维助手 · 插件设置"]',
+    )!;
+  };
+  const dialog = await open();
+  expect(dialog).not.toBeNull();
+  expect(dialog.querySelector('[data-plugin-frame]')).not.toBeNull();
+  expect(dialog.querySelector('[aria-label="返回插件列表"]')).toBeNull();
+  expect(workspace.settingsView).toBeNull();
+  dialog.querySelector<HTMLButtonElement>('[data-save]')!.click();
+  await flush();
+  expect(dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.disabled).toBe(true);
+  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  await flush();
+  expect(dialog.isConnected).toBe(true);
+  expect(workspace.pluginConfiguration).toBeDefined();
+  dialog.querySelector<HTMLButtonElement>('[data-save-failed]')!.click();
+  await flush();
+  expect(dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.disabled).toBe(
+    false,
+  );
+  dialog.querySelector<HTMLButtonElement>('[data-cancel]')!.click();
+  await flush();
+  expect(dialog.isConnected).toBe(false);
+  expect(workspace.pluginConfiguration).toBeUndefined();
+  expect(workspace.settingsView).toBeNull();
+  const reopened = await open();
+  reopened.querySelector<HTMLButtonElement>('[data-models]')!.click();
+  await flush();
+  expect(reopened.isConnected).toBe(false);
+  expect(workspace.pluginConfiguration).toBeUndefined();
+  expect(workspace.settingsView).toBe('models');
+  expect(document.querySelector('dialog[aria-label="设置"] .models-view')).not.toBeNull();
+  expect(workspace.current).toBe(current);
+  expect(workspace.tabs).toEqual([current]);
 });
 
 it('opens disabled, ungranted and UI-less plugins in the shared settings window without creating tabs', async () => {

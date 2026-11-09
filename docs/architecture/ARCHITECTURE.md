@@ -54,9 +54,13 @@ Vue / Pinia → 类型化 invoke → Tauri 主窗口 ACL → Application
 
 Workspace 按实际打开顺序保存本地、远程主机和全局插件标签，不再维护顶部模块或“全部主机”派生页。HostId 是持久目标标识，活动页变化不能修改已有资源的真实目标。`HostTools` 平铺 SSH、SFTP 和启用插件；主机内部保存最近工具、插件页面和会话。
 
-`settingsView` 独立于活动工作区。`SettingsDialog` 复用 `SettingsPanel`、`ModelsView`、`PluginsView`、`AboutView`；同一偏好草稿在窗口存续期间持续挂载。插件列表隐藏时保留筛选，`PluginSettingsPanel` 在同窗口展示详情和自有设置，配置 iframe 核验实际分类/目标/owner。
+`settingsView` 独立于活动工作区。`SettingsDialog` 复用 `SettingsPanel`、`ModelsView`、`PluginsView`、`AboutView`；同一偏好草稿在窗口存续期间持续挂载。插件列表隐藏时保留筛选，`PluginSettingsPanel` 在同窗口展示详情和自有设置。工作区入口只设置 `pluginConfiguration`，由独立 `PluginSettingsDialog` 承载同一插件面板，不挂载全局设置或改变底层插件的 active 状态，因此关闭不会触发可见性恢复后的重复查询。配置 iframe 校验当前插件、贡献页面及 owner，不依赖全局设置分类；取消只关闭插件配置；助手配置页顶部仅提供刷新，聊天页的模型管理入口仍可显式转入全局模型设置。
+
+`ModelsView` 使用本地来源/远程模型两个 Tab，默认 remote；两个面板通过 `v-show` 保持挂载，切换只改变展示，不停止本地下载或重置模型表单。键盘方向键/Home/End 由页内 Tab 导航处理，不创建新的工作区标签。
 
 `pluginSettingsBusy` 联合插件管理 busy 阻止返回、分类切换和关闭；`settingsCloseGuard` 检查保存/迁移及未保存偏好/目录修改。取消关闭保留草稿，放弃才清除字号预览；模型和插件独立保存，关闭后恢复入口焦点。
+
+前端插件配置写入成功后，UI 桥递增对应插件的运行期 `settingsRevision` 并通过公开 context 推送；不推送配置载荷，不改变业务页可见性。助手据此重读模型绑定，保存页在自身保存中跳过重读以保留成功反馈；失败和取消不触发通知。
 
 主机关闭按冻结范围异步协调：禁止新文件连接/提交，审核 dirty 文件和插件草稿、确认取消传输，排空安全提交及清理，关闭文件租约和终端/插件 owner，成功后清除本主机临时传输记录。任何失败保留工作区与可诊断状态；轮询代号防止晚到快照恢复已清记录。切页只隐藏，不执行主机关闭流程。
 
@@ -92,13 +96,15 @@ NativeStore 使用系统凭据库，当前服务为 `cn.hiboot.desktop.credentia
 
 应用自己的 `ssh_known_hosts` 按规范化 hostname+port 保存完整公钥、SHA256 和信任时间。未知主机认证前等待活跃 challenge 的用户核验，60 秒超时；竞争确认复验公钥，已知密钥变化硬拒绝，证书默认拒绝。系统 known_hosts 哈希/CA/撤销尚未接入。本地 RSA 私钥签名受[密码学门禁](DECISIONS.md)拒绝，不能以测试通过代替安全审查。
 
-每个终端独立 PTY/取消令牌/任务句柄，关闭只结束自身 Channel 和所属转发；Transport 在无相关租约后释放。SFTP/Monitor/执行拥有独立租约，单个子系统失败不误关其他会话。重连建立新 Shell，不重放用户输入。同步锁只作短暂注册表操作，不跨 await 或串行化全部输出。
+每个终端独立 PTY/取消令牌/任务句柄，关闭只结束自身 Channel 和所属转发；Transport 在无相关租约后释放。SFTP/Monitor/执行拥有独立租约，单个子系统失败不误关其他会话。`TerminalPane` 显式重连复用既有 `connect`：保留 xterm/PaneKey、清空输入与待确认粘贴、关闭旧 Session 后创建新 Shell，generation 隔离迟到事件。连接中及固定文件/容器动作重跑须确认，插件一次性票据禁止重放；显式重连和文件导航校验当前目录中的主机连接配置。同步锁只作短暂注册表操作，不跨 await 或串行化全部输出。
 
 ### 有界输入输出与布局
 
 PTY 每块最多 16 KiB，经 Tauri Channel 交给 xterm，`xterm.write(callback)` 完成后 ACK 才读取下一块。输入/resize 独立运行，输出等待不能阻止 Ctrl+C 和取消；输入队列、单次大小和粘贴确认均有界，resize 合并最新尺寸。russh 内部仍有非全有界队列，不承诺恶意服务器下的进程硬内存限额。
 
 前端区分会话标签、PaneKey 和 Session。二叉树仅计算分屏几何，固定 PaneKey 保持 xterm 挂载；每标签最多八窗格，全应用最多 32。后台终端持续消费 ACK。编号按主机运行内计数，最后会话成功关闭后重置；不持久化终端布局、标题、正文或会话，不保留旧 workspace_load/save 接口。
+
+`TerminalsView` 挂载会话新建、拖动排序、双击重命名、关闭、分屏快捷键及绑定目标 TabKey 的会话菜单；菜单复用 store 的重命名/关闭/按主机关闭所有，复制只调用普通 `open(host)`，不复制动作或票据。菜单支持右键和键盘、视口限位与焦点恢复。`TerminalPane` 在现有底部说明区提供操作菜单，内容区仍仅复制/粘贴；主动导出须确认，只读取此 xterm 的 `buffer.normal`，复用本地 UTF-8 下载能力，不自动录制。默认键位由 `core::terminal::default_shortcuts` 与前端偏好共同约束，关闭的是当前窗格而非整个工作区。
 
 纯文本复制粘贴使用受限 Tauri 原生剪贴板服务，只在用户动作后运行。异步读取绑定连接 generation，重连/卸载废弃旧读取及待确认粘贴；2 MiB 上限、大文本确认和 Bracketed Paste 保留。字号/行高变化适配当前 xterm 和 PTY，不重启 Shell。
 
@@ -108,6 +114,8 @@ Linux 本地 PTY 使用有效 `$SHELL`、账户 Shell 或 `/bin/sh` 的交互模
 
 首跳可经 SOCKS5/HTTP CONNECT，后续 direct-tcpip 嵌套 SSH，逐跳信任与认证。端口转发归属 Session，默认回环、公共绑定需确认；Local/Remote/Dynamic 有界并发与取消。远端取消未确认时关闭所属 Transport，明确报告共享会话可能断开；不自动恢复转发。
 
+`TerminalPane` 的操作菜单挂载既有 `ForwardDialog`，捕获该窗格当前 SessionId，复用原转发服务和后端，不使用活动工作区推断目标。本地或未连接窗格禁用入口；断开、重连或隐藏窗格关闭管理界面，转发生命周期仍由所属 Session 负责。
+
 rz 使用固定版本 ZMODEM 实现与流式握手识别。Rust 原生选择器发放绑定终端/取消令牌的文件句柄，不提供任意路径读取；分块读取，等待选择和上传不阻塞输出 ACK，普通输入在上传时隔离。关闭/取消撤销句柄，迟到选择不能向新 Session 发送文件。协议与实际验证见[ZMODEM 记录](../validation/terminal/VALIDATION_ZMODEM.md)。
 
 ## SFTP、传输与编辑
@@ -115,6 +123,8 @@ rz 使用固定版本 ZMODEM 实现与流式握手识别。Rust 原生选择器�
 Files 租约复用完整认证路由但不启动 Shell。目录使用 SFTP v3 RawSftpSession，传输各有独立 Channel；请求、响应、目录条目/名称和递归规划均有上限。原生选择器只通过受限文件命令开放，不授予通用 fs/shell 权限。
 
 Pinia 保存每主机文件连接、实际目录和独立导航历史；连续目录请求由代号隔离，失败保留原目录。权限按 mode 展示，owner 仅从受限 longname 格式解析，未知回退 UID，不猜测名称。两栏内部滚动，活动传输面板与页头记录共用同一任务状态。
+
+`ConflictPolicy` 与后端支持 fail/skip/rename/overwrite；`FilesView` 当前确认表单仅提供 fail/skip/overwrite，文件“重命名”动作与传输冲突的自动重命名是两条不同链路。
 
 任务由 Rust 保存，状态为 queued/scanning/running/verifying/completed 或 cancelling/cancelled/failed。默认每主机三个活动任务、可配置 1–6，全局最多 12 活动，其他队列/历史限额有界；降低设置不抢占已开始工作。页面隐藏不取消，主机关闭或退出走显式确认/排空，不跨进程恢复任务。
 
@@ -124,7 +134,7 @@ Monaco/worker 本地按需加载，编辑最多八个、每个不超过 2 MiB �
 
 原子替换改变 inode，SFTP v3 不能完整保留 ACL/xattr/硬链接或消除最终检查到 rename 的竞态，必须说明限制。提交后断线可能结果未知，须重新核对。插件文本文件请求另受 SDK 更小的配额和授权根限制，不能套用桌面编辑器上限。
 
-OSC 7 仅作为已校验路径提示，不作为权限依据。文件目录/less/tail 动作经确认后使用固定且转义的独立 PTY，不注入现有 Shell。未保存文档在关闭/重载前审核，保存失败保留草稿及恢复信息。
+OSC 7 仅作为已校验路径提示，不作为权限依据。已连接 SSH 窗格的“打开 SFTP 文件”动作发出其 Host、cwd 和 PaneKey，复用 App 既有 files 事件处理；重连清除旧 cwd，没有有效提示时不猜路径。文件页→目录/less/tail 的动作经确认后使用固定且转义的独立 PTY，不注入现有 Shell。未保存文档在关闭/重载前审核，保存失败保留草稿及恢复信息。
 
 ## 插件平台
 
@@ -156,11 +166,19 @@ Execute 默认可信宿主逐次展示实际目标与完整命令。可选 `prea
 
 当前只分发 Docker 与助手。外部 MySQL 从应用下载的开发包独立开发后上传，不进入内置目录；新增完整系统插件目录可自动构建，不维护服务白名单、不做运行时热扫描。开发包由 Vite 打入客户端，主窗口专用保存命令将固定 ZIP 写入用户选择位置。
 
+Docker 插件以六条完整固定命令预授权版本、列表、详情、资源及按需环境变量查询。详情和资源读取主机快照，由插件按完整容器 ID 筛选；概览格式不包含环境变量，环境变量只在对应标签打开时单独读取，前端只收到所选容器的数据。快照仍受通用输出和超时限额约束，停止、删除、日志、Shell 及未声明命令沿用原审批，不在宿主增加 Docker 专用匹配规则。
+
 仓库汇总有效安装与问题项，单插件旧/损坏记录隔离并显示诊断，原记录/载荷/配置不动；仓库根安全故障和数据库错误仍传播。主窗口私有 `plugin_inventory` / `plugin_reinstall_bundled` 不属于 SDK。显式重装确认绑定原记录摘要，先逐字持久备份再原子提交，保留旧载荷/配置，新安装默认禁用且不继承旧授权；不存在兼容解码或自动迁移。
 
 ## 模型传输与 AI 业务
 
 模型注册、系统 Key、真实连接测试和修订管理属于 Native；通用 `models.use` 能力在授权后传输插件构造的消息，Key/CLI 登录数据不进入 Guest。助手插件拥有资产匹配、上下文采集/脱敏、严格 query/plan/answer、冻结计划和执行后复查，不再依赖私有宿主 AI 业务 API。具体预算和资源协议见[SDK](../plugins/PLUGIN_SDK.md)。
+
+`ai::model_test` 只保留测试绑定摘要，签发 300 秒单次凭证；保存新建/关键配置或 Key 变更时消费并复验配置、凭据及编辑身份，不能用一次旧成功测试批准新配置。模型 Key 没有读取回显接口，空输入保留已有值，清除/删除走明确的用例及秘密 GC。`check_model_edit` 在 baseUrl 变化且仍有旧 Key 时要求新输入或明确清除，防止默认将原凭据发送给其他服务。
+
+助手 `workflow` 对单主机执行最多六轮/十二查询/每轮三项的只读循环，`agent::build_plan` 从完整证据冻结最多 32 项；多主机建议标记 manual_only，不能隐式选择一台执行。预览和计划按准备时刻五分钟清理，单次消费且绑定 owner/模型/SSH 修订；执行超过 100 秒不启动后续步骤，在途按平台提交边界收尾。业务清单由插件保存，Native 仍对实际请求逐项做目标与命令确认，插件确认文字不能代替授权。策略理由见[ADR 0027](decisions/0027-assistant-policy.md)。
+
+模型响应的 usage 才是实际 Token 来源；任一轮缺 usage 时不伪造累计值。准备阶段先按完整查询统计，再对选定原值脱敏，最后截短展示明细；诊断仅携带命中主机，普通知识不附目录，明确资产清单问题才附目录。`budget::fit` 在准备（消息 40 KiB）及每轮补全（44 KiB）按含 JSON 转义、模型和输出配置的完整请求估算输入并预留最大输出；不足时依次削减成功查询的可选明细、最早完整历史轮次，保留问题/归属/统计/失败及省略标记，仍不足才拒绝。前端按实际准备请求编码限制 48 KiB，删除完整旧轮次而不切断文本；压缩不改写旧消息或本地完整执行证据。验证见[上下文回归](../validation/ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-09-上下文脱敏范围与预算修复)。
 
 本地 Codex/Claude Code 使用独立本机授权和保留来源 ID，由 CLI 管理自身登录与刷新，Native 仅保存授权/版本及路径/配置摘要快照。撤销/账户或配置变化使旧请求失效；进程使用临时目录、临时会话和有界 stdin/stdout，关闭/取消终止本次进程。通过进程级参数关闭外部工具、hooks、MCP 等，并验证协议结果，避免 CLI 获得 ServerDeck 外的执行通路。
 

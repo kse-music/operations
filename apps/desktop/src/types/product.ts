@@ -14,7 +14,7 @@ export const defaultProductPreferences = (): ProductPreferences => ({
 // Locale registry: add a complete dictionary before advertising another UI language.
 export const messages = {
   'zh-CN': {
-    models: '模型管理',
+    models: '模型',
     settings: '通用',
     settingsTerminal: '终端',
     settingsShortcuts: '快捷键',

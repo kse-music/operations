@@ -1,5 +1,19 @@
 # 验证记录索引
 
+最新：[助手移除空模型绑定选项，保留未配置状态并拒绝空值保存](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-助手移除空模型绑定选项)。
+
+最新：[助手配置页移除模型设置快捷入口，保留刷新及模型绑定](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-助手配置页移除模型设置快捷入口)。
+
+最新：[终端入口补齐：重连、会话菜单、转发、导出与 SFTP 联动](terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-09-终端入口补齐)；[助手先脱敏、目标范围与预算压缩回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-09-上下文脱敏范围与预算修复)。
+
+最新：[工作区插件设置独立弹窗、Docker 列表状态保留及助手绑定同步](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-09-工作区插件设置独立弹窗)。
+
+最新：[Docker 容器详情免重复确认：六条固定读取、WASM/回环 SSH 审批边界及真实 Docker 格式验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-容器详情免重复确认)。
+
+最新：[模型入口统一命名、相关导航/搜索检查与现有终端测试限制](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-09-模型入口命名)。
+
+最新：[内置助手/Docker 样式与详情 Tab、权限说明、打包 iframe 和窗口回归](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-内置插件布局与详情-tab)。
+
 最新：[最小窗口调整为 960×600，原生设置布局及保存、取消、关闭验收](workspace/VALIDATION_LAYOUT.md#2026-11-09-最小窗口-960600-与设置弹窗)。
 
 最新：[模型管理拆分本地来源与远程模型 Tab，默认远程、操作与提示归位](ai/VALIDATION_MODEL_MANAGEMENT.md#2026-11-09-本地来源与远程模型-tab)。

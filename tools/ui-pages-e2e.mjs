@@ -604,7 +604,7 @@ async function verifyInterfaceFontSize(page, variant, width) {
     await dialog.getByRole('button', { name: '取消', exact: true }).click();
   }
   if (fontSizeOnly) {
-    for (const category of ['终端', '快捷键', '数据与存储', '关于', '模型管理']) {
+    for (const category of ['终端', '快捷键', '数据与存储', '关于', '模型']) {
       await navigateWorkspace(page, category);
       await inspect(page, `${variant}/${category}-ultra-large`);
       const clippedControls = await page

@@ -122,6 +122,10 @@ export const useTerminalsStore = defineStore('terminals', () => {
     });
     focused.value = added.key;
   }
+  function duplicate(key: string): void {
+    const pane = tabs.value.find((tab) => tab.key === key)?.panes[0];
+    if (pane) open(pane.host);
+  }
   function resize(tabId: string, id: string, ratio: number): void {
     const tab = tabs.value.find((t) => t.key === tabId);
     if (tab) tab.layout = resizeNode(tab.layout, id, ratio);
@@ -224,6 +228,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     activateHost,
     update,
     open,
+    duplicate,
     split,
     resize,
     rename,

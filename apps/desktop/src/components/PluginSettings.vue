@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { ShieldCheck, FolderKey } from '@lucide/vue';
+import { ShieldCheck, FolderKey, Check, Minus } from '@lucide/vue';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from '../services/plugins';
 import type { InstalledPlugin, PluginPermission } from '../types/plugins';
@@ -14,7 +14,7 @@ const permissions = ref<PluginPermission[]>([]),
 const labels: Record<PluginPermission, [string, string]> = {
   'network.connect': ['本机 TCP 连接', '从本机探测指定地址与端口，逐次确认'],
   'models.use': ['模型调用', '使用平台已配置模型发送插件提供的消息，凭据保留在宿主'],
-  'hosts.read': ['主机信息', '读取当前主机的基本信息'],
+  'hosts.read': ['主机目录', '读取已登记主机的公开信息，不含密码、私钥和模型凭据'],
   'ssh.execute': ['SSH 命令与终端', '执行插件提供的远程命令，启动前逐次确认真实命令和目标'],
   'ssh.execute.preapproved': [
     '固定命令预授权',
@@ -77,6 +77,21 @@ async function revoke() {
 </script>
 <template>
   <div class="plugin-settings" aria-label="插件设置">
+    <section class="plugin-settings-section plugin-package-details">
+      <h2>插件信息</h2>
+      <dl class="plugin-details">
+        <dt>插件 ID</dt>
+        <dd>{{ plugin.manifest.id }}</dd>
+        <dt>开发者</dt>
+        <dd>{{ plugin.manifest.publisher ?? plugin.manifest.author }}</dd>
+        <dt>API 版本</dt>
+        <dd>{{ plugin.manifest.apiVersion }}</dd>
+        <dt>SHA256</dt>
+        <dd class="plugin-digest">{{ plugin.packageDigest }}</dd>
+        <dt>备份版本</dt>
+        <dd>{{ plugin.previousVersion ?? '无' }}</dd>
+      </dl>
+    </section>
     <details class="plugin-settings-section plugin-permissions" :open="!builtin">
       <summary class="plugin-permissions-summary">
         <span><ShieldCheck :size="16" aria-hidden="true" />权限与访问范围</span>
@@ -90,18 +105,26 @@ async function revoke() {
             <p class="subtle">
               {{
                 builtin
-                  ? '内置插件的权限和访问范围由系统预置，无需配置。'
+                  ? '以下是此内置插件可使用的平台能力，由系统预置，仅供查阅和排查权限问题。'
                   : '仅授予需要的能力；写入、修改和其他敏感操作仍会逐次确认。'
               }}
             </p>
           </div>
         </header>
         <div class="plugin-permission-list">
-          <label
+          <component
+            :is="builtin ? 'div' : 'label'"
             v-for="permission in plugin.manifest.permissions"
             :key="permission"
             class="plugin-permission-option"
-            ><input
+            ><component
+              :is="grant?.permissions.includes(permission) ? Check : Minus"
+              v-if="builtin"
+              :size="16"
+              class="plugin-capability-icon"
+              aria-hidden="true"
+            /><input
+              v-else
               v-model="permissions"
               type="checkbox"
               :value="permission"
@@ -110,7 +133,7 @@ async function revoke() {
             /><span
               ><strong>{{ labels[permission][0] }}</strong
               ><small>{{ labels[permission][1] }}</small></span
-            ></label
+            ></component
           >
         </div>
         <details v-if="plugin.manifest.preapprovedCommands?.length" class="plugin-preset-commands">
@@ -124,7 +147,8 @@ async function revoke() {
           ><code>{{ JSON.stringify(command, null, 2) }}</code></pre>
         </details>
         <p class="plugin-all-hosts subtle">
-          适用于所有主机，使用时操作当前选择的主机。敏感操作仍需逐次确认。
+          适用于所有主机。请求仍校验实际目标与已授予能力，远程文件接口另受授权目录限制。SSH
+          命令默认逐次确认，获准的固定命令除外。授权不向插件提供登录凭据。
         </p>
         <div
           v-if="permissions.some((p) => p === 'sftp.read' || p === 'sftp.write')"
@@ -163,21 +187,6 @@ async function revoke() {
           </button>
         </footer>
       </form>
-    </details>
-    <details class="plugin-settings-section plugin-package-details">
-      <summary>插件信息</summary>
-      <dl class="plugin-details">
-        <dt>插件 ID</dt>
-        <dd>{{ plugin.manifest.id }}</dd>
-        <dt>开发者</dt>
-        <dd>{{ plugin.manifest.publisher ?? plugin.manifest.author }}</dd>
-        <dt>API 版本</dt>
-        <dd>{{ plugin.manifest.apiVersion }}</dd>
-        <dt>SHA256</dt>
-        <dd class="plugin-digest">{{ plugin.packageDigest }}</dd>
-        <dt>备份版本</dt>
-        <dd>{{ plugin.previousVersion ?? '无' }}</dd>
-      </dl>
     </details>
   </div>
 </template>

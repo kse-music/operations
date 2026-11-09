@@ -132,7 +132,6 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
                     kind: 'container_details',
                     id: String(row.ID),
                     revealEnv: false,
-                    confirmed: false,
                   },
                   '容器详情',
                 )

@@ -252,8 +252,8 @@ try {
     });
     await navigateWorkspace(page, '关于');
     await settings.locator('.about-view').waitFor();
-    await navigateWorkspace(page, '模型管理');
-    await settings.getByRole('region', { name: '模型管理', exact: true }).waitFor();
+    await navigateWorkspace(page, '模型');
+    await settings.getByRole('region', { name: '模型', exact: true }).waitFor();
     await navigateWorkspace(page, '通用');
     assert.equal(await dirty.inputValue(), '300');
     const geometry = await settings.evaluate((dialog) => {

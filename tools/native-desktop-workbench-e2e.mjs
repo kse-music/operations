@@ -123,7 +123,7 @@ try {
   const nextTheme = originalTheme === 'dark' ? 'light' : 'dark';
   await theme.selectOption(nextTheme);
   await navigateWorkspace(page, '关于');
-  await navigateWorkspace(page, '模型管理');
+  await navigateWorkspace(page, '模型');
   await navigateWorkspace(page, '通用');
   assert.equal(await theme.inputValue(), nextTheme);
   assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'terminals');

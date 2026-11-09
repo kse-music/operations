@@ -349,7 +349,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
     model = (await invoke('ai_model_save', { input })).value;
     await bindAssistantModel(page, model.id);
     await content().getByRole('button', { name: '管理模型', exact: true }).click();
-    await page.getByRole('region', { name: '模型管理', exact: true }).waitFor();
+    await page.getByRole('region', { name: '模型', exact: true }).waitFor();
     await open('AI 运维助手');
     assert.equal(
       await content().locator('.ai-model-bar, select, [aria-controls="assistant-context"]').count(),

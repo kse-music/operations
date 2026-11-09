@@ -88,7 +88,7 @@ try {
       (await page.locator('.settings-dialog-navigation .nav-item').allTextContents()).map((text) =>
         text.trim(),
       ),
-      ['通用', '终端', '快捷键', '数据与存储', '模型管理', '插件', '关于'],
+      ['通用', '终端', '快捷键', '数据与存储', '模型', '插件', '关于'],
     );
     const about = page.getByRole('button', { name: '关于', exact: true });
     await about.click();

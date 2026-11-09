@@ -329,6 +329,10 @@ it('opens an authorized settings contribution without navigating or creating a w
   expect(workspace.hostId).toBe('a');
   expect(workspace.tabs).toEqual([active]);
   expect(workspace.pluginPages).toEqual([]);
+  expect(workspace.settingsView).toBeNull();
+  await workspace.closePluginSettings();
+  expect(workspace.pluginConfiguration).toBeUndefined();
+  expect(workspace.current).toBe(active);
 });
 
 it.each(['save', 'mutation'] as const)(
@@ -337,6 +341,7 @@ it.each(['save', 'mutation'] as const)(
     const workspace = useWorkspaceStore(),
       plugins = usePluginsStore();
     workspace.navigate('files', 'a');
+    workspace.navigate('plugins');
     workspace.openPluginSettings('cn.hiboot.plugins.assistant');
     const current = workspace.current,
       configuration = workspace.pluginConfiguration;
@@ -359,6 +364,33 @@ it.each(['save', 'mutation'] as const)(
     await workspace.closeSettings();
     expect(workspace.settingsView).toBeNull();
     expect(workspace.tabs).toEqual([current]);
+  },
+);
+
+it.each(['save', 'mutation'] as const)(
+  'keeps standalone plugin settings open during a plugin %s',
+  async (operation) => {
+    const workspace = useWorkspaceStore(),
+      plugins = usePluginsStore();
+    workspace.navigate('files', 'a');
+    workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+    const current = workspace.current,
+      configuration = workspace.pluginConfiguration;
+    const guard = vi.fn(async () => false);
+    workspace.settingsCloseGuard = guard;
+    if (operation === 'save') workspace.pluginSettingsBusy = true;
+    else plugins.busy = true;
+    await workspace.closePluginSettings();
+    workspace.navigate('models');
+    expect(workspace.pluginConfiguration).toBe(configuration);
+    expect(workspace.settingsView).toBeNull();
+    workspace.pluginSettingsBusy = false;
+    plugins.busy = false;
+    await workspace.closePluginSettings();
+    expect(workspace.pluginConfiguration).toBeUndefined();
+    expect(workspace.settingsView).toBeNull();
+    expect(workspace.current).toBe(current);
+    expect(guard).not.toHaveBeenCalled();
   },
 );
 

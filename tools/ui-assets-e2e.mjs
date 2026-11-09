@@ -246,12 +246,12 @@ try {
     const notices = page.getByRole('button', { name: '关闭通知', exact: true });
     while (await notices.count()) await notices.first().click();
 
-    const models = await openAsset(page, '模型管理');
+    const models = await openAsset(page, '模型');
     assert.equal(
       await page
         .locator('.settings-dialog-navigation [aria-current="page"]')
         .getAttribute('aria-label'),
-      '模型管理',
+      '模型',
     );
     await models.getByRole('heading', { name: '内网诊断模型', exact: true }).waitFor();
     const localTab = models.getByRole('tab', { name: '本地来源', exact: true });

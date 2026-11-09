@@ -13,6 +13,10 @@
 | [0020](decisions/0020-command-preapproval.md)   | 完整命令预授权独立于业务风险判断     | 有效；精确匹配和独立权限，不使用服务白名单或“只读”自报              |
 | [0021](decisions/0021-builtin-distribution.md)  | 从完整源码目录生成内置分发           | 有效；构建期自动发现，不运行时扫描或维护手工名单                    |
 | [0022](decisions/0022-feature-retirement.md)    | 移除产品能力时保留共享基础与用户数据 | 有效；记录退出范围及旧退役兼容方案的替代关系                        |
+| [0023](decisions/0023-wasm-sandbox.md)          | 无 WASI 的 Wasmi 能力沙箱            | 有效；保留选型理由和非 OS 隔离/非抢占边界                           |
+| [0024](decisions/0024-package-commit.md)        | 受限 JSON 包与原子安装指针           | 有效；保留格式、来源确认和失败不切换当前版本的取舍                  |
+| [0025](decisions/0025-storage-relocation.md)    | 定位文件与确认启动后清理源           | 有效；主动迁移区别于旧身份兼容，Committed 后不回退部分清理源        |
+| [0027](decisions/0027-assistant-policy.md)      | 有界助手计划与最小上下文             | 有效；脱敏顺序、资产范围及预算压缩已补齐专项回归                    |
 
 ## 连接、文件与验证基础
 
@@ -28,6 +32,7 @@
 | [0006](decisions/0006-terminal-routing.md)    | 日常终端、受管路由和会话归属转发      | 路由/转发保留；布局持久化由 0018 替代                         |
 | [0007](decisions/0007-safe-files.md)          | SFTP 租约、有界队列和保守文本替换     | 文件安全保留；目录联动和主机关闭行为由 0018 修订              |
 | [0008](decisions/0008-monitoring.md)          | 固定采集、独立监控租约和有界历史      | 宿主内部实现依据；不代表当前存在独立内置监控页面              |
+| [0026](decisions/0026-windows-file-drag.md)   | Windows 虚拟文件与链接下载            | 有效；区分 Shell 协议、窗口内拖动与完整实体手势验收           |
 
 ## 已替代或退出范围的决策
 
@@ -42,6 +47,8 @@
 | 原 0015：终端移除常驻栏                                             | 复用原窗格动作和身份，将操作移到上下文菜单              | 0018；[终端菜单历史](../validation/terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md) |
 
 早期 13A 包安装/无 WASI/显式授权原则继续存在；旧版本协商、声明式 UI、宿主业务枚举和内置插件名单已经由 0016/0017/0021/0022 替代。原实验、阶段失败及验收证据保留在[插件验证记录](../validation/plugins/PLUGIN_TEST_REPORT.md)，不再复制到本索引。
+
+终端的会话菜单、普通会话复制、同窗格重连、转发、主动导出及终端→SFTP 入口已复用现有能力接通；内容区仍只提供复制/粘贴，额外动作从底部操作菜单进入，保留真实目标和会话所有权。当前验证及平台限制见[终端入口回归](../validation/terminal/VALIDATION_TERMINAL_CONTEXT_MENU.md#2026-11-09-终端入口补齐)，其他未关闭门禁仍由[实施计划](../product/IMPLEMENTATION_PLAN.md#剩余工作与验收门禁)跟踪。
 
 ## 记录规则
 

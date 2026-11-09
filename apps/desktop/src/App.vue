@@ -46,6 +46,9 @@ import GlobalSearch from './components/GlobalSearch.vue';
 import { usePluginsStore } from './stores/plugins';
 import PluginDialogs from './components/PluginDialogs.vue';
 const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
+const PluginSettingsDialog = defineAsyncComponent(
+  () => import('./components/PluginSettingsDialog.vue'),
+);
 const plugins = usePluginsStore();
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
@@ -661,13 +664,9 @@ watch(
           @navigate="navigate($event)"
           @plugin="openPlugin"
         />
-        <span
-          v-if="currentHost"
-          class="workspace-endpoint"
-          :title="`${currentHost.username}@${currentHost.hostname}:${currentHost.port}`"
-          >{{ currentHost.username }}@{{ currentHost.hostname }}:{{ currentHost.port }}</span
+        <strong v-if="isHostWorkspace && !currentHost" class="workspace-local-label"
+          >本地终端</strong
         >
-        <strong v-else-if="isHostWorkspace" class="workspace-local-label">本地终端</strong>
       </div>
       <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
@@ -763,6 +762,11 @@ watch(
   </div>
   <NotificationToasts />
   <SettingsDialog v-if="settingsOpen" />
+  <PluginSettingsDialog
+    v-if="workspace.pluginConfiguration && !settingsOpen"
+    :key="workspace.pluginConfiguration.pluginId"
+    :plugin-id="workspace.pluginConfiguration.pluginId"
+  />
   <Modal v-if="pluginTarget" title="选择使用工具的主机" @close="pluginTarget = null">
     <p>选择主机后，工具将在该主机工作区打开。</p>
     <div class="action-row">

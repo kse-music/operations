@@ -20,7 +20,6 @@ async function load() {
       kind: 'container_details',
       id: props.containerId,
       revealEnv: true,
-      confirmed: false,
     });
     if (!visible) return;
     if (

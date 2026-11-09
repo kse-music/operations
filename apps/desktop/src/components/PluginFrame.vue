@@ -62,7 +62,6 @@ const active = computed(
     (!props.contextKey ||
       ((workspace.activePluginKey === props.contextKey ||
         (props.settingsPage &&
-          workspace.settingsView === 'plugins' &&
           workspace.pluginConfiguration?.pluginId === props.pluginId &&
           workspace.pluginConfiguration.contributionId === props.page.id)) &&
         plugins.owns(props.pluginId, props.contextKey))),
@@ -254,6 +253,7 @@ watch(
     ops.connections,
     files.connections,
     models.models,
+    plugins.settingsRevisions[props.pluginId],
     application.state?.config.monitorIntervalSecs,
     props.initialSection,
     props.page,

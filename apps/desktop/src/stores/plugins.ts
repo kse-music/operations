@@ -27,6 +27,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     () => application.state?.config.product?.language ?? 'zh-CN',
   );
   const schemas = ref<Record<string, { revision: string; ui: PluginUi }>>({});
+  const settingsRevisions = ref<Record<string, number>>({});
   const dirtyPages = ref<Record<string, string>>({});
   const dirty = computed(() => Object.keys(dirtyPages.value).length > 0);
   function setDraftDirty(key: string, id: string, value: boolean) {
@@ -243,6 +244,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     loaded,
     error,
     schemas,
+    settingsRevisions,
     schema,
     prompt,
     extensions,
