@@ -58,6 +58,8 @@ it.each([true, false])(
       'page-owner',
     );
     expect(ask.mock.calls[0]?.[1]).toContain('exact command');
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0]?.[2]).toBeUndefined();
     expect(pluginsApi.approve).toHaveBeenCalledWith('approval', accepted);
     expect(resume).toHaveBeenCalledExactlyOnceWith(
       'resume-' + accepted,
@@ -75,6 +77,81 @@ it('freezes structured input before waiting in the queue', async () => {
   await vi.runAllTimersAsync();
   await job;
   expect(call.mock.calls[0]?.[1]).toEqual({ action: 'run', input: { target: { id: 'original' } } });
+});
+it.each([true, false])(
+  'shows only the readable summary and native target while preserving approval continuation, approval=%s',
+  async (accepted) => {
+    const approval = review();
+    const call = vi.spyOn(pluginsApi, 'call').mockResolvedValue({
+      ...approval,
+      result: { ...approval.result, target: 'ops@actual-host:22' },
+    });
+    const resume = vi.spyOn(pluginsApi, 'continue').mockResolvedValue(ok({ cancelled: !accepted }));
+    const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(accepted);
+    const confirmation = {
+      title: '停止容器？',
+      message: '容器：web\n服务将暂时不可用。',
+      confirmLabel: '停止',
+    };
+    const job = pluginInvokeRequest(
+      'readable-' + accepted,
+      page,
+      'run',
+      { hostId: 'host' },
+      () => true,
+      'owner',
+      confirmation,
+    );
+    confirmation.message = 'changed after dispatch';
+    await vi.runAllTimersAsync();
+    expect(await job).toEqual({ cancelled: !accepted });
+    expect(ask).toHaveBeenCalledExactlyOnceWith(
+      '停止容器？',
+      '主机：ops@actual-host:22\n\n容器：web\n服务将暂时不可用。',
+      undefined,
+      'owner',
+      { confirmLabel: '停止' },
+    );
+    expect(JSON.stringify(ask.mock.calls)).not.toContain('exact command');
+    expect(call).toHaveBeenCalledExactlyOnceWith(
+      'readable-' + accepted,
+      { action: 'run', input: { hostId: 'host' } },
+      'owner',
+    );
+    expect(pluginsApi.approve).toHaveBeenCalledWith('approval', accepted);
+    expect(resume).toHaveBeenCalledExactlyOnceWith(
+      'readable-' + accepted,
+      'frozen-future',
+      'owner',
+      !accepted,
+    );
+  },
+);
+it('keeps the full native prompt when a readable target is unavailable', async () => {
+  vi.spyOn(pluginsApi, 'call').mockResolvedValue(review());
+  vi.spyOn(pluginsApi, 'continue').mockResolvedValue(ok(null));
+  const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
+  const job = pluginInvokeRequest('missing-target', page, 'run', {}, () => true, 'owner', {
+    title: '插件标题',
+    message: '插件说明',
+  });
+  await vi.runAllTimersAsync();
+  await job;
+  expect(ask.mock.calls[0]?.[0]).toBe('插件操作需要单独确认');
+  expect(ask.mock.calls[0]?.[1]).toContain('exact command');
+});
+it.each([
+  null,
+  { title: 'title' },
+  { title: 'title', message: 'x'.repeat(2049) },
+  { title: 'title', message: 'message', target: 'forged' },
+  { title: 'title', message: 'message', confirmLabel: 7 },
+])('rejects invalid confirmation presentation before dispatch: %j', async (confirmation) => {
+  const call = vi.spyOn(pluginsApi, 'call');
+  await expect(
+    pluginInvokeRequest('invalid-confirmation', page, 'run', {}, () => true, 'owner', confirmation),
+  ).rejects.toThrow('插件确认说明');
+  expect(call).not.toHaveBeenCalled();
 });
 it('declines a late hidden approval and lets the original future clean up', async () => {
   let active = true;

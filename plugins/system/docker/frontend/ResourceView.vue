@@ -15,7 +15,9 @@ const stateLabels: Record<string, string> = {
   connecting: '连接中',
   failed: '连接失败',
 };
-import type { OpsRequest, OpsResponse, ContainerShell, LogInput } from './types';
+import type { OpsRequest, OpsResponse, LogInput } from './types';
+import type { PluginConfirmation } from '@serverdeck/plugin-sdk/types/plugins';
+import { mutationConfirmation } from './confirmation';
 import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import OpsTable from '@serverdeck/plugin-sdk/ui/OpsTable.vue';
 import OpsDetails from './OpsDetails.vue';
@@ -55,15 +57,6 @@ const detail = ref<Record<string, unknown> | null>(null),
 const detailLoading = ref(false),
   detailError = ref<string | null>(null);
 const capabilities = ref<Record<string, unknown> | null>(null);
-const pending = ref<{
-  title: string;
-  target: string;
-  request?: OpsRequest;
-  shell?: ContainerShell;
-  inspect: boolean;
-  sessionId: string;
-} | null>(null);
-const confirmedTarget = ref('');
 const log = ref<{ id: string; title: string }>();
 const probe = ref(false),
   probeTarget = ref(''),
@@ -76,8 +69,12 @@ function session() {
   if (!connection.value?.session || !connected.value) throw new Error('请先连接主机');
   return connection.value.session.id;
 }
-async function query(request: OpsRequest): Promise<OpsResponse> {
-  const value = await invoke<OpsResponse>('query', { hostId: session(), request });
+async function query(request: OpsRequest, confirmation?: PluginConfirmation): Promise<OpsResponse> {
+  const value = await invoke<OpsResponse>(
+    'query',
+    { hostId: session(), request },
+    confirmation ? { confirmation } : undefined,
+  );
   if (!value.success)
     throw new Error(`${value.code ?? '操作失败'}：${value.message ?? '请刷新核对状态'}`);
   if (value.message) notice.value = value.message;
@@ -122,51 +119,24 @@ async function inspect(request: OpsRequest, title: string) {
     if (!disposed && token === detailGeneration) detailLoading.value = false;
   }
 }
-function ask(
-  title: string,
-  target: string,
-  request?: OpsRequest,
-  shell?: ContainerShell,
-  asDetail = false,
-) {
+async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targetName?: string) {
   if (busy.value || !panelVisible.value) return;
-  const action = { title, target, request, shell, inspect: asDetail, sessionId: session() };
-  if (request?.kind === 'image_remove') {
-    void execute(action);
-    return;
-  }
-  pending.value = action;
-  confirmedTarget.value = '';
-}
-async function apply() {
-  const action = pending.value;
-  if (!action || confirmedTarget.value !== action.target) return;
-  await execute(action);
-}
-async function execute(action: NonNullable<typeof pending.value>) {
-  if (action.sessionId !== connection.value?.session?.id) {
-    error.value = '主机上下文已变化，请重新选择目标';
-    pending.value = null;
-    return;
-  }
   busy.value = true;
   error.value = null;
   notice.value = null;
   try {
-    if (action.shell && connection.value) {
+    if (request.kind === 'shell') {
       const ticket = await invoke<{ ticket: string; hostId: string }>('shell', {
         hostId: session(),
-        id: action.shell.id,
-        bash: action.shell.bash,
+        id: request.id,
+        bash: false,
       });
       await openTerminal(ticket.ticket, ticket.hostId);
-    } else if (action.request && action.inspect) await inspect(action.request, action.title);
-    else if (action.request) {
-      await query(action.request);
+    } else {
+      await query(request, mutationConfirmation(request, targetName));
       notice.value = '请求完成，请核对刷新后的目标状态。';
       await load();
     }
-    pending.value = null;
   } catch (cause) {
     if (
       !['PLUGIN_USER_CANCELLED', 'USER_CANCELLED'].includes(
@@ -213,7 +183,6 @@ function visibility() {
   ++generation;
   closeDetail();
   log.value = undefined;
-  pending.value = null;
   busy.value = false;
   if (panelVisible.value) void load();
 }
@@ -226,7 +195,7 @@ onBeforeUnmount(() => {
 useErrorNotifications(() => [error.value, detailError.value]);
 const slotContext = {
   inspect,
-  ask,
+  execute,
   query,
   openLog: async (input: LogInput, title: string) => {
     try {
@@ -238,7 +207,7 @@ const slotContext = {
   },
   openShell: (id: string) => {
     if (connected.value && panelVisible.value && connection.value)
-      ask('打开容器终端', id, undefined, { id, bash: false, confirmed: false });
+      void execute({ kind: 'shell', id });
   },
 };
 </script>
@@ -342,34 +311,6 @@ const slotContext = {
           检测 TCP 端口
         </button>
       </div>
-    </Modal>
-    <Modal v-if="pending" title="确认主机运维操作" :busy="busy" @close="pending = null">
-      <p>{{ pending.title }}</p>
-      <p>
-        主机：{{ hostDisplayName(connection?.host) }} · {{ connection?.host.hostname }} · 账号
-        {{ connection?.host.username }}
-      </p>
-      <code>{{ pending.target }}</code>
-      <p>操作可能中断业务。不会自动提权或强制删除；超时后请刷新核对，勿盲目重复。</p>
-      <label
-        >输入完整目标以确认<input
-          v-model="confirmedTarget"
-          aria-label="确认运维目标"
-          autocomplete="off"
-      /></label>
-      <label v-if="pending.shell"
-        ><input v-model="pending.shell.bash" type="checkbox" />使用 /bin/bash（默认 /bin/sh）</label
-      >
-      <footer class="dialog-actions">
-        <button class="button" :disabled="busy" @click="pending = null">取消</button
-        ><button
-          class="button danger"
-          :disabled="busy || confirmedTarget !== pending.target"
-          @click="apply"
-        >
-          确认执行
-        </button>
-      </footer>
     </Modal>
   </section>
 </template>

@@ -1,5 +1,26 @@
-import type { PluginUiPage, PluginValues } from '../types/plugins';
+import type { PluginConfirmation, PluginUiPage, PluginValues } from '../types/plugins';
 import type { JsonValue } from '@serverdeck/plugin-sdk/types/platform';
+
+export function safeConfirmation(value: unknown): PluginConfirmation | undefined {
+  if (value === undefined) return undefined;
+  const fields = safeInput(value);
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields))
+    throw new Error('插件确认说明无效');
+  const { title, message, confirmLabel } = fields;
+  if (
+    Object.keys(fields).some((key) => !['title', 'message', 'confirmLabel'].includes(key)) ||
+    typeof title !== 'string' ||
+    !title.trim() ||
+    title.length > 80 ||
+    typeof message !== 'string' ||
+    !message.trim() ||
+    message.length > 2048 ||
+    (confirmLabel !== undefined &&
+      (typeof confirmLabel !== 'string' || !confirmLabel.trim() || confirmLabel.length > 24))
+  )
+    throw new Error('插件确认说明字段无效或超限');
+  return { title, message, ...(confirmLabel === undefined ? {} : { confirmLabel }) };
+}
 
 export function safeInput(value: unknown): JsonValue {
   let nodes = 0;

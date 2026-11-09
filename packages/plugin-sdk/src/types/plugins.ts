@@ -4,6 +4,7 @@ export type PluginPermission =
   | 'hosts.read'
   | 'ssh.execute'
   | 'ssh.execute.preapproved'
+  | 'ssh.interactive.preapproved'
   | 'sftp.read'
   | 'sftp.write'
   | 'ui.contribute'
@@ -90,8 +91,14 @@ export interface PluginApproval {
   pluginName: string;
   pluginVersion: string;
   hostId: string;
+  target?: string | null;
   operation: string;
   description: string;
+}
+export interface PluginConfirmation {
+  title: string;
+  message: string;
+  confirmLabel?: string;
 }
 export interface PluginEvent {
   pluginId: string;

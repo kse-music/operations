@@ -3,7 +3,7 @@
   "id": "cn.hiboot.plugins.docker",
   "name": "Docker 管理",
   "icon": "container",
-  "version": "2.0.5",
+  "version": "2.0.7",
   "author": "ServerDeck",
   "description": "管理 Docker 容器与镜像，查看详情、日志并打开容器终端。",
   "apiVersion": "^5.0.0",
@@ -16,6 +16,7 @@
     "hosts.read",
     "ssh.execute",
     "ssh.execute.preapproved",
+    "ssh.interactive.preapproved",
     "network.connect"
   ],
   "contributions": [

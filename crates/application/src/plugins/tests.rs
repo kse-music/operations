@@ -380,6 +380,7 @@ async fn confirmation_is_frozen_to_request_owner_generation_and_profile_and_sing
         .unwrap()
         .unwrap();
     assert!(first.description.contains("uname"));
+    assert_eq!(first.target.as_deref(), Some("ops@fixture:22"));
     app.plugin_approve(&first.id, true).unwrap();
     assert!(
         app.plugin_confirmation_bound(

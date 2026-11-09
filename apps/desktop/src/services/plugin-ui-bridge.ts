@@ -211,6 +211,7 @@ export function createPluginUiBridge(input: {
           args.input,
           active,
           owner,
+          args.confirmation,
         );
         check();
         if (!active() && !input.canRetain?.())

@@ -1,5 +1,11 @@
 # 验证记录索引
 
+最新：[移除确认弹窗的执行详情与命令展示，保留业务说明和确认/取消](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-移除确认弹窗执行详情)。
+
+最新：[Docker 停止/删除使用易读确认、名称和影响说明，技术命令默认折叠](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-确认弹窗易读化)。
+
+最新：[Docker 日志/Shell 直接打开，停止/删除仅保留一次确认](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-操作确认简化)。
+
 最新：[SFTP 独立 sudo 切用户、失败保护及真实 OpenSSH 身份验证](files/VALIDATION_STAGE4.md#2026-11-09-sftp-切换用户)。
 
 最新：[AI 提问触发 PLUGIN_FUEL：固定规则初始化复用、长问题开销及正式 WASM 连续问答回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-09-提问触发-plugin_fuel-修复)。

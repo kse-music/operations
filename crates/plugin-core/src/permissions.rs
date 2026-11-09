@@ -10,6 +10,7 @@ pub const OPERATIONS: &[&str] = &[
     "hosts.read",
     "ssh.execute",
     "ssh.execute.preapproved",
+    "ssh.interactive.preapproved",
     "sftp.read",
     "sftp.write",
     "settings.read",
@@ -126,29 +127,28 @@ impl Grant {
         }
         Ok(())
     }
-    /// An explicit grant approves only immutable, fully specified package commands.
-    /// It does not classify arbitrary commands as read-only or apply to streams/PTYs.
+    /// Fixed commands and interactive sessions have separate, revision-bound grants.
     pub fn preapproves(&self, plugin: &InstalledPlugin, operation: &Capability) -> bool {
-        let Capability::Platform {
-            request: serverdeck_plugin_sdk::platform::Request::Execute { command, .. },
-            ..
-        } = operation
-        else {
+        use serverdeck_plugin_sdk::platform::Request;
+        if self.authorize(plugin, operation).is_err() {
             return false;
+        }
+        let Capability::Platform { request, .. } = operation;
+        let (permission, name) = match request {
+            Request::Execute { command, .. }
+                if plugin.manifest.preapproved_commands.contains(command) =>
+            {
+                (Permission::SshExecutePreapproved, "ssh.execute.preapproved")
+            }
+            Request::StreamOpen { .. } | Request::Terminal { .. } => (
+                Permission::SshInteractivePreapproved,
+                "ssh.interactive.preapproved",
+            ),
+            _ => return false,
         };
-        self.authorize(plugin, operation).is_ok()
-            && plugin
-                .manifest
-                .permissions
-                .contains(&Permission::SshExecutePreapproved)
-            && self
-                .permissions
-                .contains(&Permission::SshExecutePreapproved)
-            && self
-                .operations
-                .iter()
-                .any(|name| name == "ssh.execute.preapproved")
-            && plugin.manifest.preapproved_commands.contains(command)
+        plugin.manifest.permissions.contains(&permission)
+            && self.permissions.contains(&permission)
+            && self.operations.iter().any(|operation| operation == name)
     }
 }
 pub fn denied() -> Error {

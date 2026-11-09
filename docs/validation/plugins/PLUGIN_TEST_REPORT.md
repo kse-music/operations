@@ -1,5 +1,60 @@
 # 插件阶段验证记录
 
+## 2026-11-09 移除确认弹窗执行详情
+
+按用户要求移除易读操作确认弹窗的“执行详情”入口及命令脚本展示，只保留真实 SSH 主机、容器/镜像名称、操作影响和操作/取消按钮。删除宿主 `PluginDialogs.vue` 的详情模板与样式、插件 store 的闲置详情字段和 server 的详情传参；原生审批仍绑定原完整命令、owner、主机修订和续接票据。未修改权限、危险操作确认或其他插件默认完整审批流程。SDK 与当前功能说明同步；Docker 包仍为 2.0.7，此轮是宿主显示修正，无需改动插件包版本或持久配置。
+
+- `npm run test -w @serverdeck/desktop -- src/components/plugin-dialogs.test.ts src/services/plugin-server.test.ts ../../plugins/system/docker/frontend`：3 文件、32 项通过。确认 DOM 不再包含 details/summary/pre 或“执行详情”，原始命令不传入易读提示，主机/名称保留；确认、取消和关闭仍只处理原审批和 Future 一次。
+- 隔离浏览器 QA 12 场景通过：停止、删除容器、删除镜像 × 深浅主题 × 1280×820 标准字号及 960×600 的 145% 字号。验证入口和命令节点完全不存在、真实目标与影响仍显示、按钮可见可用、无横向溢出及确认/取消结果；已查看去除详情后的截图。只使用明确标记的渲染夹具，不访问真实服务器。
+- `npm run typecheck`、`npm run lint`、修改前端文件 Prettier 检查通过。`node tools/tauri.mjs build --debug --no-bundle` 完整通过，生成 `target/debug/serverdeck-desktop.exe`；前端、系统插件及开发包 ZIP 构建成功，Vite 仍有原有大 chunk 提示。构建前 D 盘约 159.9 GiB 可用，复用既有根 Cargo 和 WASM 缓存。
+
+本轮无 Rust 业务逻辑变化，未重复原生单元/SSH 矩阵，未执行实机 Docker 停止/删除、最终 WebView 点击、跨平台或安装器验收。业务说明由插件提供，用户不再通过此弹窗查看实际命令，须信任已授权插件；原生审批完整请求绑定与确认/取消边界保留。QA 浏览器脚本、12 张截图和结果位于 `.local/qa/docker-no-execution-details/`。运行新版前正常退出旧实例；本轮最新 EXE 位于 Debug 路径，上一轮 Release EXE 未替换。当前实现无后续开发依赖，本阶段停止。
+
+## 2026-11-09 Docker 确认弹窗易读化
+
+Docker 2.0.7 将停止、删除容器、删除镜像的确认标题改为具体操作，正文展示对象名称、短 ID、真实 SSH 目标以及服务中断/数据丢失影响；按钮直接标注“停止”“删除”，启动操作同样采用对应文案。完整命令和插件身份保留在默认折叠的“执行详情”。不增加输入确认，不改变单次审批、冻结请求、取消及目标配置复验。
+
+SDK `invoke` 新增可选纯文本 `confirmation` 呈现参数，由桥校验并在排队前冻结；不传给 WASM，也不作为授权依据。Native 审批单独返回实际 `target`，正文目标始终由宿主提供；缺少实际目标时保留完整原生提示。主要修改为 Docker `confirmation.ts`、`ResourceView.vue`、`App.vue` 和清单，宿主 `PluginDialogs.vue`、插件 store/server/bridge，SDK 前端类型及 Native Approval DTO。SDK、UI 契约、PRD、架构、使用与内置说明同步。
+
+### 实际执行验证
+
+- 前端：`npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend src/components/plugin-dialogs.test.ts src/services/plugin-server.test.ts src/services/plugin-ui-bridge.test.ts src/services/plugin-ui.test.ts`，5 文件、60 项通过。覆盖停止/删除的名称与影响文案、自定义按钮、命令默认折叠/展开、取消/关闭、不输入 ID、呈现副本冻结、完整命令仍保留、非法/超限/伪造 target 的呈现参数拒绝、实际目标缺失回退，以及可信 owner 与一次原 Future 续接。
+- Native：应用根 `target/` 离线锁定编译，复制测试 EXE 到 `.local/qa/docker-readable-confirmation/` 后运行，审批冻结/owner/配置/过期/一次消费回归 1 项通过，回环 SSH 回归 6 项通过；新增断言确认原生 `target` 来自实际连接。测试只使用隔离数据和本机 SSH 服务，无真实 Docker 变更。
+- 浏览器：运行 QA `preview.mjs`，真实宿主组件/服务及 Docker 文案模块通过 12 个场景，覆盖三种操作 × 深浅主题 × 1280×820 标准字号及 960×600 的 145% 字号；验证真实目标展示、技术命令和内部主机 ID 不进入正文、命令详情默认收起并可展开、无输入框、按钮可操作、无横向溢出、确认/取消结果。首次预览的启动错误通知遮挡截图局部，清除该夹具通知后重跑通过，未修改生产通知逻辑。已查看标准及最小窗口截图。
+- `npm run typecheck`、`npm run lint`、`cargo fmt --all -- --check`、修改前端文件 Prettier 检查、`cargo clippy -p serverdeck-application --all-targets --no-deps --offline --locked -- -D warnings` 通过。继续保留上节记录的原有全依赖 Clippy/未修改组件格式限制，不以本轮定向检查声称全仓库检查通过。
+- `node tools/tauri.mjs build --no-bundle` 完整通过：前端、两个内置包及开发包 ZIP 生成成功，Docker 包为 2.0.7，Windows x64 Release EXE 输出 `target/release/serverdeck-desktop.exe`。沿用根 Cargo 输出及既有 WASM 缓存，启动前 D 盘约 160 GiB 可用；本轮未构建安装器。
+
+QA 编译 JSONL、测试 EXE、日志、浏览器脚本、12 张截图和布局结果位于 `.local/qa/docker-readable-confirmation/`。浏览器为明确标注的渲染夹具，不代表最终 WebView 或截图服务器验收；未执行实机 Docker 停止/删除、跨平台或安装器验收。业务说明由插件提供，保留可展开的真实命令供审阅，仍须正确授权插件。
+
+当前 Debug 客户端正在使用，未关闭进程或覆盖其 EXE；新版输出使用根 `target/release/`。运行新版前需用户正常退出旧实例，内置 Docker 按版本升级到 2.0.7；上传来源须升级并重新授权。当前实现无后续开发依赖，本阶段停止。
+
+## 2026-11-09 Docker 操作确认简化
+
+### 完成范围与边界
+
+Docker 包升级至 2.0.6。日志和 Shell 点击直接打开；移除插件输入完整目标 ID 的重复弹窗，容器启动、停止、删除和镜像删除仅保留可信宿主一次“确认/取消”。宿主继续展示真实 SSH 目标和冻结命令，取消不执行，删除不强制、不删除卷。
+
+日志/终端命令含动态容器 ID，新增独立可选 `ssh.interactive.preapproved` 权限及同名 operation，仅用于 StreamOpen/Terminal，仍需基础 SSH 授权。该能力允许当前安装版本启动任意交互命令，不是只读证明；不能免除 Execute、文件写入或本机 TCP 的确认。内置分发预置，上传包默认不选，版本、摘要、安装修订、可见性、撤权及清理边界沿用现有平台。无数据库或配置格式迁移，旧上传包授权不继承。取舍见 [ADR 0030](../../architecture/decisions/0030-interactive-preapproval.md)。
+
+主要修改为 Docker `ResourceView.vue`、`App.vue`、类型/测试和清单，公开 Rust/TS 权限类型，plugin-core 清单/授权校验，宿主内置授权映射及权限设置页；SDK、包格式、安全说明、PRD、架构、实施计划和使用说明同步。
+
+### 实际执行验证
+
+- 前端专项：`npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend src/views/plugin-settings-panel.test.ts src/components/plugin-dialogs.test.ts src/services/plugin-server.test.ts`，4 文件、25 项通过。覆盖直接打开日志/Shell、停止/删除不再输入、宿主确认/取消/关闭、冻结动作只续接一次、上传包两类预授权分别默认未选并独立授予。首次沙箱临时缓存重命名报 EPERM，没有执行用例；沙箱外重跑通过。
+- plugin-core：`cargo test -p serverdeck-plugin-core --offline --locked --no-run --message-format=json`，根 `target/` 编译后复制测试 EXE 到 `.local/qa/docker-confirmation/` 执行，26 项通过。覆盖独立权限/operation、基础 SSH 权限、版本/摘要/修订/启停绑定，以及交互授权不能批准 Execute、SaveFile、TcpConnect。首次沙箱执行有 15 项因临时仓库原子文件操作拒绝访问失败，沙箱外同一 QA 副本全部通过。
+- 应用：`cargo test -p serverdeck-application --offline --locked --no-run --message-format=json`，复制 EXE 后执行 `plugins::tests::ssh_tests`，6 项通过；执行 `bundled_plugins::tests`，5 项通过。正式 Docker WASM 通过 Native 签发日志流和终端票据，审批池为空；停止、容器删除、镜像删除分别验证取消时不发送命令、接受后只发送一次。上传包基础授权仍产生审批，单独预授权后可直接打开，撤权释放资源；隐藏页拒绝新动作和消费终端票据。回环服务返回测试输出，不调用用户服务器。
+- 新增回归首次错误假定隐藏页面立即删除未消费终端票据。现有实现隐藏时关闭流/已打开 PTY，消费未使用票据时拒绝并删除；测试改为实际调用打开接口，断言 `PLUGIN_UI_HIDDEN`、无远程执行且票据已清除，未改变生命周期实现。
+- `npm run typecheck`、`npm run lint`、`cargo fmt --all -- --check`、全部修改前端文件的 Prettier 检查通过。扩大到 Docker 整个前端目录时，4 个未修改组件存在原有格式问题，未顺手格式化。
+- `cargo clippy -p serverdeck-plugin-sdk -p serverdeck-plugin-core -p serverdeck-application --all-targets --no-deps --offline --locked -- -D warnings` 通过。未加 `--no-deps` 的全依赖检查被原有 `crates/core/src/openssh.rs:289` 的 `single_element_loop` 告警阻断；未修改无关 OpenSSH 代码。
+- `npm run build` 通过：两个系统插件 WASM/UI、开发包 ZIP、Vue 类型检查与 Vite 生产构建成功，Docker 输出包为 2.0.6。Vite 保留原有大 chunk 提示。
+- Windows x64 Release EXE 构建通过，输出 `target/release/serverdeck-desktop.exe`。首次使用 `npm run tauri -- build --debug --no-bundle` 时，本机 npm 仅将 `build` 传给入口，实际执行 Release 及安装器构建；EXE 成功，随后 NSIS 3.13 下载被网络访问限制阻断（OS 10013），安装器未生成。改用直接入口 `node tools/tauri.mjs build --no-bundle` 后完整命令通过，生成无需安装器的客户端，未启动生产数据目录或执行实机操作。
+
+### 限制、风险与使用依赖
+
+未在截图服务器执行 Docker 操作，未进行最终桌面点击或跨平台验收。回环 SSH 验证日志数据、审批/执行边界和终端票据，不等同真实 Docker exec PTY 验收。交互预授权具有任意远程流/终端命令权限，上传插件需要用户单独审阅授予；其他插件默认确认行为不变。
+
+本次 QA 测试 EXE、编译 JSONL 与核心/SSH/内置分发测试日志保存在 `.local/qa/docker-confirmation/`。系统插件需运行包含新宿主能力的新版客户端并正常重启；上传来源需升级 2.0.6 并重新显式授权。当前实现无后续开发依赖，本阶段停止。
+
 ## 2026-11-09 Docker 移除操作反馈
 
 移除 Docker 页底部“操作反馈”入口、历史弹窗、Feedback 类型、挂载及操作后的历史查询；同时移除插件 UI 的 `history` 动作声明、WASM `history` 分支与最多 200 条记录的内存队列，以及仅为时间戳使用的 Info 调用。实际操作结果、异常传播、即时提示、变更确认、容器日志和 Shell 保留。Docker 包由 2.0.4 更新至 2.0.5，PRD 与内置版本同步；两个浏览器夹具删除历史接口，短窗口底栏检查改为定位保留的权限说明。

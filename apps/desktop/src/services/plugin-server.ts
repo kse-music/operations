@@ -1,6 +1,6 @@
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from './plugins';
-import { actionPayload } from './plugin-ui';
+import { actionPayload, safeConfirmation } from './plugin-ui';
 import type { PluginApproval, PluginUiPage } from '../types/plugins';
 
 interface Queue {
@@ -167,10 +167,12 @@ export async function pluginInvokeRequest<T>(
   values: unknown,
   isActive: () => boolean = () => true,
   owner = 'default',
+  confirmation?: unknown,
 ): Promise<T> {
   const plugins = usePluginsStore();
   const version = plugins.contextVersion(id);
   const payload = actionPayload(page, action, values);
+  const presentation = safeConfirmation(confirmation);
   const verify = () => {
     if (plugins.contextVersion(id) !== version)
       throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
@@ -188,11 +190,19 @@ export async function pluginInvokeRequest<T>(
         reply = await pluginsApi.continue(id, approval.continuation, owner, true);
         continue;
       }
+      const readable = presentation && approval.target;
       const accepted = await plugins.ask(
-        '插件操作需要单独确认',
-        `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
+        readable ? presentation.title : '插件操作需要单独确认',
+        readable
+          ? `主机：${approval.target}\n\n${presentation.message}`
+          : `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
         undefined,
         owner,
+        readable
+          ? {
+              confirmLabel: presentation.confirmLabel ?? '确认',
+            }
+          : undefined,
       );
       const confirmed = accepted && isActive();
       await pluginsApi.approve(approval.id, confirmed);

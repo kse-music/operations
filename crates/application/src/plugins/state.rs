@@ -85,6 +85,7 @@ pub struct Approval {
     pub host_id: String,
     pub operation: String,
     pub description: String,
+    pub target: Option<String>,
 }
 pub(super) struct Pending {
     pub owner: String,

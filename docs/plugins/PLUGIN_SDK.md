@@ -15,13 +15,15 @@ SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 St
 | Rust 协议、顺序 async 动作执行器 | `crates/plugin-sdk/src/{lib,platform,backend}.rs`    |
 | Vue/TS SDK                       | `packages/plugin-sdk/src/`，`@serverdeck/plugin-sdk` |
 | 独立页面启动                     | `runtime` → `mountPlugin(App)`                       |
-| 本包声明的 WASM 动作             | `invoke<T>(action, input)`                           |
+| 本包声明的 WASM 动作             | `invoke<T>(action, input, options?)`                 |
 | 平台原语                         | `platform` → `call<T>(request)`                      |
 | 安全公开元数据                   | `context` → `usePlatformContext()`                   |
 | 连接 / 终端 / 取消 / 草稿        | `connections` / `terminal` / `actions` / `drafts`    |
 | 通用组件                         | `ui/{Modal,OpsTable,TrendChart,StreamDialog}.vue`    |
 
 下载的开发包包含上述两端 SDK、工具、锁文件、文档和完整样例，无需 ServerDeck 源码或 Tauri 工具链。
+
+`invoke` 可通过 `options.confirmation` 提供 `{title,message,confirmLabel?}` 纯文本业务说明，仅改变本次宿主确认弹窗的呈现。宿主冻结说明，始终保留原生审批的真实目标与完整命令；有真实目标时正文只展示目标及业务说明，不展示执行详情或命令脚本；完整命令仍由原生审批绑定。字段限制、缺失目标行为及边界见 [UI 契约](PLUGIN_UI_EXTENSION.md)。该说明不能批准执行、替换目标或重放动作。
 
 ## Rust 动作
 
@@ -77,7 +79,9 @@ Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Cap
 
 `Command { program, args, timeoutSecs }` 将程序和参数逐项 POSIX 引用；无需人工拼接。只有明确需要 shell 时使用 `Command::script`，插件仍必须验证/引用插入脚本的值。程序 ≤4096 字节、参数 ≤128 个且每个 ≤8192 字节、合计 ≤16384 字节，无 NUL；Execute 超时 1–30 秒。Stream/PTY 持续到显式关闭或页面生命周期结束。
 
-Execute 默认经可信宿主**逐次确认真实目标与命令**。可选 Manifest `preapprovedCommands` 声明 1–16 条完整 Command（合计 JSON ≤48 KiB），同时声明并独立授予 `ssh.execute.preapproved` 权限及同名 operation 后，只有 program、args、timeoutSecs 完全匹配的 Execute 使用预授权；仍需 `ssh.execute`。预授权匹配不支持参数模板或通配符，脚本内容按原样精确匹配；上传包权限页展示完整命令，默认未选此能力，升级按原包摘要/修订重新授权。该机制不保证命令只读，不接受 Guest 的 `readOnly`/`confirmed` 免审，也无服务名白名单。StreamOpen、Terminal、SaveFile、TcpConnect 始终逐次确认真实目标与命令/写入摘要。
+Execute 默认经可信宿主**逐次确认真实目标与命令**。可选 Manifest `preapprovedCommands` 声明 1–16 条完整 Command（合计 JSON ≤48 KiB），同时声明并独立授予 `ssh.execute.preapproved` 权限及同名 operation 后，只有 program、args、timeoutSecs 完全匹配的 Execute 使用预授权；仍需 `ssh.execute`。预授权匹配不支持参数模板或通配符，脚本内容按原样精确匹配；上传包权限页展示完整命令，默认未选此能力，升级按原包摘要/修订重新授权。该机制不保证命令只读，不接受 Guest 的 `readOnly`/`confirmed` 免审，也无服务名白名单。
+
+StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.preapproved`，并独立授予同名权限和 operation 后，当前安装修订可直接启动任意远程流和终端命令；仍需声明、授予 `ssh.execute` 及同名 operation。这是任意交互命令授权，不受 `preapprovedCommands` 限制，也不表示命令只读；上传包默认未选，升级需要重新授权。该权限不能免除 Execute、SaveFile、TcpConnect 的审批。隐藏/关闭、撤权、配额、取消和实际 SSH 配置复验仍适用。
 
 `models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
 

@@ -6,6 +6,7 @@ import Docker from './App.vue';
 const api = vi.hoisted(() => ({
   query: vi.fn(),
   actions: vi.fn<(action: string) => void>(),
+  presentations: vi.fn(),
   logOpen: vi.fn<(host: string, input: unknown) => Promise<{ id: string }>>(async () => ({
     id: 'container-log',
   })),
@@ -20,8 +21,9 @@ vi.mock('@serverdeck/plugin-sdk/context', () => ({
   }),
 }));
 vi.mock('@serverdeck/plugin-sdk', () => ({
-  invoke: (action: string, input: { hostId: string; request: unknown }) => {
+  invoke: (action: string, input: { hostId: string; request: unknown }, options?: unknown) => {
     api.actions(action);
+    api.presentations(options);
     return action === 'query'
       ? api.query(input.hostId, input.request)
       : action === 'logs'
@@ -53,7 +55,7 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.restoreAllMocks();
 });
-it('shows container detail tabs, scopes environment values to their tab and preserves action confirmation', async () => {
+it('loads details on demand, opens logs and shell directly and delegates mutations to host confirmation', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -196,31 +198,43 @@ it('shows container detail tabs, scopes environment values to their tab and pres
   document.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
   await settle();
   expect(api.logClose).toHaveBeenCalledWith('container-log');
+  api.query.mockRejectedValueOnce({ code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' });
   await click('停止');
-  const confirm = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
-    (button) => button.textContent?.trim() === '确认执行',
-  )!;
-  expect(document.querySelector('[aria-label="确认运维目标"]')).not.toBeNull();
-  expect(confirm.disabled).toBe(true);
-  await click('取消');
-  expect(api.query.mock.calls.some(([, request]) => request.kind === 'container_action')).toBe(
-    false,
-  );
+  expect(api.presentations).toHaveBeenLastCalledWith({
+    confirmation: {
+      title: '停止容器？',
+      message: expect.stringContaining('owned-container'),
+      confirmLabel: '停止',
+    },
+  });
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  expect(api.query).toHaveBeenCalledWith('host', {
+    kind: 'container_action',
+    id: 'container',
+    action: 'stop',
+    confirmed: true,
+  });
   const exitedRow = () => root.querySelector('[data-ops-target="exited"]')!;
-  const confirmExitedAction = async (label: string) => {
+  const runExitedAction = async (label: string) => {
     const action = [...exitedRow().querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === label,
     )!;
     action.click();
     await settle();
-    const target = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
-    target.value = 'exited';
-    target.dispatchEvent(new Event('input'));
-    await settle();
-    await click('确认执行');
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   };
-  await confirmExitedAction('启动');
-  await confirmExitedAction('删除');
+  await runExitedAction('启动');
+  await runExitedAction('删除');
+  expect(
+    api.presentations.mock.calls.some(
+      ([options]) =>
+        options?.confirmation?.title === '删除容器？' &&
+        options.confirmation.message.includes('无法恢复') &&
+        options.confirmation.message.includes('exited-container'),
+    ),
+  ).toBe(true);
   expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_action',
     id: 'exited',
@@ -234,17 +248,19 @@ it('shows container detail tabs, scopes environment values to their tab and pres
     confirmed: true,
   });
   await click('Shell');
-  expect(api.terminal).not.toHaveBeenCalled();
-  const shellTarget = document.querySelector<HTMLInputElement>('[aria-label="确认运维目标"]')!;
-  shellTarget.value = 'container';
-  shellTarget.dispatchEvent(new Event('input'));
-  await settle();
-  await click('确认执行');
   expect(api.terminal).toHaveBeenCalledWith('shell-ticket', 'host');
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
   expect(actionLabels('image')).toEqual(['删除']);
   await click('删除');
+  expect(
+    api.presentations.mock.calls.some(
+      ([options]) =>
+        options?.confirmation?.title === '删除镜像？' &&
+        options.confirmation.message.includes('owned-image') &&
+        options.confirmation.message.includes('重新拉取'),
+    ),
+  ).toBe(true);
   expect(document.querySelector('dialog')).toBeNull();
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   expect(api.query).toHaveBeenCalledWith('host', {

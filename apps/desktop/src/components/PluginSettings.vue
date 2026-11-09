@@ -20,6 +20,10 @@ const labels: Record<PluginPermission, [string, string]> = {
     '固定命令预授权',
     '下方列出的固定命令无需逐次确认；仍需授予 SSH 命令权限',
   ],
+  'ssh.interactive.preapproved': [
+    '交互会话预授权',
+    '允许插件直接启动任意远程日志流和终端命令，无需逐次确认；仍需授予 SSH 命令权限',
+  ],
   'sftp.read': ['读取远程文件', '仅限下方可读目录'],
   'sftp.write': ['写入远程文件', '仅限下方可写目录，写入逐次确认'],
   'ui.contribute': ['插件界面', '显示插件功能和通知'],
@@ -32,6 +36,7 @@ const operationMap: Record<PluginPermission, string[]> = {
   'hosts.read': ['hosts.read'],
   'ssh.execute': ['ssh.execute'],
   'ssh.execute.preapproved': ['ssh.execute.preapproved'],
+  'ssh.interactive.preapproved': ['ssh.interactive.preapproved'],
   'sftp.read': ['sftp.read'],
   'sftp.write': ['sftp.write'],
   'ui.contribute': ['ui.contribute', 'ui.notify'],

@@ -187,6 +187,18 @@ it('passes action and platform requests through the same owner-bound helpers', a
     { name: 'Ada' },
     expect.any(Function),
     'trusted',
+    undefined,
+  );
+  const confirmation = { title: '停止容器？', message: '容器：web', confirmLabel: '停止' };
+  await ui.call('invoke', { action: 'greet', input: {}, confirmation, owner: 'forged' });
+  expect(api.invoke).toHaveBeenLastCalledWith(
+    id,
+    page,
+    'greet',
+    {},
+    expect.any(Function),
+    'trusted',
+    confirmation,
   );
   await ui.call('platform.request', { operation: { kind: 'hosts' } });
   expect(api.platform).toHaveBeenCalledWith(id, { kind: 'hosts' }, expect.any(Function), 'trusted');

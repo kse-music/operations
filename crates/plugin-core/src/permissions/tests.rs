@@ -121,6 +121,86 @@ fn permissions_are_default_deny_and_every_command_requires_confirmation() {
     assert!(serde_json::from_str::<Request>(r#"{"apiVersion":1,"requestId":"x","operation":{"kind":"system_query","request":{"kind":"containers"}}}"#).is_err());
 }
 #[test]
+fn interactive_preapproval_is_explicit_and_cannot_approve_execute_or_other_operations() {
+    let mut plugin = plugin();
+    plugin
+        .manifest
+        .permissions
+        .push(Permission::SshInteractivePreapproved);
+    plugin.manifest.validate(std::env::consts::OS).unwrap();
+    let mut input = input();
+    input.operations.push("ssh.execute".into());
+    let mut grant = Grant::new(&plugin, input).unwrap();
+    let operations = [
+        cap(Primitive::StreamOpen {
+            host_id: "host".into(),
+            command: Command::script("logs"),
+        }),
+        cap(Primitive::Terminal {
+            host_id: "host".into(),
+            command: Command::script("shell"),
+        }),
+    ];
+    for operation in &operations {
+        assert!(!grant.preapproves(&plugin, operation));
+    }
+    grant
+        .permissions
+        .push(Permission::SshInteractivePreapproved);
+    for operation in &operations {
+        assert!(!grant.preapproves(&plugin, operation));
+    }
+    grant.operations.push("ssh.interactive.preapproved".into());
+    for operation in &operations {
+        assert!(grant.preapproves(&plugin, operation));
+        for field in 0..8 {
+            let mut changed = plugin.clone();
+            let mut changed_grant = grant.clone();
+            match field {
+                0 => changed.revision = "upgraded".into(),
+                1 => changed.package_digest = "tampered".into(),
+                2 => changed.manifest.version = "2.0.0".into(),
+                3 => changed.enabled = false,
+                4 => changed
+                    .manifest
+                    .permissions
+                    .retain(|p| *p != Permission::SshInteractivePreapproved),
+                5 => changed_grant
+                    .permissions
+                    .retain(|p| *p != Permission::SshExecute),
+                6 => changed_grant
+                    .operations
+                    .retain(|name| name != "ssh.execute"),
+                _ => changed_grant
+                    .permissions
+                    .retain(|p| *p != Permission::SshInteractivePreapproved),
+            }
+            assert!(!changed_grant.preapproves(&changed, operation));
+        }
+    }
+    for request in [
+        Primitive::Execute {
+            host_id: "host".into(),
+            command: Command::script("stop"),
+        },
+        Primitive::TcpConnect {
+            target: "127.0.0.1".into(),
+            port: 80,
+        },
+        Primitive::SaveFile {
+            document_id: "document".into(),
+            content: "changed".into(),
+        },
+    ] {
+        assert!(!grant.preapproves(&plugin, &cap(request)));
+    }
+    plugin
+        .manifest
+        .permissions
+        .retain(|p| *p != Permission::SshExecute);
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
+}
+#[test]
 fn preset_execution_requires_a_separate_revision_bound_grant_and_exact_command() {
     let mut plugin = plugin();
     let command = Command::new("fixture-tool").arg("literal argument");

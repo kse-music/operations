@@ -25,7 +25,7 @@ watch(
         :disabled="!!plugins.prompt.confirmationText && phrase !== plugins.prompt.confirmationText"
         @click="plugins.decide(true)"
       >
-        明确确认
+        {{ plugins.prompt.confirmLabel ?? '明确确认' }}
       </button>
     </footer></Modal
   >

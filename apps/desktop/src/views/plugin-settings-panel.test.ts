@@ -151,7 +151,12 @@ it('shows exact preset commands and grants them only after a separate explicit s
   const plugin = { ...systemPluginFixtures()[0]!, source: 'user' as const };
   plugin.manifest = {
     ...plugin.manifest,
-    permissions: ['ui.contribute', 'ssh.execute', 'ssh.execute.preapproved'],
+    permissions: [
+      'ui.contribute',
+      'ssh.execute',
+      'ssh.execute.preapproved',
+      'ssh.interactive.preapproved',
+    ],
     preapprovedCommands: [{ program: 'fixture-tool', args: ['literal; value'], timeoutSecs: 30 }],
   };
   plugins.installed = [plugin];
@@ -161,6 +166,11 @@ it('shows exact preset commands and grants them only after a separate explicit s
   await mount(plugin.manifest.id);
   const preset = root.querySelector<HTMLInputElement>('[aria-label="ssh.execute.preapproved"]')!;
   expect(preset.checked).toBe(false);
+  const interactive = root.querySelector<HTMLInputElement>(
+    '[aria-label="ssh.interactive.preapproved"]',
+  )!;
+  expect(interactive.checked).toBe(false);
+  expect(root.textContent).toContain('任意远程日志流和终端命令');
   expect(root.querySelector('.plugin-preset-commands pre')?.textContent).toContain(
     'literal; value',
   );
@@ -178,12 +188,21 @@ it('shows exact preset commands and grants them only after a separate explicit s
   await submit();
   expect(grant.mock.calls[0]![1].permissions).not.toContain('ssh.execute.preapproved');
   expect(grant.mock.calls[0]![1].operations).not.toContain('ssh.execute.preapproved');
+  expect(grant.mock.calls[0]![1].permissions).not.toContain('ssh.interactive.preapproved');
+  expect(grant.mock.calls[0]![1].operations).not.toContain('ssh.interactive.preapproved');
   preset.checked = true;
   preset.dispatchEvent(new Event('change'));
   await nextTick();
   await submit();
   expect(grant.mock.calls[1]![1].permissions).toContain('ssh.execute.preapproved');
   expect(grant.mock.calls[1]![1].operations).toContain('ssh.execute.preapproved');
+  expect(grant.mock.calls[1]![1].permissions).not.toContain('ssh.interactive.preapproved');
+  interactive.checked = true;
+  interactive.dispatchEvent(new Event('change'));
+  await nextTick();
+  await submit();
+  expect(grant.mock.calls[2]![1].permissions).toContain('ssh.interactive.preapproved');
+  expect(grant.mock.calls[2]![1].operations).toContain('ssh.interactive.preapproved');
 });
 
 it('opens an independent settings frontend without a host and returns to the plugin list on cancel', async () => {

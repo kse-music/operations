@@ -10,7 +10,8 @@
 | [0017](decisions/0017-current-data-contract.md) | 严格当前契约与保留用户数据           | 数据库/持久配置策略由 0028 替代；插件契约、故障隔离和身份/秘密边界继续有效 |
 | [0018](decisions/0018-workspace-lifecycle.md)   | 主机工作区与资源生命周期分离         | 有效；替代旧模块导航/设置标签和终端布局持久化，关闭主机显式排空传输        |
 | [0019](decisions/0019-model-runtime.md)         | 本地模型授权与有界外部运行时         | 有效；CLI 管理登录，SDK5 下业务编排由插件负责                              |
-| [0020](decisions/0020-command-preapproval.md)   | 完整命令预授权独立于业务风险判断     | 有效；精确匹配和独立权限，不使用服务白名单或“只读”自报                     |
+| [0020](decisions/0020-command-preapproval.md)     | 完整命令预授权独立于业务风险判断     | Execute 精确匹配继续有效；流/PTY 的逐次确认限制由 0030 部分替代            |
+| [0030](decisions/0030-interactive-preapproval.md) | 交互会话采用独立预授权               | 有效；单独授权任意流/PTY 命令，Execute 变更仍须宿主确认                    |
 | [0021](decisions/0021-builtin-distribution.md)  | 从完整源码目录生成内置分发           | 有效；构建期自动发现，不运行时扫描或维护手工名单                           |
 | [0022](decisions/0022-feature-retirement.md)    | 移除产品能力时保留共享基础与用户数据 | 有效；记录退出范围及旧退役兼容方案的替代关系                               |
 | [0023](decisions/0023-wasm-sandbox.md)          | 无 WASI 的 Wasmi 能力沙箱            | 有效；保留选型理由和非 OS 隔离/非抢占边界                                  |

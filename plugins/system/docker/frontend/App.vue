@@ -121,7 +121,7 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
             }}</span
           ></template
         >
-        <template #actions="{ row, busy, inspect, ask, openLog, openShell }">
+        <template #actions="{ row, busy, inspect, execute, openLog, openShell }">
           <template v-if="section === 'containers'">
             <button
               class="text-button"
@@ -149,12 +149,15 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
               :class="{ danger: action !== 'start' }"
               :disabled="busy"
               @click="
-                ask(`容器${actionLabels[action]}`, String(row.ID), {
-                  kind: 'container_action',
-                  id: String(row.ID),
-                  action,
-                  confirmed: true,
-                })
+                execute(
+                  {
+                    kind: 'container_action',
+                    id: String(row.ID),
+                    action,
+                    confirmed: true,
+                  },
+                  String(row.Names || row.ID),
+                )
               "
             >
               {{ actionLabels[action] }}
@@ -179,11 +182,16 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
             class="text-button"
             :disabled="busy"
             @click="
-              ask('删除镜像（不强制、不删除卷）', String(row.ID), {
-                kind: 'image_remove',
-                id: String(row.ID),
-                confirmed: true,
-              })
+              execute(
+                {
+                  kind: 'image_remove',
+                  id: String(row.ID),
+                  confirmed: true,
+                },
+                [row.Repository, row.Tag]
+                  .filter((value) => value && value !== '<none>')
+                  .join(':') || String(row.ID),
+              )
             "
           >
             删除

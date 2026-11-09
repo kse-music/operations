@@ -214,6 +214,7 @@ fn bundled_grant(
             Permission::HostsRead => &["hosts.read"],
             Permission::SshExecute => &["ssh.execute"],
             Permission::SshExecutePreapproved => &["ssh.execute.preapproved"],
+            Permission::SshInteractivePreapproved => &["ssh.interactive.preapproved"],
             Permission::SftpRead => &["sftp.read"],
             Permission::SftpWrite => &["sftp.write"],
             Permission::UiContribute => &["ui.contribute", "ui.notify"],

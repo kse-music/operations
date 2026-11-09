@@ -19,6 +19,10 @@ npm run package
 
 固定后台查询可在 manifest 的 `preapprovedCommands` 声明完整 Command（最多 16 条、合计 JSON ≤48 KiB），并同时声明 `ssh.execute`、`ssh.execute.preapproved`。用户核对命令后单独授予后者权限及 operation，才可对完全匹配的 Execute 免除逐次确认。程序、参数、超时均逐字段匹配，预授权匹配无动态模板；此授权不保证命令只读，不适用于流、终端或文件写入。详见 SDK 和包格式文档。
 
+需要直接打开流或终端时，可另声明 `ssh.interactive.preapproved`，用户单独授予同名权限和 operation 后才对 StreamOpen/Terminal 免除逐次确认，仍需基础 `ssh.execute` 授权。这会允许当前安装修订启动任意交互命令，上传包默认未选；不能代替 Execute、文件写入或本机 TCP 的确认。完整边界见 SDK。
+
+需要易懂的操作确认时，前端可使用 `invoke(action, input, { confirmation: { title, message, confirmLabel } })`。例如标题“停止容器？”，正文说明容器名称和服务中断影响，按钮“停止”。宿主显示原生取得的实际目标和业务说明，不提供执行详情或命令脚本入口；完整命令仍由原生审批绑定，这些纯文本不参与授权，也不传给 WASM。字段限额和完整契约见 SDK 的 UI 说明。
+
 前端测试`npm test`，类型检查`npm run typecheck`。后端可用`cargo test --manifest-path example/backend/Cargo.toml --no-run --target-dir <QA共享target>`编译，Windows将EXE复制到QA目录运行；WASM产物在.local/plugin-build/example。工具默认locked/offline打包，先fetch依赖，不通过改锁掩盖失败。
 
 2026-11-09 的开发包修复了 SDK5 前端加载握手：恢复就绪通知和连接确认，API/UI/ABI 契约不变。用修复前开发包打出的 UI 需更新公开 SDK 并重新打包，提高插件版本后上传升级；无需修改插件业务或宿主服务接口。

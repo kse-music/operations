@@ -3,7 +3,6 @@ export const serverSections = [
   { key: 'containers', label: '容器' },
   { key: 'images', label: '镜像' },
 ];
-export type ContainerShell = { id: string; bash: boolean; confirmed: boolean };
 export type OpsRequest =
   | { kind: 'capabilities' | 'containers' | 'images' }
   | { kind: 'container_details'; id: string; revealEnv: boolean }

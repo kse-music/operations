@@ -357,6 +357,146 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
     app.shutdown().await;
 }
 #[tokio::test]
+async fn docker_interactive_sessions_skip_approval_but_mutations_require_one_decision() {
+    let f = Fixture::new();
+    let app = &f.app;
+    app.provision_bundled_plugins().unwrap();
+    let ssh = ssh(app).await;
+    let id = "cn.hiboot.plugins.docker";
+    let owner = "docker-interactive";
+    let target = "a".repeat(64);
+    app.plugin_activate(id).await.unwrap();
+    let logs = app.plugin_call_scoped(id, owner, json!({
+        "action":"logs", "input":{"hostId":ssh.host.id,"source":{"kind":"container","id":target},"lines":200,"follow":true}
+    })).await.unwrap();
+    assert!(logs.error.is_none(), "{logs:?}");
+    let stream = logs.result["id"].as_str().unwrap().to_owned();
+    let mut output = String::new();
+    for _ in 0..20 {
+        let polled = call(
+            app,
+            id,
+            owner,
+            Primitive::StreamPoll {
+                stream_id: stream.clone(),
+            },
+        )
+        .await;
+        for event in polled.result["events"].as_array().unwrap() {
+            if let Some(data) = event["dataBase64"].as_str() {
+                output.push_str(&String::from_utf8(STANDARD.decode(data).unwrap()).unwrap());
+            }
+        }
+        if output.contains("literal fixture output") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(70)).await;
+    }
+    assert!(output.contains("literal fixture output"));
+    let shell = app
+        .plugin_call_scoped(
+            id,
+            owner,
+            json!({
+                "action":"shell", "input":{"hostId":ssh.host.id,"id":target,"bash":false}
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(shell.error.is_none(), "{shell:?}");
+    let ticket = shell.result["ticket"].as_str().unwrap().to_owned();
+    assert_eq!(shell.result["hostId"], ssh.host.id);
+    assert!(app.plugin_host.lock().unwrap().approvals.is_empty());
+    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    for request in [
+        json!({"kind":"container_action","id":target,"action":"stop","confirmed":true}),
+        json!({"kind":"container_action","id":target,"action":"remove","confirmed":true}),
+        json!({"kind":"image_remove","id":target,"confirmed":true}),
+    ] {
+        for accepted in [false, true] {
+            let before = ssh.calls.lock().unwrap().len();
+            let pending = app
+                .plugin_call_scoped(
+                    id,
+                    owner,
+                    json!({
+                        "action":"query", "input":{"hostId":ssh.host.id,"request":request}
+                    }),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                pending.error.as_ref().unwrap().code,
+                "PLUGIN_CONFIRMATION_REQUIRED"
+            );
+            assert!(
+                pending.result["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&target)
+            );
+            assert_eq!(ssh.calls.lock().unwrap().len(), before);
+            app.plugin_approve(pending.result["id"].as_str().unwrap(), accepted)
+                .unwrap();
+            let result = app
+                .plugin_continue(
+                    id,
+                    owner,
+                    pending.result["continuation"].as_str().unwrap(),
+                    !accepted,
+                )
+                .await
+                .unwrap();
+            if accepted {
+                assert!(result.error.is_none(), "{result:?}");
+                assert_eq!(result.result["success"], true);
+            } else {
+                assert_eq!(result.error.unwrap().code, "USER_CANCELLED");
+            }
+            assert_eq!(
+                ssh.calls.lock().unwrap().len(),
+                before + usize::from(accepted)
+            );
+        }
+    }
+    app.plugin_scope_visibility(id, owner, false).await.unwrap();
+    assert!(!app.plugin_host.lock().unwrap().logs.contains_key(&stream));
+    let hidden_ticket = app
+        .plugin_platform_terminal_open(
+            id,
+            owner,
+            &ticket,
+            &ssh.host.id,
+            serverdeck_core::terminal::TerminalSize { cols: 80, rows: 24 },
+            Arc::new(|_| true),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        serverdeck_core::IpcError::from(hidden_ticket).code,
+        "PLUGIN_UI_HIDDEN"
+    );
+    assert!(
+        !app.plugin_host
+            .lock()
+            .unwrap()
+            .platform_terminals
+            .contains_key(&ticket)
+    );
+    let hidden = app
+        .plugin_call_scoped(
+            id,
+            owner,
+            json!({
+                "action":"shell", "input":{"hostId":ssh.host.id,"id":target}
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(hidden.error.is_some());
+    app.shutdown().await;
+}
+#[tokio::test]
 async fn uploaded_presets_need_explicit_grant_and_stop_after_revocation() {
     let f = Fixture::new();
     let app = &f.app;
@@ -417,12 +557,47 @@ async fn uploaded_presets_need_explicit_grant_and_stop_after_revocation() {
         "PLUGIN_CONFIRMATION_REQUIRED"
     );
     assert!(ssh.calls.lock().unwrap().is_empty());
+    let interactive = [
+        Primitive::StreamOpen {
+            host_id: ssh.host.id.clone(),
+            command: Command::new("fixture-echo"),
+        },
+        Primitive::Terminal {
+            host_id: ssh.host.id.clone(),
+            command: Command::new("fixture-echo"),
+        },
+    ];
+    for operation in &interactive {
+        let pending = call(app, id, "upload-page", operation.clone()).await;
+        assert_eq!(pending.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    }
+    assert!(ssh.calls.lock().unwrap().is_empty());
     f.grant(&plugin).await;
     let result = call(app, id, "upload-page", operation.clone()).await;
     assert!(result.error.is_none(), "{result:?}");
     assert_eq!(result.result["exitCode"], 0);
     assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    for operation in interactive {
+        let opened = call(app, id, "upload-page", operation).await;
+        assert!(opened.error.is_none(), "{opened:?}");
+        assert!(opened.result["id"].is_string() || opened.result["ticket"].is_string());
+    }
+    for _ in 0..20 {
+        if ssh.calls.lock().unwrap().len() == 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
     app.plugin_revoke(id.clone()).await.unwrap();
+    assert!(app.plugin_host.lock().unwrap().logs.is_empty());
+    assert!(
+        app.plugin_host
+            .lock()
+            .unwrap()
+            .platform_terminals
+            .is_empty()
+    );
     assert_eq!(
         serverdeck_core::IpcError::from(
             app.plugin_capability_scoped(id, "upload-page", request(cap(operation)))
@@ -432,7 +607,7 @@ async fn uploaded_presets_need_explicit_grant_and_stop_after_revocation() {
         .code,
         "PLUGIN_CANCELLED"
     );
-    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
     app.shutdown().await;
 }
 #[tokio::test]

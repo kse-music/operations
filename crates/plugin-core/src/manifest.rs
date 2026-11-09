@@ -160,6 +160,11 @@ impl Manifest {
         if permissions.len() != self.permissions.len() || self.contributions.len() > 32 {
             return Err(invalid("插件权限重复或 UI 贡献超限"));
         }
+        if permissions.contains(&Permission::SshInteractivePreapproved)
+            && !permissions.contains(&Permission::SshExecute)
+        {
+            return Err(invalid("交互会话预授权需要 SSH 权限"));
+        }
         if self.preapproved_commands.len() > 16
             || (!self.preapproved_commands.is_empty()
                 && (!permissions.contains(&Permission::SshExecute)

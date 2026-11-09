@@ -267,6 +267,7 @@ impl Application {
             host_id,
             operation: operation.operation().into(),
             description,
+            target: target.map(str::to_owned),
         };
         data.approvals.insert(
             public.id.clone(),

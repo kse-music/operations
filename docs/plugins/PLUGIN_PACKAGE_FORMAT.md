@@ -29,6 +29,8 @@
 
 可选 `preapprovedCommands` 是最多 16 条完整 `{program,args,timeoutSecs}` 的数组，合计 JSON 编码不超过 48 KiB。需同时声明 `ssh.execute`、`ssh.execute.preapproved`，后者不得在无命令时声明。每条命令遵守 SDK Command 的参数和超时限制，重复实际命令拒绝。声明是包摘要的一部分，升级重新绑定授权；预授权匹配不支持参数模板、通配符或动态参数替换，脚本内容按原样匹配。宿主在用户另行授权后才对完全匹配的 Execute 免除逐次确认；该声明不能证明命令只读，也不适用于流、终端或文件写入。
 
+`ssh.interactive.preapproved` 是独立可选权限，必须同时声明 `ssh.execute`。授予同名权限和 operation 后，当前安装修订可直接启动任意 StreamOpen/Terminal 命令，不匹配固定命令清单；上传包默认不授予，升级重新绑定授权。它不免除 Execute、文件保存或本机 TCP 连接的确认，详见 [SDK](PLUGIN_SDK.md)。
+
 formatVersion/schemaVersion仍为1。kind支持workspace/navigation/host_menu/command/settings/server，全部使用UI4 frontend页面。可选routes是最多32项的唯一合法导航标识；旧tool和领域surface被拒绝。
 
 13A-1 使用 `.sdplugin`，UTF-8 JSON：`{formatVersion: 1, manifest, files: [{path, content}]}`。content 为严格标准 base64，不压缩，不支持链接、设备文件或权限位。源码目录使用 `manifest.json`；打包器将其嵌入 manifest 字段并生成 files 校验清单。不得当作 ZIP 解包。
