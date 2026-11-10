@@ -20,7 +20,6 @@ import { FileWarning, Info, ListTodo, Monitor, Puzzle, Server, Unplug, X } from 
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
-import RemoteEditorHost from './components/RemoteEditorHost.vue';
 import FileOpenDialogs from './components/FileOpenDialogs.vue';
 import { useHostsStore } from './stores/hosts';
 import { hostDisplayName, type Host } from './types/hosts';
@@ -360,13 +359,17 @@ const store = useHostsStore();
 const terminals = useTerminalsStore();
 const files = useFilesStore();
 let releaseExit: UnlistenFn | undefined;
+let releaseEditor: UnlistenFn | undefined;
+let releaseEditorSaved: UnlistenFn | undefined;
 const exitBusy = ref(false);
+const exitError = ref<string | null>(null);
 async function confirmExit(): Promise<void> {
   exitBusy.value = true;
+  exitError.value = null;
   try {
     await filesApi.exit(true);
   } catch (cause) {
-    files.error = errorMessage(cause);
+    exitError.value = errorMessage(cause);
     exitBusy.value = false;
   }
 }
@@ -431,6 +434,12 @@ onMounted(async () => {
         void event;
         files.exitReview = true;
       });
+      releaseEditor = await listen<import('./services/editor').EditorStatus>(
+        'remote-editor-state',
+        (event) => files.editorState(event.payload),
+      );
+      releaseEditorSaved = await listen('remote-editor-saved', () => void files.refresh());
+      await files.syncEditorState();
     } catch (cause) {
       files.error = `关闭确认入口注册失败：${errorMessage(cause)}`;
     }
@@ -455,6 +464,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', revealActiveTab);
   window.removeEventListener('beforeunload', protectDraft);
   releaseExit?.();
+  releaseEditor?.();
+  releaseEditorSaved?.();
 });
 function openPlugin(
   id: string,
@@ -782,7 +793,6 @@ watch(
     @select-host="setContext"
     @plugin="openPlugin"
   />
-  <RemoteEditorHost v-if="files.document" :key="files.document.token" />
   <FileOpenDialogs />
   <Modal
     v-if="files.exitReview"
@@ -811,7 +821,7 @@ watch(
           <FileWarning :size="16" aria-hidden="true" />
           <div>
             <strong>未保存的修改</strong>
-            <p>放弃未保存的文本编辑。</p>
+            <p>关闭独立编辑器，放弃未保存的文本编辑。</p>
           </div>
         </li>
       </ul>
@@ -820,6 +830,7 @@ watch(
         <span>已完成的文件会保留。远端命令是否停止仍需核对。</span>
       </p>
     </div>
+    <p v-if="exitError" class="error-text" role="alert">{{ exitError }}</p>
     <footer class="dialog-actions exit-review-actions">
       <button class="button danger" type="button" :disabled="exitBusy" @click="confirmExit">
         确认

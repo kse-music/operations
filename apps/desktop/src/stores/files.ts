@@ -2,16 +2,11 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Host } from '../types/hosts';
-import type {
-  DirectoryListing,
-  ExternalDocument,
-  SftpUser,
-  TextDocument,
-  TransferInfo,
-} from '../types/files';
+import type { DirectoryListing, ExternalDocument, SftpUser, TransferInfo } from '../types/files';
 import { unfinished } from '../types/files';
 import type { TerminalEvent } from '../types/terminal';
 import { filesApi } from '../services/files';
+import type { EditorDocument, EditorStatus } from '../services/editor';
 import { useTerminalsStore } from './terminals';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
@@ -65,7 +60,7 @@ export const useFilesStore = defineStore('files', () => {
     localPendingPath = ref<string | null>(null),
     error = ref<string | null>(null),
     tasks = ref<TransferInfo[]>([]),
-    document = ref<TextDocument | null>(null),
+    document = ref<EditorDocument | null>(null),
     dirty = ref(false),
     editorBusy = ref(false),
     openingPath = ref(''),
@@ -80,6 +75,7 @@ export const useFilesStore = defineStore('files', () => {
   const current = computed(() => connections.value[active.value]);
   const pending = computed(() => tasks.value.filter(unfinished).length);
   let localGeneration = 0;
+  let editorGeneration = 0;
   let transferGeneration = 0;
   const opening = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
@@ -319,29 +315,28 @@ export const useFilesStore = defineStore('files', () => {
       return;
     }
     editorBusy.value = true;
+    const generation = editorGeneration;
     try {
-      document.value = await filesApi.read(sessionId, path);
-      dirty.value = false;
+      const opened = await filesApi.openEditor(sessionId, path);
+      if (generation === editorGeneration) {
+        document.value = opened;
+        dirty.value = false;
+      }
     } catch (cause) {
       openIssue.value = { sessionId, path, message: errorMessage(cause) };
     } finally {
       editorBusy.value = false;
     }
   }
-  async function editorFailed(): Promise<void> {
-    const old = document.value;
-    if (!old) return;
-    openIssue.value = {
-      sessionId: old.sessionId,
-      path: old.path,
-      message: '内置编辑器加载失败，可重试或使用系统应用编辑。',
-    };
-    try {
-      await filesApi.closeEditor(old.token, false);
-      if (document.value?.token === old.token) document.value = null;
-    } catch (cause) {
-      error.value = errorMessage(cause);
-    }
+  function editorState(status: EditorStatus): void {
+    editorGeneration++;
+    document.value = status.document;
+    dirty.value = status.dirty;
+  }
+  async function syncEditorState(): Promise<void> {
+    const generation = editorGeneration;
+    const status = await filesApi.editorStatus();
+    if (generation === editorGeneration) editorState(status);
   }
   function offerExternal(path: string): void {
     if (!current.value?.id) return;
@@ -468,11 +463,11 @@ export const useFilesStore = defineStore('files', () => {
       for (const task of latest)
         if (task.hostId === hostId && unfinished(task)) ids.add(task.sessionId);
       if (
-        (document.value && ids.has(document.value.sessionId) && dirty.value) ||
+        (document.value && ids.has(document.value.sessionId)) ||
         (externalDocument.value && ids.has(externalDocument.value.sessionId)) ||
         (editorBusy.value && active.value === hostId)
       ) {
-        error.value = '请先保存或关闭此主机的编辑文档，再关闭主机。';
+        error.value = '请先关闭此主机的编辑文档，再关闭主机。';
         return false;
       }
       const count = latest.filter((task) => task.hostId === hostId && unfinished(task)).length;
@@ -612,7 +607,8 @@ export const useFilesStore = defineStore('files', () => {
     localOpening,
     cancelExternalSave,
     externalError,
-    editorFailed,
+    editorState,
+    syncEditorState,
     offerExternal,
     openLocal,
     startExternal,

@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   clearTransfers: vi.fn(),
   switchUser: vi.fn(),
   read: vi.fn(),
+  openEditor: vi.fn(),
+  editorStatus: vi.fn(),
   closeEditor: vi.fn(),
   externalPrepare: vi.fn(),
   externalReady: vi.fn(),
@@ -62,10 +64,45 @@ describe('file opening and external editing', () => {
     ready: false,
     atomicSave: true,
   };
+  it('keeps native close state when an older open response arrives afterwards', async () => {
+    const store = connected();
+    let opened!: (value: { token: string; sessionId: string; path: string }) => void;
+    mocks.openEditor.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          opened = resolve;
+        }),
+    );
+    const request = store.edit('/config.ini');
+    store.editorState({ document: null, dirty: false });
+    opened({ token: 'closed', sessionId: 'session', path: '/config.ini' });
+    await request;
+    expect(store.document).toBeNull();
+    expect(store.editorBusy).toBe(false);
+  });
+  it('does not overwrite a newer native editor event with an older startup snapshot', async () => {
+    const store = connected();
+    let snapshot!: (value: { document: null; dirty: boolean }) => void;
+    mocks.editorStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          snapshot = resolve;
+        }),
+    );
+    const request = store.syncEditorState();
+    store.editorState({
+      document: { token: 'live', sessionId: 'session', path: '/config.ini' },
+      dirty: true,
+    });
+    snapshot({ document: null, dirty: false });
+    await request;
+    expect(store.document?.token).toBe('live');
+    expect(store.dirty).toBe(true);
+  });
   it('shows read progress, keeps ini eligible and offers a fallback with the actual error', async () => {
     const store = connected();
     let reject!: (error: unknown) => void;
-    mocks.read.mockImplementation(
+    mocks.openEditor.mockImplementation(
       () =>
         new Promise((_resolve, fail) => {
           reject = fail;
@@ -74,16 +111,16 @@ describe('file opening and external editing', () => {
     const request = store.edit('/config.ini', 100);
     expect(store.editorBusy).toBe(true);
     expect(store.openingPath).toBe('/config.ini');
-    expect(mocks.read).toHaveBeenCalledWith('session', '/config.ini');
+    expect(mocks.openEditor).toHaveBeenCalledWith('session', '/config.ini');
     reject({ code: 'TEXT_ENCODING', message: '文件不是有效 UTF-8，未进行有损解码' });
     await request;
     expect(store.editorBusy).toBe(false);
     expect(store.openIssue?.message).toContain('UTF-8');
     expect(store.document).toBeNull();
     expect(store.error).toBeNull();
-    mocks.read.mockClear();
+    mocks.openEditor.mockClear();
     await store.edit('/large.log', 2 * 1024 * 1024 + 1);
-    expect(mocks.read).not.toHaveBeenCalled();
+    expect(mocks.openEditor).not.toHaveBeenCalled();
     expect(store.openIssue?.message).toContain('2 MiB');
   });
   it('opens only a verified completed download once and keeps the original session when another host becomes active', async () => {
@@ -270,19 +307,22 @@ describe('host transfer lifetime', () => {
     await store.open(host);
     expect(mocks.open).not.toHaveBeenCalled();
   });
-  it('protects an unsaved document before asking to cancel its transfers', async () => {
-    const store = useFilesStore();
-    store.document = { sessionId: 'session', token: 'document' } as TextDocument;
-    store.dirty = true;
-    mocks.tasks.mockResolvedValue([transfer({ state: 'running' })]);
-    mocks.connections.mockResolvedValue([{ id: 'session', hostId: 'host' }]);
-    const ask = vi.spyOn(usePluginsStore(), 'ask');
-    expect(await store.prepareHostClose('host')).toBe(false);
-    expect(store.error).toContain('保存或关闭');
-    expect(store.document.token).toBe('document');
-    expect(ask).not.toHaveBeenCalled();
-    expect(mocks.close).not.toHaveBeenCalled();
-  });
+  it.each([false, true])(
+    'protects an open independent document (dirty=%s) before asking to cancel its transfers',
+    async (dirty) => {
+      const store = useFilesStore();
+      store.document = { sessionId: 'session', token: 'document' } as TextDocument;
+      store.dirty = dirty;
+      mocks.tasks.mockResolvedValue([transfer({ state: 'running' })]);
+      mocks.connections.mockResolvedValue([{ id: 'session', hostId: 'host' }]);
+      const ask = vi.spyOn(usePluginsStore(), 'ask');
+      expect(await store.prepareHostClose('host')).toBe(false);
+      expect(store.error).toContain('请先关闭');
+      expect(store.document.token).toBe('document');
+      expect(ask).not.toHaveBeenCalled();
+      expect(mocks.close).not.toHaveBeenCalled();
+    },
+  );
   it('waits for an in-flight connection and closes it before forgetting the host', async () => {
     let finish!: (value: { id: string }) => void;
     mocks.open.mockImplementationOnce(

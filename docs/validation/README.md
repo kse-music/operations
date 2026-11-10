@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[SFTP 单文档独立编辑器、窗口权限与关闭保护](files/VALIDATION_STAGE4.md#2026-11-10-单文档独立编辑器窗口)。
+
 最新：[Release EXE 产物核对、首次打开立即迁移及跨盘原生验收](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-release-exe-与首次启动迁移)。
 
 最新：[首次启动后立即迁移的文件写入竞争、19 项回归及 Windows 跨盘原生验证](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-首次启动后迁移的文件写入竞争)。

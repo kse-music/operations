@@ -5,7 +5,7 @@ use serverdeck_core::{
     terminal::{TerminalEvent, TerminalSession, TerminalSize},
 };
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 pub struct ExitApproval(pub AtomicBool);
 #[tauri::command]
@@ -106,11 +106,16 @@ pub async fn files_action(
         .map_err(Into::into)
 }
 #[tauri::command]
-pub async fn files_close(
+pub async fn files_close<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     application: tauri::State<'_, Application>,
     id: String,
     cancel: bool,
 ) -> Result<(), IpcError> {
+    if let Some(editors) = tauri::Manager::try_state::<crate::editor_commands::EditorWindows>(&app)
+    {
+        editors.check_session_close(&id)?;
+    }
     application
         .files_close(&id, cancel)
         .await
@@ -321,8 +326,14 @@ pub fn app_exit_confirm<R: tauri::Runtime>(
     confirmed: bool,
 ) -> Result<(), IpcError> {
     let pending = application.exit_pending();
-    if !confirmed && (pending.0 > 0 || pending.1 > 0) {
-        app.emit("app-exit-review", pending)
+    let editors = app.try_state::<crate::editor_commands::EditorWindows>();
+    if let Some(editors) = &editors {
+        editors.check_exit()?;
+    }
+    if !confirmed
+        && (pending.0 > 0 || pending.1 > 0 || editors.is_some_and(|editors| editors.is_open()))
+    {
+        app.emit_to("main", "app-exit-review", pending)
             .map_err(|_| IpcError::from(Error::Validation("无法请求退出确认，请重试")))?;
         return Ok(());
     }

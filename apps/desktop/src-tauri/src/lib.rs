@@ -1,6 +1,7 @@
 mod ai_commands;
 pub mod browser_commands;
 pub mod commands;
+pub mod editor_commands;
 pub mod file_commands;
 mod monitor_commands;
 mod ops_commands;
@@ -41,6 +42,7 @@ pub fn run() {
                     serverdeck_application::storage_location::Locations { data, logs, webview: app.path().app_local_data_dir()? },
                 )?;
                 let locations = profile.locations().clone();
+                app.manage(editor_commands::EditorWindows::new(locations.webview.clone()));
                 // Record upgrade failures before loading configuration. Apply the
                 // persisted log level only after its safe upgrade has completed.
                 let guard = logging::initialize(&locations.logs, serverdeck_core::LogLevel::Info)?;
@@ -55,6 +57,10 @@ pub fn run() {
                 let window_config = app.config().app.windows.iter().find(|w| w.label == "main")
                     .ok_or("main window configuration missing")?;
                 tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                    .on_navigation({
+                        let handle = app.handle().clone();
+                        move |_| !handle.state::<editor_commands::EditorWindows>().is_open()
+                    })
                     .data_directory(locations.webview).build()?;
                 window_state::initialize(app.handle(), &app.state::<Application>())?;
                 tracing::info!(operation = "startup", "ServerDeck initialized");
@@ -69,6 +75,9 @@ pub fn run() {
         })
         .invoke_handler(command_handler())
         .on_window_event(|window, event| {
+            if editor_commands::window_event(window, event) || window.label() != "main" {
+                return;
+            }
             window_state::record(window,event);
             terminal_upload_commands::drag_event(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
@@ -81,7 +90,8 @@ pub fn run() {
             }
         })
         .on_page_load(|webview, payload| {
-            if payload.event() == tauri::webview::PageLoadEvent::Started
+            if webview.label() == "main"
+                && payload.event() == tauri::webview::PageLoadEvent::Started
                 && let Some(state) = webview.try_state::<Application>()
             {
                 let application = state.inner().clone();
@@ -112,7 +122,7 @@ pub fn run() {
                 .0
                 .load(Ordering::Acquire)
             {
-                if app.emit("app-exit-review", pending).is_err() {
+                if app.emit_to("main", "app-exit-review", pending).is_err() {
                     tracing::warn!(
                         operation = "exit_review",
                         "could not request exit confirmation"
@@ -229,6 +239,13 @@ pub fn command_handler<R: tauri::Runtime>()
         file_commands::text_save,
         file_commands::text_dirty,
         file_commands::text_close,
+        editor_commands::editor_open,
+        editor_commands::editor_status,
+        editor_commands::editor_load,
+        editor_commands::editor_dirty,
+        editor_commands::editor_save,
+        editor_commands::editor_reload,
+        editor_commands::editor_close,
         file_commands::file_terminal,
         file_commands::app_exit_confirm,
         commands::forward_start,

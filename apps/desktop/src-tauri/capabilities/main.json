@@ -65,6 +65,8 @@
     "allow-transfer-cancel",
     "allow-transfer-retry",
     "allow-text-read",
+    "allow-editor-open",
+    "allow-editor-status",
     "allow-external-prepare",
     "allow-external-ready",
     "allow-external-save",

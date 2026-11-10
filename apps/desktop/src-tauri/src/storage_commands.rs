@@ -60,6 +60,12 @@ pub async fn app_storage_migrate<R: Runtime>(
     if !confirmed {
         return Err(Error::Validation("迁移数据并重启需要明确确认").into());
     }
+    if app
+        .try_state::<crate::editor_commands::EditorWindows>()
+        .is_some_and(|editors| editors.is_open())
+    {
+        return Err(Error::Validation("请先保存并关闭独立编辑器，再迁移数据目录").into());
+    }
     if application.has_external_editors()? {
         return Err(Error::Validation("请先结束外部编辑并关闭外部应用，再迁移数据目录").into());
     }

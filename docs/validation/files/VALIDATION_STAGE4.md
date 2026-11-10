@@ -1,5 +1,16 @@
 # SFTP 文件管理阶段验收
 
+## 2026-11-10 单文档独立编辑器窗口
+
+- 内置编辑改用无 parent/owner 的 Tauri 顶层窗口，一次一个文档；独立入口按需加载 Monaco，沿用既有 2 MiB/UTF-8、只读降级及冲突检测/原子保存。主窗口只同步摘要和 dirty，窗口实际标签绑定唯一文档；专用 capability 不授予主机、凭据、终端或任意文件命令。窗口加载/关闭/尺寸事件与主窗口清理、退出和几何记录隔离。取舍见 [ADR 0037](../../architecture/decisions/0037-independent-file-editor.md)。
+- 未保存关闭提供返回、保存后关闭和明确放弃，保存失败保留草稿；保存/读取中拒绝关闭/应用退出。打开文档期间阻止所属连接/主机主动关闭、切用户、数据迁移及页面导航/刷新；主程序退出仍显式确认放弃编辑，取消退出保留窗口。
+- 最终前端全量 `npm test`：62 文件、657 项通过；关联六文件专项共 130 项通过。覆盖失败保留草稿、保存后关闭、明确放弃、保存中阻止关闭、dirty 更新与保存顺序、重载失败、系统关闭事件路由、主题字号、短颜色转换、迟到状态不复活已关闭文档，以及已保存文档仍保护所属租约。Monaco 和 IPC 在这些前端测试中使用受控替身，不能代替真实原生/远端验收。jsdom 保留既有 canvas 未实现提示。
+- 桌面及 SDK TypeScript、全量 ESLint、相关 Prettier、Rust 格式与差异检查通过。`cargo check -p serverdeck-desktop --tests`、桌面全部原生测试编译通过；复制新增测试 EXE 到 `.local/qa/remote-editor-window/` 后执行：最终 5 项 IPC 测试通过，覆盖单例、失败释放槽位、摘要无正文、文档绑定、伪造窗口标签、远程来源、主窗口命令拒绝，以及未收到 dirty 事件时仍需退出审核。原生 IPC 测试使用 Tauri MockRuntime，不代表实际跨屏或 WebView2 验收。
+- `node tools/tauri.mjs build --debug --no-bundle` 通过，产物为 `target/debug/serverdeck-desktop.exe`，包含正式前端和本地 Monaco worker；保留既有大 chunk 提示，没有生成安装器。严格依赖 Clippy 被原有 `crates/core/src/openssh.rs:289` 的 `single_element_loop` 阻断；桌面自身 `cargo clippy -p serverdeck-desktop --tests --no-deps -- -D warnings` 通过，未修改无关 OpenSSH 实现。
+- 使用正式构建页面、真实 Monaco/worker 和受控 IPC 的无头 Edge 检查，复现浅色主题加载失败：CSS 压缩把 `#ffffff` 缩为 `#fff`，Monaco token 颜色表拒绝短十六进制。进入主题前展开三/四位颜色，增加回归。深色 1000×740/标准字号与浅色 600×430/145% 字号两组均通过：真实输入、取消关闭后继续输入、保存失败保留草稿、再次保存后以 `discard=false` 关闭，以及代码区高度/无横向溢出；截图已查看。错误保留在编辑器/审核框内，不重复弹出遮挡按钮的错误 toast；成功通知保留。脚本、结果与截图位于 `.local/qa/remote-editor-window/ui-editor.mjs`、`ui-results.json`、`editor-*-review.png`。这不是原生系统关闭按钮或物理跨屏验收。
+- 既有完整 IPC 初跑出现存储/插件夹具和回环模型服务失败。将原生测试 TEMP/TMP 同样改到项目后，存储/插件用例通过；唯一剩余的 `AI_NETWORK` 在沙箱外隔离执行本机回环用例后通过。浏览器链接 IPC 3 项通过，1 项真实系统浏览器打开用例按原有 ignored 标记未运行。
+- 首次前端测试在沙箱系统临时目录发生 Vite 缓存 rename EPERM，未运行用例；将本次进程 TEMP/TMP/TMPDIR 指向项目内 `.local/editor-window-tests/tmp` 后完成上述测试，不修改系统环境。WSL 只读可用性探测返回 `Wsl/E_ACCESSDENIED`，未启动 Linux/真实 SSH 测试宿主，未改动远端文件。实际双屏/DPI/输入法、真实 SFTP 保存和其他平台仍待验收；窗口位置持久化、多文档和崩溃草稿恢复不在首版范围。
+
 ## 2026-11-10 文件成功提示不再常驻
 
 - 根因：结束外部编辑把副本路径写入全局 `files.notice`，`FilesView` 将其渲染为无关闭/过期机制的成功横幅；关闭主机只清连接和传输，未清旧提示。`App` 同时监听该值再发通知，导致同一结果同时出现在通知和常驻横幅。

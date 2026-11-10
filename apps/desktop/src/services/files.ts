@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { ensureDesktop } from './ipc';
+import type { EditorDocument, EditorStatus } from './editor';
 import type { TerminalEvent, TerminalSession, TerminalSize } from '../types/terminal';
 import type {
   DirectoryListing,
@@ -55,6 +56,8 @@ export const filesApi = {
   retry: (id: string, sessionId: string, conflict: ConflictPolicy, confirmed: boolean) =>
     call<TransferInfo>('transfer_retry', { id, sessionId, conflict, confirmed }),
   read: (id: string, path: string) => call<TextDocument>('text_read', { id, path }),
+  openEditor: (id: string, path: string) => call<EditorDocument>('editor_open', { id, path }),
+  editorStatus: () => call<EditorStatus>('editor_status'),
   openLocal: (path: string) => call<boolean>('files_open_local', { path }),
   externalPrepare: (id: string, path: string) =>
     call<ExternalDocument>('external_prepare', { id, path }),

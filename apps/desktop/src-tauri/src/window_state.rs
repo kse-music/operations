@@ -58,6 +58,9 @@ pub fn initialize<R: Runtime>(
     Ok(())
 }
 pub fn record<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEvent) {
+    if window.label() != "main" {
+        return;
+    }
     if !matches!(
         event,
         tauri::WindowEvent::Resized(_) | tauri::WindowEvent::ScaleFactorChanged { .. }

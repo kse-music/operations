@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "capabilities": ["main"],
+      "capabilities": ["main", "remote-editor"],
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src sdplugin: http://sdplugin.localhost",
       "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src sdplugin: http://sdplugin.localhost"
     }

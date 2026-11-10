@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { useErrorNotifications } from '../composables/error-notifications';
-import { onMounted, onBeforeUnmount, ref, computed } from 'vue';
-import { FileCode2, Save, RotateCw, Search, WrapText, Maximize2, Minimize2, X } from '@lucide/vue';
+import { onMounted, onBeforeUnmount, ref, reactive, computed, nextTick } from 'vue';
+import { FileCode2, Save, RotateCw, Search, WrapText, X } from '@lucide/vue';
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/editor/contrib/find/browser/findController';
 import 'monaco-editor/languages/definitions/javascript/register';
@@ -17,18 +16,18 @@ import 'monaco-editor/languages/definitions/css/register';
 import 'monaco-editor/languages/definitions/html/register';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 import Modal from './Modal.vue';
-import { useFilesStore } from '../stores/files';
 import { useNotificationsStore } from '../stores/notifications';
-import { filesApi } from '../services/files';
+import { editorApi } from '../services/editor';
+import type { TextDocument } from '../types/files';
 import { errorMessage } from '../services/ipc';
-const store = useFilesStore();
+const props = defineProps<{ initialDocument: TextDocument }>();
+const store = reactive({ document: props.initialDocument, dirty: false });
 const notifications = useNotificationsStore();
-const emit = defineEmits<{ ready: [] }>();
+const emit = defineEmits<{ ready: []; closed: [] }>();
 const shortcutModifier = /Mac/.test(navigator.platform) ? '⌘' : 'Ctrl';
 const container = ref<HTMLElement>(),
   error = ref<string | null>(null),
   busy = ref(false),
-  maximized = ref(false),
   wrap = ref(true),
   position = ref({ lineNumber: 1, column: 1 }),
   lineCount = ref(1),
@@ -38,6 +37,7 @@ let editor: monaco.editor.IStandaloneCodeEditor,
   model: monaco.editor.ITextModel,
   resetting = false;
 let appearance: MutationObserver | undefined;
+let dirtyUpdates = Promise.resolve();
 const document = computed(() => store.document!);
 const fileName = computed(() => document.value.path.split('/').pop() || document.value.path);
 const directory = computed(() => document.value.path.slice(0, -fileName.value.length) || '/');
@@ -66,7 +66,14 @@ function updateStatus(): void {
 function updateAppearance(): void {
   const root = globalThis.document.documentElement;
   const styles = getComputedStyle(root);
-  const color = (name: string) => styles.getPropertyValue(name).trim();
+  const color = (name: string) => {
+    const value = styles.getPropertyValue(name).trim();
+    // CSS minification shortens e.g. #ffffff to #fff. Monaco's token color
+    // table requires full-length hex values, including editor.background.
+    return /^#[\da-f]{3,4}$/i.test(value)
+      ? `#${[...value.slice(1)].map((digit) => digit + digit).join('')}`
+      : value;
+  };
   const colors = Object.fromEntries(
     [
       ['editor.background', '--panel'],
@@ -178,9 +185,11 @@ onMounted(() => {
       document.value.content;
     if (dirty !== store.dirty) {
       store.dirty = dirty;
-      void filesApi.dirty(document.value.token, dirty).catch((cause) => {
-        error.value = errorMessage(cause);
-      });
+      dirtyUpdates = dirtyUpdates
+        .then(() => editorApi.dirty(dirty))
+        .catch((cause) => {
+          error.value = errorMessage(cause);
+        });
     }
   });
   editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -194,27 +203,27 @@ onBeforeUnmount(() => {
   editor?.dispose();
   model?.dispose();
 });
-async function save(): Promise<void> {
-  if (busy.value || !document.value.atomicSave) return;
+async function save(): Promise<boolean> {
+  if (busy.value || !document.value.atomicSave) return false;
   busy.value = true;
   error.value = null;
   editor.updateOptions({ readOnly: true });
   try {
-    const result = await filesApi.save(
-      document.value.token,
+    await dirtyUpdates;
+    const result = await editorApi.save(
       model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true),
-      true,
     );
     if (!result.document) {
       error.value = `${result.message ?? '保存失败'}；恢复路径：${result.recoveryPath ?? '无'}`;
-      return;
+      return false;
     }
     store.document = result.document;
     store.dirty = false;
     notifications.push('远程文件已保存并校验。');
-    void store.refresh();
+    return true;
   } catch (cause) {
     error.value = errorMessage(cause);
+    return false;
   } finally {
     busy.value = false;
     if (store.document) editor.updateOptions({ readOnly: !store.document.atomicSave });
@@ -223,27 +232,28 @@ async function save(): Promise<void> {
 function request(action: 'close' | 'reload'): void {
   if (busy.value) return;
   if (store.dirty) pending.value = action;
-  else void perform(action);
+  else void perform(action, false);
 }
-async function perform(action: 'close' | 'reload'): Promise<void> {
+async function perform(action: 'close' | 'reload', discard: boolean): Promise<void> {
   pending.value = null;
   busy.value = true;
   error.value = null;
   editor.updateOptions({ readOnly: true });
   try {
-    const old = document.value;
+    await dirtyUpdates;
     if (action === 'close') {
-      await filesApi.closeEditor(old.token, true);
-      store.document = null;
-      store.dirty = false;
+      await editorApi.close(discard);
+      emit('closed');
     } else {
-      const value = await filesApi.read(old.sessionId, old.path);
-      await filesApi.closeEditor(old.token, true);
+      const value = await editorApi.reload(discard);
       resetting = true;
-      store.document = value;
-      editor.setValue(value.content);
-      store.dirty = false;
-      resetting = false;
+      try {
+        store.document = value;
+        editor.setValue(value.content);
+        store.dirty = false;
+      } finally {
+        resetting = false;
+      }
     }
   } catch (cause) {
     error.value = errorMessage(cause);
@@ -252,50 +262,49 @@ async function perform(action: 'close' | 'reload'): Promise<void> {
     if (store.document) editor.updateOptions({ readOnly: !store.document.atomicSave });
   }
 }
-useErrorNotifications(() => [
-  error.value,
-  document.value?.atomicSave === false ? '服务器缺少原子替换扩展，此文档只可查看。' : null,
-]);
+async function cancelReview(): Promise<void> {
+  pending.value = null;
+  await nextTick();
+  editor.focus();
+}
+async function saveAndPerform(): Promise<void> {
+  const action = pending.value;
+  if (action && (await save())) await perform(action, false);
+}
+function protectDraft(event: BeforeUnloadEvent): void {
+  if (store.dirty || busy.value) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+}
+onMounted(() => window.addEventListener('beforeunload', protectDraft));
+onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft));
+defineExpose({ requestClose: () => request('close') });
 </script>
 <template>
-  <Modal
-    title="远程文本编辑"
-    :panel-class="`remote-editor-dialog${maximized ? ' is-maximized' : ''}`"
-    :busy="busy"
-    @close="request('close')"
-  >
-    <template #header>
-      <header class="editor-titlebar">
-        <span class="editor-file-icon"><FileCode2 :size="22" aria-hidden="true" /></span>
-        <div class="editor-file-heading">
-          <div class="editor-file-name">
-            <h2 :title="fileName">{{ fileName }}</h2>
-            <span v-if="store.dirty" class="editor-modified">未保存</span
-            ><span v-if="!document.atomicSave" class="editor-readonly">只读</span>
-          </div>
-          <p :title="document.path">{{ directory }}</p>
+  <section class="remote-editor-window" aria-label="远程文本编辑">
+    <header class="editor-titlebar">
+      <span class="editor-file-icon"><FileCode2 :size="22" aria-hidden="true" /></span>
+      <div class="editor-file-heading">
+        <div class="editor-file-name">
+          <h2 :title="fileName">{{ fileName }}</h2>
+          <span v-if="store.dirty" class="editor-modified">未保存</span
+          ><span v-if="!document.atomicSave" class="editor-readonly">只读</span>
         </div>
-        <div class="editor-window-actions">
-          <button
-            class="icon-button"
-            :aria-label="maximized ? '还原编辑器' : '最大化编辑器'"
-            :title="maximized ? '还原' : '最大化'"
-            @click="maximized = !maximized"
-          >
-            <component :is="maximized ? Minimize2 : Maximize2" :size="16" aria-hidden="true" />
-          </button>
-          <button
-            class="icon-button"
-            aria-label="关闭编辑器"
-            title="关闭编辑器"
-            :disabled="busy"
-            @click="request('close')"
-          >
-            <X :size="18" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
-    </template>
+        <p :title="document.path">{{ directory }}</p>
+      </div>
+      <div class="editor-window-actions">
+        <button
+          class="icon-button"
+          aria-label="关闭编辑器"
+          title="关闭编辑器"
+          :disabled="busy"
+          @click="request('close')"
+        >
+          <X :size="18" aria-hidden="true" />
+        </button>
+      </div>
+    </header>
     <div class="editor-toolbar" role="toolbar" aria-label="编辑操作">
       <button
         class="button primary editor-save"
@@ -353,12 +362,20 @@ useErrorNotifications(() => [
         ><span>{{ languageLabel }}</span>
       </div>
     </footer>
-  </Modal>
-  <Modal v-if="pending" title="未保存内容" @close="pending = null"
+  </section>
+  <Modal v-if="pending" title="未保存内容" :busy="busy" @close="cancelReview"
     ><p>当前修改尚未保存。{{ pending === 'close' ? '关闭' : '重新加载' }}将丢弃修改。</p>
+    <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <footer class="dialog-actions">
-      <button class="button" @click="pending = null">返回编辑</button
-      ><button class="button danger" @click="perform(pending!)">
+      <button class="button" :disabled="busy" @click="cancelReview">返回编辑</button>
+      <button
+        class="button primary"
+        :disabled="busy || !document.atomicSave"
+        @click="saveAndPerform"
+      >
+        保存并{{ pending === 'close' ? '关闭' : '重新加载' }}
+      </button>
+      <button class="button danger" :disabled="busy" @click="perform(pending!, true)">
         放弃修改并{{ pending === 'close' ? '关闭' : '重新加载' }}
       </button>
     </footer></Modal

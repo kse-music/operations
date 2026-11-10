@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "remote-editor",
+  "description": "Local independent editor windows may only access their backend-bound document and clipboard.",
+  "windows": ["remote-editor-*"],
+  "permissions": [
+    "allow-editor-load",
+    "allow-editor-dirty",
+    "allow-editor-save",
+    "allow-editor-reload",
+    "allow-editor-close",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text"
+  ]
+}

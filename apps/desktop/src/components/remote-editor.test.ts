@@ -77,11 +77,10 @@ vi.mock('monaco-editor/languages/definitions/css/register', () => ({}));
 vi.mock('monaco-editor/languages/definitions/html/register', () => ({}));
 vi.mock('monaco-editor/editor/editor.worker?worker', () => ({ default: class {} }));
 import RemoteEditor from './RemoteEditor.vue';
-import { useFilesStore } from '../stores/files';
 import { useNotificationsStore } from '../stores/notifications';
-import { filesApi } from '../services/files';
+import { editorApi } from '../services/editor';
 
-let app: App, pinia: Pinia, root: HTMLDivElement;
+let app: App, pinia: Pinia, root: HTMLDivElement, currentDoc: TextDocument;
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const doc: TextDocument = {
   token: 'file',
@@ -98,10 +97,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   pinia = createPinia();
   setActivePinia(pinia);
-  useFilesStore().document = { ...doc };
-  vi.spyOn(filesApi, 'dirty').mockResolvedValue(undefined);
-  vi.spyOn(filesApi, 'closeEditor').mockResolvedValue(undefined);
-  vi.spyOn(useFilesStore(), 'refresh').mockResolvedValue(undefined);
+  currentDoc = { ...doc };
+  vi.spyOn(editorApi, 'dirty').mockResolvedValue(undefined);
+  vi.spyOn(editorApi, 'close').mockResolvedValue(undefined);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value() {
@@ -118,13 +116,13 @@ afterEach(() => {
   root.remove();
   vi.restoreAllMocks();
   delete document.documentElement.dataset.theme;
+  document.documentElement.style.removeProperty('--panel');
   if (originalShowModal)
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 async function mount() {
-  const store = useFilesStore();
-  app = createApp({ render: () => (store.document ? h(RemoteEditor) : null) }).use(pinia);
+  app = createApp({ render: () => h(RemoteEditor, { initialDocument: currentDoc }) }).use(pinia);
   app.mount(root);
   await nextTick();
 }
@@ -135,7 +133,7 @@ function saveButton(): HTMLButtonElement {
   return document.querySelector<HTMLButtonElement>('.editor-save')!;
 }
 
-it('shows actual cursor, line endings and dirty state while maximizing preserves the model', async () => {
+it('fills an independent editor surface and shows actual cursor, line endings and dirty state', async () => {
   await mount();
   expect(document.querySelector('.editor-file-heading')?.textContent).toContain('deploy.sh');
   expect(document.querySelector('.editor-file-heading p')?.getAttribute('title')).toBe(doc.path);
@@ -148,18 +146,15 @@ it('shows actual cursor, line endings and dirty state while maximizing preserves
   expect(status.textContent).toContain('CRLF');
   expect(status.textContent).toContain('Shell');
   expect(status.textContent).toContain('有未保存的修改');
-  expect(filesApi.dirty).toHaveBeenCalledWith('file', true);
-  button('最大化编辑器').click();
-  await nextTick();
-  expect(document.querySelector('dialog')?.classList.contains('is-maximized')).toBe(true);
-  button('还原编辑器').click();
-  await nextTick();
+  expect(editorApi.dirty).toHaveBeenCalledWith(true);
+  expect(document.querySelector('.remote-editor-window')).not.toBeNull();
+  expect(document.querySelector('dialog')).toBeNull();
   expect(mock.create).toHaveBeenCalledTimes(1);
   expect(mock.model.getValue()).toBe('one\r\ntwo\r\nthree');
 });
 
 it.each(['button', 'keyboard'])('saves atomically by default via %s', async (action) => {
-  const save = vi.spyOn(filesApi, 'save').mockResolvedValue({
+  const save = vi.spyOn(editorApi, 'save').mockResolvedValue({
     document: { ...doc, content: 'changed' },
     recoveryPath: null,
     message: null,
@@ -172,8 +167,8 @@ it.each(['button', 'keyboard'])('saves atomically by default via %s', async (act
   expect(saveButton().disabled).toBe(false);
   if (action === 'button') saveButton().click();
   else (mock.editor.addCommand.mock.calls[0]![1] as () => void)();
-  await vi.waitFor(() => expect(useFilesStore().dirty).toBe(false));
-  expect(save).toHaveBeenCalledExactlyOnceWith('file', 'changed', true);
+  await vi.waitFor(() => expect(save).toHaveBeenCalledExactlyOnceWith('changed'));
+  await nextTick();
   expect(document.querySelector('.editor-statusbar')?.textContent).toContain('已与远程文件同步');
   expect(useNotificationsStore().items).toEqual([
     expect.objectContaining({ text: '远程文件已保存并校验。', error: false }),
@@ -181,8 +176,8 @@ it.each(['button', 'keyboard'])('saves atomically by default via %s', async (act
 });
 
 it('blocks repeated button and keyboard saves while a save is pending', async () => {
-  let finish!: (result: Awaited<ReturnType<typeof filesApi.save>>) => void;
-  const save = vi.spyOn(filesApi, 'save').mockImplementation(
+  let finish!: (result: Awaited<ReturnType<typeof editorApi.save>>) => void;
+  const save = vi.spyOn(editorApi, 'save').mockImplementation(
     () =>
       new Promise((resolve) => {
         finish = resolve;
@@ -191,19 +186,19 @@ it('blocks repeated button and keyboard saves while a save is pending', async ()
   await mount();
   mock.change('changed');
   saveButton().click();
-  await nextTick();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
   expect(saveButton().disabled).toBe(true);
   expect(mock.editor.updateOptions).toHaveBeenLastCalledWith({ readOnly: true });
   saveButton().click();
   (mock.editor.addCommand.mock.calls[0]![1] as () => void)();
-  expect(save).toHaveBeenCalledExactlyOnceWith('file', 'changed', true);
+  expect(save).toHaveBeenCalledExactlyOnceWith('changed');
   finish({ document: { ...doc, content: 'changed' }, recoveryPath: null, message: null });
   await vi.waitFor(() => expect(saveButton().disabled).toBe(false));
-  expect(useFilesStore().dirty).toBe(false);
+  expect(document.querySelector('.editor-statusbar')?.textContent).toContain('已与远程文件同步');
 });
 
 it('keeps failed content editable and displays the actual save error', async () => {
-  vi.spyOn(filesApi, 'save').mockRejectedValue({ message: '远端内容已变化' });
+  vi.spyOn(editorApi, 'save').mockRejectedValue({ message: '远端内容已变化' });
   await mount();
   mock.change('my draft');
   await nextTick();
@@ -211,14 +206,14 @@ it('keeps failed content editable and displays the actual save error', async () 
   await vi.waitFor(() =>
     expect(document.querySelector('.editor-feedback')?.textContent).toBe('远端内容已变化'),
   );
-  expect(useFilesStore().dirty).toBe(true);
+  expect(document.querySelector('.editor-statusbar')?.textContent).toContain('有未保存的修改');
   expect(mock.model.getValue()).toBe('my draft');
   expect(mock.editor.updateOptions).toHaveBeenLastCalledWith({ readOnly: false });
 });
 
 it('keeps unsupported atomic saves read only, including keyboard commands', async () => {
-  useFilesStore().document!.atomicSave = false;
-  const save = vi.spyOn(filesApi, 'save');
+  currentDoc.atomicSave = false;
+  const save = vi.spyOn(editorApi, 'save');
   await mount();
   expect(mock.create.mock.calls[0]![1]).toMatchObject({ readOnly: true });
   expect(saveButton().disabled).toBe(true);
@@ -230,7 +225,7 @@ it('keeps unsupported atomic saves read only, including keyboard commands', asyn
 it.each(['关闭编辑器', '重新加载'])(
   'protects dirty content before %s and preserves it when cancelled',
   async (action) => {
-    const read = vi.spyOn(filesApi, 'read');
+    const read = vi.spyOn(editorApi, 'reload');
     await mount();
     mock.change('unsaved');
     if (action === '关闭编辑器') button(action).click();
@@ -241,14 +236,15 @@ it.each(['关闭编辑器', '重新加载'])(
     await nextTick();
     const review = document.querySelector<HTMLDialogElement>('dialog[aria-label="未保存内容"]')!;
     expect(review.open).toBe(true);
-    expect(filesApi.closeEditor).not.toHaveBeenCalled();
+    expect(editorApi.close).not.toHaveBeenCalled();
     expect(read).not.toHaveBeenCalled();
     [...review.querySelectorAll<HTMLButtonElement>('button')]
       .find((b) => b.textContent?.includes('返回编辑'))!
       .click();
     await nextTick();
     expect(mock.model.getValue()).toBe('unsaved');
-    expect(useFilesStore().document).not.toBeNull();
+    expect(document.querySelector('.remote-editor-window')).not.toBeNull();
+    expect(mock.editor.focus).toHaveBeenCalledTimes(2);
   },
 );
 
@@ -268,12 +264,138 @@ it('reuses Monaco find and wrap actions and follows the application theme', asyn
   );
 });
 
-it('closes a clean document and releases Monaco without dereferencing a closed document', async () => {
+it('expands minified CSS colors before passing a light theme to Monaco', async () => {
+  document.documentElement.dataset.theme = 'light';
+  document.documentElement.style.setProperty('--panel', '#fff');
+  await mount();
+  expect(mock.defineTheme).toHaveBeenCalledWith(
+    'serverdeck-editor',
+    expect.objectContaining({
+      base: 'vs',
+      colors: expect.objectContaining({
+        'editor.background': '#ffffff',
+        'editorGutter.background': '#ffffff',
+      }),
+    }),
+  );
+});
+
+it('requests a clean native close without authorizing draft discard', async () => {
   await mount();
   button('关闭编辑器').click();
-  await vi.waitFor(() => expect(useFilesStore().document).toBeNull());
-  expect(filesApi.closeEditor).toHaveBeenCalledExactlyOnceWith('file', true);
+  await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(false));
+  app.unmount();
+  app = undefined!;
   expect(mock.editor.dispose).toHaveBeenCalledOnce();
   expect(mock.model.dispose).toHaveBeenCalledOnce();
   expect(document.querySelector('dialog')).toBeNull();
+});
+
+function reviewButton(text: string): HTMLButtonElement {
+  return [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find((b) =>
+    b.textContent?.includes(text),
+  )!;
+}
+
+it('saves before closing a dirty native editor and leaves the draft open when saving fails', async () => {
+  const save = vi.spyOn(editorApi, 'save').mockRejectedValueOnce({ message: '远端内容已变化' });
+  await mount();
+  mock.change('draft to protect');
+  button('关闭编辑器').click();
+  await nextTick();
+  reviewButton('保存并关闭').click();
+  await vi.waitFor(() =>
+    expect(document.querySelector('dialog')?.textContent).toContain('远端内容已变化'),
+  );
+  expect(editorApi.close).not.toHaveBeenCalled();
+  expect(mock.model.getValue()).toBe('draft to protect');
+  save.mockResolvedValueOnce({
+    document: { ...doc, content: 'draft to protect' },
+    recoveryPath: null,
+    message: null,
+  });
+  reviewButton('保存并关闭').click();
+  await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(false));
+  expect(save).toHaveBeenCalledTimes(2);
+});
+
+it('closes a dirty editor only after explicit discard and keeps it open if close fails', async () => {
+  vi.mocked(editorApi.close).mockRejectedValueOnce({ message: '关闭失败，请重试' });
+  await mount();
+  mock.change('unsaved');
+  button('关闭编辑器').click();
+  await nextTick();
+  reviewButton('放弃修改并关闭').click();
+  await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(true));
+  expect(mock.model.getValue()).toBe('unsaved');
+  await vi.waitFor(() =>
+    expect(document.querySelector('.editor-feedback')?.textContent).toContain('关闭失败'),
+  );
+});
+
+it('ignores close requests during a save and waits for dirty updates before saving', async () => {
+  let markDirty!: () => void, finish!: (result: Awaited<ReturnType<typeof editorApi.save>>) => void;
+  vi.mocked(editorApi.dirty).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        markDirty = resolve;
+      }),
+  );
+  const save = vi.spyOn(editorApi, 'save').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await mount();
+  mock.change('pending');
+  saveButton().click();
+  await nextTick();
+  expect(save).not.toHaveBeenCalled();
+  button('关闭编辑器').click();
+  expect(editorApi.close).not.toHaveBeenCalled();
+  expect(document.querySelector('dialog')).toBeNull();
+  markDirty();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+  finish({ document: { ...doc, content: 'pending' }, recoveryPath: null, message: null });
+  await vi.waitFor(() => expect(saveButton().disabled).toBe(false));
+  button('关闭编辑器').click();
+  await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(false));
+});
+
+it('reloads only the bound document after discard and preserves the draft when remote reading fails', async () => {
+  const reload = vi.spyOn(editorApi, 'reload').mockRejectedValueOnce({ message: '连接已断开' });
+  await mount();
+  mock.change('local draft');
+  const trigger = () =>
+    [...document.querySelectorAll<HTMLButtonElement>('.editor-toolbar button')]
+      .find((b) => b.textContent?.includes('重新加载'))!
+      .click();
+  trigger();
+  await nextTick();
+  reviewButton('放弃修改并重新加载').click();
+  await vi.waitFor(() => expect(reload).toHaveBeenCalledExactlyOnceWith(true));
+  await vi.waitFor(() =>
+    expect(document.querySelector('.editor-feedback')?.textContent).toContain('连接已断开'),
+  );
+  expect(mock.model.getValue()).toBe('local draft');
+  reload.mockResolvedValueOnce({ ...doc, token: 'replacement', content: 'latest remote' });
+  trigger();
+  await nextTick();
+  reviewButton('放弃修改并重新加载').click();
+  await vi.waitFor(() => expect(mock.model.getValue()).toBe('latest remote'));
+  expect(mock.create).toHaveBeenCalledOnce();
+  expect(document.querySelector('.editor-statusbar')?.textContent).toContain('已与远程文件同步');
+});
+
+it('protects a dirty draft against browser unload while preserving the current model', async () => {
+  await mount();
+  const clean = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(clean);
+  expect(clean.defaultPrevented).toBe(false);
+  mock.change('unsaved draft');
+  const dirty = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(dirty);
+  expect(dirty.defaultPrevented).toBe(true);
+  expect(mock.model.getValue()).toBe('unsaved draft');
 });

@@ -1,6 +1,5 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import App from './App.vue';
 import { useApplicationStore } from './stores/application';
 import './styles/main.css';
 import './styles/hosts.css';
@@ -8,7 +7,11 @@ import './styles/terminal.css';
 import './styles/files.css';
 
 const pinia = createPinia();
-const app = createApp(App);
+const editorWindow = new URLSearchParams(window.location.search).has('remote-editor');
+const Root = editorWindow
+  ? (await import('./EditorWindow.vue')).default
+  : (await import('./App.vue')).default;
+const app = createApp(Root);
 app.use(pinia);
 const store = useApplicationStore(pinia);
 app.config.errorHandler = () => store.reportUnexpectedError();
