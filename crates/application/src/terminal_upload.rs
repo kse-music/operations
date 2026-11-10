@@ -11,6 +11,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::SystemTime,
 };
+mod drop;
 
 const CHUNK: usize = 8192;
 const MAX_FILES: usize = 100;
@@ -19,20 +20,28 @@ struct SelectedFile {
     file: File,
     size: u64,
     modified: SystemTime,
+    chunk: usize,
 }
 struct Selection {
     token: String,
     files: Vec<Arc<Mutex<SelectedFile>>>,
     released: tokio::sync::watch::Sender<()>,
+    drop_paths: Option<Vec<PathBuf>>,
+    temporary: Option<tempfile::NamedTempFile>,
 }
 #[derive(Clone)]
 pub(crate) struct TerminalUploads(
     Arc<Mutex<HashMap<String, Selection>>>,
     Arc<tokio::sync::Semaphore>,
+    Arc<Mutex<drop::Grants>>,
 );
 impl Default for TerminalUploads {
     fn default() -> Self {
-        Self(Arc::default(), Arc::new(tokio::sync::Semaphore::new(32)))
+        Self(
+            Arc::default(),
+            Arc::new(tokio::sync::Semaphore::new(32)),
+            Arc::default(),
+        )
     }
 }
 
@@ -60,6 +69,8 @@ impl TerminalUploads {
                 token: token.clone(),
                 files: vec![],
                 released: tokio::sync::watch::channel(()).0,
+                drop_paths: None,
+                temporary: None,
             },
         );
         Ok(token)
@@ -105,6 +116,7 @@ impl TerminalUploads {
                 file,
                 size: metadata.len(),
                 modified: metadata.modified().map_err(io_error)?,
+                chunk: CHUNK,
             })));
         }
         let mut selections = locked(&self.0)?;
@@ -135,7 +147,7 @@ impl TerminalUploads {
         if offset > selected.size {
             return Err(Error::Validation("上传文件偏移超出文件大小"));
         }
-        let mut data = vec![0; CHUNK.min((selected.size - offset) as usize)];
+        let mut data = vec![0; selected.chunk.min((selected.size - offset) as usize)];
         selected
             .file
             .seek(SeekFrom::Start(offset))
@@ -152,6 +164,7 @@ impl TerminalUploads {
     }
     pub(crate) fn clear(&self) -> Result<(), Error> {
         locked(&self.0)?.clear();
+        locked(&self.2)?.clear();
         Ok(())
     }
     pub(crate) fn pending(&self) -> Result<usize, Error> {

@@ -177,9 +177,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         )
           continue;
         if (isHostTab(tab)) {
+          const decision = terminals.confirmHostUploadClose(tab.hostId);
+          if (decision !== true && !(await decision)) continue;
           if (tab.hostId && !(await files.prepareHostClose(tab.hostId))) continue;
           const first = terminals.hostTabs(tab.hostId)[0];
-          if (first) await terminals.closeAll(first.key);
+          if (first) await terminals.closeAll(first.key, true);
           if (terminals.hostTabs(tab.hostId).length) continue;
         }
         if (pages.length) {

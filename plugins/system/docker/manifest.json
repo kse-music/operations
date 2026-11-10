@@ -3,7 +3,7 @@
   "id": "cn.hiboot.plugins.docker",
   "name": "Docker 管理",
   "icon": "container",
-  "version": "2.1.2",
+  "version": "2.2.2",
   "author": "ServerDeck",
   "description": "管理 Docker 容器、镜像与 Compose 项目，查看服务状态、日志并确认启停。",
   "apiVersion": "^5.0.0",
@@ -34,7 +34,7 @@
       "program": "sh",
       "args": [
         "-c",
-        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; if ! command -v docker >/dev/null 2>&1; then printf '{\"dockerInstalled\":false,\"dockerState\":\"absent\"}'; else d version --format '{{json .}}'; fi"
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; if ! command -v docker >/dev/null 2>&1; then printf '{\"dockerInstalled\":false,\"dockerState\":\"absent\"}'; else sd_version=$(d version --format '{{json .}}') || exit; sd_os=$(d info --format '{{json .OperatingSystem}}') || sd_os=null; printf '{\"dockerVersion\":%s,\"dockerOperatingSystem\":%s}' \"$sd_version\" \"$sd_os\"; fi"
       ],
       "timeoutSecs": 30
     },

@@ -109,9 +109,10 @@
   margin-right: auto;
 }
 .docker-workbench .ops-toolbar .ops-search {
-  flex: 1;
+  flex: 0 1 320px;
+  width: 320px;
   min-width: 140px;
-  max-width: none;
+  max-width: 100%;
 }
 .docker-workbench .ops-search input {
   width: 100%;

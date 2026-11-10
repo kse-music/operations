@@ -197,6 +197,30 @@ pub struct TerminalUploadSelection {
     pub files: Vec<TerminalUploadFile>,
 }
 
+/// Native drop capability. Paths are retained by Rust, never supplied by read IPC.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalDropGrant {
+    pub grant: String,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalDropSelection {
+    pub token: String,
+    pub names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalDropPrepared {
+    pub size: u64,
+    pub sha256: String,
+    pub command: String,
+    pub nonce: String,
+}
+
 #[cfg(test)]
 mod preference_tests {
     use super::*;

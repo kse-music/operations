@@ -16,6 +16,11 @@ export type OpsRequest =
   | { kind: 'container_details'; id: string; revealEnv: boolean }
   | { kind: 'container_stats'; id: string }
   | {
+      kind: 'container_maintenance';
+      action: 'restart_exited' | 'clear_logs';
+      confirmed: boolean;
+    }
+  | {
       kind: 'container_action';
       id: string;
       action: 'start' | 'stop' | 'restart' | 'remove';

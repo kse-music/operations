@@ -1,5 +1,11 @@
 # 验证记录索引
 
+最新：[Docker 日志首次定位、自动跟随、历史阅读与独立滚动弹窗](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-日志跟随与弹窗滚动)。
+
+最新：[Docker 三标签页短搜索框、刷新文案、行内重启及操作系统信息](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-列表操作与信息调整)。
+
+最新：[Docker 容器列表批量重启、清空日志按钮与确认、Shell 安全边界及打包界面验证](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-容器批量操作按钮)。
+
 最新：[关于页移除技术栈，展示固定的北京时间发布时间](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-关于页发布时间)。
 
 最新：[SFTP 远程目录层级选择、图标缩进、跳转与失败恢复](files/VALIDATION_STAGE4.md#2026-11-10-远程目录层级选择)。
@@ -239,6 +245,8 @@
 - [主机管理移除标签、备注和收藏验收](hosts/VALIDATION_REMOVE_HOST_METADATA.md)
 
 ## SSH 与终端
+
+- [终端拖放上传与当前 Shell 权限](terminal/VALIDATION_TERMINAL_DROP.md)（含[静默上传与弹窗进度](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-静默上传与弹窗进度)、[弹窗关闭后恢复焦点](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-上传弹窗关闭后恢复终端焦点)）
 
 - [SSH / SFTP 技术验证与暂定决策](terminal/SSH_TECH_VALIDATION.md)
 - [终端顶部紧凑布局验收](terminal/VALIDATION_COMPACT_TERMINAL_HEADER.md)

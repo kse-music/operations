@@ -1,6 +1,67 @@
 use serverdeck_application::Application;
-use serverdeck_core::{Error, IpcError, terminal::TerminalUploadSelection};
+use serverdeck_core::{
+    Error, IpcError,
+    terminal::{TerminalDropPrepared, TerminalDropSelection, TerminalUploadSelection},
+};
 use tauri_plugin_dialog::DialogExt;
+
+pub fn drag_event<R: tauri::Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEvent) {
+    use tauri::{Emitter, Manager};
+    if window.label() != "main" {
+        return;
+    }
+    let tauri::WindowEvent::DragDrop(event) = event else {
+        return;
+    };
+    let payload = match event {
+        tauri::DragDropEvent::Enter { position, .. } | tauri::DragDropEvent::Over { position } => {
+            serde_json::json!({"type":"over", "x":position.x, "y":position.y})
+        }
+        tauri::DragDropEvent::Leave => serde_json::json!({"type":"leave"}),
+        tauri::DragDropEvent::Drop { paths, position } => {
+            match window
+                .state::<Application>()
+                .terminal_upload_register_drop(paths.clone())
+            {
+                Ok(grant) => {
+                    serde_json::json!({"type":"drop", "x":position.x, "y":position.y, "grant":grant.grant, "names":grant.names})
+                }
+                Err(error) => {
+                    tracing::warn!(operation="terminal_native_drop", error=%error);
+                    serde_json::json!({"type":"error","x":position.x,"y":position.y,"message":IpcError::from(error).message})
+                }
+            }
+        }
+        _ => return,
+    };
+    if let Err(error) = window.emit("terminal-file-drag", payload) {
+        tracing::warn!(operation="terminal_native_drop_event", error=%error);
+    }
+}
+
+#[tauri::command]
+pub async fn terminal_upload_claim_drop(
+    application: tauri::State<'_, Application>,
+    id: String,
+    grant: String,
+) -> Result<TerminalDropSelection, IpcError> {
+    application
+        .terminal_upload_claim_drop(&id, &grant)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn terminal_upload_prepare_drop(
+    application: tauri::State<'_, Application>,
+    id: String,
+    token: String,
+    confirmed: bool,
+) -> Result<TerminalDropPrepared, IpcError> {
+    application
+        .terminal_upload_prepare_drop(id, token, confirmed)
+        .await
+        .map_err(Into::into)
+}
 
 #[tauri::command]
 pub async fn terminal_upload_pick<R: tauri::Runtime>(

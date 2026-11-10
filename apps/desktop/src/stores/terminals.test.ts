@@ -8,6 +8,7 @@ vi.mock('../services/terminal', () => ({
 }));
 import { terminalApi } from '../services/terminal';
 import { useTerminalsStore } from './terminals';
+import { usePluginsStore } from './plugins';
 import type { Host } from '../types/hosts';
 import { nextTick } from 'vue';
 const host = { id: 'host', name: 'Host' } as Host;
@@ -20,6 +21,56 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('independent terminal tabs', () => {
+  it('keeps an upload and its session when close confirmation is declined', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const pane = store.panes[0]!;
+    store.update(pane.key, { sessionId: 'upload-session' });
+    const stop = vi.fn(async () => {});
+    store.registerUpload(pane.key, () => true, stop);
+    vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
+    await store.closePane(pane.key);
+    expect(stop).not.toHaveBeenCalled();
+    expect(terminalApi.close).not.toHaveBeenCalled();
+    expect(store.panes).toHaveLength(1);
+  });
+  it('waits for upload cancellation before closing its channel', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const pane = store.panes[0]!;
+    store.update(pane.key, { sessionId: 'upload-session' });
+    let finish!: () => void;
+    const stop = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    store.registerUpload(pane.key, () => true, stop);
+    vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
+    const closing = store.closePane(pane.key);
+    await vi.waitFor(() => expect(stop).toHaveBeenCalledOnce());
+    expect(terminalApi.close).not.toHaveBeenCalled();
+    finish();
+    await closing;
+    expect(terminalApi.close).toHaveBeenCalledExactlyOnceWith('upload-session');
+    expect(store.panes).toEqual([]);
+  });
+  it('confirms once for all upload panes in a host and unregisters old handlers', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const first = store.panes[0]!;
+    const stop = vi.fn(async () => {});
+    const remove = store.registerUpload(first.key, () => true, stop);
+    remove();
+    store.open(host);
+    store.registerUpload(store.panes[1]!.key, () => true, stop);
+    const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
+    await store.closeAll(store.active);
+    expect(ask).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(store.panes).toEqual([]);
+  });
   it('resets empty-host counters and does not consume numbers on rejected opens', async () => {
     const store = useTerminalsStore();
     store.open(null);

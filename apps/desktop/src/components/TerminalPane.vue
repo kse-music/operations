@@ -26,6 +26,7 @@ import { TerminalInputQueue } from '../services/terminal-input';
 import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
 import { useApplicationStore } from '../stores/application';
 import Modal from './Modal.vue';
+import TerminalDropUpload from './TerminalDropUpload.vue';
 import '@xterm/xterm/css/xterm.css';
 
 const props = defineProps<{ tab: TerminalPaneModel; active: boolean; standalone?: boolean }>();
@@ -51,6 +52,21 @@ const preferences = computed(
 const working = ref(false);
 const uploadProgress = ref<UploadProgress | null>(null);
 let upload: ZmodemUpload | undefined;
+const dropUpload = ref<InstanceType<typeof TerminalDropUpload>>();
+const dropEnabled = computed(
+  () =>
+    props.active &&
+    props.tab.state === 'connected' &&
+    !!props.tab.host &&
+    !props.standalone &&
+    !props.tab.pluginTerminal &&
+    !props.tab.containerShell &&
+    !props.tab.fileAction &&
+    !uploadProgress.value,
+);
+function canReceiveDrop(): boolean {
+  return terminal?.buffer?.active?.type === 'normal' && !upload?.busy;
+}
 const menu = ref<{ x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuActions = computed(() => [
@@ -75,6 +91,7 @@ let resizeTimer: ReturnType<typeof setTimeout> | undefined;
 let scrollFrame: number | undefined;
 let forceBottomScroll = false;
 const encoder = new TextEncoder();
+let unregisterUpload: (() => void) | undefined;
 
 function fitTerminal(forceBottom = false): void {
   if (!props.active || !container.value?.clientWidth || !container.value.clientHeight || !terminal)
@@ -139,6 +156,33 @@ function dialogBlocksTerminal(): boolean {
   const top = dialogs.item(dialogs.length - 1);
   return !!top && !(props.standalone && top.contains(container.value ?? null));
 }
+function activateDropTarget(id: string): void {
+  if (
+    disposed ||
+    !props.active ||
+    props.tab.state !== 'connected' ||
+    session?.id !== id ||
+    props.tab.sessionId !== id ||
+    container.value?.closest('[inert]')
+  )
+    return;
+  store.focused = props.tab.key;
+  focusTerminal();
+}
+async function restoreDropFocus(id: string): Promise<void> {
+  const attempt = generation;
+  await nextTick();
+  if (
+    disposed ||
+    generation !== attempt ||
+    props.tab.state !== 'connected' ||
+    session?.id !== id ||
+    props.tab.sessionId !== id ||
+    container.value?.closest('[inert]')
+  )
+    return;
+  focusTerminal();
+}
 function update(values: Partial<Omit<TerminalPaneModel, 'key' | 'host'>>): void {
   if (props.standalone) emit('update', values);
   else store.update(props.tab.key, values);
@@ -167,6 +211,10 @@ async function toggleFind(): Promise<void> {
 }
 function queueInput(data: Uint8Array): void {
   if (props.tab.state !== 'connected' || !data.length) return;
+  if (dropUpload.value?.busy) {
+    if (data.includes(3) || data.includes(24)) dropUpload.value.cancel();
+    return;
+  }
   if (upload?.busy) {
     if (data.includes(3) || data.includes(24)) upload.cancel();
     return;
@@ -178,6 +226,7 @@ async function connect(): Promise<void> {
   if (working.value) return;
   working.value = true;
   const attempt = ++generation;
+  dropUpload.value?.dispose();
   upload?.dispose();
   upload = undefined;
   uploadProgress.value = null;
@@ -260,8 +309,11 @@ async function connect(): Promise<void> {
     const receive = (event: TerminalEvent) => {
       if (disposed || attempt !== generation) return;
       if (event.type === 'data') {
-        if (receiver) receiver.consume(new Uint8Array(event.data));
-        else terminal.write(new Uint8Array(event.data));
+        const data = new Uint8Array(event.data);
+        const ordinary = dropUpload.value?.consume(data) ?? data;
+        if (dropUpload.value?.busy) terminal.write(ordinary);
+        else if (receiver) receiver.consume(ordinary);
+        else terminal.write(ordinary);
         terminal.write(new Uint8Array(), () => {
           void opening
             .then((value) => terminalApi.ack(value.id, event.sequence))
@@ -272,6 +324,7 @@ async function connect(): Promise<void> {
         });
       } else if (event.type === 'state') {
         if (['closed', 'failed', 'disconnected'].includes(event.state)) {
+          dropUpload.value?.dispose();
           receiver?.dispose();
           pendingPaste.value = null;
           inputQueue.reset();
@@ -281,6 +334,7 @@ async function connect(): Promise<void> {
         if (event.state !== 'awaiting_trust') trust.value = null;
       } else if (event.type === 'trust') trust.value = event;
       else if (event.type === 'exit') {
+        dropUpload.value?.dispose();
         receiver?.dispose();
         terminal.write(
           `\r\n\x1b[90m[Shell 已结束${event.status === null ? '' : `，退出码 ${event.status}`}]\x1b[0m\r\n`,
@@ -464,6 +518,17 @@ function nativePaste(event: ClipboardEvent): void {
     requestPaste(text);
   }
 }
+async function sendDrop(id: string, data: Uint8Array): Promise<void> {
+  if (disposed || session?.id !== id || props.tab.state !== 'connected')
+    throw new Error('终端会话已改变，上传已停止。');
+  if (!inputQueue.enqueue(data)) throw new Error('终端输入队列已满，上传已停止。');
+  await inputQueue.flush();
+}
+async function interruptDrop(id: string): Promise<void> {
+  if (disposed || session?.id !== id) throw new Error('终端会话已结束。');
+  inputQueue.reset(id);
+  await sendDrop(id, Uint8Array.of(3));
+}
 function terminalOptions() {
   const p = preferences.value;
   return {
@@ -481,6 +546,14 @@ function find(backward = false): void {
   message.value = found ? null : '滚动缓冲中没有匹配内容。';
 }
 onMounted(() => {
+  if (!props.standalone)
+    unregisterUpload = store.registerUpload(
+      props.tab.key,
+      () => !!dropUpload.value?.busy,
+      async () => {
+        await dropUpload.value?.stop();
+      },
+    );
   terminal = new Terminal({
     ...terminalOptions(),
     fontSize: application.state?.config.terminalFontSize ?? 16,
@@ -590,7 +663,9 @@ watch(
   },
 );
 onBeforeUnmount(() => {
+  unregisterUpload?.();
   disposed = true;
+  dropUpload.value?.dispose();
   upload?.dispose();
   ++generation;
   clearTimeout(resizeTimer);
@@ -639,6 +714,21 @@ useErrorNotifications(message);
       @mousedown.capture="preventTerminalRightClick"
       @contextmenu.capture="terminalContextMenu"
     ></div>
+    <TerminalDropUpload
+      v-if="tab.sessionId && tab.host"
+      :key="tab.sessionId"
+      ref="dropUpload"
+      :session-id="tab.sessionId"
+      :target="name"
+      :enabled="dropEnabled"
+      :can-receive="canReceiveDrop"
+      :area="container"
+      :send="sendDrop"
+      :interrupt="interruptDrop"
+      @error="message = errorMessage($event)"
+      @activate="activateDropTarget"
+      @closed="restoreDropFocus"
+    />
     <div v-if="uploadProgress" class="terminal-upload" role="status" aria-live="polite">
       <span v-if="uploadProgress.phase === 'choosing'">ZMODEM：请选择要上传的本地文件…</span>
       <template v-else-if="uploadProgress.phase === 'uploading'">

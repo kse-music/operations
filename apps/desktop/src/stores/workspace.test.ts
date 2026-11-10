@@ -60,6 +60,22 @@ it('keeps the host and terminal intact when transfer cancellation is declined', 
   expect(files.closingHosts).toEqual([]);
 });
 
+it('asks about terminal uploads before closing any file connections', async () => {
+  const workspace = useWorkspaceStore(),
+    terminals = useTerminalsStore(),
+    files = useFilesStore();
+  workspace.navigate('terminals', 'a');
+  terminals.open({ id: 'a', name: 'A' } as Host);
+  const stop = vi.fn(async () => {});
+  terminals.registerUpload(terminals.focused, () => true, stop);
+  vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
+  const prepare = vi.spyOn(files, 'prepareHostClose');
+  await workspace.close('host:a');
+  expect(prepare).not.toHaveBeenCalled();
+  expect(stop).not.toHaveBeenCalled();
+  expect(workspace.current?.hostId).toBe('a');
+});
+
 it('clears history only after a successful host close and reopens with no old records', async () => {
   const workspace = useWorkspaceStore(),
     files = useFilesStore();
@@ -163,7 +179,7 @@ it('waits for close completion and prevents duplicate close requests for the sam
   await workspace.close('host:');
   expect(workspace.tabs).toHaveLength(1);
   expect(terminals.tabs).toHaveLength(1);
-  expect(close).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
   finish();
   await pending;
   expect(workspace.tabs).toHaveLength(0);

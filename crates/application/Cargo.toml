@@ -32,6 +32,7 @@ tracing-appender = "0.2"
 sha2 = "0.10"
 fs2 = "0.4"
 tempfile.workspace = true
+tar = { version = "0.4", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true

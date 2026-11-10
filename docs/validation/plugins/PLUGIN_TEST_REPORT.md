@@ -1275,3 +1275,98 @@ Linux 集成实际完成：随机 OS 凭据经既有应用连接路径认证、�
 证据：[检查结果](../../../.local/qa/docker-capabilities/ui/results.json)、[深色版本表单](../../../.local/qa/docker-capabilities/ui/capabilities-1280-dark.png)、[最小窗口大字号表单](../../../.local/qa/docker-capabilities/ui/capabilities-960-light.png)。截图已逐张查看，五项字段及关闭按钮完整可见。
 
 限制：本轮界面检查使用明确的版本响应夹具，不冒充真实远端查询；未重新执行原生 SSH 链路、Rust 测试或跨平台桌面验收，未重新生成桌面 EXE/安装包。后续使用需加载新插件包或重新构建桌面；核心字段缺失仍如实显示不可用。保留本轮开始时已有的 Compose、TCP 检测移除及其他修改。
+
+## 2026-11-10 Docker 容器批量操作按钮
+
+### 实现与范围
+
+- 阅读 `D:\CodexProjects\xx` 下的三个原始脚本，分别实现清空日志、重启全部容器和重启已退出容器；源脚本保持原样。
+- Docker 包升级至 2.2.0，三个按钮位于容器列表搜索栏与刷新按钮之间，仅在容器页显示。作用于当前 SSH 主机，范围不受搜索筛选影响；执行期间禁止重复操作，完成后显示匹配/成功/失败/跳过数量并刷新。
+- 继续使用 SDK5 通用命令及宿主一次确认，未增加预授权、SDK/IPC、数据库或配置字段。确认前不执行远端命令；全部重启包括已停止容器，已退出重启使用精确 `status=exited`，不是 grep 文本状态。
+- 日志清理读取当前 daemon 的数据目录和各容器驱动/LogPath，核对完整 ID、标准路径及普通文件，拒绝符号链接和异常路径，只截断当前 json-file 日志，保留轮转文件，其他驱动计为跳过。不自动提权、不创建缺失文件，单项失败继续统计并保留 stderr；汇总失败不会显示为成功。
+
+### 实际验证
+
+环境：Windows、稳定版 Rust、Node/npm；构建前 D 盘约 158 GiB 空闲。原生构建复用根 `target/`，WASM 使用原 `.local/plugin-build/docker/`；原生测试 EXE 复制到 `.local/qa/docker-maintenance/` 执行。
+
+| 检查 | 命令/入口 | 结果 |
+| --- | --- | --- |
+| 前端回归 | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend`，TEMP/TMP 指向本任务 QA 目录 | 8 项通过；三按钮、主机级范围、确认说明、搜索不改变目标、成功后刷新、取消、部分失败/权限/超时、重复点击和其他标签隐藏，保留容器/镜像/Compose 回归 |
+| 类型 | `npm run typecheck` | desktop 与 plugin-sdk 均通过 |
+| Rust 单元 | `cargo test --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --no-run` 后运行 QA 副本 | 默认 9 项通过，1 项 WSL 环境用例默认忽略；三项变更不预授权，未确认拒绝，汇总计数/溢出/格式校验通过 |
+| 生产 Shell 命令体 | QA 副本 `docker-tests.exe --ignored --nocapture`，在 WSL sh 中使用隔离 Docker 函数夹具 | 1 项通过；全部/已退出选择、部分重启失败、空列表、查询失败、非法 ID、非默认带空格目录、普通日志截断、符号链接与越界路径拒绝、轮转文件保留、写入失败计数 |
+| 正式插件构建 | `node tools/build-system-plugins.mjs` | 通过，生成 Docker 2.2.0 正式 WASM 与独立前端包 |
+| 正式 WASM 回归 | `cargo test -p serverdeck-plugin-runtime --test platform_plugins --offline --locked --no-run` 后运行 QA 副本 | 6 项通过，1 项真实 Compose 环境用例仍忽略；新增三项维护操作的未确认拒绝、原审批取消续接、不预授权、成功/部分失败及 stderr 保留、远端失败回归 |
+| 打包界面 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-maintenance/ui` 后执行 `node tools/ui-docker-compose-e2e.mjs` | 1280×820 深色标准字号、960×600 浅色 145% 字号均通过；三按钮可点击、范围说明和实际请求匹配，无横向溢出或 pageerror，保留 Compose 及版本表单回归 |
+| 静态检查 | `npx eslint plugins/system/docker/frontend tools/ui-docker-compose-e2e.mjs --max-warnings 0`；`cargo clippy --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --all-targets -- -D warnings` | 均通过 |
+| 格式与文档 | 本次前端、manifest、浏览器检查工具的 Prettier check；Docker backend `cargo fmt --check` 与 WASM 测试文件 rustfmt check；`git diff --check`；本地文档路径检查 | 全部通过，304 条本地文档/证据链接存在；manifest 换行经 Prettier 规范化后复查通过 |
+
+界面使用测试响应，不冒充真实 daemon 查询。截图已查看：[常规窗口](../../../.local/qa/docker-maintenance/ui/maintenance-1280-dark.png)、[最小窗口大字号](../../../.local/qa/docker-maintenance/ui/maintenance-960-light.png)、[检查结果](../../../.local/qa/docker-maintenance/ui/results.json)。测试源码：[Vue 回归](../../../plugins/system/docker/frontend/docker.test.ts)、[命令及 Shell 回归](../../../plugins/system/docker/backend/src/maintenance.rs)、[WASM 回归](../../../crates/plugin-runtime/tests/platform_plugins.rs)。
+
+初次 WSL 与 Edge 启动受沙箱限制，授予执行环境权限后重跑通过。WASM 测试最初连续覆盖三组操作触及每秒二十次消息限额；改为每组使用独立测试 Runtime 后全部通过，没有放宽生产限流或权限。
+
+### 限制、风险与依赖
+
+- 未操作真实 Docker daemon 或用户服务器，未执行真实容器重启/日志清空的 SSH/UI 全链路、安装器或 macOS/Linux 桌面验收；未重建桌面 EXE。原有无关修改保持。
+- 全部重启会启动已停止服务；日志清空不可恢复。日志目录需当前 SSH 账号写权限和远端 `truncate`，其他驱动/轮转日志不清理。平台 30 秒限额保持不变，容器较多或停止缓慢时可能部分完成，失败/超时须刷新核对，不自动重放。
+- 使用新功能需加载本次 2.2.0 插件包或重新构建桌面；后续真实验收需要用户授权的隔离 Docker SSH 主机。本阶段不自动部署、重启用户容器或进入安装发布。
+
+## 2026-11-10 Docker 列表操作与信息调整
+
+### 当前变更
+
+- Docker 2.2.1：容器、镜像、Compose 三个标签页搜索框固定约 320px，可随窄窗口收缩；刷新按钮统一为“刷新”。
+- 移除全部重启的工具栏按钮、TypeScript/Rust 动作枚举及确认文案，旧 `restart_all` 请求明确拒绝。保留清空日志与已退出重启，每行增加“重启”，复用既有完整容器 ID 校验和宿主单次确认；已停止容器重启会启动它，确认说明保留这一影响。
+- “版本 / 能力详情”入口和弹窗标题统一为“Docker信息”，原五项字段之外新增“操作系统”。版本固定命令同时从当前 daemon 的 `OperatingSystem` 投影取得名称，固定预授权仍为八条并精确同步清单；字段缺失或 info 读取失败显示“不可用”，stderr 保留，不使用客户端或桌面系统代替。无 SDK/IPC、数据库、配置格式或权限种类变化。
+
+### 本轮检查
+
+环境：Windows、Rust 稳定版、Node/npm、WSL。构建前 D 盘约 158 GiB 可用；继续复用根 `target/` 与原 WASM 缓存，原生测试 EXE 复制到 `.local/qa/docker-toolbar/` 执行。
+
+| 检查 | 实际命令/入口 | 结果 |
+| --- | --- | --- |
+| Vue 交互回归 | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend` | 8 项通过；单容器重启请求及确认名称、两项批量操作/重复点击/取消/失败、全部重启缺席、信息六字段及缺失/异常类型、既有 Compose 和详情流程 |
+| 类型检查 | `npm run typecheck` | desktop 和 plugin-sdk 均通过 |
+| 原生单元测试 | `cargo test --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --no-run` 后运行 QA 副本 | 10 项通过、1 项 WSL 用例默认忽略；新增 daemon 操作系统解析、缺失/畸形输出及退役动作拒绝 |
+| WSL Shell | QA 副本 `docker-tests.exe --ignored --nocapture` | 1 项通过；生产命令体配隔离 Docker 函数夹具，验证仅 exited 选择、部分失败、空目标、日志安全边界，不修改真实容器 |
+| 插件构建 | `node tools/build-system-plugins.mjs` | 通过，Docker 2.2.1 WASM/独立前端包生成 |
+| 正式 WASM | `cargo test -p serverdeck-plugin-runtime --test platform_plugins --offline --locked --no-run` 后运行 QA 副本 | 7 项通过、1 项真实 Compose 用例仍忽略；新增操作系统查询的清单精确匹配、返回字段、退役动作拒绝及单容器重启审批取消，保留批量/Compose/助手回归 |
+| 打包界面 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-toolbar/ui` 后运行 `node tools/ui-docker-compose-e2e.mjs` | 2361×900、1280×820 深色标准字号及 960×600 浅色 145% 字号均通过；三个标签页搜索框实测 140–322px，行内重启请求/名称/确认正确，全部重启缺席，六项信息完整，无页面横向溢出和 pageerror |
+| 真实只读信息 | 在 WSL sh 中运行从生产源码提取的完整 `PRELUDE + CAPABILITIES` | 返回操作系统 `Ubuntu 22.04.5 LTS`、运行平台 `linux / amd64`、服务端 Docker `29.4.3`；未重启/修改容器 |
+| 静态及格式 | 定向 ESLint `--max-warnings 0`；backend Clippy `--all-targets -- -D warnings`；本次前端/manifest/工具 Prettier check、backend cargo fmt check、WASM 测试 rustfmt check及 `git diff --check` | 均通过 |
+
+界面检查使用固定响应夹具，与真实只读信息分开记录。截图已查看：[容器操作](../../../.local/qa/docker-toolbar/ui/maintenance-1280-dark.png)、[最小窗口 Docker信息](../../../.local/qa/docker-toolbar/ui/capabilities-960-light.png)；[三种窗口检查结果](../../../.local/qa/docker-toolbar/ui/results.json)、[真实 daemon 字段](../../../.local/qa/docker-toolbar/live-information.json)。
+
+### 限制与后续依赖
+
+- 未执行真实容器重启、清空日志或远端原生 SSH/WebView 点击链路；未重建桌面 EXE/安装器，未验收 macOS/Linux 桌面。没有操作用户服务器、日志或既有持久配置，其他在途修改保留。
+- 单容器重启会短暂中断服务，也会启动已停止容器；清理不可恢复、现有写权限要求及平台 30 秒限额保持。后续使用需加载 2.2.1 插件包或重建桌面；真实状态变更验收仍依赖授权的隔离测试主机。本阶段完成后不自动进入部署或安装发布。
+
+## 2026-11-10 Docker 日志跟随与弹窗滚动
+
+### 问题复现及修复
+
+- 原 `StreamDialog` 追加文本后没有设置日志区滚动位置，首次多行输出停在顶部；弹窗本身可滚动，日志区又有固定最小高度/最大高度，短窗口大字号下可能出现双层滚动。
+- 修复前以正式 2.2.1 包运行新增浏览器回归：注入 200 行含长堆栈的日志后，“滚动距离末尾不超过 2px”断言等待 5 秒超时，复现用户所报问题。日志来自明确的 UI 测试夹具，不冒充远端容器。
+- 修改 SDK 通用日志组件，Docker 包升级为 2.2.2；首次打开及新输出完成 DOM 更新后定位末尾。用户离开末尾超过 24px 时暂停自动滚动但继续接收，靠近末尾、点击“最新日志”或暂停后继续均恢复跟随。暂停期间和历史阅读状态不因新输出或尺寸变化强制跳动。
+- 日志采用宽弹窗，标题及工具栏固定、日志区独立滚动；窗口尺寸/字号变化后跟随模式保持末尾，字号跟随平台设置。保留纯文本输出、过滤、复制、导出、1 MiB/5000 行缓存及自有流清理；新增无匹配内容提示，结束/失败时禁用无效暂停操作。无 SDK props、wire、IPC、后端命令、权限或持久格式变化。
+
+### 实际检查
+
+环境：Windows、Node/npm、Edge；构建前 D 盘约 158 GiB 可用，WASM 仍使用原有插件缓存。本轮只修改 Vue/CSS、测试、包版本和相关文档，没有运行 Rust 原生测试或构建桌面 EXE。
+
+| 检查 | 命令/入口 | 结果 |
+| --- | --- | --- |
+| 交互回归 | `npm run test -w @serverdeck/desktop -- ../../packages/plugin-sdk/src/ui/stream-dialog.test.ts ../../plugins/system/docker/frontend`，TEMP/TMP 指向 `.local/qa/docker-log-follow/temp` | 2 文件、15 项通过；新增滚动/历史位置、暂停/继续、手动回到底部、尺寸变化、ResizeObserver 释放；保留 Unicode、纯文本、复制、流关闭/重试/隐藏和 Docker/Compose 回归 |
+| 类型 | `npm run typecheck` | desktop 与 plugin-sdk 均通过 |
+| 插件构建 | `node tools/build-system-plugins.mjs` | 通过；Docker 2.2.2 包含修改后的 SDK 日志组件；WASM 后端源码未变化，复用现有缓存 |
+| 真实浏览器布局/滚动 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-log-follow/ui` 后运行 `node tools/ui-docker-compose-e2e.mjs` | 2361×900、1280×820 深色标准字号及 960×600 浅色 145% 字号均通过；首次/追加定位末尾、历史期间追加仍保持顶部、最新按钮、暂停恢复、过滤/空结果、临时缩短至 500px 后恢复、关闭释放流；无外层弹窗滚动、无越界及 pageerror |
+| 静态及格式 | 对日志组件/测试、Docker 测试及浏览器工具执行 ESLint `--max-warnings 0`；上述代码与 manifest 的 Prettier check；`git diff --check` | 全部通过 |
+
+截图均已查看：[常规窗口最新日志](../../../.local/qa/docker-log-follow/ui/container-logs-1280-dark.png)、[最小窗口大字号](../../../.local/qa/docker-log-follow/ui/container-logs-960-light.png)、[三种窗口结果](../../../.local/qa/docker-log-follow/ui/results.json)。源码：[日志组件](../../../packages/plugin-sdk/src/ui/StreamDialog.vue)、[组件回归](../../../packages/plugin-sdk/src/ui/stream-dialog.test.ts)、[正式打包界面回归](../../../tools/ui-docker-compose-e2e.mjs)。
+
+### 限制、风险与后续依赖
+
+- 本轮验证使用真实浏览器布局和生产组件，日志响应为测试夹具；未连接用户服务器、未运行原生 WebView/SSH 日志全链路或跨平台验收，未重建桌面 EXE/安装器。原有无关修改保持。
+- 有界缓存仍只保留最近 1 MiB/5000 行，长时间阅读时更早内容仍会淘汰；没有增加磁盘日志存储或恢复历史能力。恢复跟随只改变显示位置，不重新执行命令或重建流。
+- 使用修复需加载 2.2.2 插件包或重建桌面；外部插件使用该 SDK 组件时需重新打包。原生实机验收依赖运行当前构建及授权测试主机，本阶段不继续部署或操作远端容器。

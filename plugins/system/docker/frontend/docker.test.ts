@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import Docker from './App.vue';
@@ -52,6 +52,15 @@ function mountDocker(props: { initialSection?: 'compose'; onShell?: () => void }
   app = createApp(Docker, { hostId: 'host', ...props }).use(pinia);
   app.mount(root);
 }
+beforeEach(() => {
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+});
 afterEach(() => {
   app?.unmount();
   if (pinia) disposePinia(pinia);
@@ -60,6 +69,7 @@ afterEach(() => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 it('loads details on demand, opens logs and shell directly and delegates mutations to host confirmation', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
@@ -112,8 +122,8 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
     [...root.querySelectorAll(`[data-ops-target="${id}"] .ops-row-actions button`)].map((button) =>
       button.textContent?.trim(),
     );
-  expect(actionLabels('container')).toEqual(['详情', '停止', '删除', '日志', 'Shell']);
-  expect(actionLabels('exited')).toEqual(['详情', '启动', '删除', '日志', 'Shell']);
+  expect(actionLabels('container')).toEqual(['详情', '停止', '重启', '删除', '日志', 'Shell']);
+  expect(actionLabels('exited')).toEqual(['详情', '启动', '重启', '删除', '日志', 'Shell']);
   expect(root.querySelector('.row-action-menu')).toBeNull();
   const click = async (label: string) => {
     const button = [...document.querySelectorAll('button')].find(
@@ -230,7 +240,21 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
     expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   };
   await runExitedAction('启动');
+  await runExitedAction('重启');
   await runExitedAction('删除');
+  expect(api.query).toHaveBeenCalledWith('host', {
+    kind: 'container_action',
+    id: 'exited',
+    action: 'restart',
+    confirmed: true,
+  });
+  expect(api.presentations).toHaveBeenCalledWith({
+    confirmation: {
+      title: '重启容器？',
+      message: expect.stringContaining('exited-container'),
+      confirmLabel: '重启',
+    },
+  });
   expect(
     api.presentations.mock.calls.some(
       ([options]) =>
@@ -282,7 +306,7 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
     detail: null,
     records: [],
   });
-  await click('刷新运维列表');
+  await click('刷新');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('Docker daemon unavailable');
   expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
   expect(api.actions.mock.calls.some(([action]) => action === 'history')).toBe(false);
@@ -304,9 +328,9 @@ it.each([
           Components: [{ Name: 'containerd' }],
         },
       },
-      dockerInfo: { Debug: 'UNNEEDED_DETAILS' },
+      dockerOperatingSystem: 'Ubuntu 24.04.3 LTS',
     },
-    expected: ['是', '运行中', '27.5.1', '28.5.1', 'linux / amd64'],
+    expected: ['是', '运行中', '27.5.1', '28.5.1', 'linux / amd64', 'Ubuntu 24.04.3 LTS'],
   },
   {
     name: 'missing server information',
@@ -315,24 +339,25 @@ it.each([
       dockerState: 'unavailable',
       dockerVersion: { Client: { Version: '28.5.1', Os: 'darwin', Arch: 'arm64' }, Server: null },
     },
-    expected: ['是', '不可用或权限不足', '不可用', '28.5.1', '不可用'],
+    expected: ['是', '不可用或权限不足', '不可用', '28.5.1', '不可用', '不可用'],
   },
   {
     name: 'Docker not installed',
     detail: { dockerInstalled: false, dockerState: 'absent' },
-    expected: ['否', '未安装', '不可用', '不可用', '不可用'],
+    expected: ['否', '未安装', '不可用', '不可用', '不可用', '不可用'],
   },
   {
     name: 'invalid version fields',
     detail: {
       dockerInstalled: true,
       dockerState: 'unexpected',
+      dockerOperatingSystem: { name: 'UNNEEDED_DETAILS' },
       dockerVersion: {
         Server: { Version: { nested: 'UNNEEDED_DETAILS' }, Os: ['linux'], Arch: null },
         Client: [],
       },
     },
-    expected: ['是', '未知', '不可用', '不可用', '不可用'],
+    expected: ['是', '未知', '不可用', '不可用', '不可用', '不可用'],
   },
 ])('shows only core Docker capability fields for $name', async ({ detail, expected }) => {
   vi.clearAllMocks();
@@ -354,12 +379,12 @@ it.each([
   mountDocker();
   await settle();
   const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent?.trim() === '版本 / 能力详情',
+    (b) => b.textContent?.trim() === 'Docker信息',
   );
   expect(button).toBeTruthy();
   button!.click();
   await settle();
-  const modal = document.querySelector('dialog[aria-label="主机能力与版本"]');
+  const modal = document.querySelector('dialog[aria-label="Docker信息"]');
   expect(modal).toBeTruthy();
   expect([...modal!.querySelectorAll('dt')].map((field) => field.textContent)).toEqual([
     'Docker 已安装',
@@ -367,6 +392,7 @@ it.each([
     'Docker 版本',
     '客户端版本',
     '运行平台',
+    '操作系统',
   ]);
   expect([...modal!.querySelectorAll('dd')].map((field) => field.textContent?.trim())).toEqual(
     expected,
@@ -471,11 +497,11 @@ it('manages Compose projects with host confirmations, service details and owned 
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('permission denied');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('可能部分完成');
   api.query.mockResolvedValueOnce({ success: true, records: [], detail: null });
-  await click('刷新运维列表');
+  await click('刷新');
   expect(root.textContent).toContain('没有匹配项目');
   expect(root.querySelector('.docker-summary strong')?.textContent).toBe('0');
   api.query.mockRejectedValueOnce(new Error('docker: unknown command: compose'));
-  await click('刷新运维列表');
+  await click('刷新');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('unknown command');
   expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
 });
@@ -516,4 +542,109 @@ it('closes a late Compose log stream after its tab is deactivated', async () => 
   await settle();
   expect(api.logClose).toHaveBeenCalled();
   expect(document.querySelector('dialog')).toBeNull();
+});
+
+it('runs host-wide maintenance from the container toolbar with confirmation, feedback and busy guards', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    code: null,
+    message: request.kind === 'container_maintenance' ? '匹配 2 个，成功 2 个，失败 0 个。' : null,
+    detail: request.kind === 'capabilities' ? { dockerState: 'running' } : null,
+    records:
+      request.kind === 'containers'
+        ? [
+            { ID: 'a', Names: 'visible' },
+            { ID: 'b', Names: 'hidden' },
+          ]
+        : [],
+  }));
+  mountDocker();
+  await settle();
+  const button = (label: string) =>
+    [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent?.trim() === label,
+    )!;
+  const search = root.querySelector<HTMLInputElement>('[aria-label="运维项目搜索"]')!;
+  search.value = 'visible';
+  search.dispatchEvent(new Event('input'));
+  await settle();
+  expect(root.querySelector('[data-ops-target="b"]')).toBeNull();
+  expect(button('重启全部容器')).toBeUndefined();
+  for (const [label, action, impact] of [
+    ['清空容器日志', 'clear_logs', '无法恢复'],
+    ['重启已退出容器', 'restart_exited', 'exited'],
+  ]) {
+    const reads = api.query.mock.calls.filter(
+      ([, request]) => request.kind === 'containers',
+    ).length;
+    button(label!).click();
+    await settle();
+    expect(api.query).toHaveBeenCalledWith('host', {
+      kind: 'container_maintenance',
+      action,
+      confirmed: true,
+    });
+    expect(api.presentations).toHaveBeenCalledWith({
+      confirmation: {
+        title: `${label}？`,
+        message: expect.stringContaining(impact!),
+        confirmLabel: label,
+      },
+    });
+    const confirmation = api.presentations.mock.calls.find(
+      ([options]) => options?.confirmation?.title === `${label}？`,
+    )![0]!.confirmation;
+    expect(confirmation.message).toContain('不受列表搜索条件影响');
+    expect(
+      api.query.mock.calls.filter(([, request]) => request.kind === 'containers'),
+    ).toHaveLength(reads + 1);
+    expect(root.querySelector('.banner.success')?.textContent).toContain('成功 2 个');
+  }
+  api.query.mockRejectedValueOnce({ code: 'USER_CANCELLED', message: '取消' });
+  const reads = api.query.mock.calls.filter(([, request]) => request.kind === 'containers').length;
+  button('重启已退出容器').click();
+  await settle();
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  expect(api.query.mock.calls.filter(([, request]) => request.kind === 'containers')).toHaveLength(
+    reads,
+  );
+  for (const cause of [
+    { code: 'DOCKER_PARTIAL_FAILURE', message: '成功 1 个，失败 1 个' },
+    { code: 'REMOTE_COMMAND', message: 'permission denied' },
+    { code: 'TIMEOUT', message: '执行超时' },
+  ]) {
+    api.query.mockResolvedValueOnce({ success: false, ...cause });
+    button('清空容器日志').click();
+    await settle();
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain(cause.message);
+    expect(root.querySelector('[role="alert"]')?.textContent).toContain('可能部分完成');
+    expect(root.querySelector('.banner.success')).toBeNull();
+  }
+  let finish: (value: unknown) => void = () => {};
+  api.query.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  button('重启已退出容器').click();
+  await settle();
+  expect(button('重启已退出容器').disabled).toBe(true);
+  expect(button('清空容器日志').disabled).toBe(true);
+  const calls = api.query.mock.calls.length;
+  button('重启已退出容器').click();
+  expect(api.query.mock.calls).toHaveLength(calls);
+  finish({ success: true, message: '没有已退出的容器，无需重启。', records: [], detail: null });
+  await settle();
+  expect(root.querySelector('.banner.success')?.textContent).toContain('没有已退出的容器');
+  for (const tab of ['镜像', 'Compose 项目']) {
+    button(tab).click();
+    await settle();
+    expect(button('清空容器日志')).toBeUndefined();
+    expect(button('重启全部容器')).toBeUndefined();
+    expect(button('重启已退出容器')).toBeUndefined();
+  }
 });

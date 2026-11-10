@@ -97,6 +97,8 @@ fn main() {
             "forward_stop",
             "terminal_open",
             "terminal_upload_pick",
+            "terminal_upload_claim_drop",
+            "terminal_upload_prepare_drop",
             "terminal_upload_read",
             "terminal_upload_release",
             "terminal_local_open",

@@ -6,6 +6,7 @@ use serverdeck_plugin_sdk::{
 };
 mod compose;
 mod docker;
+mod maintenance;
 std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
 fn dispatch(context: Context, action: String, input: Value) -> Action {
     Box::pin(async move {
@@ -87,7 +88,12 @@ async fn execute(context: &Context, host: &str, query: &docker::Query) -> Result
         .checked()?;
     let mut response = query.response(&result.stdout)?;
     if !result.stderr.is_empty() {
-        response["message"] = json!(result.stderr);
+        response["message"] = json!(
+            match response["message"].as_str().filter(|s| !s.is_empty()) {
+                Some(message) => format!("{message}\n{}", result.stderr),
+                None => result.stderr,
+            }
+        );
     }
     Ok(response)
 }

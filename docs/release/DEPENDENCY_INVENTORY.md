@@ -150,6 +150,7 @@
 | ff 0.14.0                               | MIT/Apache-2.0                                      | Cargo          |
 | fiat-crypto 0.3.0                       | MIT OR Apache-2.0 OR BSD-1-Clause                   | Cargo          |
 | field-offset 0.3.6                      | MIT OR Apache-2.0                                   | Cargo          |
+| filetime 0.2.29                         | MIT/Apache-2.0                                      | Cargo          |
 | find-msvc-tools 0.1.15                  | MIT OR Apache-2.0                                   | Cargo          |
 | flate2 1.1.10                           | MIT OR Apache-2.0                                   | Cargo          |
 | fnv 1.0.7                               | Apache-2.0 / MIT                                    | Cargo          |
@@ -455,6 +456,7 @@
 | system-deps 6.2.2                       | MIT OR Apache-2.0                                   | Cargo          |
 | tao 0.37.2                              | Apache-2.0                                          | Cargo          |
 | tao-macros 0.1.4                        | MIT OR Apache-2.0                                   | Cargo          |
+| tar 0.4.46                              | MIT OR Apache-2.0                                   | Cargo          |
 | target-lexicon 0.12.16                  | Apache-2.0 WITH LLVM-exception                      | Cargo          |
 | tauri 2.12.5                            | Apache-2.0 OR MIT                                   | Cargo          |
 | tauri-build 2.7.4                       | Apache-2.0 OR MIT                                   | Cargo          |

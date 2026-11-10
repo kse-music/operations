@@ -6,6 +6,21 @@ export interface TerminalUploadSelection {
   token: string;
   files: { name: string; size: number }[];
 }
+export interface TerminalDropSelection {
+  token: string;
+  names: string[];
+}
+export interface TerminalDropPrepared {
+  size: number;
+  sha256: string;
+  command: string;
+  nonce: string;
+}
+export type TerminalFileDrag =
+  | { type: 'leave' }
+  | { type: 'over'; x: number; y: number }
+  | { type: 'drop'; x: number; y: number; grant: string; names: string[] }
+  | { type: 'error'; x: number; y: number; message: string };
 export interface TerminalSession {
   routeHostIds: string[];
   id: string;

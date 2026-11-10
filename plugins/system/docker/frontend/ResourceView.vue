@@ -153,8 +153,8 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
     )
       error.value =
         errorMessage(cause) +
-        (request.kind === 'compose_action'
-          ? '；操作可能部分完成，请刷新核对项目状态，勿直接重复执行。'
+        (request.kind === 'compose_action' || request.kind === 'container_maintenance'
+          ? '；操作可能部分完成，请刷新核对实际状态，勿直接重复执行。'
           : '');
     notice.value = null;
   } finally {
@@ -270,11 +270,11 @@ const slotContext = {
           @click="
             closeDetail();
             detail = capabilities;
-            detailTitle = '主机能力与版本';
+            detailTitle = 'Docker信息';
             detailOpen = true;
           "
         >
-          版本 / 能力详情
+          Docker信息
         </button>
       </div>
       <div class="ops-toolbar">
@@ -284,9 +284,9 @@ const slotContext = {
             aria-label="运维项目搜索"
             :placeholder="searchPlaceholder ?? '搜索名称、镜像、状态或端口…'"
         /></label>
-        <slot name="toolbar" />
+        <slot name="toolbar" :execute="execute" :busy="busy" />
         <button class="button" :disabled="busy" @click="load">
-          <RefreshCw :size="14" aria-hidden="true" />{{ busy ? '正在读取…' : '刷新运维列表' }}
+          <RefreshCw :size="14" aria-hidden="true" />{{ busy ? '正在读取…' : '刷新' }}
         </button>
         <span v-if="hint" class="subtle">{{ hint }}</span>
       </div>

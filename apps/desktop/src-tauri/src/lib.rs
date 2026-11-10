@@ -69,6 +69,7 @@ pub fn run() {
         .invoke_handler(command_handler())
         .on_window_event(|window, event| {
             window_state::record(window,event);
+            terminal_upload_commands::drag_event(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && !window.state::<file_commands::ExitApproval>().0.load(Ordering::Acquire)
             {
@@ -234,6 +235,8 @@ pub fn command_handler<R: tauri::Runtime>()
         commands::forward_stop,
         commands::terminal_open,
         terminal_upload_commands::terminal_upload_pick,
+        terminal_upload_commands::terminal_upload_claim_drop,
+        terminal_upload_commands::terminal_upload_prepare_drop,
         terminal_upload_commands::terminal_upload_read,
         terminal_upload_commands::terminal_upload_release,
         commands::terminal_local_open,

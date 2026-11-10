@@ -82,6 +82,8 @@
     "allow-forward-stop",
     "allow-terminal-open",
     "allow-terminal-upload-pick",
+    "allow-terminal-upload-claim-drop",
+    "allow-terminal-upload-prepare-drop",
     "allow-terminal-upload-read",
     "allow-terminal-upload-release",
     "allow-terminal-local-open",

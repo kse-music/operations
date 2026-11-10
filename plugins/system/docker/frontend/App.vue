@@ -53,7 +53,7 @@ const columns = computed(() =>
         ],
 );
 const activeStates = ['running', 'paused', 'restarting'];
-const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
+const actionLabels = { start: '启动', stop: '停止', restart: '重启', remove: '删除' };
 </script>
 <template>
   <div class="plugin-server-surface docker-workbench">
@@ -119,6 +119,22 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
               </div>
             </article>
           </div>
+        </template>
+        <template #toolbar="{ execute, busy }">
+          <template v-if="section === 'containers'">
+            <button
+              v-for="[action, label] in [
+                ['clear_logs', '清空容器日志'],
+                ['restart_exited', '重启已退出容器'],
+              ] as const"
+              :key="action"
+              class="button"
+              :disabled="busy"
+              @click="execute({ kind: 'container_maintenance', action, confirmed: true })"
+            >
+              {{ label }}
+            </button>
+          </template>
         </template>
         <template #cell="{ row, column }">
           <template v-if="column.key === 'Names'"
@@ -215,6 +231,7 @@ const actionLabels = { start: '启动', stop: '停止', remove: '删除' };
             <button
               v-for="action in [
                 activeStates.includes(String(row.State).toLowerCase()) ? 'stop' : 'start',
+                'restart',
                 'remove',
               ] as const"
               :key="action"

@@ -38,6 +38,7 @@
 | [0029](decisions/0029-sftp-user.md)             | 文件页显式 sudo 与独立身份租约        | 有效；终端不联动，运行期密码不持久化，插件不继承 sudo 身份           |
 | [0031](decisions/0031-external-file-editing.md) | 系统应用选择与确认式远程外部编辑      | 有效；扩展 0007 的编辑范围，保留快照冲突检测、原子回传及本地恢复副本 |
 | [0032](decisions/0032-default-atomic-text-save.md) | 内置文本编辑默认原子保存 | 有效；替代 0007 的内置编辑器额外勾选确认，保留后端检查及外部回传确认 |
+| [0033](decisions/0033-terminal-drop-upload.md) | 当前 Shell 确认式拖放上传 | 有效；原 PTY 继承身份、无额外安装、一次性授权及不覆盖提交 |
 
 ## 已替代或退出范围的决策
 

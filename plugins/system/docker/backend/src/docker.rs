@@ -5,6 +5,7 @@ use serverdeck_plugin_sdk::{
     serde_json::{self, Value, json},
 };
 pub const PRELUDE: &str = "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; ";
+const CAPABILITIES: &str = "if ! command -v docker >/dev/null 2>&1; then printf '{\"dockerInstalled\":false,\"dockerState\":\"absent\"}'; else sd_version=$(d version --format '{{json .}}') || exit; sd_os=$(d info --format '{{json .OperatingSystem}}') || sd_os=null; printf '{\"dockerVersion\":%s,\"dockerOperatingSystem\":%s}' \"$sd_version\" \"$sd_os\"; fi";
 const DETAILS_FORMAT: &str = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"Config":{"Image":{{json .Config.Image}}},"State":{{json .State}},"NetworkSettings":{"Ports":{{json .NetworkSettings.Ports}}},"Mounts":{{json .Mounts}},"HostConfig":{"RestartPolicy":{{json .HostConfig.RestartPolicy}}}}"#;
 const ENVIRONMENT_FORMAT: &str = r#"{"Id":{{json .Id}},"Config":{"Env":{{json .Config.Env}}}}"#;
 
@@ -67,6 +68,10 @@ pub enum Query {
         action: Action,
         confirmed: bool,
     },
+    ContainerMaintenance {
+        action: crate::maintenance::Action,
+        confirmed: bool,
+    },
     ImageRemove {
         id: String,
         confirmed: bool,
@@ -80,21 +85,61 @@ fn confirm(value: bool) -> Result<(), ApiError> {
 }
 impl Query {
     pub fn command(&self) -> Result<String, ApiError> {
-        let body=match self{
-   Self::Capabilities=>"if ! command -v docker >/dev/null 2>&1; then printf '{\"dockerInstalled\":false,\"dockerState\":\"absent\"}'; else d version --format '{{json .}}'; fi".into(),
-   Self::Containers=>"d container ls --all --no-trunc --format '{{json .}}'".into(),
-   Self::Images=>"d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
-   Self::ComposeProjects=>crate::compose::PROJECTS.into(),
-   Self::ComposeServices{project}=>{crate::compose::project_name(project)?;return crate::compose::services_command();},
-   Self::ComposeAction{..}=>return Err(invalid("Compose 变更必须先重新查询真实项目配置")),
-   Self::ContainerDetails{id,reveal_env}=>{container_id(id)?;inspect_command(if *reveal_env {ENVIRONMENT_FORMAT} else {DETAILS_FORMAT})?},
-   Self::ContainerStats{id}=>{container_id(id)?;"d stats --all --no-stream --no-trunc --format '{{json .}}'".into()},
-   Self::ContainerAction{id,action,confirmed}=>{container_id(id)?;confirm(*confirmed)?;let name=match action{Action::Start=>"start",Action::Stop=>"stop --time 10",Action::Restart=>"restart --time 10",Action::Remove=>"rm"};format!("d container {name} {}",quote(id)?)},
-   Self::ImageRemove{id,confirmed}=>{image_id(id)?;confirm(*confirmed)?;format!("d image rm {}",quote(id)?)},
-  };
+        let body = match self {
+            Self::Capabilities => CAPABILITIES.into(),
+            Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
+            Self::Images => "d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
+            Self::ComposeProjects => crate::compose::PROJECTS.into(),
+            Self::ComposeServices { project } => {
+                crate::compose::project_name(project)?;
+                return crate::compose::services_command();
+            }
+            Self::ComposeAction { .. } => {
+                return Err(invalid("Compose 变更必须先重新查询真实项目配置"));
+            }
+            Self::ContainerDetails { id, reveal_env } => {
+                container_id(id)?;
+                inspect_command(if *reveal_env {
+                    ENVIRONMENT_FORMAT
+                } else {
+                    DETAILS_FORMAT
+                })?
+            }
+            Self::ContainerStats { id } => {
+                container_id(id)?;
+                "d stats --all --no-stream --no-trunc --format '{{json .}}'".into()
+            }
+            Self::ContainerAction {
+                id,
+                action,
+                confirmed,
+            } => {
+                container_id(id)?;
+                confirm(*confirmed)?;
+                let name = match action {
+                    Action::Start => "start",
+                    Action::Stop => "stop --time 10",
+                    Action::Restart => "restart --time 10",
+                    Action::Remove => "rm",
+                };
+                format!("d container {name} {}", quote(id)?)
+            }
+            Self::ContainerMaintenance { action, confirmed } => {
+                confirm(*confirmed)?;
+                return Ok(crate::maintenance::command(action));
+            }
+            Self::ImageRemove { id, confirmed } => {
+                image_id(id)?;
+                confirm(*confirmed)?;
+                format!("d image rm {}", quote(id)?)
+            }
+        };
         Ok(format!("{PRELUDE}{body}"))
     }
     pub fn response(&self, text: &str) -> Result<Value, ApiError> {
+        if let Self::ContainerMaintenance { action, .. } = self {
+            return crate::maintenance::response(action, text);
+        }
         if matches!(self, Self::ComposeProjects) {
             return crate::compose::projects(text);
         }
@@ -149,7 +194,15 @@ impl Query {
                 detail = if v.get("dockerInstalled").is_some() {
                     v
                 } else {
-                    json!({"dockerInstalled":true,"dockerState":if v["Server"].is_object(){"running"}else{"unavailable"},"dockerVersion":v})
+                    let version = v
+                        .get("dockerVersion")
+                        .filter(|value| value.is_object())
+                        .ok_or_else(format)?;
+                    let os = &v["dockerOperatingSystem"];
+                    if !os.is_null() && !os.is_string() {
+                        return Err(format());
+                    }
+                    json!({"dockerInstalled":true,"dockerState":if version["Server"].is_object(){"running"}else{"unavailable"},"dockerVersion":version,"dockerOperatingSystem":os})
                 };
             }
             _ => (),
@@ -179,6 +232,39 @@ pub fn shell_command(id: &str, bash: bool) -> Result<String, ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn capabilities_include_daemon_operating_system_and_reject_malformed_output() {
+        let response = Query::Capabilities.response(&json!({"dockerVersion":{"Server":{"Version":"27.5.1","Os":"linux","Arch":"amd64"},"Client":{"Version":"28.5.1"}},"dockerOperatingSystem":"Ubuntu 24.04.3 LTS"}).to_string()).unwrap();
+        assert_eq!(
+            response["detail"]["dockerOperatingSystem"],
+            "Ubuntu 24.04.3 LTS"
+        );
+        assert_eq!(response["detail"]["dockerState"], "running");
+        let missing = Query::Capabilities
+            .response(r#"{"dockerVersion":{"Server":null},"dockerOperatingSystem":null}"#)
+            .unwrap();
+        assert!(missing["detail"]["dockerOperatingSystem"].is_null());
+        assert_eq!(missing["detail"]["dockerState"], "unavailable");
+        assert_eq!(
+            Query::Capabilities
+                .response(r#"{"dockerInstalled":false,"dockerState":"absent"}"#)
+                .unwrap()["detail"]["dockerInstalled"],
+            false
+        );
+        for text in [
+            "[]",
+            "{}",
+            r#"{"dockerVersion":{},"dockerOperatingSystem":{}}"#,
+        ] {
+            assert!(Query::Capabilities.response(text).is_err());
+        }
+        assert!(
+            serde_json::from_value::<Query>(
+                json!({"kind":"container_maintenance","action":"restart_all","confirmed":true})
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn removed_tcp_queries_are_rejected_without_network_permission() {
         for location in ["local", "remote"] {
@@ -266,6 +352,26 @@ mod tests {
             log_command(&id, 200, true).unwrap(),
             shell_command(&id, false).unwrap(),
         ] {
+            assert!(!commands.contains(&serverdeck_plugin_sdk::platform::Command::script(command)));
+        }
+        for action in [
+            crate::maintenance::Action::RestartExited,
+            crate::maintenance::Action::ClearLogs,
+        ] {
+            assert!(
+                Query::ContainerMaintenance {
+                    action: action.clone(),
+                    confirmed: false
+                }
+                .command()
+                .is_err()
+            );
+            let command = Query::ContainerMaintenance {
+                action,
+                confirmed: true,
+            }
+            .command()
+            .unwrap();
             assert!(!commands.contains(&serverdeck_plugin_sdk::platform::Command::script(command)));
         }
     }

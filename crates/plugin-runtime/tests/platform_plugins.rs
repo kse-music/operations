@@ -239,6 +239,115 @@ async fn docker_compose_prepares_project_commands_and_survives_denial() {
     runtime.shutdown().await.unwrap();
 }
 
+#[tokio::test]
+async fn docker_information_and_individual_restart_use_current_contract() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let manifest: Value =
+        serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
+    let info = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"capabilities"}}), |request| {
+        assert_eq!(request["command"], manifest["preapprovedCommands"][0]);
+        assert!(request["command"]["args"][1].as_str().unwrap().contains("{{json .OperatingSystem}}"));
+        json!({"state":"completed","exitCode":0,"stdout":"{\"dockerVersion\":{\"Server\":{\"Os\":\"linux\"}},\"dockerOperatingSystem\":\"Ubuntu 24.04.3 LTS\"}","stderr":"","truncated":false,"message":null})
+    }).await;
+    assert_eq!(
+        done(&info)["detail"]["dockerOperatingSystem"],
+        "Ubuntu 24.04.3 LTS"
+    );
+    let removed = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"container_maintenance","action":"restart_all","confirmed":true}}), |_| panic!("removed action reached host")).await;
+    assert_eq!(removed.error.unwrap().code, "INPUT");
+    let target = "a".repeat(64);
+    let input = json!({"hostId":"host","request":{"kind":"container_action","id":target,"action":"restart","confirmed":true}});
+    let pending = runtime
+        .call(&id, json!({"action":"query","input":input}))
+        .await
+        .unwrap();
+    let command = &operation(&pending)["command"];
+    assert!(
+        command["args"][1]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("d container restart --time 10 '{target}'"))
+    );
+    assert!(
+        !manifest["preapprovedCommands"]
+            .as_array()
+            .unwrap()
+            .contains(command)
+    );
+    let cancelled = runtime.resume(&id, json!({"hostResponse":{"requestId":pending.result["request"]["requestId"],"result":null,"error":{"code":"USER_CANCELLED","message":"取消"}}})).await.unwrap();
+    assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn docker_maintenance_requires_confirmation_and_reports_partial_failures() {
+    let manifest: Value =
+        serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
+    for action in ["restart_exited", "clear_logs"] {
+        let (_directory, runtime, id) = packaged("docker");
+        runtime.activate(&id).await.unwrap();
+        let input = json!({"hostId":"host","request":{"kind":"container_maintenance","action":action,"confirmed":false}});
+        let unconfirmed = invoke(&runtime, &id, "query", input.clone(), |_| {
+            panic!("unconfirmed action reached host")
+        })
+        .await;
+        assert_eq!(unconfirmed.error.unwrap().code, "DOCKER_INPUT");
+        let mut input = input;
+        input["request"]["confirmed"] = json!(true);
+        let pending = runtime
+            .call(&id, json!({"action":"query","input":input}))
+            .await
+            .unwrap();
+        let request = operation(&pending);
+        assert_eq!(request["kind"], "execute");
+        assert_eq!(request["hostId"], "host");
+        assert!(
+            !manifest["preapprovedCommands"]
+                .as_array()
+                .unwrap()
+                .contains(&request["command"])
+        );
+        let script = request["command"]["args"][1].as_str().unwrap();
+        assert_eq!(
+            script.contains("--filter status=exited"),
+            action == "restart_exited"
+        );
+        assert_eq!(
+            script.contains("truncate --no-create"),
+            action == "clear_logs"
+        );
+        let cancelled = runtime.resume(&id, json!({"hostResponse":{"requestId":pending.result["request"]["requestId"],"result":null,"error":{"code":"USER_CANCELLED","message":"取消"}}})).await.unwrap();
+        assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
+        let completed = invoke(&runtime, &id, "query", input.clone(), |_| json!({"state":"completed","exitCode":0,"stdout":"{\"matched\":2,\"succeeded\":2,\"failed\":0,\"skipped\":0}","stderr":"","truncated":false,"message":null})).await;
+        assert_eq!(done(&completed)["success"], true);
+        assert!(
+            done(&completed)["message"]
+                .as_str()
+                .unwrap()
+                .contains("成功 2 个")
+        );
+        let partial = invoke(&runtime, &id, "query", input.clone(), |_| json!({"state":"completed","exitCode":0,"stdout":"{\"matched\":2,\"succeeded\":1,\"failed\":1,\"skipped\":0}","stderr":"Permission denied","truncated":false,"message":null})).await;
+        assert_eq!(done(&partial)["success"], false);
+        assert_eq!(done(&partial)["code"], "DOCKER_PARTIAL_FAILURE");
+        assert!(
+            done(&partial)["message"]
+                .as_str()
+                .unwrap()
+                .contains("失败 1 个")
+        );
+        assert!(
+            done(&partial)["message"]
+                .as_str()
+                .unwrap()
+                .contains("Permission denied")
+        );
+        let failed = invoke(&runtime, &id, "query", input, |_| json!({"state":"completed","exitCode":1,"stdout":"","stderr":"daemon unavailable","truncated":false,"message":null})).await;
+        assert!(failed.error.is_some());
+        runtime.shutdown().await.unwrap();
+    }
+}
+
 // Opt-in only: the caller creates and owns this isolated, networkless QA project.
 // Uses real Docker through WSL; does not claim to exercise the native SSH/UI bridge.
 #[tokio::test]

@@ -6,10 +6,16 @@ import type {
   TerminalSession,
   TerminalSize,
   TerminalUploadSelection,
+  TerminalDropSelection,
+  TerminalDropPrepared,
 } from '../types/terminal';
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
+  claimDrop: (id: string, grant: string): Promise<TerminalDropSelection> =>
+    invoke('terminal_upload_claim_drop', { id, grant }),
+  prepareDrop: (id: string, token: string): Promise<TerminalDropPrepared> =>
+    invoke('terminal_upload_prepare_drop', { id, token, confirmed: true }),
   uploadPick: (id: string): Promise<TerminalUploadSelection> => {
     ensureDesktop();
     return invoke('terminal_upload_pick', { id });

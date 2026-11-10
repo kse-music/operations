@@ -7,6 +7,8 @@ const api = vi.hoisted(() => ({ call: vi.fn(), copy: vi.fn().mockResolvedValue(u
 vi.mock('../platform', () => ({ call: api.call }));
 vi.mock('../services/clipboard', () => ({ clipboardApi: { writeText: api.copy } }));
 let app: App | undefined, root: HTMLDivElement;
+let resized: () => void;
+const disconnected = vi.fn();
 const closed = vi.fn();
 const settle = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
@@ -24,6 +26,17 @@ beforeEach(() => {
   api.call.mockReset();
   api.copy.mockClear();
   closed.mockClear();
+  disconnected.mockClear();
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        resized = callback;
+      }
+      observe() {}
+      disconnect = disconnected;
+    },
+  );
   updateVisibility(true);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -42,6 +55,7 @@ afterEach(async () => {
   root?.remove();
   updateVisibility(true);
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 it('caps UTF-8 bytes and lines while retaining recent complete Unicode characters', () => {
@@ -165,4 +179,73 @@ it('records a cleanup fault on unmount instead of silently swallowing it', async
   await settle();
   expect(report).toHaveBeenCalledWith('Plugin stream cleanup failed', 'IO');
   expect(report.mock.calls.flat()).not.toContain('private details');
+});
+
+it('follows the rendered tail, preserves history and returns to latest after resume or resize', async () => {
+  let line = 'initial';
+  api.call.mockImplementation(async (input) =>
+    input.kind === 'stream_poll'
+      ? { events: [{ type: 'data', dataBase64: btoa(`${line}\n`) }] }
+      : null,
+  );
+  await mount();
+  const output = document.querySelector<HTMLPreElement>('.platform-stream-output')!;
+  let height = 1000;
+  Object.defineProperties(output, {
+    scrollHeight: { get: () => height },
+    clientHeight: { get: () => 200 },
+  });
+  const scrollTop = vi.spyOn(output, 'scrollTop', 'set');
+  const button = (label: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent?.trim() === label,
+    )!;
+  line = 'first poll';
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(scrollTop).toHaveBeenLastCalledWith(1000);
+  expect(output.textContent).toContain(line);
+  output.scrollTop = 100;
+  output.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.body.textContent).toContain('查看历史 · 新日志继续接收');
+  scrollTop.mockClear();
+  height = 1200;
+  line = 'arrived while reading history';
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(output.textContent).toContain(line);
+  expect(output.scrollTop).toBe(100);
+  expect(scrollTop).not.toHaveBeenCalled();
+  resized();
+  expect(scrollTop).not.toHaveBeenCalled();
+  button('最新日志').click();
+  await settle();
+  expect(scrollTop).toHaveBeenLastCalledWith(1200);
+  button('暂停').click();
+  await settle();
+  scrollTop.mockClear();
+  height = 1400;
+  line = 'queued output after pause';
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(scrollTop).not.toHaveBeenCalled();
+  resized();
+  expect(scrollTop).not.toHaveBeenCalled();
+  button('继续').click();
+  await settle();
+  expect(scrollTop).toHaveBeenLastCalledWith(1400);
+  height = 1600;
+  resized();
+  expect(scrollTop).toHaveBeenLastCalledWith(1600);
+  // Manually returning within the tail threshold also resumes following.
+  output.scrollTop = 1380;
+  output.dispatchEvent(new Event('scroll'));
+  line = 'manual tail follow';
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(scrollTop).toHaveBeenLastCalledWith(1600);
+  app!.unmount();
+  app = undefined;
+  expect(disconnected).toHaveBeenCalledOnce();
 });

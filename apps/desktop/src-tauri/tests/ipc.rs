@@ -926,6 +926,14 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     for (command, body) in [
         ("terminal_upload_pick", json!({"id":"missing"})),
         (
+            "terminal_upload_claim_drop",
+            json!({"id":"missing","grant":"forged"}),
+        ),
+        (
+            "terminal_upload_prepare_drop",
+            json!({"id":"missing","token":"forged","confirmed":true}),
+        ),
+        (
             "terminal_upload_read",
             json!({"id":"missing","token":"forged","index":0,"offset":0}),
         ),

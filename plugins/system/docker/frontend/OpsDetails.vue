@@ -23,6 +23,7 @@ const labels: Record<string, string> = {
   dockerVersion: 'Docker 版本',
   dockerClientVersion: '客户端版本',
   dockerPlatform: '运行平台',
+  dockerOperatingSystem: '操作系统',
   dockerInfo: 'Docker 信息',
   systemd: 'systemd 可用',
   systemdUser: '用户服务可用',
@@ -67,6 +68,7 @@ const entries = computed(() => {
       dockerVersion: text(server.Version),
       dockerClientVersion: text(client.Version),
       dockerPlatform: [text(server.Os), text(server.Arch)].filter(Boolean).join(' / ') || null,
+      dockerOperatingSystem: text(props.detail.dockerOperatingSystem),
     });
   }
   const entries = Object.entries(props.detail).filter(
