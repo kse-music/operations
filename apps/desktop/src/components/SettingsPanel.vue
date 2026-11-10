@@ -22,7 +22,7 @@ import {
 const application = useApplicationStore();
 const workspace = useWorkspaceStore();
 const migration = useStorageMigration();
-const { target, preview, discardDocuments, busy, changed } = migration;
+const { target, preview, discardDocuments, busy, restarting, changed } = migration;
 const props = withDefaults(defineProps<{ category?: SettingsCategory }>(), { category: 'general' });
 const emit = defineEmits<{ category: [category: SettingsCategory] }>();
 const categoryLabel = computed(
@@ -381,9 +381,12 @@ function restoreDefaults(): void {
               </div>
             </dl>
             <p class="subtle full-width">
-              选择空的专用目录。修改后迁移应用数据并自动重启；成功启动后清理旧副本。系统凭据和已下载文件保留原位置。
+              选择空的专用目录。确认后将关闭窗口，在重启期间迁移并校验数据；新目录启动成功后清理旧副本。系统凭据和已下载文件保留原位置。
             </p>
-            <p v-if="application.state.storage.notice" class="subtle full-width">
+            <p
+              v-if="application.state.storage.notice && !changed && !busy"
+              class="subtle full-width"
+            >
               {{ application.state.storage.notice }}
             </p>
           </div>
@@ -454,10 +457,17 @@ function restoreDefaults(): void {
       <p>
         将保存所有分类设置，断开连接并安全结束后台任务（当前
         {{ preview.unfinishedTasks }}
-        项未完成传输）。重启后迁移并校验，新目录启动成功后自动清理旧副本。
+        项未完成传输）。随后关闭窗口，在重启期间复制并校验数据；窗口关闭不代表迁移完成。新目录启动成功后自动清理旧副本。
+      </p>
+      <p v-if="busy" role="status">
+        {{
+          restarting
+            ? '正在安全结束任务并重启，数据将在重启期间复制和校验。请等待应用自动重新打开。'
+            : '正在保存设置并安排迁移，请稍候…'
+        }}
       </p>
       <label v-if="preview.dirtyDocuments" class="checkbox-label"
-        ><input v-model="discardDocuments" type="checkbox" />明确放弃
+        ><input v-model="discardDocuments" type="checkbox" :disabled="busy" />明确放弃
         {{ preview.dirtyDocuments }} 份文档的未保存修改</label
       >
       <p v-if="preview.dirtyDocuments" class="subtle">也可以取消本次操作，保存文档后再迁移。</p>
@@ -469,7 +479,7 @@ function restoreDefaults(): void {
           :disabled="busy || (!!preview.dirtyDocuments && !discardDocuments)"
           @click="migration.confirm"
         >
-          确认迁移并重启
+          {{ busy ? (restarting ? '正在重启…' : '正在准备…') : '确认迁移并重启' }}
         </button>
       </div>
     </Modal>

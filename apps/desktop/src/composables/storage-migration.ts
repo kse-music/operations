@@ -10,6 +10,7 @@ export function useStorageMigration() {
   const preview = ref<StoragePreview | null>(null);
   const discardDocuments = ref(false);
   const busy = ref(false);
+  const restarting = ref(false);
   let config: AppConfig | null = null;
   watch(
     () => application.state?.storage?.rootDirectory,
@@ -32,8 +33,10 @@ export function useStorageMigration() {
     }
   }
   async function review(draft: AppConfig) {
+    if (busy.value) return;
     busy.value = true;
     application.error = null;
+    application.notice = null;
     try {
       preview.value = await ipc.storagePreview(target.value.trim());
       config = JSON.parse(JSON.stringify(draft)) as AppConfig;
@@ -49,16 +52,18 @@ export function useStorageMigration() {
     busy.value = true;
     application.saving = true;
     application.error = null;
+    application.notice = null;
     try {
-      const restarting = await ipc.storageMigrate(
+      restarting.value = await ipc.storageMigrate(
         config,
         preview.value.targetDirectory,
         discardDocuments.value,
       );
-      application.notice = restarting
-        ? '设置已保存，正在安全结束任务并重启以迁移数据…'
+      application.notice = restarting.value
+        ? '设置已保存，正在安全结束任务并重启；窗口关闭后开始迁移，请等待应用自动重新打开。'
         : '设置已保存，数据目录未变化，无需重启。';
-      if (!restarting && application.state) {
+      if (restarting.value) return;
+      if (application.state) {
         application.state.config = config;
         target.value = application.state.storage?.rootDirectory ?? target.value;
       }
@@ -66,9 +71,12 @@ export function useStorageMigration() {
     } catch (cause) {
       application.error = ipc.errorMessage(cause);
     } finally {
-      busy.value = false;
-      application.saving = false;
+      // The IPC acknowledges a scheduled restart, not a completed migration.
+      if (!restarting.value) {
+        busy.value = false;
+        application.saving = false;
+      }
     }
   }
-  return { target, preview, discardDocuments, busy, changed, browse, review, confirm };
+  return { target, preview, discardDocuments, busy, restarting, changed, browse, review, confirm };
 }

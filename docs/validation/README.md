@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[数据目录迁移确认弹窗保持处理中、窗口关闭与完成时序](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-数据目录迁移等待状态)。
+
 最新：[Docker 日志首次定位、自动跟随、历史阅读与独立滚动弹窗](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-日志跟随与弹窗滚动)。
 
 最新：[Docker 三标签页短搜索框、刷新文案、行内重启及操作系统信息](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-列表操作与信息调整)。

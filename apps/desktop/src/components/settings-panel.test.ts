@@ -454,6 +454,103 @@ it('retains target and preferences when migration preflight fails', async () => 
   expect(document.querySelector('dialog')).toBeNull();
 });
 
+it('keeps migration visible and locked after restart is scheduled until the process exits', async () => {
+  vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
+    targetDirectory: 'D:\\ServerDeck',
+    bytes: 1024,
+    availableBytes: 1e9,
+    unfinishedTasks: 1,
+    dirtyDocuments: 1,
+  });
+  let scheduleRestart!: (restarting: boolean) => void;
+  const migrate = vi
+    .spyOn(ipc, 'storageMigrate')
+    .mockImplementation(() => new Promise((resolve) => (scheduleRestart = resolve)));
+  await storageDraft();
+  const application = useApplicationStore();
+  application.state!.storage!.notice = '数据迁移完成，旧副本已清理。';
+  application.notice = '上次迁移完成';
+  await submit();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+  const discard = dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  discard.click();
+  await nextTick();
+  const confirm = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '确认迁移并重启',
+  )!;
+  confirm.click();
+  await nextTick();
+  expect(dialog.querySelector('[role="status"]')?.textContent).toContain('正在保存设置');
+  expect(discard.disabled).toBe(true);
+  expect(application.notice).toBeNull();
+  expect(root.querySelector('#settings-panel-storage')?.textContent).not.toContain('旧副本已清理');
+
+  scheduleRestart(true);
+  await vi.waitFor(() => expect(application.notice).toContain('正在安全结束任务并重启'));
+  expect(document.querySelector('dialog')).toBe(dialog);
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('[role="status"]')?.textContent).toContain('请等待应用自动重新打开');
+  expect(dialog.textContent).toContain('窗口关闭不代表迁移完成');
+  expect(application.saving).toBe(true);
+  expect([...dialog.querySelectorAll<HTMLButtonElement>('button')].every((b) => b.disabled)).toBe(
+    true,
+  );
+  expect([...root.querySelectorAll('fieldset')].every((field) => field.disabled)).toBe(true);
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(false);
+  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  confirm.click();
+  await nextTick();
+  expect(document.querySelector('dialog')).toBe(dialog);
+  expect(migrate).toHaveBeenCalledOnce();
+  expect(application.state!.storage!.rootDirectory).toBe('C:\\ServerDeck');
+});
+
+it('retains the migration dialog and drafts on preparation failure and allows retry', async () => {
+  vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
+    targetDirectory: 'D:\\ServerDeck',
+    bytes: 1024,
+    availableBytes: 1e9,
+    unfinishedTasks: 0,
+    dirtyDocuments: 0,
+  });
+  const migrate = vi
+    .spyOn(ipc, 'storageMigrate')
+    .mockRejectedValueOnce({ message: '无法登记目录迁移' })
+    .mockResolvedValue(true);
+  await storageDraft();
+  await select(0);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await submit();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+  const confirm = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '确认迁移并重启',
+  )!;
+  confirm.click();
+  const application = useApplicationStore();
+  await vi.waitFor(() => expect(application.error).toBe('无法登记目录迁移'));
+  expect(application.saving).toBe(false);
+  expect(confirm.disabled).toBe(false);
+  expect(dialog.querySelector('[role="status"]')).toBeNull();
+  expect(root.querySelector<HTMLSelectElement>('[data-testid="theme-select"]')!.value).toBe(
+    'light',
+  );
+  expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
+    'D:\\ServerDeck',
+  );
+  confirm.click();
+  await vi.waitFor(() => expect(migrate).toHaveBeenCalledTimes(2));
+  expect(migrate).toHaveBeenLastCalledWith(
+    expect.objectContaining({ theme: 'light' }),
+    'D:\\ServerDeck',
+    false,
+  );
+  await vi.waitFor(() => expect(application.saving).toBe(true));
+  expect(document.querySelector('dialog')).toBe(dialog);
+  expect(confirm.disabled).toBe(true);
+});
+
 it('applies saved preferences immediately when a path alias requires no restart', async () => {
   vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
     targetDirectory: 'C:\\ServerDeck',
@@ -473,4 +570,7 @@ it('applies saved preferences immediately when a path alias requires no restart'
     .click();
   await vi.waitFor(() => expect(useApplicationStore().state!.config.theme).toBe('light'));
   expect(useApplicationStore().notice).toContain('无需重启');
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(useApplicationStore().saving).toBe(false);
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
 });

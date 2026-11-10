@@ -1,5 +1,26 @@
 # 设置导航与关于页面合并验证
 
+## 2026-11-10 数据目录迁移等待状态
+
+### 核查与修复
+
+- 确认现有顺序为：保存偏好及 Pending 迁移登记 → 安全结束任务并退出旧进程 → 新进程在创建主窗口前复制、校验文件和数据库 → 前后端启动确认 → 提交及逐文件复核清理旧副本。因此旧窗口消失时迁移尚未完成，重启期间需要释放 SQLite、日志及 WebView 的文件占用。
+- 修复前端把 `app_storage_migrate` 返回 `true` 当成可以结束等待的问题：该返回值仅代表安排重启。确认弹窗、忙碌状态及设置关闭保护现在保持至进程退出，显示准备/重启状态，并明确“窗口关闭不代表迁移完成”。准备失败保留弹窗及全部草稿，可重试；同目录别名无需重启时正常结束等待并应用已保存设置。
+- 迁移处理中禁止再次确认、取消、Esc 关闭及修改放弃文档的确认；输入新目录时隐藏上次迁移完成的历史提示，预检/确认清除旧通知。本次不改变后端复制、确认启动、回退与清理状态机，不修改数据库、持久配置格式或依赖。
+- 主要文件：`apps/desktop/src/composables/storage-migration.ts`、`components/SettingsPanel.vue`、`components/settings-panel.test.ts`；同步架构与使用说明。
+
+### 实际验证
+
+- 新增回归先在旧实现执行：设置测试 17 项通过、2 项失败，检出准备状态缺失及重启登记后等待被解除；修正测试路径字面量后保留有效失败记录。最终在 `apps/desktop` 执行 `npx vitest run src/components/settings-panel.test.ts src/stores/application.test.ts src/stores/workspace.test.ts src/App.test.ts`，**4 文件、131 项全部通过**。覆盖登记成功后弹窗及关闭保护保持、失败重试保留草稿、路径别名无需重启、启动提交完成前不可写及提交失败不可用。
+- `cargo test -p serverdeck-application --lib storage_location::tests --no-run --message-format=json` 编译成功，随后将测试 EXE 复制到 QA 目录运行 `storage_location::tests --nocapture`，**16 项全部通过**。覆盖复制/启动确认/源清理顺序、文件与偏好保留、中断续传、损坏与占用回退、源变化保留、路径与空间拒绝。编译前 D 盘约 154.4 GiB 可用，复用根 `target/`，遵循现有增量和调试配置。
+- `npm run typecheck`（桌面与 SDK）、本次前端源文件 ESLint、修改文件 Prettier、差异空白检查通过；在 `apps/desktop` 执行 `npx vite build` 成功，保留既有 Monaco 大 chunk 提醒。
+- 只读检查当前用户 `%APPDATA%/cn.hiboot.desktop/storage-location.json`：活动根为 `E:\softwareData\servicedeck\data`，`migration` 为空，notice 为“数据迁移完成，旧副本已清理。”，目标数据库文件存在。这说明本机定位状态记录该次迁移已完成；没有重跑用户迁移、读取业务表、逐文件复核正式数据或更改现有配置。
+- 日志及复制后的测试程序位于 `.local/qa/storage-migration-window/`：`regression-before.log`、`vitest-final.log`、`cargo-build.jsonl`、`cargo-build.log`、`migration-tests.log`、`frontend-build.log`。Vitest 的进程级 TEMP/TMP 指向独立 QA 临时目录，未改系统环境配置。
+
+### 限制、风险与下一阶段依赖
+
+未重建或替换用户正在使用的桌面 EXE，未进行本次真实 WebView2 自动重启迁移、浏览器截图、安装器、macOS/Linux 或故障硬件验收。前端夹具和迁移库专项通过不表示新界面已在当前程序中生效；实际分发仍需重新构建桌面产物并做原生验收。主窗口在重启复制期间仍不可见，也没有百分比进度，数据较多时等待时间较长；本次修复只保证退出前状态真实且不提前解除保护。当前修复已完成，无新的实现依赖，不主动开始其他阶段。
+
 ## 2026-11-10 关于页发布时间
 
 - 关于页产品信息移除“技术栈”，在应用版本下展示“发布时间”。Vite 在前端打包时生成并嵌入 ISO 时间，界面按 `Asia/Shanghai` 显示年月日、时分秒及“北京时间”；开发模式取本次 Vite 启动时间。打开页面、重新检查后端及客户端时钟变化不刷新该值，后端未就绪时仍可查看。
