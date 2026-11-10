@@ -1,5 +1,9 @@
 # 验证记录索引
 
+最新：[Release EXE 产物核对、首次打开立即迁移及跨盘原生验收](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-release-exe-与首次启动迁移)。
+
+最新：[首次启动后立即迁移的文件写入竞争、19 项回归及 Windows 跨盘原生验证](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-首次启动后迁移的文件写入竞争)。
+
 最新：[数据目录迁移确认弹窗保持处理中、窗口关闭与完成时序](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-数据目录迁移等待状态)。
 
 最新：[Docker 日志首次定位、自动跟随、历史阅读与独立滚动弹窗](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-日志跟随与弹窗滚动)。

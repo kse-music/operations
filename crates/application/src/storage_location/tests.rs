@@ -347,6 +347,97 @@ fn dedicated_directory_directly_under_a_drive_root_is_allowed() {
 
 #[cfg(windows)]
 #[test]
+fn hashing_waits_for_a_shared_writer_to_finish() {
+    use std::{io::Seek, sync::mpsc, time::Duration};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("webview-state");
+    let mut writer = File::create(&path).unwrap();
+    writer.write_all(b"initial").unwrap();
+    let (sender, receiver) = mpsc::channel();
+    let worker_path = path.clone();
+    let worker = std::thread::spawn(move || sender.send(hash(&worker_path)).unwrap());
+    let early = receiver.recv_timeout(Duration::from_millis(200));
+    writer.rewind().unwrap();
+    writer.write_all(b"settled").unwrap();
+    writer.sync_all().unwrap();
+    drop(writer);
+    let premature = early.is_ok();
+    let actual = early
+        .unwrap_or_else(|_| receiver.recv_timeout(Duration::from_secs(5)).unwrap())
+        .unwrap();
+    worker.join().unwrap();
+    assert!(
+        !premature,
+        "migration read a file whose writer was still open"
+    );
+    assert_eq!(actual, hash(&path).unwrap());
+}
+
+#[cfg(windows)]
+#[test]
+fn migration_reader_prevents_writes_and_replacement_until_released() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("webview-state");
+    fs::write(&path, b"settled").unwrap();
+    let reader = read_source(&path).unwrap();
+    assert!(File::open(&path).is_ok());
+    let write_error = File::options().write(true).open(&path).unwrap_err();
+    assert_eq!(write_error.raw_os_error(), Some(32));
+    let rename_error = fs::rename(&path, dir.path().join("renamed")).unwrap_err();
+    assert_eq!(rename_error.raw_os_error(), Some(32));
+    drop(reader);
+    assert!(File::options().write(true).open(&path).is_ok());
+    fs::rename(&path, dir.path().join("renamed")).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn first_launch_migration_waits_for_webview_writers_before_inventory() {
+    use std::{io::Seek, sync::mpsc, time::Duration};
+
+    let fixture = Fixture::new();
+    fixture.open().prepare(&fixture.target).unwrap();
+    let state = fixture.defaults.webview.join("EBWebView/state");
+    let mut writer = File::options().write(true).open(&state).unwrap();
+    writer.write_all(b"initial state").unwrap();
+    let (sender, receiver) = mpsc::channel();
+    let locator = fixture.locator.clone();
+    let defaults = fixture.defaults.clone();
+    let worker = std::thread::spawn(move || {
+        assert!(sender.send(Profile::open(locator, defaults)).is_ok());
+    });
+    let early = receiver.recv_timeout(Duration::from_millis(200));
+    writer.rewind().unwrap();
+    writer.write_all(b"settled state").unwrap();
+    writer.sync_all().unwrap();
+    drop(writer);
+    let premature = early.is_ok();
+    let mut profile = early
+        .unwrap_or_else(|_| receiver.recv_timeout(Duration::from_secs(10)).unwrap())
+        .unwrap();
+    worker.join().unwrap();
+    assert!(
+        !premature,
+        "migration finished while a WebView writer was still open"
+    );
+    assert_eq!(
+        profile.locations().data,
+        fixture.target,
+        "{:?}",
+        profile.info().notice
+    );
+    assert_eq!(
+        fs::read(fixture.target.join("webview/EBWebView/state")).unwrap(),
+        b"settled state"
+    );
+    assert!(fixture.defaults.data.join("serverdeck.sqlite3").exists());
+    profile.ready().unwrap();
+    assert!(!state.exists());
+}
+
+#[cfg(windows)]
+#[test]
 fn occupied_source_falls_back_without_deleting_data() {
     use std::os::windows::fs::OpenOptionsExt;
     let fixture = Fixture::new();
@@ -358,7 +449,10 @@ fn occupied_source_falls_back_without_deleting_data() {
         .unwrap();
     let profile = fixture.open();
     assert_eq!(profile.locations(), &fixture.defaults);
-    assert!(profile.info().notice.unwrap().contains("旧数据未删除"));
+    let notice = profile.info().notice.unwrap();
+    assert!(notice.contains("旧数据未删除"));
+    assert!(notice.contains("后台进程写入或占用"));
+    assert!(!fixture.target.exists());
     drop(lock);
     assert_eq!(
         fs::read(fixture.defaults.webview.join("EBWebView/state")).unwrap(),

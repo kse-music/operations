@@ -1,5 +1,37 @@
 # 设置导航与关于页面合并验证
 
+## 2026-11-10 Release EXE 与首次启动迁移
+
+- 用户补充实际复制的是 `target/release/serverdeck-desktop.exe`，新电脑确认后自动重开，数据库实际路径仍旧且没有可见结果。核对发现该文件生成于北京时间 **19:43:35**，早于上一轮修复；上一轮原生验证及交付构建使用 debug，不能作为该旧 Release 已修复的证据。旧 EXE 二进制保留旧校验错误文本，不包含新增的后台写入等待逻辑；旧文件已复制保留于 QA 目录，未取得另一台电脑的定位文件，未把产物落后推断为其唯一失败分支。
+- 扩展 `tools/native-storage-e2e.mjs`：`--release` 构建 Release 测试副本，`--first-launch` 在首次就绪后、创建任何测试主机或凭据前，通过真实设置界面立即迁移。重启后必须同时满足实际数据库根、界面根目录输入值、定位文件 active、migration 为空和完成结果；后续保留原有取消与数据保留断言，再执行跨盘迁移。测试构建不论成功与否均在 `finally` 恢复普通构建配置，回环请求增加明确超时。
+- 实际执行 `node tools/native-storage-e2e.mjs --release --first-launch`，在沙箱外运行隔离 Windows/WebView2/IPC/SQLite 测试：**首次打开立即迁移并重启通过**，新路径与完成提示均可见；随后取消不保存/迁移/重启、**D→C 跨盘迁移及自动重启通过**，主机与凭据引用、插件状态/文件、WebView localStorage 保留，源清理及定位状态通过。测试秘密验后删除，QA 正常退出，已查看首次迁移完成截图。测试使用独立标识和数据根的 Release 复制件，不运行正式用户数据。
+- 普通配置的 `target/release/serverdeck-desktop.exe` 已重新构建，生成时间为北京时间 **2026-11-10 20:40:32**，大小 **45,264,384 bytes**，SHA-256 为 `3d0c26604052f0a50e228b3164cf096aecf59225e43889a5bdbdb9d1c8ea7078`。二进制检查确认包含后台写入等待修复，且不包含 QA 应用标识。此前 EXE 的 SHA-256 为 `5337443ad7fd5f8097075ba1b5913187a9b00c2fffd3f34302815ae7afb6bd45`，不能混用两份产物的验收结果。
+- 构建前确认目标 EXE 未在运行、D 盘约 153.7 GiB 空闲；沿用根 `target/`、现有 Release 优化及开发/测试缓存规则，没有另建原生缓存。普通与隔离 Release 构建均成功，前端类型及生产构建由正常构建链执行，保留既有 Monaco 大 chunk 提醒。修改工具的语法、Prettier 和差异空白检查通过；本轮没有再次改变迁移实现，上一轮的 19 项 Rust 迁移回归及 Clippy 结果保留，不声称本轮重跑。
+- 证据：`.local/qa/storage-release/` 的 `artifact-before.json`、`binary-before.json`、`serverdeck-desktop-before.exe`、`artifact-after.json`、`release-native.log`；原生结果及截图位于 `.local/settings-storage/native-1794313878879/`，`results.json` 标记 `profile: release`、`firstLaunch: true`、`crossVolume: true`，截图为 `first-launch-migrated.png` 和 `migrated-storage.png`。
+- 未在用户另一台电脑运行更新后的普通 EXE，未生成 NSIS 安装器，未重验 macOS/Linux 或故障硬件。持续占用超过等待上限仍会保留旧目录并失败；另一台电脑需复制这次更新后的 EXE 才会包含修复。当前 Release 构建及隔离验收已完成，无剩余构建依赖；目标电脑实测仍需对应环境，不主动扩大发布范围。
+
+## 2026-11-10 首次启动后迁移的文件写入竞争
+
+### 问题与实现
+
+- 用户报告另一台电脑首次启动后立即迁移，每次重新迁移都提示“迁移文件校验失败”。该提示意味着复制副本与迁移清单摘要不一致；截图不包含具体文件，未取得另一台电脑的失败清单，不能断言其唯一触发文件。
+- 旧实现通过允许并发写入的句柄计算摘要，随后重新打开源文件复制；主进程退出后 WebView2 等后台进程仍可能写入。Windows 回归在旧实现确认摘要读取早于写句柄关闭，并复现模拟首次启动后台写入时迁移回退旧目录，原 16 项迁移测试通过、新增两项失败。
+- Windows 复制前对整个源清单探测禁止写入和替换的只读句柄，遇共享占用或退出期间临时文件消失时，每 100 ms 从头重新探测，最多等待约 10 秒；通过后才计算完整摘要。摘要与源复制期间同样禁止写入/替换，目标写句柄在落盘后关闭再校验，保留完整 SHA-256 和 SQLite 检查。
+- 持续占用明确提示后台写入/占用；复制校验不一致时复核源，区分源变化与副本错误，并保留异常原因链。失败仍使用旧目录，保留原数据和已有暂存；已提交后的变化文件保留与清理重试语义不变。本次无数据库、定位文件版本、IPC DTO 或依赖变化。
+- 主要文件：`crates/application/src/storage_location.rs`、`storage_location/tests.rs`；同步架构及使用说明。
+
+### 验证结果与证据
+
+- `cargo test -p serverdeck-application --lib storage_location::tests --no-run --message-format=json` 编译后复制测试 EXE 到 QA 目录，执行 `storage_location::tests --nocapture`，最终 **19 项全部通过**。新增覆盖共享写句柄释放前不可读取、读取期间拒绝写入/替换、首次启动写入完成后才建立迁移清单；加强永久占用错误原因及目标未发布断言，保留全部原有损坏、回退、中断续传和清理保护断言。
+- `cargo clippy -p serverdeck-application -p serverdeck-desktop --all-targets` 成功，保留既有 `core/openssh.rs` 的 `single_element_loop` 告警；未声称严格零告警。Rust 格式、修改文档 Prettier 和差异空白检查通过。
+- 运行 `node tools/native-storage-e2e.mjs`，目标为本次可写 C 盘 QA 根下的随机目录：普通及隔离 Windows 调试构建成功，真实 WebView2/IPC/SQLite/系统测试凭据的 **D→C 跨盘迁移及自动重启通过**；取消不保存/迁移/重启，主机和凭据引用、插件版本/禁用选择、插件文件及 WebView localStorage 保留，源数据库/插件/WebView 清理，定位文件保留。随机测试凭据验后删除，QA 正常退出；已查看完成截图，未迁移或修改正式用户数据。
+- 原生测试首轮在沙箱中无法连接 QA 回环调试端口，迁移用例未开始；将相同隔离测试放到沙箱外后成功。构建入口确认至少 10 GiB 空间，沿用根 `target/` 和既有调试/增量配置，运行测试 EXE 均为复制件；普通桌面构建配置已恢复。
+- 证据：`.local/qa/storage-first-launch/` 中的 `regression-before.log`、`final-build.jsonl`、`final-build.log`、`migration-final.log`、`clippy.log`、`native-migration.log`（首轮环境失败）与 `native-migration-unrestricted.log`；原生结果、截图及隔离副本位于 `.local/settings-storage/native-1794313427422/`，其中 `results.json` 明确记录跨盘目标和验收结果。前端类型检查及生产构建由原生构建链执行，保留既有 Monaco 大 chunk 提醒。
+
+### 未验证、风险与下一阶段依赖
+
+未在用户另一台电脑执行验证，也未生成或安装新的 Release/NSIS 包，未实测 macOS/Linux、长期占用、故障磁盘或断电。持续写入超过等待上限时仍会保留旧目录并失败，需要排查占用，不会忽略校验或自动删除失败副本。修复已完成且 Windows 调试版已构建；另一台电脑的已安装旧版本不会自动获得修复，分发依赖重新生成安装包及目标环境验收，本阶段不主动开始后续发布。
+
 ## 2026-11-10 数据目录迁移等待状态
 
 ### 核查与修复

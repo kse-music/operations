@@ -11,8 +11,12 @@ import { navigateWorkspace } from './ui-navigation.mjs';
 
 if (process.platform !== 'win32') throw new Error('This native check requires Windows/WebView2.');
 const root = fileURLToPath(new URL('../', import.meta.url));
+const release = process.argv.includes('--release');
+const firstLaunch = process.argv.includes('--first-launch');
 const run = path.join(root, '.local/settings-storage', `native-${Date.now()}`);
-const source = path.join(run, 'source');
+const defaultSource = path.join(run, 'source');
+let source = defaultSource;
+const firstLaunchTarget = path.join(run, 'first-launch');
 const destination = process.env.SERVERDECK_STORAGE_TEST_TARGET
   ? path.resolve(process.env.SERVERDECK_STORAGE_TEST_TARGET, `profile-${randomUUID()}`)
   : path.join(run, 'migrated');
@@ -23,7 +27,7 @@ await writeFile(
   configFile,
   JSON.stringify({
     identifier: 'cn.hiboot.desktop.storage.e2e',
-    app: { appDirectoriesOverride: source },
+    app: { appDirectoriesOverride: defaultSource },
   }),
 );
 function build(config) {
@@ -32,19 +36,25 @@ function build(config) {
     [
       path.join(root, 'tools/tauri.mjs'),
       'build',
-      '--debug',
+      ...(release ? [] : ['--debug']),
       '--no-bundle',
       ...(config ? ['--config', config] : []),
     ],
-    { cwd: root, stdio: 'inherit' },
+    { cwd: root, stdio: 'inherit', windowsHide: true },
   );
   if (result.error) throw result.error;
   assert.equal(result.status, 0, 'native build failed');
 }
-build(configFile);
-await copyFile(path.join(root, 'target/debug/serverdeck-desktop.exe'), executable);
-// Restore the normal build configuration before starting the QA copy.
-build();
+try {
+  build(configFile);
+  await copyFile(
+    path.join(root, 'target', release ? 'release' : 'debug', 'serverdeck-desktop.exe'),
+    executable,
+  );
+} finally {
+  // Restore the normal build configuration even when preparing the QA copy fails.
+  build();
+}
 const port = await new Promise((resolve, reject) => {
   const server = net.createServer();
   server.on('error', reject);
@@ -75,7 +85,9 @@ async function connect() {
   let reports = 0;
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
+      const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
+        signal: AbortSignal.timeout(2000),
+      });
       const version = await response.json();
       browser = await chromium.connectOverCDP(version.webSocketDebuggerUrl);
       page = browser.contexts()[0].pages()[0];
@@ -106,8 +118,44 @@ async function absent(file) {
     throw e;
   }
 }
+async function confirmAndRestart(dialog) {
+  const disconnected = new Promise((resolve) => browser.once('disconnected', resolve));
+  await dialog.getByRole('button', { name: '确认迁移并重启', exact: true }).click();
+  await Promise.race([
+    disconnected,
+    delay(30000).then(() => {
+      throw new Error('old QA process did not close');
+    }),
+  ]);
+  await connect();
+}
 try {
   await connect();
+  if (firstLaunch) {
+    const initial = await invoke('app_bootstrap');
+    assert.equal(path.resolve(initial.dataDirectory), defaultSource, 'refusing a non-QA profile');
+    await navigateWorkspace(page, '数据与存储');
+    await page.getByLabel('数据根目录', { exact: true }).fill(firstLaunchTarget);
+    await page.getByRole('button', { name: '保存、迁移并重启', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '迁移数据并重启', exact: true });
+    await dialog.waitFor();
+    await confirmAndRestart(dialog);
+    const relocated = await invoke('app_bootstrap');
+    currentRoot = relocated.dataDirectory;
+    assert.equal(path.resolve(currentRoot), firstLaunchTarget, JSON.stringify(relocated.storage));
+    assert.equal(relocated.storage.notice, '数据迁移完成，旧副本已清理。');
+    assert.equal(await absent(path.join(defaultSource, 'serverdeck.sqlite3')), true);
+    const locator = JSON.parse(await readFile(path.join(defaultSource, 'storage-location.json')));
+    assert.equal(path.resolve(locator.active.data), firstLaunchTarget);
+    assert.equal(locator.migration, null);
+    source = firstLaunchTarget;
+    await navigateWorkspace(page, '数据与存储');
+    assert.equal(await page.getByLabel('数据根目录', { exact: true }).inputValue(), source);
+    await page.screenshot({ path: path.join(run, 'first-launch-migrated.png') });
+    results.push(
+      'first launch immediately migrates, restarts, reports completion and commits the new actual path',
+    );
+  }
   const original = await invoke('app_bootstrap');
   assert.equal(path.resolve(original.dataDirectory), source, 'refusing to touch a non-QA profile');
   const secret = `storage-qa-${randomUUID()}`;
@@ -157,15 +205,7 @@ try {
   dialog = page.getByRole('dialog', { name: '迁移数据并重启', exact: true });
   await dialog.waitFor();
   await page.screenshot({ path: path.join(run, 'migration-confirm.png') });
-  const disconnected = new Promise((resolve) => browser.once('disconnected', resolve));
-  await dialog.getByRole('button', { name: '确认迁移并重启', exact: true }).click();
-  await Promise.race([
-    disconnected,
-    delay(30000).then(() => {
-      throw new Error('old QA process did not close');
-    }),
-  ]);
-  await connect();
+  await confirmAndRestart(dialog);
   const migrated = await invoke('app_bootstrap');
   currentRoot = migrated.dataDirectory;
   assert.equal(path.resolve(currentRoot), destination, JSON.stringify(migrated.storage));
@@ -191,7 +231,11 @@ try {
   assert.equal(await absent(path.join(source, 'serverdeck.sqlite3')), true);
   assert.equal(await absent(path.join(source, 'plugins')), true);
   assert.equal(await absent(path.join(source, 'webview')), true);
-  assert.equal(await absent(path.join(source, 'storage-location.json')), false);
+  assert.equal(await absent(path.join(defaultSource, 'storage-location.json')), false);
+  const locator = JSON.parse(await readFile(path.join(defaultSource, 'storage-location.json')));
+  assert.equal(path.resolve(locator.active.data), destination);
+  assert.equal(locator.migration, null);
+  assert.equal(migrated.storage.notice, '数据迁移完成，旧副本已清理。');
   assert(
     !(await readFile(path.join(destination, 'serverdeck.sqlite3'))).includes(Buffer.from(secret)),
   );
@@ -204,6 +248,9 @@ try {
     path.join(run, 'results.json'),
     JSON.stringify(
       {
+        profile: release ? 'release' : 'debug',
+        firstLaunch,
+        defaultSource,
         source,
         destination,
         crossVolume: path.parse(source).root !== path.parse(destination).root,
@@ -219,7 +266,11 @@ try {
     // Only random QA credentials are deleted; preserve diagnostics and profile artifacts.
     try {
       const active = await invoke('app_bootstrap');
-      assert([source, destination].includes(path.resolve(active.dataDirectory)));
+      assert(
+        [defaultSource, firstLaunchTarget, source, destination].includes(
+          path.resolve(active.dataDirectory),
+        ),
+      );
       if (credentialId) await invoke('credential_delete', { id: credentialId, detachHosts: true });
       await invoke('app_exit_confirm', { confirmed: true });
     } catch (error) {

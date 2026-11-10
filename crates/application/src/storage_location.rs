@@ -2,7 +2,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, File},
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -158,19 +158,38 @@ fn ensure_capacity(bytes: u64, available: u64) -> Result<(), Error> {
     Ok(())
 }
 
-fn hash(path: &Path) -> Result<(u64, String), Error> {
+fn open_read(path: &Path) -> std::io::Result<File> {
+    let mut options = File::options();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Reject an existing writer and prevent writes/replacement while reading.
+        options.share_mode(1); // FILE_SHARE_READ
+    }
+    options.open(path)
+}
+
+fn read_source(path: &Path) -> Result<File, Error> {
     check_path(path)?;
     let mut attempts = 0;
-    let mut file = loop {
-        match File::open(path) {
-            Ok(file) => break file,
+    loop {
+        match open_read(path) {
+            Ok(file) => return Ok(file),
             Err(error) if matches!(error.raw_os_error(), Some(32 | 33)) && attempts < 30 => {
                 attempts += 1;
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
             Err(error) => return Err(io(error)),
         }
-    };
+    }
+}
+
+fn hash(path: &Path) -> Result<(u64, String), Error> {
+    hash_file(&mut read_source(path)?)
+}
+
+fn hash_file(file: &mut File) -> Result<(u64, String), Error> {
     let mut hasher = Sha256::new();
     let mut size = 0;
     let mut buffer = [0; 64 * 1024];
@@ -484,6 +503,44 @@ impl Profile {
         Ok(files.into_values().collect())
     }
 
+    #[cfg(windows)]
+    fn wait_for_source_writers(&self, paths: &Locations) -> Result<(), Error> {
+        // A closed host window does not mean WebView2 has flushed its profile.
+        // Restart the entire probe after a conflict, before hashing any files.
+        let mut attempts = 0;
+        loop {
+            let result = self.inventory(paths, false).and_then(|files| {
+                for entry in files.iter().filter(|entry| !entry.directory) {
+                    check_path(&entry.source)?;
+                    open_read(&entry.source).map_err(io)?;
+                }
+                Ok(())
+            });
+            match result {
+                Ok(()) => return Ok(()),
+                Err(Error::Storage(source))
+                    if source
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|error| {
+                            error.kind() == std::io::ErrorKind::NotFound
+                                || matches!(error.raw_os_error(), Some(32 | 33))
+                        }) =>
+                {
+                    if attempts == 100 {
+                        return Err(Error::Connection {
+                            code: "STORAGE_MIGRATION_SOURCE_BUSY",
+                            message: "旧目录文件仍被后台进程写入或占用，请完全退出应用后重试",
+                            source: Some(source),
+                        });
+                    }
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     pub fn preview(&self, path: &Path) -> Result<StoragePreview, Error> {
         let target = self.target(path)?;
         let files = self.inventory(&self.state.active, false)?;
@@ -547,6 +604,8 @@ impl Profile {
     fn copy_pending(&mut self, mut job: Migration) -> Result<(), Error> {
         let staging = Self::staging(&job)?;
         check_path(&staging)?;
+        #[cfg(windows)]
+        self.wait_for_source_writers(&job.source)?;
         // Recheck destination after the old process exits, before any overwrite is possible.
         let pending = self.state.migration.take();
         let preview = self.preview(&job.target.data);
@@ -586,7 +645,7 @@ impl Profile {
             if destination.try_exists().map_err(io)? {
                 continue;
             }
-            let mut input = File::open(&entry.source).map_err(io)?;
+            let mut input = read_source(&entry.source)?;
             let mut output = File::options()
                 .write(true)
                 .create_new(true)
@@ -594,8 +653,27 @@ impl Profile {
                 .map_err(io)?;
             std::io::copy(&mut input, &mut output).map_err(io)?;
             output.sync_all().map_err(io)?;
+            drop(output);
             if hash(&destination)? != (entry.bytes, entry.digest.clone()) {
-                return Err(Error::Validation("迁移文件校验失败"));
+                input.rewind().map_err(io)?;
+                if hash_file(&mut input)? != (entry.bytes, entry.digest.clone()) {
+                    return Err(Error::Connection {
+                        code: "STORAGE_MIGRATION_SOURCE_CHANGED",
+                        message: "迁移时旧目录文件仍在变化，请完全退出应用后重试",
+                        source: Some(Box::new(std::io::Error::other(format!(
+                            "source changed after inventory: {}",
+                            entry.relative.display()
+                        )))),
+                    });
+                }
+                return Err(Error::Connection {
+                    code: "STORAGE_MIGRATION_VERIFY",
+                    message: "迁移副本校验失败，已保留旧目录和暂存副本",
+                    source: Some(Box::new(std::io::Error::other(format!(
+                        "copied file differs from source: {}",
+                        entry.relative.display()
+                    )))),
+                });
             }
         }
         serverdeck_storage::Database::verify_file(&staging.join("serverdeck.sqlite3"))?;
