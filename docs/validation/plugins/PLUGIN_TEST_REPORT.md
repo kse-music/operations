@@ -77,7 +77,7 @@ Docker 包 2.2.4 的容器详情调整为「概览、资源使用、启动配置
 | 真实浏览器详情回归 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-startup-layout/details`，`node tools/ui-docker-compose-e2e.mjs --details` | 2361×900、1280×820 深色标准字号及 960×600 浅色 145% 字号全部通过；确认内容区实际滚动、外层 scrollTop=0、关闭按钮和标签在弹窗内，滚到底直接点击关闭并确认移除，再重新打开；变量直接展示、按钮缺席、切换明文清理、失败/inspect 和页面无越界、无 pageerror 均通过 |
 | 静态/格式 | 修改的 Vue/TS/浏览器工具 ESLint 零警告；前端/CSS/manifest/工具 Prettier；`git diff --check` | 通过；发现并修正 Vue 属性顺序警告，无其他代码静态错误 |
 
-浏览器响应均为明确的本地夹具，不冒充真实容器环境变量。新增 `--details` 使用同一正式包和 MessageChannel 夹具独立运行本模块；默认综合回归的所有既有断言保留。第一次综合回归通过三种窗口的滚动几何检查；补上“滚到底直接点击关闭”后，综合回归两次在既有日志过滤步骤的 `assertLatest` 超时，未能完成全部详情检查。该失败没有删除断言或修改日志生产代码来规避，最终独立详情回归在三种窗口全部完成。不能据此宣称本轮综合日志回归全部通过。
+浏览器响应均为明确的本地夹具，不冒充真实容器环境变量。新增 `--details` 使用同一正式包和 MessageChannel 夹具独立运行本模块；默认综合回归的所有既有断言保留。第一次综合回归通过三种窗口的滚动几何检查；补上“滚到底直接点击关闭”后，综合回归两次在既有日志过滤步骤的 `assertLatest` 超时，未能完成全部详情检查。该失败没有删除断言或修改日志生产代码来规避，最终独立详情回归在三种窗口全部完成。不能据此宣称本轮综合日志回归全部通过。该超时后续定位及 2.2.7 的完整回归见[日志跟随修复](#2026-11-10-docker-日志跟随与弹窗滚动)。
 
 已查看[最小窗口滚到底](../../../.local/qa/docker-startup-layout/details/startup-scrolled-960-light.png)、[常规窗口滚到底](../../../.local/qa/docker-startup-layout/details/startup-scrolled-1280-dark.png)及[顶部直接展示](../../../.local/qa/docker-startup-layout/details/startup-960-light.png)；[三组详情结果](../../../.local/qa/docker-startup-layout/details/results.json)。测试中展示的 `CONFIG_FIXTURE_SECRET` 是固定夹具字符串，不是用户秘密。
 
@@ -1477,3 +1477,37 @@ Linux 集成实际完成：随机 OS 凭据经既有应用连接路径认证、�
 - 本轮验证使用真实浏览器布局和生产组件，日志响应为测试夹具；未连接用户服务器、未运行原生 WebView/SSH 日志全链路或跨平台验收，未重建桌面 EXE/安装器。原有无关修改保持。
 - 有界缓存仍只保留最近 1 MiB/5000 行，长时间阅读时更早内容仍会淘汰；没有增加磁盘日志存储或恢复历史能力。恢复跟随只改变显示位置，不重新执行命令或重建流。
 - 使用修复需加载 2.2.2 插件包或重建桌面；外部插件使用该 SDK 组件时需重新打包。原生实机验收依赖运行当前构建及授权测试主机，本阶段不继续部署或操作远端容器。
+
+### 2.2.7：过滤和布局重排不再误判历史阅读
+
+#### 复现与原因
+
+- 使用正式 2.2.6 包及原有完整浏览器回归复现 5 秒末尾断言超时。记录的都是滚动尺寸、状态和事件顺序，不记录日志正文；数据源为明确的本地合成日志夹具，不访问用户服务器。
+- 事件证据显示：过滤恢复后缩短窗口，输出 `scrollTop` 仍为 11052、`scrollHeight` 仍为 11594，`clientHeight` 由 542 变为 262，距底部因此增加 280px。浏览器先触发 scroll，原 `onScroll` 误把布局变化判断为用户翻历史，将 following 设为 false；随后 ResizeObserver 因此不再定位末尾。[原始事件记录](../../../.local/qa/docker-log-filter/before/log-follow-failure-2361-dark.json)、[失败截图](../../../.local/qa/docker-log-filter/before/log-follow-failure-2361-dark.png)保留并已查看。
+- 新增可钳制真实 scrollTop 的单元回归，在修复前确定失败：缩小视口触发 scroll 后状态错误变成历史阅读。修复最初只比较自然钳制位置，原三组综合回归通过；增加动态字号及窄窗口后再次失败。字号恢复和窗口变窄可在一次回调前连续钳制、锚定和重新换行，不能据最终偏移差异推断用户行为。[窄窗口事件记录](../../../.local/qa/docker-log-filter/narrow-trace/log-follow-failure-2361-dark.json)保留该中间失败。临时关闭滚动锚定没有独立解决问题，已撤回该改动。
+
+#### 实现
+
+`StreamDialog` 记录上次处理的输出/视口高度。布局发生变化时保留原跟随意图；当前帧有滚轮、指针或滚动键输入时，仍按用户实际滚动更新跟随，普通滚动继续使用 24px 阈值。DOM 更新和尺寸观察仍负责将跟随模式定位到末尾，暂停/历史模式不因过滤为空、不足一屏或布局钳制自动恢复跟随。输入标记消费/过帧后释放，卸载取消标记动画帧、轮询和观察，继续关闭自有流。
+
+最终没有加入滚动锚定覆盖、任意等待或自动重试，没有增加原有 5 秒断言上限、删除断言或使用 `--details` 跳过日志检查。保留原 CSS 布局、纯文本过滤/复制/导出、缓存和流生命周期；没有 SDK props、wire、IPC、后端命令、权限或持久格式变化。主要源码为 [StreamDialog.vue](../../../packages/plugin-sdk/src/ui/StreamDialog.vue)、[单元回归](../../../packages/plugin-sdk/src/ui/stream-dialog.test.ts)和[浏览器综合回归](../../../tools/ui-docker-compose-e2e.mjs)；Docker 包为 2.2.7。
+
+#### 实际验证
+
+环境为 Windows、Node/npm、无头 Edge；构建前 D 盘约 154 GiB 空闲，WASM 沿用既有插件缓存，TEMP/TMP 指向 `.local/qa/docker-log-filter/temp`。
+
+| 检查 | 命令/范围 | 结果 |
+| --- | --- | --- |
+| Vue 回归 | `npm run test -w @serverdeck/desktop -- ../../packages/plugin-sdk/src/ui/stream-dialog.test.ts ../../plugins/system/docker/frontend` | 3 文件、22 项通过。新增 ResizeObserver 前 scroll 的顺序、自然钳制不恢复历史跟随、重排时真实滚轮仍能进入历史、过滤无匹配/清除、键盘输入标记及卸载帧清理；保留 UTF-8、有界缓存、复制、暂停/继续、关闭失败重试和迟到响应等断言 |
+| 类型 | `npm run typecheck` | desktop 与 plugin-sdk 均通过 |
+| 插件构建 | `node tools/build-system-plugins.mjs` | 通过；生成含当前共享组件的 Docker 2.2.7 正式 WASM/UI 标准包，后端源码未改、WASM 复用缓存 |
+| 完整浏览器回归 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-log-filter/full`，`node tools/ui-docker-compose-e2e.mjs` | 2361×900、1280×820 深色标准字号及 960×600 浅色 145% 字号全部通过。真实鼠标滚轮进入历史；历史/暂停期间过滤和清除保持阅读；跟随时长匹配、无匹配、少量匹配及清除都正常；动态切换 100%/145% 字号、宽度缩至 800 后恢复、高度缩至 500 后恢复仍跟随末尾。原 Compose 项目、列表、信息和详情直接显示变量、滚到底关闭、失败/inspect 等检查全部执行，页面无越界和 pageerror |
+| 静态与格式 | 修改的组件、测试、工具 ESLint `--max-warnings 0`；Prettier；`git diff --check` | 全部通过；未格式化无关源码或历史文档 |
+
+[三组完整结果](../../../.local/qa/docker-log-filter/full/results.json)、[浅色大字号最新日志](../../../.local/qa/docker-log-filter/full/container-logs-960-light.png)和[常规窗口最新日志](../../../.local/qa/docker-log-filter/full/container-logs-1280-dark.png)已查看。临时原型拦截和事件观察诊断已从测试工具移除；最终仅在断言失败时记录尺寸/状态/过滤阶段摘要及截图，不写日志正文。
+
+#### 限制、风险与使用依赖
+
+- 本轮为组件和 Windows Edge 生产包夹具验证，未连接真实 SSH 日志流、未验收原生 WebView、安装器或 macOS/Linux；未改 Rust，未重跑原生 Rust/WASM 协议测试，也未重建桌面 EXE。
+- 日志仍仅保留最近 1 MiB/5000 行，历史可因缓存上限淘汰；没有持久日志存储或远端行为变化。平台事件顺序差异仍需原生实机验证，本轮未宣称跨平台全部通过。
+- 使用需加载 Docker 2.2.7，或正常退出现有客户端后完成桌面构建并重启；外部插件若使用该共享 SDK 组件也需重新打包。当前阶段结束，不部署或修改用户服务器、日志及持久配置。

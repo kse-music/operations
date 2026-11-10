@@ -307,7 +307,8 @@
 
 ## 插件系统
 
-- [Docker 统一启动配置（2026-11-10）](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-统一启动配置)：端口/挂载合并为 Compose YAML；2.2.6 变量直接显示、固定顶部/内容独立滚动及滚到底关闭通过三种窗口详情回归，综合日志过滤仍有超时；保留 2.2.5 固定读取免确认/旧版选项兼容和 2.2.4 浏览器证据，原生 SSH/WebView 未验。
+- [Docker 日志过滤与跟随修复（2026-11-10）](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-日志跟随与弹窗滚动)：2.2.7 修复布局滚动误判历史状态；过滤、历史/暂停、动态字号、窄/短窗口及详情关闭完整三组回归通过，原生 SSH/WebView 未验。
+- [Docker 统一启动配置（2026-11-10）](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-统一启动配置)：端口/挂载合并为 Compose YAML；2.2.6 变量直接显示、固定顶部/内容独立滚动及滚到底关闭通过三种窗口详情回归，当时综合日志超时已由 2.2.7 日志跟随修复关闭；保留 2.2.5 固定读取免确认/旧版选项兼容和 2.2.4 浏览器证据，原生 SSH/WebView 未验。
 - [Docker Shell 终端体验（2026-11-10）](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-shell-终端体验)：容器/SSH 上下文、状态、最大化、查找、字号及清屏；真实 xterm 五种窗口和失败场景夹具，原生 SSH/WebView 未验。
 - [插件界面握手超时修复（2026-11-09）](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-插件界面握手超时修复)：SDK 就绪/连接确认恢复，真实宿主与打包 UI 联通、Windows 原生与独立 MySQL 复验。
 - [SDK5 旧插件记录导致启动失败修复（2026-11-09）](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-旧插件记录导致启动失败修复)：逐项故障隔离、显式备份重装、日常记录副本真实桌面验证及 Windows junction 测试限制。

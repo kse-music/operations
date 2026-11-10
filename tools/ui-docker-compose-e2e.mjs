@@ -488,19 +488,45 @@ try {
     const logOutput = logs.locator('.platform-stream-output');
     await logOutput.getByText('CONTAINER_LOG_0200', { exact: false }).waitFor();
     const plugin = page.frames()[1];
-    const assertLatest = async () => {
-      await plugin.waitForFunction(
-        () => {
-          const el = document.querySelector('.platform-stream-output');
-          return (
-            el &&
-            el.scrollHeight > el.clientHeight &&
-            el.scrollHeight - el.clientHeight - el.scrollTop <= 2
-          );
-        },
-        undefined,
-        { timeout: 5000 },
-      );
+    const assertLatest = async (stage = 'latest') => {
+      try {
+        await plugin.waitForFunction(
+          () => {
+            const el = document.querySelector('.platform-stream-output');
+            return (
+              el &&
+              el.scrollHeight > el.clientHeight &&
+              el.scrollHeight - el.clientHeight - el.scrollTop <= 2
+            );
+          },
+          undefined,
+          { timeout: 5000 },
+        );
+      } catch (error) {
+        await writeFile(
+          `${output}/log-follow-failure-${width}-${theme}.json`,
+          JSON.stringify(
+            {
+              stage,
+              geometry: await logOutput.evaluate((element) => ({
+                top: element.scrollTop,
+                height: element.scrollHeight,
+                client: element.clientHeight,
+                status: element
+                  .closest('.platform-stream-dialog')
+                  .querySelector('[role="status"]')
+                  .textContent.trim(),
+                filter: element.closest('.platform-stream-dialog').querySelector('input').value,
+                length: element.textContent.length,
+              })),
+            },
+            null,
+            2,
+          ),
+        );
+        await page.screenshot({ path: `${output}/log-follow-failure-${width}-${theme}.png` });
+        throw error;
+      }
     };
     await assertLatest();
     const appendLog = async (line) =>
@@ -514,6 +540,9 @@ try {
     await appendLog('CONTAINER_LIVE_0201');
     await logOutput.getByText('CONTAINER_LIVE_0201', { exact: false }).waitFor();
     await assertLatest();
+    await logOutput.hover();
+    await page.mouse.wheel(0, -600);
+    await logs.getByText('查看历史 · 新日志继续接收', { exact: true }).waitFor();
     await logOutput.evaluate((el) => {
       el.scrollTop = 0;
     });
@@ -521,23 +550,69 @@ try {
     await appendLog('CONTAINER_LIVE_0202');
     await logOutput.getByText('CONTAINER_LIVE_0202', { exact: false }).waitFor();
     assert.equal(await logOutput.evaluate((el) => el.scrollTop), 0);
+    await logOutput.evaluate((element) => {
+      element.scrollTop = 200;
+    });
+    await logs.getByRole('textbox', { name: '过滤输出' }).fill('no-match-fixture');
+    await logOutput.getByText('没有匹配的日志。', { exact: true }).waitFor();
+    await logs.getByText('查看历史 · 新日志继续接收', { exact: true }).waitFor();
+    await logs.getByRole('textbox', { name: '过滤输出' }).fill('');
+    await logOutput.getByText('CONTAINER_LIVE_0202', { exact: false }).waitFor();
+    await plugin.waitForFunction(() => {
+      const output = document.querySelector('.platform-stream-output');
+      return (
+        output.scrollTop === 0 &&
+        output
+          .closest('.platform-stream-dialog')
+          .querySelector('[role="status"]')
+          .textContent.includes('查看历史')
+      );
+    });
     await logs.getByRole('button', { name: '最新日志', exact: true }).click();
     await assertLatest();
     await logs.getByRole('button', { name: '暂停', exact: true }).click();
     await logs.getByText('已暂停', { exact: true }).waitFor();
+    await logOutput.evaluate((element) => {
+      element.scrollTop = 100;
+    });
+    await logs.getByRole('textbox', { name: '过滤输出' }).fill('CONTAINER_LOG_');
+    assert.equal(await logOutput.evaluate((element) => element.scrollTop), 100);
+    await logs.getByRole('textbox', { name: '过滤输出' }).fill('');
+    assert.equal(await logOutput.evaluate((element) => element.scrollTop), 100);
     await appendLog('CONTAINER_RESUMED_0203');
     await logs.getByRole('button', { name: '继续', exact: true }).click();
     await logOutput.getByText('CONTAINER_RESUMED_0203', { exact: false }).waitFor();
     await assertLatest();
     await logs.getByRole('textbox', { name: '过滤输出' }).fill('CONTAINER_LOG_');
-    await assertLatest();
+    await assertLatest('filter-long');
     assert.equal((await logOutput.textContent()).includes('CONTAINER_LIVE'), false);
     await logs.getByRole('textbox', { name: '过滤输出' }).fill('no-match-fixture');
     await logOutput.getByText('没有匹配的日志。', { exact: true }).waitFor();
     await logs.getByRole('textbox', { name: '过滤输出' }).fill('');
-    await assertLatest();
+    await assertLatest('clear-empty-filter');
+    await logs.getByRole('textbox', { name: '过滤输出' }).fill('CONTAINER_LIVE_');
+    await logOutput.getByText('CONTAINER_LIVE_0202', { exact: false }).waitFor();
+    await logs.getByText('实时跟踪 · 自动滚动到最新', { exact: true }).waitFor();
+    await logs.getByRole('textbox', { name: '过滤输出' }).fill('');
+    await assertLatest('clear-short-filter');
+    await plugin.evaluate(
+      (value) =>
+        document.documentElement.style.setProperty('--interface-font-scale', String(value)),
+      scale === 1 ? 1.45 : 1,
+    );
+    await assertLatest('font-scale');
+    await plugin.evaluate(
+      (value) =>
+        document.documentElement.style.setProperty('--interface-font-scale', String(value)),
+      scale,
+    );
+    await assertLatest('restore-font-scale');
+    await page.setViewportSize({ width: 800, height });
+    await assertLatest('narrow-window');
+    await page.setViewportSize({ width, height });
+    await assertLatest('restore-width');
     await page.setViewportSize({ width, height: 500 });
-    await assertLatest();
+    await assertLatest('short-window');
     await page.setViewportSize({ width, height });
     await assertLatest();
     const logGeometry = await logs.evaluate((el) => {

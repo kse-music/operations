@@ -32,8 +32,33 @@ let disposed = false,
   timer: ReturnType<typeof setTimeout> | undefined,
   stopping: Promise<void> | undefined,
   resizeObserver: ResizeObserver | undefined;
+let lastLayout: { height: number; viewport: number } | undefined;
+let userScrollFrame: number | undefined;
+function clearScrollIntent() {
+  if (userScrollFrame !== undefined) cancelAnimationFrame(userScrollFrame);
+  userScrollFrame = undefined;
+}
+function markScrollIntent() {
+  clearScrollIntent();
+  userScrollFrame = requestAnimationFrame(() => {
+    userScrollFrame = undefined;
+  });
+}
+function onScrollKey(event: KeyboardEvent) {
+  if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key))
+    markScrollIntent();
+}
+function rememberLayout(element: HTMLPreElement) {
+  lastLayout = {
+    height: element.scrollHeight,
+    viewport: element.clientHeight,
+  };
+}
 function scrollToBottom() {
-  if (!disposed && output.value) output.value.scrollTop = output.value.scrollHeight;
+  if (!disposed && output.value) {
+    output.value.scrollTop = output.value.scrollHeight;
+    rememberLayout(output.value);
+  }
 }
 function followLatest() {
   following.value = true;
@@ -41,8 +66,16 @@ function followLatest() {
 }
 function onScroll() {
   const element = output.value;
-  if (element)
+  if (!element) return;
+  const layoutChanged =
+    lastLayout &&
+    (lastLayout.height !== element.scrollHeight || lastLayout.viewport !== element.clientHeight);
+  // Layout can clamp or anchor the offset several times before ResizeObserver.
+  // Only explicit input may change follow intent during that reflow.
+  if (!layoutChanged || userScrollFrame !== undefined)
     following.value = element.scrollHeight - element.clientHeight - element.scrollTop <= 24;
+  clearScrollIntent();
+  rememberLayout(element);
 }
 watch(
   text,
@@ -159,6 +192,7 @@ watch(visible, (value) => {
 onBeforeUnmount(() => {
   disposed = true;
   clearTimeout(timer);
+  clearScrollIntent();
   resizeObserver?.disconnect();
   void stop().catch((cause) => {
     console.error(
@@ -205,6 +239,9 @@ onBeforeUnmount(() => {
         aria-label="日志输出"
         tabindex="0"
         @scroll="onScroll"
+        @wheel.passive="markScrollIntent"
+        @pointerdown="markScrollIntent"
+        @keydown="onScrollKey"
         >{{ text || (filter ? '没有匹配的日志。' : '等待输出…') }}</pre>
     </section>
   </Modal>

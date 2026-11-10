@@ -249,3 +249,64 @@ it('follows the rendered tail, preserves history and returns to latest after res
   app = undefined;
   expect(disconnected).toHaveBeenCalledOnce();
 });
+
+it('preserves follow intent when resize scroll arrives before ResizeObserver and filtering clamps history', async () => {
+  api.call.mockImplementation(async (input) =>
+    input.kind === 'stream_poll'
+      ? { events: [{ type: 'data', dataBase64: btoa('match line\nother line\n') }] }
+      : null,
+  );
+  await mount();
+  const output = document.querySelector<HTMLPreElement>('.platform-stream-output')!;
+  let height = 1000,
+    viewport = 200,
+    top = 0;
+  Object.defineProperties(output, {
+    scrollHeight: { get: () => height },
+    clientHeight: { get: () => viewport },
+    scrollTop: {
+      get: () => top,
+      set: (value: number) => {
+        top = Math.max(0, Math.min(value, height - viewport));
+      },
+      configurable: true,
+    },
+  });
+  resized();
+  expect(top).toBe(800);
+  // Shrinking a viewport changes the tail gap without moving the scroll offset.
+  viewport = 100;
+  output.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.body.textContent).toContain('实时跟踪 · 自动滚动到最新');
+  resized();
+  expect(top).toBe(900);
+  // A real upward movement still opts out, including during a layout change.
+  output.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+  viewport = 150;
+  output.scrollTop = 300;
+  output.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.body.textContent).toContain('查看历史 · 新日志继续接收');
+  const filter = document.querySelector<HTMLInputElement>('[aria-label="过滤输出"]')!;
+  filter.value = 'no matches';
+  height = viewport;
+  top = 0; // Browser clamps the offset as filtered content becomes empty.
+  filter.dispatchEvent(new Event('input'));
+  await settle();
+  output.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(output.textContent).toContain('没有匹配的日志');
+  expect(document.body.textContent).toContain('查看历史 · 新日志继续接收');
+  height = 1000;
+  filter.value = '';
+  filter.dispatchEvent(new Event('input'));
+  await settle();
+  resized();
+  expect(top).toBe(0);
+  expect(output.textContent).toContain('match line');
+  output.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageUp' }));
+  app!.unmount();
+  app = undefined;
+  expect(vi.getTimerCount()).toBe(0);
+});
