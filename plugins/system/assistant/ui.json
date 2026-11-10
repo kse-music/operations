@@ -8,6 +8,19 @@
       "initialAction": null,
       "fields": [],
       "actions": [
+        { "id": "poll", "label": "poll", "discardDirty": false, "enabledWhen": null },
+        {
+          "id": "tools",
+          "label": "tools",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
+          "id": "task",
+          "label": "task",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
         {
           "id": "resolve_hosts",
           "label": "resolve_hosts",

@@ -100,6 +100,59 @@ impl Redactor {
             .filter(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'))
             .collect()
     }
+    /// Mask original ranges while preserving line boundaries used by file edits.
+    pub fn lines(&self, text: &str) -> String {
+        let mut ranges = Vec::new();
+        for value in &self.values {
+            ranges.extend(
+                text.match_indices(value.as_str())
+                    .map(|(i, _)| (i, i + value.len())),
+            );
+        }
+        for rule in &self.rules.rules {
+            ranges.extend(rule.find_iter(text).map(|m| (m.start(), m.end())));
+        }
+        if self.mask_addresses {
+            ranges.extend(
+                self.rules
+                    .addresses
+                    .find_iter(text)
+                    .map(|m| (m.start(), m.end())),
+            );
+        }
+        ranges.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (start, end) in ranges {
+            if let Some(last) = merged.last_mut()
+                && start <= last.1
+            {
+                last.1 = last.1.max(end);
+                continue;
+            }
+            merged.push((start, end));
+        }
+        let mut output = String::new();
+        let mut cursor = 0;
+        for (start, end) in merged {
+            output.push_str(&text[cursor..start]);
+            let mut masked = false;
+            for c in text[start..end].chars() {
+                if matches!(c, '\r' | '\n') {
+                    output.push(c);
+                    masked = false;
+                } else if !masked {
+                    output.push_str("[REDACTED]");
+                    masked = true;
+                }
+            }
+            cursor = end;
+        }
+        output.push_str(&text[cursor..]);
+        output
+            .chars()
+            .filter(|c| !c.is_control() || matches!(c, '\r' | '\n' | '\t'))
+            .collect()
+    }
     pub fn value(&self, value: &mut Value) {
         match value {
             Value::String(s) => *s = self.text(s),
@@ -135,6 +188,26 @@ impl Redactor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn file_redaction_preserves_original_line_coordinates_including_multiline_secrets() {
+        let raw = "header\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nprivate\r\n-----END OPENSSH PRIVATE KEY-----\r\npassword: secret\r\nlast\r\n";
+        let masked = Redactor::new(true, vec![]).unwrap().lines(raw);
+        assert_eq!(masked.lines().count(), raw.lines().count());
+        assert_eq!(masked.lines().nth(5), Some("last"));
+        assert!(!masked.contains("private"));
+        assert!(!masked.contains("secret"));
+        let (result, _) = crate::files::apply(
+            raw,
+            &[crate::files::Edit {
+                start_line: 6,
+                delete_lines: 1,
+                insert_lines: vec!["x: yy".into()],
+            }],
+        )
+        .unwrap();
+        assert!(result.starts_with(raw.strip_suffix("last\r\n").unwrap()));
+        assert!(result.ends_with("x: yy\r\n"));
+    }
     #[test]
     fn redacts_nested_secrets_keys_urls_private_keys_addresses_and_literals() {
         let redactor = Redactor::new(true, vec!["internal.example".to_owned().into()]).unwrap();

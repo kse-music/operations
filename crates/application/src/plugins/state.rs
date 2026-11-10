@@ -17,6 +17,9 @@ struct Control {
     messages: usize,
 }
 pub(super) struct Document {
+    pub settings: Value,
+    pub at: Instant,
+    pub dirty: bool,
     pub profile: String,
     pub owner: String,
     pub plugin: String,
@@ -24,6 +27,21 @@ pub(super) struct Document {
     pub internal_token: String,
     pub path: String,
     pub host: String,
+}
+#[derive(Clone)]
+pub(super) struct Copy {
+    pub settings: Value,
+    pub plugin: String,
+    pub owner: String,
+    pub generation: String,
+    pub revision: String,
+    pub preview: serverdeck_plugin_sdk::platform::TransferPreview,
+    pub plan: serverdeck_sftp::PreparedCopy,
+    pub job: Option<serverdeck_sftp::CopyHandle>,
+    pub cancelled: bool,
+    pub at: Instant,
+    pub targets: Vec<RevisionTarget>,
+    pub sessions: Vec<(String, String)>,
 }
 pub(super) struct Log {
     pub profile: String,
@@ -50,6 +68,7 @@ pub(super) struct OutputData {
 }
 #[derive(Clone, PartialEq)]
 pub(super) enum RevisionTarget {
+    ApprovalMode(serverdeck_plugin_sdk::platform::ApprovalMode),
     Model { id: String, revision: String },
     Host { id: String, profile: String },
 }
@@ -113,6 +132,7 @@ pub struct Event {
 }
 #[derive(Default)]
 pub(super) struct Data {
+    pub copies: BTreeMap<String, Copy>,
     pub lifecycle_requests: BTreeMap<String, CancellationToken>,
     pub user_cancellations: BTreeMap<String, Arc<AtomicBool>>,
     pub closed_owners: BTreeSet<(String, String)>,
@@ -148,6 +168,8 @@ impl Default for Host {
     }
 }
 pub(super) struct Call {
+    pub collecting: bool,
+    pub batch: Arc<Mutex<Option<BatchConsent>>>,
     pub lifecycle: CancellationToken,
     pub user_cancelled: Arc<AtomicBool>,
     pub owner: String,
@@ -155,10 +177,38 @@ pub(super) struct Call {
     pub id: String,
     pub generation: String,
     pub cancel: CancellationToken,
-    _permit: OwnedSemaphorePermit,
+    owns_busy: bool,
+    _permit: Option<OwnedSemaphorePermit>,
+}
+pub(super) struct BatchConsent {
+    pub at: Instant,
+    pub operations: BTreeMap<String, u16>,
+}
+impl Call {
+    pub fn collector(&self) -> Self {
+        Self {
+            collecting: true,
+            batch: Arc::default(),
+            lifecycle: self.lifecycle.clone(),
+            user_cancelled: self.user_cancelled.clone(),
+            owner: self.owner.clone(),
+            host: self.host.clone(),
+            id: self.id.clone(),
+            generation: self.generation.clone(),
+            cancel: self.cancel.clone(),
+            owns_busy: false,
+            _permit: None,
+        }
+    }
+    pub fn has_batch(&self) -> Result<bool, Error> {
+        Ok(self.batch.lock().map_err(|_| Error::Busy)?.is_some())
+    }
 }
 impl Drop for Call {
     fn drop(&mut self) {
+        if !self.owns_busy {
+            return;
+        }
         if let Ok(mut data) = self.host.data.lock() {
             data.busy.remove(&self.id);
             data.requests.remove(&self.id);
@@ -175,6 +225,64 @@ impl Drop for Call {
     }
 }
 impl Host {
+    /// Cancellation only: never occupies or releases an in-flight Guest action.
+    pub(super) fn start_control_scoped(&self, id: &str, owner: &str) -> Result<Call, Error> {
+        if owner.is_empty() || owner.len() > 512 || owner.contains('\0') {
+            return Err(Error::Validation("插件页面标识无效"));
+        }
+        let mut data = self.lock()?;
+        if data
+            .closed_owners
+            .contains(&(id.to_owned(), owner.to_owned()))
+        {
+            return Err(failure("PLUGIN_CANCELLED", "插件页面已关闭"));
+        }
+        let control = data.controls.get_mut(id).ok_or(Error::NotFound)?;
+        if control.cancel.is_cancelled() {
+            return Err(failure("PLUGIN_CANCELLED", "插件已停止"));
+        }
+        if control.window.elapsed() >= Duration::from_secs(1) {
+            control.window = Instant::now();
+            control.messages = 0;
+        }
+        if control.messages >= 20 {
+            return Err(failure("PLUGIN_RATE_LIMIT", "插件能力请求超过每秒二十次"));
+        }
+        control.messages += 1;
+        let lifecycle = control.cancel.child_token();
+        Ok(Call {
+            collecting: false,
+            batch: Arc::default(),
+            lifecycle: lifecycle.clone(),
+            user_cancelled: Arc::new(AtomicBool::new(false)),
+            owner: owner.into(),
+            host: self.clone(),
+            id: id.into(),
+            generation: control.generation.clone(),
+            cancel: lifecycle.child_token(),
+            owns_busy: false,
+            _permit: None,
+        })
+    }
+    pub(super) fn verify_resource(
+        &self,
+        id: &str,
+        generation: &str,
+        owner: &str,
+    ) -> Result<(), Error> {
+        let data = self.lock()?;
+        if data
+            .closed_owners
+            .contains(&(id.to_owned(), owner.to_owned()))
+            || !data
+                .controls
+                .get(id)
+                .is_some_and(|c| c.generation == generation && !c.cancel.is_cancelled())
+        {
+            return Err(failure("PLUGIN_CANCELLED", "所属插件或页面已关闭"));
+        }
+        Ok(())
+    }
     pub(super) fn lock(&self) -> Result<std::sync::MutexGuard<'_, Data>, Error> {
         self.data.lock().map_err(|_| Error::Busy)
     }
@@ -222,6 +330,8 @@ impl Host {
         control.messages += 1;
         let lifecycle = control.cancel.child_token();
         let call = Call {
+            collecting: false,
+            batch: Arc::default(),
             lifecycle: lifecycle.clone(),
             user_cancelled: Arc::new(AtomicBool::new(false)),
             owner: owner.to_owned(),
@@ -229,7 +339,8 @@ impl Host {
             id: id.into(),
             generation: control.generation.clone(),
             cancel: lifecycle.child_token(),
-            _permit: permit,
+            owns_busy: true,
+            _permit: Some(permit),
         };
         data.requests.insert(id.into(), call.cancel.clone());
         data.lifecycle_requests

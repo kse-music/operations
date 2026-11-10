@@ -102,6 +102,8 @@ NativeStore 使用系统凭据库，当前服务为 `cn.hiboot.desktop.credentia
 
 ### 有界输入输出与布局
 
+`TerminalPane` 通过 xterm `WebLinksAddon` 识别普通 HTTP/HTTPS 文本，并让 OSC 8 `linkHandler` 共用左键激活处理。链接走仅本地主窗口授权的 `terminal_open_link` IPC，Rust 校验 HTTP/HTTPS、主机及有界无控制字符的 URL 后，在阻塞任务调用系统默认浏览器；不向前端开放任意程序、文件或通用 Shell 权限。隐藏/已卸载窗格与被其他弹窗阻挡的终端不激活链接，打开失败使用已有错误通知。
+
 PTY 每块最多 16 KiB，经 Tauri Channel 交给 xterm，`xterm.write(callback)` 完成后 ACK 才读取下一块。输入/resize 独立运行，输出等待不能阻止 Ctrl+C 和取消；输入队列、单次大小和粘贴确认均有界，resize 合并最新尺寸。russh 内部仍有非全有界队列，不承诺恶意服务器下的进程硬内存限额。
 
 前端区分会话标签、PaneKey 和 Session。二叉树仅计算分屏几何，固定 PaneKey 保持 xterm 挂载；每标签最多八窗格，全应用最多 32。后台终端持续消费 ACK。编号按主机运行内计数，最后会话成功关闭后重置；不持久化终端布局、标题、正文或会话，不保留旧 workspace_load/save 接口。
@@ -166,7 +168,7 @@ OSC 7 仅作为已校验路径提示，不作为权限依据。已连接 SSH 窗
 
 ### 包、运行时和业务边界
 
-Host/Rust/TS SDK 5.0.0，UI v4、ABI/wire 1；拒绝旧开发期合同。WASM 无 WASI/任意原生导入，受线性内存、fuel、消息及并发限额；自带 Vue JS/CSS 位于不带 same-origin 的受限 iframe，经认证 MessageChannel 访问可信桥，不能任意转发 Tauri IPC。
+Host/Rust/TS SDK 5.2.0，UI v4、ABI/wire 1；拒绝旧开发期合同。WASM 无 WASI/任意原生导入，受线性内存、fuel、消息及并发限额；自带 Vue JS/CSS 位于不带 same-origin 的受限 iframe，经认证 MessageChannel 访问可信桥，不能任意转发 Tauri IPC。
 
 ```text
 插件 Vue → 认证桥 → 本包 action → WASM async Runtime
@@ -202,13 +204,19 @@ Compose 业务在 Docker 插件内实现，通过项目列表及仅投影必要�
 
 仓库汇总有效安装与问题项，单插件旧/损坏记录隔离并显示诊断，原记录/载荷/配置不动；仓库根安全故障和数据库错误仍传播。主窗口私有 `plugin_inventory` / `plugin_reinstall_bundled` 不属于 SDK。显式重装确认绑定原记录摘要，先逐字持久备份再原子提交，保留旧载荷/配置，新安装默认禁用且不继承旧授权；不存在兼容解码或自动迁移。
 
+SDK 5.1 的通用文件传输原语通过冻结端点及原生审批复用既有 SFTP 队列，支持单文件本机上传和服务器间流式中转。后台持续复验授权及修订，字节不经模型/插件桥；结果未知不自动重试。文本读取也需宿主确认，保存增加读回复查。详细契约及限制见[SDK](../plugins/PLUGIN_SDK.md#文件与传输51)、[助手架构](ASSISTANT_AGENT.md#文件与传输)。
+
+审批模式与计划确认复用通用SDK：独立读取预授权只覆盖文件/传输预检及manifest完整固定命令；策略绑定owner/VM，默认仍请求批准。计划由Native预检并冻结请求摘要/次数，批准只在同一WASM动作内消费；目标或请求改变拒绝，不扩大权限。详见[助手审批模式](ASSISTANT_AGENT.md#审批模式与单次计划确认)、[ADR0035](decisions/0035-task-approval-modes.md)。
+
 ## 模型传输与 AI 业务
 
 模型注册、系统 Key、真实连接测试和修订管理属于 Native；通用 `models.use` 能力在授权后传输插件构造的消息，Key/CLI 登录数据不进入 Guest。助手插件拥有资产匹配、上下文采集/脱敏、严格 query/plan/answer、冻结计划和执行后复查，不再依赖私有宿主 AI 业务 API。具体预算和资源协议见[SDK](../plugins/PLUGIN_SDK.md)。
 
 `ai::model_test` 只保留测试绑定摘要，签发 300 秒单次凭证；保存新建/关键配置或 Key 变更时消费并复验配置、凭据及编辑身份，不能用一次旧成功测试批准新配置。模型 Key 没有读取回显接口，空输入保留已有值，清除/删除走明确的用例及秘密 GC。`check_model_edit` 在 baseUrl 变化且仍有旧 Key 时要求新输入或明确清除，防止默认将原凭据发送给其他服务。
 
-助手 `workflow` 对单主机执行最多六轮/十二查询/每轮三项的只读循环，`agent::build_plan` 从完整证据冻结最多 32 项；多主机建议标记 manual_only，不能隐式选择一台执行。预览和计划按准备时刻五分钟清理，单次消费且绑定 owner/模型/SSH 修订；执行超过 100 秒不启动后续步骤，在途按平台提交边界收尾。业务清单由插件保存，Native 仍对实际请求逐项做目标与命令确认，插件确认文字不能代替授权。策略理由见[ADR 0027](decisions/0027-assistant-policy.md)。
+助手 `workflow` 对单主机执行最多六轮/十二查询/每轮三项的只读循环，`agent::build_plan` 从完整证据冻结最多 32 项；多主机命令建议标记 manual_only；文件工具使用明确匹配的 hostId，不能隐式选择一台执行命令。预览和计划按准备时刻五分钟清理，单次消费且绑定 owner/模型/SSH 修订；执行超过 100 秒不启动后续步骤，在途按平台提交边界收尾。业务清单由插件保存，Native 可对固定请求集合一次确认，再逐项复验并按次数消费授权，插件确认文字不能代替授权。策略理由见[ADR 0027](decisions/0027-assistant-policy.md)。
+
+助手 `tools` 目录统一现有 13 项只读、5 项变更工具的元数据与完整参数，模型批次在查询前全部校验，查询/执行共用工具结果。`task` 模块维护最多 32 个运行期快照，绑定原 owner、模型及 SSH 修订，覆盖准备、查询、待审核、执行、复查及终态；终态不恢复执行，任务查询仍经 Native 复验；传输状态/取消不依赖过期模型句柄，但不能启动或改变目标。前端展示状态及未确认结果，不提供实时状态事件或持久恢复。协议和限额见[助手工具与任务](ASSISTANT_AGENT.md)，取舍见[ADR 0033](decisions/0033-assistant-tools-tasks.md)。
 
 模型响应的 usage 才是实际 Token 来源；任一轮缺 usage 时不伪造累计值。准备阶段先按完整查询统计，再对选定原值脱敏，最后截短展示明细；诊断仅携带命中主机，普通知识不附目录，明确资产清单问题才附目录。`budget::fit` 在准备（消息 40 KiB）及每轮补全（44 KiB）按含 JSON 转义、模型和输出配置的完整请求估算输入并预留最大输出；不足时依次削减成功查询的可选明细、最早完整历史轮次，保留问题/归属/统计/失败及省略标记，仍不足才拒绝。前端按实际准备请求编码限制 48 KiB，删除完整旧轮次而不切断文本；压缩不改写旧消息或本地完整执行证据。验证见[上下文回归](../validation/ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-09-上下文脱敏范围与预算修复)。
 

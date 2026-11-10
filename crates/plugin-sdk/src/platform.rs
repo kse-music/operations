@@ -2,6 +2,21 @@
 use crate::{ApiError, Permission};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    #[default]
+    Request,
+    Assist,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApprovalOperation {
+    pub request: Box<Request>,
+    pub count: u16,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Command {
@@ -83,6 +98,46 @@ pub struct Message {
     pub content: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum TransferSource {
+    Local { path: String },
+    Remote { host_id: String, path: String },
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemotePath {
+    pub host_id: String,
+    pub path: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferPreview {
+    pub id: String,
+    pub source: TransferSource,
+    pub destination: RemotePath,
+    pub bytes: u64,
+    pub overwrite: bool,
+    pub target_exists: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TransferState {
+    pub id: String,
+    pub state: String,
+    pub total_bytes: u64,
+    pub transferred_bytes: u64,
+    pub bytes_per_second: u64,
+    pub sha256: Option<String>,
+    pub message: Option<String>,
+    pub recovery_paths: Vec<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -91,6 +146,12 @@ pub struct Message {
     deny_unknown_fields
 )]
 pub enum Request {
+    ApprovalMode {
+        mode: ApprovalMode,
+    },
+    ConfirmOperations {
+        operations: Vec<ApprovalOperation>,
+    },
     Info,
     Hosts,
     Host {
@@ -147,6 +208,23 @@ pub enum Request {
         document_id: String,
         dirty: bool,
     },
+    TransferPrepare {
+        source: TransferSource,
+        destination: RemotePath,
+        overwrite: bool,
+    },
+    TransferStart {
+        id: String,
+    },
+    TransferStatus {
+        id: String,
+    },
+    TransferCancel {
+        id: String,
+    },
+    TransferClose {
+        id: String,
+    },
     SettingsRead,
     SettingsWrite {
         value: serde_json::Value,
@@ -178,6 +256,8 @@ impl Request {
         match self {
             Self::TcpConnect { .. } => Permission::NetworkConnect,
             Self::Info
+            | Self::ApprovalMode { .. }
+            | Self::ConfirmOperations { .. }
             | Self::Notify { .. }
             | Self::ResultRead { .. }
             | Self::ResultClose { .. }
@@ -194,6 +274,11 @@ impl Request {
             Self::Models | Self::Model { .. } | Self::ModelComplete { .. } => Permission::ModelsUse,
             Self::ReadFile { .. } | Self::CloseFile { .. } => Permission::SftpRead,
             Self::SaveFile { .. } | Self::FileDirty { .. } => Permission::SftpWrite,
+            Self::TransferPrepare { .. }
+            | Self::TransferStart { .. }
+            | Self::TransferStatus { .. }
+            | Self::TransferCancel { .. }
+            | Self::TransferClose { .. } => Permission::SftpTransfer,
             Self::SettingsRead => Permission::SettingsRead,
             Self::SettingsWrite { .. } => Permission::SettingsWrite,
         }
@@ -202,6 +287,8 @@ impl Request {
         match self {
             Self::TcpConnect { .. } => "network.connect",
             Self::Info
+            | Self::ApprovalMode { .. }
+            | Self::ConfirmOperations { .. }
             | Self::ResultRead { .. }
             | Self::ResultClose { .. }
             | Self::OutputOpen { .. }
@@ -218,6 +305,11 @@ impl Request {
             Self::Models | Self::Model { .. } | Self::ModelComplete { .. } => "models.use",
             Self::ReadFile { .. } | Self::CloseFile { .. } => "sftp.read",
             Self::SaveFile { .. } | Self::FileDirty { .. } => "sftp.write",
+            Self::TransferPrepare { .. }
+            | Self::TransferStart { .. }
+            | Self::TransferStatus { .. }
+            | Self::TransferCancel { .. }
+            | Self::TransferClose { .. } => "sftp.transfer",
             Self::SettingsRead => "settings.read",
             Self::SettingsWrite { .. } => "settings.write",
         }
@@ -226,9 +318,13 @@ impl Request {
         matches!(
             self,
             Self::Execute { .. }
+                | Self::ConfirmOperations { .. }
                 | Self::StreamOpen { .. }
                 | Self::Terminal { .. }
                 | Self::SaveFile { .. }
+                | Self::ReadFile { .. }
+                | Self::TransferPrepare { .. }
+                | Self::TransferStart { .. }
                 | Self::TcpConnect { .. }
         )
     }
@@ -254,6 +350,9 @@ impl Request {
                 | Self::OutputPart { .. }
                 | Self::OutputFinish { .. }
                 | Self::FileDirty { dirty: false, .. }
+                | Self::TransferStatus { .. }
+                | Self::TransferCancel { .. }
+                | Self::TransferClose { .. }
         )
     }
 }

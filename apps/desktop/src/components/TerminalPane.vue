@@ -8,6 +8,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { filesApi } from '../services/files';
 import { osc7Path } from '../services/osc7';
 import { hostDisplayName, type Host } from '../types/hosts';
@@ -545,6 +546,21 @@ function find(backward = false): void {
   const found = backward ? search.findPrevious(query.value) : search.findNext(query.value);
   message.value = found ? null : '滚动缓冲中没有匹配内容。';
 }
+function activateLink(event: MouseEvent, url: string): void {
+  event.preventDefault();
+  if (
+    event.button !== 0 ||
+    disposed ||
+    !props.active ||
+    terminal.hasSelection() ||
+    dialogBlocksTerminal()
+  )
+    return;
+  const attempt = generation;
+  void terminalApi.openLink(url).catch((cause: unknown) => {
+    if (!disposed && attempt === generation) message.value = errorMessage(cause);
+  });
+}
 onMounted(() => {
   if (!props.standalone)
     unregisterUpload = store.registerUpload(
@@ -560,11 +576,13 @@ onMounted(() => {
     allowProposedApi: false,
     allowTransparency: false,
     ignoreBracketedPasteMode: false,
+    linkHandler: { activate: activateLink, allowNonHttpProtocols: false },
   });
   fit = new FitAddon();
   search = new SearchAddon();
   terminal.loadAddon(fit);
   terminal.loadAddon(search);
+  terminal.loadAddon(new WebLinksAddon(activateLink));
   terminal.parser.registerOscHandler(7, (data) => {
     const cwd = osc7Path(data);
     if (cwd) update({ cwd });

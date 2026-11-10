@@ -39,6 +39,7 @@ tempfile.workspace = true
 rusqlite = { version = "0.38", features = ["bundled"] }
 russh = { version = "0.65", default-features = false, features = ["ring", "rsa"] }
 rand = "0.10"
+russh-sftp = "3.0.1"
 
 [lints]
 workspace = true

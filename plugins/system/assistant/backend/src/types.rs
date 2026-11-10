@@ -1,4 +1,4 @@
-use crate::{Error, ops::LogSource};
+use crate::{Error, ops::LogSource, tools::ToolResult};
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -13,6 +13,8 @@ pub struct ContextSelection {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PrepareInput {
+    #[serde(default)]
+    pub approval_mode: serverdeck_plugin_sdk::platform::ApprovalMode,
     pub model_id: String,
     pub session_id: Option<String>,
     pub question: String,
@@ -98,27 +100,51 @@ pub struct ExecuteInput {
     pub change_confirmation: Option<String>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskInput {
+    pub id: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentObservation {
     pub query: String,
-    pub success: bool,
     pub records: usize,
-    pub message: Option<String>,
+    #[serde(flatten)]
+    pub result: ToolResult,
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStep {
     pub action: String,
     pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<StepPreview>,
+}
+#[derive(Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum StepPreview {
+    Edit {
+        path: String,
+        base_sha256: String,
+        diff: String,
+    },
+    Transfer {
+        preview: serverdeck_plugin_sdk::platform::TransferPreview,
+    },
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStepResult {
     pub action: String,
     pub target: String,
-    pub status: String,
-    pub message: String,
+    #[serde(flatten)]
+    pub result: ToolResult,
 }
 
 #[cfg(test)]

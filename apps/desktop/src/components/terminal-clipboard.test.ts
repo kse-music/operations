@@ -10,6 +10,7 @@ import { defaultTerminalPreferences } from '../types/preferences';
 import { defaultProductPreferences } from '../types/product';
 import { hostInput } from '../types/hosts';
 import { clipboardApi } from '../services/clipboard';
+import type { ITerminalOptions } from '@xterm/xterm';
 
 vi.mock('../services/clipboard', () => ({
   clipboardApi: { writeText: vi.fn(), readText: vi.fn() },
@@ -21,9 +22,14 @@ const xterm = vi.hoisted(() => ({
   input: vi.fn() as (data: string) => void,
   keyHandler: vi.fn(() => true) as (event: KeyboardEvent) => boolean,
   pasted: vi.fn(),
+  options: {} as ITerminalOptions,
+  activateLink: (() => {}) as (event: MouseEvent, url: string) => void,
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
+    constructor(options: ITerminalOptions) {
+      xterm.options = options;
+    }
     buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
     options = {};
     cols = 80;
@@ -59,6 +65,13 @@ vi.mock('@xterm/xterm', () => ({
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {} }));
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
+vi.mock('@xterm/addon-web-links', () => ({
+  WebLinksAddon: class {
+    constructor(activate: (event: MouseEvent, url: string) => void) {
+      xterm.activateLink = activate;
+    }
+  },
+}));
 
 let app: App, pinia: Pinia, root: HTMLDivElement, tab: TerminalPaneModel;
 const active = ref(true);
@@ -138,6 +151,7 @@ beforeEach(async () => {
   });
   vi.spyOn(terminalApi, 'input').mockResolvedValue();
   vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  vi.spyOn(terminalApi, 'openLink').mockResolvedValue();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(PaneHarness).use(pinia);
@@ -161,6 +175,53 @@ afterEach(() => {
 function enable(value = true) {
   useApplicationStore().state!.config.terminal.quickCopyPaste = value;
 }
+it('opens plain HTTP/HTTPS and OSC 8 links on a left click without sending shell input', async () => {
+  const url = 'http://localhost:8080/login?state=abc&next=%2Fhome#result';
+  const event = new MouseEvent('click', { button: 0, cancelable: true });
+  xterm.activateLink(event, url);
+  expect(event.defaultPrevented).toBe(true);
+  expect(terminalApi.openLink).toHaveBeenCalledExactlyOnceWith(url);
+  expect(terminalApi.input).not.toHaveBeenCalled();
+  expect(xterm.options.linkHandler?.allowNonHttpProtocols).toBe(false);
+  xterm.options.linkHandler!.activate(event, 'https://example.com/path', {
+    start: { x: 1, y: 1 },
+    end: { x: 20, y: 1 },
+  });
+  expect(terminalApi.openLink).toHaveBeenLastCalledWith('https://example.com/path');
+  await nextTick();
+});
+
+it('does not activate links with a right click, a hidden pane, or another modal', async () => {
+  const url = 'https://example.com/';
+  xterm.activateLink(new MouseEvent('click', { button: 2 }), url);
+  active.value = false;
+  await nextTick();
+  xterm.activateLink(new MouseEvent('click'), url);
+  active.value = true;
+  await nextTick();
+  const dialog = document.createElement('dialog');
+  dialog.open = true;
+  document.body.append(dialog);
+  xterm.activateLink(new MouseEvent('click'), url);
+  expect(terminalApi.openLink).not.toHaveBeenCalled();
+});
+
+it('does not open a link while dragging to select its text', () => {
+  xterm.selection = 'https://example.com/selected';
+  xterm.activateLink(new MouseEvent('click'), xterm.selection);
+  expect(terminalApi.openLink).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+});
+
+it('shows browser opening errors through notifications', async () => {
+  vi.mocked(terminalApi.openLink).mockRejectedValueOnce({ message: '无法打开默认浏览器' });
+  xterm.activateLink(new MouseEvent('click'), 'https://example.com/');
+  await vi.waitFor(() =>
+    expect(useNotificationsStore().items.some((item) => item.text === '无法打开默认浏览器')).toBe(
+      true,
+    ),
+  );
+});
 function rightClick(selector = '.xterm-container', button = 2, shiftKey = false) {
   const event = new MouseEvent('contextmenu', {
     bubbles: true,

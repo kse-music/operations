@@ -1,5 +1,108 @@
 # 助手直接对话验证
 
+## 2026-11-10 审批模式与单次计划确认
+
+用户实测删除 `/work/compose.middleware.yml` 第315行后要求减少按钮与输入确认，并明确选择“自动读取，文件修改/传输及其他变更合并为一次确认”。本轮助手2.3.0、SDK5.2.0，增加输入区请求批准/帮我审批，移除插件重复审核/复选框/文字输入；真实变更仍由Native一次确认。没有接入独立AI审批模型、Skill、MCP或持久设置。
+
+实现与约束见[助手审批模式](../../architecture/ASSISTANT_AGENT.md#审批模式与单次计划确认)、[SDK](../../plugins/PLUGIN_SDK.md#审批模式与计划确认52)、[ADR0035](../../architecture/decisions/0035-task-approval-modes.md)。主要文件为助手 `AssistantView.vue/assistant.ts` 与 `workflow.rs`、Native `plugins/approvals.rs`、`platform.rs/capabilities.rs/state.rs`、SFTP `editor.rs`，同步SDK/权限、manifest固定查询清单和调用方。保留工作区中已有终端/浏览器等无关修改。
+
+环境为Windows、Node22.17.0、稳定Rust1.99.1。原生复用根target，WASM沿用既有插件缓存；构建前D盘约156 GiB空闲。测试EXE复制到 [QA目录](../../../.local/qa/assistant-approval-modes/) 后运行，回环SSH/SFTP与UI夹具不连接用户服务器/付费模型，没有操作用户compose文件或强杀进程。
+
+| 检查          | 结果及关键断言                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 前端全量      | `npm test`：59文件618项通过。默认请求批准、选择仅影响新任务、帮我审批自动进入宿主确认、普通模式等待执行按钮；取消/离页/模型变更/防重放及旧状态恢复继续通过。`frontend-all.log`。                                                                                                                                                                                                                                                                                                                                          |
+| 前端针对性    | 助手、通用宿主续接、权限页共64项通过；不再出现插件复选框/输入确认，依旧只续接原Future，不重发初始动作。`frontend-focused.log`。                                                                                                                                                                                                                                                                                                                                                                                           |
+| 助手Rust      | 编译测试后复制EXE，28项通过。新增12条固定查询/采样命令与manifest逐字一致；目录、预算、计划、任务与文件编辑回归保持。`assistant-test.log`。                                                                                                                                                                                                                                                                                                                                                                                |
+| Native        | 编译 `serverdeck-application --lib` 后复制EXE筛选 `plugins::`：27项通过，1项外部包环境测试忽略。新增真实回环测试覆盖读取独立预授权、默认仍确认、写入不自动批准、跨owner拒绝、保存差异/字节冻结、批准前不写入、按次数消费/动作外不继承、计划外请求撤销剩余授权、任意命令不按只读免审；真实WASM原Future一次确认完成两次SSH调用，拒绝时零执行。`native-plugins.log`。最后授权失败撤销处理后，文件/批次/原Future续接7项定向复验通过，见 `native-files-final.log`、`native-batch-final.log`、`native-continuation-final.log`。 |
+| 标准包WASM    | 系统入口构建助手/Docker/测试夹具，平台集成11项通过、1项真实Compose测试忽略。平台回应使用夹具，权限/实际执行由以上Native测试验证。`plugins-build.log/runtime-test.log`。                                                                                                                                                                                                                                                                                                                                                   |
+| 图形检查      | 打包正式前端由独立无头Edge经MessageChannel加载，在1524×852和960×600验证选择器、默认值、help自动执行入口/request等待点击、无文字确认、无水平溢出和页面错误；UI数据为标明的夹具，未冒充服务器保存。截图 `composer-desktop.png`、`assist-plan-desktop.png`、`composer-minimum.png`，断言 `ui-result.json`。                                                                                                                                                                                                                  |
+| 编译/静态检查 | 类型检查、ESLint、助手严格Clippy及Native/Application/SDK所有target Clippy通过；后者沿用已记录的既有OpenSSH `single_element_loop` 规则例外，没有修改无关实现。Rust格式、Prettier、diff检查及相关文档链接检查见QA日志。                                                                                                                                                                                                                                                                                                     |
+| 构建          | `npm run build`、`cargo check -p serverdeck-desktop --locked`通过；`node tools/tauri.mjs build --debug --no-bundle`通过，产物复制为QA的 `ServerDeck-approval-modes.exe`（约61.6 MB）；未启动用户实例。ZIP开发包与标准包均使用当前SDK5.2，版本/预授权12条及ZIP内容已检查（`artifacts.json`）。                                                                                                                                                                                                                             |
+
+首次UI夹具因内联脚本换行转义导致握手超时，修正后图形检查通过；直接覆盖测试包触发EEXIST，改用标准系统构建入口重新发布。前端旧“页面没有任何select”断言改为排除新审批选择器，仍保留没有模型选择面板的有效断言；原文字确认测试改为验证单宿主确认与防重放。相关19份文档428个本地链接/锚点通过（`docs-links.log`），保留既有大chunk构建提示。
+
+### 限制与剩余问题
+
+- 帮我审批只免除已获独立权限的授权文本/传输预检及12条完整固定命令；动态PID/容器/服务详情和指定日志等未列入清单的SSH请求仍会确认，首次指纹核验不跳过。它不自动批准写入，不使用额外审批模型。
+- 模式只在当前页内保留且发送时固定，不跨重启保存。隐藏页不发起新确认，后台产生的计划返回后点击执行。计划仍受60 KiB消息、96次原语调用及180秒动作预算限制，过大明确失败；展示省略的长差异仍需结合聊天完整预览。
+- 文件32 KiB、单文件传输、SFTP无服务端CAS/原子替换元数据和未知结果限制保持。自动脱敏可能遗漏秘密，help读取内容可由已选模型处理。
+- 本轮未连接真实模型/用户服务器、未验收完整原生WebView2图形流程、安装器或macOS/Linux；无头Edge检查与Native真实协议测试分别提供证据。第三阶段Skill/任务编排未启动。
+
+## 2026-11-10 第二阶段文件编辑与传输
+
+范围：助手包 **2.2.0**、Host/Rust/TS SDK **5.1.0**，完成远程文件修改预览/确认保存、本机单文件上传、服务器间经本机流式中转、进度/取消/校验；工具目录增至18项。复用既有 SFTP、宿主授权与队列，不引入 DeepAgents、Skill/MCP、数据库或持久配置变化。当前契约见[助手架构](../../architecture/ASSISTANT_AGENT.md)、[SDK](../../plugins/PLUGIN_SDK.md#文件与传输51)，取舍见[ADR0034](../../architecture/decisions/0034-plugin-file-transfers.md)。
+
+主要文件：
+
+- 助手 `backend/src/{files,tools,workflow,task,redact}.rs`：同一原文行号的局部修改、保留未修改内容/换行、真实差异、文档/预览引用校验、冻结执行和异步原生任务结果保留。
+- 助手 `frontend/{AssistantAgent,AssistantView}.vue`、`assistant.ts`：差异与传输预览、可见页进度轮询、忙碌模型期间独立取消、校验和/恢复路径及未知结果展示。
+- 两端 SDK `platform` 类型、权限和版本，Native `plugins/{platform,state,capabilities,file_transfers}.rs`：确认读取/准备/启动/保存，owner/VM/修订/配置/目录复验，原生取消与生命周期排空。
+- SFTP `transfer/copy.rs`、`transfer.rs`、`editor.rs`：共享队列及目标变更锁、32 KiB固定缓冲、源/目标快照、同目录临时文件、SHA-256读回、安全提交和保存后复查。
+- 相关 Native/SFTP/WASM/Vue 测试、开发包锁文件、PRD/实施计划/架构/SDK/使用指南同步；仅新增复用已有版本的 SFTP 测试依赖，无新生产框架依赖。
+
+环境：Windows、Rust稳定版1.99.1、Node22.17.0；构建前D盘约157 GiB空闲。原生构建复用根 `target/`，测试EXE复制到QA后运行；WASM沿用 `.local/plugin-build/<插件>/`，关闭增量和全量调试，没有强杀或替换用户实例。证据位于 [QA目录](../../../.local/qa/assistant-files-stage2/)。
+
+| 检查         | 实际结果与关键断言                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 助手 Rust    | `cargo test --manifest-path plugins/system/assistant/backend/Cargo.toml --no-run --locked --message-format=json` 后复制EXE运行，27项通过。覆盖原文第6行删除/第20行后插入、LF/CRLF及末尾换行、重叠/越界、保留未改秘密、多行脱敏行号、工具类型一致、长传输超过预览TTL及关闭scope未知状态。日志 `assistant-test.log`。                                                                                                                                     |
+| SFTP复制     | `cargo test -p serverdeck-sftp --test copies --no-run --locked` 后复制EXE运行，5项通过。真实回环SSH与磁盘SFTP：本机上传、两服务器同Engine中转、实际字节/SHA、覆盖/源变更/目标竞争、目录末尾斜杠、链接和非原子拒绝、目标读回损坏、撤权/取消不替换原件、模拟提交后授权复验失败保留可能已提交事实并禁止重试。日志 `copies-test.log`。                                                                                                                      |
+| 既有SFTP回归 | `cargo test -p serverdeck-sftp --tests --no-run --locked` 后复制 `files` EXE，15项通过。含文本冲突、权限/非原子不截断、队列/取消/断线/重试、宿主关闭、外部编辑、大文件和sudo身份隔离。日志 `sftp-regression.log`。                                                                                                                                                                                                                                      |
+| Native插件   | `cargo test -p serverdeck-application --lib --no-run --locked` 后复制EXE、筛选 `plugins::`，23项通过、1项独立外部包测试忽略。新增3项文件测试最终单独复验通过：真实审批后才读取/保存、原文冲突及跨owner拒绝、传输准备不写入、启动二次审批、防重放、模型Guest忙碌期间取消且不释放其busy、撤权排空和临时资源清理。日志 `native-plugins.log`、`native-files-final.log`。                                                                                    |
+| 正式包WASM   | 标准 `node tools/build-system-plugins.mjs --with-test-fixtures`；`cargo test -p serverdeck-plugin-runtime --test platform_plugins --no-run --locked` 后复制EXE运行：11项通过、1项真实Compose环境测试忽略。新增近32 KiB文本通过常规fuel/内存、脱敏后冻结原文保存且不写入占位符、预览不保存、双主机中转交原生任务、进度/终态/结果缓存，防止重复启动；平台返回为测试夹具，真实SFTP与审批由以上宿主测试验证。日志 `plugins-build.log`、`runtime-test.log`。 |
+| 前端         | `npm test`：59文件、617项通过（包含助手41项），新增真实DOM差异纯文本/脚本不执行、传输轮询完成、忙碌模型期间独立取消、新对话顺序撤销旧任务后才准备新请求。最终全量617项通过，早先focused日志保留中途失败与修复线索，最终证据以全量日志为准。日志 `frontend-all.log`、`frontend-focused.log`。                                                                                                                                                            |
+| 编译与构建   | `npm run typecheck`、`npm run lint`、`npm run build`、`cargo check -p serverdeck-desktop --locked`通过；系统标准包、Vue页面、SDK和ZIP开发包构建成功。保留已有大chunk提示。日志 `typecheck.log`、`lint.log`、`desktop-build.log`、`desktop-check.log`。                                                                                                                                                                                                  |
+| 构建工具     | `npm run test:build` 32项通过，含包发现/缺损拒绝与junction不遍历目标。日志 `build-tests.log`。                                                                                                                                                                                                                                                                                                                                                          |
+| Rust静态检查 | 助手 `cargo clippy --all-targets --locked -- -D warnings`通过；Native严格Clippy被既有 `crates/core/src/openssh.rs:289` 的 `single_element_loop` 阻断。未修改该无关实现，使用 `-D warnings -A clippy::single-element-loop` 后SFTP/Application/SDK的所有target通过。日志 `clippy.log`、`clippy-with-baseline-exception.log`、`assistant-clippy.log`。                                                                                                     |
+
+初次回环测试被沙箱阻断SSH网络，构建工具junction测试被沙箱拒绝创建链接；在经授权的QA目录/回环范围重跑后通过。Vitest默认系统临时路径的rename被拒绝，改用QA内TEMP/TMP后通过。联调曾暴露测试夹具凭据/规范路径、旧SDK版本断言及新增完整工具提示词的预算不足；修正夹具/当前契约，并把预算回归放到可容纳18项工具目录的窗口，保留小窗口明确拒绝和全部统计/失败断言。
+
+`cargo fmt --all -- --check`、助手独立Rust格式检查、Prettier及 `git diff --check` 通过；20份相关文档的421个本地链接/锚点通过（`docs-links.log`）。
+
+最终产物核对通过：助手标准包2.2.0 / `^5.1.0` 及文件权限声明一致，开发包ZIP包含两端SDK5.1.0、传输类型和对应SDK文档；包摘要与63个ZIP条目的核对元数据记录在QA的 `artifacts.json`。
+
+### 未验证、限制、风险和下一阶段依赖
+
+- 本轮没有连接用户生产服务器或调用付费/真实模型；没有运行完整WebView2图形端到端、安装器、macOS/Linux、长时间/网络切换矩阵。协议夹具和DOM测试不代表这些验收已完成，也不证明所有模型均可靠生成计划。
+- 文件修改只限远程单个UTF-8普通文本≤32 KiB；无本地文本编辑、YAML语义校验或应用reload。传输仅单文件，不传目录/链接，不解包，无断点续传/跨重启恢复。
+- SFTP v3无服务端CAS，同属性（含秒级时间）并发改写仍有竞态；替换沿用inode/硬链接/ACL/xattr限制。自动脱敏不保证覆盖所有秘密；读取授权后，脱敏文件明细会发给所选模型。提交或提交后复验不确定不自动重试/回滚，临时清理失败保留恢复路径。
+- 第三阶段需要另行授权，范围为Skill来源/版本与规程加载、步骤依赖及有界重新规划；MCP/持久恢复属于其后阶段，不能代替原生权限。当前阶段完成后停止。
+
+## 2026-11-10 第一阶段工具与任务基础
+
+范围：完成现有工具目录、严格批次参数、统一工具结果、运行期任务及审批绑定；助手包 **2.1.0**，复用 SDK5。未接入文件编辑、传输、Skill/MCP、外部框架或持久恢复，未修改数据库/持久配置合同。当前合同见[助手架构](../../architecture/ASSISTANT_AGENT.md)，取舍见[ADR 0033](../../architecture/decisions/0033-assistant-tools-tasks.md)。
+
+主要实现：
+
+- `backend/src/tools.rs`：14 项工具（11 查询/3 变更）的目录与 Schema，整批解码时先检查工具读写类型及完整字段，再复用严格类型、完整 ID/PID/服务名校验。无参数枚举的额外字段也拒绝，首项查询不能先于后续参数校验。
+- `backend/src/{task,workflow,agent,types}.rs`：共用工具结果，最多 32 个运行期任务；状态、owner、原模型/SSH 绑定、过期、终态防重放及未知结果保留。复用已有镜像、容器、服务冻结与复查，不增加任意 Shell 或助手 Native 特权。
+- 助手前端：同步结果/任务类型、展示状态、异常读取原任务、停止及离页处理；即使直接再次调用执行方法也拒绝已提交计划。`ui.json` 声明 `tools/task` 动作，标准包通过项目入口重新构建。
+- 包级测试补充真实 WASM 的目录、任务、冻结参数、绑定、拒绝/防重放、三项/十二查询及最大 32 项计划形状。Native SSH 夹具同步当前 Docker 信息外层对象，并增加版本与操作系统断言，未改 Docker 业务代码或删除断言。
+
+环境：Windows、Rust 1.99.1 稳定版、Node 22.17.0。原生构建复用根 `target/`，WASM 复用 `.local/plugin-build/assistant/`；检查时 D 盘约 158 GiB 空闲，保持关闭增量和行号级调试。所有原生测试从复制到 QA 目录的 EXE 运行，没有运行或锁定 target 内测试输出，没有强杀用户进程。
+
+| 检查              | 实际结果及关键断言                                                                                                                                                                                                                                                                                                                           |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 助手 Rust         | `cargo test --manifest-path plugins/system/assistant/backend/Cargo.toml --target-dir target --offline --locked --no-run --message-format=json` 后复制 EXE：24 项通过。含目录与类型、无参数额外字段/越权拒绝、整批无先行查询、任务隔离/修订/过期/取消/有界保留、镜像/容器/systemd 计划及复查                                                  |
+| 正式包 WASM       | `cargo test -p serverdeck-plugin-runtime --test platform_plugins --offline --locked --no-run --message-format=json` 后复制 EXE：9 项通过、1 项原有真实 Compose 环境用例 ignored。验证实际包、原 fuel/内存限额、12 查询上限、三项批次、32 项参数解码、宿主拒绝、原绑定及单次执行；32 项用例因缺少查询证据明确拒绝，不表示执行了 32 项真实变更 |
+| Native 插件与 SSH | `cargo test -p serverdeck-application --lib --offline --locked --no-run --message-format=json` 后复制 EXE，以 `plugins::tests --test-threads=1 --nocapture` 运行：18 项通过、1 项独立外部包用例 ignored。覆盖默认拒绝、撤权、审批绑定/续接/单次消费、真实回环 SSH 的字面参数/目标变更/失败/超限/owner 清理，以及内置升级与配置保留           |
+| 前端              | 完整 `npm test`：59 文件、609 项通过；最后停止/离页状态调整后，desktop 目录定向助手测试 38 项通过。JSDOM 原有 Canvas 未实现提示保留                                                                                                                                                                                                          |
+| 构建与类型        | `npm run typecheck`、`npm run build`、`cargo check -p serverdeck-desktop --offline --locked` 通过；前端生产构建包含正式插件包，Vite 原有大分块提示保留                                                                                                                                                                                       |
+| 静态与格式        | 助手、runtime 包级测试及 application 的 `cargo clippy ... --offline --locked --no-deps -- -D warnings`；`npm run lint` 及最终助手定向 ESLint；插件 Cargo fmt、改动原生测试 rustfmt、助手前端/清单及新增架构文档 Prettier 检查均通过                                                                                                          |
+
+过程中的失败及修复：
+
+1. 无参数 `images` 枚举会被 Serde 接受额外字段，新增的拒绝测试首先失败。加入目录字段集合检查，原用例及正式包注入用例通过，未以删除断言通过。
+2. 最大 32 项计划参数解码真实触发 `PLUGIN_FUEL / OutOfFuel`：每项重复构造整份目录。固定目录改为 VM 内缓存，不放宽 20,000,000 fuel、16 MiB、2 秒等平台限额。基线在 `batch-fuel-baseline.log`；修复后同一用例及 health 通过。
+3. 沙箱系统临时目录 rename/mkdir 拒绝导致前端未运行测试；切换任务 QA TEMP/TMP 后全量通过。Native 临时目录和回环 TCP/SSH 也受沙箱影响，改为 QA 临时目录，并经自动审批在沙箱外运行同一测试副本，仅使用临时数据和本机协议夹具。首次、环境修正后及最终日志均保留。
+4. 沙箱外剩余的 Docker 信息失败来自原 SSH 夹具返回旧的裸版本 JSON，与当前正式包契约不符。夹具同步 `dockerVersion/dockerOperatingSystem`，增加两个字段断言；最终 Native 插件 18 项通过。
+5. 直接打包至已有输出被 `EEXIST` 拒绝；随后使用项目 `npm run build` 的 staging/发布流程成功，没有删除原包或覆盖用户数据。
+
+文档新增引用/锚点检查 18 处、零失效，改动范围的 `git diff --check` 通过；记录在 `doc-links.json`。正式助手包版本及 SHA-256 另存 `package-artifact.json`。
+
+证据目录：`.local/qa/assistant-tools-stage1/`。主要日志为 `assistant-tests-final.log`、`platform-tests-final.log`、`application-plugin-tests-verified.log`、`frontend-tests-final.log`、`assistant-frontend-final.log`、`typecheck.log`、`production-build-final.log`、`desktop-check.log`、三个 `*-clippy.log`、`lint.log` 和 `format.log`；编译元数据及 QA EXE 同目录保留。初始环境失败见 `frontend-tests.log`、`application-plugin-tests.log`、`application-plugin-tests-final.log` 和 `application-plugin-tests-unsandboxed.log`。
+
+未验证/限制：模型使用协议夹具，没有真实模型账号或本地 CLI 账号调用；SSH 用例真实建立本机连接，但 Docker/systemd 输出仍为测试夹具，未做真实远端业务变更；本轮未执行 Windows GUI 端到端、安装器或 macOS/Linux 客户端验收。任务在内存中，关闭/重启不恢复，verifying 不保证即时推送；未知结果须独立核对。未运行的两项 ignored 用例及既有发布门禁不关闭。第二阶段仍依赖文件/传输通用接口、明确端点及原生授权，此阶段完成后停止。最后检查发现工作区另有并行的终端/浏览器及依赖变更，已保留；这些变更不属于本阶段，不能用本报告声明整个并行工作区的最终版本已验收。
+
 ## 2026-11-09 提问触发 PLUGIN_FUEL 修复
 
 用户报告提问后整个助手变为“插件暂不可用 PLUGIN_FUEL”。修复前运行正式助手标准包，现有 `assistant_owns_redaction_and_preview_inside_the_packaged_wasm` 在模型元数据返回后真实触发 `OutOfFuel`，尚未调用模型补全；仅验证 iframe 挂载及 Native Rust 业务测试不能发现此故障。

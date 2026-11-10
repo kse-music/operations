@@ -12,6 +12,15 @@ describe('terminal IPC contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+  it('opens links through restricted desktop IPC and propagates browser failures', async () => {
+    const url = 'http://localhost:8080/login?state=abc&next=%2Fhome#result';
+    mocks.invoke.mockResolvedValueOnce(undefined);
+    await terminalApi.openLink(url);
+    expect(mocks.desktop).toHaveBeenCalledOnce();
+    expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('terminal_open_link', { url });
+    mocks.invoke.mockRejectedValueOnce({ code: 'BROWSER_OPEN', message: '无法打开默认浏览器' });
+    await expect(terminalApi.openLink(url)).rejects.toMatchObject({ code: 'BROWSER_OPEN' });
+  });
   it('opens the fixed local shell through a streaming IPC without host or command input', async () => {
     const receive = vi.fn();
     mocks.invoke.mockResolvedValueOnce({ id: 'local:session', shell: 'PowerShell' });

@@ -324,6 +324,43 @@ pub fn pid_valid(pid: u32) -> Result<(), Error> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[test]
+fn task_read_preapproval_manifest_matches_exact_generated_queries() {
+    use serverdeck_plugin_sdk::platform::Command;
+    let mut commands = vec![];
+    for request in [
+        Request::Diagnostic {
+            tool: ReadDiagnostic::Uptime,
+        },
+        Request::Diagnostic {
+            tool: ReadDiagnostic::Memory,
+        },
+        Request::Diagnostic {
+            tool: ReadDiagnostic::Disk,
+        },
+        Request::Capabilities,
+        Request::Containers,
+        Request::Images,
+        Request::Processes,
+        Request::Ports,
+        Request::Services {
+            scope: Scope::System,
+        },
+        Request::Services { scope: Scope::User },
+    ] {
+        commands.push(Command::script(request.command().unwrap()));
+    }
+    let metrics = include_str!("metrics.sh").replace("\r\n", "\n");
+    commands.push(Command::script(metrics.clone()));
+    commands.push(Command::script(format!("sleep 0.25;{metrics}")));
+    let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+    assert_eq!(
+        serde_json::to_value(commands).unwrap(),
+        manifest["preapprovedCommands"]
+    );
+}
 pub fn target_valid(target: &str, port: u16) -> Result<(), Error> {
     if port == 0
         || target.is_empty()

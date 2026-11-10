@@ -1,5 +1,15 @@
 # AI 运维助手布局验证
 
+## 2026-11-10 输入区焦点与空间
+
+助手包2.3.1。按用户截图去掉文本区聚焦的浏览器默认白色outline/阴影；仅作用于助手提问区，不移除模式选择器/按钮的键盘焦点提示。文本区最小高度60→112px、最大高度140→240px；底栏上间距7→12px、外框底部内距14→10px，底栏下移并扩大输入空间；矮窗口最小高度42→72px。主要修改 `plugins/system/assistant/frontend/assistant.css`、包版本及当前使用说明，无后端/IPC/审批/存储行为或依赖变化。
+
+- 标准系统插件构建通过；磁盘约156 GiB空闲，复用原有WASM缓存及根target。Windows Debug无安装器构建初次因运行中的 `target/debug/serverdeck-desktop.exe` 被锁定而失败（访问拒绝）；用户正常退出后重新构建通过，没有强杀。新程序复制到QA的 `ServerDeck-composer-layout.exe`，最终结果见 `native-build.log`。
+- 真实打包前端在独立无头Edge通过MessageChannel加载，1524×852/100%、960×600/145%、960×400/100%检查：聚焦outline为none、阴影none、内边框0px；文本区高度分别达到112/112/72px，底栏间距至少12px、底部内距约11px，无横向溢出且发送按钮保持可见。截图已查看，界面数据为显式标注的本机夹具，不连接真实模型或服务器。
+- 格式与diff检查及构建结果保存在 `.local/qa/assistant-composer-layout/`；样式变更未重跑Rust单元或远程运维测试。尚未验收完整原生WebView2流程、安装器、macOS/Linux；既有发送、审批与换行逻辑未修改。
+
+证据：`ui-result.json`、`composer-1524x852-1.png`、`composer-960x600-1.45.png`、`composer-960x400-1.png`、`plugins-build.log`。
+
 ## 2026-11-07 模型绑定弹窗
 
 助手包 1.8.1。按本地服务与模型管理分组，Codex/Claude Code 并排卡片显示连接状态；选中来源的模型与授权操作合并为紧凑状态行，注册模型采用列表。未绑定为轻量行，底栏固定当前绑定、未保存/操作提示与取消/保存。助手设置页签使用下划线，内容仅一个滚动容器，外层及 iframe 页面不滚动。

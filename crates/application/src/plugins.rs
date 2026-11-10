@@ -1,6 +1,8 @@
 use super::*;
 use serverdeck_plugin_core::{InstallInput, InstalledPlugin, Manifest, UninstallInput};
+mod approvals;
 mod capabilities;
+mod file_transfers;
 mod platform;
 mod results;
 pub(crate) mod state;

@@ -7,6 +7,8 @@ export type PluginPermission =
   | 'ssh.interactive.preapproved'
   | 'sftp.read'
   | 'sftp.write'
+  | 'sftp.transfer'
+  | 'operations.read.preapproved'
   | 'ui.contribute'
   | 'settings.read'
   | 'settings.write';

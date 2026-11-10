@@ -217,6 +217,8 @@ fn bundled_grant(
             Permission::SshInteractivePreapproved => &["ssh.interactive.preapproved"],
             Permission::SftpRead => &["sftp.read"],
             Permission::SftpWrite => &["sftp.write"],
+            Permission::SftpTransfer => &["sftp.transfer"],
+            Permission::OperationsReadPreapproved => &["operations.read.preapproved"],
             Permission::UiContribute => &["ui.contribute", "ui.notify"],
             Permission::SettingsRead => &["settings.read"],
             Permission::SettingsWrite => &["settings.write"],
@@ -303,7 +305,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!installed.enabled);
-        assert_eq!(installed.manifest.api_version, "^5.0.0");
+        assert_eq!(installed.manifest.api_version, "^5.2.0");
         assert!(app.plugin_inventory().await.unwrap().problems.is_empty());
         assert_eq!(
             app.plugins.settings_read(id).unwrap()["modelId"],

@@ -1,4 +1,5 @@
 mod ai_commands;
+pub mod browser_commands;
 pub mod commands;
 pub mod file_commands;
 mod monitor_commands;
@@ -240,6 +241,7 @@ pub fn command_handler<R: tauri::Runtime>()
         terminal_upload_commands::terminal_upload_read,
         terminal_upload_commands::terminal_upload_release,
         commands::terminal_local_open,
+        browser_commands::terminal_open_link,
         commands::terminal_input,
         commands::terminal_resize,
         commands::terminal_ack,

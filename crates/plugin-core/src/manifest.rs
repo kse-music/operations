@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "5.0.0";
+pub const API_VERSION: &str = "5.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -168,7 +168,8 @@ impl Manifest {
         if self.preapproved_commands.len() > 16
             || (!self.preapproved_commands.is_empty()
                 && (!permissions.contains(&Permission::SshExecute)
-                    || !permissions.contains(&Permission::SshExecutePreapproved)))
+                    || !(permissions.contains(&Permission::SshExecutePreapproved)
+                        || permissions.contains(&Permission::OperationsReadPreapproved))))
             || (permissions.contains(&Permission::SshExecutePreapproved)
                 && self.preapproved_commands.is_empty())
         {

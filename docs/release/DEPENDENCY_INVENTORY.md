@@ -6,6 +6,8 @@
 
 2026-11-05 随网络诊断本机执行链移除 encoding_rs 0.8.35；工作区和独立插件锁文件均已不包含该依赖，对应许可文本同步移除。其他条目沿用原清单，未重新审计。
 
+2026-11-10 为终端网址点击补充 @xterm/addon-web-links 0.12.0、tauri-plugin-opener 2.7.2、open 5.4.5、is-docker 0.2.0 与 is-wsl 0.4.0；完整许可文本同步加入 THIRD_PARTY_NOTICES.txt。后两项为跨平台解析依赖，本次 Windows 未编译。
+
 | 名称与版本                              | 声明许可证                                          | 来源           |
 | --------------------------------------- | --------------------------------------------------- | -------------- |
 | adler2 2.0.1                            | 0BSD OR MIT OR Apache-2.0                           | Cargo          |
@@ -233,6 +235,8 @@
 | inout 0.2.5                             | MIT OR Apache-2.0                                   | Cargo          |
 | ipnet 2.12.2                            | MIT OR Apache-2.0                                   | Cargo          |
 | itoa 1.0.18                             | MIT OR Apache-2.0                                   | Cargo          |
+| is-docker 0.2.0                         | MIT                                                 | Cargo          |
+| is-wsl 0.4.0                            | MIT                                                 | Cargo          |
 | javascriptcore-rs 1.1.2                 | MIT                                                 | Cargo          |
 | javascriptcore-rs-sys 1.1.1             | MIT                                                 | Cargo          |
 | jiff 0.2.38                             | Unlicense OR MIT                                    | Cargo          |
@@ -311,6 +315,7 @@
 | objc2-user-notifications 0.3.2          | Zlib OR Apache-2.0 OR MIT                           | Cargo          |
 | objc2-web-kit 0.3.2                     | Zlib OR Apache-2.0 OR MIT                           | Cargo          |
 | once_cell 1.21.4                        | MIT OR Apache-2.0                                   | Cargo          |
+| open 5.4.5                             | MIT                                                 | Cargo          |
 | option-ext 0.2.0                        | MPL-2.0                                             | Cargo          |
 | ordered-stream 0.2.0                    | MIT OR Apache-2.0                                   | Cargo          |
 | p256 0.14.0                             | Apache-2.0 OR MIT                                   | Cargo          |
@@ -465,6 +470,7 @@
 | tauri-plugin 2.7.2                      | Apache-2.0 OR MIT                                   | Cargo          |
 | tauri-plugin-dialog 2.8.4               | Apache-2.0 OR MIT                                   | Cargo          |
 | tauri-plugin-fs 2.7.1                   | Apache-2.0 OR MIT                                   | Cargo          |
+| tauri-plugin-opener 2.7.2               | Apache-2.0 OR MIT                                   | Cargo          |
 | tauri-plugin-single-instance 2.5.5      | Apache-2.0 OR MIT                                   | Cargo          |
 | tauri-runtime 2.12.2                    | Apache-2.0 OR MIT                                   | Cargo          |
 | tauri-runtime-wry 2.12.3                | Apache-2.0 OR MIT                                   | Cargo          |
@@ -613,6 +619,7 @@
 | @tauri-apps/api 2.12.4                  | Apache-2.0 OR MIT                                   | npm production |
 | @xterm/addon-fit 0.11.0                 | MIT                                                 | npm production |
 | @xterm/addon-search 0.16.0              | MIT                                                 | npm production |
+| @xterm/addon-web-links 0.12.0            | MIT                                                 | npm production |
 | @xterm/xterm 6.0.0                      | MIT                                                 | npm production |
 | @types/trusted-types 2.0.7              | MIT                                                 | npm production |
 | dompurify 3.4.17                        | (MPL-2.0 OR Apache-2.0)                             | npm production |

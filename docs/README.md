@@ -22,6 +22,7 @@
 ## 架构与决策：architecture
 
 - [总体架构](architecture/ARCHITECTURE.md)：模块职责、数据流、接口和生命周期。
+- [助手工具与任务](architecture/ASSISTANT_AGENT.md)：工具目录、文件预览/保存、双端传输、运行期任务及审批绑定。
 - [数据库与配置升级](architecture/DATA_MIGRATIONS.md)：支持版本、事务与一致备份、失败恢复及后续迁移开发规则。
 - [技术决策](architecture/DECISIONS.md)：按主题索引独立 ADR，标明有效、部分替代和退出范围的关系。
 - [ADR 0001：SSH 候选库与密码学安全门禁](architecture/decisions/0001-ssh-crypto-gate.md)：独立决策记录。
@@ -29,7 +30,7 @@
 ## 使用指南：guides
 
 - [使用说明](guides/USER_GUIDE.md)：安装、升级、主机连接、日常操作和备份。
-- [AI 助手](guides/AI_ASSISTANT.md)：模型配置、主机关联、切页后台处理、SSH 智能体查询/计划/确认执行/复查及兼容命令审核。
+- [AI 助手](guides/AI_ASSISTANT.md)：模型配置、主机关联、切页后台处理、工具目录、运行期任务及 SSH 查询/计划/确认执行/复查。
 
 ## 插件开发：plugins
 
@@ -38,7 +39,7 @@
 - [开发与本地安装](plugins/PLUGIN_DEVELOPMENT.md)
 - [包格式](plugins/PLUGIN_PACKAGE_FORMAT.md)
 - [运行时与 ABI](plugins/PLUGIN_RUNTIME.md)
-- [公开 SDK](plugins/PLUGIN_SDK.md)：Rust 5.0 / Vue 5.0，插件源码边界与公共能力。
+- [公开 SDK](plugins/PLUGIN_SDK.md)：Rust 5.2 / Vue 5.2，插件源码边界与公共能力。
 - [API 版本策略](plugins/PLUGIN_API_VERSIONING.md)
 - [安全边界](plugins/PLUGIN_SECURITY.md)
 - [插件 UI 扩展](plugins/PLUGIN_UI_EXTENSION.md)：当前 UI v4 独立前端、隔离与生命周期。

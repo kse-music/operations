@@ -12,6 +12,10 @@ const permissions = ref<PluginPermission[]>([]),
   readRoots = ref(''),
   writeRoots = ref('');
 const labels: Record<PluginPermission, [string, string]> = {
+  'operations.read.preapproved': [
+    '任务读取免确认',
+    '“帮我审批”模式下直接读取授权目录内文本、检查传输元数据及执行下方清单固定命令；不自动判断任意命令只读，写入仍需确认',
+  ],
   'network.connect': ['本机 TCP 连接', '从本机探测指定地址与端口，逐次确认'],
   'models.use': ['模型调用', '使用平台已配置模型发送插件提供的消息，凭据保留在宿主'],
   'hosts.read': ['主机目录', '读取已登记主机的公开信息，不含密码、私钥和模型凭据'],
@@ -24,13 +28,18 @@ const labels: Record<PluginPermission, [string, string]> = {
     '交互会话预授权',
     '允许插件直接启动任意远程日志流和终端命令，无需逐次确认；仍需授予 SSH 命令权限',
   ],
-  'sftp.read': ['读取远程文件', '仅限下方可读目录'],
+  'sftp.read': ['读取远程文件', '仅限下方可读目录，读取文本逐次确认'],
   'sftp.write': ['写入远程文件', '仅限下方可写目录，写入逐次确认'],
+  'sftp.transfer': [
+    '文件上传与中转',
+    '本机普通文件上传或远程文件中转；准备和启动逐次确认，远程读写仍须独立权限与目录授权',
+  ],
   'ui.contribute': ['插件界面', '显示插件功能和通知'],
   'settings.read': ['读取插件配置', '仅限这个插件自己的配置'],
   'settings.write': ['保存插件配置', '仅限这个插件自己的配置'],
 };
 const operationMap: Record<PluginPermission, string[]> = {
+  'operations.read.preapproved': ['operations.read.preapproved'],
   'network.connect': ['network.connect'],
   'models.use': ['models.use'],
   'hosts.read': ['hosts.read'],
@@ -39,6 +48,7 @@ const operationMap: Record<PluginPermission, string[]> = {
   'ssh.interactive.preapproved': ['ssh.interactive.preapproved'],
   'sftp.read': ['sftp.read'],
   'sftp.write': ['sftp.write'],
+  'sftp.transfer': ['sftp.transfer'],
   'ui.contribute': ['ui.contribute', 'ui.notify'],
   'settings.read': ['settings.read'],
   'settings.write': ['settings.write'],

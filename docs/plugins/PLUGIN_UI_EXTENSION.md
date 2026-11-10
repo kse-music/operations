@@ -1,6 +1,6 @@
 # 插件 UI v4
 
-UI v4必须携带独立Vue前端，Host API为5.0.0。`entry.ui`指向严格JSON，不接收插件HTML；`frontend.script/style`为包内平面ASCII文件名（≤80字节，以.js/.css结尾），长度及SHA256纳入files清单。
+UI v4必须携带独立Vue前端，Host API为5.2.0。`entry.ui`指向严格JSON，不接收插件HTML；`frontend.script/style`为包内平面ASCII文件名（≤80字节，以.js/.css结尾），长度及SHA256纳入files清单。
 
 ```json
 {

@@ -1,15 +1,14 @@
 use super::{
-    state::{Call, Pending, failure},
+    state::{Call, failure},
     *,
 };
 use serde_json::Value;
 use serverdeck_plugin_core::{
     InstalledPlugin,
-    package::digest,
     permissions::{Grant, GrantInput, denied},
 };
 use serverdeck_plugin_sdk::{ApiError, Capability, Request, Response};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 impl Application {
     pub async fn plugin_grant(&self, id: String, input: GrantInput) -> Result<Grant, Error> {
         if self.plugin_detail(id.clone()).await?.source
@@ -77,7 +76,17 @@ impl Application {
             return Err(Error::ShuttingDown);
         }
         self.plugin_detail(id.to_owned()).await?;
-        let call = self.plugin_host.start_scoped(id, owner)?;
+        let call = if matches!(
+            &request.operation,
+            Capability::Platform {
+                request: serverdeck_plugin_sdk::platform::Request::TransferCancel { .. },
+                ..
+            }
+        ) {
+            self.plugin_host.start_control_scoped(id, owner)?
+        } else {
+            self.plugin_host.start_scoped(id, owner)?
+        };
         self.plugin_dispatch(&call, request).await
     }
     pub(super) async fn plugin_dispatch(
@@ -112,6 +121,9 @@ impl Application {
                 })
             }
             Err(error) => {
+                if let Some(batch) = call.batch.lock().map_err(|_| Error::Busy)?.as_mut() {
+                    batch.operations.clear();
+                }
                 let ipc = serverdeck_core::IpcError::from(error);
                 self.plugin_host.event(Event {
                     plugin_id: call.id.clone(),
@@ -135,7 +147,11 @@ impl Application {
             }
         }
     }
-    async fn plugin_dispatch_inner(&self, call: &Call, request: Request) -> Result<Value, Error> {
+    pub(super) async fn plugin_dispatch_inner(
+        &self,
+        call: &Call,
+        request: Request,
+    ) -> Result<Value, Error> {
         if request.api_version != 1
             || request.request_id.is_empty()
             || request.request_id.len() > 80
@@ -184,40 +200,54 @@ impl Application {
         if !operation.needs_confirmation() {
             return Ok(None);
         }
-        let hash = digest(
-            &serde_json::to_vec(&(
-                plugin.revision.as_str(),
-                call.generation.as_str(),
-                call.owner.as_str(),
-                operation,
-                binding,
-            ))
-            .map_err(|e| Error::Worker(Box::new(e)))?,
-        );
-        let mut data = self.plugin_host.lock()?;
-        data.approvals
-            .retain(|_, pending| pending.at.elapsed() <= Duration::from_secs(60));
-        if let Some(key) = data
-            .approvals
-            .iter()
-            .find(|(_, pending)| pending.digest == hash && pending.approved)
-            .map(|(key, _)| key.clone())
-        {
-            data.approvals.remove(&key);
-            return Ok(None);
-        }
-        if data.approvals.len() >= 16
-            || data
-                .approvals
-                .values()
-                .filter(|pending| pending.public.plugin_id == call.id)
-                .count()
-                >= 4
-        {
-            return Err(Error::Busy);
-        }
+        let data = self.plugin_host.lock()?;
         let Capability::Platform { request, .. } = operation;
         let description = match request {
+            serverdeck_plugin_sdk::platform::Request::ReadFile { path, .. } => format!(
+                "读取远程文本文件：{path}（最多 32 KiB）；插件可使用已授予的模型能力处理内容"
+            ),
+            serverdeck_plugin_sdk::platform::Request::TransferPrepare {
+                source,
+                destination,
+                overwrite,
+            } => format!(
+                "检查传输来源与目标，冻结文件大小及属性；尚不传输内容。\n来源：{}\n目标目录：{}\n覆盖：{}",
+                match source {
+                    serverdeck_plugin_sdk::platform::TransferSource::Local { path } =>
+                        format!("本机 {path}"),
+                    serverdeck_plugin_sdk::platform::TransferSource::Remote { host_id, path } =>
+                        format!("{host_id}:{path}"),
+                },
+                destination.path,
+                overwrite
+            ),
+            serverdeck_plugin_sdk::platform::Request::TransferStart { id } => {
+                let copy = data.copies.get(id).ok_or(Error::NotFound)?;
+                if copy.plugin != call.id
+                    || copy.owner != call.owner
+                    || copy.generation != call.generation
+                {
+                    return Err(denied());
+                }
+                format!(
+                    "传输单个普通文件，{} 字节；校验后提交。\n来源：{}\n目标：{}\n{}",
+                    copy.preview.bytes,
+                    match &copy.preview.source {
+                        serverdeck_plugin_sdk::platform::TransferSource::Local { path } =>
+                            format!("本机 {path}"),
+                        serverdeck_plugin_sdk::platform::TransferSource::Remote {
+                            host_id,
+                            path,
+                        } => format!("{host_id}:{path}"),
+                    },
+                    copy.preview.destination.path,
+                    if copy.preview.target_exists {
+                        "将原子覆盖现有目标文件"
+                    } else {
+                        "不覆盖已有文件"
+                    }
+                )
+            }
             serverdeck_plugin_sdk::platform::Request::Execute { command, .. }
             | serverdeck_plugin_sdk::platform::Request::StreamOpen { command, .. }
             | serverdeck_plugin_sdk::platform::Request::Terminal { command, .. } => command
@@ -238,15 +268,25 @@ impl Application {
                     return Err(denied());
                 }
                 format!(
-                    "写入 {}，{} 字节，SHA256 {}",
+                    "写入 {}，{} 字节，SHA256 {}\n{}",
                     doc.path,
                     content.len(),
-                    digest(content.as_bytes())
+                    serverdeck_plugin_core::package::digest(content.as_bytes()),
+                    self.files.preview_text(&doc.internal_token, content)?
                 )
             }
             _ => return Ok(None),
         };
         let host_id = match request {
+            serverdeck_plugin_sdk::platform::Request::ReadFile { host_id, .. } => host_id.clone(),
+            serverdeck_plugin_sdk::platform::Request::TransferPrepare { destination, .. } => {
+                destination.host_id.clone()
+            }
+            serverdeck_plugin_sdk::platform::Request::TransferStart { id } => data
+                .copies
+                .get(id)
+                .map(|copy| copy.preview.destination.host_id.clone())
+                .ok_or(Error::NotFound)?,
             serverdeck_plugin_sdk::platform::Request::SaveFile { document_id, .. } => data
                 .documents
                 .get(document_id)
@@ -259,30 +299,22 @@ impl Application {
         } else {
             description
         };
-        let public = Approval {
-            id: uuid::Uuid::new_v4().to_string(),
-            plugin_id: call.id.clone(),
-            plugin_name: plugin.manifest.name.clone(),
-            plugin_version: plugin.manifest.version.clone(),
-            host_id,
-            operation: operation.operation().into(),
-            description,
-            target: target.map(str::to_owned),
-        };
-        data.approvals.insert(
-            public.id.clone(),
-            Pending {
-                owner: call.owner.clone(),
-                public: public.clone(),
-                digest: hash,
-                at: Instant::now(),
-                approved: false,
+        drop(data);
+        self.plugin_confirm_details(
+            call,
+            plugin,
+            operation,
+            super::approvals::ConfirmationDetails {
+                host_id,
+                binding: binding.map(str::to_owned),
+                target: target.map(str::to_owned),
+                description,
             },
-        );
-        Ok(Some(public))
+        )
     }
     pub(crate) async fn plugin_stop_resources(&self, id: &str) -> Result<(), Error> {
         self.plugin_host.stop(id).await?;
+        self.plugin_close_copies(id, None).await?;
         let (documents, streams, terminals) = {
             let mut data = self.plugin_host.lock()?;
             data.continuations.retain(|_, p| p.plugin != id);

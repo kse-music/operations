@@ -1,4 +1,5 @@
 import type { LogSource } from './ops-types';
+import type { TransferPreview, TransferState } from '@serverdeck/plugin-sdk/types/platform';
 export interface AiConfig {
   provider: 'openai_compatible' | 'local_codex' | 'local_claude_code';
   baseUrl: string;
@@ -57,6 +58,7 @@ export interface AiSelection {
   logLines: number;
 }
 export interface AiPrepare {
+  approvalMode?: 'request' | 'assist';
   modelId: string;
   sessionId: string | null;
   question: string;
@@ -82,6 +84,7 @@ export interface AiResolveHosts {
   redactValues: string[];
 }
 export interface AiTurn {
+  approvalMode?: 'request' | 'assist';
   id: string;
   question: string;
   state: 'pending' | 'complete' | 'failed' | 'cancelled';
@@ -89,8 +92,68 @@ export interface AiTurn {
   error: string;
   requestId: string;
   hostIds: string[];
+  task: AiTask | null;
+}
+export type AiTaskStatus =
+  | 'prepared'
+  | 'running'
+  | 'awaiting_approval'
+  | 'executing'
+  | 'transferring'
+  | 'verifying'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'unverified'
+  | 'expired';
+export interface AiTask {
+  id: string;
+  status: AiTaskStatus;
+  modelId: string;
+  hostIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+}
+export const taskStatusLabels: Record<AiTaskStatus, string> = {
+  prepared: '已准备',
+  running: '正在查询与分析',
+  awaiting_approval: '等待审核',
+  executing: '正在执行',
+  transferring: '正在传输',
+  verifying: '正在复查',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已停止',
+  unverified: '结果未确认，请核对实际状态',
+  expired: '已过期，请重新提问',
+};
+export type AiToolId =
+  | 'diagnostic'
+  | 'capabilities'
+  | 'images'
+  | 'containers'
+  | 'container_details'
+  | 'container_stats'
+  | 'processes'
+  | 'process_details'
+  | 'ports'
+  | 'services'
+  | 'service_details'
+  | 'remove_untagged_images'
+  | 'container'
+  | 'service'
+  | 'file_read'
+  | 'file_edit'
+  | 'transfer_prepare'
+  | 'transfer';
+export interface AiToolResult {
+  tool: AiToolId;
+  status: 'running' | 'succeeded' | 'verified' | 'failed' | 'unverified' | 'skipped';
+  message: string | null;
 }
 export interface AiPreview {
+  task?: AiTask;
   id: string;
   modelId: string;
   destination: string;
@@ -109,6 +172,7 @@ export interface AiProposal {
   changeConfirmation: string | null;
 }
 export interface AiAnswer {
+  task?: AiTask;
   text: string;
   proposals: AiProposal[];
   usage: { inputTokens: number; outputTokens: number } | null;
@@ -116,6 +180,9 @@ export interface AiAnswer {
   agent?: AiAgentReport;
 }
 export interface AiExecution {
+  pending?: boolean;
+  transfer?: TransferState;
+  task?: AiTask;
   success: boolean;
   output: string;
   agent?: { steps: AiAgentStepResult[] };
@@ -123,12 +190,12 @@ export interface AiExecution {
 export interface AiAgentStep {
   action: string;
   target: string;
+  preview?:
+    | { kind: 'edit'; path: string; baseSha256: string; diff: string }
+    | { kind: 'transfer'; preview: TransferPreview };
 }
-export interface AiAgentStepResult extends AiAgentStep {
-  status: 'verified' | 'failed' | 'unverified' | 'skipped';
-  message: string;
-}
+export interface AiAgentStepResult extends AiAgentStep, AiToolResult {}
 export interface AiAgentReport {
-  observations: { query: string; success: boolean; records: number; message: string | null }[];
+  observations: (AiToolResult & { query: string; records: number })[];
   steps: AiAgentStep[];
 }

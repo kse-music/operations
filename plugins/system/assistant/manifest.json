@@ -3,10 +3,10 @@
   "id": "cn.hiboot.plugins.assistant",
   "name": "AI 运维助手",
   "icon": "bot",
-  "version": "2.0.6",
+  "version": "2.3.1",
   "author": "ServerDeck",
-  "description": "通过 SSH 查询主机、生成操作计划，在确认后执行并复查结果。",
-  "apiVersion": "^5.0.0",
+  "description": "查询主机、预览文件修改及传输计划，在确认后执行并校验结果。",
+  "apiVersion": "^5.2.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"
@@ -15,9 +15,13 @@
     "ui.contribute",
     "hosts.read",
     "ssh.execute",
+    "sftp.read",
+    "sftp.write",
+    "sftp.transfer",
     "models.use",
     "settings.read",
-    "settings.write"
+    "settings.write",
+    "operations.read.preapproved"
   ],
   "contributions": [
     {
@@ -31,7 +35,109 @@
       "kind": "settings"
     }
   ],
-  "platforms": ["windows", "linux", "macos"],
+  "platforms": [
+    "windows",
+    "linux",
+    "macos"
+  ],
   "files": [],
-  "publisher": null
+  "publisher": null,
+  "preapprovedCommands": [
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; uptime"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; free -m"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; df -h"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; printf 'SDOPS1\\000'\nif command -v docker >/dev/null 2>&1; then\n printf '1\\000'\n d version --format '{{json .}}'\n printf '\\000%s\\000' \"$?\"\nelse printf '0\\000\\000127\\000'; fi\nif test -d /run/systemd/system && command -v systemctl >/dev/null 2>&1; then printf '1\\000'; else printf '0\\000'; fi\ncommand -v ps >/dev/null 2>&1 && printf '1\\000' || printf '0\\000'\ncommand -v ss >/dev/null 2>&1 && printf '1\\000' || printf '0\\000'\ncommand -v python3 >/dev/null 2>&1 && printf '1\\000' || printf '0\\000'\nexit 0\n"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; d container ls --all --no-trunc --format '{{json .}}'"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; d image ls --all --no-trunc --digests --format '{{json .}}'"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; ps -eo pid=,user=,pcpu=,pmem=,etimes=,comm= --sort=-pcpu"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; ss -H -lntup"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; test -d /run/systemd/system || { printf '此系统未运行 systemd' >&2; exit 78; }; systemctl --system --no-ask-password --no-pager --plain --full --no-legend list-units --all --type=service || exit $?; printf '\\000'; systemctl --system --no-ask-password --no-pager --no-legend list-unit-files --type=service"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; test -d /run/systemd/system || { printf '此系统未运行 systemd' >&2; exit 78; }; systemctl --user --no-ask-password --no-pager --plain --full --no-legend list-units --all --type=service || exit $?; printf '\\000'; systemctl --user --no-ask-password --no-pager --no-legend list-unit-files --type=service"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C\nexport PATH=/usr/sbin:/usr/bin:/sbin:/bin\nprintf 'SDMON1\\000'\npart() {\n    printf '%s\\000' \"$1\"\n    shift\n    \"$@\"\n    result=$?\n    printf '\\000%s_code\\000%s\\000' \"$section\" \"$result\"\n}\nsection=stat; part stat head -c 262145 /proc/stat\nsection=memory; part memory head -c 65537 /proc/meminfo\nsection=uptime; part uptime cat /proc/uptime\nsection=boot; part boot cat /proc/sys/kernel/random/boot_id\nsection=load; part load cat /proc/loadavg\nsection=hostname; part hostname cat /proc/sys/kernel/hostname\nsection=kernel; part kernel uname -r\nsection=arch; part arch uname -m\nsection=os; part os head -c 16385 /etc/os-release\nsection=cpuinfo; part cpuinfo head -c 65536 /proc/cpuinfo\nsection=time; part time date '+%Y-%m-%dT%H:%M:%S%z %Z'\nprintf 'timezone\\000'\nif test -r /etc/timezone; then head -c 1024 /etc/timezone\nelse readlink /etc/localtime\nfi\nprintf '\\000'\nsection=net; part net head -c 65537 /proc/net/dev\nsection=addresses; part addresses ip -o address show\nprintf 'indices\\000'\nfor interface in /sys/class/net/*; do\n    test -r \"$interface/ifindex\" || continue\n    printf '%s ' \"${interface##*/}\"\n    cat \"$interface/ifindex\"\ndone\nprintf '\\000'\nsection=mounts; part mounts head -c 524289 /proc/self/mountinfo\nsection=df; part df timeout -s KILL 4 df -P -k -T\nexit 0\n"
+      ],
+      "timeoutSecs": 30
+    },
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "sleep 0.25;export LC_ALL=C\nexport PATH=/usr/sbin:/usr/bin:/sbin:/bin\nprintf 'SDMON1\\000'\npart() {\n    printf '%s\\000' \"$1\"\n    shift\n    \"$@\"\n    result=$?\n    printf '\\000%s_code\\000%s\\000' \"$section\" \"$result\"\n}\nsection=stat; part stat head -c 262145 /proc/stat\nsection=memory; part memory head -c 65537 /proc/meminfo\nsection=uptime; part uptime cat /proc/uptime\nsection=boot; part boot cat /proc/sys/kernel/random/boot_id\nsection=load; part load cat /proc/loadavg\nsection=hostname; part hostname cat /proc/sys/kernel/hostname\nsection=kernel; part kernel uname -r\nsection=arch; part arch uname -m\nsection=os; part os head -c 16385 /etc/os-release\nsection=cpuinfo; part cpuinfo head -c 65536 /proc/cpuinfo\nsection=time; part time date '+%Y-%m-%dT%H:%M:%S%z %Z'\nprintf 'timezone\\000'\nif test -r /etc/timezone; then head -c 1024 /etc/timezone\nelse readlink /etc/localtime\nfi\nprintf '\\000'\nsection=net; part net head -c 65537 /proc/net/dev\nsection=addresses; part addresses ip -o address show\nprintf 'indices\\000'\nfor interface in /sys/class/net/*; do\n    test -r \"$interface/ifindex\" || continue\n    printf '%s ' \"${interface##*/}\"\n    cat \"$interface/ifindex\"\ndone\nprintf '\\000'\nsection=mounts; part mounts head -c 524289 /proc/self/mountinfo\nsection=df; part df timeout -s KILL 4 df -P -k -T\nexit 0\n"
+      ],
+      "timeoutSecs": 30
+    }
+  ]
 }

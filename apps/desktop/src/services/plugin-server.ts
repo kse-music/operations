@@ -37,7 +37,7 @@ export async function pluginPlatformRequest<T>(
         throw { code: 'PLUGIN_CANCELLED', message: '页面已隐藏或上下文已变化' };
       const accepted = await plugins.ask(
         '插件操作需要单独确认',
-        `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
+        `${approval.pluginName} ${approval.pluginVersion}\n${approval.description}`,
         undefined,
         owner,
       );
@@ -192,17 +192,23 @@ export async function pluginInvokeRequest<T>(
       }
       const readable = presentation && approval.target;
       const accepted = await plugins.ask(
-        readable ? presentation.title : '插件操作需要单独确认',
+        readable
+          ? presentation.title
+          : approval.operation === 'ui.contribute'
+            ? '确认执行本次计划'
+            : '插件操作需要单独确认',
         readable
           ? `主机：${approval.target}\n\n${presentation.message}`
-          : `${approval.pluginName} ${approval.pluginVersion}\n${approval.hostId}\n${approval.description}`,
+          : `${approval.pluginName} ${approval.pluginVersion}\n${approval.description}`,
         undefined,
         owner,
         readable
           ? {
               confirmLabel: presentation.confirmLabel ?? '确认',
             }
-          : undefined,
+          : approval.operation === 'ui.contribute'
+            ? { confirmLabel: '确认执行' }
+            : undefined,
       );
       const confirmed = accepted && isActive();
       await pluginsApi.approve(approval.id, confirmed);

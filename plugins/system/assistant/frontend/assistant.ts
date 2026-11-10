@@ -1,4 +1,4 @@
-import { onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue';
+import { onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 import { useAssistantApi } from './api';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
@@ -28,14 +28,92 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   let controller: AbortController | null = null;
   const turns = ref<AiTurn[]>([]),
     busy = ref<'prepare' | 'send' | 'execute' | ''>('');
-  const error = ref(''),
-    review = shallowRef<AiProposal | null>(null);
+  const error = ref('');
   const outputs = ref<Record<string, AiExecution>>({}),
     attempted = ref<string[]>([]),
     expired = ref<string[]>([]);
   let version = 0,
     disposed = false,
     requestId = '';
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let polling = false;
+  let pollOffset = 0;
+  let cleanup: Promise<void> | null = null;
+  const cancelling = ref<string[]>([]);
+  function schedulePoll() {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = null;
+    if (disposed || !visible.value || !Object.values(outputs.value).some((value) => value.pending))
+      return;
+    pollTimer = setTimeout(() => {
+      void pollTransfers();
+    }, 1000);
+  }
+  async function pollTransfers() {
+    if (disposed || !visible.value || busy.value || polling) {
+      schedulePoll();
+      return;
+    }
+    const pending = Object.entries(outputs.value).filter(([, value]) => value.pending);
+    if (!pending.length) return;
+    const [proposalId] = pending[pollOffset++ % pending.length]!;
+    const turn = turns.value.find((turn) =>
+      turn.answer?.proposals.some((p) => p.id === proposalId),
+    );
+    if (!turn?.requestId) return;
+    const current = version;
+    polling = true;
+    try {
+      const result = await aiApi.poll(turn.requestId);
+      if (!disposed && current === version) {
+        outputs.value[proposalId] = result;
+        turn.task = result.task ?? turn.task;
+      }
+    } catch (cause) {
+      const code = (cause as { code?: string })?.code;
+      if (
+        !disposed &&
+        current === version &&
+        !['BUSY', 'PLUGIN_BUSY', 'PLUGIN_RATE_LIMIT'].includes(code ?? '')
+      )
+        error.value = `传输状态读取失败：${errorMessage(cause)}`;
+    } finally {
+      polling = false;
+      schedulePoll();
+    }
+  }
+  async function cancelTransfer(proposalId: string) {
+    const transfer = outputs.value[proposalId]?.transfer;
+    if (!transfer || !outputs.value[proposalId]?.pending || cancelling.value.includes(proposalId))
+      return;
+    const current = version;
+    cancelling.value.push(proposalId);
+    try {
+      const state = await aiApi.cancelTransfer(transfer.id);
+      if (!disposed && current === version && outputs.value[proposalId])
+        outputs.value[proposalId] = { ...outputs.value[proposalId]!, transfer: state };
+    } catch (cause) {
+      if (!disposed && current === version) error.value = errorMessage(cause);
+    } finally {
+      cancelling.value = cancelling.value.filter((id) => id !== proposalId);
+      schedulePoll();
+    }
+  }
+  watch([visible, outputs, busy], schedulePoll, { deep: true });
+  async function refreshTask(turn: AiTurn, fallback: 'failed' | 'unverified') {
+    if (!turn.task) return;
+    const current = version;
+    try {
+      const snapshot = await aiApi.task(turn.task.id);
+      if (!disposed && current === version) turn.task = snapshot;
+    } catch (cause) {
+      if (disposed || current !== version) return;
+      turn.task = { ...turn.task, status: fallback };
+      error.value = [error.value, `任务状态读取失败：${errorMessage(cause)}`]
+        .filter(Boolean)
+        .join('\n');
+    }
+  }
   async function revoke(id: string) {
     if (!id || (!visible.value && !keepRunning.value)) return;
     const current = version;
@@ -46,15 +124,29 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     }
   }
   function invalidate() {
+    if (pollTimer) clearTimeout(pollTimer);
+    for (const value of Object.values(outputs.value))
+      if (value.pending && value.transfer) {
+        void aiApi.cancelTransfer(value.transfer.id).catch((cause: unknown) => {
+          if (!disposed) error.value = errorMessage(cause);
+        });
+      }
     controller?.abort();
     hostContext.clear();
     version++;
     const ids = new Set(turns.value.map((t) => t.requestId).filter(Boolean));
     if (requestId) ids.add(requestId);
-    for (const id of ids) void revoke(id);
+    if (ids.size) {
+      const draining = (cleanup ?? Promise.resolve()).then(async () => {
+        for (const id of ids) await revoke(id);
+      });
+      cleanup = draining;
+      void draining.then(() => {
+        if (cleanup === draining) cleanup = null;
+      });
+    }
     requestId = '';
     turns.value = [];
-    review.value = null;
     outputs.value = {};
     attempted.value = [];
     expired.value = [];
@@ -62,23 +154,33 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   }
   watch([visible, keepRunning], ([active, retained]) => {
     if (active) return;
-    review.value = null;
     if (retained) return;
     controller?.abort();
     ++version;
     requestId = '';
-    review.value = null;
     error.value = '';
     // The Host revokes these resources when the page hides. Keep readable history,
     // but never attempt to cancel or execute handles from the previous context.
+    for (const output of Object.values(outputs.value))
+      if (output.pending) {
+        output.pending = false;
+        output.success = false;
+        output.output = '所属页面已释放，传输结果未确认，请独立核对目标文件';
+      }
     for (const turn of turns.value) {
       turn.requestId = '';
-      if (turn.state === 'pending') turn.state = 'cancelled';
+      if (turn.state === 'pending') {
+        turn.state = 'cancelled';
+        if (turn.task) turn.task = { ...turn.task, status: 'cancelled' };
+      }
       for (const proposal of turn.answer?.proposals ?? [])
         if (!expired.value.includes(proposal.id)) expired.value.push(proposal.id);
     }
   });
   async function send(input: AiPrepare, initialHostIds: string[] = []) {
+    const submitted = version;
+    if (cleanup) await cleanup;
+    if (disposed || submitted !== version) return;
     if (busy.value) return;
     const current = version;
     const previousHostIds =
@@ -86,12 +188,14 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     controller = new AbortController();
     const turn: AiTurn = {
       id: crypto.randomUUID(),
+      approvalMode: input.approvalMode ?? 'request',
       question: input.question,
       state: 'pending',
       answer: null,
       error: '',
       requestId: '',
       hostIds: [],
+      task: null,
     };
     turns.value.push(turn);
     const entry = turns.value[turns.value.length - 1]!;
@@ -106,6 +210,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     error.value = '';
     busy.value = 'prepare';
     let retained = false;
+    let automatic: AiProposal | undefined;
     try {
       if (keepRunning.value && aiApi.begin) {
         await aiApi.begin();
@@ -153,6 +258,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       }
       requestId = prepared.id;
       entry.requestId = prepared.id;
+      entry.task = prepared.task ? { ...prepared.task, status: 'running' } : null;
       busy.value = 'send';
       // Sending consumes the frozen native request; command execution is reviewed separately.
       const answer = await aiApi.send(prepared.id, true);
@@ -168,11 +274,15 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
           ],
         };
         entry.state = 'complete';
+        entry.task = answer.task ?? entry.task;
+        if (entry.approvalMode === 'assist' && visible.value)
+          automatic = answer.proposals.find((p) => p.risk !== 'manual_only');
       }
     } catch (e) {
       if (!disposed && current === version) {
         entry.error = errorMessage(e);
         entry.state = 'failed';
+        await refreshTask(entry, 'failed');
       }
     } finally {
       if (retained) await end();
@@ -181,6 +291,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       hostContext.phase.value = '';
       controller = null;
     }
+    if (automatic && !disposed && current === version && visible.value)
+      await executeProposal(automatic);
   }
   async function end() {
     try {
@@ -199,8 +311,10 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     version++;
     requestId = '';
     const turn = turns.value.find((t) => t.state === 'pending');
-    if (turn) turn.state = 'cancelled';
-    review.value = null;
+    if (turn) {
+      turn.state = 'cancelled';
+      if (turn.task) turn.task = { ...turn.task, status: 'cancelled' };
+    }
     await revoke(id);
   }
   function inspect(proposal: AiProposal) {
@@ -211,31 +325,28 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       proposal.risk === 'manual_only'
     )
       return;
-    review.value = proposal;
+    return executeProposal(proposal);
   }
-  async function execute(confirmed: boolean, changeConfirmation: string) {
-    const proposal = review.value;
-    if (proposal) await executeProposal(proposal, confirmed, changeConfirmation);
-  }
-  async function executeProposal(
-    proposal: AiProposal,
-    confirmed: boolean,
-    changeConfirmation: string,
-  ) {
+  async function executeProposal(proposal: AiProposal) {
+    const submitted = version;
+    if (cleanup) await cleanup;
+    if (disposed || submitted !== version) return;
     if (
       !proposal ||
       expired.value.includes(proposal.id) ||
+      attempted.value.includes(proposal.id) ||
       busy.value ||
-      !confirmed ||
-      (proposal.changeConfirmation !== null && proposal.changeConfirmation !== changeConfirmation)
+      proposal.risk === 'manual_only'
     )
       return;
     const current = version;
+    const turn = turns.value.find((turn) =>
+      turn.answer?.proposals.some((p) => p.id === proposal.id),
+    );
     attempted.value.push(proposal.id);
+    if (turn?.task) turn.task = { ...turn.task, status: 'executing' };
     busy.value = 'execute';
-    requestId =
-      turns.value.find((turn) => turn.answer?.proposals.some((p) => p.id === proposal.id))
-        ?.requestId ?? '';
+    requestId = turn?.requestId ?? '';
     error.value = '';
     let retained = false;
     try {
@@ -244,22 +355,24 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
         retained = true;
         if (disposed || current !== version) return;
       }
-      const result = await aiApi.execute(
-        proposal.id,
-        true,
-        proposal.changeConfirmation === null ? null : changeConfirmation,
-      );
-      if (!disposed && current === version) outputs.value[proposal.id] = result;
+      const result = await aiApi.execute(proposal.id, true, null);
+      if (!disposed && current === version) {
+        outputs.value[proposal.id] = result;
+        if (turn) turn.task = result.task ?? turn.task;
+      }
     } catch (e) {
-      if (current === version) error.value = errorMessage(e);
+      if (current === version) {
+        error.value = errorMessage(e);
+        if (turn) await refreshTask(turn, 'unverified');
+      }
     } finally {
       if (retained) await end();
-      if (current === version) review.value = null;
       busy.value = '';
       requestId = '';
     }
   }
   onBeforeUnmount(() => {
+    if (pollTimer) clearTimeout(pollTimer);
     disposed = true;
     invalidate();
   });
@@ -268,14 +381,14 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     turns,
     busy,
     error,
-    review,
     outputs,
     attempted,
     expired,
     send,
     cancel,
     inspect,
-    execute,
     invalidate,
+    cancelling,
+    cancelTransfer,
   };
 }

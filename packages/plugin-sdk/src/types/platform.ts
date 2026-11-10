@@ -17,7 +17,33 @@ export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
+export type TransferSource =
+  { kind: 'local'; path: string } | { kind: 'remote'; hostId: string; path: string };
+export interface RemotePath {
+  hostId: string;
+  path: string;
+}
+export interface TransferPreview {
+  id: string;
+  source: TransferSource;
+  destination: RemotePath;
+  bytes: number;
+  overwrite: boolean;
+  targetExists: boolean;
+}
+export interface TransferState {
+  id: string;
+  state: string;
+  totalBytes: number;
+  transferredBytes: number;
+  bytesPerSecond: number;
+  sha256: string | null;
+  message: string | null;
+  recoveryPaths: string[];
+}
 export type PlatformRequest =
+  | { kind: 'approval_mode'; mode: 'request' | 'assist' }
+  | { kind: 'confirm_operations'; operations: { request: PlatformRequest; count: number }[] }
   | { kind: 'tcp_connect'; target: string; port: number }
   | { kind: 'info' | 'hosts' | 'models' }
   | { kind: 'model'; modelId: string }
@@ -35,6 +61,16 @@ export type PlatformRequest =
   | { kind: 'save_file'; documentId: string; content: string }
   | { kind: 'close_file'; documentId: string; discard: boolean }
   | { kind: 'file_dirty'; documentId: string; dirty: boolean }
+  | {
+      kind: 'transfer_prepare';
+      source: TransferSource;
+      destination: RemotePath;
+      overwrite: boolean;
+    }
+  | {
+      kind: 'transfer_start' | 'transfer_status' | 'transfer_cancel' | 'transfer_close';
+      id: string;
+    }
   | { kind: 'settings_read' }
   | { kind: 'settings_write'; value: JsonValue }
   | { kind: 'notify'; message: string }

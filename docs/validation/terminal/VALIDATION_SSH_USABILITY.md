@@ -1,5 +1,35 @@
 # SSH 日常使用增强验收
 
+## 2026-11-10 终端网址点击
+
+### 实现与行为
+
+本地和 SSH 共用的 `TerminalPane` 载入 xterm 官方 `WebLinksAddon`，普通 HTTP/HTTPS 文本及 OSC 8 网页链接使用同一左键回调，经仅主窗口授权的 `terminal_open_link` IPC 交给系统默认浏览器。Rust 校验协议、主机、32 KiB 上限及空白/控制字符，不开放任意文件或 Shell。隐藏、卸载、其他弹窗阻挡及已有选区时不激活，失败通过已有通知显示，不记录 URL 正文。
+
+真实浏览器夹具先暴露了 xterm 在同一网址内拖动选择仍会激活链接的行为；增加 `hasSelection()` 保护后，原失败断言及单击回归通过。测试夹具切换输出时需先移动到另一行，避免 xterm 对同一鼠标单元格的悬停缓存干扰后续用例。
+
+### 实际执行
+
+环境：Windows、Node 22.17.0、xterm 6.0.0、WebLinksAddon 0.12.0、独立无头 Edge。证据保留在 `.local/qa/terminal-links/`，含 `browser-check.mjs`、`browser-result.json`、已查看的 `drag-selection.png`、复制后的 `browser-links-tests.exe`、`validation-result.json` 和新增依赖归档的校验/许可资料。
+
+| 检查                                                                                                                                                                | 结果                                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| 终端相关 Vitest：`terminal-clipboard`、`plugin-terminal-dialog`、`terminal-zmodem`、`terminal-drop-focus`、`terminal-actions`、`terminal-zoom`、`services/terminal` | 7 个文件、55 项通过；包含错误提示、右键/隐藏/弹窗不打开、拖动选区保护和 IPC 参数/错误传播              |
+| `cargo test -p serverdeck-desktop --test browser_links --no-run --locked --offline`，复制 EXE 到 QA 后执行                                                          | 3 项常规测试通过；合法本机/IP/IPv6/端口/查询/片段保留，非法协议/输入拒绝，非主窗口/远程来源 ACL 拒绝   |
+| QA EXE 显式执行 `--ignored --nocapture`                                                                                                                             | 1 项通过；真实调用默认浏览器，回环 HTTP 服务收到指定路径与查询参数。片段按浏览器标准不发送到 HTTP 服务 |
+| `node .local/qa/terminal-links/browser-check.mjs`                                                                                                                   | 9 组通过：本机/回环/HTTPS、悬停与直接左键、换行长链接、OSC 8、危险协议不激活、拖动保留选区、右键不打开 |
+| `npm run build`、`npm run typecheck`                                                                                                                                | 通过；保留既有大 chunk 提示                                                                            |
+| 修改源码 ESLint、Prettier；新增文档段落格式/链接检查；`cargo fmt --all -- --check`                                                                                  | 通过                                                                                                   |
+| `cargo check -p serverdeck-desktop --offline`                                                                                                                       | 通过                                                                                                   |
+| `cargo clippy -p serverdeck-desktop --all-targets --locked --offline -- -D warnings`                                                                                | 未通过：现有 `crates/core/src/openssh.rs:289` 触发 `single_element_loop`，未修改无关实现               |
+| `cargo clippy -p serverdeck-desktop --all-targets --no-deps --locked --offline -- -D warnings`                                                                      | 通过；只证明桌面修改范围，不代表依赖全量 Clippy 通过                                                   |
+
+首次沙箱内 Vitest 因临时缓存重命名 `EPERM` 没有执行测试，使用正常本地权限后通过。Rust mock WebView 测试打印已有的默认图标资源提示，ACL 断言通过。新增两个跨平台依赖归档 SHA-256 与 Cargo.lock 一致，五项新增依赖许可证已同步交付声明。
+
+### 限制与后续依赖
+
+真实 xterm 交互夹具使用内存终端后端并截获打开链接 IPC；默认浏览器由独立 Rust 原生测试实测，本次未声称完成打包桌面内从真实 SSH 输出点击到浏览器的端到端验收。未重建桌面 EXE/安装器，也未测试 Linux/macOS 客户端；新版桌面产物需要重新构建。SSH 输出中的 localhost 指向运行浏览器的本机，访问远程服务依赖本机可达地址或已有转发。本阶段无其他已知阻断，不自动开始跨平台或发布工作。
+
 ## 2026-11-09 窗口缩放滚动与末行裁切修复
 
 ### 复现与实现

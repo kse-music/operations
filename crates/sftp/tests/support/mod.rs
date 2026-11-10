@@ -54,6 +54,7 @@ fn attrs(m: &std::fs::Metadata) -> FileAttributes {
 }
 #[derive(Default)]
 pub struct FileFaults {
+    pub corrupt_reads: std::sync::atomic::AtomicBool,
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
     pub links: Mutex<HashMap<String, String>>,
@@ -236,6 +237,13 @@ impl russh_sftp::server::Handler for Disk {
             return Err(StatusCode::Eof);
         }
         bytes.truncate(n);
+        if self
+            .faults
+            .corrupt_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            bytes[0] ^= 1;
+        }
         Ok(Data { id, data: bytes })
     }
     async fn write(
@@ -510,11 +518,14 @@ impl server::Handler for Handler {
     }
 }
 pub struct Server {
+    // Used only by integration suites that connect two servers to one engine.
+    #[allow(dead_code)]
+    pub database: Database,
     pub faults: Arc<FileFaults>,
     pub root: tempfile::TempDir,
     pub host: Host,
     pub engine: Engine,
-    password: String,
+    pub password: String,
     sockets: Arc<Mutex<Vec<std::net::TcpStream>>>,
     task: tokio::task::JoinHandle<()>,
     _database: tempfile::TempDir,
@@ -526,9 +537,19 @@ impl Drop for Server {
 }
 impl Server {
     pub async fn start(atomic: bool, delay: Duration) -> Self {
+        Self::start_shared(atomic, delay, None).await
+    }
+    pub async fn start_shared(
+        atomic: bool,
+        delay: Duration,
+        shared: Option<(Database, Engine)>,
+    ) -> Self {
         let root = tempfile::tempdir().expect("root");
         let database = tempfile::tempdir().expect("db");
-        let db = Database::open(database.path().join("db")).expect("db");
+        let db = shared
+            .as_ref()
+            .map(|(db, _)| db.clone())
+            .unwrap_or_else(|| Database::open(database.path().join("db")).expect("db"));
         let password = uuid::Uuid::new_v4().to_string();
         let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("key");
         let pin = key.public_key().fingerprint(HashAlg::Sha256).to_string();
@@ -558,7 +579,9 @@ impl Server {
                 ssh: Default::default(),
             })
             .expect("host");
-        let engine = Engine::new(db.clone());
+        let engine = shared
+            .map(|(_, engine)| engine)
+            .unwrap_or_else(|| Engine::new(db.clone()));
         let sockets = Arc::new(Mutex::new(Vec::<std::net::TcpStream>::new()));
         let peers = sockets.clone();
         let pw = password.clone();
@@ -572,6 +595,7 @@ impl Server {
             }
         });
         Self {
+            database: db,
             faults,
             root,
             host,

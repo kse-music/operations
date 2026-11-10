@@ -1,6 +1,6 @@
-# Plugin SDK 5.0.0
+# Plugin SDK 5.2.0
 
-Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.0.0**；WASM ABI / wire 为 1，界面为 UI v4。当前开发期直接拒绝旧主版本、旧业务能力和旧 UI，不提供兼容层。
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.2.0**；WASM ABI / wire 为 1，界面为 UI v4。当前开发期直接拒绝旧主版本、旧业务能力和旧 UI，不提供兼容层。
 
 ## 职责边界
 
@@ -64,20 +64,21 @@ serverdeck_plugin_sdk::export_plugin!(handle);
 
 Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Capability` 只有 `Platform { request, bindings }`，身份和页面 owner 由可信宿主绑定。目标使用明确的登记 `hostId`，不使用界面当前选中主机或内部 session ID。
 
-| 请求 kind                                      | 用途                              | 权限 / operation              |
-| ---------------------------------------------- | --------------------------------- | ----------------------------- |
-| `info`                                         | 时间、nonce、当前插件/作用域修订  | `ui.contribute`               |
-| `hosts`, `host`                                | 安全资产目录、指定主机及修订绑定  | `hosts.read`                  |
-| `models`, `model`, `model_complete`            | 安全模型目录/绑定、插件自备消息   | `models.use`                  |
-| `execute`                                      | 单次 SSH 命令，真实退出状态与输出 | `ssh.execute`                 |
-| `stream_open/poll/pause/stop`                  | 任意已批准命令的有界 ACK 字节流   | `ssh.execute`                 |
-| `terminal`                                     | 已批准命令的一次性 PTY 票据       | `ssh.execute`                 |
-| `read_file`, `close_file`                      | 受目录范围约束的文本编辑句柄      | `sftp.read`                   |
-| `save_file`, `file_dirty`                      | 冲突检测、原子保存、退出保护      | `sftp.write`                  |
-| `settings_read/write`                          | 本插件独立 JSON 配置              | `settings.read/write`         |
-| `notify`                                       | 有界通知                          | `ui.contribute` / `ui.notify` |
-| `tcp_connect`                                  | 从本机探测目标 TCP 端口，3 秒超时 | `network.connect`             |
-| `result_read/close`, `output_open/part/finish` | SDK 内部透明分块传输              | `ui.contribute`               |
+| 请求 kind                                      | 用途                              | 权限 / operation                                                      |
+| ---------------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `info`                                         | 时间、nonce、当前插件/作用域修订  | `ui.contribute`                                                       |
+| `hosts`, `host`                                | 安全资产目录、指定主机及修订绑定  | `hosts.read`                                                          |
+| `models`, `model`, `model_complete`            | 安全模型目录/绑定、插件自备消息   | `models.use`                                                          |
+| `execute`                                      | 单次 SSH 命令，真实退出状态与输出 | `ssh.execute`                                                         |
+| `stream_open/poll/pause/stop`                  | 任意已批准命令的有界 ACK 字节流   | `ssh.execute`                                                         |
+| `terminal`                                     | 已批准命令的一次性 PTY 票据       | `ssh.execute`                                                         |
+| `read_file`, `close_file`                      | 受目录范围约束的文本编辑句柄      | `sftp.read`                                                           |
+| `save_file`, `file_dirty`                      | 冲突检测、原子保存、退出保护      | `sftp.write`                                                          |
+| `transfer_prepare/start/status/cancel/close`   | 单文件本机上传及双端中转任务      | `sftp.transfer`；准备/启动另需目标 `sftp.write`，远程源需 `sftp.read` |
+| `settings_read/write`                          | 本插件独立 JSON 配置              | `settings.read/write`                                                 |
+| `notify`                                       | 有界通知                          | `ui.contribute` / `ui.notify`                                         |
+| `tcp_connect`                                  | 从本机探测目标 TCP 端口，3 秒超时 | `network.connect`                                                     |
+| `result_read/close`, `output_open/part/finish` | SDK 内部透明分块传输              | `ui.contribute`                                                       |
 
 `Command { program, args, timeoutSecs }` 将程序和参数逐项 POSIX 引用；无需人工拼接。只有明确需要 shell 时使用 `Command::script`，插件仍必须验证/引用插入脚本的值。程序 ≤4096 字节、参数 ≤128 个且每个 ≤8192 字节、合计 ≤16384 字节，无 NUL；Execute 超时 1–30 秒。Stream/PTY 持续到显式关闭或页面生命周期结束。
 
@@ -88,6 +89,37 @@ StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.prea
 `models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
 
 ## 前端闭环
+
+### 审批模式与计划确认（5.2）
+
+`approval_mode {mode:"request"|"assist"}`（ui.contribute）返回owner/VM绑定的opaque `binding`；WASM可将它放入 `Context::with_bindings`，不得把句柄交给模型或把模型字段作为授权。mode不是权限：仅当manifest与当前grant均声明、授予独立 `operations.read.preapproved` permission及operation时，assist才免除 `read_file`、`transfer_prepare`，以及 `preapprovedCommands` 中完整匹配Execute的单次确认；基础读写/SSH权限和目录范围仍必须满足。未列入清单的动态命令仍确认，不自动推断命令只读。普通 `ssh.execute.preapproved` 的已有行为不变。
+
+`confirm_operations {operations:[{request,count}]}`（ui.contribute）供同一WASM动作内合并确认固定请求集合；request仅限execute/save_file/transfer_start，1–96个唯一条目、最多128次使用，完整消息仍≤60 KiB。重复请求可合并count，不能包含嵌套计划或其他能力。Native先按真实权限/句柄/配置和实际目标预检，未批准不执行；返回常规宿主确认并沿原Future续接。批准后后续相同请求及绑定按次数消费，不再弹单项确认，新增/变化/超次数请求拒绝并撤销剩余授权。授权仅保存在当前原生动作中，不跨新invoke、owner、VM或重放；不要用多个独立前端call请求共享它。拒绝、超时或关闭沿原生命周期取消，写入与复查仍保留各自提交边界。
+
+文件保存确认含实际路径、摘要和原文/候选差异；差异超过显示限额明确标注省略，调用方仍须提供完整业务预览。读取免确认不等于秘密不会进入模型，应在模式说明中告知数据用途。此功能不提供AI自动批准写入，不替代主机指纹、目录授权或服务端冲突检测。
+
+### 文件与传输（5.1）
+
+`read_file {hostId,path}` 按审批模式和独立读取预授权读取≤32 KiB 的 UTF-8 普通文本，拒绝链接/别名路径。文档 ID 绑定页面、VM、登录身份、原文和插件配置；`save_file {documentId,content}` 经宿主单项或计划确认、复验配置/目录/原文版本，原子提交并读回复查。不能用新路径或跨页面句柄保存。未标记 dirty 的文档五分钟后可回收，dirty 文档沿用退出保护，过期须重新读取。`info.activeScopes` 返回当前插件仍打开页面的 opaque scope，仅供 Guest 清理遗留状态，不是授权凭证。
+
+```ts
+import { call } from '@serverdeck/plugin-sdk/platform';
+import type { TransferPreview, TransferState } from '@serverdeck/plugin-sdk/types/platform';
+const preview = await call<TransferPreview>({
+  kind: 'transfer_prepare',
+  source: { kind: 'local', path: 'D:\\work\\xx.tar.gz' },
+  destination: { hostId: 'test-host-id', path: '/work' },
+  overwrite: false,
+});
+// 展示 preview 后由用户确认；远程源使用 { kind:'remote',hostId,path }。
+const state = await call<TransferState>({ kind: 'transfer_start', id: preview.id });
+```
+
+精确 DTO 以两端 SDK 类型为准。准备遵循读取审批模式，启动须经宿主单项或计划确认：前者授权读取源元数据及目标状态，后者固定实际源、目标、大小及覆盖策略。预览五分钟内单次消费，每 owner 最多8项、全局32项。目标是已有规范目录，preview 返回完整目标文件路径。只传单个普通文件，不跟随链接/重解析点，不传目录、不解包、不自动重试。
+
+启动返回后任务在 Native 既有 SFTP 队列运行，复制使用固定32 KiB缓冲、同目录临时文件和目标读回 SHA-256；字节不通过 JS/WASM/模型。`transfer_status {id}` 返回原生状态、进度、速度、摘要、错误及恢复路径。`transfer_cancel {id}` 仅取消自有任务，可绕开同插件正在占用的 Guest 动作，不占用或释放其 busy 标记。`transfer_close {id}` 取消、等待安全收尾并释放句柄。状态/取消/关闭不依赖已过期的模型绑定，但仍验证当前权限、owner、VM代。启动后继续复验插件/模型/SSH修订、配置、目录授权和连接，关闭所属页面或撤权会取消并排空；运行中不受五分钟预览 TTL 截断，不支持跨重启恢复。提交已发生但复验失败为 `unverified`，不能自动重放或回滚。
+
+SFTP v3 缺少服务端 CAS，远端属性可能只有秒级时间；同属性并发改写仍有竞态。保存/覆盖是文件替换，inode、硬链接、ACL/xattr 的限制沿用文件页。目标临时文件无法清理时返回恢复路径。
 
 ```ts
 import { invoke } from '@serverdeck/plugin-sdk';

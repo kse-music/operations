@@ -14,6 +14,132 @@ struct Handler {
     calls: Arc<Mutex<Vec<String>>>,
     channels: HashMap<ChannelId, Channel<server::Msg>>,
 }
+
+#[tokio::test]
+async fn a_confirmed_command_batch_cannot_expand_or_replay_and_assist_cannot_run_arbitrary_commands()
+ {
+    use serverdeck_plugin_sdk::platform::{ApprovalMode, ApprovalOperation};
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture.install("dev.batch").await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let ssh = ssh(app).await;
+    let policy = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    let bindings = vec![policy.result["binding"].as_str().unwrap().to_owned()];
+    let call = app.plugin_host.start_scoped(id, "page").unwrap();
+    let op = Primitive::Execute {
+        host_id: ssh.host.id.clone(),
+        command: Command::new("fixture-read"),
+    };
+    let run = |op| {
+        app.plugin_dispatch(
+            &call,
+            request(Capability::Platform {
+                request: op,
+                bindings: bindings.clone(),
+            }),
+        )
+    };
+    let arbitrary = run(op.clone()).await.unwrap();
+    assert_eq!(
+        arbitrary.error.unwrap().code,
+        "PLUGIN_CONFIRMATION_REQUIRED"
+    );
+    assert!(ssh.calls.lock().unwrap().is_empty());
+    let plan = Primitive::ConfirmOperations {
+        operations: vec![ApprovalOperation {
+            request: Box::new(op.clone()),
+            count: 2,
+        }],
+    };
+    let preview = run(plan.clone()).await.unwrap();
+    assert_eq!(preview.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    assert!(ssh.calls.lock().unwrap().is_empty());
+    app.plugin_approve(
+        preview.result["confirmationRequired"]["id"]
+            .as_str()
+            .unwrap(),
+        true,
+    )
+    .unwrap();
+    assert!(run(plan).await.unwrap().error.is_none());
+    for _ in 0..2 {
+        let executed = run(op.clone()).await.unwrap();
+        assert!(executed.error.is_none(), "{executed:?}");
+        assert_eq!(executed.result["state"], "completed");
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    let expanded = run(Primitive::Execute {
+        host_id: ssh.host.id.clone(),
+        command: Command::new("different-command"),
+    })
+    .await
+    .unwrap();
+    assert_eq!(expanded.error.unwrap().code, "PLUGIN_PLAN_CHANGED");
+    let replay = run(op).await.unwrap();
+    assert_eq!(replay.error.unwrap().code, "PLUGIN_PLAN_CHANGED");
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    drop(call);
+    app.shutdown().await;
+}
+#[tokio::test]
+async fn one_native_confirmation_resumes_original_wasm_batch_and_decline_executes_nothing() {
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let id = fixture.wasm().await;
+    let ssh = ssh(app).await;
+    let input = json!({"operations":[{"request":{"kind":"execute","hostId":ssh.host.id,"command":{"program":"fixture-read","args":[],"timeoutSecs":30}},"count":2}]});
+    let first = app
+        .plugin_call_scoped(&id, "page", json!({"action":"batch","input":input}))
+        .await
+        .unwrap();
+    assert_eq!(first.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    assert!(ssh.calls.lock().unwrap().is_empty());
+    app.plugin_approve(first.result["id"].as_str().unwrap(), false)
+        .unwrap();
+    let cancelled = app
+        .plugin_continue(
+            &id,
+            "page",
+            first.result["continuation"].as_str().unwrap(),
+            true,
+        )
+        .await
+        .unwrap();
+    assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
+    assert!(ssh.calls.lock().unwrap().is_empty());
+    let pending = app
+        .plugin_call_scoped(&id, "page", json!({"action":"batch","input":input}))
+        .await
+        .unwrap();
+    assert_eq!(pending.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    app.plugin_approve(pending.result["id"].as_str().unwrap(), true)
+        .unwrap();
+    let finished = app
+        .plugin_continue(
+            &id,
+            "page",
+            pending.result["continuation"].as_str().unwrap(),
+            false,
+        )
+        .await
+        .unwrap();
+    assert!(finished.error.is_none(), "{finished:?}");
+    assert_eq!(finished.result["results"].as_array().unwrap().len(), 2);
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    app.plugin_close_scope(&id, "page").await.unwrap();
+    app.shutdown().await;
+}
+
 impl server::Handler for Handler {
     type Error = russh::Error;
     async fn auth_password(&mut self, _: &str, password: &str) -> Result<Auth, Self::Error> {
@@ -50,7 +176,13 @@ impl server::Handler for Handler {
             s.extended_data(id, 1, b"fixture permission denied".to_vec())?;
             s.exit_status_request(id, 7)?;
         } else if command.contains("d version --format") {
-            s.data(id, br#"{"Server":{"Version":"fixture-version"}}"#.to_vec())?;
+            let version = json!({"Server":{"Version":"fixture-version"}});
+            let output = if command.contains("dockerOperatingSystem") {
+                json!({"dockerVersion":version,"dockerOperatingSystem":"Fixture Linux"})
+            } else {
+                version
+            };
+            s.data(id, output.to_string().into_bytes())?;
             s.exit_status_request(id, 0)?;
         } else if command.contains("d container ls --all --no-trunc") {
             s.data(
@@ -249,7 +381,17 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
             assert!(reply.error.is_none(), "{kind}: {reply:?}");
             assert_eq!(reply.result["success"], true);
             match kind {
-                "capabilities" => assert_eq!(reply.result["detail"]["dockerState"], "running"),
+                "capabilities" => {
+                    assert_eq!(reply.result["detail"]["dockerState"], "running");
+                    assert_eq!(
+                        reply.result["detail"]["dockerVersion"]["Server"]["Version"],
+                        "fixture-version"
+                    );
+                    assert_eq!(
+                        reply.result["detail"]["dockerOperatingSystem"],
+                        "Fixture Linux"
+                    );
+                }
                 "containers" => assert_eq!(reply.result["records"][0]["ID"], "fixture-container"),
                 "images" => assert_eq!(reply.result["records"][0]["ID"], "sha256:fixture-image"),
                 "container_details" => {

@@ -15,7 +15,7 @@ use serverdeck_plugin_sdk::{
     platform::{Command, Request},
 };
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 fn command_line(command: &Command) -> Result<String, Error> {
     let value = command
@@ -76,7 +76,7 @@ impl Application {
         }
         Ok(())
     }
-    fn plugin_scope_visible(&self, call: &Call) -> Result<bool, Error> {
+    pub(super) fn plugin_scope_visible(&self, call: &Call) -> Result<bool, Error> {
         Ok(self
             .plugin_host
             .lock()?
@@ -89,7 +89,12 @@ impl Application {
         if owner.is_empty() || owner.len() > 512 {
             return Err(Error::Validation("插件页面标识无效"));
         }
+        self.plugin_host
+            .lock()?
+            .closed_owners
+            .insert((id.to_owned(), owner.to_owned()));
         self.plugin_host.stop_scope(id, owner).await?;
+        self.plugin_close_copies(id, Some(owner)).await?;
         let (documents, streams, terminals) = {
             let mut data = self.plugin_host.lock()?;
             data.continuations
@@ -194,15 +199,48 @@ impl Application {
                     | Request::OutputOpen { .. }
                     | Request::OutputPart { .. }
                     | Request::OutputFinish { .. }
+                    | Request::TransferStatus { .. }
+                    | Request::TransferCancel { .. }
+                    | Request::TransferClose { .. }
             )
         {
             self.plugin_check_bindings(call, &bindings).await?;
+        }
+        if matches!(
+            request,
+            Request::TransferPrepare { .. }
+                | Request::TransferStart { .. }
+                | Request::TransferStatus { .. }
+                | Request::TransferCancel { .. }
+                | Request::TransferClose { .. }
+        ) {
+            return self
+                .plugin_transfer(call, plugin, grant, request, bindings)
+                .await;
+        }
+        match request {
+            Request::ApprovalMode { mode } => {
+                let binding =
+                    self.plugin_revision_binding(call, state::RevisionTarget::ApprovalMode(mode))?;
+                return Ok(json!({"binding":binding,"mode":mode}));
+            }
+            Request::ConfirmOperations { operations } => {
+                return self
+                    .plugin_confirm_operations(call, plugin, operations, bindings)
+                    .await;
+            }
+            _ => (),
         }
         let mut binding = None;
         let mut target = None;
         if let Some(host) = request.host() {
             if matches!(request, Request::ReadFile { .. }) {
-                self.plugin_platform_file_session(call, host).await?;
+                if !self.plugin_scope_visible(call)? {
+                    return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面读取文件"));
+                }
+                let session = self.plugin_platform_file_session(call, host).await?;
+                binding = Some(self.terminals.lease_profile(&session)?);
+                target = Some(self.plugin_session_target(&session)?);
             } else {
                 let session = self.plugin_platform_session(call, host).await?;
                 binding = Some(self.terminals.ops_profile(&session)?);
@@ -228,7 +266,18 @@ impl Application {
                     .validate()
                     .map_err(|_| Error::Validation("远程命令参数无效"))?;
             }
-            Request::ReadFile { path, .. } => grant.path(path, false)?,
+            Request::ReadFile { host_id, path } => {
+                if path.chars().any(char::is_control) {
+                    return Err(Error::Validation("插件文件路径不能包含控制字符"));
+                }
+                grant.path(path, false)?;
+                let session = self.plugin_platform_file_session(call, host_id).await?;
+                let canonical = self.files.canonical_path(&session, path).await?;
+                grant.path(&canonical, false)?;
+                if canonical != *path {
+                    return Err(Error::Validation("插件文件须使用无链接的规范绝对路径"));
+                }
+            }
             Request::SaveFile {
                 document_id,
                 content,
@@ -237,6 +286,7 @@ impl Application {
                     return Err(failure("PLUGIN_FILE_LIMIT", "插件文本保存超过 32 KiB"));
                 }
                 let (_, path, host, profile) = self.plugin_platform_document(call, document_id)?;
+                self.plugin_file_settings(call, document_id).await?;
                 grant.path(&path, true)?;
                 let session = self.plugin_platform_file_session(call, &host).await?;
                 if self.terminals.lease_profile(&session)? != profile {
@@ -252,7 +302,10 @@ impl Application {
             bindings: bindings.clone(),
         };
         if request.needs_confirmation()
-            && !grant.preapproves(plugin, &operation)
+            && (call.collecting
+                || call.has_batch()?
+                || !(grant.preapproves(plugin, &operation)
+                    || self.plugin_auto_read(call, plugin, grant, &operation)?))
             && let Some(approval) = self.plugin_confirmation_bound(
                 call,
                 plugin,
@@ -275,7 +328,12 @@ impl Application {
                 let connection=tokio::select!{_=call.cancel.cancelled()=>return Err(failure("USER_CANCELLED","TCP 连接已取消")),result=tokio::time::timeout(Duration::from_secs(3),tokio::net::TcpStream::connect((target.as_str(),port)))=>result};
                 match connection{Ok(Ok(stream))=>{drop(stream);json!({"reachable":true,"milliseconds":at.elapsed().as_secs_f64()*1000.0})},Ok(Err(error))=>return Err(Error::Worker(Box::new(error))),Err(error)=>return Err(Error::Worker(Box::new(error)))}
             }
-            Request::Info=>json!({"unixMs":SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|Error::Worker(Box::new(e)))?.as_millis() as u64,"nonce":uuid::Uuid::new_v4().to_string(),"pluginId":call.id,"revision":plugin.revision,"scope":format!("{}:{}",call.generation,call.owner)}),
+            Request::Info=>{
+                let scope=format!("{}:{}",call.generation,call.owner);
+                let mut active=self.plugin_host.lock()?.visible_owners.keys().filter(|(id,_)|id==&call.id).map(|(_,owner)|format!("{}:{}",call.generation,owner)).collect::<Vec<_>>();
+                if !active.contains(&scope) {active.push(scope.clone());}
+                json!({"unixMs":SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|Error::Worker(Box::new(e)))?.as_millis() as u64,"nonce":uuid::Uuid::new_v4().to_string(),"pluginId":call.id,"revision":plugin.revision,"scope":scope,"activeScopes":active})
+            },
             Request::Hosts=>self.blocking(|db| {
                 let catalog=db.catalog()?;
                 Ok(json!({"hosts":catalog.hosts.iter().map(|host| json!({"id":host.id,"name":host.config.name,"hostname":host.config.hostname,"port":host.config.port,"username":host.config.username,"description":host.config.description,"groupId":host.config.group_id})).collect::<Vec<_>>(),"groups":catalog.groups}))
@@ -306,23 +364,31 @@ impl Application {
                 let path=self.files.canonical_path(&session,&path).await?;
                 grant.path(&path,false)?;
                 if self.files.properties(&session,&path).await?.size.is_none_or(|size|size>32768) {return Err(failure("PLUGIN_FILE_LIMIT","插件只可读取不超过 32 KiB 的文本文件"));}
+                let expired=self.plugin_host.lock()?.documents.iter().filter(|(_,doc)|!doc.dirty && doc.at.elapsed()>Duration::from_secs(300)).map(|(id,doc)|(id.clone(),doc.internal_token.clone())).collect::<Vec<_>>();
+                for (id,token) in expired {self.files.close_editor(&token,true)?;self.plugin_host.lock()?.documents.remove(&id);}
                 if self.plugin_host.lock()?.documents.len()>=8 {return Err(Error::Busy);}
+                let repo=self.plugins.clone();let plugin_id=call.id.clone();let settings=self.blocking(move |_|repo.settings_read(&plugin_id)).await?;
                 let document=self.files.read_text(&session,&path).await?;
+                if document.content.len()>32768 {self.files.close_editor(&document.token,true)?;return Err(failure("PLUGIN_FILE_LIMIT","文件在读取期间已超过 32 KiB"));}
                 let verified=async{let current=self.plugin_platform_file_session(call,&host_id).await?;if self.terminals.lease_profile(&current)?!=profile{return Err(Error::Conflict);}Ok(())}.await;
                 if let Err(error)=verified{self.files.close_editor(&document.token,true)?;return Err(error);}
                 if !self.plugin_scope_visible(call)?{self.files.close_editor(&document.token,true)?;return Err(failure("PLUGIN_UI_HIDDEN","页面已隐藏，文件读取已释放"));}
                 if let Err(error)=self.plugin_host.verify(call) {self.files.close_editor(&document.token,true)?;return Err(error);}
                 let id=uuid::Uuid::new_v4().to_string();
                 let value=json!({"id":id,"path":document.path,"content":document.content,"sha256":document.sha256,"atomicSave":document.atomic_save,"permissions":document.permissions});
-                self.plugin_host.lock()?.documents.insert(id,state::Document {profile,owner:call.owner.clone(),plugin:call.id.clone(),generation:call.generation.clone(),internal_token:document.token,path,host:host_id});
+                if call.user_cancelled.load(std::sync::atomic::Ordering::Acquire) {self.files.close_editor(&document.token,true)?;return Err(failure("USER_CANCELLED","读取已取消，文件句柄已释放"));}
+                self.plugin_host.lock()?.documents.insert(id,state::Document {settings,at:Instant::now(),dirty:false,profile,owner:call.owner.clone(),plugin:call.id.clone(),generation:call.generation.clone(),internal_token:document.token,path,host:host_id});
                 value
             }
             Request::SaveFile {document_id,content}=>{
+                self.plugin_file_settings(call,&document_id).await?;
                 let (token,path,host,profile)=self.plugin_platform_document(call,&document_id)?;
                 grant.path(&path,true)?;
                 let session=self.plugin_platform_file_session(call,&host).await?;
                 if self.terminals.lease_profile(&session)?!=profile{return Err(Error::Conflict);}
-                let result=self.files.save_text(serverdeck_core::files::SaveText {token,content,confirm_replace:true}).await?;
+                let result=self.files.save_text(serverdeck_core::files::SaveText {token:token.clone(),content,confirm_replace:true}).await?;
+                if result.document.is_some() {self.files.verify_saved(&token).await?;}
+                if result.document.is_some() && let Some(doc)=self.plugin_host.lock()?.documents.get_mut(&document_id) {doc.at=Instant::now();doc.dirty=false;}
                 if call.cancel.is_cancelled() {return Err(failure("PLUGIN_SAVE_CANCELLED","已开始的文件保存已安全收尾，请重新读取核对结果"));}
                 let current=async{let session=self.plugin_platform_file_session(call,&host).await?;if self.terminals.lease_profile(&session)?!=profile{return Err(Error::Conflict);}Ok(())}.await;
                 if let Err(error)=current{return Err(Error::Connection{code:"PLUGIN_TARGET_CHANGED",message:"文件保存已安全收尾，但连接或目标配置已变化，请独立核对保存结果",source:Some(Box::new(error))});}
@@ -339,7 +405,9 @@ impl Application {
             Request::FileDirty {document_id,dirty}=>{
                 let (token,path,_,_)=self.plugin_platform_document(call,&document_id)?;
                 grant.path(&path,true)?;
-                self.files.editor_dirty(&token,dirty)?;Value::Null
+                self.files.editor_dirty(&token,dirty)?;
+                if let Some(doc)=self.plugin_host.lock()?.documents.get_mut(&document_id) {doc.at=Instant::now();doc.dirty=dirty;}
+                Value::Null
             }
             Request::StreamOpen {host_id,command}=>{
                 if !self.plugin_scope_visible(call)?{return Err(failure("PLUGIN_UI_HIDDEN","页面已隐藏，不能打开新的输出流"));}
@@ -451,6 +519,7 @@ impl Application {
                 data.results.insert(result_id.clone(),state::ResultData {owner:call.owner.clone(),plugin:call.id.clone(),generation:call.generation.clone(),bytes:output.bytes,at:std::time::Instant::now()});
                 json!({"__pluginResult":{"id":result_id,"bytes":bytes,"chunks":chunks}})
             }
+            Request::ApprovalMode {..}|Request::ConfirmOperations {..}|Request::TransferPrepare {..}|Request::TransferStart {..}|Request::TransferStatus {..}|Request::TransferCancel {..}|Request::TransferClose {..}=>return Err(Error::Validation("传输请求未进入任务路由")),
         };
         self.plugin_host.verify(call)?;
         self.plugin_authorize(call, &operation).await?;
@@ -544,7 +613,7 @@ impl Application {
             json!({"state":outcome.state,"exitCode":outcome.code,"message":outcome.message,"stdout":stdout,"stderr":stderr,"truncated":truncated}),
         )
     }
-    fn plugin_session_target(&self, id: &str) -> Result<String, Error> {
+    pub(super) fn plugin_session_target(&self, id: &str) -> Result<String, Error> {
         let endpoint = self
             .terminals
             .connection_status()?
@@ -561,13 +630,20 @@ impl Application {
             endpoint.username, endpoint.port
         ))
     }
-    async fn plugin_platform_file_session(&self, call: &Call, host: &str) -> Result<String, Error> {
+    pub(super) async fn plugin_platform_file_session(
+        &self,
+        call: &Call,
+        host: &str,
+    ) -> Result<String, Error> {
         let session = self
             .terminals
             .login_file_connections()?
             .into_iter()
-            .find(|session| session.host_id == host)
-            .ok_or_else(|| failure("PLUGIN_SESSION_CLOSED", "目标主机没有已验证的 SFTP 连接"))?;
+            .find(|session| session.host_id == host);
+        let session = match session {
+            Some(session) => session,
+            None => self.plugin_open_file_connection(call, host).await?,
+        };
         let engine = self.terminals.clone();
         let host = host.to_owned();
         let id = session.id.clone();
@@ -600,6 +676,27 @@ impl Application {
             document.host.clone(),
             document.profile.clone(),
         ))
+    }
+    async fn plugin_file_settings(&self, call: &Call, id: &str) -> Result<(), Error> {
+        self.plugin_platform_document(call, id)?;
+        let expected = self
+            .plugin_host
+            .lock()?
+            .documents
+            .get(id)
+            .ok_or(Error::NotFound)?
+            .settings
+            .clone();
+        let repo = self.plugins.clone();
+        let plugin_id = call.id.clone();
+        if self
+            .blocking(move |_| repo.settings_read(&plugin_id))
+            .await?
+            != expected
+        {
+            return Err(Error::Conflict);
+        }
+        Ok(())
     }
     fn plugin_platform_stream_owner(&self, call: &Call, id: &str) -> Result<(), Error> {
         let data = self.plugin_host.lock()?;
@@ -761,6 +858,15 @@ impl Application {
         Ok(id)
     }
     async fn plugin_check_bindings(&self, call: &Call, bindings: &[String]) -> Result<(), Error> {
+        let expected = self.plugin_binding_targets(call, bindings)?;
+        self.plugin_verify_targets(expected).await?;
+        self.plugin_host.verify(call)
+    }
+    pub(super) fn plugin_binding_targets(
+        &self,
+        call: &Call,
+        bindings: &[String],
+    ) -> Result<Vec<state::RevisionTarget>, Error> {
         if bindings.len() > 16 {
             return Err(Error::Validation("平台修订绑定超过限制"));
         }
@@ -781,8 +887,15 @@ impl Application {
                 })
                 .collect::<Result<Vec<_>, Error>>()?
         };
+        Ok(expected)
+    }
+    pub(super) async fn plugin_verify_targets(
+        &self,
+        expected: Vec<state::RevisionTarget>,
+    ) -> Result<(), Error> {
         for target in expected {
             match target {
+                state::RevisionTarget::ApprovalMode(_) => (),
                 state::RevisionTarget::Model { id, revision } => {
                     let (record, _) = self.ai_credentials(id).await?;
                     if record.revision != revision {
@@ -801,6 +914,6 @@ impl Application {
                 }
             }
         }
-        self.plugin_host.verify(call)
+        Ok(())
     }
 }

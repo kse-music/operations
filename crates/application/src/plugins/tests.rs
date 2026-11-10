@@ -16,6 +16,7 @@ use std::{
     time::{Duration, Instant},
 };
 use zeroize::Zeroizing;
+mod file_tests;
 mod ssh_tests;
 
 #[tokio::test]
@@ -201,6 +202,8 @@ fn permissions() -> Vec<Permission> {
         Permission::SshExecute,
         Permission::SftpRead,
         Permission::SftpWrite,
+        Permission::SftpTransfer,
+        Permission::OperationsReadPreapproved,
         Permission::SettingsRead,
         Permission::SettingsWrite,
         Permission::NetworkConnect,

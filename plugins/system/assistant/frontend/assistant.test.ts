@@ -14,6 +14,9 @@ const api = vi.hoisted(() => ({
   prepare: vi.fn(),
   send: vi.fn(),
   execute: vi.fn(),
+  task: vi.fn(),
+  poll: vi.fn(),
+  cancelTransfer: vi.fn(),
   cancel: vi.fn(),
   resolveHosts: vi.fn(),
   hostList: vi.fn(),
@@ -51,7 +54,7 @@ import SettingsView from './SettingsView.vue';
 import { useAssistant } from './assistant';
 import { usePlatformContext, updatePlatformContext } from '@serverdeck/plugin-sdk/context';
 const hostInput = () => ({ port: 22, username: 'ops', description: '', groupId: null });
-import type { AiModel } from './types';
+import type { AiModel, AiTask, AiTaskStatus } from './types';
 const defaultAiConfig = () => ({
   provider: 'openai_compatible' as const,
   baseUrl: 'https://model.example/v1',
@@ -103,6 +106,140 @@ const answer: AiAnswer = {
   usage: { inputTokens: 10, outputTokens: 20 },
   warnings: ['不可信内容'],
 };
+
+it('shows the frozen file diff as text before any save', async () => {
+  api.send.mockResolvedValueOnce({
+    ...answer,
+    proposals: [answer.proposals[1]],
+    agent: {
+      observations: [],
+      steps: [
+        {
+          action: '确认保存文件修改',
+          target: 'host:/work/x.yaml',
+          preview: {
+            kind: 'edit',
+            path: '/work/x.yaml',
+            baseSha256: 'a'.repeat(64),
+            diff: '@@ 原文第6行 @@\n-old\n+<script>unsafe()</script>\n',
+          },
+        },
+      ],
+    },
+  });
+  await mount();
+  await send();
+  expect(root.querySelector('[aria-label="文件修改差异"]')?.textContent).toContain(
+    '+<script>unsafe()</script>',
+  );
+  expect(root.querySelector('script')).toBeNull();
+  expect(root.textContent).toContain('a'.repeat(64));
+  expect(api.execute).not.toHaveBeenCalled();
+});
+
+it('polls a native transfer to completion and cancels directly while the model is busy', async () => {
+  const state = mountState();
+  const transfer = {
+    id: 'native-copy',
+    state: 'running',
+    totalBytes: 100,
+    transferredBytes: 50,
+    bytesPerSecond: 10,
+    sha256: null,
+    message: null,
+    recoveryPaths: [],
+  };
+  state.turns.value = [
+    {
+      id: 'turn',
+      question: '上传',
+      state: 'complete',
+      answer,
+      error: '',
+      requestId: 'root',
+      hostIds: ['host'],
+      task: null,
+    },
+  ];
+  state.outputs.value.change = { success: false, pending: true, output: '传输中', transfer };
+  api.cancelTransfer.mockResolvedValue({ ...transfer, state: 'cancelling' });
+  state.busy.value = 'send';
+  await state.cancelTransfer('change');
+  expect(api.cancelTransfer).toHaveBeenCalledWith('native-copy');
+  expect(api.cancel).not.toHaveBeenCalled();
+  state.busy.value = '';
+  api.poll.mockResolvedValue({
+    success: true,
+    pending: false,
+    output: '已校验',
+    transfer: { ...transfer, state: 'completed', transferredBytes: 100, sha256: 'a'.repeat(64) },
+  });
+  vi.useFakeTimers();
+  try {
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(api.poll).toHaveBeenCalledWith('root');
+    expect(state.outputs.value.change?.pending).toBe(false);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.poll).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('drains old task cancellation sequentially before preparing a new conversation', async () => {
+  const state = mountState();
+  state.turns.value = ['old-a', 'old-b'].map((id) => ({
+    id,
+    question: id,
+    state: 'complete',
+    answer,
+    error: '',
+    requestId: id,
+    hostIds: [],
+    task: null,
+  }));
+  let release!: () => void;
+  api.cancel.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  state.invalidate();
+  const sending = state.send({
+    modelId: 'model-a',
+    sessionId: null,
+    autoHosts: true,
+    question: 'new',
+    selection: {
+      server: true,
+      metrics: false,
+      processes: false,
+      docker: false,
+      log: null,
+      logLines: 100,
+    },
+    maskAddresses: true,
+    redactValues: [],
+  });
+  await nextTick();
+  expect(api.cancel).toHaveBeenCalledTimes(1);
+  expect(api.prepare).not.toHaveBeenCalled();
+  release();
+  await sending;
+  expect(api.cancel.mock.calls.slice(0, 2)).toEqual([['old-a'], ['old-b']]);
+  expect(api.prepare).toHaveBeenCalledOnce();
+});
+const taskSnapshot = (status: AiTaskStatus): AiTask => ({
+  id: 'preview-a',
+  status,
+  modelId: 'model-a',
+  hostIds: ['host-a'],
+  createdAt: 1000,
+  updatedAt: 2000,
+  expiresAt: 301000,
+});
 async function settle() {
   await nextTick();
   await new Promise((r) => setTimeout(r, 0));
@@ -112,16 +249,6 @@ function button(text: string, scope: ParentNode = document) {
   return [...scope.querySelectorAll<HTMLButtonElement>('button')].find(
     (b) => b.textContent?.trim() === text,
   )!;
-}
-function check(label: string, scope: ParentNode = document) {
-  return [...scope.querySelectorAll<HTMLLabelElement>('label')]
-    .find((l) => l.textContent?.includes(label))!
-    .querySelector<HTMLInputElement>('input')!;
-}
-async function toggle(input: HTMLInputElement) {
-  input.checked = !input.checked;
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  await settle();
 }
 async function mount(hostId?: string) {
   root = document.createElement('div');
@@ -224,7 +351,7 @@ it('delegates context selection to the host without a configuration panel or sen
   await mount();
   expect(root.querySelector('aside, [aria-controls="assistant-context"]')).toBeNull();
   expect(root.querySelector('input[type=checkbox]')).toBeNull();
-  expect(root.querySelector('.ai-model-bar, select')).toBeNull();
+  expect(root.querySelector('.ai-model-bar, select:not([aria-label="审批模式"])')).toBeNull();
   await generate();
   expect(api.prepare).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -289,36 +416,81 @@ it('refreshes the binding after another page saves settings without losing the q
   expect(editor.value).toBe('保留这个问题');
   expect(button('发送').disabled).toBe(true);
 });
-it('approves one immutable read-only proposal once and requires a separate typed change confirmation', async () => {
+it('opens only the host execution path without checkbox or typed confirmation', async () => {
   await mount();
   await send();
-  const reviewButtons = () => root.querySelectorAll<HTMLButtonElement>('.ai-proposal button');
-  reviewButtons()[0]!.click();
-  await settle();
-  expect(button('批准执行这一条').disabled).toBe(true);
-  expect(api.execute).not.toHaveBeenCalled();
-  await toggle(check('我已审核目标'));
-  button('批准执行这一条').click();
+  const buttons = () => root.querySelectorAll<HTMLButtonElement>('.ai-proposal button');
+  buttons()[0]!.click();
   await settle();
   expect(api.execute).toHaveBeenCalledWith('read', true, null);
-  expect(reviewButtons()[0]!.disabled).toBe(true);
+  expect(buttons()[0]!.disabled).toBe(true);
   expect(root.textContent).toContain('readonly-output');
-  reviewButtons()[1]!.click();
+  buttons()[1]!.click();
   await settle();
-  await toggle(check('我已审核目标'));
-  expect(button('批准执行这一条').disabled).toBe(true);
-  const input = document.querySelector<HTMLInputElement>('dialog input:not([type=checkbox])')!;
-  input.value = 'yes';
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  await settle();
-  expect(button('批准执行这一条').disabled).toBe(true);
-  input.value = answer.proposals[1]!.changeConfirmation!;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  await settle();
-  button('批准执行这一条').click();
-  await settle();
-  expect(api.execute).toHaveBeenLastCalledWith('change', true, input.value);
+  expect(document.querySelector('.ai-command-review')).toBeNull();
+  expect(root.textContent).not.toContain('请手动输入');
+  expect(api.execute).toHaveBeenLastCalledWith('change', true, null);
   expect(api.execute).toHaveBeenCalledTimes(2);
+});
+
+it('freezes approval mode per new task and assist opens the host plan confirmation automatically', async () => {
+  await mount();
+  await send();
+  expect(api.prepare.mock.lastCall![0].approvalMode).toBe('request');
+  expect(api.execute).not.toHaveBeenCalled();
+  const mode = root.querySelector<HTMLSelectElement>('[aria-label="审批模式"]')!;
+  mode.value = 'assist';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(api.execute).not.toHaveBeenCalled();
+  await send();
+  expect(api.prepare.mock.lastCall![0].approvalMode).toBe('assist');
+  expect(api.execute).toHaveBeenCalledExactlyOnceWith('read', true, null);
+  expect(root.querySelector('.ai-command-review')).toBeNull();
+});
+it('shows task approval and uncertain completion without presenting a failed change as completed', async () => {
+  api.prepare.mockResolvedValue({ ...preview, task: taskSnapshot('prepared') });
+  api.send.mockResolvedValue({ ...answer, task: taskSnapshot('awaiting_approval') });
+  api.execute.mockResolvedValue({
+    success: false,
+    output: '连接中断，请核对',
+    task: taskSnapshot('unverified'),
+  });
+  await mount();
+  await send();
+  expect(root.textContent).toContain('任务状态：等待审核');
+  root.querySelector<HTMLButtonElement>('.ai-proposal button')!.click();
+  await settle();
+  expect(root.textContent).toContain('任务状态：结果未确认，请核对实际状态');
+  expect(root.textContent).not.toContain('任务状态：已完成');
+});
+it('recovers backend task failure after an execution error and prevents resubmission', async () => {
+  api.prepare.mockResolvedValue({ ...preview, task: taskSnapshot('prepared') });
+  api.send.mockResolvedValue({ ...answer, task: taskSnapshot('awaiting_approval') });
+  api.execute.mockRejectedValue({ message: '目标修订已变化' });
+  api.task.mockResolvedValue(taskSnapshot('failed'));
+  const state = mountState();
+  await state.send({
+    modelId: 'model-a',
+    sessionId: null,
+    question: '检查镜像',
+    selection: {
+      server: false,
+      metrics: false,
+      processes: false,
+      docker: false,
+      log: null,
+      logLines: 100,
+    },
+    maskAddresses: true,
+    redactValues: [],
+  });
+  await state.inspect(answer.proposals[0]!);
+  expect(api.task).toHaveBeenCalledWith('preview-a');
+  expect(state.turns.value[0]!.task?.status).toBe('failed');
+  expect(state.error.value).toBe('目标修订已变化');
+  await state.inspect(answer.proposals[0]!);
+  expect(api.execute).toHaveBeenCalledTimes(1);
 });
 it('keeps conversation when editing a draft, carries prior messages and recovers from API failure', async () => {
   await mount();
@@ -365,7 +537,7 @@ it('loads the persisted plugin binding and revokes old previews on rebind, edit 
   await settle();
   updateVisibility(true);
   await settle();
-  expect(root.querySelector('select')).toBeNull();
+  expect(root.querySelector('select:not([aria-label="审批模式"])')).toBeNull();
   expect(root.querySelectorAll('.ai-chat-turn, .ai-proposal')).toHaveLength(0);
   expect(root.querySelector('[aria-label="发送预览"]')).toBeNull();
   await generate();
@@ -442,7 +614,7 @@ it('matches all assets automatically and only connects the matched host', async 
   api.resolveHosts.mockResolvedValue({ hostIds: ['a'], message: '', modelRevision: 'r1' });
   openConnected();
   await mount();
-  expect(root.querySelectorAll('select')).toHaveLength(0);
+  expect(root.querySelectorAll('select:not([aria-label="审批模式"])')).toHaveLength(0);
   expect(api.opsOpen).not.toHaveBeenCalled();
 
   await send();
@@ -509,7 +681,9 @@ it('shows a frozen agent plan, submits it for trusted host approval and presents
       },
     ],
     agent: {
-      observations: [{ query: 'Docker 镜像', success: true, records: 3, message: null }],
+      observations: [
+        { query: 'Docker 镜像', tool: 'images', status: 'succeeded', records: 3, message: null },
+      ],
       steps: [
         { action: '删除无标签镜像', target: 'sha256:image-a' },
         { action: '删除无标签镜像', target: 'sha256:image-b' },
@@ -522,7 +696,12 @@ it('shows a frozen agent plan, submits it for trusted host approval and presents
     output: '计划未全部完成',
     agent: {
       steps: [
-        { ...agentAnswer.agent!.steps[0], status: 'verified', message: '已复查镜像不存在' },
+        {
+          ...agentAnswer.agent!.steps[0],
+          tool: 'remove_untagged_images',
+          status: 'verified',
+          message: '已复查镜像不存在',
+        },
         { ...agentAnswer.agent!.steps[1], status: 'failed', message: '镜像被引用，未强制删除' },
       ],
     },
@@ -533,20 +712,10 @@ it('shows a frozen agent plan, submits it for trusted host approval and presents
   expect(root.textContent).toContain('执行计划 · 2 项操作');
   expect(root.textContent).toContain('sha256:image-a');
   expect(api.execute).not.toHaveBeenCalled();
-  button('审核执行计划').click();
-  await settle();
-  expect(api.execute).not.toHaveBeenCalled();
-  await toggle(check('我已审核目标'));
-  const confirmation = document.querySelector<HTMLInputElement>(
-    'dialog input:not([type=checkbox])',
-  )!;
-  confirmation.value = '执行计划 12345678';
-  confirmation.dispatchEvent(new Event('input', { bubbles: true }));
-  await settle();
-  button('批准执行这一条').click();
+  button('执行计划').click();
   await settle();
   expect(document.querySelector('.ai-command-review')).toBeNull();
-  expect(api.execute).toHaveBeenCalledExactlyOnceWith('plan-a', true, '执行计划 12345678');
+  expect(api.execute).toHaveBeenCalledExactlyOnceWith('plan-a', true, null);
   expect(root.textContent).toContain('已复查镜像不存在');
   expect(root.textContent).toContain('镜像被引用，未强制删除');
   expect(root.textContent).not.toContain('计划已执行并完成复查');
@@ -569,13 +738,12 @@ it('can stop remaining plan steps while retaining the final execution report', a
     maskAddresses: true,
     redactValues: [],
   });
-  state.inspect(answer.proposals[0]!);
   api.execute.mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;
     }),
   );
-  const work = state.execute(true, '');
+  const work = state.inspect(answer.proposals[0]!);
   await settle();
   await state.cancel();
   expect(api.cancel).toHaveBeenCalledWith('preview-a');
@@ -626,10 +794,7 @@ it('renders Markdown structure but blocks HTML, executable URLs and remote image
 it('starts a new conversation and never includes execution output in follow-up history', async () => {
   await mount();
   await send();
-  button('审核此命令').click();
-  await settle();
-  await toggle(check('我已审核目标'));
-  button('批准执行这一条').click();
+  button('执行此操作').click();
   await settle();
   await send();
   const history = api.prepare.mock.lastCall![0].history;
@@ -755,6 +920,7 @@ it('retains readable replies after hiding but expires old command handles withou
       state: 'complete',
       answer,
       requestId: 'old-context-preview',
+      task: null,
       error: '',
       hostIds: [],
     },
@@ -765,7 +931,7 @@ it('retains readable replies after hiding but expires old command handles withou
   await settle();
   expect(state.turns.value[0]!.answer?.text).toBe(answer.text);
   state.inspect(answer.proposals[0]!);
-  expect(state.review.value).toBeNull();
+  expect(api.execute).not.toHaveBeenCalled();
   state.invalidate();
   await settle();
   expect(api.cancel).not.toHaveBeenCalledWith('old-context-preview');
@@ -809,15 +975,13 @@ it('finishes a retained host answer while hidden and keeps its plan usable after
   expect(api.end).toHaveBeenCalledOnce();
   updateVisibility(true);
   await settle();
-  state.inspect(answer.proposals[0]!);
-  expect(state.review.value?.id).toBe('read');
   let executed!: (value: { success: boolean; output: string }) => void;
   api.execute.mockReturnValueOnce(
     new Promise((resolve) => {
       executed = resolve;
     }),
   );
-  const execution = state.execute(true, '');
+  const execution = state.inspect(answer.proposals[0]!);
   await settle();
   updateVisibility(false);
   await settle();

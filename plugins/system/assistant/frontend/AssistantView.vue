@@ -21,10 +21,9 @@ import { useAssistant } from './assistant';
 import { useHostCatalog } from './platform-state';
 import { hostDisplayName } from './platform-state';
 import { useModelBinding } from './model-binding';
-import { isLocalModel } from './types';
+import { isLocalModel, taskStatusLabels } from './types';
 import AssistantMarkdown from './AssistantMarkdown';
 import AssistantAgent from './AssistantAgent.vue';
-import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import './assistant.css';
 const props = defineProps<{ hostId?: string; keepRunning?: boolean }>();
 const suggestions = [
@@ -56,7 +55,7 @@ onMounted(() => {
     // The catalog exposes the failure in its visible error state.
   });
 });
-const { turns, busy, error, review, outputs, attempted, expired } = ai;
+const { turns, busy, error, outputs, attempted, expired } = ai;
 const messages = ref<HTMLElement>(),
   chatForm = ref<HTMLFormElement>();
 watch(
@@ -67,8 +66,7 @@ watch(
   { flush: 'post' },
 );
 const question = ref('');
-const commandApproved = ref(false),
-  changeConfirmation = ref('');
+const approvalMode = ref<'request' | 'assist'>('request');
 const ready = computed(
   () =>
     !busy.value &&
@@ -89,16 +87,13 @@ watch(
   },
   { flush: 'sync' },
 );
-watch(review, () => {
-  commandApproved.value = false;
-  changeConfirmation.value = '';
-});
 function send() {
   if (!ready.value) return;
   const text = question.value;
   question.value = '';
   void ai.send(
     {
+      approvalMode: approvalMode.value,
       modelId: modelId.value,
       sessionId: null,
       autoHosts: true,
@@ -215,6 +210,9 @@ const readinessHint = computed(() => {
             <div class="ai-chat-message assistant">
               <div class="ai-message-avatar"><Bot :size="18" aria-hidden="true" /></div>
               <div class="ai-message-content">
+                <p v-if="turn.task" class="ai-caption" role="status">
+                  任务状态：{{ taskStatusLabels[turn.task.status] }}
+                </p>
                 <div v-if="turn.state === 'pending'" class="ai-chat-waiting" role="status">
                   <LoaderCircle :size="16" class="ai-spin" aria-hidden="true" />{{
                     busy === 'prepare'
@@ -300,8 +298,8 @@ const readinessHint = computed(() => {
                               : attempted.includes(proposal.id)
                                 ? '已提交，不自动重试'
                                 : turn.answer.agent?.steps.length
-                                  ? '审核执行计划'
-                                  : '审核此命令'
+                                  ? '执行计划'
+                                  : '执行此操作'
                           }}
                         </button>
                       </div>
@@ -309,22 +307,60 @@ const readinessHint = computed(() => {
                         v-if="outputs[proposal.id]"
                         role="status"
                         class="ai-execution"
-                        :class="{ failed: !outputs[proposal.id]!.success }"
+                        :class="{
+                          failed: !outputs[proposal.id]!.success && !outputs[proposal.id]!.pending,
+                        }"
                       >
                         <p>
+                          <LoaderCircle
+                            v-if="outputs[proposal.id]!.pending"
+                            :size="14"
+                            aria-hidden="true"
+                          />
                           <CheckCircle2
-                            v-if="outputs[proposal.id]!.success"
+                            v-else-if="outputs[proposal.id]!.success"
                             :size="14"
                             aria-hidden="true"
                           /><AlertTriangle v-else :size="14" aria-hidden="true" />{{
-                            outputs[proposal.id]!.success
-                              ? outputs[proposal.id]!.agent
-                                ? '计划已执行并完成复查'
-                                : '执行成功'
-                              : '命令失败，请核对服务器状态'
+                            outputs[proposal.id]!.pending
+                              ? '文件传输进行中'
+                              : outputs[proposal.id]!.success
+                                ? outputs[proposal.id]!.agent
+                                  ? '计划已执行并完成复查'
+                                  : '执行成功'
+                                : '操作未确认成功，请核对实际状态'
                           }}
                         </p>
                         <pre class="ai-output">{{ outputs[proposal.id]!.output }}</pre>
+                        <div v-if="outputs[proposal.id]!.transfer" aria-label="文件传输进度">
+                          <progress
+                            :value="outputs[proposal.id]!.transfer!.transferredBytes"
+                            :max="outputs[proposal.id]!.transfer!.totalBytes || 1"
+                          />
+                          <p>
+                            {{ outputs[proposal.id]!.transfer!.transferredBytes }} /
+                            {{ outputs[proposal.id]!.transfer!.totalBytes }} 字节 ·
+                            {{ outputs[proposal.id]!.transfer!.bytesPerSecond }} 字节/秒
+                          </p>
+                          <p v-if="outputs[proposal.id]!.transfer!.sha256">
+                            SHA-256：{{ outputs[proposal.id]!.transfer!.sha256 }}
+                          </p>
+                          <p
+                            v-for="path in outputs[proposal.id]!.transfer!.recoveryPaths"
+                            :key="path"
+                          >
+                            需人工核对的恢复路径：{{ path }}
+                          </p>
+                          <button
+                            v-if="outputs[proposal.id]!.pending"
+                            class="button"
+                            type="button"
+                            :disabled="ai.cancelling.value.includes(proposal.id)"
+                            @click="ai.cancelTransfer(proposal.id)"
+                          >
+                            取消传输
+                          </button>
+                        </div>
                       </div>
                     </article>
                   </details>
@@ -357,6 +393,22 @@ const readinessHint = computed(() => {
             @keydown.enter="enter"
           />
           <div class="ai-chat-composer-footer">
+            <label class="ai-approval-mode">
+              <ShieldCheck :size="14" aria-hidden="true" />
+              <select
+                v-model="approvalMode"
+                aria-label="审批模式"
+                :disabled="!!busy"
+                :title="
+                  approvalMode === 'assist'
+                    ? '自动处理授权读取和预检，内容可交给已选模型；动态SSH仍按规则批准，变更计划确认一次；仅对新任务生效'
+                    : '读取按宿主规则请求批准，变更计划只确认一次；仅对新任务生效'
+                "
+              >
+                <option value="request">请求批准</option>
+                <option value="assist">帮我审批</option>
+              </select>
+            </label>
             <span>{{ readinessHint }}</span
             ><button v-if="busy" class="button" type="button" @click="ai.cancel">
               <Square :size="12" aria-hidden="true" />停止</button
@@ -367,54 +419,5 @@ const readinessHint = computed(() => {
         </form>
       </section>
     </div>
-    <Modal
-      v-if="review"
-      :title="review.risk === 'change' ? '单独确认系统变更' : '批准只读诊断'"
-      :busy="busy === 'execute'"
-      @close="review = null"
-      ><div class="ai-command-review">
-        <dl class="ai-destination">
-          <div>
-            <dt>固定目标</dt>
-            <dd>{{ review.target }}</dd>
-          </div>
-        </dl>
-        <pre class="ai-output ai-command">{{ review.command }}</pre>
-        <p class="ai-proposal-reason">{{ review.reason }}</p>
-        <label v-if="review.changeConfirmation" class="ai-change-confirm"
-          >请手动输入：{{ review.changeConfirmation
-          }}<input v-model="changeConfirmation" autocomplete="off" :disabled="!!busy" /></label
-        ><label class="check ai-approval"
-          ><input
-            v-model="commandApproved"
-            type="checkbox"
-            :disabled="!!busy"
-          />我已审核目标和这一条命令，批准执行</label
-        >
-        <p class="ai-caption">
-          审批 10 分钟内有效，仅可使用一次。连接变化后拒绝执行；失败也不自动重试或提权。
-        </p>
-        <div class="dialog-actions">
-          <button v-if="busy === 'execute'" class="button" type="button" @click="ai.cancel">
-            停止后续操作
-          </button>
-          <button class="button" type="button" :disabled="!!busy" @click="review = null">
-            取消</button
-          ><button
-            class="button primary"
-            type="button"
-            :disabled="
-              !!busy ||
-              !commandApproved ||
-              (review.changeConfirmation !== null &&
-                changeConfirmation !== review.changeConfirmation)
-            "
-            @click="ai.execute(commandApproved, changeConfirmation)"
-          >
-            {{ busy === 'execute' ? '执行并复查中…' : '批准执行这一条' }}
-          </button>
-        </div>
-      </div></Modal
-    >
   </section>
 </template>

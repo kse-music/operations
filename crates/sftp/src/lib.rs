@@ -11,7 +11,7 @@ use std::{
 };
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
-pub use transfer::Transfers;
+pub use transfer::{CopyGuard, CopyHandle, CopySource, PreparedCopy, Transfers};
 
 pub(crate) fn fail(code: &'static str, message: &'static str) -> Error {
     Error::Connection {

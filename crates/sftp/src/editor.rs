@@ -13,6 +13,63 @@ pub(crate) struct Document {
     pub external: Option<crate::external::ExternalState>,
 }
 impl Files {
+    pub fn preview_text(&self, token: &str, content: &str) -> Result<String, Error> {
+        let old = locked(&self.documents)?
+            .get(token)
+            .ok_or(Error::NotFound)?
+            .public
+            .content
+            .clone();
+        let before = old.lines().collect::<Vec<_>>();
+        let after = content.lines().collect::<Vec<_>>();
+        let first = before
+            .iter()
+            .zip(&after)
+            .take_while(|(a, b)| a == b)
+            .count();
+        let suffix = before[first..]
+            .iter()
+            .rev()
+            .zip(after[first..].iter().rev())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let mut diff = format!("@@ 原文第 {} 行起 @@\n", first + 1);
+        for (prefix, lines) in [
+            ('-', &before[first..before.len() - suffix]),
+            ('+', &after[first..after.len() - suffix]),
+        ] {
+            for line in lines {
+                if diff.len() + line.len() > 16000 {
+                    diff.push_str("\n（差异较长，后部已省略；完整预览见聊天）");
+                    return Ok(diff);
+                }
+                diff.push(prefix);
+                diff.push_str(line);
+                diff.push('\n');
+            }
+        }
+        if before == after && old != content {
+            diff.push_str("（仅换行格式或文件末尾换行发生变化）");
+        }
+        Ok(diff)
+    }
+    pub async fn verify_saved(&self, token: &str) -> Result<(), Error> {
+        let document = locked(&self.documents)?
+            .get(token)
+            .cloned()
+            .ok_or(Error::NotFound)?;
+        let _permit = self.slot().await?;
+        let remote = self.client(&document.public.session_id).await?;
+        if remote.hash(&document.public.path).await? != document.public.sha256
+            || !remote::same(&remote.attrs(&document.public.path).await?, &document.attrs)
+        {
+            return Err(fail(
+                "EDITOR_VERIFY",
+                "文件已提交，但保存后复查不一致，请独立核对",
+            ));
+        }
+        Ok(())
+    }
     pub async fn read_text(&self, session: &str, path: &str) -> Result<TextDocument, Error> {
         remote_absolute(path)?;
         let _permit = self.slot().await?;

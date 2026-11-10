@@ -13,9 +13,12 @@ use tokio::{
     sync::Notify,
 };
 use uuid::Uuid;
+mod copy;
+pub use copy::{CopyGuard, CopyHandle, CopySource, PreparedCopy};
 
 struct Task {
     input: TransferInput,
+    copy: Option<copy::Job>,
     drag_export: bool,
     info: Mutex<TransferInfo>,
     cancel: CancellationToken,
@@ -27,6 +30,31 @@ struct Task {
     done: Notify,
 }
 impl Task {
+    fn cancel(&self) -> Result<(), Error> {
+        let mut info = locked(&self.info)?;
+        if !info.unfinished() {
+            return Ok(());
+        }
+        self.cancel.cancel();
+        if info.state == "queued" {
+            info.state = "cancelled".into();
+            info.message = Some("排队任务已取消".into());
+            if let Some(job) = &self.copy {
+                job.release();
+            }
+            self.done.notify_waiters();
+        } else {
+            info.state = "cancelling".into();
+        }
+        Ok(())
+    }
+    fn uses_session(&self, session: &str) -> bool {
+        self.input.session_id == session
+            || self
+                .copy
+                .as_ref()
+                .is_some_and(|job| job.plan.source_session() == Some(session))
+    }
     fn snapshot(&self) -> Result<TransferInfo, Error> {
         let mut info = locked(&self.info)?.clone();
         info.remaining_bytes = info
@@ -117,12 +145,13 @@ impl Transfers {
         self.schedule();
     }
     pub fn start(&self, input: TransferInput) -> Result<TransferInfo, Error> {
-        self.enqueue(input, false).map(|(info, _)| info)
+        self.enqueue(input, false, None).map(|(info, _)| info)
     }
     fn enqueue(
         &self,
         input: TransferInput,
         drag_export: bool,
+        copy: Option<copy::Job>,
     ) -> Result<(TransferInfo, Arc<Task>), Error> {
         input.validate()?;
         tokio::runtime::Handle::try_current()
@@ -149,6 +178,7 @@ impl Transfers {
         };
         let task = Arc::new(Task {
             input,
+            copy,
             drag_export,
             info: Mutex::new(info.clone()),
             cancel: CancellationToken::new(),
@@ -205,6 +235,7 @@ impl Transfers {
                 confirm_overwrite: false,
             },
             true,
+            None,
         )?;
         loop {
             let done = task.done.notified();
@@ -287,11 +318,14 @@ impl Transfers {
         Ok(())
     }
     pub fn session_unfinished(&self, session: &str) -> Result<usize, Error> {
-        Ok(self
-            .list()?
-            .iter()
-            .filter(|i| i.session_id == session && i.unfinished())
-            .count())
+        let queue = locked(&self.queue)?;
+        let mut count = 0;
+        for task in &queue.tasks {
+            if task.uses_session(session) && task.snapshot()?.unfinished() {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
     pub fn cancel(&self, id: &str) -> Result<(), Error> {
         let queue = locked(&self.queue)?;
@@ -300,19 +334,7 @@ impl Transfers {
             .iter()
             .find(|t| t.snapshot().is_ok_and(|i| i.id == id))
             .ok_or(Error::NotFound)?;
-        let mut info = locked(&task.info)?;
-        if !info.unfinished() {
-            return Ok(());
-        }
-        task.cancel.cancel();
-        if info.state == "queued" {
-            info.state = "cancelled".into();
-            info.message = Some("排队任务已取消".into());
-            task.done.notify_waiters();
-        } else {
-            info.state = "cancelling".into();
-        }
-        Ok(())
+        task.cancel()
     }
     pub fn retry(
         &self,
@@ -329,6 +351,11 @@ impl Transfers {
                 .find(|t| t.snapshot().is_ok_and(|i| i.id == id))
                 .ok_or(Error::NotFound)?;
             let info = task.snapshot()?;
+            if task.copy.is_some() {
+                return Err(Error::Validation(
+                    "此任务须在原插件重新准备并确认，不能直接重试",
+                ));
+            }
             if task.drag_export
                 || info.unfinished()
                 || !["failed", "cancelled"].contains(&info.state.as_str())
@@ -370,6 +397,9 @@ impl Transfers {
                     if task.owner_closed.is_cancelled() {
                         info.state = "failed".into();
                         info.message = Some("文件连接已关闭，请重新连接后重试".into());
+                        if let Some(job) = &task.copy {
+                            job.release();
+                        }
                         task.done.notify_waiters();
                         continue;
                     }
@@ -404,7 +434,13 @@ impl Transfers {
         let result = match opened {
             Ok(remote) => {
                 cleanup_remote = Some(remote.clone());
-                let operation = self.copy_tree(&task, &remote);
+                let operation = async {
+                    if let Some(job) = &task.copy {
+                        copy::run(&self.engine, &self.mutations, &task, &remote, job).await
+                    } else {
+                        self.copy_tree(&task, &remote).await
+                    }
+                };
                 tokio::pin!(operation);
                 tokio::select! {
                     result = &mut operation => result,
@@ -415,6 +451,9 @@ impl Transfers {
             }
             Err(error) => Err(error),
         };
+        if let Some(job) = &task.copy {
+            job.release();
+        }
         let temporary = task.temporary.lock().ok().and_then(|mut t| t.take());
         let mut recovery = None;
         if let Some((remote_path, path)) = temporary {
@@ -486,12 +525,19 @@ impl Transfers {
         self.schedule();
     }
     pub async fn cancel_session(&self, session: &str) -> Result<(), Error> {
-        let ids: Vec<_> = self
-            .list()?
-            .into_iter()
-            .filter(|i| i.session_id == session && i.unfinished())
-            .map(|i| i.id)
-            .collect();
+        let ids = {
+            let queue = locked(&self.queue)?;
+            queue
+                .tasks
+                .iter()
+                .filter(|task| task.uses_session(session))
+                .map(|task| task.snapshot())
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .filter(|info| info.unfinished())
+                .map(|info| info.id)
+                .collect::<Vec<_>>()
+        };
         for id in ids {
             self.cancel(&id)?;
         }
@@ -503,7 +549,7 @@ impl Transfers {
             .iter()
             .filter(|t| {
                 t.snapshot()
-                    .is_ok_and(|i| i.unfinished() && session.is_none_or(|s| i.session_id == s))
+                    .is_ok_and(|i| i.unfinished() && session.is_none_or(|s| t.uses_session(s)))
             })
             .cloned()
             .collect();

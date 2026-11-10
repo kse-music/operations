@@ -246,6 +246,8 @@
 
 ## SSH 与终端
 
+- [终端 HTTP/HTTPS 网址点击与默认浏览器验证](terminal/VALIDATION_SSH_USABILITY.md#2026-11-10-终端网址点击)
+
 - [终端拖放上传与当前 Shell 权限](terminal/VALIDATION_TERMINAL_DROP.md)（含[静默上传与弹窗进度](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-静默上传与弹窗进度)、[弹窗关闭后恢复焦点](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-上传弹窗关闭后恢复终端焦点)）
 
 - [SSH / SFTP 技术验证与暂定决策](terminal/SSH_TECH_VALIDATION.md)
@@ -297,7 +299,7 @@
 ## 模型与 AI 助手
 
 - [AI 运维助手验证记录](ai/VALIDATION_AI_ASSISTANT.md)
-- [助手直接对话与智能体验证](ai/VALIDATION_ASSISTANT_CHAT.md)：含 SSH 查询、固定计划、宿主确认、执行复查及无标签镜像清理；保留按需上下文、模型绑定、发送免弹窗和直接对话的历史验证。
+- [助手直接对话与智能体验证](ai/VALIDATION_ASSISTANT_CHAT.md)：含审批模式与单次计划确认、第二阶段文件预览/确认保存、上传/双端中转及第一阶段工具目录、参数预检和运行期任务，以及 SSH 查询、固定计划、宿主确认、执行复查及无标签镜像清理；保留按需上下文、模型绑定、发送免弹窗和直接对话的历史验证。
 - [助手自动关联主机验证](ai/VALIDATION_ASSISTANT_HOSTS.md)
 - [AI 运维助手布局验证](ai/VALIDATION_ASSISTANT_LAYOUT.md)
 - [模型管理验证记录](ai/VALIDATION_MODEL_MANAGEMENT.md)

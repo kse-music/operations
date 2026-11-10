@@ -7,6 +7,7 @@ mod agent;
 mod budget;
 mod collection;
 mod disk;
+mod files;
 mod metrics;
 mod metrics_types;
 mod ops;
@@ -15,6 +16,8 @@ mod prompts;
 mod redact;
 mod routing;
 mod summary;
+mod task;
+mod tools;
 mod types;
 mod workflow;
 #[derive(Debug)]

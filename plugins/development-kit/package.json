@@ -14,7 +14,7 @@
     "package": "node tools/build-plugin.mjs ./example ./example.sdplugin"
   },
   "dependencies": {
-    "@serverdeck/plugin-sdk": "5.0.0",
+    "@serverdeck/plugin-sdk": "5.2.0",
     "vue": "3.5.44"
   },
   "devDependencies": {

@@ -12,6 +12,10 @@ import type {
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
+  openLink: (url: string): Promise<void> => {
+    ensureDesktop();
+    return invoke('terminal_open_link', { url });
+  },
   claimDrop: (id: string, grant: string): Promise<TerminalDropSelection> =>
     invoke('terminal_upload_claim_drop', { id, grant }),
   prepareDrop: (id: string, token: string): Promise<TerminalDropPrepared> =>
