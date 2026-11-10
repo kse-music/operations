@@ -6,6 +6,8 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 
+// --details runs container detail layout and close checks independently.
+const detailsOnly = process.argv.includes('--details');
 const output = process.env.SERVERDECK_DOCKER_UI_OUTPUT ?? '.local/qa/compose/ui';
 await mkdir(output, { recursive: true });
 const pkg = JSON.parse(await readFile('plugins/system/packages/docker.sdplugin', 'utf8'));
@@ -91,6 +93,12 @@ try {
                 } else result = { id: 'project-log' };
               } else if (request.kind === 'compose_projects' && window.fixture.mode === 'error')
                 error = { code: 'REMOTE_COMMAND', message: 'Compose 未安装或访问被拒绝' };
+              else if (
+                request.kind === 'container_startup' &&
+                window.fixture.mode === 'config-error' &&
+                !request.inspectOnly
+              )
+                error = { code: 'REMOTE_COMMAND', message: 'Compose 配置文件不存在' };
               else {
                 if (
                   ['compose_action', 'container_maintenance', 'container_action'].includes(
@@ -161,7 +169,55 @@ try {
                               ExitCode: 0,
                             })),
                           }
-                        : null,
+                        : request.kind === 'container_details'
+                          ? {
+                              id: request.id,
+                              name: '/production-web',
+                              image: 'nginx:stable',
+                              environment: [],
+                              state: { Status: 'running' },
+                            }
+                          : request.kind === 'container_startup'
+                            ? {
+                                id: request.id,
+                                source: request.inspectOnly ? 'inspect' : 'compose',
+                                project: 'shop-production',
+                                service: 'web',
+                                environmentRevealed: request.revealEnv,
+                                warnings: [
+                                  '展示当前项目文件中的 service 配置，可能与容器创建时不同。',
+                                ],
+                                configuration: {
+                                  services: {
+                                    web: {
+                                      image: 'nginx:stable',
+                                      ports: [
+                                        {
+                                          target: 80,
+                                          published: '8080',
+                                          protocol: 'tcp',
+                                          host_ip: '::1',
+                                        },
+                                      ],
+                                      volumes: [
+                                        {
+                                          type: 'bind',
+                                          source: '/srv/业务系统/production deployment/html',
+                                          target: '/usr/share/nginx/html',
+                                          read_only: true,
+                                        },
+                                      ],
+                                      environment: Object.fromEntries(
+                                        Array.from({ length: 20 }, (_, index) => [
+                                          `VARIABLE_${index}`,
+                                          request.revealEnv ? 'CONFIG_FIXTURE_SECRET' : '[已隐藏]',
+                                        ]),
+                                      ),
+                                    },
+                                  },
+                                },
+                              }
+                            : null,
                 };
               }
             } else if (method === 'platform.request') {
@@ -205,6 +261,109 @@ try {
       assert.equal(geometry.overflow, false);
       assert(geometry.searchWidth >= 140 && geometry.searchWidth <= 322);
     };
+    const checkDetails = async () => {
+      await frame
+        .locator(`[data-ops-target="${'a'.repeat(64)}"]`)
+        .getByRole('button', { name: '详情', exact: true })
+        .click();
+      const detail = frame.getByRole('dialog', { name: '容器详情', exact: true });
+      await detail.getByRole('tab', { name: '启动配置', exact: true }).click();
+      const yaml = detail.getByLabel('Compose 启动配置');
+      await yaml.getByText('read_only: true', { exact: false }).waitFor();
+      assert.deepEqual(
+        (await detail.getByRole('tab').allTextContents()).map((label) => label.trim()),
+        ['概览', '资源使用', '启动配置', '环境变量'],
+      );
+      assert((await yaml.textContent()).includes('published: "8080"'));
+      assert((await yaml.textContent()).includes('/srv/业务系统/production deployment/html'));
+      const panel = detail.getByRole('tabpanel');
+      await panel.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      await detail.evaluate((element) => {
+        element.scrollTop = element.scrollHeight;
+      });
+      const scrollGeometry = await detail.evaluate((element) => {
+        const close = element.querySelector('[aria-label="关闭对话框"]').getBoundingClientRect();
+        const tabs = element.querySelector('[role="tablist"]').getBoundingClientRect();
+        const panel = element.querySelector('[role="tabpanel"]');
+        const box = element.getBoundingClientRect();
+        return {
+          outerScroll: element.scrollTop,
+          panelScroll: panel.scrollTop,
+          closeTop: close.top,
+          closeBottom: close.bottom,
+          tabsTop: tabs.top,
+          boxTop: box.top,
+          boxBottom: box.bottom,
+        };
+      });
+      await page.screenshot({ path: `${output}/startup-scrolled-${width}-${theme}.png` });
+      assert.equal(scrollGeometry.outerScroll, 0, '详情弹窗自身不应滚动');
+      assert(scrollGeometry.panelScroll > 0, '详情内容区应当可以独立滚动');
+      assert(
+        scrollGeometry.closeTop >= scrollGeometry.boxTop &&
+          scrollGeometry.closeBottom <= scrollGeometry.boxBottom,
+      );
+      assert(scrollGeometry.tabsTop >= scrollGeometry.boxTop);
+      await detail.getByRole('button', { name: '关闭对话框' }).click();
+      await detail.waitFor({ state: 'detached' });
+      await frame
+        .locator(`[data-ops-target="${'a'.repeat(64)}"]`)
+        .getByRole('button', { name: '详情', exact: true })
+        .click();
+      await detail.getByRole('tab', { name: '启动配置', exact: true }).click();
+      await yaml.getByText('CONFIG_FIXTURE_SECRET', { exact: false }).waitFor();
+      await panel.evaluate((element) => {
+        element.scrollTop = 0;
+      });
+      assert((await detail.textContent()).includes('CONFIG_FIXTURE_SECRET'));
+      assert.equal(
+        await detail.getByRole('button', { name: '查看环境变量值', exact: true }).count(),
+        0,
+      );
+      assert.equal(
+        await detail.getByRole('button', { name: '隐藏环境变量值', exact: true }).count(),
+        0,
+      );
+      const configBounds = await detail.boundingBox();
+      assert(
+        configBounds &&
+          configBounds.x >= 0 &&
+          configBounds.y >= 0 &&
+          configBounds.x + configBounds.width <= width + 1 &&
+          configBounds.y + configBounds.height <= height + 1,
+      );
+      await measure();
+      await page.screenshot({ path: `${output}/startup-${width}-${theme}.png` });
+      await yaml.getByText('CONFIG_FIXTURE_SECRET', { exact: false }).waitFor();
+      await detail.getByRole('tab', { name: '概览', exact: true }).click();
+      assert(!(await detail.textContent()).includes('CONFIG_FIXTURE_SECRET'));
+      await page.evaluate(() => {
+        window.fixture.mode = 'config-error';
+      });
+      await detail.getByRole('tab', { name: '启动配置', exact: true }).click();
+      await detail
+        .getByRole('alert')
+        .getByText('Compose 配置文件不存在', { exact: false })
+        .waitFor();
+      await detail.getByRole('button', { name: '使用容器信息转换', exact: true }).click();
+      await detail.getByText('容器信息转换 · Compose 格式', { exact: true }).waitFor();
+      await yaml.waitFor();
+      await detail.getByRole('button', { name: '关闭对话框' }).click();
+      await page.evaluate(() => {
+        window.fixture.mode = 'normal';
+      });
+    };
+    if (detailsOnly) {
+      await frame.getByRole('tab', { name: '容器', exact: true }).click();
+      await frame.locator(`[data-ops-target="${'a'.repeat(64)}"]`).waitFor();
+      await checkDetails();
+      assert.deepEqual(errors, []);
+      results.push({ width, height, scale, theme, scope: 'details', passed: true });
+      await page.close();
+      continue;
+    }
     await measure();
     await page.screenshot({ path: `${output}/projects-${width}-${theme}.png` });
     await frame.getByRole('button', { name: 'Docker信息', exact: true }).click();
@@ -401,6 +560,7 @@ try {
     await page.screenshot({ path: `${output}/container-logs-${width}-${theme}.png` });
     await frame.getByRole('button', { name: '关闭对话框' }).click();
     await page.waitForFunction(() => window.fixture.stopped.includes('container-log'));
+    await checkDetails();
     assert.deepEqual(errors, []);
     results.push({ width, height, scale, theme, passed: true });
     await page.close();

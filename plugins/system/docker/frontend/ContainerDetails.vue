@@ -4,6 +4,7 @@ import OpsDetails from './OpsDetails.vue';
 import type { OpsRequest, OpsResponse } from './types';
 import ContainerResources from './ContainerResources.vue';
 import ContainerEnvironment from './ContainerEnvironment.vue';
+import ContainerStartup from './ContainerStartup.vue';
 
 const props = defineProps<{
   containerId: string;
@@ -13,8 +14,7 @@ const props = defineProps<{
 const tabs = [
   { key: 'overview', label: '概览' },
   { key: 'resources', label: '资源使用' },
-  { key: 'ports', label: '端口映射' },
-  { key: 'mounts', label: '挂载' },
+  { key: 'startup', label: '启动配置' },
   { key: 'environment', label: '环境变量' },
 ] as const;
 type Tab = (typeof tabs)[number]['key'];
@@ -105,37 +105,6 @@ const overview = computed(() => {
     ...(fieldText(state.Error) ? { 状态错误: fieldText(state.Error) } : {}),
   };
 });
-
-const ports = computed(() =>
-  Object.entries(fields(props.detail.ports)).flatMap(([container, bindings]) =>
-    Array.isArray(bindings) && bindings.length
-      ? bindings.map((binding: unknown) => ({
-          container,
-          address: fieldText(fields(binding).HostIp) || '所有接口',
-          port: fieldText(fields(binding).HostPort),
-        }))
-      : [{ container, address: '未发布到主机', port: '—' }],
-  ),
-);
-const mountTypes = new Map([
-  ['bind', '绑定挂载'],
-  ['volume', '数据卷'],
-  ['tmpfs', '内存文件系统'],
-  ['npipe', '命名管道'],
-]);
-const mounts = computed(() =>
-  (Array.isArray(props.detail.mounts) ? props.detail.mounts : []).map((value: unknown) => {
-    const mount = fields(value);
-    const type = fieldText(mount.Type);
-    return {
-      type: mountTypes.get(type) ?? type,
-      source: fieldText(mount.Source),
-      name: fieldText(mount.Name),
-      target: fieldText(mount.Destination),
-      access: mount.RW === true ? '读写' : mount.RW === false ? '只读' : '不可用',
-    };
-  }),
-);
 </script>
 
 <template>
@@ -163,6 +132,7 @@ const mounts = computed(() =>
     </div>
     <section
       :id="panelId"
+      :key="activeTab"
       class="docker-detail-panel"
       role="tabpanel"
       :aria-labelledby="`${panelId}-${activeTab}`"
@@ -174,48 +144,11 @@ const mounts = computed(() =>
         :container-id="containerId"
         :query="query"
       />
-      <template v-else-if="activeTab === 'ports'">
-        <p v-if="!ports.length" class="host-empty">此容器没有端口映射。</p>
-        <dl v-for="(port, index) in ports" :key="index" class="docker-detail-row">
-          <div>
-            <dt>容器端口 / 协议</dt>
-            <dd>{{ port.container }}</dd>
-          </div>
-          <div>
-            <dt>主机监听地址</dt>
-            <dd>{{ port.address }}</dd>
-          </div>
-          <div>
-            <dt>主机端口</dt>
-            <dd>{{ port.port || '不可用' }}</dd>
-          </div>
-        </dl>
-      </template>
-      <template v-else-if="activeTab === 'mounts'">
-        <p v-if="!mounts.length" class="host-empty">此容器没有挂载。</p>
-        <dl v-for="(mount, index) in mounts" :key="index" class="docker-detail-row">
-          <div>
-            <dt>挂载类型</dt>
-            <dd>{{ mount.type || '不可用' }}</dd>
-          </div>
-          <div>
-            <dt>主机路径</dt>
-            <dd>{{ mount.source || '—' }}</dd>
-          </div>
-          <div v-if="mount.name">
-            <dt>卷名称</dt>
-            <dd>{{ mount.name }}</dd>
-          </div>
-          <div>
-            <dt>容器内路径</dt>
-            <dd>{{ mount.target || '不可用' }}</dd>
-          </div>
-          <div>
-            <dt>访问模式</dt>
-            <dd>{{ mount.access }}</dd>
-          </div>
-        </dl>
-      </template>
+      <ContainerStartup
+        v-else-if="activeTab === 'startup'"
+        :container-id="containerId"
+        :query="query"
+      />
       <ContainerEnvironment v-else :container-id="containerId" :query="query" />
     </section>
   </div>

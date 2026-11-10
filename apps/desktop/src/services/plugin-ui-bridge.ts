@@ -14,6 +14,7 @@ import { downloadResult } from './download';
 import { errorMessage } from './ipc';
 import type { PluginUiPage, PluginPermission } from '../types/plugins';
 import type { PlatformRequest } from '@serverdeck/plugin-sdk/types/platform';
+import type { TerminalPresentation } from '@serverdeck/plugin-sdk/terminal';
 export function createPluginUiBridge(input: {
   id: string;
   revision: string;
@@ -23,7 +24,7 @@ export function createPluginUiBridge(input: {
   isActive?: () => boolean;
   canRetain?: () => boolean;
   settingsAction?: (action: 'close' | 'models') => void;
-  terminal?: (ticket: string, hostId: string) => void;
+  terminal?: (ticket: string, hostId: string, presentation?: TerminalPresentation) => void;
   stream?: (id: string, event: unknown) => void;
 }) {
   const hosts = useHostsStore(),
@@ -236,7 +237,7 @@ export function createPluginUiBridge(input: {
         )
           throw new Error('连接目标无效');
         return ensure(args.hostId, args.files === true);
-      case 'terminal.open':
+      case 'terminal.open': {
         if (
           !input.terminal ||
           typeof args.ticket !== 'string' ||
@@ -244,8 +245,32 @@ export function createPluginUiBridge(input: {
           !has('ssh.execute')
         )
           throw new Error('终端票据无效');
-        input.terminal(args.ticket, args.hostId);
+        let presentation: TerminalPresentation | undefined;
+        if (args.presentation !== undefined) {
+          const value = args.presentation;
+          if (
+            !value ||
+            typeof value !== 'object' ||
+            Array.isArray(value) ||
+            Object.entries(value).some(
+              ([key, text]) =>
+                !['title', 'description'].includes(key) ||
+                typeof text !== 'string' ||
+                !text.trim() ||
+                text.length > (key === 'title' ? 160 : 240) ||
+                /\p{Cc}/u.test(text),
+            )
+          )
+            throw new Error('终端显示信息无效');
+          const display = value as TerminalPresentation;
+          presentation = {
+            ...(display.title ? { title: display.title.trim() } : {}),
+            ...(display.description ? { description: display.description.trim() } : {}),
+          };
+        }
+        input.terminal(args.ticket, args.hostId, presentation);
         return null;
+      }
       case 'workspace.draft':
         if (typeof args.dirty !== 'boolean' || !input.contextKey) throw new Error('草稿作用域无效');
         plugins.setDraftDirty(input.contextKey, input.id, args.dirty);

@@ -5,6 +5,7 @@ export interface DropProgress {
     'preparing' | 'starting' | 'uploading' | 'verifying' | 'committing' | 'cancelling' | 'blocked';
   sent: number;
   size: number;
+  bytesPerSecond: number;
   uid?: string;
   directory?: string;
 }
@@ -62,6 +63,7 @@ export class TerminalDropUpload {
   private peerFailure?: Error;
   private count = 0;
   private inFlightBytes = 0;
+  private uploadStartedAt?: number;
   private unsafeTerminal = false;
   private released = false;
   private expected?: {
@@ -72,7 +74,7 @@ export class TerminalDropUpload {
   };
   private endWaiter?: () => void;
   private endReject?: (error: Error) => void;
-  private value: DropProgress = { phase: 'preparing', sent: 0, size: 0 };
+  private value: DropProgress = { phase: 'preparing', sent: 0, size: 0, bytesPerSecond: 0 };
   constructor(private options: Options) {}
   get busy(): boolean {
     return this.running;
@@ -92,6 +94,10 @@ export class TerminalDropUpload {
   }
   private progress(phase: DropProgress['phase']): void {
     this.value.phase = phase;
+    const seconds =
+      this.uploadStartedAt === undefined ? 0 : (performance.now() - this.uploadStartedAt) / 1000;
+    this.value.bytesPerSecond =
+      phase === 'uploading' && seconds > 0 ? Math.floor(this.value.sent / seconds) : 0;
     this.options.progress({ ...this.value });
   }
   consume(data: Uint8Array): void {
@@ -276,6 +282,7 @@ export class TerminalDropUpload {
       this.progress('starting');
       this.started = true;
       await this.exchange('READY', encoder.encode(prepared.command));
+      this.uploadStartedAt = performance.now();
       for (let offset = 0, seq = 0; offset < prepared.size; seq++) {
         if (this.cancelled || this.disposed) throw new Error('上传已取消。');
         const bytes = await this.options.read(offset);

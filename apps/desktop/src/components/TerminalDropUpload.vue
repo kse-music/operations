@@ -6,6 +6,7 @@ import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import { TerminalDropUpload, type DropProgress } from '../services/terminal-drop';
 import type { TerminalDropSelection, TerminalFileDrag } from '../types/terminal';
+import { bytes } from '../types/files';
 import Modal from './Modal.vue';
 
 const props = defineProps<{
@@ -254,7 +255,10 @@ onBeforeUnmount(() => {
         v-else-if="!['blocked', 'cancelling'].includes(progress.phase)"
         aria-label="拖放上传进度"
       ></progress>
-      <span v-if="progress.size">{{ progress.sent }} / {{ progress.size }} 字节</span>
+      <span v-if="progress.size">{{ bytes(progress.sent) }} / {{ bytes(progress.size) }}</span>
+      <span v-if="progress.phase === 'uploading'" aria-label="平均上传速度">
+        平均 {{ bytes(progress.bytesPerSecond) }}/s
+      </span>
     </div>
     <p v-if="failure" class="banner error" role="alert">{{ failure }}</p>
     <footer class="dialog-actions">

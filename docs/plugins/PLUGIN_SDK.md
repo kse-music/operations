@@ -126,7 +126,9 @@ import { invoke } from '@serverdeck/plugin-sdk';
 const result = await invoke('inspect', { hostId });
 ```
 
-动作必须在当前 `ui.json` 页面 actions 中声明；结构化 input 为 JSON，最大 60 KiB、深度16、4096节点。不得传函数、循环引用或原型特殊字段。前端可直接使用 `call` 处理通用文件、配置等；业务编排放在自己的 WASM 中。`connections.ensureConnection(hostId, files?)` 委托平台连接及真实指纹审核，不向插件暴露租约。`terminal.openTerminal(ticket,hostId)` 仅打开本页已批准票据。
+动作必须在当前 `ui.json` 页面 actions 中声明；结构化 input 为 JSON，最大 60 KiB、深度16、4096节点。不得传函数、循环引用或原型特殊字段。前端可直接使用 `call` 处理通用文件、配置等；业务编排放在自己的 WASM 中。`connections.ensureConnection(hostId, files?)` 委托平台连接及真实指纹审核，不向插件暴露租约。`terminal.openTerminal(ticket, hostId, presentation?)` 仅打开本页已批准票据。
+
+终端可选 `presentation` 只接受 `title`（最多 160 字符）和 `description`（最多 240 字符）的非空、无控制字符纯文本；未知字段拒绝。用于显示容器等业务上下文，不作为主机、命令或权限依据，实际 SSH 地址仍由宿主展示。省略时沿用通用插件终端标题。弹窗复用宿主终端的查找、字体和剪贴板能力，支持最大化/还原及本地清屏；这些操作不创建新 PTY、不重放票据。结束后保留历史和原因，从插件原入口重新打开才创建新会话。
 
 Context 只含主题/字号、入口 hostId、可见状态和获授权的公开元数据。资产目录需 hosts.read；仅 SSH/SFTP 权限只能看到入口主机的安全连接状态。无凭据表、认证配置、代理命令、内部连接/transport ID。models.use 允许模型公开状态；修改模型、Key、授权和安装工具不属于插件桥。
 

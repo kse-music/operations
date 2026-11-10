@@ -473,6 +473,73 @@ async fn docker_compose_prepares_project_commands_and_survives_denial() {
 }
 
 #[tokio::test]
+async fn docker_startup_unifies_inspect_and_compose_without_leaking_other_containers() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let manifest: Value =
+        serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
+    let completed = |stdout: String| json!({"state":"completed","exitCode":0,"stdout":stdout,"stderr":"","truncated":false,"message":null});
+    for (compose, reveal, inspect_only) in [
+        (false, false, false),
+        (false, true, false),
+        (true, false, false),
+        (true, true, false),
+        (true, false, true),
+    ] {
+        let snapshot = json!({"Id":"a".repeat(64),"Name":"/web","Config":{"Image":"nginx","Labels":if compose {json!({"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/a b","com.docker.compose.project.config_files":"/srv/a b/compose.yaml,/srv/a b/override.yaml"})} else {json!({})}},"EnvironmentKeys":["TOKEN"],"HostConfig":{"NetworkMode":"bridge"},"Mounts":[]});
+        let mut config_read = false;
+        let reply = invoke(&runtime,&id,"query",json!({"hostId":"host","request":{"kind":"container_startup","id":"a".repeat(64),"revealEnv":reveal,"inspectOnly":inspect_only}}), |request| {
+            match request["kind"].as_str().unwrap() {
+                "host" => metadata(request),
+                "execute" => {
+                    let command = &request["command"];
+                    let script = command["args"][1].as_str().unwrap();
+                    if script.contains("config --format json") {
+                        config_read = true;
+                        assert!(manifest["preapprovedCommands"].as_array().unwrap().contains(command), "every startup read must be exactly preapproved");
+                        assert!(script.contains("sd_reveal="));
+                        assert!(!script.contains("/srv/a b"), "project paths must be read by the fixed script");
+                        let model=json!({"services":{"web":{"image":"nginx","environment":{"TOKEN":"compose-secret"},"build":{"context":"/src"}},"other":{"environment":{"OTHER":"other-secret"}}}});
+                        completed(json!({"Id":"a".repeat(64),"Members":["a".repeat(64)],"Project":"shop","WorkingDir":"/srv/a b","ConfigFiles":"/srv/a b/compose.yaml,/srv/a b/override.yaml","Model":model,"ExitCode":0,"EnvironmentFilesResolved":reveal}).to_string())
+                    } else if script.contains("EnvironmentKeys") {
+                        assert!(manifest["preapprovedCommands"].as_array().unwrap().contains(command));
+                        completed(format!("{}\n{}",json!({"Id":"b".repeat(64),"Config":{"Env":["OTHER=other-secret"]}}),snapshot))
+                    } else {
+                        assert!(reveal);
+                        assert!(manifest["preapprovedCommands"].as_array().unwrap().contains(command));
+                        completed(json!({"Id":"a".repeat(64),"Config":{"Env":["TOKEN=container-secret"]}}).to_string())
+                    }
+                },
+                other => panic!("unexpected primitive {other}"),
+            }
+        }).await;
+        let detail = &done(&reply)["detail"];
+        assert_eq!(config_read, compose && !inspect_only);
+        assert_eq!(
+            detail["source"],
+            if config_read { "compose" } else { "inspect" }
+        );
+        assert_eq!(detail["environmentRevealed"], reveal);
+        assert!(!detail.to_string().contains("other-secret"));
+        assert_eq!(
+            detail.to_string().contains("compose-secret"),
+            config_read && reveal
+        );
+        assert_eq!(
+            detail.to_string().contains("container-secret"),
+            !config_read && reveal
+        );
+        if config_read {
+            assert_eq!(
+                detail["configuration"]["services"]["web"]["build"]["context"],
+                "/src"
+            );
+        }
+    }
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn docker_information_and_individual_restart_use_current_contract() {
     let (_directory, runtime, id) = packaged("docker");
     runtime.activate(&id).await.unwrap();

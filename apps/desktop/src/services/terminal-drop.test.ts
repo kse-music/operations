@@ -96,6 +96,73 @@ it('streams bounded binary blocks and handles byte-fragmented READY and immediat
   expect(h.upload.busy).toBe(false);
 });
 
+it('measures average acknowledged archive bytes from READY and excludes preparation and startup', async () => {
+  let now = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const h = fixture(65540);
+  h.prepare.mockImplementation(async () => {
+    now = 20000;
+    return { size: 65540, nonce, sha256: 'a'.repeat(64), command: 'start\r' };
+  });
+  h.send
+    .mockImplementationOnce(async () => {
+      now = 30000;
+      h.upload.consume(frame('READY:0:' + btoa('/root/current\n')));
+    })
+    .mockImplementationOnce(async () => {
+      expect(h.progress.at(-1)).toMatchObject({ sent: 0, bytesPerSecond: 0 });
+      now += 2000;
+      h.upload.consume(frame('ACK:0'));
+    })
+    .mockImplementationOnce(async () => {
+      // Sending the second block has not advanced acknowledged progress.
+      expect(h.progress.at(-1)).toMatchObject({ sent: 65536, bytesPerSecond: 32768 });
+      now += 2000;
+      h.upload.consume(frame('ACK:1'));
+    });
+  const running = h.upload.run();
+  await vi.waitFor(() => expect(h.progress.at(-1)?.sent).toBe(65540));
+  expect(h.progress.at(-1)).toMatchObject({
+    phase: 'uploading',
+    bytesPerSecond: 16385,
+  });
+  now += 10000;
+  h.upload.consume(frame('VERIFYING'));
+  expect(h.progress.at(-1)).toMatchObject({ phase: 'verifying', bytesPerSecond: 0 });
+  h.upload.consume(frame('COMMITTING'));
+  h.upload.consume(frame('DONE:2'));
+  h.upload.consume(frame('RETURN'));
+  await running;
+  expect(h.failed).not.toHaveBeenCalled();
+  expect(h.notice).toHaveBeenCalledWith('上传完成：2 个项目。');
+});
+
+it('keeps speed finite at zero elapsed time and clears it when cancelling', async () => {
+  vi.spyOn(performance, 'now').mockReturnValue(0);
+  const h = fixture();
+  h.send
+    .mockImplementationOnce(async () => {
+      h.upload.consume(frame('READY:0:' + btoa('/root/current\n')));
+    })
+    .mockImplementationOnce(async () => {
+      h.upload.consume(frame('ACK:0'));
+    })
+    .mockImplementationOnce(async () => {});
+  const running = h.upload.run();
+  await vi.waitFor(() => expect(h.send).toHaveBeenCalledTimes(3));
+  expect(h.progress.at(-1)).toMatchObject({ sent: 65536, bytesPerSecond: 0 });
+  h.upload.cancel();
+  await running;
+  expect(h.progress).toContainEqual(
+    expect.objectContaining({ phase: 'cancelling', bytesPerSecond: 0 }),
+  );
+  expect(
+    h.progress.filter((value) => value).every((value) => Number.isFinite(value!.bytesPerSecond)),
+  ).toBe(true);
+  expect(h.interrupt).toHaveBeenCalledOnce();
+  expect(h.failed).not.toHaveBeenCalled();
+});
+
 it('reports remote conflicts without claiming completion or replacing the cause', async () => {
   const h = fixture(10, 'ERROR:CONFLICT:0');
   await h.upload.run();

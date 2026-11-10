@@ -85,7 +85,7 @@ pub fn services(text: &str, project: &str) -> Result<Vec<Value>, ApiError> {
 }
 
 #[derive(Debug, PartialEq)]
-struct Target {
+pub(crate) struct Target {
     directory: String,
     files: Vec<String>,
 }
@@ -99,7 +99,7 @@ fn path(value: &str) -> Result<String, ApiError> {
     Ok(value.into())
 }
 
-fn target(rows: &[Value]) -> Result<Target, ApiError> {
+pub(crate) fn target(rows: &[Value]) -> Result<Target, ApiError> {
     let mut selected = None;
     for row in rows {
         let directory = path(row["WorkingDir"].as_str().unwrap_or_default())?;
@@ -123,7 +123,7 @@ fn target(rows: &[Value]) -> Result<Target, ApiError> {
     selected.ok_or_else(|| ApiError::new("COMPOSE_NOT_FOUND", "项目已无普通服务容器，请刷新列表"))
 }
 
-fn command(project: &str, rows: &[Value], suffix: &str) -> Result<Command, ApiError> {
+pub(crate) fn command(project: &str, rows: &[Value], suffix: &str) -> Result<Command, ApiError> {
     project_name(project)?;
     let target = target(rows)?;
     let mut body = format!(

@@ -195,6 +195,45 @@ it('keeps the same dialog for progress and closes only after commit, Shell retur
   );
 });
 
+it('shows formatted acknowledged bytes and average upload speed only during transfer', async () => {
+  let now = 1000;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  prepareUpload();
+  vi.mocked(terminalApi.prepareDrop).mockResolvedValue({
+    size: 131072,
+    sha256: 'a'.repeat(64),
+    nonce,
+    command: 'start\r',
+  });
+  vi.mocked(terminalApi.uploadRead).mockResolvedValue(Array(65536).fill(7));
+  drop();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  const dialog = document.querySelector('dialog')!;
+  [...dialog.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '确认上传')!
+    .click();
+  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
+  expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toContain('平均 0 B/s');
+  expect(dialog.textContent).toContain('0 B / 128.0 KiB');
+  now += 2000;
+  receive('ACK:0');
+  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledTimes(2));
+  expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toContain(
+    '平均 32.0 KiB/s',
+  );
+  expect(dialog.textContent).toContain('64.0 KiB / 128.0 KiB');
+  expect(dialog.querySelector('progress')?.value).toBe(65536);
+  now += 2000;
+  receive('ACK:1', 'VERIFYING');
+  await nextTick();
+  expect(dialog.querySelector('[aria-label="平均上传速度"]')).toBeNull();
+  expect(dialog.textContent).toContain('128.0 KiB / 128.0 KiB');
+  expect(dialog.textContent).toContain('正在校验并解包');
+  receive('COMMITTING', 'DONE:2', 'RETURN');
+  await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
+  expect(terminalApi.uploadRelease).toHaveBeenCalledOnce();
+});
+
 it('keeps failures inside the dialog and closes them without releasing the grant twice', async () => {
   vi.mocked(terminalApi.prepareDrop).mockRejectedValue(new Error('本地文件读取失败'));
   drop();

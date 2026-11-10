@@ -46,6 +46,7 @@ const message = ref<string | null>(null);
 const trust = ref<Extract<TerminalEvent, { type: 'trust' }> | null>(null);
 const query = ref('');
 const finding = ref(false);
+const displayFontSize = ref(application.state?.config.terminalFontSize ?? 16);
 const pendingPaste = ref<string | null>(null);
 const preferences = computed(
   () => application.state?.config.terminal ?? defaultTerminalPreferences(),
@@ -192,12 +193,18 @@ function terminalAction(name: string): void {
   if (props.standalone && ['zoomIn', 'zoomOut', 'zoomReset'].includes(name)) {
     const base = application.state?.config.terminalFontSize ?? 16;
     const current = terminal.options.fontSize ?? base;
-    terminal.options.fontSize =
+    displayFontSize.value =
       name === 'zoomReset'
         ? base
-        : Math.max(8, Math.min(32, current + (name === 'zoomIn' ? 1 : -1)));
+        : Math.max(10, Math.min(32, current + (name === 'zoomIn' ? 1 : -1)));
+    terminal.options.fontSize = displayFontSize.value;
     fitTerminal();
+    focusTerminal();
   } else emit('action', props.tab.key, name);
+}
+function clearScreen(): void {
+  terminal.clear();
+  focusTerminal();
 }
 async function toggleFind(): Promise<void> {
   finding.value = !finding.value;
@@ -393,13 +400,7 @@ function preventTerminalRightClick(event: MouseEvent): void {
   }
 }
 function zoomWithWheel(event: WheelEvent): void {
-  if (
-    !props.active ||
-    !event.ctrlKey ||
-    event.deltaY === 0 ||
-    document.querySelector('dialog[open]')
-  )
-    return;
+  if (!props.active || !event.ctrlKey || event.deltaY === 0 || dialogBlocksTerminal()) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   terminalAction(event.deltaY < 0 ? 'zoomIn' : 'zoomOut');
@@ -407,7 +408,7 @@ function zoomWithWheel(event: WheelEvent): void {
 function terminalContextMenu(event: MouseEvent): void {
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (!props.active || document.querySelector('dialog[open]')) return;
+  if (!props.active || dialogBlocksTerminal()) return;
   if (preferences.value.quickCopyPaste && event.button === 2 && !event.shiftKey) {
     menu.value = null;
     void paste();
@@ -675,6 +676,7 @@ watch(
   () => application.state?.config.terminalFontSize,
   (size) => {
     if (terminal && size) {
+      displayFontSize.value = size;
       pendingFontSize = size;
       fitTerminal();
     }
@@ -699,6 +701,15 @@ onBeforeUnmount(() => {
   inputQueue.dispose();
 });
 useErrorNotifications(message);
+defineExpose({
+  focus: focusTerminal,
+  toggleFind,
+  zoom: terminalAction,
+  clearScreen,
+  fontSize: displayFontSize,
+  finding,
+  message,
+});
 </script>
 <template>
   <section
@@ -715,6 +726,7 @@ useErrorNotifications(message);
         aria-label="终端查找内容"
         placeholder="在终端滚动缓冲中查找"
         @keydown.enter="find()"
+        @keydown.esc.stop.prevent="toggleFind"
       /><button class="tool-button" aria-label="上一个" title="上一个匹配" @click="find(true)">
         <ArrowUp :size="14" aria-hidden="true" /></button
       ><button class="tool-button" aria-label="下一个" title="下一个匹配" @click="find()">

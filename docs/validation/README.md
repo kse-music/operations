@@ -248,7 +248,7 @@
 
 - [终端 HTTP/HTTPS 网址点击与默认浏览器验证](terminal/VALIDATION_SSH_USABILITY.md#2026-11-10-终端网址点击)
 
-- [终端拖放上传与当前 Shell 权限](terminal/VALIDATION_TERMINAL_DROP.md)（含[静默上传与弹窗进度](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-静默上传与弹窗进度)、[弹窗关闭后恢复焦点](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-上传弹窗关闭后恢复终端焦点)）
+- [终端拖放上传与当前 Shell 权限](terminal/VALIDATION_TERMINAL_DROP.md)（含[静默上传与弹窗进度](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-静默上传与弹窗进度)、[弹窗关闭后恢复焦点](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-上传弹窗关闭后恢复终端焦点)、[容量与平均上传速度](terminal/VALIDATION_TERMINAL_DROP.md#2026-11-10-终端上传平均速度)）
 
 - [SSH / SFTP 技术验证与暂定决策](terminal/SSH_TECH_VALIDATION.md)
 - [终端顶部紧凑布局验收](terminal/VALIDATION_COMPACT_TERMINAL_HEADER.md)
@@ -307,6 +307,8 @@
 
 ## 插件系统
 
+- [Docker 统一启动配置（2026-11-10）](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-统一启动配置)：端口/挂载合并为 Compose YAML；2.2.6 变量直接显示、固定顶部/内容独立滚动及滚到底关闭通过三种窗口详情回归，综合日志过滤仍有超时；保留 2.2.5 固定读取免确认/旧版选项兼容和 2.2.4 浏览器证据，原生 SSH/WebView 未验。
+- [Docker Shell 终端体验（2026-11-10）](plugins/PLUGIN_TEST_REPORT.md#2026-11-10-docker-shell-终端体验)：容器/SSH 上下文、状态、最大化、查找、字号及清屏；真实 xterm 五种窗口和失败场景夹具，原生 SSH/WebView 未验。
 - [插件界面握手超时修复（2026-11-09）](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-插件界面握手超时修复)：SDK 就绪/连接确认恢复，真实宿主与打包 UI 联通、Windows 原生与独立 MySQL 复验。
 - [SDK5 旧插件记录导致启动失败修复（2026-11-09）](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-旧插件记录导致启动失败修复)：逐项故障隔离、显式备份重装、日常记录副本真实桌面验证及 Windows junction 测试限制。
 - [插件阶段验证记录](plugins/PLUGIN_TEST_REPORT.md)：含 2026-11-05 网络诊断完整调用链删除、SDK 3.0/系统包 1.3、旧包归档与保留状态升级的 Windows 原生验证；以及主机工具按钮平铺、配置统一归属设置的回归。保留旧插件真实 SSH、主机草稿隔离、包升级、UI/SDK、图标及上传安装的历史证据。

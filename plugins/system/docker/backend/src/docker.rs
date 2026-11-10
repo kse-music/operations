@@ -9,7 +9,7 @@ const CAPABILITIES: &str = "if ! command -v docker >/dev/null 2>&1; then printf 
 const DETAILS_FORMAT: &str = r#"{"Id":{{json .Id}},"Name":{{json .Name}},"Created":{{json .Created}},"Config":{"Image":{{json .Config.Image}}},"State":{{json .State}},"NetworkSettings":{"Ports":{{json .NetworkSettings.Ports}}},"Mounts":{{json .Mounts}},"HostConfig":{"RestartPolicy":{{json .HostConfig.RestartPolicy}}}}"#;
 const ENVIRONMENT_FORMAT: &str = r#"{"Id":{{json .Id}},"Config":{"Env":{{json .Config.Env}}}}"#;
 
-fn inspect_command(format: &str) -> Result<String, ApiError> {
+pub(crate) fn inspect_command(format: &str) -> Result<String, ApiError> {
     // A fixed snapshot keeps preapproval exact; select the requested ID in the plugin.
     Ok(format!(
         "sd_ids=$(d container ls --all --quiet --no-trunc) || exit; if test -n \"$sd_ids\"; then set -f; d container inspect --format {} -- $sd_ids; fi",
@@ -63,6 +63,11 @@ pub enum Query {
     ContainerStats {
         id: String,
     },
+    ContainerStartup {
+        id: String,
+        reveal_env: bool,
+        inspect_only: bool,
+    },
     ContainerAction {
         id: String,
         action: Action,
@@ -86,6 +91,10 @@ fn confirm(value: bool) -> Result<(), ApiError> {
 impl Query {
     pub fn command(&self) -> Result<String, ApiError> {
         let body = match self {
+            Self::ContainerStartup { id, .. } => {
+                container_id(id)?;
+                return crate::startup::snapshot_command();
+            }
             Self::Capabilities => CAPABILITIES.into(),
             Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
             Self::Images => "d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
@@ -289,7 +298,7 @@ mod tests {
         let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
         let commands: Vec<serverdeck_plugin_sdk::platform::Command> =
             serde_json::from_value(manifest["preapprovedCommands"].clone()).unwrap();
-        let expected = [
+        let mut expected = [
             Query::Capabilities,
             Query::Containers,
             Query::Images,
@@ -306,10 +315,19 @@ mod tests {
             Query::ComposeServices {
                 project: "shop".into(),
             },
+            Query::ContainerStartup {
+                id: "a".repeat(64),
+                reveal_env: false,
+                inspect_only: false,
+            },
         ]
         .iter()
         .map(|query| serverdeck_plugin_sdk::platform::Command::script(query.command().unwrap()))
         .collect::<Vec<_>>();
+        expected.extend([
+            crate::startup::compose_command(false),
+            crate::startup::compose_command(true),
+        ]);
         assert_eq!(commands, expected);
         let id = "a".repeat(64);
         for query in [

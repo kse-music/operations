@@ -110,3 +110,25 @@ TerminalDropUpload 接受拖放时携带原 SessionId 通知父窗格激活并�
 本次为前端焦点生命周期修复，未修改接收协议、权限或持久数据，未重复执行 Rust/SSH/PTY 传输验收。JSDOM 回归证明焦点与输入路由，原生桌面中的光标闪烁及实际拖放仍未人工复验，不据此声明所有平台通过。保留已有 Canvas 未实现和 Monaco 大 chunk 提示。
 
 下一步依赖正常退出旧版后用新构建进行原生交互复验；本阶段不生成安装器或继续跨平台验收。
+
+## 2026-11-10 终端上传平均速度
+
+### 行为及实现
+
+终端拖放上传弹窗新增平均上传速度，容量复用 SFTP 的 `bytes` 格式化函数，显示 B/KiB/MiB/GiB。`services/terminal-drop.ts` 从 READY 后用 `performance.now()` 计时，以已匹配 ACK 的原始归档字节除以传输耗时；未确认数据不推进计数，Base64 膨胀、准备与接收端启动不计入速度。仅传输阶段展示速度，校验、提交及取消时清零并隐藏，零耗时保持有限数值。
+
+主要修改为 `TerminalDropUpload.vue`、`services/terminal-drop.ts` 及两者测试；同步 PRD、架构、使用指南、实施计划与验证索引。不涉及 Rust、IPC、插件 SDK、持久格式或接收协议变更。
+
+两处速度差异的实现依据：终端每 64 KiB 经前端读取、Base64 编码、PTY 输入后，远端调用 timeout/head、wc、base64 接收并确认，再发送下一块；SFTP 在 Rust 的传输任务中直接读写二进制。终端另有打包、归档校验及解包开销。此处解释固定开销，不将用户截图当成同环境吞吐基准，本阶段不优化传输协议。
+
+### 已执行验证
+
+- 定向 Vitest：5 文件、47 项通过，范围为终端上传服务、上传弹窗、上传后焦点、终端剪贴板/rz 与 SFTP 传输面板。新增 3 项回归验证均速数值、未确认字节、准备/启动计时边界、零耗时、取消及校验阶段、容量单位和成功关闭。
+- 首次 Vitest 因系统临时目录文件重命名 EPERM 未进入测试；将该次命令的 TEMP/TMP 指向 `.local/terminal-drop/speed-temp` 后，上述测试通过。未修改系统或持久配置。
+- `npm run typecheck`：桌面及 SDK 通过；`npm run lint`：全量 ESLint 通过。
+- `node tools/tauri.mjs build --debug --no-bundle`：Windows Debug 构建通过，产物为 `target/debug/serverdeck-desktop.exe`；构建前 D 盘约 155 GiB 空闲，使用根 target，未强杀或替换运行中的程序。[构建记录](../../../.local/terminal-drop/speed-build.log)保留前端打包、插件构建与原生编译结果；已有 Monaco 大 chunk 提示仍在。
+- 修改文件的 Prettier 检查及 `git diff --check` 通过；实施计划同表格对齐同步格式化，未修改无关功能。
+
+### 限制、风险与下一步依赖
+
+本次显示的是传输开始以来的平均速度，在上传进度更新时刷新；不表示瞬时网卡流量，也不改变现有大文件吞吐。未对用户服务器重新实测速度差异，未做物理拖放或跨平台验收。保留当前 PTY 链路的额外编码、命令和确认开销；大文件可使用 SFTP，需要当前 sudo 身份/目录时使用终端上传。原生交互复验依赖正常退出旧版后运行新构建，本阶段不生成安装器或继续协议优化。

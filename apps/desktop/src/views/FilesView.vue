@@ -681,11 +681,13 @@ onBeforeUnmount(() => {
           >
             <Copy :size="14" aria-hidden="true" /></button
           ><button
-            class="button"
+            class="tool-button"
+            aria-label="上传选中"
+            title="上传选中"
             :disabled="store.current?.state !== 'connected' || !localSelection.length"
             @click="prepareTransfer('upload', localSelection)"
           >
-            <Upload :size="14" aria-hidden="true" />上传选中
+            <Upload :size="14" aria-hidden="true" />
           </button>
           <button
             class="tool-button"
@@ -774,11 +776,13 @@ onBeforeUnmount(() => {
         </form>
         <div class="toolbar">
           <button
-            class="button"
+            class="tool-button"
+            aria-label="切换用户"
+            title="切换用户"
             :disabled="store.current?.state !== 'connected'"
             @click="showUserForm"
           >
-            <UserRoundCog :size="14" aria-hidden="true" />切换用户
+            <UserRoundCog :size="14" aria-hidden="true" />
           </button>
           <button
             class="tool-button"
@@ -805,11 +809,13 @@ onBeforeUnmount(() => {
           >
             <Copy :size="14" aria-hidden="true" /></button
           ><button
-            class="button"
+            class="tool-button"
+            aria-label="下载选中"
+            title="下载选中"
             :disabled="!remoteSelection.length"
             @click="prepareTransfer('download', remoteSelection)"
           >
-            <Download :size="14" aria-hidden="true" />下载选中</button
+            <Download :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button danger"
             aria-label="删除选中"

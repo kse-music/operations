@@ -1,5 +1,112 @@
 # 插件阶段验证记录
 
+## 2026-11-10 Docker 统一启动配置
+
+### 完成范围
+
+Docker 包 2.2.4 的容器详情调整为「概览、资源使用、启动配置、环境变量」，端口映射和挂载合并为只读 Compose YAML。Compose 容器按真实标签确定项目目录、有序文件与 service，复用参数引用和绝对路径校验读取当前文件合并结果，保留完整 service 及其引用的顶层网络、卷、configs、secrets 定义；其他 service 仅保留依赖引用。配置缺失、解析失败或审批取消如实显示，用户可显式选择 inspect 转换。
+
+普通容器转换镜像、启动命令、端口/协议/监听地址、挂载类型/路径/读写及选项、重启策略、健康检查、网络及可映射的资源/安全参数。已有卷和网络使用真实名称的 external 引用，未转换的有效 HostConfig 设置和特殊挂载选项明确提示，不承诺完整恢复历史 docker run 命令或独立部署。固定快照只输出环境变量名称，明文复用独立查询；Compose 内联环境变量在 WASM 中隐藏，默认保留变量表达式和 env_file 引用，不解析环境文件。显式查看才向前端提供明文，离开标签/关闭/新请求清理并隔离迟到响应；内联 secrets/configs 内容始终隐藏。
+
+新增 `container_startup` 为插件内部请求，不改 SDK、IPC 或持久格式。固定读取由八条增至九条；动态 Compose 文件解析沿用宿主审批，未增加通配免确认或修改远端配置。主要源码为 `ContainerDetails.vue`、`ContainerStartup.vue`、`compose-yaml.ts`、`startup.rs`、Docker 请求/分派及清单；复用 `compose.rs` 现有命令构造。
+
+### 实际验证
+
+环境：Windows、稳定 Rust、Node/npm、Edge，本机 WSL Docker/Compose。构建前 D 盘约 155 GiB 可用；原生构建复用根目录 target，测试使用复制到 QA 目录的 EXE，WASM 使用既有 `.local/plugin-build/docker/`。
+
+| 检查 | 命令/入口 | 结果 |
+| --- | --- | --- |
+| 前端交互与 YAML | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend`，TEMP/TMP 指向 `.local/qa/docker-startup/temp` | 2 文件、12 项通过；四标签与端口/挂载 YAML、配置来源、显式变量显示/隐藏、配置失败与显式回退、错误容器拒绝、关闭时迟到结果隔离、标量编码及原 Docker/Compose/Shell 回归 |
+| YAML 独立解析 | `.local/qa/docker-startup/check-yaml.mjs` 调用生产序列化函数，再以 PyYAML 6.0.3 `safe_load` 对比原 JSON | 通过；端口数字字符串、布尔/空值样式字符串、换行及 Unicode 行分隔符、列表与空结构保持原值，无新增运行依赖 |
+| 原生单元测试 | `cargo test --manifest-path plugins/system/docker/backend/Cargo.toml --target-dir target --offline --locked --no-run` 后运行 QA 副本 | 14 项通过；WSL 维护与新增只读集成用例默认忽略。覆盖 IPv6、未运行容器端口、绑定/命名卷/tmpfs、外部卷/网络、命令/资源/健康检查、完整 service 保留与顶层引用筛选、环境变量和内联内容隐藏、畸形/重复/错误 ID 拒绝及清单精确匹配 |
+| 本机真实只读集成 | QA 副本 `docker-tests.exe --ignored startup::tests::live_read_only_snapshot_and_compose_config --nocapture` | 1 项通过；真实 daemon 快照格式、健康检查等可选字段及缺少 Env 键时的快照、默认无 Env 值；真实 Compose 解析 QA 双文件、默认变量端口、缺失 env_file 保留引用、覆盖字段和命名卷引用。只读 daemon、只写 QA 配置文件，未创建或变更容器 |
+| 正式 WASM 调用链 | 根目录 `cargo test -p serverdeck-plugin-runtime --test platform_plugins --offline --locked --no-run` 后运行 QA 副本 | 完整运行 12 项通过、既有真实项目生命周期用例忽略；最终包定向 Docker 4 项复验通过。新增普通/Compose/显式 inspect、变量显示、选中容器隔离、动态配置不在预授权、带空格有序文件参数；保留现有 Docker/助手协议测试 |
+| 插件构建 | `node tools/build-system-plugins.mjs` | Docker 2.2.4 正式 WASM 与独立 UI 标准包生成，遵守公开 SDK 源码边界 |
+| 浏览器布局与交互 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-startup/ui` 后运行 `node tools/ui-docker-compose-e2e.mjs` | 2361×900、1280×820 深色标准字号及 960×600 浅色 145% 字号全部通过；四标签、YAML 端口/只读挂载、明文按需/切换清理、失败与显式 inspect，弹窗和页面无越界、无 pageerror。原 Compose/列表/信息及日志跟随回归一并通过 |
+| 类型、静态与格式 | `npm run typecheck`；定向 ESLint 零警告；backend Clippy `--all-targets -- -D warnings`、cargo fmt、Prettier 与 `git diff --check` | 通过；Prettier 检查本次前端/清单/浏览器工具，文档检查新增索引和相对链接，不格式化无关历史 |
+
+浏览器使用明确的响应夹具，不冒充真实 SSH/UI 验收。已查看[常规窗口](../../../.local/qa/docker-startup/ui/startup-1280-dark.png)和[最小窗口大字号](../../../.local/qa/docker-startup/ui/startup-960-light.png)，[三组结果](../../../.local/qa/docker-startup/ui/results.json)；[只读快照摘要](../../../.local/qa/docker-startup/live-snapshot-check.json)。真实只读集成源码与结果由 `startup.rs` 忽略用例保留，可重复执行；不保存真实容器完整载荷或环境变量值。
+
+过程中的问题如实保留：默认 Windows 沙箱临时缓存 rename 触发 EPERM，改用本任务 QA 临时目录后通过；WSL 和无头 Edge 在沙箱内受访问/进程限制，沙箱外执行通过。首次快照预授权测试发现新构造缺少 PRELUDE，修正后匹配通过；真实 daemon 发现健康检查等可选 Config 字段缺失，改为按键索引后通过。浏览器夹具首次缺少详情所需 environment 数组，补全契约后通过；新增弹窗流程插在既有日志回归前时曾在日志过滤跟随断言超时，将新流程移到既有流程后隔离状态，最终三组完整通过，未修改日志生产代码或删除断言。
+
+### 限制、风险与后续依赖
+
+- 未验证真实远端 SSH/WebView 的新配置查询审批与点击全链路、安装器及其他桌面平台；本轮没有运行会启动/停止/重建真实容器的生命周期用例。当前项目文件和环境可能与创建时不同，历史自定义 env-file、shell 变量、缺失配置、老版本 Compose 不支持选项等会造成读取失败，可显式选择当前容器转换。
+- 转换结果用于查看，外部资源、依赖服务及主机路径需要原环境；未转换项明确展示。环境变量隐藏不等于任意命令、标签或构建参数中的秘密都能自动识别，完整配置仅在用户主动打开时读取，数据不进入日志。
+- 加载需使用 2.2.4 包或在正常退出现有应用后完成桌面构建并重启。本轮未重建桌面 EXE/安装器，不强杀运行中的应用；其他在途修改保留，不继续部署或发布。
+
+### 2.2.5：启动配置免确认与旧版 Compose 兼容
+
+用户真实截图复现两处问题：2.2.4 的 Compose 配置使用动态命令，因此触发宿主逐次确认；默认固定传入 `--no-env-resolution`，远端 Compose 返回 `unknown flag: --no-env-resolution`。该截图仅作为故障证据，本轮未连接截图主机。
+
+改为隐藏/显式变量两条完整固定读取脚本，清单预授权从九条增至十一条。远端按项目去重读取配置，复验成员 ID、原始工作目录及有序配置文件一致性；路径以位置参数逐项传入，拒绝控制字符、相对路径和超量文件，不执行 eval，不接收前端路径。WASM 从配置流中核对当前成员与标签，仅读取当前项目/service 并隐藏变量；项目错误与 stderr 分段隔离。容器启停/重启/删除等变更确认、上传包显式授权、SSH 修订绑定、输出和超时上限保持。取舍见 [ADR 0036](../../architecture/decisions/0036-compose-config-preapproval.md)。
+
+脚本先检查 Compose help，只在支持时加入 `--no-env-resolution`。旧版默认不插值，但可能解析 env_file；返回前仍隐藏变量值，界面明确提示实际行为。文件缺失、权限错误或配置损坏不伪装成功，保留原因和显式 inspect 转换入口；不自动安装或升级远端 Compose。
+
+本轮验证（Windows，D 盘约 154 GiB 可用；原生复用 target，并从 QA 副本运行）：
+
+| 检查 | 命令/范围 | 结果 |
+| --- | --- | --- |
+| 原生单元 | Docker backend `cargo test --offline --locked --target-dir target --no-run` 后运行 `.local/qa/docker-startup/docker-tests.exe` | 15 项通过、3 项默认忽略；新增配置流解析、重复/错误成员/元数据变化拒绝、项目诊断隔离，预授权清单与实际固定命令逐字匹配 |
+| 隔离 Shell | QA 副本 `--ignored startup::tests::shell_config_handles_legacy_flags_paths_and_project_failures --nocapture` | 1 项通过；四组新/旧 Compose 与隐藏/显式变量组合，旧版遇到多余选项即失败的夹具确认无不支持参数；带空格/中文/引号/命令替换字样的路径原值传递，拒绝相对路径/控制字符/同名项目冲突，其他项目失败不阻断选中项目。全部 Docker 调用为测试函数，无真实 daemon 访问 |
+| 本机只读集成 | QA 副本 `--ignored startup::tests::live_read_only_snapshot_and_compose_config --nocapture` | 1 项通过；真实 Docker 快照，固定生产脚本经测试标签发现夹具调用真实 Compose help/config；QA 双文件合并、env_file 保留策略、service 隔离与变量隐藏通过。未创建、启停或变更容器 |
+| 正式 WASM | 根目录 `cargo test -p serverdeck-plugin-runtime --test platform_plugins --offline --locked --no-run` 后 QA 副本 `platform-tests.exe docker_ --nocapture` | 4 项通过、真实项目生命周期用例默认忽略；启动配置普通/Compose/显式 inspect/显式变量流程的每条 execute 都精确包含于当前清单，不含前端/选中项目路径；既有变更不在预授权且取消仍不执行 |
+| 前端回归 | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend`，TEMP/TMP 使用本主题 QA 目录 | 2 文件、12 项通过；未改 UI 组件，保留错误、重试、显式 inspect、变量和迟到响应清理回归 |
+| 构建、静态与格式 | 系统插件构建；backend Clippy 零警告、cargo fmt；manifest Prettier、Rust 测试 rustfmt 及 `git diff --check` | 通过；生成 Docker 2.2.5 正式 WASM/独立 UI 标准包，无宿主/SDK/数据库变更 |
+
+未使用真实旧版 Compose 安装环境或截图服务器验收；旧版选项行为通过可拒绝未知参数的隔离夹具验证，真实 CLI 验证针对本机现有版本。未重跑浏览器布局（本轮未改 UI），未重建桌面 EXE/安装器或验收原生 SSH/WebView、其他平台。上方 2.2.4 的浏览器记录属于对应版本历史。
+
+使用依赖为加载 2.2.5 插件包，或正常退出现有客户端后重建并重启。固定快照会读取当前主机发现的项目配置，项目多或输出大时仍可能触及平台上限；仅向前端返回所选 service，不能把固定预授权解释为任意动态命令免确认。没有修改远端项目文件、用户数据或持久配置。
+
+
+### 2.2.6：变量直接显示与详情独立滚动
+
+用户要求移除启动配置中的“查看环境变量值”按钮并直接显示变量，同时修复整窗滚动导致关闭按钮离开视口的问题。先对正式 2.2.5 包增加浏览器断言复现：将详情和内容滚到底后，外层 `scrollTop` 实测 229，而预期为 0；[旧版滚动截图](../../../.local/qa/docker-startup-layout/before/startup-scrolled-2361-dark.png)中标题和关闭按钮已离开可视区域，已查看。
+
+2.2.6 的启动配置在组件挂载时直接请求 `revealEnv: true`，成功内容不再提供查看/隐藏按钮；错误重试及显式 inspect 转换同样直接显示变量。切换标签/关闭卸载组件，清理明文并拒绝迟到响应；概览仍不读取变量，独立环境变量标签保留原按需行为。后端、SDK、IPC、十一条固定预授权命令及权限均未改变。
+
+滚动修复只在 Docker CSS 中命中包含容器详情的 Modal，采用有界 flex 高度、外层 overflow hidden、可收缩中间层及独立滚动的 tabpanel。标题、关闭按钮和分类标签固定；内容滚动隔离于外层，按标签重建内容面板复位滚动位置。未修改通用 Modal、日志组件或其他弹窗布局。
+
+实际检查：
+
+| 检查 | 命令/范围 | 结果 |
+| --- | --- | --- |
+| Vue 交互 | `npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend`，TEMP/TMP 指向 `.local/qa/docker-startup-layout/temp` | 2 文件、14 项通过；进入即显示值、成功内容无按钮、当前请求直接展示、错误/显式 inspect、错误容器拒绝、关闭时清理及迟到结果隔离，保留既有 Docker/Compose/Shell 与 YAML 编码回归 |
+| 类型 | `npm run typecheck` | desktop 与 plugin-sdk 均通过 |
+| 正式包构建 | `node tools/build-system-plugins.mjs` | 生成 Docker 2.2.6 WASM/UI 标准包，后端复用现有 WASM 缓存；D 盘约 154 GiB 空闲，未构建桌面 EXE |
+| 真实浏览器详情回归 | `SERVERDECK_DOCKER_UI_OUTPUT=.local/qa/docker-startup-layout/details`，`node tools/ui-docker-compose-e2e.mjs --details` | 2361×900、1280×820 深色标准字号及 960×600 浅色 145% 字号全部通过；确认内容区实际滚动、外层 scrollTop=0、关闭按钮和标签在弹窗内，滚到底直接点击关闭并确认移除，再重新打开；变量直接展示、按钮缺席、切换明文清理、失败/inspect 和页面无越界、无 pageerror 均通过 |
+| 静态/格式 | 修改的 Vue/TS/浏览器工具 ESLint 零警告；前端/CSS/manifest/工具 Prettier；`git diff --check` | 通过；发现并修正 Vue 属性顺序警告，无其他代码静态错误 |
+
+浏览器响应均为明确的本地夹具，不冒充真实容器环境变量。新增 `--details` 使用同一正式包和 MessageChannel 夹具独立运行本模块；默认综合回归的所有既有断言保留。第一次综合回归通过三种窗口的滚动几何检查；补上“滚到底直接点击关闭”后，综合回归两次在既有日志过滤步骤的 `assertLatest` 超时，未能完成全部详情检查。该失败没有删除断言或修改日志生产代码来规避，最终独立详情回归在三种窗口全部完成。不能据此宣称本轮综合日志回归全部通过。
+
+已查看[最小窗口滚到底](../../../.local/qa/docker-startup-layout/details/startup-scrolled-960-light.png)、[常规窗口滚到底](../../../.local/qa/docker-startup-layout/details/startup-scrolled-1280-dark.png)及[顶部直接展示](../../../.local/qa/docker-startup-layout/details/startup-960-light.png)；[三组详情结果](../../../.local/qa/docker-startup-layout/details/results.json)。测试中展示的 `CONFIG_FIXTURE_SECRET` 是固定夹具字符串，不是用户秘密。
+
+本轮未改 Rust 或读取协议，未重跑原生 Rust/WASM/真实 Docker 测试；未验真实 SSH/WebView、截图主机、安装器或其他平台。变量在当前标签可见，离开即清理，当前 Compose 文件/环境与历史创建时不同等既有限制保持。使用需加载 2.2.6 包，或正常退出现有客户端后完成桌面构建并重启；本轮不强杀运行中的应用、不操作真实容器或持久配置。
+
+
+## 2026-11-10 Docker Shell 终端体验
+
+### 完成范围
+
+容器 Shell 弹窗展示容器名称、短 ID、`/bin/sh`、宿主提供的真实 SSH 地址及连接状态。默认窗口上限为 1200×780，随视口收缩；支持最大化/还原、查找及 Esc 关闭查找、10–32 字号调整/重置、本地清屏。复用 `TerminalPane`，修复独立弹窗内的右键菜单及 Ctrl+滚轮缩放被全局弹窗检查拦截；嵌套弹窗仍隔离底层交互。显示操作保持同一 PTY，断线保留历史和原因，不重放一次性票据，关闭及迟到打开仍释放自身资源。
+
+Docker 通过公开 SDK 可选 `presentation` 传递纯文本业务上下文，宿主检查字段、长度及控制字符，不接受命令字段，不改变票据授权或实际主机。旧的两参数调用保留。主要修改为 `PluginTerminalDialog.vue`、共享 `TerminalPane.vue`、`PluginFrame.vue`、桥/SDK 和 Docker Shell 调用链；当前需求、SDK、架构及插件说明已同步。本轮 Shell 改动先提升包版本至 2.2.3，同期工作区合并构建的当前包为 2.2.4。
+
+### 实际验证
+
+- 终端/桥/SDK及普通终端回归：6 文件、84 项通过。覆盖显示上下文、连接状态、搜索和 Esc、字号边界、清屏不发送命令、不重建 PTY、不影响工作区终端、断线/失败、不重用票据、关闭及迟到打开清理、弹窗内菜单/滚轮和嵌套弹窗隔离、普通终端快捷键与字号。命令：`npm run test -w @serverdeck/desktop -- src/components/plugin-terminal-dialog.test.ts src/components/terminal-clipboard.test.ts src/services/plugin-ui-bridge.test.ts src/views/terminal-zoom.test.ts src/views/terminal-actions.test.ts ../../packages/plugin-sdk/src/terminal.test.ts`。
+- Docker 前端最终复验：1 文件、9 项通过，包含独立的 Shell 名称/短 ID/执行 Shell 呈现测试。命令：`npm run test -w @serverdeck/desktop -- ../../plugins/system/docker/frontend/docker.test.ts`。中间一次综合执行为 66/67 通过，失败发生在并行容器详情改动期间旧测试仍查找“端口映射”标签；未删除或修改该断言以规避失败，待对应实现/测试同步后复验通过。测试最初被 Windows 沙箱临时缓存 rename 的 EPERM 阻断，沙箱外以本地夹具执行通过。
+- 浏览器：`.local/qa/docker-terminal/preview.mjs` 使用真实 Vue 组件和 xterm，本地替代远端 PTY/剪贴板服务。五组窗口为 1280×820、1920×1080 深色标准字号，以及 960×600 浅色、640×480 深色、390×460 浅色的 145% 界面字号；另验连接失败。全部通过窗口边界、长名称省略、无横向溢出、末行可见、关闭可达、最大化实际触发 PTY resize、搜索选区、菜单粘贴、清屏不发命令、断线和关闭清理。首次发现“查找”按钮受全局定宽样式影响，修正后复验；搜索高亮断言改为 xterm 实际选区。无头 Edge 在沙箱外运行，只访问本地夹具。已查看深色标准、浅色大字号截图。
+- 桌面前端 Vite 生产构建和 Docker 独立前端 SDK 边界构建通过；Vite 保留既有大块体积提示。`npm run typecheck`、修改前端文件 ESLint（零警告）及 Prettier 检查通过。
+
+QA 脚本、浏览器构建、五组截图、失败截图、`results.json` 与桌面构建日志保存在 `.local/qa/docker-terminal/`。这些是明确的界面/协议夹具，不冒充真实 Docker 会话验收。
+
+### 限制与使用依赖
+
+未访问截图服务器、未运行真实远端容器 Shell、未验安装器或其他平台。工作区同期还有容器启动配置和终端上传改动，均予以保留；首次整包构建因当时缺失 `startup.rs` 失败，源码补齐后重试通过 WASM/UI 打包及桌面前端构建、进入 Release 原生编译，记录位于 `desktop-build.log` 与 `desktop-build-retry.log`。补充沙箱外进程检查发现用户正运行 `target/release/serverdeck-desktop.exe`；按项目规范停止本轮构建，等待用户正常退出，不强杀应用，不宣称新 EXE 已生成。沙箱内进程检查未显示该实例，今后不能仅据此判断构建输出未占用。
+
+本轮不涉及数据库、配置升级或用户数据清理。业务标题只是插件提供的显示文本，真实目标和权限继续由宿主票据绑定；不能将浏览器夹具视为 SSH/WebView 全链路验收。采用新界面依赖正常退出现有客户端后完成桌面构建并重启。
+
 ## 2026-11-10 移除 Docker TCP 连通性检测
 
 - 本轮移除探测功能，最终校验的 Docker 包为 2.1.2。移除入口、弹窗和前端请求类型，删除本地连接与远程 Python 探测分支、参数校验和响应解析，并从插件清单移除 `network.connect`。平台通用网络能力继续供其他插件使用。

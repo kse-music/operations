@@ -71,6 +71,33 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+it('opens the selected container shell with its name, short ID and actual shell context', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const id = 'a'.repeat(64);
+  api.terminal.mockClear();
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    code: null,
+    message: null,
+    detail: request.kind === 'capabilities' ? { dockerState: 'running' } : null,
+    records:
+      request.kind === 'containers' ? [{ ID: id, Names: 'backend-api', State: 'running' }] : [],
+  }));
+  mountDocker();
+  await settle();
+  root
+    .querySelector<HTMLButtonElement>(
+      `[data-ops-target="${id}"] .ops-row-actions button:last-child`,
+    )!
+    .click();
+  await settle();
+  expect(api.terminal).toHaveBeenCalledExactlyOnceWith('shell-ticket', 'host', {
+    title: 'backend-api',
+    description: 'aaaaaaaaaaaa · /bin/sh',
+  });
+});
+
 it('loads details on demand, opens logs and shell directly and delegates mutations to host confirmation', async () => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -88,18 +115,37 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
     detail:
       request.kind === 'capabilities'
         ? { dockerState: 'running' }
-        : request.kind === 'container_details'
+        : request.kind === 'container_startup'
           ? {
               id: 'container',
-              image: 'owned-image',
-              state: { Status: 'running', Health: { Status: 'healthy' } },
-              ports: { '8080/tcp': [{ HostIp: '::', HostPort: '8081' }], '8443/tcp': null },
-              mounts: [{ Type: 'bind', Source: '/srv/fixture', Destination: '/data', RW: false }],
-              restartPolicy: { Name: 'on-failure', MaximumRetryCount: 3 },
-              environment: [request.revealEnv ? 'TOKEN=fixture=value' : 'TOKEN=[已隐藏]'],
+              source: 'inspect',
               environmentRevealed: request.revealEnv,
+              warnings: [],
+              configuration: {
+                services: {
+                  container: {
+                    image: 'owned-image',
+                    ports: [{ target: 8080, published: '8081', protocol: 'tcp', host_ip: '::' }],
+                    expose: ['8443/tcp'],
+                    volumes: [
+                      { type: 'bind', source: '/srv/fixture', target: '/data', read_only: true },
+                    ],
+                  },
+                },
+              },
             }
-          : null,
+          : request.kind === 'container_details'
+            ? {
+                id: 'container',
+                image: 'owned-image',
+                state: { Status: 'running', Health: { Status: 'healthy' } },
+                ports: { '8080/tcp': [{ HostIp: '::', HostPort: '8081' }], '8443/tcp': null },
+                mounts: [{ Type: 'bind', Source: '/srv/fixture', Destination: '/data', RW: false }],
+                restartPolicy: { Name: 'on-failure', MaximumRetryCount: 3 },
+                environment: [request.revealEnv ? 'TOKEN=fixture=value' : 'TOKEN=[已隐藏]'],
+                environmentRevealed: request.revealEnv,
+              }
+            : null,
     records:
       request.kind === 'containers'
         ? [
@@ -160,14 +206,21 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
   await selectTab('资源使用');
   expect(api.query).toHaveBeenCalledWith('host', { kind: 'container_stats', id: 'container' });
   expect(panel()?.textContent).toContain('12.34%');
-  await selectTab('端口映射');
-  expect(panel()?.textContent).toContain('8080/tcp');
-  expect(panel()?.textContent).toContain('8081');
-  expect(panel()?.textContent).toContain('未发布到主机');
-  await selectTab('挂载');
-  expect(panel()?.textContent).toContain('/srv/fixture');
-  expect(panel()?.textContent).toContain('/data');
-  expect(panel()?.textContent).toContain('只读');
+  expect(
+    [...(detail()?.querySelectorAll('[role="tab"]') ?? [])].map((tab) => tab.textContent?.trim()),
+  ).toEqual(['概览', '资源使用', '启动配置', '环境变量']);
+  await selectTab('启动配置');
+  expect(api.query).toHaveBeenCalledWith('host', {
+    kind: 'container_startup',
+    id: 'container',
+    revealEnv: true,
+    inspectOnly: false,
+  });
+  expect(panel()?.querySelector('pre')?.textContent).toContain('published: "8081"');
+  expect(panel()?.querySelector('pre')?.textContent).toContain('"8443/tcp"');
+  expect(panel()?.querySelector('pre')?.textContent).toContain('/srv/fixture');
+  expect(panel()?.querySelector('pre')?.textContent).toContain('/data');
+  expect(panel()?.querySelector('pre')?.textContent).toContain('read_only: true');
   await selectTab('环境变量');
   expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_details',
@@ -276,7 +329,10 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
     confirmed: true,
   });
   await click('Shell');
-  expect(api.terminal).toHaveBeenCalledWith('shell-ticket', 'host');
+  expect(api.terminal).toHaveBeenCalledWith('shell-ticket', 'host', {
+    title: 'owned-container',
+    description: 'container · /bin/sh',
+  });
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
   expect(actionLabels('image')).toEqual(['删除']);

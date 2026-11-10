@@ -14,6 +14,7 @@ import { errorMessage } from '../services/ipc';
 import type { PluginUiPage } from '../types/plugins';
 import type { ServerSection } from '../types/server';
 import type { Host } from '../types/hosts';
+import type { TerminalPresentation } from '@serverdeck/plugin-sdk/terminal';
 import PluginTerminalDialog from './PluginTerminalDialog.vue';
 const props = withDefaults(
   defineProps<{
@@ -55,7 +56,7 @@ const application = useApplicationStore(),
   notifications = useNotificationsStore();
 const plugins = usePluginsStore(),
   workspace = useWorkspaceStore();
-const terminal = ref<{ host: Host; ticket: string }>();
+const terminal = ref<{ host: Host; ticket: string; presentation?: TerminalPresentation }>();
 const active = computed(
   () =>
     props.active &&
@@ -89,10 +90,10 @@ const bridge = createPluginUiBridge({
   isActive: () => active.value,
   canRetain: () => props.retainRequests,
   settingsAction: props.settingsPage ? (action) => emit('settingsAction', action) : undefined,
-  terminal: (ticket, hostId) => {
+  terminal: (ticket, hostId, presentation) => {
     const host = hosts.catalog?.hosts.find((h) => h.id === hostId);
     if (!host) throw new Error('终端目标主机已删除');
-    terminal.value = { host, ticket };
+    terminal.value = { host, ticket, presentation };
   },
 });
 watch(
@@ -309,10 +310,12 @@ onBeforeUnmount(() => {
     />
     <PluginTerminalDialog
       v-if="terminal && active"
+      :key="terminal.ticket"
       :host="terminal.host"
       :ticket="terminal.ticket"
       :plugin-id="pluginId"
       :owner="contextKey || 'default'"
+      :presentation="terminal.presentation"
       @close="terminal = undefined"
     />
   </div>

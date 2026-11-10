@@ -7,6 +7,7 @@ use serverdeck_plugin_sdk::{
 mod compose;
 mod docker;
 mod maintenance;
+mod startup;
 std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
 fn dispatch(context: Context, action: String, input: Value) -> Action {
     Box::pin(async move {
@@ -74,6 +75,14 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
     })
 }
 async fn execute(context: &Context, host: &str, query: &docker::Query) -> Result<Value, ApiError> {
+    if let docker::Query::ContainerStartup {
+        id,
+        reveal_env,
+        inspect_only,
+    } = query
+    {
+        return startup::load(context, host, id, *reveal_env, *inspect_only).await;
+    }
     if let docker::Query::ComposeAction {
         project,
         action,

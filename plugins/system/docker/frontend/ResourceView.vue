@@ -139,7 +139,10 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
         id: request.id,
         bash: false,
       });
-      await openTerminal(ticket.ticket, ticket.hostId);
+      await openTerminal(ticket.ticket, ticket.hostId, {
+        title: (targetName || request.id.slice(0, 12)).slice(0, 160),
+        description: `${request.id.slice(0, 12)} · /bin/sh`,
+      });
     } else {
       const value = await query(request, mutationConfirmation(request, targetName));
       await load();
@@ -247,9 +250,9 @@ const slotContext = {
       if (!disposed && token === generation) busy.value = false;
     }
   },
-  openShell: (id: string) => {
+  openShell: (id: string, name?: string) => {
     if (connected.value && panelVisible.value && connection.value)
-      void execute({ kind: 'shell', id });
+      void execute({ kind: 'shell', id }, name);
   },
 };
 </script>

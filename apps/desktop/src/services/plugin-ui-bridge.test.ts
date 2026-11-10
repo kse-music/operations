@@ -114,6 +114,59 @@ function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
 
+it('passes optional terminal display text while preserving ticket and permission checks', async () => {
+  grant('ui.contribute', 'ssh.execute');
+  const terminal = vi.fn();
+  let active = true;
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: 'host',
+    terminal,
+    isActive: () => active,
+  });
+  await ui.call('terminal.open', { ticket: 'opaque', hostId: 'host' });
+  expect(terminal).toHaveBeenLastCalledWith('opaque', 'host', undefined);
+  await ui.call('terminal.open', {
+    ticket: 'opaque',
+    hostId: 'host',
+    presentation: { title: ' api ', description: 'abcdef · /bin/sh' },
+  });
+  expect(terminal).toHaveBeenLastCalledWith('opaque', 'host', {
+    title: 'api',
+    description: 'abcdef · /bin/sh',
+  });
+  active = false;
+  await expect(
+    ui.call('terminal.open', { ticket: 'opaque', hostId: 'host' }),
+  ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+  active = true;
+  grant('ui.contribute');
+  await expect(ui.call('terminal.open', { ticket: 'opaque', hostId: 'host' })).rejects.toThrow(
+    '终端票据',
+  );
+  expect(terminal).toHaveBeenCalledTimes(2);
+});
+it.each([
+  null,
+  [],
+  { title: 1 },
+  { title: ' ' },
+  { title: 'x'.repeat(161) },
+  { description: 'x'.repeat(241) },
+  { title: 'a\nb' },
+  { title: 'api', command: 'forged command' },
+])('rejects invalid terminal presentation %j', async (presentation) => {
+  grant('ui.contribute', 'ssh.execute');
+  const terminal = vi.fn();
+  const ui = createPluginUiBridge({ id, revision: 'revision', page, hostId: 'host', terminal });
+  await expect(
+    ui.call('terminal.open', { ticket: 'opaque', hostId: 'host', presentation }),
+  ).rejects.toThrow('终端显示信息');
+  expect(terminal).not.toHaveBeenCalled();
+});
+
 it('notifies only this plugin after a successful settings write and keeps failures unchanged', async () => {
   const subject = bridge(),
     plugins = usePluginsStore();

@@ -508,7 +508,7 @@ it('confirms a sudo identity, clears the password immediately, and displays the 
       }),
   );
   const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-    button.textContent?.includes('切换用户'),
+    button.getAttribute('aria-label') === '切换用户',
   )!;
   button.click();
   await nextTick();
@@ -548,7 +548,7 @@ it('returns to the login user only after an explicit confirmation', async () => 
     listing: { path: '/home/operator', parent: '/home', entries: [] },
   });
   [...root.querySelectorAll<HTMLButtonElement>('button')]
-    .find((button) => button.textContent?.includes('切换用户'))!
+    .find((button) => button.getAttribute('aria-label') === '切换用户')!
     .click();
   await nextTick();
   const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="切换 SFTP 用户"]')!;
@@ -568,7 +568,7 @@ it('preserves the original connection after sudo rejection and leaves a blank pa
   const files = useFilesStore(pinia);
   vi.spyOn(filesApi, 'switchUser').mockRejectedValue({ message: 'sudo denied' });
   [...root.querySelectorAll<HTMLButtonElement>('button')]
-    .find((button) => button.textContent?.includes('切换用户'))!
+    .find((button) => button.getAttribute('aria-label') === '切换用户')!
     .click();
   await nextTick();
   const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="切换 SFTP 用户"]')!;
@@ -647,7 +647,7 @@ it.each(['local', 'remote'] as const)(
     await nextTick();
     const toolbar = table.closest('.file-side')!.querySelector('.toolbar')!;
     const transfer = [...toolbar.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes(side === 'local' ? '上传选中' : '下载选中'),
+      button.getAttribute('aria-label') === (side === 'local' ? '上传选中' : '下载选中'),
     )!;
     expect(transfer.disabled).toBe(false);
     let reject!: (cause: unknown) => void;
@@ -945,7 +945,7 @@ it('filters hidden remote files and folders and removes them from the active sel
   expect(toggle.getAttribute('aria-pressed')).toBe('false');
   expect(pane.querySelector('.file-list-tools')?.textContent?.trim()).toBe('1 项 · 1 已选');
   const download = [...pane.querySelectorAll<HTMLButtonElement>('.toolbar button')].find(
-    (button) => button.textContent?.trim() === '下载选中',
+    (button) => button.getAttribute('aria-label') === '下载选中',
   )!;
   download.click();
   await nextTick();

@@ -263,7 +263,11 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
             >
               日志
             </button>
-            <button class="text-button" :disabled="busy" @click="openShell(String(row.ID))">
+            <button
+              class="text-button"
+              :disabled="busy"
+              @click="openShell(String(row.ID), String(row.Names || ''))"
+            >
               Shell
             </button>
           </template>
