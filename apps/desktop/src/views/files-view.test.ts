@@ -85,6 +85,46 @@ afterEach(() => {
 });
 
 const drivePicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择本地磁盘"]')!;
+it.each([
+  ['local', 'directory', '进入目录', '上传选中'],
+  ['local', 'file', '选择应用打开…', '上传选中'],
+  ['remote', 'directory', '进入目录', '下载选中'],
+  ['remote', 'file', '打开文本', '下载选中'],
+] as const)(
+  'shows icons beside every %s %s menu action without changing its labels',
+  async (side, kind, open, transfer) => {
+    const files = useFilesStore(pinia);
+    const selected = { ...entry, kind };
+    if (side === 'local') files.local!.entries = [selected];
+    else files.current!.listing!.entries = [selected];
+    await nextTick();
+    root
+      .querySelector(`[aria-label="${side === 'local' ? '本地文件' : '远程文件'}"] tbody tr`)!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await nextTick();
+    const buttons = [
+      ...root.querySelectorAll<HTMLButtonElement>('.file-context-menu [role="menuitem"]'),
+    ];
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual([
+      open,
+      ...(side === 'remote' && kind === 'file' ? ['使用系统应用编辑…'] : []),
+      transfer,
+      '复制绝对路径',
+      '查看属性',
+      ...(side === 'remote' ? ['重命名', '删除选中', '在新终端中打开'] : []),
+    ]);
+    for (const button of buttons) {
+      expect(button.firstElementChild?.tagName).toBe('svg');
+      expect(button.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
+    }
+    const write = vi.spyOn(clipboardApi, 'writeText').mockResolvedValue(undefined);
+    buttons.find((button) => button.textContent?.trim() === '复制绝对路径')!.click();
+    expect(write).toHaveBeenCalledExactlyOnceWith(selected.path);
+    await nextTick();
+    expect(root.querySelector('.file-context-menu')).toBeNull();
+  },
+);
+
 const driveOptions = () => [
   ...document.querySelectorAll<HTMLElement>('[aria-label="本地磁盘"] [role="option"]'),
 ];

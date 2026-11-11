@@ -594,7 +594,7 @@ try {
     'workspace close frees all three local PTYs; numbering continues with surviving sessions and resets to one only when empty',
   );
   await showHostTree(page);
-  await row.click();
+  await row.dblclick();
   await active().locator('.xterm-container[data-state="failed"]').waitFor();
   await selectHostWorkspace(page, '');
   for (let index = 0; index < 3; index++) {
@@ -619,7 +619,7 @@ try {
   );
   assert.equal(await page.locator(`.terminal-pane[data-host-id="${host.id}"]`).count(), 0);
   await showHostTree(page);
-  await page.locator(`.tree-host[data-host-id="${host.id}"]`).click();
+  await page.locator(`.tree-host[data-host-id="${host.id}"]`).dblclick();
   await active().locator('.xterm-container[data-state="failed"]').waitFor();
   await page
     .getByRole('alert')

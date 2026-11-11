@@ -1,5 +1,15 @@
 # 验证记录索引
 
+最新：[重新连接仅对已结束会话可用，其他状态置灰并阻止执行](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-重连操作仅对已结束会话可用)。
+
+最新：[重连清空旧画面、滚动历史及备用屏幕，隔离排队/迟到输出](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-重连清空终端历史)。
+
+最新：[迁移完成提示不再随每次启动重复、历史结果与当前通知分离](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-11-迁移完成提示不再重复)。
+
+最新：[断开后停止光标闪烁、只读输入与重连恢复](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-断开后光标停止闪烁)。
+
+最新：[主机双击打开、会话重新连接/断开及断线图标](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-会话重连断开与断线图标)。
+
 最新：[硬件问题系统采样、动态文件大小错误与助手继续回答回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-11-硬件查询触发文件冲突)。
 
 最新：[简体中文 / English 切换、设置保存与内置插件同步](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-11-英文界面语言)。
@@ -308,7 +318,7 @@
 - [主机上下文一致性验收](workspace/VALIDATION_CONTEXT.md)
 - [错误提示统一验收](workspace/VALIDATION_ERROR_NOTIFICATIONS.md)
 - [主机交互与本地终端验收](workspace/VALIDATION_INTERACTIONS.md)
-- [页面布局调整验收](workspace/VALIDATION_LAYOUT.md)
+- [页面布局调整验收](workspace/VALIDATION_LAYOUT.md)（含[统一右键菜单紧凑布局与 SFTP 图标](workspace/VALIDATION_LAYOUT.md#2026-11-11-统一右键菜单紧凑布局)）
 - [顶部模块与左侧菜单验证（2026-11-03）](workspace/VALIDATION_MODULE_NAVIGATION.md)
 - [顶部模块不自动打开默认菜单（2026-11-03）](workspace/VALIDATION_MODULE_SELECTION.md)
 - [禁用系统右键菜单验收](workspace/VALIDATION_NATIVE_MENU.md)

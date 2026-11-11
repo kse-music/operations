@@ -360,6 +360,12 @@ try {
     }
     await page.getByLabel('搜索主机', { exact: true }).fill('');
     await page.locator('.tree-host').first().click();
+    assert.equal(
+      await page.locator('.terminal-tab').count(),
+      0,
+      `${name}: single click must only select`,
+    );
+    await page.locator('.tree-host').first().dblclick();
     await page.locator('.terminal-tab').first().waitFor();
     await page.locator('.tree-host').first().dblclick();
     assert.equal(await page.locator('.terminal-tab').count(), 1, `${name}: duplicate terminal`);
@@ -400,7 +406,7 @@ try {
       el.scrollTop = 0;
     });
     await page.screenshot({ path: `${output}/${name}.png` });
-    await page.locator('.tree-host').first().click();
+    await page.locator('.tree-host').first().dblclick();
     await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     assert.equal(await page.locator('.activity-rail-collapsed').isVisible(), true);
     assert.equal(await page.locator('.host-tree-section').isVisible(), false);

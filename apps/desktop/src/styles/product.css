@@ -196,10 +196,6 @@ kbd {
   height: auto;
   background: var(--rail);
 }
-.workspace-tab-menu {
-  max-width: calc(100vw - 16px);
-  max-height: calc(100vh - 16px);
-}
 .workspace-tab {
   display: flex;
   flex-shrink: 0;

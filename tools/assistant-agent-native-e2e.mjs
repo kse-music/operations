@@ -295,7 +295,7 @@ try {
       .replace(/=+$/, '');
   if (backgroundTest) {
     await showHostTree(page);
-    await page.locator(`.tree-host[data-host-id="${hostId}"]`).click();
+    await page.locator(`.tree-host[data-host-id="${hostId}"]`).dblclick();
     const trust = page.getByRole('dialog', { name: '确认 SSH 主机指纹', exact: true });
     await trust.waitFor();
     assert((await trust.innerText()).includes(fingerprint));

@@ -47,6 +47,7 @@ export function storageMigrate(
   });
 }
 
+// Only notice from this response is a new startup outcome; bootstrap retains migration history.
 export function storageReady(): Promise<StorageInfo> {
   ensureDesktop();
   return invoke('app_storage_ready');

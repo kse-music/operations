@@ -249,7 +249,7 @@ it.each(['', 'a'])(
       .querySelector<HTMLButtonElement>(
         savedHostId ? `.tree-host[data-host-id="${savedHostId}"]` : '[aria-label="本地终端"]',
       )!
-      .click();
+      .dispatchEvent(new MouseEvent(savedHostId ? 'dblclick' : 'click', { bubbles: true }));
     await flush();
     expect(useWorkspaceStore().current).toMatchObject({
       view: 'terminals',
@@ -672,7 +672,7 @@ it('opens the host tree menu without connecting and closes sessions through thei
   expect(document.querySelector('[aria-label="主机树操作"]')).not.toBeNull();
   expect(useTerminalsStore().panes).toHaveLength(0);
   document.querySelector<HTMLButtonElement>('[aria-label="关闭主机树菜单"]')!.click();
-  host.click();
+  host.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(useTerminalsStore().panes[0]?.host?.id).toBe('a');
   root
@@ -883,7 +883,9 @@ it('collapses the persistent host tree from the header and retains its search on
 it('keeps collapsed rail actions reachable without replacing the host tree or closing sessions', async () => {
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   const hostPane = terminals.panes[0]!;
   const tree = document.querySelector('.host-tree-section');
@@ -1053,7 +1055,9 @@ it('keeps welcome and avoids opening connections when settings are opened from t
 });
 
 it('keeps host and plugin function tabs in one row while settings preserve the active terminal', async () => {
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
@@ -1109,7 +1113,9 @@ it('switches full file pages from the toolbar without closing file or terminal s
   }
   const closeFiles = vi.spyOn(filesApi, 'close'),
     closeTerminal = vi.spyOn(terminalApi, 'close');
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   const pane = terminals.panes[0]!;
   pane.state = 'connected';
@@ -1150,7 +1156,9 @@ it('switches full file pages from the toolbar without closing file or terminal s
   expect(document.querySelector('.files-view, .workspace-file-panel')).toBeNull();
   expect(terminals.focused).toBe(pane.key);
   expect(pane.sessionId).toBe('ssh-a');
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="b"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="b"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   await tool('SFTP 文件');
   expect(files.active).toBe('b');
@@ -1182,7 +1190,9 @@ it.each(['a', 'b'])(
     const hosts = useHostsStore(),
       terminals = useTerminalsStore(),
       workspace = useWorkspaceStore();
-    document.querySelector<HTMLButtonElement>('.tree-host')!.click();
+    document
+      .querySelector<HTMLButtonElement>('.tree-host')!
+      .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     await flush();
     const active = workspace.active,
       focused = terminals.focused,
@@ -1218,12 +1228,17 @@ it.each(['a', 'b'])(
   },
 );
 
-it('opens SSH on a single sidebar host click and reuses the existing terminal', async () => {
+it('opens SSH on a double sidebar host click and reuses the existing terminal', async () => {
   const selector = '.tree-host';
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   const host = document.querySelector<HTMLButtonElement>(selector)!;
+  const before = workspace.active;
   host.click();
+  await flush();
+  expect(workspace.active).toBe(before);
+  expect(terminals.panes).toHaveLength(0);
+  host.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
   expect(terminals.panes).toHaveLength(1);
@@ -1239,18 +1254,22 @@ it('opens SSH on a single sidebar host click and reuses the existing terminal', 
   expect(workspace.current?.view).toBe('terminals');
   expect(terminals.tabs).toHaveLength(1);
   expect(terminals.active).toBe(key);
-  document.querySelectorAll<HTMLButtonElement>('.tree-host')[1]!.click();
+  document
+    .querySelectorAll<HTMLButtonElement>('.tree-host')[1]!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(workspace.current?.hostId).toBe('b');
   expect(terminals.tabs).toHaveLength(2);
-  document.querySelector<HTMLButtonElement>('.tree-host')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(terminals.active).toBe(key);
   expect(terminals.tabs).toHaveLength(2);
 });
 
 it.each([false, true])(
-  'connects only the selected idle pane on a host click (existing workspace=%s)',
+  'connects only the selected idle pane on a host double-click (existing workspace=%s)',
   async (existing) => {
     const terminals = useTerminalsStore(),
       workspace = useWorkspaceStore();
@@ -1267,7 +1286,9 @@ it.each([false, true])(
     );
     const keys = terminals.panes.map((pane) => pane.key);
     const click = () =>
-      document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+      document
+        .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+        .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     click();
     await flush();
     const selected = terminals.panes.find((pane) => pane.key === terminals.focused)!;
@@ -1312,7 +1333,9 @@ it.each(['connecting', 'awaiting_trust', 'connected', 'failed'])(
     terminals.update(pane.key, { state, sessionId: 'existing-session' });
     workspace.navigate('terminals', 'a');
     await flush();
-    document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+    document
+      .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+      .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     await flush();
     expect(terminals.panes).toHaveLength(1);
     expect(terminals.panes[0]).toMatchObject({
@@ -1334,7 +1357,9 @@ it('creates a shell in an existing empty workspace only after the host tree is c
   await flush();
   expect(terminals.panes).toHaveLength(1);
   expect(workspace.current).toMatchObject({ view: 'terminals', hostId: 'a' });
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(terminals.panes).toHaveLength(2);
   expect(terminals.panes.find((pane) => pane.key === terminals.focused)).toMatchObject({
@@ -1534,7 +1559,9 @@ it('opens settings with its global shortcut without changing the workspace', asy
 
 it('opens a fresh local terminal from welcome after the remote workspace and its sessions close', async () => {
   expect(document.querySelector('[aria-label="打开本地工作区"]')).toBeNull();
-  document.querySelector<HTMLButtonElement>('.tree-host')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(document.querySelector('[aria-label="打开本地工作区"]')).toBeNull();
   useWorkspaceStore().close(useWorkspaceStore().active, 'all');
@@ -1603,7 +1630,7 @@ it.each(['remote', 'local'])(
     await flush();
     const names = () =>
       [...document.querySelectorAll('.terminal-tab [role="tab"]')].map((button) =>
-        button.firstChild?.textContent?.trim(),
+        button.querySelector('.terminal-session-title')?.textContent?.trim(),
       );
     expect(names()).toEqual(['会话 1', '会话 2', '会话 3']);
     document.querySelector<HTMLButtonElement>('[aria-label="关闭标签 会话 2"]')!.click();
@@ -1625,7 +1652,7 @@ it.each(['remote', 'local'])(
       .querySelector<HTMLButtonElement>(
         host ? `.tree-host[data-host-id="${host.id}"]` : '[aria-label="本地终端"]',
       )!
-      .click();
+      .dispatchEvent(new MouseEvent(host ? 'dblclick' : 'click', { bubbles: true }));
     await flush();
     expect(names()).toEqual(['会话 1']);
   },
@@ -1662,7 +1689,7 @@ it.each(['remote', 'local'])(
     expect(terminals.active).toBe(previous);
     const menu = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(
-      ['复制', '重命名', '关闭所有', '关闭'],
+      ['复制', '重命名', '重新连接', '断开连接', '关闭所有', '关闭'],
     );
     expect(JSON.stringify(terminals.tabs)).toBe(original);
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -1779,7 +1806,9 @@ it('restores each host tool, file connection and terminal session through primar
       loading: false,
       listing: { path: `/${host.id}`, parent: '/', entries: [] },
     };
-  document.querySelector<HTMLButtonElement>('.tree-host')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   await newSession();
   const lastSession = terminals.active;
@@ -1790,7 +1819,9 @@ it('restores each host tool, file connection and terminal session through primar
       .click();
     await flush();
   };
-  document.querySelectorAll<HTMLButtonElement>('.tree-host')[1]!.click();
+  document
+    .querySelectorAll<HTMLButtonElement>('.tree-host')[1]!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   await selectHost('b');
   expect(document.querySelectorAll('.terminal-tab')).toHaveLength(1);
@@ -1995,7 +2026,9 @@ it('activating an empty host workspace does not silently create a replacement Sh
     workspace = useWorkspaceStore();
   terminals.open(null);
   workspace.navigate('terminals', '');
-  document.querySelector<HTMLButtonElement>('.tree-host')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   const local = terminals.hostTabs('')[0]!;
   await terminals.close(local.key);
@@ -2082,7 +2115,9 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   };
   vi.spyOn(pluginsApi, 'list').mockResolvedValue(plugins.installed);
   const show = async (id: string) => {
-    document.querySelector<HTMLButtonElement>(`.tree-host[data-host-id="${id}"]`)!.click();
+    document
+      .querySelector<HTMLButtonElement>(`.tree-host[data-host-id="${id}"]`)!
+      .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     await flush();
     document
       .querySelector<HTMLButtonElement>('.host-tools [data-plugin-id="dev.host-draft"]')!
@@ -2105,7 +2140,9 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   editorB.value = 'draft for b';
   editorB.dispatchEvent(new Event('input', { bubbles: true }));
   await nextTick();
-  document.querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(workspace.current).toMatchObject({
     view: 'extension',

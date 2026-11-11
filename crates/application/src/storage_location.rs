@@ -75,6 +75,7 @@ struct State {
 pub struct Profile {
     locator: PathBuf,
     state: State,
+    startup_notice: Option<String>,
 }
 
 // Never traverse a symlink, junction or other Windows reparse point, including ancestors.
@@ -226,7 +227,11 @@ impl Profile {
                 notice: None,
             }
         };
-        let mut profile = Self { locator, state };
+        let mut profile = Self {
+            locator,
+            state,
+            startup_notice: None,
+        };
         profile.validate_state()?;
         if let Some(job) = profile.state.migration.clone() {
             match job.phase {
@@ -251,6 +256,7 @@ impl Profile {
                 }
                 Phase::Committed => (),
             }
+            profile.startup_notice = profile.state.notice.clone();
         }
         if profile.locator.try_exists().map_err(io)? {
             check_path(&profile.state.active.data)?;
@@ -718,9 +724,12 @@ impl Profile {
     }
 
     /// Called only after Rust initialization and the main UI bootstrap both succeed.
+    /// Reports new startup outcomes once; `info` retains the persisted migration history.
     pub fn ready(&mut self) -> Result<StorageInfo, Error> {
         let Some(mut job) = self.state.migration.clone() else {
-            return Ok(self.info());
+            let mut info = self.info();
+            info.notice = self.startup_notice.take();
+            return Ok(info);
         };
         if job.phase == Phase::Pending {
             return Err(Error::Busy);
@@ -748,6 +757,7 @@ impl Profile {
             }
         }
         self.persist()?;
+        self.startup_notice = None;
         Ok(self.info())
     }
 

@@ -133,6 +133,11 @@ function ignoreDragClick(event: MouseEvent): void {
   event.preventDefault();
   event.stopPropagation();
 }
+function openHost(host: Host): void {
+  if (suppressClick || store.busy) return;
+  store.selectedId = host.id;
+  emit('select', host);
+}
 onBeforeUnmount(() => {
   endDrag();
   clearTimeout(clickTimer);
@@ -447,16 +452,21 @@ onBeforeUnmount(() => {
                 'drag-ready': pendingDrag?.host.id === host.id,
               }"
               :title="
-                tr('{0}@{1}:{2} · 拖动可移动到其他文件夹', host.username, host.hostname, host.port)
+                tr(
+                  '{0}@{1}:{2} · 双击打开，拖动可移动到其他文件夹',
+                  host.username,
+                  host.hostname,
+                  host.port,
+                )
               "
               :aria-current="store.selectedId === host.id ? 'true' : undefined"
               :draggable="false"
               @pointerdown="beginDrag(host, $event)"
               @dragstart.prevent
-              @click="
-                store.selectedId = host.id;
-                $emit('select', host);
-              "
+              @click="store.selectedId = host.id"
+              @dblclick="openHost(host)"
+              @keydown.enter.prevent="openHost(host)"
+              @keydown.space.prevent="openHost(host)"
               @contextmenu.prevent.stop="openContext({ kind: 'host', id: host.id }, $event)"
               @keydown="contextKeys({ kind: 'host', id: host.id }, $event)"
             >

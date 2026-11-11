@@ -3,21 +3,27 @@ import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { tr } from '../i18n/messages';
 
 import { clipboardApi } from '../services/clipboard';
-import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import {
   ArrowUp,
   ArrowRight,
+  AppWindow,
   Copy,
   Eye,
   EyeOff,
+  FilePenLine,
+  FolderOpen,
   FolderPlus,
   FileUp,
   FolderUp,
+  Info,
   RefreshCw,
   Upload,
   Download,
   Trash2,
   CircleX,
+  SquareTerminal,
+  TextCursorInput,
   UserRoundCog,
 } from '@lucide/vue';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
@@ -137,6 +143,7 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
   } | null>(null),
   properties = ref<FileEntry | null>(null),
   terminalAction = ref<FileTerminalAction | null>(null);
+const menuElement = ref<HTMLElement>();
 const transfer = ref<{
   id: string;
   host: string;
@@ -479,13 +486,22 @@ async function retry(task: TransferInfo): Promise<void> {
     retry: task.id,
   };
 }
-function context(side: 'local' | 'remote', entry: FileEntry, event: MouseEvent): void {
+async function context(
+  side: 'local' | 'remote',
+  entry: FileEntry,
+  event: MouseEvent,
+): Promise<void> {
   menu.value = {
     side,
     entry,
-    x: Math.min(event.clientX, window.innerWidth - 220),
-    y: Math.min(event.clientY, window.innerHeight - 330),
+    x: event.clientX,
+    y: event.clientY,
   };
+  await nextTick();
+  if (!menu.value || !menuElement.value) return;
+  const bounds = menuElement.value.getBoundingClientRect();
+  menu.value.x = Math.max(8, Math.min(menu.value.x, window.innerWidth - bounds.width - 8));
+  menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - bounds.height - 8));
 }
 function mutate(kind: 'mkdir' | 'rename' | 'delete'): void {
   const current = store.current;
@@ -956,7 +972,12 @@ onBeforeUnmount(() => {
       :aria-label="tr('关闭文件菜单')"
       @click="menu = null"
     ></button>
-    <div class="context-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+    <div
+      ref="menuElement"
+      class="context-menu file-context-menu"
+      role="menu"
+      :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+    >
       <button
         role="menuitem"
         @click="
@@ -964,6 +985,16 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
+        <component
+          :is="
+            menu.entry.kind === 'directory'
+              ? FolderOpen
+              : menu.side === 'local'
+                ? AppWindow
+                : FilePenLine
+          "
+          aria-hidden="true"
+        />
         {{
           menu.entry.kind === 'directory'
             ? tr('进入目录')
@@ -979,6 +1010,7 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
+        <AppWindow aria-hidden="true" />
         {{ tr(' 使用系统应用编辑…') }}</button
       ><button
         role="menuitem"
@@ -989,6 +1021,7 @@ onBeforeUnmount(() => {
           )
         "
       >
+        <component :is="menu.side === 'local' ? Upload : Download" aria-hidden="true" />
         {{ menu.side === 'local' ? tr('上传选中') : tr('下载选中') }}</button
       ><button
         role="menuitem"
@@ -997,15 +1030,20 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
+        <Copy aria-hidden="true" />
         {{ tr(' 复制绝对路径') }}</button
-      ><button role="menuitem" @click="showProperties">{{ tr('查看属性') }}</button
+      ><button role="menuitem" @click="showProperties">
+        <Info aria-hidden="true" />{{ tr('查看属性') }}</button
       ><template v-if="menu.side === 'remote'"
-        ><button role="menuitem" @click="mutate('rename')">{{ tr('重命名') }}</button
-        ><button role="menuitem" @click="mutate('delete')">{{ tr('删除选中') }}</button
+        ><button role="menuitem" @click="mutate('rename')">
+          <TextCursorInput aria-hidden="true" />{{ tr('重命名') }}</button
+        ><button role="menuitem" @click="mutate('delete')">
+          <Trash2 aria-hidden="true" />{{ tr('删除选中') }}</button
         ><button
           role="menuitem"
           @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
         >
+          <SquareTerminal aria-hidden="true" />
           {{ tr(' 在新终端中打开 ') }}
         </button></template
       >

@@ -48,6 +48,7 @@ const renaming = ref<string | null>(null),
 const tab = computed(() => store.tabs.find((t) => t.key === store.active));
 const menu = ref<{ key: string; x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
+const menuTarget = computed(() => store.tabs.find((item) => item.key === menu.value?.key));
 let menuTrigger: HTMLElement | null = null;
 function closeMenu(): void {
   menu.value = null;
@@ -70,7 +71,7 @@ async function openMenu(key: string, event: MouseEvent | KeyboardEvent): Promise
   menu.value.x = Math.max(8, Math.min(menu.value.x, window.innerWidth - size.width - 8));
   menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - size.height - 8));
   await nextTick();
-  menuElement.value?.querySelector<HTMLButtonElement>('button')?.focus();
+  menuElement.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 }
 function menuKey(event: KeyboardEvent): void {
   if (['Escape', 'Tab'].includes(event.key)) {
@@ -78,7 +79,9 @@ function menuKey(event: KeyboardEvent): void {
     closeMenu();
     return;
   }
-  const buttons = [...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+  const buttons = [
+    ...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+  ];
   if (!buttons.length || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
   event.preventDefault();
   const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -90,19 +93,26 @@ function menuKey(event: KeyboardEvent): void {
         : (index + (event.key === 'ArrowUp' ? -1 : 1) + buttons.length) % buttons.length
   ]?.focus();
 }
-function runMenu(action: 'duplicate' | 'rename' | 'all' | 'close'): void {
+function runMenu(
+  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'close',
+): void {
   const target = store.tabs.find((item) => item.key === menu.value?.key);
   closeMenu();
   if (!target) return;
-  if (action === 'duplicate') {
+  if (action === 'duplicate' || action === 'reconnect') {
     const snapshot = target.panes[0]?.host;
     const configured = snapshot && hosts.catalog?.hosts.find((item) => item.id === snapshot.id);
     if (snapshot && (!configured || !sameHostConnection(snapshot, configured))) {
-      store.error = tr('主机连接配置已变更，请从主机树重新打开后再复制会话。');
+      store.error =
+        action === 'duplicate'
+          ? tr('主机连接配置已变更，请从主机树重新打开后再复制会话。')
+          : tr('主机连接配置已变更，请从主机树重新打开后再重新连接会话。');
       return;
     }
-    store.duplicate(target.key);
+    if (action === 'duplicate') store.duplicate(target.key);
+    else void store.reconnect(target.key);
   } else if (action === 'rename') rename(target.key);
+  else if (action === 'disconnect') void store.disconnect(target.key);
   else if (action === 'all') void store.closeAll(target.key);
   else void store.close(target.key);
 }
@@ -277,7 +287,22 @@ watch(
               @click="store.select(item.key)"
               @dblclick="rename(item.key)"
             >
-              {{ sessionTitle(item) }}
+              <svg
+                v-if="
+                  item.panes.some((pane) =>
+                    ['closed', 'failed', 'disconnected'].includes(pane.state),
+                  )
+                "
+                class="terminal-disconnected-icon"
+                viewBox="0 0 16 16"
+                role="img"
+                :aria-label="tr('已断开连接')"
+              >
+                <title>{{ tr('已断开连接') }}</title>
+                <circle cx="8" cy="8" r="7" fill="currentColor" />
+                <path d="M4 8h8" stroke="white" stroke-width="2" />
+              </svg>
+              <span class="terminal-session-title">{{ sessionTitle(item) }}</span>
               <small>{{
                 item.panes.length > 1
                   ? tr('{0} 个窗格', item.panes.length)
@@ -346,7 +371,7 @@ watch(
       ></button>
       <div
         ref="menuElement"
-        class="context-menu"
+        class="context-menu terminal-session-menu"
         role="menu"
         :aria-label="tr('终端会话操作')"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
@@ -354,6 +379,20 @@ watch(
       >
         <button role="menuitem" @click="runMenu('duplicate')">{{ tr('复制') }}</button>
         <button role="menuitem" @click="runMenu('rename')">{{ tr('重命名') }}</button>
+        <button
+          role="menuitem"
+          :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
+          @click="runMenu('reconnect')"
+        >
+          {{ tr('重新连接') }}
+        </button>
+        <button
+          role="menuitem"
+          :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
+          @click="runMenu('disconnect')"
+        >
+          {{ tr('断开连接') }}
+        </button>
         <button role="menuitem" @click="runMenu('all')">{{ tr('关闭所有') }}</button>
         <button role="menuitem" @click="runMenu('close')">{{ tr('关闭') }}</button>
       </div>

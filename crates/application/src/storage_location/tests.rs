@@ -99,6 +99,60 @@ fn migration_preserves_preferences_plugins_logs_webview_and_empty_directories_un
 }
 
 #[test]
+fn completion_notice_is_not_replayed_by_ready_or_later_launches() {
+    let fixture = Fixture::new();
+    let mut profile = fixture.copied();
+    let completion = profile.ready().unwrap().notice.unwrap();
+    assert!(completion.contains("迁移完成"));
+    let locator = fs::read(&fixture.locator).unwrap();
+    assert!(profile.ready().unwrap().notice.is_none());
+    assert_eq!(profile.info().notice.as_deref(), Some(completion.as_str()));
+    for _ in 0..2 {
+        let mut reopened = fixture.open();
+        assert_eq!(reopened.locations().data, fixture.target);
+        assert!(reopened.state.migration.is_none());
+        assert_eq!(reopened.info().notice.as_deref(), Some(completion.as_str()));
+        assert!(reopened.ready().unwrap().notice.is_none());
+        assert_eq!(fs::read(&fixture.locator).unwrap(), locator);
+        assert!(fixture.target.join("serverdeck.sqlite3").is_file());
+    }
+}
+
+#[test]
+fn startup_rollback_notice_is_reported_once_and_retained_as_history() {
+    let fixture = Fixture::new();
+    fixture.copied();
+    let mut profile = fixture.open();
+    let notice = profile.ready().unwrap().notice.unwrap();
+    assert!(notice.contains("恢复旧目录"));
+    assert!(profile.ready().unwrap().notice.is_none());
+    let mut reopened = fixture.open();
+    assert_eq!(reopened.info().notice.as_deref(), Some(notice.as_str()));
+    assert!(reopened.ready().unwrap().notice.is_none());
+    assert!(fixture.target.join("serverdeck.sqlite3").is_file());
+    assert!(fixture.defaults.data.join("serverdeck.sqlite3").is_file());
+}
+
+#[test]
+fn startup_copy_failure_notice_is_reported_once_without_losing_the_reason() {
+    let fixture = Fixture::new();
+    fixture.open().prepare(&fixture.target).unwrap();
+    fs::create_dir(&fixture.target).unwrap();
+    fs::write(fixture.target.join("keep"), b"unrelated").unwrap();
+    let mut profile = fixture.open();
+    let notice = profile.ready().unwrap().notice.unwrap();
+    assert!(notice.contains("数据迁移未完成"));
+    assert!(notice.contains("旧数据未删除"));
+    assert!(profile.ready().unwrap().notice.is_none());
+    assert_eq!(
+        fixture.open().info().notice.as_deref(),
+        Some(notice.as_str())
+    );
+    assert_eq!(fs::read(fixture.target.join("keep")).unwrap(), b"unrelated");
+    assert!(fixture.defaults.data.join("serverdeck.sqlite3").is_file());
+}
+
+#[test]
 fn failed_candidate_startup_rolls_back_without_deleting_either_copy() {
     let fixture = Fixture::new();
     fixture.copied();
@@ -152,6 +206,15 @@ fn modified_source_is_retained_and_committed_target_stays_active() {
             .contains("清理未完成")
     );
     assert_eq!(fixture.open().locations().data, fixture.target);
+    assert!(
+        fixture
+            .open()
+            .ready()
+            .unwrap()
+            .notice
+            .unwrap()
+            .contains("清理未完成")
+    );
     assert_eq!(
         fs::read(fixture.defaults.data.join("plugins/settings.json")).unwrap(),
         b"changed after copying"

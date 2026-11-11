@@ -69,3 +69,49 @@ it('exposes a startup error instead of enabling an uncommitted candidate', async
   expect(application.ready).toBe(false);
   expect(application.error).toBe('无法提交存储目录');
 });
+
+it('keeps migration history in settings without replaying a startup notification', async () => {
+  const value = bootstrap();
+  value.storage!.notice = '数据迁移完成，旧副本已清理。';
+  vi.spyOn(ipc, 'bootstrap').mockImplementation(async () => structuredClone(value));
+  vi.spyOn(ipc, 'storageReady').mockResolvedValue({ ...value.storage!, notice: null });
+  const application = useApplicationStore();
+  application.notice = '上次提示';
+  await application.initialize();
+  expect(application.ready).toBe(true);
+  expect(application.notice).toBeNull();
+  expect(application.state?.storage?.notice).toBe(value.storage!.notice);
+  await application.initialize();
+  expect(application.notice).toBeNull();
+  expect(application.state?.storage?.notice).toBe(value.storage!.notice);
+});
+
+it('shows a current migration result once while retaining its history on reinitialize', async () => {
+  const value = bootstrap();
+  vi.spyOn(ipc, 'bootstrap').mockImplementation(async () => structuredClone(value));
+  const notice = '数据迁移完成，旧副本已清理。';
+  vi.spyOn(ipc, 'storageReady')
+    .mockResolvedValueOnce({ ...value.storage!, notice })
+    .mockResolvedValue({ ...value.storage!, notice: null });
+  const application = useApplicationStore();
+  await application.initialize();
+  expect(application.notice).toBe(notice);
+  value.storage!.notice = notice;
+  await application.initialize();
+  expect(application.notice).toBeNull();
+  expect(application.state?.storage?.notice).toBe(notice);
+});
+
+it.each([
+  '新目录上次未完成启动，已恢复旧目录；目标副本保留，请检查后重新选择空目录。',
+  '新目录已启用，旧副本清理未完成：旧目录文件已变化。下次启动重试。',
+])('still reports current startup warnings: %s', async (notice) => {
+  const value = bootstrap();
+  vi.spyOn(ipc, 'bootstrap').mockResolvedValue(value);
+  value.storage!.notice = notice;
+  vi.spyOn(ipc, 'storageReady').mockResolvedValue({ ...value.storage!, notice });
+  const application = useApplicationStore();
+  await application.initialize();
+  expect(application.notice).toBe(notice);
+  expect(application.state?.storage?.notice).toBe(notice);
+});

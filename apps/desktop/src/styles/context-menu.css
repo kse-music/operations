@@ -1,0 +1,56 @@
+.context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: default;
+}
+.context-menu {
+  position: fixed;
+  z-index: 41;
+  width: max-content;
+  min-width: min(168px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  padding: 4px;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px #0004;
+  font-size: var(--font-size-body);
+}
+.context-menu [role='menuitem'] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  text-align: left;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.context-menu [role='menuitem']:not(:disabled):hover,
+.context-menu [role='menuitem']:focus-visible {
+  background: var(--hover);
+}
+.context-menu [role='menuitem']:focus-visible {
+  outline-offset: -2px;
+}
+.context-menu [role='menuitem'] > svg {
+  width: 1.15em;
+  height: 1.15em;
+  flex-shrink: 0;
+}
+.context-menu [role='separator'] {
+  height: 1px;
+  margin: 3px 4px;
+  background: var(--border);
+}

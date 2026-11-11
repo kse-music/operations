@@ -96,6 +96,7 @@ let scrollFrame: number | undefined;
 let forceBottomScroll = false;
 const encoder = new TextEncoder();
 let unregisterUpload: (() => void) | undefined;
+let unregisterConnection: (() => void) | undefined;
 
 function isConnected(attempt: number): boolean {
   return !disposed && attempt === generation && props.tab.state === 'connected';
@@ -258,6 +259,13 @@ async function connect(): Promise<void> {
       connectRequested: false,
       state: 'opening',
     });
+    if (attempt > 1) {
+      finding.value = false;
+      query.value = '';
+      search.clearDecorations();
+      // Cancel incomplete controls, then reset after queued output and before the new Shell.
+      terminal.write('\x18\x1bc');
+    }
     fitTerminal();
     const open = props.tab.pluginTerminal
       ? (
@@ -380,6 +388,44 @@ async function connect(): Promise<void> {
   } finally {
     working.value = false;
   }
+}
+async function changeConnection(action: 'reconnect' | 'disconnect'): Promise<void> {
+  if (disposed || working.value) return;
+  if (
+    action === 'reconnect' &&
+    (props.tab.fileAction || props.tab.containerShell || props.tab.pluginTerminal)
+  )
+    return;
+  working.value = true;
+  const previousState = props.tab.state;
+  update({ state: 'closing', connectRequested: false });
+  try {
+    if (session) await terminalApi.close(session.id);
+    if (disposed) return;
+    ++generation;
+    session = undefined;
+    inputQueue.reset();
+    dropUpload.value?.dispose();
+    upload?.dispose();
+    upload = undefined;
+    uploadProgress.value = null;
+    trust.value = null;
+    pendingPaste.value = null;
+    message.value = null;
+    update({
+      state: 'disconnected',
+      sessionId: undefined,
+      transportId: undefined,
+      routeHostIds: undefined,
+      cwd: undefined,
+    });
+  } catch (cause) {
+    if (props.tab.state === 'closing') update({ state: previousState });
+    throw cause;
+  } finally {
+    working.value = false;
+  }
+  if (action === 'reconnect' && !disposed) await connect();
 }
 async function confirm(accept: boolean): Promise<void> {
   if (!session) return;
@@ -538,6 +584,13 @@ async function interruptDrop(id: string): Promise<void> {
   inputQueue.reset(id);
   await sendDrop(id, Uint8Array.of(3));
 }
+function terminalInputOptions() {
+  const connected = props.tab.state === 'connected';
+  return {
+    cursorBlink: connected && preferences.value.cursorBlink,
+    disableStdin: !connected,
+  };
+}
 function terminalOptions() {
   const p = preferences.value;
   return {
@@ -545,7 +598,7 @@ function terminalOptions() {
     lineHeight: resolveTerminalLineHeight(p.lineHeight),
     scrollback: p.scrollback,
     theme: terminalThemes[p.theme],
-    cursorBlink: p.cursorBlink,
+    ...terminalInputOptions(),
     cursorStyle: p.cursorStyle,
   };
 }
@@ -570,6 +623,8 @@ function activateLink(event: MouseEvent, url: string): void {
   });
 }
 onMounted(() => {
+  if (!props.standalone)
+    unregisterConnection = store.registerConnection(props.tab.key, changeConnection);
   if (!props.standalone)
     unregisterUpload = store.registerUpload(
       props.tab.key,
@@ -654,6 +709,7 @@ onMounted(() => {
 watch(
   () => props.tab.state,
   (state) => {
+    if (terminal) Object.assign(terminal.options, terminalInputOptions());
     if (state === 'connected') inputQueue.reset(session?.id);
     else {
       clearTimeout(resizeTimer);
@@ -705,6 +761,7 @@ watch(
   },
 );
 onBeforeUnmount(() => {
+  unregisterConnection?.();
   unregisterUpload?.();
   disposed = true;
   dropUpload.value?.dispose();

@@ -62,6 +62,9 @@ export const stateLabels: Record<string, string> = {
   get closed() {
     return tr('已关闭');
   },
+  get disconnected() {
+    return tr('已断开连接');
+  },
   get failed() {
     return tr('连接失败');
   },

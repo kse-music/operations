@@ -21,6 +21,112 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('independent terminal tabs', () => {
+  it.each([
+    ['connected', false],
+    ['idle', false],
+    ['opening', false],
+    ['connecting', false],
+    ['authenticating', false],
+    ['awaiting_trust', false],
+    ['closing', false],
+    ['unexpected', false],
+    ['disconnected', true],
+    ['closed', true],
+    ['failed', true],
+  ] as const)('only permits reconnect for an ended session (%s)', async (state, allowed) => {
+    const store = useTerminalsStore();
+    store.open(host);
+    store.update(store.focused, { state, sessionId: 'session' });
+    const change = vi.fn(async () => {});
+    store.registerConnection(store.focused, change);
+    expect(store.canReconnect(store.active)).toBe(allowed);
+    await store.reconnect(store.active);
+    expect(change).toHaveBeenCalledTimes(allowed ? 1 : 0);
+    expect(terminalApi.close).not.toHaveBeenCalled();
+  });
+  it('blocks reconnect when a split session still contains a connected pane', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    store.split(store.focused, 'rows');
+    const tab = store.tabs[0]!;
+    const changes = tab.panes.map((pane, index) => {
+      store.update(pane.key, { state: index ? 'connected' : 'disconnected' });
+      const change = vi.fn(async () => {});
+      store.registerConnection(pane.key, change);
+      return change;
+    });
+    expect(store.canReconnect(tab.key)).toBe(false);
+    await store.reconnect(tab.key);
+    expect(changes.every((change) => !change.mock.calls.length)).toBe(true);
+    store.update(tab.panes[1]!.key, { state: 'closed' });
+    expect(store.canReconnect(tab.key)).toBe(true);
+    await store.reconnect(tab.key);
+    for (const change of changes) expect(change).toHaveBeenCalledExactlyOnceWith('reconnect');
+  });
+  it.each(['reconnect', 'disconnect'] as const)(
+    'confirms uploads once before %s and protects against duplicate actions',
+    async (action) => {
+      const store = useTerminalsStore();
+      store.open(host);
+      store.split(store.focused, 'rows');
+      const tab = store.tabs[0]!;
+      const changes = tab.panes.map((pane) => {
+        store.update(pane.key, {
+          state: action === 'reconnect' ? 'disconnected' : 'connected',
+          sessionId: pane.key,
+        });
+        const change = vi.fn(async () => {});
+        store.registerConnection(pane.key, change);
+        return change;
+      });
+      let finish!: () => void;
+      const stop = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      store.registerUpload(tab.panes[0]!.key, () => true, stop);
+      const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
+      await store[action](tab.key);
+      expect(stop).not.toHaveBeenCalled();
+      expect(changes.every((change) => change.mock.calls.length === 0)).toBe(true);
+      ask.mockResolvedValue(true);
+      const changing = store[action](tab.key);
+      await nextTick();
+      await store[action](tab.key);
+      await store.close(tab.key);
+      expect(store.tabs).toHaveLength(1);
+      expect(stop).toHaveBeenCalledOnce();
+      expect(changes.every((change) => change.mock.calls.length === 0)).toBe(true);
+      finish();
+      await changing;
+      expect(ask).toHaveBeenCalledTimes(2);
+      for (const change of changes) expect(change).toHaveBeenCalledExactlyOnceWith(action);
+      expect(store.changingConnections).toEqual([]);
+    },
+  );
+  it('reports upload cancellation failure without disconnecting or reconnecting', async () => {
+    const store = useTerminalsStore();
+    store.open(host);
+    const pane = store.panes[0]!;
+    store.update(pane.key, { state: 'disconnected', sessionId: 'session' });
+    const change = vi.fn(async () => {});
+    store.registerConnection(pane.key, change);
+    store.registerUpload(
+      pane.key,
+      () => true,
+      async () => {
+        throw new Error('stop failed');
+      },
+    );
+    vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
+    await store.reconnect(store.active);
+    expect(change).not.toHaveBeenCalled();
+    expect(pane.state).toBe('disconnected');
+    expect(store.error).toBe('stop failed');
+    expect(store.changingConnections).toEqual([]);
+  });
   it('keeps an upload and its session when close confirmation is declined', async () => {
     const store = useTerminalsStore();
     store.open(host);

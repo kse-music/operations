@@ -408,7 +408,7 @@ export async function productChecks(context) {
   await reloadHosts(page);
   await showHostTree(page);
   const previousPanes = await page.locator('.terminal-pane').count();
-  await page.locator('.tree-host').filter({ hasText: originalHost.name }).click();
+  await page.locator('.tree-host').filter({ hasText: originalHost.name }).dblclick();
   await page.locator(`.terminal-pane:visible[data-host-id="${hostId}"]`).waitFor();
   if ((await page.locator('.terminal-pane').count()) === previousPanes)
     await page.getByRole('button', { name: '新建终端会话', exact: true }).click();

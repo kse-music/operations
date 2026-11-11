@@ -4908,7 +4908,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-ai"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "regex",
  "reqwest",
@@ -4926,7 +4926,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-application"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "fs2",
@@ -4963,7 +4963,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4974,7 +4974,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-desktop"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
@@ -4998,7 +4998,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-monitor"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rand",
  "russh",
@@ -5015,7 +5015,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-ops"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rand",
  "russh",
@@ -5033,7 +5033,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-plugin-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "semver",
@@ -5048,7 +5048,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-plugin-runtime"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -5072,7 +5072,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-security"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "keyring",
  "serverdeck-core",
@@ -5083,7 +5083,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-sftp"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rand",
  "rpassword",
@@ -5104,7 +5104,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-ssh"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
  "rand",
@@ -5124,7 +5124,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-ssh-probe"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "rand",
@@ -5138,7 +5138,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-storage"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rusqlite",
  "serde",
@@ -5152,7 +5152,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-tasks"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "rand",
  "russh",
@@ -5168,7 +5168,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-windows-file-drag"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serverdeck-core",
  "tempfile",

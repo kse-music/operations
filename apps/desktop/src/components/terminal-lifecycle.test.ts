@@ -7,16 +7,20 @@ import { useTerminalsStore } from '../stores/terminals';
 import { useNotificationsStore } from '../stores/notifications';
 import { hostInput } from '../types/hosts';
 import type { TerminalEvent, TerminalSize } from '../types/terminal';
+import type { ITerminalOptions } from '@xterm/xterm';
 
 const xterm = vi.hoisted(() => ({
   resize: vi.fn() as (size: TerminalSize) => void,
   input: vi.fn() as (data: string) => void,
   parsed: [] as (() => void)[],
+  options: {} as ITerminalOptions,
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
-    options = {};
+    constructor(public options: ITerminalOptions) {
+      xterm.options = options;
+    }
     cols = 80;
     rows = 24;
     parser = { registerOscHandler: vi.fn() };
@@ -39,7 +43,11 @@ vi.mock('@xterm/xterm', () => ({
   },
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {} }));
-vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
+vi.mock('@xterm/addon-search', () => ({
+  SearchAddon: class {
+    clearDecorations() {}
+  },
+}));
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }));
 
 function deferred() {
@@ -142,6 +150,36 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
     }
   }
 
+  it.each(['closing', 'disconnected', 'closed', 'failed'])(
+    'stops cursor blinking and makes the terminal read-only in the %s state',
+    async (state) => {
+      expect(xterm.options.cursorBlink).toBe(true);
+      expect(xterm.options.disableStdin).not.toBe(true);
+      receive({ type: 'state', state, code: null, message: null });
+      expect(xterm.options.cursorBlink).toBe(false);
+      expect(xterm.options.disableStdin).toBe(true);
+      xterm.input('must not send');
+      expect(terminalApi.input).not.toHaveBeenCalled();
+      receive({ type: 'state', state: 'connected', code: null, message: null });
+      expect(xterm.options.cursorBlink).toBe(true);
+      expect(xterm.options.disableStdin).toBe(false);
+    },
+  );
+
+  it('restores cursor settings and input after explicit disconnect and reconnect', async () => {
+    const options = xterm.options;
+    await store.disconnect(store.active);
+    expect(xterm.options.cursorBlink).toBe(false);
+    expect(xterm.options.disableStdin).toBe(true);
+    await store.reconnect(store.active);
+    expect(store.panes[0]?.state).toBe('connected');
+    expect(xterm.options).toBe(options);
+    expect(xterm.options.cursorBlink).toBe(true);
+    expect(xterm.options.disableStdin).toBe(false);
+    xterm.input('ready');
+    expect(terminalApi.input).toHaveBeenCalledWith(id, new TextEncoder().encode('ready'));
+  });
+
   it.each(['resize', 'input', 'ack'] as const)(
     'stops %s during close before the backend closed event arrives',
     async (operation) => {
@@ -227,6 +265,31 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
     xterm.input('retry');
     expect(terminalApi.input).toHaveBeenCalledWith(id, new TextEncoder().encode('retry'));
   });
+
+  it.each(['resize', 'input', 'ack'] as const)(
+    'discards old %s failures and input after disconnect',
+    async (operation) => {
+      const request = deferred(),
+        close = deferred();
+      vi.mocked(terminalApi[operation]).mockReturnValueOnce(request.promise);
+      vi.mocked(terminalApi.close).mockReturnValueOnce(close.promise);
+      await startRequest(operation);
+      const disconnecting = store.disconnect(store.active);
+      expect(store.panes[0]?.state).toBe('closing');
+      request.reject(missing);
+      await settle();
+      xterm.input('must not send');
+      xterm.resize(size);
+      await vi.advanceTimersByTimeAsync(80);
+      close.resolve();
+      await disconnecting;
+      expect(store.panes[0]).toMatchObject({ state: 'disconnected', sessionId: undefined });
+      expect(store.tabs).toHaveLength(1);
+      expect(terminalApi.input).toHaveBeenCalledTimes(operation === 'input' ? 1 : 0);
+      expect(terminalApi.resize).toHaveBeenCalledTimes(operation === 'resize' ? 1 : 0);
+      expect(useNotificationsStore().items).toEqual([]);
+    },
+  );
 
   it('does not restore connected state when the backend reports a failed session during close', async () => {
     const close = deferred();

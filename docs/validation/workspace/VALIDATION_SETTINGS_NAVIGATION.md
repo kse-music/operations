@@ -1,5 +1,25 @@
 # 设置导航与关于页面合并验证
 
+## 2026-11-11 迁移完成提示不再重复
+
+### 原因与修复
+
+- 只读核对当前用户 `storage-location.json`：version=1、migration=null、notice 为“数据迁移完成，旧副本已清理。”。启动未登记新的迁移；问题是无迁移时 `Profile.ready()` 直接返回包含历史 notice 的 `info()`，前端每次初始化均把它作为新通知。
+- `storage_location.rs` 增加仅运行期的启动通知，在无迁移任务时一次性返回本次复制失败/回退的结果；本次迁移提交/清理产生的结果仍正常返回，清理未完成的实际重试继续报告。持久 notice 留作历史，未修改定位文件 version=1 格式、数据库、迁移步骤或清理规则。
+- `stores/application.ts` 仅将 `app_storage_ready` 当前 notice 用于通知，并保留 bootstrap 的历史结果供设置页查看；重新初始化清除旧通知。`services/ipc.ts` 标明该私有返回值的 notice 语义，DTO 形状不变。测试位于 `storage_location/tests.rs` 与 `stores/application.test.ts`。
+
+### 实际验证
+
+- 修复前新增 Rust 回归复现三项失败：成功结果、启动回退及复制失败均被重复 ready 重放。普通系统临时目录首轮出现 AccessDenied；将本次测试进程 TEMP/TMP 指向 `.local/qa/storage-notice/tmp/` 后，旧实现为 19 通过/3 失败。前端新增回归先复现两项失败，确认分离通知时仍须保留设置页历史。
+- `cargo test -p serverdeck-application --lib storage_location::tests --no-run --locked --offline --message-format=json` 编译通过，复制测试 EXE 到 QA 目录后运行 `storage_location::tests --nocapture`：22 项全部通过。验证首次成功提示、重复 ready 和多次重开不重放历史、定位文件字节不变、历史保留、回退/复制失败提示一次、清理失败重试、数据与源保护，以及原迁移场景。
+- 在 `apps/desktop` 执行 `node ../../node_modules/vitest/vitest.mjs run --maxWorkers=2 src/stores/application.test.ts src/components/settings-panel.test.ts src/stores/workspace.test.ts src/App.test.ts`：4 文件、138 项通过。覆盖当前结果一次性展示、同文案历史保留、失败仍提示、启动提交失败不可用及设置/工作区回归；使用已确认可运行的沙箱外 Vitest。
+- `npm run typecheck`、三个修改 TS 文件的 ESLint、`cargo fmt --all -- --check` 通过。`cargo clippy -p serverdeck-application --all-targets --locked --offline` 通过，保留既有 `serverdeck-core/openssh.rs` 的 single_element_loop 提示；前端 Vite 生产构建通过，保留既有编辑器大分块提示。相关修改文件 Prettier、文档链接/锚点和 `git diff --check` 通过。
+- 构建前输出磁盘约 145.8 GiB 可用，沿用根 `target/`、关闭增量及行号级调试信息；测试运行 QA EXE 副本。编译、修复前失败与最终专项、Clippy 日志位于 `.local/qa/storage-notice/`。
+
+### 限制与后续依赖
+
+未重新运行真实 Tauri 开发启动、WebView2 自动迁移/重启或跨平台验收，未重建桌面 EXE/安装包，也未执行完整前端/Rust 测试。未迁移、清理或修改用户实际数据和定位文件，保留工作区其他修改。当前源码修复已完成，无新增依赖；开发程序需正常退出并重新运行以加载新的 Rust 代码，原生复核需要对应环境。未发现新增数据风险。
+
 ## 2026-11-11 英文界面语言
 
 ### 已实现行为与范围

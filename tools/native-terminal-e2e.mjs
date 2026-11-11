@@ -261,7 +261,7 @@ try {
   async function openTerminal() {
     await showHostTree(page);
     const panes = await page.locator('.terminal-pane').count();
-    await page.locator('.tree-host').filter({ hasText: 'Linux SSH verification' }).click();
+    await page.locator('.tree-host').filter({ hasText: 'Linux SSH verification' }).dblclick();
     await page.locator(`.terminal-pane:visible[data-host-id="${hostId}"]`).waitFor();
     if ((await page.locator('.terminal-pane').count()) === panes)
       await page.getByRole('button', { name: '新建终端会话', exact: true }).click();

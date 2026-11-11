@@ -1,5 +1,29 @@
 # 页面布局调整验收
 
+## 2026-11-11 统一右键菜单紧凑布局
+
+### 完成范围
+
+- 梳理主机树根目录/文件夹/主机、工作区主机标签、终端会话、终端正文（含复用该组件的插件终端弹窗）、SFTP 本地/远程列表的自定义右键菜单。内置插件未发现独立的右键菜单实现；磁盘/目录下拉框属于列表选择器，沿用原交互。
+- 统一到 `apps/desktop/src/styles/context-menu.css`，移除主机、终端和工作区的重复布局规则。标准字号单行 28px、上下内边距 4px、菜单内边距 4px；字号放大时内容自然增高，快捷键仍在右侧，保留禁用状态及键盘焦点提示。菜单随内容确定宽度，窗口四周预留 8px，过长时内部滚动。
+- SFTP 本地/远程目录和文件的所有菜单操作增加 Lucide 图标，包括打开、系统应用、上传/下载、复制路径、属性、重命名、删除和新终端；图标随字号变化、图标列对齐，标签及业务确认流程沿用原实现。定位由固定预估 220×330 改为渲染后测量实际菜单尺寸。
+- 主要文件：公共菜单样式、`styles/main.css` 导入、`styles/hosts.css`、`styles/terminal.css`、`styles/product.css`、`styles/files.css`、`views/FilesView.vue`、`views/files-view.test.ts` 和 `tools/ui-context-menu-e2e.mjs`。同步 PRD 显示要求及实施计划状态，保留工作区原有未提交修改。
+
+### 实际验证
+
+- `npm run typecheck`：桌面和 TypeScript SDK 均通过。
+- `npm run lint`：通过。
+- `npm run test -w @serverdeck/desktop -- src/views/files-view.test.ts src/components/host-tree-menu.test.ts src/components/terminal-clipboard.test.ts src/components/plugin-terminal-dialog.test.ts src/views/terminal-actions.test.ts src/App.test.ts`：6 文件、180 项通过；新增四种本地/远程 × 文件/目录的图标、标签、复制路径及关闭菜单回归。首次运行因沙箱临时目录重命名 `EPERM` 未执行测试，改用 `.local/context-menu-qa/tmp` 的 `TEMP`/`TMP` 后通过。
+- `npx vite build`（`apps/desktop`）：生产前端构建通过，仍有已有 Monaco 大 chunk 提示。本轮不涉及 Rust 或协议变更，未执行原生/Cargo 和安装器构建。
+- 本次源码/样式/测试脚本及 PRD、验证报告/索引的 Prettier 检查、`git diff --check` 和相关本地 Markdown 链接检查通过。实施计划全文件 Prettier 检查仍报告两处原有表格排版差异；移除本轮新增状态段落后检查同样失败，未重排无关表格。
+- `node tools/ui-context-menu-e2e.mjs`：本机无头 Edge + 实际 Vue/xterm/CSS，四组各十种菜单均通过：1280×820 深/浅色标准中文、960×600 深色 145% 中文、960×280 浅色 145% 英文。280px 高度仅作超短视口压力检查，不更改原生窗口最小尺寸。检查四周边界、无横向溢出、行高、图标存在/对齐、长菜单内部滚动及最后一项可访问。
+- 实测标准行高 28px；工作区标签菜单 122px、会话菜单 178px、SFTP 远程目录七项 206px、远程文件八项 234px；145% 字号单行约 36.41px。超短窗口远程长菜单限高 264px 并可滚动。
+- 浏览器结果与截图保存在 `.local/context-menu-qa/results.json` 和同目录 PNG，人工检查深色 SFTP、浅色及超大字号/短窗口截图。测试用内存夹具，不写用户配置、不执行 SSH/SFTP；普通浏览器的原生拖放不可用通知在截图前清除，不计作原生拖放通过。初期脚本使用通用事件无法传递鼠标坐标，已改用显式 `MouseEvent`，最终运行通过；沙箱中 Edge 启动失败及跨沙箱本地服务不可达后，改在沙箱外同进程启动独立 Vite/Edge 完成检查。
+
+### 限制、风险与依赖
+
+未验收原生 Windows/WebView2、macOS/Linux、安装器及真实 SSH/SFTP 操作；插件终端弹窗由既有组件测试验证菜单可用，未增加原生弹窗实测。已知剩余风险为原生字体/缩放度量差异，后续实机复核依赖新版客户端及测试环境。本阶段无后续功能依赖，不启动其他阶段。
+
 ## 2026-11-09 最小窗口 960×600 与设置弹窗
 
 ### 完成范围

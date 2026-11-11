@@ -1,6 +1,7 @@
 @import '@serverdeck/plugin-sdk/ui/foundation.css';
 @import url('./theme.css');
 @import url('./plugins.css');
+@import url('./context-menu.css');
 body {
   -webkit-user-select: none;
   user-select: none;

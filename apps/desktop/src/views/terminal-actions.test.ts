@@ -10,6 +10,7 @@ import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { useTerminalsStore } from '../stores/terminals';
 import TerminalsView from './TerminalsView.vue';
+import type { ITerminalOptions } from '@xterm/xterm';
 
 const native = vi.hoisted(() => ({
   open: vi.fn(),
@@ -18,10 +19,15 @@ const native = vi.hoisted(() => ({
   input: vi.fn(),
   ack: vi.fn(),
   resize: vi.fn(),
+  trust: vi.fn(),
   receivers: [] as ((event: TerminalEvent) => void)[],
 }));
 const terminals = vi.hoisted(() => ({
-  instances: [] as { osc?: (value: string) => boolean; writes: unknown[] }[],
+  instances: [] as {
+    osc?: (value: string) => boolean;
+    writes: unknown[];
+    options: ITerminalOptions;
+  }[],
 }));
 vi.mock('../services/terminal', () => ({ terminalApi: native }));
 vi.mock('@xterm/xterm', () => ({
@@ -36,7 +42,7 @@ vi.mock('@xterm/xterm', () => ({
         this.osc = handler;
       },
     };
-    constructor(public options: unknown) {
+    constructor(public options: ITerminalOptions) {
       terminals.instances.push(this);
     }
     loadAddon() {}
@@ -59,7 +65,11 @@ vi.mock('@xterm/addon-fit', () => ({
     fit() {}
   },
 }));
-vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
+vi.mock('@xterm/addon-search', () => ({
+  SearchAddon: class {
+    clearDecorations() {}
+  },
+}));
 
 let app: App, pinia: Pinia, root: HTMLElement;
 const host: Host = {
@@ -255,6 +265,8 @@ it('duplicates the right-click target as an ordinary fresh shell and preserves t
   expect([...menu.querySelectorAll('button')].map((item) => item.textContent)).toEqual([
     '复制',
     '重命名',
+    '重新连接',
+    '断开连接',
     '关闭所有',
     '关闭',
   ]);
@@ -268,6 +280,251 @@ it('duplicates the right-click target as an ordinary fresh shell and preserves t
   expect(added.panes[0]!.host?.id).toBe('host');
   expect(native.open).toHaveBeenLastCalledWith('host', expect.anything(), expect.any(Function));
 });
+
+it.each(['ssh', 'local'])(
+  'preserves output on %s disconnect and resets it on reconnect without replacing the tab',
+  async (kind) => {
+    const store = useTerminalsStore();
+    if (kind === 'local') {
+      hostId.value = '';
+      store.open(null);
+      await flush();
+    }
+    const target = store.tabs.at(-1)!;
+    const pane = target.panes[0]!;
+    const oldSession = pane.sessionId;
+    const original = native.receivers.at(-1)!;
+    const xterm = terminals.instances.at(-1)!;
+    original({ type: 'data', sequence: 1, data: [72, 105] });
+    await flush();
+    const writes = xterm.writes.length;
+    const terminalCount = terminals.instances.length;
+    const layout = JSON.stringify(target.layout);
+    button('断开连接', await tabMenu()).click();
+    await flush();
+    expect(native.close).toHaveBeenCalledExactlyOnceWith(oldSession);
+    expect(pane).toMatchObject({
+      state: 'disconnected',
+      sessionId: undefined,
+      connectRequested: false,
+    });
+    expect(store.tabs).toContainEqual(target);
+    expect(JSON.stringify(target.layout)).toBe(layout);
+    expect(xterm.writes).toHaveLength(writes);
+    const icon = root.querySelector(
+      '.terminal-tab.active [role=tab] > .terminal-disconnected-icon',
+    );
+    expect(icon?.getAttribute('aria-label')).toBe('已断开连接');
+    expect(icon?.nextElementSibling?.textContent).toContain('会话');
+    original({ type: 'state', state: 'connected', code: null, message: null });
+    original({ type: 'data', sequence: 2, data: [88] });
+    expect(pane.state).toBe('disconnected');
+    expect(xterm.writes).toHaveLength(writes);
+    const menu = await tabMenu();
+    expect(button('断开连接', menu).disabled).toBe(true);
+    expect(button('重新连接', menu).disabled).toBe(false);
+    button('重新连接', menu).click();
+    await flush();
+    expect(pane.state).toBe('connected');
+    expect(pane.sessionId).not.toBe(oldSession);
+    expect(terminals.instances).toHaveLength(terminalCount);
+    expect(xterm.writes.slice(writes)).toEqual(['\x18\x1bc']);
+    original({ type: 'data', sequence: 3, data: [79, 76, 68] });
+    expect(xterm.writes).toHaveLength(writes + 1);
+    native.receivers.at(-1)!({ type: 'data', sequence: 1, data: [78, 69, 87] });
+    expect(xterm.writes.at(-2)).toEqual(new Uint8Array([78, 69, 87]));
+    expect(root.querySelector('.terminal-tab.active .terminal-disconnected-icon')).toBeNull();
+    expect(native.input).not.toHaveBeenCalled();
+  },
+);
+
+it('reconnects every pane of the right-click target without changing other tabs or focus', async () => {
+  const store = useTerminalsStore();
+  const target = store.tabs[0]!;
+  store.split(store.focused, 'rows');
+  store.rename(target.key, '部署');
+  store.open(host);
+  store.open({ ...host, id: 'other' });
+  await flush();
+  const active = store.active,
+    focused = store.focused;
+  const ids = target.panes.map((pane) => pane.sessionId);
+  const layout = JSON.stringify(target.layout);
+  const writes = terminals.instances.map((terminal) => terminal.writes.length);
+  for (const pane of target.panes) store.update(pane.key, { state: 'disconnected' });
+  button('重新连接', await tabMenu(0)).click();
+  await vi.waitFor(() => expect(store.changingConnections).toEqual([]));
+  expect(native.close.mock.calls.map(([id]) => id)).toEqual(ids);
+  expect(
+    target.panes.every(
+      (pane, index) => pane.sessionId !== ids[index] && pane.state === 'connected',
+    ),
+  ).toBe(true);
+  expect(target.title).toBe('部署');
+  expect(JSON.stringify(target.layout)).toBe(layout);
+  expect(store.active).toBe(active);
+  expect(store.focused).toBe(focused);
+  expect(store.tabs).toHaveLength(3);
+  expect(
+    terminals.instances.map((terminal, index) => terminal.writes.slice(writes[index])),
+  ).toEqual([['\x18\x1bc'], ['\x18\x1bc'], [], []]);
+});
+
+it.each(['closed', 'failed', 'disconnected'])(
+  'shows the disconnected icon after a %s event and allows retry',
+  async (state) => {
+    native.receivers[0]!({ type: 'state', state, code: null, message: null });
+    await flush();
+    expect(
+      root.querySelector('.terminal-tab [role=tab] > .terminal-disconnected-icon'),
+    ).not.toBeNull();
+    button('重新连接', await tabMenu()).click();
+    await flush();
+    expect(native.open).toHaveBeenCalledTimes(2);
+    expect(root.querySelector('.terminal-disconnected-icon')).toBeNull();
+  },
+);
+
+it('keeps the connection usable and prevents replacement when disconnect fails', async () => {
+  const terminal = terminals.instances[0]!;
+  const output = [...terminal.writes];
+  native.close.mockRejectedValueOnce(new Error('disconnect failed'));
+  button('断开连接', await tabMenu()).click();
+  await flush();
+  expect(useTerminalsStore().panes[0]).toMatchObject({
+    state: 'connected',
+    sessionId: 'session-0',
+  });
+  expect(useTerminalsStore().error).toBe('disconnect failed');
+  expect(native.open).toHaveBeenCalledTimes(1);
+  expect(terminal.writes).toEqual(output);
+});
+
+it('reports reconnection failures and retains the tab with a clean display for retry', async () => {
+  native.receivers[0]!({ type: 'state', state: 'disconnected', code: null, message: null });
+  native.open.mockRejectedValueOnce(new Error('authentication failed'));
+  button('重新连接', await tabMenu()).click();
+  await flush();
+  expect(useTerminalsStore().panes[0]?.state).toBe('failed');
+  expect(useTerminalsStore().tabs).toHaveLength(1);
+  expect(root.querySelector('.terminal-disconnected-icon')).not.toBeNull();
+  button('重新连接', await tabMenu()).click();
+  await flush();
+  expect(useTerminalsStore().panes[0]?.state).toBe('connected');
+});
+
+it.each(['fileAction', 'containerShell', 'pluginTerminal'] as const)(
+  'does not replay a %s when reconnecting',
+  async (kind) => {
+    const pane = useTerminalsStore().panes[0]!;
+    if (kind === 'fileAction') pane.fileAction = { kind: 'tail', path: '/logs' };
+    else if (kind === 'containerShell')
+      pane.containerShell = { id: 'container', bash: false, confirmed: true };
+    else pane.pluginTerminal = { pluginId: 'plugin', owner: 'owner', ticket: 'ticket' };
+    const menu = await tabMenu();
+    expect(button('断开连接', menu).disabled).toBe(false);
+    native.receivers[0]!({ type: 'state', state: 'disconnected', code: null, message: null });
+    await flush();
+    expect(button('重新连接', menu).disabled).toBe(true);
+    button('重新连接', menu).click();
+    await useTerminalsStore().reconnect(useTerminalsStore().active);
+    await flush();
+    expect(native.open).toHaveBeenCalledTimes(1);
+    expect(native.close).not.toHaveBeenCalled();
+  },
+);
+
+it('rejects reconnecting a host whose current connection configuration changed', async () => {
+  native.receivers[0]!({ type: 'state', state: 'disconnected', code: null, message: null });
+  useHostsStore().catalog!.hosts[0]!.hostname = 'changed.example';
+  button('重新连接', await tabMenu()).click();
+  await flush();
+  expect(useTerminalsStore().error).toContain('主机连接配置已变更');
+  expect(native.close).not.toHaveBeenCalled();
+  expect(native.open).toHaveBeenCalledTimes(1);
+});
+
+it('waits for fingerprint confirmation on reconnect without trusting automatically', async () => {
+  native.receivers[0]!({ type: 'state', state: 'disconnected', code: null, message: null });
+  native.open.mockImplementationOnce(async (_host, _size, receive) => {
+    queueMicrotask(() => {
+      receive({ type: 'state', state: 'awaiting_trust', code: null, message: null });
+      receive({
+        type: 'trust',
+        hostname: 'target.example',
+        port: 22,
+        algorithm: 'ssh-ed25519',
+        fingerprint: 'SHA256:test',
+      });
+    });
+    return { id: 'replacement', hostId: 'host', transportId: 'new', routeHostIds: ['host'] };
+  });
+  button('重新连接', await tabMenu()).click();
+  await flush();
+  expect(useTerminalsStore().panes[0]).toMatchObject({
+    state: 'awaiting_trust',
+    sessionId: 'replacement',
+  });
+  expect(document.querySelector('[aria-label="确认 SSH 主机指纹"]')?.textContent).toContain(
+    'SHA256:test',
+  );
+  expect(native.trust).not.toHaveBeenCalled();
+});
+
+it('skips disabled reconnect and disconnect items in keyboard navigation', async () => {
+  native.receivers[0]!({ type: 'state', state: 'connecting', code: null, message: null });
+  await flush();
+  const menu = await tabMenu();
+  expect(button('重新连接', menu).disabled).toBe(true);
+  button('重命名', menu).focus();
+  menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(document.activeElement).toBe(button('断开连接', menu));
+});
+
+it.each([
+  'connected',
+  'idle',
+  'opening',
+  'connecting',
+  'authenticating',
+  'awaiting_trust',
+  'closing',
+])('greys out reconnect and ignores activation while the session is %s', async (state) => {
+  native.receivers[0]!({ type: 'state', state, code: null, message: null });
+  await flush();
+  const terminal = terminals.instances[0]!;
+  const writes = [...terminal.writes];
+  const menu = await tabMenu();
+  const reconnect = button('重新连接', menu);
+  expect(reconnect.disabled).toBe(true);
+  reconnect.click();
+  await useTerminalsStore().reconnect(useTerminalsStore().active);
+  await flush();
+  expect(native.open).toHaveBeenCalledTimes(1);
+  expect(native.close).not.toHaveBeenCalled();
+  expect(terminal.writes).toEqual(writes);
+});
+
+it.each([true, false])(
+  'keeps a disconnected cursor inactive after preferences change and restores blink=%s on reconnect',
+  async (blink) => {
+    const application = useApplicationStore();
+    const preferences = application.state!.config.terminal;
+    const options = terminals.instances[0]!.options;
+    button('断开连接', await tabMenu()).click();
+    await flush();
+    preferences.cursorBlink = blink;
+    preferences.theme = 'light';
+    await flush();
+    expect(options.cursorBlink).toBe(false);
+    expect(options.disableStdin).toBe(true);
+    button('重新连接', await tabMenu()).click();
+    await flush();
+    expect(options.cursorBlink).toBe(blink);
+    expect(options.disableStdin).toBe(false);
+    expect(preferences.cursorBlink).toBe(blink);
+  },
+);
 
 it('closes only the menu target host and retains failed sessions and other hosts', async () => {
   const store = useTerminalsStore();

@@ -31,6 +31,7 @@ export interface TerminalTab {
   panes: TerminalPaneModel[];
   layout: LayoutNode;
 }
+type ConnectionAction = 'reconnect' | 'disconnect';
 export const useTerminalsStore = defineStore('terminals', () => {
   const tabs = ref<TerminalTab[]>([]),
     active = ref(''),
@@ -41,6 +42,73 @@ export const useTerminalsStore = defineStore('terminals', () => {
   const lastHostTabs = new Map<string, string>();
   const sessionNumbers = new Map<string, number>();
   const uploads = new Map<string, { active: () => boolean; stop: () => Promise<void> }>();
+  const connections = new Map<string, (action: ConnectionAction) => Promise<void>>();
+  const changingConnections = ref<string[]>([]);
+  function registerConnection(
+    key: string,
+    change: (action: ConnectionAction) => Promise<void>,
+  ): () => void {
+    connections.set(key, change);
+    return () => {
+      if (connections.get(key) === change) connections.delete(key);
+    };
+  }
+  function canReconnect(key: string): boolean {
+    const tab = tabs.value.find((tab) => tab.key === key);
+    return (
+      !!tab &&
+      !changingConnections.value.includes(key) &&
+      tab.panes.every(
+        (pane) =>
+          !pane.fileAction &&
+          !pane.containerShell &&
+          !pane.pluginTerminal &&
+          ['closed', 'failed', 'disconnected'].includes(pane.state),
+      )
+    );
+  }
+  function canDisconnect(key: string): boolean {
+    const tab = tabs.value.find((tab) => tab.key === key);
+    return (
+      !!tab &&
+      !changingConnections.value.includes(key) &&
+      !tab.panes.some((pane) => ['opening', 'closing'].includes(pane.state)) &&
+      tab.panes.some(
+        (pane) =>
+          !!pane.sessionId && !['idle', 'closed', 'failed', 'disconnected'].includes(pane.state),
+      )
+    );
+  }
+  async function changeConnection(key: string, action: ConnectionAction): Promise<void> {
+    if (!(action === 'reconnect' ? canReconnect(key) : canDisconnect(key))) return;
+    const tab = tabs.value.find((tab) => tab.key === key);
+    if (!tab) return;
+    const targets = tab.panes.map((pane) => ({ pane, change: connections.get(pane.key) }));
+    if (targets.some((target) => !target.change)) return;
+    changingConnections.value.push(key);
+    try {
+      const uploading = targets.filter(({ pane }) => uploads.get(pane.key)?.active());
+      if (
+        uploading.length &&
+        !(await usePluginsStore().ask(
+          action === 'reconnect' ? tr('停止上传并重新连接') : tr('停止上传并断开连接'),
+          tr(
+            '目标会话还有待确认或进行中的拖放上传。继续将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
+          ),
+        ))
+      )
+        return;
+      for (const { pane } of uploading) await uploads.get(pane.key)?.stop();
+      for (const { pane, change } of targets) {
+        if (panes.value.includes(pane) && connections.get(pane.key) === change)
+          await change?.(action);
+      }
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    } finally {
+      changingConnections.value = changingConnections.value.filter((id) => id !== key);
+    }
+  }
   function registerUpload(
     key: string,
     active: () => boolean,
@@ -216,7 +284,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   async function closePane(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
     const pane = tab?.panes.find((p) => p.key === key);
-    if (!tab || !pane) return;
+    if (!tab || !pane || changingConnections.value.includes(tab.key)) return;
     let previousState = pane.state;
     try {
       const decision = approved || confirmUploadClose([pane]);
@@ -242,7 +310,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   }
   async function close(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
-    if (!tab) return;
+    if (!tab || changingConnections.value.includes(key)) return;
     const decision = approved || confirmUploadClose(tab.panes);
     if (decision !== true && !(await decision)) return;
     for (const pane of [...tab.panes]) await closePane(pane.key, true);
@@ -250,6 +318,12 @@ export const useTerminalsStore = defineStore('terminals', () => {
   async function closeAll(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
+    if (
+      hostTabs(tab.panes[0]?.host?.id ?? '').some((tab) =>
+        changingConnections.value.includes(tab.key),
+      )
+    )
+      return;
     const decision = approved || confirmHostUploadClose(tab.panes[0]?.host?.id ?? '');
     if (decision !== true && !(await decision)) return;
     const targets = hostTabs(tab.panes[0]?.host?.id ?? '').map((t) => t.key);
@@ -289,6 +363,12 @@ export const useTerminalsStore = defineStore('terminals', () => {
     closeAll,
     closeHost,
     registerUpload,
+    registerConnection,
+    canReconnect,
+    canDisconnect,
+    reconnect: (key: string) => changeConnection(key, 'reconnect'),
+    disconnect: (key: string) => changeConnection(key, 'disconnect'),
+    changingConnections,
     confirmHostUploadClose,
   };
 });

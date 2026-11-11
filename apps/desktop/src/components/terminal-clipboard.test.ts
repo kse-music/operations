@@ -64,7 +64,11 @@ vi.mock('@xterm/xterm', () => ({
   },
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {} }));
-vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
+vi.mock('@xterm/addon-search', () => ({
+  SearchAddon: class {
+    clearDecorations() {}
+  },
+}));
 vi.mock('@xterm/addon-web-links', () => ({
   WebLinksAddon: class {
     constructor(activate: (event: MouseEvent, url: string) => void) {

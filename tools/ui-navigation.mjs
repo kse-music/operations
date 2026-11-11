@@ -258,7 +258,7 @@ export async function selectHostWorkspace(page, id) {
     await page.getByLabel('搜索主机', { exact: true }).fill('');
     for (const group of await page.locator('.group-toggle[aria-expanded=false]').all())
       await group.click();
-    await page.locator(`.tree-host[data-host-id=${JSON.stringify(id)}]`).click();
+    await page.locator(`.tree-host[data-host-id=${JSON.stringify(id)}]`).dblclick();
   }
   if (await page.evaluate(() => innerWidth <= 720)) {
     const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });

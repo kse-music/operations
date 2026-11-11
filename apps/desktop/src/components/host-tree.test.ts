@@ -218,11 +218,11 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   row.click();
   await nextTick();
   expect(hosts.selectedId).toBe('first');
-  expect(select).toHaveBeenCalledOnce();
-  expect(select).toHaveBeenCalledWith(first);
+  expect(select).not.toHaveBeenCalled();
   expect(row.getAttribute('aria-current')).toBe('true');
   row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   expect(select).toHaveBeenCalledOnce();
+  expect(select).toHaveBeenCalledWith(first);
   const context = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
   row.dispatchEvent(context);
   await nextTick();
@@ -397,6 +397,7 @@ it.each(['Escape', 'pointercancel', 'outside', 'same-group'])(
       pointer(window, 'pointerup', 50, 90);
     }
     row.click();
+    row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     await nextTick();
     expect(update).not.toHaveBeenCalled();
     expect(select).not.toHaveBeenCalled();
@@ -417,6 +418,8 @@ it('keeps normal clicks and ignores tiny moves, right buttons and dragging while
   row.click();
   await nextTick();
   expect(row.classList.contains('drag-ready')).toBe(false);
+  expect(select).not.toHaveBeenCalled();
+  row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   expect(select).toHaveBeenCalledOnce();
   pointer(row, 'pointerdown', 10, 10, 2);
   await nextTick();
@@ -432,6 +435,13 @@ it('keeps normal clicks and ignores tiny moves, right buttons and dragging while
   await nextTick();
   expect(update).not.toHaveBeenCalled();
   expect(root.querySelector('.host-drag-preview')).toBeNull();
+});
+it.each(['Enter', ' '])('opens the focused host with %s', async (key) => {
+  const { select } = await mountDragTree();
+  const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
+  row.focus();
+  row.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+  expect(select).toHaveBeenCalledOnce();
 });
 it('drops onto a host row inside another group without selecting either host', async () => {
   const { store, host, update, select } = await mountDragTree();

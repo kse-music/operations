@@ -49,6 +49,14 @@
   opacity: 0.65;
   margin-left: 6px;
 }
+.terminal-disconnected-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 6px;
+  color: #ff1a1a;
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
 .modal.terminal-rename-dialog {
   width: min(420px, calc(100vw - 24px));
   padding: 20px;
@@ -82,6 +90,9 @@
   min-height: 0;
   overflow: hidden;
 }
+.terminal-pane:not([data-state='connected']) .xterm-cursor {
+  animation: none !important;
+}
 .terminal-drop-overlay {
   position: absolute;
   inset: 8px;
@@ -113,14 +124,7 @@
   overflow: auto;
   overflow-wrap: anywhere;
 }
-.terminal-context-menu {
-  width: max-content;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100vh - 16px);
-}
-.terminal-context-menu button {
-  display: flex;
-  align-items: center;
+.terminal-context-menu [role='menuitem'] {
   justify-content: space-between;
   gap: 24px;
 }

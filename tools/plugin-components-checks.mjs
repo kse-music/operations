@@ -199,7 +199,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
       .digest('base64')
       .replace(/=+$/, '');
   await showHostTree(page);
-  await page.locator(`.tree-host[data-host-id="${hosts[0].id}"]`).click();
+  await page.locator(`.tree-host[data-host-id="${hosts[0].id}"]`).dblclick();
   const trust = page.getByRole('dialog', { name: '确认 SSH 主机指纹', exact: true });
   await trust.waitFor();
   assert((await trust.innerText()).includes(fingerprint));
