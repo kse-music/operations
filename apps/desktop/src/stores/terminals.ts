@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
 import { computed, ref, watch } from 'vue';
@@ -25,6 +26,7 @@ export interface TerminalPaneModel {
 export interface TerminalTab {
   key: string;
   title: string;
+  renamed?: boolean;
   sessionNumber: number;
   panes: TerminalPaneModel[];
   layout: LayoutNode;
@@ -55,10 +57,12 @@ export const useTerminalsStore = defineStore('terminals', () => {
     return (
       !count ||
       usePluginsStore().ask(
-        '停止上传并关闭终端',
-        '目标终端还有 ' +
+        tr('停止上传并关闭终端'),
+        tr('目标终端还有 ') +
           count +
-          ' 个待确认或进行中的拖放上传。关闭将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
+          tr(
+            ' 个待确认或进行中的拖放上传。关闭将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
+          ),
       )
     );
   }
@@ -88,12 +92,12 @@ export const useTerminalsStore = defineStore('terminals', () => {
   function hostState(id: string): string {
     const p = panes.value.filter((p) => p.host?.id === id || p.routeHostIds?.includes(id));
     return p.some((p) => p.state === 'connected')
-      ? '已连接'
+      ? tr('已连接')
       : p.some((p) =>
             ['opening', 'connecting', 'authenticating', 'awaiting_trust'].includes(p.state),
           )
-        ? '连接中'
-        : '未连接';
+        ? tr('连接中')
+        : tr('未连接');
   }
   function update(key: string, values: Partial<Omit<TerminalPaneModel, 'key' | 'host'>>): void {
     const pane = panes.value.find((p) => p.key === key);
@@ -113,7 +117,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     containerShell?: import('../types/ops').ContainerShell,
   ): void {
     if (panes.value.length >= 32) {
-      error.value = '最多打开 32 个终端窗格。';
+      error.value = tr('最多打开 32 个终端窗格。');
       return;
     }
     const pane = newPane(host);
@@ -122,7 +126,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const key = crypto.randomUUID();
     tabs.value.push({
       key,
-      title: host ? hostDisplayName(host) : '本地设备',
+      title: host ? hostDisplayName(host) : tr('本地设备'),
       sessionNumber: nextSessionNumber(host?.id ?? ''),
       panes: [pane],
       layout: { kind: 'leaf', pane: pane.key },
@@ -135,7 +139,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const pane = tab?.panes.find((p) => p.key === key);
     if (!tab || !pane) return;
     if (tab.panes.length >= 8 || panes.value.length >= 32) {
-      error.value = '每个标签最多 8 个窗格，总计最多 32 个。';
+      error.value = tr('每个标签最多 8 个窗格，总计最多 32 个。');
       return;
     }
     const added = newPane(pane.host);
@@ -167,11 +171,14 @@ export const useTerminalsStore = defineStore('terminals', () => {
         (c) => c.charCodeAt(0) < 32 || (c.charCodeAt(0) >= 127 && c.charCodeAt(0) <= 159),
       )
     ) {
-      error.value = '标签名称须为 1–128 个字符且不含控制字符。';
+      error.value = tr('标签名称须为 1–128 个字符且不含控制字符。');
       return false;
     }
     const tab = tabs.value.find((t) => t.key === key);
-    if (tab) tab.title = title;
+    if (tab) {
+      tab.title = title;
+      tab.renamed = true;
+    }
     return !!tab;
   }
   function reorder(key: string, before: string): void {
@@ -210,12 +217,17 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
     const pane = tab?.panes.find((p) => p.key === key);
     if (!tab || !pane) return;
+    let previousState = pane.state;
     try {
       const decision = approved || confirmUploadClose([pane]);
       if (decision !== true && !(await decision)) return;
       const upload = uploads.get(pane.key);
       if (upload?.active()) await upload.stop();
-      if (pane.sessionId) await terminalApi.close(pane.sessionId);
+      if (pane.sessionId) {
+        previousState = pane.state;
+        pane.state = 'closing';
+        await terminalApi.close(pane.sessionId);
+      }
       const layout = removeLeaf(tab.layout, key);
       if (!layout) removeTab(tab.key);
       else {
@@ -224,6 +236,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
         if (focused.value === key) focused.value = tab.panes[0]?.key ?? '';
       }
     } catch (cause) {
+      if (pane.state === 'closing') pane.state = previousState;
       error.value = errorMessage(cause);
     }
   }

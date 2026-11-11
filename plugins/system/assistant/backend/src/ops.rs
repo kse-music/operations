@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const PRELUDE: &str = "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; ";
+const PROCESS_DETAILS: &str = r#"printf 'SDPROC1\000'; cat /proc/sys/kernel/random/boot_id; printf '\000'; cat "/proc/$1/stat" || { printf '进程已退出或无权读取，请刷新进程列表\n' >&2; exit 66; }; printf '\000'; cat "/proc/$1/status" || { printf '进程已退出或无权读取，请刷新进程列表\n' >&2; exit 66; }; printf '\000'; readlink "/proc/$1/exe" || printf '不可用（权限或进程已退出）'"#;
+const CONTAINER_DETAILS: &str = r#"d container inspect --format '{{json .}}' -- "$1""#;
+const CONTAINER_STATS: &str = r#"d stats --no-stream --format '{{json .}}' -- "$1""#;
+const SERVICE_DETAILS: &str = r#"systemctl "$1" --no-ask-password --no-pager show --property=Id,LoadState,ActiveState,SubState,UnitFileState,Description,MainPID,ExecMainStatus,FragmentPath,ActiveEnterTimestamp -- "$2""#;
+pub const SYSTEM_JOURNAL: &str = "exec journalctl --system --no-pager --quiet -n 100 -o short-iso";
 pub fn quote(value: &str) -> Result<String, Error> {
     if value.is_empty() || value.len() > 4096 || value.contains('\0') {
         return Err(Error::Validation("参数为空、过长或包含 NUL"));
@@ -175,6 +180,35 @@ pub enum Request {
     },
 }
 impl Request {
+    pub fn platform_command(&self) -> Result<serverdeck_plugin_sdk::platform::Command, Error> {
+        use serverdeck_plugin_sdk::platform::Command;
+        let (script, args) = match self {
+            Self::ProcessDetails { pid } => {
+                pid_valid(*pid)?;
+                (PROCESS_DETAILS, vec![pid.to_string()])
+            }
+            Self::ContainerDetails {
+                id,
+                reveal_env: false,
+                ..
+            } => {
+                container_id(id)?;
+                (CONTAINER_DETAILS, vec![id.clone()])
+            }
+            Self::ContainerStats { id } => {
+                container_id(id)?;
+                (CONTAINER_STATS, vec![id.clone()])
+            }
+            Self::ServiceDetails { scope, unit } => {
+                unit_name(unit)?;
+                (SERVICE_DETAILS, vec![scope.flag().into(), unit.clone()])
+            }
+            _ => return Ok(Command::script(self.command()?)),
+        };
+        let mut command = Command::script(format!("{PRELUDE}{script}")).arg("serverdeck-read");
+        command.args.extend(args);
+        Ok(command)
+    }
     pub fn command(&self) -> Result<String, Error> {
         let body = match self {
             Self::Diagnostic { tool } => tool.command().into(),
@@ -189,18 +223,16 @@ impl Request {
                 container_id(id)?;
                 if *reveal_env {
                     confirm(*confirmed)?;
+                } else {
+                    return self.platform_command()?.shell().map_err(Into::into);
                 }
                 format!(
                     "d container inspect --format '{{{{json .}}}}' {}",
                     quote(id)?
                 )
             }
-            Self::ContainerStats { id } => {
-                container_id(id)?;
-                format!(
-                    "d stats --no-stream --format '{{{{json .}}}}' {}",
-                    quote(id)?
-                )
+            Self::ContainerStats { .. } => {
+                return self.platform_command()?.shell().map_err(Into::into);
             }
             Self::ContainerAction {
                 id,
@@ -226,11 +258,8 @@ impl Request {
                 format!("d image rm {}", quote(id)?)
             }
             Self::Processes => "ps -eo pid=,user=,pcpu=,pmem=,etimes=,comm= --sort=-pcpu".into(),
-            Self::ProcessDetails { pid } => {
-                pid_valid(*pid)?;
-                format!(
-                    "printf 'SDPROC1\\000'; cat /proc/sys/kernel/random/boot_id; printf '\\000'; cat /proc/{pid}/stat || {{ printf '进程已退出或无权读取，请刷新进程列表\\n' >&2; exit 66; }}; printf '\\000'; cat /proc/{pid}/status || {{ printf '进程已退出或无权读取，请刷新进程列表\\n' >&2; exit 66; }}; printf '\\000'; readlink /proc/{pid}/exe || printf '不可用（权限或进程已退出）'"
-                )
+            Self::ProcessDetails { .. } => {
+                return self.platform_command()?.shell().map_err(Into::into);
             }
             Self::Signal {
                 pid,
@@ -263,13 +292,8 @@ impl Request {
                     scope.flag()
                 )
             }
-            Self::ServiceDetails { scope, unit } => {
-                unit_name(unit)?;
-                format!(
-                    "systemctl {} --no-ask-password --no-pager show --property=Id,LoadState,ActiveState,SubState,UnitFileState,Description,MainPID,ExecMainStatus,FragmentPath,ActiveEnterTimestamp -- {}",
-                    scope.flag(),
-                    quote(unit)?
-                )
+            Self::ServiceDetails { .. } => {
+                return self.platform_command()?.shell().map_err(Into::into);
             }
             Self::ServiceAction {
                 scope,
@@ -355,6 +379,35 @@ fn task_read_preapproval_manifest_matches_exact_generated_queries() {
     let metrics = include_str!("metrics.sh").replace("\r\n", "\n");
     commands.push(Command::script(metrics.clone()));
     commands.push(Command::script(format!("sleep 0.25;{metrics}")));
+    commands.push(Command::script(format!("{PRELUDE}{SYSTEM_JOURNAL}")));
+    for request in [
+        Request::ProcessDetails { pid: 835251 },
+        Request::ContainerDetails {
+            id: "a".repeat(64),
+            reveal_env: false,
+            confirmed: false,
+        },
+        Request::ContainerStats { id: "b".repeat(64) },
+        Request::ServiceDetails {
+            scope: Scope::System,
+            unit: "app.service".into(),
+        },
+        Request::ServiceDetails {
+            scope: Scope::User,
+            unit: "app.service".into(),
+        },
+    ] {
+        let concrete = request.platform_command().unwrap();
+        let mut template = concrete.clone();
+        let index = template.args.len() - 1;
+        template.args[index] = match request {
+            Request::ProcessDetails { .. } => "{{sd:uint:2:2147483647}}".into(),
+            Request::ServiceDetails { .. } => "{{sd:identifier:256:.service}}".into(),
+            _ => "{{sd:hex:64}}".into(),
+        };
+        assert!(template.matches_argument_template(&concrete));
+        commands.push(template);
+    }
     let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
     assert_eq!(
         serde_json::to_value(commands).unwrap(),

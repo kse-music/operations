@@ -1,9 +1,40 @@
+import { tr } from '../i18n/messages';
 export const interfaceFontSizes = [
-  { value: 'small', label: '小', scale: 0.95 },
-  { value: 'standard', label: '标准', scale: 1 },
-  { value: 'large', label: '大', scale: 1.15 },
-  { value: 'extraLarge', label: '特大', scale: 1.3 },
-  { value: 'ultraLarge', label: '超大', scale: 1.45 },
+  {
+    value: 'small',
+    get label() {
+      return tr('小');
+    },
+    scale: 0.95,
+  },
+  {
+    value: 'standard',
+    get label() {
+      return tr('标准');
+    },
+    scale: 1,
+  },
+  {
+    value: 'large',
+    get label() {
+      return tr('大');
+    },
+    scale: 1.15,
+  },
+  {
+    value: 'extraLarge',
+    get label() {
+      return tr('特大');
+    },
+    scale: 1.3,
+  },
+  {
+    value: 'ultraLarge',
+    get label() {
+      return tr('超大');
+    },
+    scale: 1.45,
+  },
 ] as const;
 
 export type InterfaceFontSize = (typeof interfaceFontSizes)[number]['value'];
@@ -44,17 +75,39 @@ export const defaultTerminalPreferences = (): TerminalPreferences => ({
   },
 });
 export const shortcutLabels: Record<string, string> = {
-  copy: '复制',
-  paste: '粘贴',
-  find: '查找',
-  splitRows: '水平分屏（上下）',
-  splitColumns: '垂直分屏（左右）',
-  newTab: '新建同主机标签',
-  closePane: '关闭窗格',
-  nextTab: '下一个标签',
-  previousTab: '上一个标签',
-  zoomIn: '放大字体',
-  zoomOut: '缩小字体',
+  get copy() {
+    return tr('复制');
+  },
+  get paste() {
+    return tr('粘贴');
+  },
+  get find() {
+    return tr('查找');
+  },
+  get splitRows() {
+    return tr('水平分屏（上下）');
+  },
+  get splitColumns() {
+    return tr('垂直分屏（左右）');
+  },
+  get newTab() {
+    return tr('新建同主机标签');
+  },
+  get closePane() {
+    return tr('关闭窗格');
+  },
+  get nextTab() {
+    return tr('下一个标签');
+  },
+  get previousTab() {
+    return tr('上一个标签');
+  },
+  get zoomIn() {
+    return tr('放大字体');
+  },
+  get zoomOut() {
+    return tr('缩小字体');
+  },
 };
 const keyNames: Record<string, string> = {
   Equal: '=',

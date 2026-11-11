@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
@@ -55,19 +56,19 @@ export const useOpsStore = defineStore('operations', () => {
       (c) => c.host.id === id || c.session?.routeHostIds.includes(id),
     );
     return c.some((c) => c.state === 'connected')
-      ? '已连接'
+      ? tr('已连接')
       : c.some((c) =>
             ['opening', 'connecting', 'authenticating', 'awaiting_trust'].includes(c.state),
           )
-        ? '连接中'
-        : '未连接';
+        ? tr('连接中')
+        : tr('未连接');
   }
   async function sync(): Promise<void> {
     const live = await opsApi.connections();
     for (const c of Object.values(connections.value)) {
       if (c.state === 'connected' && c.session && !live.some((s) => s.id === c.session?.id)) {
         c.state = 'failed';
-        c.error = '运维连接已结束，请重新连接';
+        c.error = tr('运维连接已结束，请重新连接');
       }
     }
   }

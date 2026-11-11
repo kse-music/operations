@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 export type EntryKind = 'file' | 'directory' | 'symlink' | 'other';
 export interface FileEntry {
   name: string;
@@ -94,14 +95,30 @@ export type FileTerminalAction = { kind: 'directory' | 'view' | 'tail'; path: st
 export const unfinished = (task: TransferInfo): boolean =>
   ['queued', 'scanning', 'running', 'verifying', 'cancelling'].includes(task.state);
 export const taskLabels: Record<string, string> = {
-  queued: '排队中',
-  scanning: '扫描中',
-  running: '传输中',
-  verifying: '校验中',
-  cancelling: '取消中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
+  get queued() {
+    return tr('排队中');
+  },
+  get scanning() {
+    return tr('扫描中');
+  },
+  get running() {
+    return tr('传输中');
+  },
+  get verifying() {
+    return tr('校验中');
+  },
+  get cancelling() {
+    return tr('取消中');
+  },
+  get completed() {
+    return tr('已完成');
+  },
+  get failed() {
+    return tr('失败');
+  },
+  get cancelled() {
+    return tr('已取消');
+  },
 };
 export function bytes(value: number | null): string {
   if (value === null) return '—';
@@ -134,7 +151,7 @@ export function permissionText(value: number | null): string {
 }
 export function remoteJoin(parent: string, name: string): string {
   if (!name || name === '.' || name === '..' || name.includes('/') || name.includes('\0'))
-    throw new Error('名称不能包含 / 或 NUL');
+    throw new Error(tr('名称不能包含 / 或 NUL'));
   return `${parent.replace(/\/+$/, '')}/${name}`;
 }
 export function remoteDirectoryLocations(path: string): FileLocation[] {

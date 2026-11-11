@@ -1,5 +1,34 @@
 # 设置导航与关于页面合并验证
 
+## 2026-11-11 英文界面语言
+
+### 已实现行为与范围
+
+- 「设置 → 通用 → 界面语言」增加 English，默认仍为简体中文。仅保存成功后应用语言，失败保留草稿及原显示语言；保存值可重新打开数据库读取，不重置已有设置或数据。
+- 桌面导航、设置、主机、终端、文件、模型及插件管理，以及内置 Docker、AI 助手和 SDK 通用组件接入独立英文词典。既有页面随响应式 locale 更新，语言切换不重挂载插件、不发送业务请求、不重建会话；主机/文件/容器名称、输入内容、模型回答、命令输出与原始技术诊断保留原文。
+- 插件使用认证 MessageChannel 的 `PlatformContext.language`；已有双语 UI 标题格式继续使用。上传插件的元数据保持原文，其自有界面翻译由插件实现负责。插值参数只替换一次，未知文本及对象原型同名文本保持原文。
+- 独立编辑器在打开时读取已保存语言，原生窗口标题与文件选择框同样读取该值；已打开的独立编辑器需重新打开以应用语言。无法读取配置的启动失败提示为中英双语。操作系统提供的文件选择框按钮随系统语言。
+- 继续使用原 `product.language` 字符串字段，严格接受 `zh-CN` / `en-US`，未知值拒绝；无数据库结构、配置格式版本、权限或迁移变化。
+
+主要文件：桌面 `i18n/`、`ProductSettings.vue`、application/plugin stores、页面和编辑器；SDK `i18n.ts`、context/runtime；两个内置插件的前端词典和 `ui.json`；Core 产品偏好校验、Storage 产品回归及桌面原生标题/选择框。同步 PRD、架构、使用说明、SDK、实施计划和验证索引，保留工作区原有的其他修改。
+
+### 实际验证
+
+- 最终 `npm test`：**64 个文件、702 项全部通过**。覆盖中英往返、保存成功/失败和恢复默认、导航及内置元数据响应更新、上传插件与用户名称保留、终端会话保留、插件不重挂载/不重发请求、助手输入与 Docker 数据保留、文件磁盘名称切换、编辑器语言初始化，以及四份词典插值完整性。
+- `npm run typecheck`、`npm run lint` 通过。最终 `npm run build` 通过，包含真实内置 WASM/UI 包、桌面类型检查与 Vite 生产构建；保留已有 Monaco 大 chunk 提示。
+- Core / Storage 的 `product` 测试先 `--no-run --message-format=json` 编译，再复制 EXE 到本任务 QA 目录执行，**4 + 5 项通过**，包含语言合法性、序列化、保存后重开及其他偏好保留。`cargo check -p serverdeck-desktop --locked` 通过。
+- 桌面最终 `cargo test -p serverdeck-desktop --lib --test editor_window --no-run --locked --message-format=json` 编译成功；QA 副本中编辑器 IPC 集成 **6 项通过**、标题单测 **1 项通过**，覆盖保存英文后的 IPC 读取、文档路径/内容保留以及中英文标题/控制字符处理。原生测试统一使用根 `target/` 构建并复制至 QA 运行；构建前 D 盘空闲超过 10 GiB，未开启增量编译或新增原生缓存。
+- 本次 113 个前端/词典/测试文件 Prettier、9 个 Rust 文件 rustfmt、差异空白检查及受影响文档本地链接检查通过；静态扫描 1592 处翻译调用，未发现缺失词条。
+- 浏览器在 **1440×900、960×600** 下检查 General、Terminal、Shortcuts、Data and storage、About 共 10 个英文页面状态，以及中英文往返；页面和表单无横向溢出、无脚本错误。已查看桌面与最小窗口截图。使用隔离浏览器和内存夹具，不写正式配置、不发远程操作。
+
+证据位于 `.local/interface-language/`：`tests-final.log`、`typecheck-final.log`、`lint-final.log`、`build-final.log`、`cargo-check.log`、Rust 编译 JSON/QA EXE、编辑器测试日志以及 `ui/results.json` 和页面截图。
+
+首次 Vitest 在沙箱 TEMP 路径遇到 EPERM，未开始测试；改用本任务临时目录后通过。Edge 在沙箱内无法启动，沙箱外也无法访问沙箱内服务，最终将测试浏览器及临时 Vite 服务放在相同的沙箱外环境后通过。编辑器初次回归读取 MockRuntime 的窗口标题得到空串；已核对 Tauri 测试运行时的 `title()` 固定返回空串，将标题内容断言移至实际标题生成函数，IPC 集成测试仍核验保存语言与文档内容。保留原失败日志，没有弱化业务断言。
+
+### 未验证、风险与下一阶段依赖
+
+未重新生成/安装 Windows EXE 或 NSIS，未实测真实 WebView2 的完整中英文操作链、系统文件选择框、实际 SSH/模型或 macOS/Linux。浏览器和 MockRuntime 结果不能替代这些环境验收。保留 jsdom canvas 缺失提示、Monaco 大 chunk 提醒及 MockRuntime EXE 缺少图标资源提示；没有由语言变更引入的已知阻断问题。当前实现完成，用户运行的旧 EXE 不会自动更新；安装版使用依赖后续构建和目标环境验收，本阶段不主动发布。
+
 ## 2026-11-10 Release EXE 与首次启动迁移
 
 - 用户补充实际复制的是 `target/release/serverdeck-desktop.exe`，新电脑确认后自动重开，数据库实际路径仍旧且没有可见结果。核对发现该文件生成于北京时间 **19:43:35**，早于上一轮修复；上一轮原生验证及交付构建使用 debug，不能作为该旧 Release 已修复的证据。旧 EXE 二进制保留旧校验错误文本，不包含新增的后台写入等待逻辑；旧文件已复制保留于 QA 目录，未取得另一台电脑的定位文件，未把产物落后推断为其唯一失败分支。

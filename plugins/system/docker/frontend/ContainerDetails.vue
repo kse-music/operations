@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+import { locale } from '@serverdeck/plugin-sdk/i18n';
+
 import { computed, ref, useId } from 'vue';
 import OpsDetails from './OpsDetails.vue';
 import type { OpsRequest, OpsResponse } from './types';
@@ -12,10 +15,30 @@ const props = defineProps<{
   query: (request: OpsRequest) => Promise<OpsResponse>;
 }>();
 const tabs = [
-  { key: 'overview', label: '概览' },
-  { key: 'resources', label: '资源使用' },
-  { key: 'startup', label: '启动配置' },
-  { key: 'environment', label: '环境变量' },
+  {
+    key: 'overview',
+    get label() {
+      return tr('概览');
+    },
+  },
+  {
+    key: 'resources',
+    get label() {
+      return tr('资源使用');
+    },
+  },
+  {
+    key: 'startup',
+    get label() {
+      return tr('启动配置');
+    },
+  },
+  {
+    key: 'environment',
+    get label() {
+      return tr('环境变量');
+    },
+  },
 ] as const;
 type Tab = (typeof tabs)[number]['key'];
 const activeTab = ref<Tab>('overview');
@@ -54,7 +77,7 @@ function dateTime(value: unknown): string {
   const raw = fieldText(value);
   if (!raw || raw.startsWith('0001-01-01')) return '—';
   const date = new Date(raw);
-  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString('zh-CN', { hour12: false });
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString(locale.value, { hour12: false });
 }
 
 const stateLabels = new Map([
@@ -87,22 +110,31 @@ const overview = computed(() => {
   const restart = fieldText(policy.Name);
   const retries = fieldText(policy.MaximumRetryCount);
   return {
-    名称: fieldText(detail.name).replace(/^\//, ''),
-    镜像: fieldText(detail.image),
-    '容器 ID': props.containerId,
-    运行状态: stateLabels.get(status) ?? status,
-    健康检查: health ? (healthLabels.get(health) ?? health) : '未报告',
-    '主进程 PID（主机）': typeof state.Pid === 'number' && state.Pid > 0 ? state.Pid : '—',
-    创建时间: dateTime(detail.created),
-    最近启动: dateTime(state.StartedAt),
-    最近退出: dateTime(state.FinishedAt),
-    退出码: state.Running === false ? fieldText(state.ExitCode) : '—',
-    重启策略: typeof policy.Name === 'string' ? (policyLabels.get(restart) ?? restart) : '',
+    [tr('名称')]: fieldText(detail.name).replace(/^\//, ''),
+    [tr('镜像')]: fieldText(detail.image),
+    [tr('容器 ID')]: props.containerId,
+    [tr('运行状态')]: stateLabels.has(status) ? tr(stateLabels.get(status)!) : status,
+    [tr('健康检查')]: health
+      ? healthLabels.has(health)
+        ? tr(healthLabels.get(health)!)
+        : health
+      : tr('未报告'),
+    [tr('主进程 PID（主机）')]: typeof state.Pid === 'number' && state.Pid > 0 ? state.Pid : '—',
+    [tr('创建时间')]: dateTime(detail.created),
+    [tr('最近启动')]: dateTime(state.StartedAt),
+    [tr('最近退出')]: dateTime(state.FinishedAt),
+    [tr('退出码')]: state.Running === false ? fieldText(state.ExitCode) : '—',
+    [tr('重启策略')]:
+      typeof policy.Name === 'string'
+        ? policyLabels.has(restart)
+          ? tr(policyLabels.get(restart)!)
+          : restart
+        : '',
     ...(restart === 'on-failure' && retries
-      ? { 最大重试次数: retries === '0' ? '不限' : retries }
+      ? { [tr('最大重试次数')]: retries === '0' ? tr('不限') : retries }
       : {}),
-    ...(state.OOMKilled === true ? { 退出原因: '因内存不足被终止' } : {}),
-    ...(fieldText(state.Error) ? { 状态错误: fieldText(state.Error) } : {}),
+    ...(state.OOMKilled === true ? { [tr('退出原因')]: tr('因内存不足被终止') } : {}),
+    ...(fieldText(state.Error) ? { [tr('状态错误')]: fieldText(state.Error) } : {}),
   };
 });
 </script>
@@ -112,7 +144,7 @@ const overview = computed(() => {
     <div
       class="server-tabs docker-detail-tabs"
       role="tablist"
-      aria-label="容器详情分类"
+      :aria-label="tr('容器详情分类')"
       @keydown="moveTabFocus"
     >
       <button

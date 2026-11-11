@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { onBeforeUnmount, ref } from 'vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
@@ -22,7 +24,7 @@ async function submit(): Promise<void> {
         secret: password.value,
         clearSecret: false,
       }),
-    '代理密码已保存。',
+    tr('代理密码已保存。'),
   );
   if (result.ok) {
     password.value = '';
@@ -32,13 +34,13 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <Modal title="新建代理密码" :busy="store.busy" @close="emit('close')">
+  <Modal :title="tr('新建代理密码')" :busy="store.busy" @close="emit('close')">
     <form class="editor-form" @submit.prevent="submit">
       <fieldset :disabled="store.busy">
-        <label>名称<input v-model="name" autofocus maxlength="128" required /></label>
-        <label>
-          代理密码
-          <input
+        <label>{{ tr('名称') }}<input v-model="name" autofocus maxlength="128" required /></label>
+        <label
+          >{{ tr(' 代理密码 ')
+          }}<input
             v-model="password"
             type="password"
             autocomplete="new-password"
@@ -47,13 +49,13 @@ async function submit(): Promise<void> {
           />
         </label>
       </fieldset>
-      <p class="subtle">保存到系统凭据库，可供其他代理配置使用。</p>
+      <p class="subtle">{{ tr('保存到系统凭据库，可供其他代理配置使用。') }}</p>
       <footer class="dialog-actions">
         <button class="button" type="button" :disabled="store.busy" @click="emit('close')">
-          取消
+          {{ tr(' 取消 ') }}
         </button>
         <button class="button primary" type="submit" :disabled="store.busy">
-          {{ store.busy ? '保存中…' : '保存代理密码' }}
+          {{ store.busy ? tr('保存中…') : tr('保存代理密码') }}
         </button>
       </footer>
     </form>

@@ -8,6 +8,7 @@ pub enum ApprovalMode {
     #[default]
     Request,
     Assist,
+    Full,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -75,6 +76,116 @@ impl Command {
         }
         Ok(result)
     }
+    /// Only whole argv entries can vary. Programs and script text remain literal.
+    pub fn validate_argument_template(&self) -> Result<bool, ApiError> {
+        self.validate()?;
+        if self.program.contains("{{sd:") {
+            return Err(argument_template_error());
+        }
+        let mut parameterized = false;
+        for arg in &self.args {
+            parameterized |= ArgumentRule::parse(arg)?.is_some();
+        }
+        if parameterized
+            && (self.program != "sh"
+                || self.args.first().map(String::as_str) != Some("-c")
+                || self.args.len() < 4
+                || self.args[..3].iter().any(|arg| arg.contains("{{sd:")))
+        {
+            return Err(argument_template_error());
+        }
+        Ok(parameterized)
+    }
+    pub fn matches_argument_template(&self, command: &Self) -> bool {
+        if self.program != command.program
+            || self.timeout_secs != command.timeout_secs
+            || self.args.len() != command.args.len()
+            || !matches!(self.validate_argument_template(), Ok(true))
+            || command.validate().is_err()
+        {
+            return false;
+        }
+        self.args.iter().zip(&command.args).all(|(template, arg)| {
+            match ArgumentRule::parse(template) {
+                Ok(Some(rule)) => rule.matches(arg),
+                Ok(None) => template == arg,
+                Err(_) => false,
+            }
+        })
+    }
+}
+
+enum ArgumentRule<'a> {
+    Uint { min: u32, max: u32 },
+    Hex { len: usize },
+    Identifier { max: usize, suffix: &'a str },
+}
+fn argument_template_error() -> ApiError {
+    ApiError::new(
+        "COMMAND_TEMPLATE",
+        "参数模板须为独立且有界的整数、十六进制或标识符参数",
+    )
+}
+impl<'a> ArgumentRule<'a> {
+    fn parse(value: &'a str) -> Result<Option<Self>, ApiError> {
+        if !value.contains("{{sd:") {
+            return Ok(None);
+        }
+        let value = value
+            .strip_prefix("{{sd:")
+            .and_then(|v| v.strip_suffix("}}"))
+            .ok_or_else(argument_template_error)?;
+        let parts = value.split(':').collect::<Vec<_>>();
+        let number = |value: &str| value.parse::<u32>().map_err(|_| argument_template_error());
+        let rule = match parts.as_slice() {
+            ["uint", min, max] => {
+                let (min, max) = (number(min)?, number(max)?);
+                if min > max {
+                    return Err(argument_template_error());
+                }
+                Self::Uint { min, max }
+            }
+            ["hex", len] if (1..=128).contains(&number(len)?) => Self::Hex {
+                len: number(len)? as usize,
+            },
+            ["identifier", max, suffix]
+                if (1..=256).contains(&number(max)?)
+                    && suffix.len() <= 32
+                    && suffix.bytes().all(identifier_byte) =>
+            {
+                Self::Identifier {
+                    max: number(max)? as usize,
+                    suffix,
+                }
+            }
+            _ => return Err(argument_template_error()),
+        };
+        Ok(Some(rule))
+    }
+    fn matches(&self, value: &str) -> bool {
+        match self {
+            Self::Uint { min, max } => {
+                !value.is_empty()
+                    && value.bytes().all(|c| c.is_ascii_digit())
+                    && value
+                        .parse::<u32>()
+                        .is_ok_and(|n| (*min..=*max).contains(&n))
+            }
+            Self::Hex { len } => {
+                value.len() == *len && value.bytes().all(|c| c.is_ascii_hexdigit())
+            }
+            Self::Identifier { max, suffix } => {
+                !value.is_empty()
+                    && value.len() <= *max
+                    && !value.starts_with('-')
+                    && value.ends_with(suffix)
+                    && value.bytes().all(identifier_byte)
+            }
+        }
+    }
+}
+fn identifier_byte(value: u8) -> bool {
+    value.is_ascii_alphanumeric() || b"_.@:-\\".contains(&value)
 }
 /// Quote one POSIX shell argument. Empty arguments are preserved.
 pub fn quote(value: &str) -> Result<String, ApiError> {
@@ -187,6 +298,9 @@ pub enum Request {
         host_id: String,
         command: Command,
     },
+    Streaming {
+        request: crate::streaming::Request,
+    },
     ModelComplete {
         model_id: String,
         expected_revision: Option<String>,
@@ -254,6 +368,10 @@ pub enum Request {
 impl Request {
     pub fn permission(&self) -> Permission {
         match self {
+            Self::Streaming { request } => request.permission(),
+            Self::ApprovalMode {
+                mode: ApprovalMode::Full,
+            } => Permission::OperationsFullPreapproved,
             Self::TcpConnect { .. } => Permission::NetworkConnect,
             Self::Info
             | Self::ApprovalMode { .. }
@@ -285,6 +403,10 @@ impl Request {
     }
     pub fn operation(&self) -> &'static str {
         match self {
+            Self::Streaming { request } => request.operation(),
+            Self::ApprovalMode {
+                mode: ApprovalMode::Full,
+            } => "operations.full.preapproved",
             Self::TcpConnect { .. } => "network.connect",
             Self::Info
             | Self::ApprovalMode { .. }
@@ -317,7 +439,9 @@ impl Request {
     pub fn needs_confirmation(&self) -> bool {
         matches!(
             self,
-            Self::Execute { .. }
+            Self::ApprovalMode {
+                mode: ApprovalMode::Full
+            } | Self::Execute { .. }
                 | Self::ConfirmOperations { .. }
                 | Self::StreamOpen { .. }
                 | Self::Terminal { .. }
@@ -338,9 +462,15 @@ impl Request {
         }
     }
     pub fn allowed_after_cancel(&self) -> bool {
+        if let Self::Streaming { request } = self {
+            return request.cleanup();
+        }
         matches!(
             self,
             Self::Info
+                | Self::ApprovalMode {
+                    mode: ApprovalMode::Request
+                }
                 | Self::Notify { .. }
                 | Self::CloseFile { .. }
                 | Self::StreamStop { .. }
@@ -360,6 +490,90 @@ impl Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancellation_allows_authority_reduction_but_never_elevation() {
+        assert!(
+            Request::ApprovalMode {
+                mode: ApprovalMode::Request
+            }
+            .allowed_after_cancel()
+        );
+        for mode in [ApprovalMode::Assist, ApprovalMode::Full] {
+            assert!(!Request::ApprovalMode { mode }.allowed_after_cancel());
+        }
+        assert!(
+            Request::ApprovalMode {
+                mode: ApprovalMode::Full
+            }
+            .needs_confirmation()
+        );
+    }
+    #[test]
+    fn parameterized_reads_keep_script_literal_and_validate_each_argument() {
+        let template = Command::script("printf '%s' \"$1\"")
+            .arg("fixture-read")
+            .arg("{{sd:uint:2:2147483647}}");
+        let command = Command::script("printf '%s' \"$1\"")
+            .arg("fixture-read")
+            .arg("835251");
+        assert!(template.matches_argument_template(&command));
+        for value in [
+            "1",
+            "-1",
+            "2147483648",
+            "2;reboot",
+            "$(reboot)",
+            "2\n",
+            "",
+            "2 3",
+        ] {
+            let mut changed = command.clone();
+            changed.args[3] = value.into();
+            assert!(!template.matches_argument_template(&changed), "{value}");
+        }
+        for changed in [
+            Command::script("reboot").arg("fixture-read").arg("835251"),
+            command.clone().arg("extra"),
+        ] {
+            assert!(!template.matches_argument_template(&changed));
+        }
+        for marker in ["{{sd:hex:64}}", "{{sd:identifier:256:.service}}"] {
+            let template = Command::script("printf '%s' \"$1\"")
+                .arg("fixture-read")
+                .arg(marker);
+            let mut value = template.clone();
+            value.args[3] = if marker.contains("hex") {
+                "a".repeat(64)
+            } else {
+                "app@prod.service".into()
+            };
+            assert!(template.matches_argument_template(&value));
+            for unsafe_value in [
+                "app.service;reboot",
+                "../../app.service",
+                "-app.service",
+                "app.socket",
+            ] {
+                value.args[3] = unsafe_value.into();
+                assert!(!template.matches_argument_template(&value));
+            }
+        }
+        for invalid in [
+            Command::script("{{sd:identifier:256:}}"),
+            Command::new("{{sd:identifier:256:}}"),
+            Command::script("echo ok")
+                .arg("fixture-read")
+                .arg("prefix{{sd:uint:2:3}}"),
+            Command::script("echo ok")
+                .arg("fixture-read")
+                .arg("{{sd:uint:4:2}}"),
+            Command::script("echo ok")
+                .arg("fixture-read")
+                .arg("{{sd:hex:0}}"),
+        ] {
+            assert!(invalid.validate_argument_template().is_err());
+        }
+    }
     #[test]
     fn command_arguments_remain_literal_and_no_service_is_automatically_exempt() {
         let command = Command::new("tool").arg("").arg("x'$(touch BAD); y");

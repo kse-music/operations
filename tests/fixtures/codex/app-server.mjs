@@ -43,9 +43,23 @@ for await (const line of lines) {
         process.stdout.write('x'.repeat(1024 * 1024 + 1));
         break;
       }
+      if (scenario === 'stream') {
+        reply({
+          method: 'item/agentMessage/delta',
+          params: { itemId: 'reply', delta: '{"answer":"' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        reply({
+          method: 'item/agentMessage/delta',
+          params: { itemId: 'reply', delta: 'OK","commands":[]}' },
+        });
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
       reply({
         method: 'item/completed',
-        params: { item: { type: 'agentMessage', text: '{"answer":"OK","commands":[]}' } },
+        params: {
+          item: { id: 'reply', type: 'agentMessage', text: '{"answer":"OK","commands":[]}' },
+        },
       });
       if (scenario === 'crash') {
         process.exit(4);

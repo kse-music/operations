@@ -100,6 +100,29 @@ impl Redactor {
             .filter(|c| !c.is_control() || matches!(c, '\n' | '\r' | '\t'))
             .collect()
     }
+    /// Hold unfinished ASCII tokens and literal-secret prefixes before applying existing rules.
+    pub fn stream_text(&self, text: &str, complete: bool) -> String {
+        if complete {
+            return self.text(text);
+        }
+        let mut end = text.len();
+        for (i, ch) in text.char_indices().rev() {
+            if !ch.is_ascii() || ch.is_whitespace() {
+                break;
+            }
+            end = i;
+        }
+        for value in &self.values {
+            let max = value.len().min(text.len());
+            for length in (1..=max).rev() {
+                if value.is_char_boundary(length) && text.ends_with(&value[..length]) {
+                    end = end.min(text.len() - length);
+                    break;
+                }
+            }
+        }
+        self.text(&text[..end])
+    }
     /// Mask original ranges while preserving line boundaries used by file edits.
     pub fn lines(&self, text: &str) -> String {
         let mut ranges = Vec::new();
@@ -188,6 +211,24 @@ impl Redactor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn streamed_prefixes_do_not_reveal_split_credentials_addresses_or_literal_secrets() {
+        let redactor =
+            Redactor::new(true, vec!["蓝鲸保密值 with spaces".to_owned().into()]).unwrap();
+        let text = "开始 蓝鲸保密值 with spaces\n密码 password=secret-value\nBearer abcdefgh\nsk-abcdefghijklmnop\n192.168.1.159\n结束";
+        for (end, _) in text.char_indices().skip(1) {
+            let shown = redactor.stream_text(&text[..end], false);
+            for secret in ["蓝鲸", "secret-value", "abcdef", "sk-abc", "192.168"] {
+                assert!(!shown.contains(secret), "prefix {end}: {shown}");
+            }
+        }
+        assert_eq!(redactor.stream_text(text, true), redactor.text(text));
+        assert!(
+            !redactor
+                .stream_text("开始 secret-value", false)
+                .contains("secret-value")
+        );
+    }
     #[test]
     fn file_redaction_preserves_original_line_coordinates_including_multiline_secrets() {
         let raw = "header\r\n-----BEGIN OPENSSH PRIVATE KEY-----\r\nprivate\r\n-----END OPENSSH PRIVATE KEY-----\r\npassword: secret\r\nlast\r\n";

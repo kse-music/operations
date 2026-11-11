@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Plus, X } from '@lucide/vue';
 import { useTerminalsStore, type TerminalTab } from '../stores/terminals';
@@ -36,8 +38,8 @@ function newTerminal(): void {
 }
 function sessionTitle(item: TerminalTab): string {
   const host = item.panes[0]?.host;
-  return item.title === (host ? hostDisplayName(host) : '本地设备')
-    ? `会话 ${item.sessionNumber}`
+  return !item.renamed && (!host || item.title === hostDisplayName(host))
+    ? tr('会话 {0}', item.sessionNumber)
     : item.title;
 }
 const area = ref<HTMLElement>();
@@ -96,7 +98,7 @@ function runMenu(action: 'duplicate' | 'rename' | 'all' | 'close'): void {
     const snapshot = target.panes[0]?.host;
     const configured = snapshot && hosts.catalog?.hosts.find((item) => item.id === snapshot.id);
     if (snapshot && (!configured || !sameHostConnection(snapshot, configured))) {
-      store.error = '主机连接配置已变更，请从主机树重新打开后再复制会话。';
+      store.error = tr('主机连接配置已变更，请从主机树重新打开后再复制会话。');
       return;
     }
     store.duplicate(target.key);
@@ -241,10 +243,10 @@ watch(
 <template>
   <div class="terminals-view">
     <div v-if="!tabs.length" class="workspace-empty">
-      <h2>没有打开的终端</h2>
-      <p>当前主机尚无终端。可新建会话，或通过工作区标签切换主机。</p>
+      <h2>{{ tr('没有打开的终端') }}</h2>
+      <p>{{ tr('当前主机尚无终端。可新建会话，或通过工作区标签切换主机。') }}</p>
       <button class="button" :disabled="!!props.hostId && !host" @click="newTerminal">
-        {{ props.hostId ? '新建终端' : '打开本地终端' }}
+        {{ props.hostId ? tr('新建终端') : tr('打开本地终端') }}
       </button>
     </div>
     <Teleport
@@ -253,7 +255,7 @@ watch(
       :disabled="!props.toolbarTarget"
     >
       <div class="terminal-session-header">
-        <div class="terminal-tabs" role="tablist" aria-label="终端标签">
+        <div class="terminal-tabs" role="tablist" :aria-label="tr('终端标签')">
           <div
             v-for="item in tabs"
             :key="item.key"
@@ -278,12 +280,12 @@ watch(
               {{ sessionTitle(item) }}
               <small>{{
                 item.panes.length > 1
-                  ? `${item.panes.length} 个窗格`
+                  ? tr('{0} 个窗格', item.panes.length)
                   : stateLabels[item.panes[0]?.state ?? 'idle']
               }}</small></button
             ><button
-              :aria-label="`关闭标签 ${sessionTitle(item)}`"
-              title="关闭标签"
+              :aria-label="tr('关闭标签 {0}', sessionTitle(item))"
+              :title="tr('关闭标签')"
               @click="store.close(item.key)"
             >
               <X :size="14" aria-hidden="true" />
@@ -292,8 +294,8 @@ watch(
         </div>
         <button
           class="shell-icon-button"
-          aria-label="新建终端会话"
-          title="新建终端会话"
+          :aria-label="tr('新建终端会话')"
+          :title="tr('新建终端会话')"
           @click="newTerminal"
         >
           <Plus :size="15" aria-hidden="true" />
@@ -327,7 +329,7 @@ watch(
         tabindex="0"
         :aria-orientation="divider.axis === 'columns' ? 'vertical' : 'horizontal'"
         :aria-valuenow="divider.ratio"
-        aria-label="调整分屏大小"
+        :aria-label="tr('调整分屏大小')"
         @pointerdown.prevent="dragDivider($event, divider)"
         @keydown="resizeKey($event, divider)"
       ></div>
@@ -337,7 +339,7 @@ watch(
     <template v-if="menu">
       <button
         class="context-backdrop"
-        aria-label="关闭会话菜单"
+        :aria-label="tr('关闭会话菜单')"
         @click="closeMenu"
         @contextmenu.prevent="closeMenu"
         @wheel.prevent="closeMenu"
@@ -346,31 +348,36 @@ watch(
         ref="menuElement"
         class="context-menu"
         role="menu"
-        aria-label="终端会话操作"
+        :aria-label="tr('终端会话操作')"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         @keydown="menuKey"
       >
-        <button role="menuitem" @click="runMenu('duplicate')">复制</button>
-        <button role="menuitem" @click="runMenu('rename')">重命名</button>
-        <button role="menuitem" @click="runMenu('all')">关闭所有</button>
-        <button role="menuitem" @click="runMenu('close')">关闭</button>
+        <button role="menuitem" @click="runMenu('duplicate')">{{ tr('复制') }}</button>
+        <button role="menuitem" @click="runMenu('rename')">{{ tr('重命名') }}</button>
+        <button role="menuitem" @click="runMenu('all')">{{ tr('关闭所有') }}</button>
+        <button role="menuitem" @click="runMenu('close')">{{ tr('关闭') }}</button>
       </div>
     </template>
   </Teleport>
-  <Modal v-if="renaming" title="重命名标签" @close="renaming = null"
-    ><form @submit.prevent="submitRename">
+  <Modal
+    v-if="renaming"
+    :title="tr('重命名标签')"
+    panel-class="terminal-rename-dialog"
+    @close="renaming = null"
+    ><form class="terminal-rename-form" @submit.prevent="submitRename">
       <label
-        >标签名称<input
+        >{{ tr('标签名称')
+        }}<input
           v-model="title"
           class="terminal-rename-input"
           maxlength="128"
           required
           autofocus
-          aria-label="标签名称"
+          :aria-label="tr('标签名称')"
       /></label>
       <footer class="dialog-actions">
-        <button class="button" type="button" @click="renaming = null">取消</button
-        ><button class="button primary" type="submit">保存名称</button>
+        <button class="button" type="button" @click="renaming = null">{{ tr('取消') }}</button
+        ><button class="button primary" type="submit">{{ tr('保存名称') }}</button>
       </footer>
     </form></Modal
   >

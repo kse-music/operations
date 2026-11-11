@@ -79,6 +79,13 @@ pub(super) struct RevisionBinding {
     pub target: RevisionTarget,
     pub at: Instant,
 }
+impl RevisionBinding {
+    pub fn expired(&self) -> bool {
+        self.target
+            != RevisionTarget::ApprovalMode(serverdeck_plugin_sdk::platform::ApprovalMode::Full)
+            && self.at.elapsed() >= Duration::from_secs(600)
+    }
+}
 pub(super) struct PlatformTerminalTicket {
     pub plugin: String,
     pub owner: String,
@@ -120,6 +127,7 @@ pub(super) struct Continuation {
     pub revision: String,
     pub request: serverdeck_plugin_sdk::Request,
     pub remaining: usize,
+    pub stream_remaining: usize,
     pub started: Instant,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,10 +141,13 @@ pub struct Event {
 #[derive(Default)]
 pub(super) struct Data {
     pub copies: BTreeMap<String, Copy>,
+    pub model_streams: BTreeMap<String, Arc<super::streaming::ModelStream>>,
+    pub progress: BTreeMap<String, super::streaming::Progress>,
     pub lifecycle_requests: BTreeMap<String, CancellationToken>,
     pub user_cancellations: BTreeMap<String, Arc<AtomicBool>>,
     pub closed_owners: BTreeSet<(String, String)>,
     pub bindings: BTreeMap<String, RevisionBinding>,
+    pub full_access_sessions: BTreeMap<(String, String), String>,
     pub outputs: BTreeMap<String, OutputData>,
     pub platform_terminals: BTreeMap<String, PlatformTerminalTicket>,
     pub open_terminals: BTreeMap<String, PlatformTerminalOwner>,
@@ -225,7 +236,7 @@ impl Drop for Call {
     }
 }
 impl Host {
-    /// Cancellation only: never occupies or releases an in-flight Guest action.
+    /// Cancellation and authority reduction never occupy or release an in-flight Guest action.
     pub(super) fn start_control_scoped(&self, id: &str, owner: &str) -> Result<Call, Error> {
         if owner.is_empty() || owner.len() > 512 || owner.contains('\0') {
             return Err(Error::Validation("插件页面标识无效"));

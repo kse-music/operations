@@ -1,5 +1,17 @@
 # 验证记录索引
 
+最新：[硬件问题系统采样、动态文件大小错误与助手继续回答回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-11-硬件查询触发文件冲突)。
+
+最新：[简体中文 / English 切换、设置保存与内置插件同步](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-11-英文界面语言)。
+
+最新：[助手真实流式回答：完成前显示、断流保留与旧会话隔离](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-11-助手流式回答)。
+
+最新：[关闭本地/SSH 终端后的 NOT_FOUND、迟到 resize/ACK 与关闭失败恢复回归](workspace/VALIDATION_ERROR_NOTIFICATIONS.md#2026-11-11-关闭终端后偶发记录不存在)。
+
+最新：[CPU/内存排查 PLUGIN_FUEL、多挂载采样及工具结果处理回归](ai/VALIDATION_ASSISTANT_CHAT.md#2026-11-11-cpu-内存排查触发-plugin_fuel)。
+
+最新：[会话重命名紧凑弹窗、参考尺寸及保存/取消验证](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-会话重命名弹窗布局)。
+
 最新：[SFTP 编辑器系统标题与紧凑工具栏](files/VALIDATION_STAGE4.md#2026-11-11-编辑器紧凑工具栏)。
 
 最新：[SFTP 单文档独立编辑器、窗口权限与关闭保护](files/VALIDATION_STAGE4.md#2026-11-10-单文档独立编辑器窗口)。

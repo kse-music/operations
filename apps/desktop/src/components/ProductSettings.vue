@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import ProxyPasswordDialog from './ProxyPasswordDialog.vue';
@@ -61,10 +63,10 @@ useErrorNotifications(error);
     <legend>
       {{
         {
-          general: '界面与运行',
-          connection: 'SSH 连接',
-          shortcuts: '全局快捷键',
-          storage: '下载与传输',
+          general: tr('界面与运行'),
+          connection: tr('SSH 连接'),
+          shortcuts: tr('全局快捷键'),
+          storage: tr('下载与传输'),
         }[section]
       }}
     </legend>
@@ -72,29 +74,32 @@ useErrorNotifications(error);
       <slot />
       <template v-if="section === 'general'">
         <label
-          >界面语言<select v-model="model.language" aria-label="界面语言">
-            <option value="zh-CN">简体中文</option>
+          >{{ tr('界面语言')
+          }}<select v-model="model.language" :aria-label="tr('界面语言')">
+            <option value="zh-CN">{{ tr('简体中文') }}</option>
+            <option value="en-US">English</option>
           </select></label
         >
       </template>
       <template v-if="section === 'storage'">
         <div class="full-width settings-field">
-          <label for="default-download-directory">默认下载目录</label>
+          <label for="default-download-directory">{{ tr('默认下载目录') }}</label>
           <div class="input-action">
             <input
               id="default-download-directory"
               v-model="model.downloadDirectory"
-              placeholder="未设置时使用本地文件栏当前目录"
-              aria-label="默认下载目录"
+              :placeholder="tr('未设置时使用本地文件栏当前目录')"
+              :aria-label="tr('默认下载目录')"
               @change="model.downloadDirectory ||= null"
             />
-            <button type="button" class="button" @click="browse">选择下载目录</button>
+            <button type="button" class="button" @click="browse">{{ tr('选择下载目录') }}</button>
           </div>
         </div>
       </template>
       <template v-if="section === 'connection'">
         <label
-          >默认认证超时（秒）<input
+          >{{ tr('默认认证超时（秒）')
+          }}<input
             v-model.number="model.sshDefaults.authTimeoutSecs"
             type="number"
             min="1"
@@ -102,16 +107,18 @@ useErrorNotifications(error);
             required
         /></label>
         <label
-          >默认 Keepalive 间隔（秒）<input
+          >{{ tr('默认 Keepalive 间隔（秒）')
+          }}<input
             v-model.number="model.sshDefaults.keepaliveIntervalSecs"
-            aria-label="默认 Keepalive 间隔"
+            :aria-label="tr('默认 Keepalive 间隔')"
             type="number"
             min="1"
             max="3600"
             required
         /></label>
         <label
-          >默认 Keepalive 失败次数<input
+          >{{ tr('默认 Keepalive 失败次数')
+          }}<input
             v-model.number="model.sshDefaults.keepaliveCountMax"
             type="number"
             min="1"
@@ -120,40 +127,45 @@ useErrorNotifications(error);
         /></label>
         <div class="settings-fields settings-subsection full-width">
           <label
-            >默认代理<select v-model="mode" aria-label="全局默认代理">
-              <option value="direct">直连</option>
+            >{{ tr('默认代理')
+            }}<select v-model="mode" :aria-label="tr('全局默认代理')">
+              <option value="direct">{{ tr('直连') }}</option>
               <option value="socks5">SOCKS5</option>
               <option value="http_connect">HTTP CONNECT</option>
             </select></label
           >
           <template v-if="model.sshDefaults.proxy"
             ><label
-              >代理地址<input
+              >{{ tr('代理地址')
+              }}<input
                 v-model="model.sshDefaults.proxy.hostname"
                 required
-                aria-label="默认代理地址" /></label
+                :aria-label="tr('默认代理地址')" /></label
             ><label
-              >代理端口<input
+              >{{ tr('代理端口')
+              }}<input
                 v-model.number="model.sshDefaults.proxy.port"
                 type="number"
                 min="1"
                 max="65535"
                 required /></label
             ><label class="checkbox-label full-width"
-              ><input v-model="authenticated" type="checkbox" />代理需要认证</label
+              ><input v-model="authenticated" type="checkbox" />{{ tr('代理需要认证') }}</label
             ><template v-if="authenticated"
               ><label
-                >代理用户名<input
+                >{{ tr('代理用户名')
+                }}<input
                   v-model="model.sshDefaults.proxy.username"
-                  aria-label="代理用户名"
+                  :aria-label="tr('代理用户名')"
                   required /></label
               ><label
-                >代理安全凭据<select
+                >{{ tr('代理安全凭据')
+                }}<select
                   v-model="model.sshDefaults.proxy.credentialId"
-                  aria-label="代理安全凭据"
+                  :aria-label="tr('代理安全凭据')"
                   required
                 >
-                  <option :value="null">选择密码凭据</option>
+                  <option :value="null">{{ tr('选择密码凭据') }}</option>
                   <option
                     v-for="c in hosts.catalog?.credentials.filter((c) => c.kind === 'password')"
                     :key="c.id"
@@ -164,29 +176,36 @@ useErrorNotifications(error);
                 </select></label
               >
               <button type="button" class="text-button" @click="newProxyPassword = true">
-                ＋ 新建代理密码
+                {{ tr(' ＋ 新建代理密码 ') }}
               </button>
             </template></template
           >
         </div>
         <p class="subtle full-width">
-          连接超时、Keepalive
-          和代理作为新建主机的默认值，不改写已有主机或在途连接。认证代理必须关联系统凭据；HTTP
-          CONNECT 的代理连接本身不使用 TLS。
+          {{
+            tr(
+              ' 连接超时、Keepalive 和代理作为新建主机的默认值，不改写已有主机或在途连接。认证代理必须关联系统凭据；HTTP CONNECT 的代理连接本身不使用 TLS。 ',
+            )
+          }}
         </p>
       </template>
       <template v-if="section === 'shortcuts'">
-        <label v-for="(title, key) in { search: '全局搜索', settings: '打开设置' }" :key="key"
+        <label
+          v-for="(title, key) in { search: tr('全局搜索'), settings: tr('打开设置') }"
+          :key="key"
           >{{ title
           }}<input
             :value="model.shortcuts[key]"
             readonly
-            :aria-label="`${title}全局快捷键`"
+            :aria-label="tr('{0}全局快捷键', title)"
             @keydown="capture(key, $event)"
         /></label>
         <p class="subtle full-width">
-          使用 Ctrl（macOS 可用 Command）及可选 Shift。不会覆盖远端 Ctrl+C/Z
-          等控制键；对话框中不触发全局导航。
+          {{
+            tr(
+              ' 使用 Ctrl（macOS 可用 Command）及可选 Shift。不会覆盖远端 Ctrl+C/Z 等控制键；对话框中不触发全局导航。 ',
+            )
+          }}
         </p>
       </template>
     </div>

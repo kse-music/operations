@@ -1,12 +1,19 @@
+import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import * as ipc from '../services/ipc';
 import type { AppConfig, Bootstrap } from '../types/ipc';
 import type { InterfaceFontSize } from '../types/preferences';
 
 export const useApplicationStore = defineStore('application', () => {
   const state = ref<Bootstrap | null>(null);
+  watch(
+    () => state.value?.config.product.language,
+    (language) => setLocale(language ?? 'zh-CN'),
+    { immediate: true, flush: 'sync' },
+  );
   const interfaceFontSizePreview = ref<InterfaceFontSize>();
   const loading = ref(false);
   const saving = ref(false);
@@ -41,7 +48,7 @@ export const useApplicationStore = defineStore('application', () => {
     notice.value = null;
     try {
       state.value.config = await ipc.saveConfig({ ...config });
-      notice.value = '设置已保存。日志级别在下次启动时生效。';
+      notice.value = tr('设置已保存。日志级别在下次启动时生效。');
     } catch (cause) {
       error.value = ipc.errorMessage(cause);
     } finally {
@@ -51,7 +58,7 @@ export const useApplicationStore = defineStore('application', () => {
 
   function reportUnexpectedError(): void {
     // Do not display/log raw component errors: future components may handle secrets.
-    error.value = '界面发生异常，请重新启动应用并检查本地日志。';
+    error.value = tr('界面发生异常，请重新启动应用并检查本地日志。');
   }
 
   useErrorNotifications(error);

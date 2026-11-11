@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, ref, watch } from 'vue';
 import { ShieldCheck, FolderKey, Check, Minus } from '@lucide/vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -14,7 +16,15 @@ const permissions = ref<PluginPermission[]>([]),
 const labels: Record<PluginPermission, [string, string]> = {
   'operations.read.preapproved': [
     '任务读取免确认',
-    '“帮我审批”模式下直接读取授权目录内文本、检查传输元数据及执行下方清单固定命令；不自动判断任意命令只读，写入仍需确认',
+    '“帮我批准”模式下直接读取授权目录内文本、检查传输元数据及执行下方固定读取命令；风险操作仍需确认',
+  ],
+  'operations.read.arguments.preapproved': [
+    '带目标参数的读取免确认',
+    '“帮我批准”模式下允许下方固定脚本使用经严格校验的目标参数，未声明的命令仍需批准',
+  ],
+  'operations.full.preapproved': [
+    '完全访问模式',
+    '经宿主首次授权后，当前页面可在已授予权限与目录范围内自动执行读取、写入和命令，不再逐次确认；授权持续到切换模式或关闭会话',
   ],
   'network.connect': ['本机 TCP 连接', '从本机探测指定地址与端口，逐次确认'],
   'models.use': ['模型调用', '使用平台已配置模型发送插件提供的消息，凭据保留在宿主'],
@@ -40,6 +50,8 @@ const labels: Record<PluginPermission, [string, string]> = {
 };
 const operationMap: Record<PluginPermission, string[]> = {
   'operations.read.preapproved': ['operations.read.preapproved'],
+  'operations.read.arguments.preapproved': ['operations.read.arguments.preapproved'],
+  'operations.full.preapproved': ['operations.full.preapproved'],
   'network.connect': ['network.connect'],
   'models.use': ['models.use'],
   'hosts.read': ['hosts.read'],
@@ -86,32 +98,32 @@ async function save() {
 }
 async function revoke() {
   if (builtin.value) return;
-  if (await plugins.ask('撤销插件授权？', '将停止插件调用，并关闭它的文档和日志。'))
+  if (await plugins.ask(tr('撤销插件授权？'), tr('将停止插件调用，并关闭它的文档和日志。')))
     await plugins.mutate(() => pluginsApi.revoke(props.plugin.manifest.id));
 }
 </script>
 <template>
-  <div class="plugin-settings" aria-label="插件设置">
+  <div class="plugin-settings" :aria-label="tr('插件设置')">
     <section class="plugin-settings-section plugin-package-details">
-      <h2>插件信息</h2>
+      <h2>{{ tr('插件信息') }}</h2>
       <dl class="plugin-details">
-        <dt>插件 ID</dt>
+        <dt>{{ tr('插件 ID') }}</dt>
         <dd>{{ plugin.manifest.id }}</dd>
-        <dt>开发者</dt>
+        <dt>{{ tr('开发者') }}</dt>
         <dd>{{ plugin.manifest.publisher ?? plugin.manifest.author }}</dd>
-        <dt>API 版本</dt>
+        <dt>{{ tr('API 版本') }}</dt>
         <dd>{{ plugin.manifest.apiVersion }}</dd>
         <dt>SHA256</dt>
         <dd class="plugin-digest">{{ plugin.packageDigest }}</dd>
-        <dt>备份版本</dt>
-        <dd>{{ plugin.previousVersion ?? '无' }}</dd>
+        <dt>{{ tr('备份版本') }}</dt>
+        <dd>{{ plugin.previousVersion ?? tr('无') }}</dd>
       </dl>
     </section>
     <details class="plugin-settings-section plugin-permissions" :open="!builtin">
       <summary class="plugin-permissions-summary">
-        <span><ShieldCheck :size="16" aria-hidden="true" />权限与访问范围</span>
+        <span><ShieldCheck :size="16" aria-hidden="true" />{{ tr('权限与访问范围') }}</span>
         <span class="plugin-status" :class="{ enabled: !!grant }">{{
-          grant ? '已授权' : '尚未授权'
+          grant ? tr('已授权') : tr('尚未授权')
         }}</span>
       </summary>
       <form @submit.prevent="save">
@@ -120,8 +132,8 @@ async function revoke() {
             <p class="subtle">
               {{
                 builtin
-                  ? '以下是此内置插件可使用的平台能力，由系统预置，仅供查阅和排查权限问题。'
-                  : '仅授予需要的能力；写入、修改和其他敏感操作仍会逐次确认。'
+                  ? tr('以下是此内置插件可使用的平台能力，由系统预置，仅供查阅和排查权限问题。')
+                  : tr('仅授予需要的能力；完全访问模式须另经宿主授权，授权后可取消逐次确认。')
               }}
             </p>
           </div>
@@ -146,15 +158,22 @@ async function revoke() {
               :aria-label="permission"
               :disabled="builtin || plugins.busy"
             /><span
-              ><strong>{{ labels[permission][0] }}</strong
-              ><small>{{ labels[permission][1] }}</small></span
+              ><strong>{{ tr(labels[permission][0]) }}</strong
+              ><small>{{ tr(labels[permission][1]) }}</small></span
             ></component
           >
         </div>
         <details v-if="plugin.manifest.preapprovedCommands?.length" class="plugin-preset-commands">
-          <summary>预授权命令（{{ plugin.manifest.preapprovedCommands.length }} 条）</summary>
+          <summary>
+            {{ tr('预授权命令（') }}{{ plugin.manifest.preapprovedCommands.length
+            }}{{ tr(' 条）') }}
+          </summary>
           <p class="subtle">
-            授予固定命令预授权后，以下命令可在当前选择的主机上执行，无需逐次确认。请先核对内容；此授权不保证命令只读。
+            {{
+              tr(
+                ' 授予固定命令预授权后，以下命令可在当前选择的主机上执行，无需逐次确认。请先核对内容；此授权不保证命令只读。 ',
+              )
+            }}
           </p>
           <pre
             v-for="(command, index) in plugin.manifest.preapprovedCommands"
@@ -162,35 +181,40 @@ async function revoke() {
           ><code>{{ JSON.stringify(command, null, 2) }}</code></pre>
         </details>
         <p class="plugin-all-hosts subtle">
-          适用于所有主机。请求仍校验实际目标与已授予能力，远程文件接口另受授权目录限制。SSH
-          命令默认逐次确认，获准的固定命令除外。授权不向插件提供登录凭据。
+          {{
+            tr(
+              ' 适用于所有主机。请求仍校验实际目标与已授予能力，远程文件接口另受授权目录限制。SSH 命令默认逐次确认，获准的固定命令除外。授权不向插件提供登录凭据。 ',
+            )
+          }}
         </p>
         <div
           v-if="permissions.some((p) => p === 'sftp.read' || p === 'sftp.write')"
           class="plugin-path-scopes"
         >
-          <h3><FolderKey :size="16" aria-hidden="true" />远程目录</h3>
+          <h3><FolderKey :size="16" aria-hidden="true" />{{ tr('远程目录') }}</h3>
           <label v-if="permissions.includes('sftp.read')"
-            >可读目录<textarea
+            >{{ tr('可读目录')
+            }}<textarea
               v-model="readRoots"
               rows="3"
-              aria-label="插件可读目录"
-              placeholder="每行一个绝对目录，例如 /var/log"
+              :aria-label="tr('插件可读目录')"
+              :placeholder="tr('每行一个绝对目录，例如 /var/log')"
               :disabled="builtin || plugins.busy"
             />
           </label>
           <label v-if="permissions.includes('sftp.write')"
-            >可写目录<textarea
+            >{{ tr('可写目录')
+            }}<textarea
               v-model="writeRoots"
               rows="3"
-              aria-label="插件可写目录"
-              placeholder="每行一个绝对目录"
+              :aria-label="tr('插件可写目录')"
+              :placeholder="tr('每行一个绝对目录')"
               :disabled="builtin || plugins.busy"
             />
           </label>
         </div>
         <footer v-if="!builtin" class="action-row plugin-settings-actions">
-          <button class="button primary" :disabled="plugins.busy">保存并授权</button
+          <button class="button primary" :disabled="plugins.busy">{{ tr('保存并授权') }}</button
           ><button
             v-if="grant"
             type="button"
@@ -198,7 +222,7 @@ async function revoke() {
             :disabled="plugins.busy"
             @click="revoke"
           >
-            撤销授权
+            {{ tr(' 撤销授权 ') }}
           </button>
         </footer>
       </form>

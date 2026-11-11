@@ -6,6 +6,7 @@ mod file_transfers;
 mod platform;
 mod results;
 pub(crate) mod state;
+mod streaming;
 pub use state::{Approval, Event};
 #[cfg(test)]
 mod tests;
@@ -173,7 +174,7 @@ impl Application {
                 .retain(|_, pending| pending.public.plugin_id != id);
         }
         let reply = self.plugin_runtime.call(id, payload).await?;
-        self.plugin_drive(&call, reply, 96, std::time::Instant::now())
+        self.plugin_drive(&call, reply, 96, 1024, std::time::Instant::now())
             .await
     }
     pub async fn plugin_continue(
@@ -222,6 +223,7 @@ impl Application {
                     pending.request,
                     response.result["confirmationRequired"].clone(),
                     pending.remaining,
+                    pending.stream_remaining,
                     pending.started,
                 )
                 .await;
@@ -231,8 +233,14 @@ impl Application {
             .plugin_runtime
             .resume(id, serde_json::json!({"hostResponse":response}))
             .await?;
-        self.plugin_drive(&call, reply, pending.remaining, pending.started)
-            .await
+        self.plugin_drive(
+            &call,
+            reply,
+            pending.remaining,
+            pending.stream_remaining,
+            pending.started,
+        )
+        .await
     }
     async fn plugin_pending_reply(
         &self,
@@ -240,6 +248,7 @@ impl Application {
         request: serverdeck_plugin_sdk::Request,
         mut approval: serde_json::Value,
         remaining: usize,
+        stream_remaining: usize,
         started: std::time::Instant,
     ) -> Result<serverdeck_plugin_runtime::protocol::Reply, Error> {
         let plugin = self.plugin_detail(call.id.clone()).await?;
@@ -259,6 +268,7 @@ impl Application {
                 revision: plugin.revision,
                 request,
                 remaining,
+                stream_remaining,
                 started,
             },
         );
@@ -277,9 +287,11 @@ impl Application {
         call: &state::Call,
         mut reply: serverdeck_plugin_runtime::protocol::Reply,
         remaining: usize,
+        stream_remaining: usize,
         started: std::time::Instant,
     ) -> Result<serverdeck_plugin_runtime::protocol::Reply, Error> {
         let mut left = remaining;
+        let mut stream_left = stream_remaining;
         loop {
             self.plugin_host.verify(call)?;
             if started.elapsed() > std::time::Duration::from_secs(180) {
@@ -297,13 +309,19 @@ impl Application {
                     return Ok(reply);
                 }
                 Ok(serverdeck_plugin_sdk::Yield::HostCall { request }) => {
-                    if left == 0 {
+                    let is_stream_io = matches!(&request.operation, serverdeck_plugin_sdk::Capability::Platform { request: serverdeck_plugin_sdk::platform::Request::Streaming { request }, .. } if request.stream_io());
+                    let budget = if is_stream_io {
+                        &mut stream_left
+                    } else {
+                        &mut left
+                    };
+                    if *budget == 0 {
                         return Err(state::failure(
                             "PLUGIN_CHAIN_LIMIT",
-                            "插件动作的平台调用次数超过九十六次",
+                            "插件动作达到平台调用次数限制（普通96次，流式读写1024次）",
                         ));
                     }
-                    left -= 1;
+                    *budget -= 1;
                     let response = self.plugin_dispatch(call, request.clone()).await?;
                     if !response.result["confirmationRequired"].is_null() {
                         return self
@@ -312,6 +330,7 @@ impl Application {
                                 request,
                                 response.result["confirmationRequired"].clone(),
                                 left,
+                                stream_left,
                                 started,
                             )
                             .await;

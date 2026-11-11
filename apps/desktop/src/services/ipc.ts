@@ -1,18 +1,19 @@
+import { tr } from '../i18n/messages';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { AppConfig, Bootstrap, StorageInfo, StoragePreview } from '../types/ipc';
 
 export function errorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
     const message = error.message;
-    if (typeof message === 'string') return message;
+    if (typeof message === 'string') return tr(message);
   }
-  return '操作未完成，请重试并检查本地应用日志。';
+  return tr('操作未完成，请重试并检查本地应用日志。');
 }
 
 export function ensureDesktop(): void {
   if (!isTauri()) {
     throw new Error(
-      '当前为浏览器预览，未连接 Rust 后端。请使用 npm run tauri -- dev 启动桌面应用。',
+      tr('当前为浏览器预览，未连接 Rust 后端。请使用 npm run tauri -- dev 启动桌面应用。'),
     );
   }
 }

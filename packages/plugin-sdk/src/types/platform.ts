@@ -41,8 +41,20 @@ export interface TransferState {
   message: string | null;
   recoveryPaths: string[];
 }
+export type StreamingRequest =
+  | { kind: 'model_start'; modelId: string; expectedRevision: string | null; messages: Message[] }
+  | { kind: 'model_poll' | 'model_close' | 'progress_close'; id: string }
+  | { kind: 'progress_open' }
+  | { kind: 'progress_publish'; id: string; text: string; reset: boolean }
+  | { kind: 'progress_read'; id: string; revision: number; offset: number };
+export interface ProgressPart {
+  revision: number;
+  text: string;
+  offset: number;
+}
 export type PlatformRequest =
-  | { kind: 'approval_mode'; mode: 'request' | 'assist' }
+  | { kind: 'streaming'; request: StreamingRequest }
+  | { kind: 'approval_mode'; mode: 'request' | 'assist' | 'full' }
   | { kind: 'confirm_operations'; operations: { request: PlatformRequest; count: number }[] }
   | { kind: 'tcp_connect'; target: string; port: number }
   | { kind: 'info' | 'hosts' | 'models' }

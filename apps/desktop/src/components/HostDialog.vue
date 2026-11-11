@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue';
 import Modal from './Modal.vue';
 import ProxyPasswordDialog from './ProxyPasswordDialog.vue';
@@ -81,7 +83,7 @@ function selectKey(event: Event): void {
   const field = event.target as HTMLInputElement;
   const file = field.files?.[0] ?? null;
   field.setCustomValidity(
-    file && (file.size === 0 || file.size > 1024 * 1024) ? '私钥文件须为 1 字节至 1 MiB' : '',
+    file && (file.size === 0 || file.size > 1024 * 1024) ? tr('私钥文件须为 1 字节至 1 MiB') : '',
   );
   keyFile.value = file;
   keyData.value = '';
@@ -136,10 +138,10 @@ async function testConnection(confirmed?: HostKeyFingerprint): Promise<void> {
       return;
     }
     testId.value = result.testId;
-    testMessage.value = 'SSH 连接和认证成功，可以保存主机。';
+    testMessage.value = tr('SSH 连接和认证成功，可以保存主机。');
     expiry = setTimeout(() => {
       invalidateTest();
-      testMessage.value = '测试结果已过期，请重新测试连接。';
+      testMessage.value = tr('测试结果已过期，请重新测试连接。');
     }, result.expiresInSeconds * 1000);
   } catch (error) {
     if (!disposed) testError.value = errorMessage(error);
@@ -159,7 +161,7 @@ async function submit(): Promise<void> {
         ? hostsApi.updateTested(props.host.id, input, authentication, receipt)
         : hostsApi.create(input, authentication, receipt);
     },
-    props.host ? '主机已更新。' : '主机已创建。',
+    props.host ? tr('主机已更新。') : tr('主机已创建。'),
   );
   if (result.ok) {
     clearAuthentication();
@@ -174,44 +176,46 @@ function proxyPasswordSaved(id: string): void {
 }
 </script>
 <template>
-  <Modal :title="host ? '编辑主机' : '新建主机'" :busy="busy" @close="emit('close')">
+  <Modal :title="host ? tr('编辑主机') : tr('新建主机')" :busy="busy" @close="emit('close')">
     <form ref="form" class="editor-form" @submit.prevent="submit">
       <fieldset class="form-grid" :disabled="busy">
         <label
-          >主机名称（可选）<input
+          >{{ tr('主机名称（可选）')
+          }}<input
             v-model="draft.name"
             autofocus
             maxlength="128"
-            placeholder="留空时显示地址，非 22 端口会附加端口号"
+            :placeholder="tr('留空时显示地址，非 22 端口会附加端口号')"
         /></label>
         <label
-          >地址（IP / 域名）<input
+          >{{ tr('地址（IP / 域名）')
+          }}<input
             v-model="draft.hostname"
             required
             maxlength="253"
             placeholder="192.0.2.10 / server.example.com"
         /></label>
         <label
-          >SSH 端口<input
-            v-model.number="draft.port"
-            type="number"
-            min="1"
-            max="65535"
-            step="1"
-            required
+          >{{ tr('SSH 端口')
+          }}<input v-model.number="draft.port" type="number" min="1" max="65535" step="1" required
         /></label>
         <label
-          >用户名<input v-model="draft.username" required maxlength="128" autocomplete="off"
+          >{{ tr('用户名')
+          }}<input v-model="draft.username" required maxlength="128" autocomplete="off"
         /></label>
         <label
-          >认证方式<select v-model="authSelection" aria-label="认证方式">
-            <option v-if="draft.authType === 'agent'" value="" disabled hidden>沿用当前认证</option>
+          >{{ tr('认证方式')
+          }}<select v-model="authSelection" :aria-label="tr('认证方式')">
+            <option v-if="draft.authType === 'agent'" value="" disabled hidden>
+              {{ tr('沿用当前认证') }}
+            </option>
             <option value="password">{{ authLabels.password }}</option>
             <option value="private_key">{{ authLabels.private_key }}</option>
           </select></label
         >
         <label
-          >连接超时（秒）<input
+          >{{ tr('连接超时（秒）')
+          }}<input
             v-model.number="draft.connectTimeoutSecs"
             type="number"
             min="1"
@@ -219,24 +223,26 @@ function proxyPasswordSaved(id: string): void {
             step="1"
             required
         /></label>
-        <label v-if="draft.authType === 'password'" class="full-width">
-          SSH 密码
-          <input
+        <label v-if="draft.authType === 'password'" class="full-width"
+          >{{ tr(' SSH 密码 ')
+          }}<input
             v-model="secret"
             type="password"
             autocomplete="new-password"
             maxlength="2048"
             :required="!host"
-            :placeholder="draft.credentialId ? '已保存，留空沿用原密码' : '输入 SSH 登录密码'"
+            :placeholder="
+              draft.credentialId ? tr('已保存，留空沿用原密码') : tr('输入 SSH 登录密码')
+            "
           />
         </label>
         <template v-else-if="draft.authType === 'private_key'">
           <p class="subtle full-width">
-            服务器授权公钥，本机使用对应的私钥签名。请粘贴私钥内容或选择本机私钥文件。
+            {{ tr(' 服务器授权公钥，本机使用对应的私钥签名。请粘贴私钥内容或选择本机私钥文件。 ') }}
           </p>
-          <label v-if="!keyFile" class="full-width">
-            私钥内容
-            <textarea
+          <label v-if="!keyFile" class="full-width"
+            >{{ tr(' 私钥内容 ')
+            }}<textarea
               v-model="keyData"
               class="private-key-input"
               rows="3"
@@ -244,40 +250,51 @@ function proxyPasswordSaved(id: string): void {
               :required="!host"
               autocomplete="off"
               spellcheck="false"
-              placeholder="粘贴完整私钥内容"
+              :placeholder="tr('粘贴完整私钥内容')"
             />
           </label>
           <div class="full-width">
-            <label>
-              私钥文件
-              <input ref="keyFileInput" type="file" aria-label="选择私钥文件" @change="selectKey" />
+            <label
+              >{{ tr(' 私钥文件 ')
+              }}<input
+                ref="keyFileInput"
+                type="file"
+                :aria-label="tr('选择私钥文件')"
+                @change="selectKey"
+              />
             </label>
             <button v-if="keyFile" type="button" class="text-button" @click="clearKeyFile">
-              清除文件选择
+              {{ tr(' 清除文件选择 ') }}
             </button>
           </div>
-          <label v-if="keyData || keyFile" class="full-width">
-            加密私钥口令（可选）
-            <input v-model="secret" type="password" autocomplete="new-password" maxlength="2048" />
+          <label v-if="keyData || keyFile" class="full-width"
+            >{{ tr(' 加密私钥口令（可选） ')
+            }}<input
+              v-model="secret"
+              type="password"
+              autocomplete="new-password"
+              maxlength="2048"
+            />
           </label>
           <p v-else class="subtle full-width">
             {{
               legacyKey
-                ? '当前使用已有的私钥文件路径。留空沿用，选择或粘贴私钥可重新导入。'
+                ? tr('当前使用已有的私钥文件路径。留空沿用，选择或粘贴私钥可重新导入。')
                 : draft.credentialId
-                  ? '已保存私钥，留空沿用。'
-                  : '请先填写私钥，再测试连接。'
+                  ? tr('已保存私钥，留空沿用。')
+                  : tr('请先填写私钥，再测试连接。')
             }}
           </p>
         </template>
         <p v-else class="subtle full-width">
-          当前主机使用系统 SSH Agent。可改用 SSH 密码或公钥认证。
+          {{ tr(' 当前主机使用系统 SSH Agent。可改用 SSH 密码或公钥认证。 ') }}
         </p>
         <details class="full-width">
-          <summary>SSH 高级连接设置</summary>
+          <summary>{{ tr('SSH 高级连接设置') }}</summary>
           <div class="form-grid">
             <label
-              >认证超时（秒）<input
+              >{{ tr('认证超时（秒）')
+              }}<input
                 v-model.number="draft.ssh.authTimeoutSecs"
                 type="number"
                 min="1"
@@ -285,7 +302,8 @@ function proxyPasswordSaved(id: string): void {
                 required
             /></label>
             <label
-              >Keepalive 间隔（秒）<input
+              >{{ tr('Keepalive 间隔（秒）')
+              }}<input
                 v-model.number="draft.ssh.keepaliveIntervalSecs"
                 type="number"
                 min="1"
@@ -293,7 +311,8 @@ function proxyPasswordSaved(id: string): void {
                 required
             /></label>
             <label
-              >Keepalive 失败次数<input
+              >{{ tr('Keepalive 失败次数')
+              }}<input
                 v-model.number="draft.ssh.keepaliveCountMax"
                 type="number"
                 min="1"
@@ -301,8 +320,9 @@ function proxyPasswordSaved(id: string): void {
                 required
             /></label>
             <label
-              >ProxyJump 跳板主机<select v-model="draft.ssh.jumpHostId" aria-label="跳板主机">
-                <option :value="null">不使用跳板</option>
+              >{{ tr('ProxyJump 跳板主机')
+              }}<select v-model="draft.ssh.jumpHostId" :aria-label="tr('跳板主机')">
+                <option :value="null">{{ tr('不使用跳板') }}</option>
                 <option
                   v-for="item in store.catalog?.hosts.filter((h) => h.id !== host?.id)"
                   :key="item.id"
@@ -313,40 +333,42 @@ function proxyPasswordSaved(id: string): void {
               </select></label
             >
             <label
-              >网络代理<select v-model="proxyMode" aria-label="网络代理">
-                <option value="direct">不使用代理</option>
+              >{{ tr('网络代理')
+              }}<select v-model="proxyMode" :aria-label="tr('网络代理')">
+                <option value="direct">{{ tr('不使用代理') }}</option>
                 <option value="socks5">SOCKS5</option>
                 <option value="http_connect">HTTP CONNECT</option>
               </select></label
             >
             <template v-if="draft.ssh.proxy"
               ><label
-                >代理地址<input
+                >{{ tr('代理地址')
+                }}<input
                   v-model="draft.ssh.proxy.hostname"
-                  aria-label="代理地址"
+                  :aria-label="tr('代理地址')"
                   required
                   maxlength="253" /></label
               ><label
-                >代理端口<input
+                >{{ tr('代理端口')
+                }}<input
                   v-model.number="draft.ssh.proxy.port"
                   type="number"
                   min="1"
                   max="65535"
                   required /></label
               ><label
-                >代理用户名（可选）<input
+                >{{ tr('代理用户名（可选）')
+                }}<input
                   :value="draft.ssh.proxy.username ?? ''"
                   maxlength="128"
                   @input="
                     draft.ssh.proxy.username = ($event.target as HTMLInputElement).value || null
                   " /></label
               ><label
-                >代理安全密码凭据<select
-                  v-model="draft.ssh.proxy.credentialId"
-                  aria-label="代理密码凭据"
-                >
+                >{{ tr('代理安全密码凭据')
+                }}<select v-model="draft.ssh.proxy.credentialId" :aria-label="tr('代理密码凭据')">
                   <option :value="null">
-                    {{ draft.ssh.proxy.username ? '请选择安全密码凭据' : '无代理认证' }}
+                    {{ draft.ssh.proxy.username ? tr('请选择安全密码凭据') : tr('无代理认证') }}
                   </option>
                   <option
                     v-for="credential in store.catalog?.credentials.filter(
@@ -365,48 +387,59 @@ function proxyPasswordSaved(id: string): void {
                 type="button"
                 @click="newProxyPassword = true"
               >
-                ＋ 新建代理密码
+                {{ tr(' ＋ 新建代理密码 ') }}
               </button>
               <p
                 v-if="draft.ssh.proxy.username && !draft.ssh.proxy.credentialId"
                 class="banner full-width"
               >
-                请关联代理密码凭据后再连接此主机。
+                {{ tr(' 请关联代理密码凭据后再连接此主机。 ') }}
               </p>
               <p class="subtle full-width">
-                网络代理用于连接第一个跳板或目标，密码引用系统安全凭据。当前代理链路不使用
-                TLS，SOCKS 用户名密码和 HTTP Basic 认证应仅用于可信代理网络。
+                {{
+                  tr(
+                    ' 网络代理用于连接第一个跳板或目标，密码引用系统安全凭据。当前代理链路不使用 TLS，SOCKS 用户名密码和 HTTP Basic 认证应仅用于可信代理网络。 ',
+                  )
+                }}
               </p></template
             >
             <p class="subtle full-width">
-              跳板链最多 4 层，每一跳独立校验主机密钥和认证。ProxyCommand
-              不受支持，不执行本地配置中的任意命令。
+              {{
+                tr(
+                  ' 跳板链最多 4 层，每一跳独立校验主机密钥和认证。ProxyCommand 不受支持，不执行本地配置中的任意命令。 ',
+                )
+              }}
             </p>
           </div>
         </details>
       </fieldset>
-      <section v-if="trust" class="banner" aria-label="核对 SSH 主机指纹">
-        <p>首次连接 {{ trust.hostname }}:{{ trust.port }}。请通过可信渠道核对指纹。</p>
+      <section v-if="trust" class="banner" :aria-label="tr('核对 SSH 主机指纹')">
+        <p>
+          {{ tr('首次连接 ') }}{{ trust.hostname }}:{{ trust.port
+          }}{{ tr('。请通过可信渠道核对指纹。') }}
+        </p>
         <p>
           {{ trust.algorithm }} <code class="fingerprint">{{ trust.fingerprint }}</code>
         </p>
         <div class="toolbar">
-          <button class="button" type="button" @click="invalidateTest">拒绝指纹</button>
+          <button class="button" type="button" @click="invalidateTest">{{ tr('拒绝指纹') }}</button>
           <button class="button" type="button" @click="testConnection(trust)">
-            信任并继续测试
+            {{ tr(' 信任并继续测试 ') }}
           </button>
         </div>
       </section>
       <p v-if="testError" class="banner" role="alert">{{ testError }}</p>
       <p class="subtle" role="status">
-        {{ testMessage || (testing ? '正在连接并验证 SSH 登录…' : '测试连接成功后即可保存。') }}
+        {{
+          testMessage || (testing ? tr('正在连接并验证 SSH 登录…') : tr('测试连接成功后即可保存。'))
+        }}
       </p>
       <footer class="dialog-actions">
         <button class="button" type="button" :disabled="busy" @click="testConnection()">
-          {{ testing ? '测试中…' : '测试连接' }}
+          {{ testing ? tr('测试中…') : tr('测试连接') }}
         </button>
         <button type="submit" class="button primary" :disabled="busy || !testId">
-          {{ store.busy ? '保存中…' : '保存主机' }}
+          {{ store.busy ? tr('保存中…') : tr('保存主机') }}
         </button>
       </footer>
     </form>

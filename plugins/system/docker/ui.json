@@ -1,10 +1,16 @@
 {
   "uiVersion": 4,
-  "title": "Docker 管理",
+  "title": {
+    "zh-CN": "Docker 管理",
+    "en-US": "Docker management"
+  },
   "pages": [
     {
       "id": "server",
-      "title": "Docker 管理",
+      "title": {
+        "zh-CN": "Docker 管理",
+        "en-US": "Docker management"
+      },
       "fields": [],
       "actions": [
         {

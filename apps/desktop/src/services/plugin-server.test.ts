@@ -251,3 +251,66 @@ it.each([0, 1048577])('rejects an unbounded result descriptor: %s', async (bytes
   await checked;
   expect(cap).not.toHaveBeenCalled();
 });
+
+it('permits a hidden-page Full revocation but never hidden Full activation', async () => {
+  const capability = vi
+    .spyOn(pluginsApi, 'capability')
+    .mockResolvedValue({ requestId: 'qa-reduction', result: null, error: null });
+  const reduction = pluginPlatformRequest(
+    'hidden-reduction',
+    { kind: 'approval_mode', mode: 'request' },
+    () => false,
+    'owner',
+  );
+  await vi.runAllTimersAsync();
+  expect(await reduction).toBeNull();
+  expect(capability).toHaveBeenCalledExactlyOnceWith(
+    'hidden-reduction',
+    expect.objectContaining({
+      operation: {
+        kind: 'platform',
+        request: { kind: 'approval_mode', mode: 'request' },
+        bindings: [],
+      },
+    }),
+    'owner',
+  );
+  const elevation = expect(
+    pluginPlatformRequest(
+      'hidden-elevation',
+      { kind: 'approval_mode', mode: 'full' },
+      () => false,
+      'owner',
+    ),
+  ).rejects.toMatchObject({ code: 'PLUGIN_CANCELLED' });
+  await vi.runAllTimersAsync();
+  await elevation;
+  expect(capability).toHaveBeenCalledTimes(1);
+});
+
+it('reads owned display progress while the same plugin action is still pending in its queue', async () => {
+  let complete!: (value: ReturnType<typeof ok>) => void;
+  vi.spyOn(pluginsApi, 'call').mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const action = pluginInvokeRequest('stream-live', page, 'run', {});
+  await vi.runAllTimersAsync();
+  const capability = vi.spyOn(pluginsApi, 'capability').mockResolvedValue({
+    requestId: 'part',
+    error: null,
+    result: { revision: 1, text: 'first', offset: 5 },
+  });
+  const part = await pluginPlatformRequest(
+    'stream-live',
+    { kind: 'streaming', request: { kind: 'progress_read', id: 'owned', revision: 0, offset: 0 } },
+    () => true,
+    'owner',
+  );
+  expect(part).toEqual({ revision: 1, text: 'first', offset: 5 });
+  expect(capability).toHaveBeenCalledTimes(1);
+  complete(ok({ text: 'final' }));
+  expect(await action).toEqual({ text: 'final' });
+});

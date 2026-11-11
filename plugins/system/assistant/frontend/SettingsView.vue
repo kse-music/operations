@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import { computed, ref, watch } from 'vue';
 import { Bot, Boxes, Check, RefreshCw, ShieldCheck } from '@lucide/vue';
 import { request } from '@serverdeck/plugin-sdk/transport';
@@ -25,33 +27,35 @@ async function close() {
 }
 </script>
 <template>
-  <section class="binding-view" aria-label="助手模型绑定">
+  <section class="binding-view" :aria-label="tr('助手模型绑定')">
     <header class="binding-heading">
       <span class="binding-emblem"><Bot :size="21" aria-hidden="true" /></span>
       <div class="binding-intro">
-        <h2>助手模型绑定</h2>
-        <p>为所有主机共用的助手选择模型，保存后生效。</p>
+        <h2>{{ tr('助手模型绑定') }}</h2>
+        <p>{{ tr('为所有主机共用的助手选择模型，保存后生效。') }}</p>
       </div>
       <div class="binding-heading-actions">
         <button class="button" :disabled="loading || saving" @click="binding.load">
-          <RefreshCw :size="14" :class="{ 'binding-spinning': loading }" aria-hidden="true" />刷新
+          <RefreshCw :size="14" :class="{ 'binding-spinning': loading }" aria-hidden="true" />{{
+            tr('刷新 ')
+          }}
         </button>
       </div>
     </header>
     <form class="binding-form" @submit.prevent="binding.save(draft)">
       <div class="binding-content">
-        <p v-if="loading" class="binding-feedback" role="status">正在读取模型配置…</p>
+        <p v-if="loading" class="binding-feedback" role="status">{{ tr('正在读取模型配置…') }}</p>
         <p v-if="error" class="binding-feedback error-text" role="alert">{{ error }}</p>
         <p v-if="message" class="binding-feedback binding-success" role="status">{{ message }}</p>
-        <fieldset :disabled="!loaded || loading || saving" aria-label="使用模型">
+        <fieldset :disabled="!loaded || loading || saving" :aria-label="tr('使用模型')">
           <section
             v-if="localSources.length"
             class="binding-group"
             aria-labelledby="binding-local-title"
           >
             <div class="binding-group-heading">
-              <h3 id="binding-local-title">本地来源</h3>
-              <span>沿用本机工具配置与登录</span>
+              <h3 id="binding-local-title">{{ tr('本地来源') }}</h3>
+              <span>{{ tr('沿用本机工具配置与登录') }}</span>
             </div>
             <div class="binding-local-options">
               <label
@@ -72,7 +76,7 @@ async function close() {
                   ><small>{{ source.status.message }}</small></span
                 >
                 <span class="binding-state" :class="{ ready: sourceReady(source.id) }">{{
-                  sourceReady(source.id) ? '已就绪' : '未就绪'
+                  sourceReady(source.id) ? tr('已就绪') : tr('未就绪')
                 }}</span>
               </label>
             </div>
@@ -80,9 +84,9 @@ async function close() {
           <section class="binding-group" aria-labelledby="binding-remote-title">
             <div class="binding-group-heading">
               <h3 id="binding-remote-title">
-                远程模型 <span class="binding-count">{{ remoteModels.length }}</span>
+                {{ tr(' 远程模型 ') }}<span class="binding-count">{{ remoteModels.length }}</span>
               </h3>
-              <span>由平台统一管理凭据</span>
+              <span>{{ tr('由平台统一管理凭据') }}</span>
             </div>
             <div v-if="remoteModels.length" class="binding-registered">
               <label
@@ -104,7 +108,7 @@ async function close() {
                   ><small>{{ model.config.model }}</small></span
                 >
                 <span class="binding-state" :class="{ ready: model.hasKey }">{{
-                  model.hasKey ? '已就绪' : '缺少 Key'
+                  model.hasKey ? tr('已就绪') : tr('缺少 Key')
                 }}</span>
                 <Check
                   v-if="draft === model.id"
@@ -115,22 +119,24 @@ async function close() {
               </label>
             </div>
             <p v-else-if="loaded && !loading" class="binding-empty">
-              尚未注册远程模型，可前往平台模型设置添加。
+              {{ tr(' 尚未注册远程模型，可前往平台模型设置添加。 ') }}
             </p>
           </section>
         </fieldset>
         <div class="binding-platform-note">
           <ShieldCheck :size="17" aria-hidden="true" />
-          <p>模型凭据、CLI 安装与授权统一在平台管理，插件无法读取登录凭据。</p>
+          <p>{{ tr('模型凭据、CLI 安装与授权统一在平台管理，插件无法读取登录凭据。') }}</p>
         </div>
       </div>
       <footer class="binding-footer">
         <div class="binding-current">
           <span
-            >当前绑定
-            <strong>{{ current?.name ?? (modelId ? '模型已不可用' : '未绑定') }}</strong></span
+            >{{ tr('当前绑定 ')
+            }}<strong>{{
+              current?.name ?? (modelId ? tr('模型已不可用') : tr('未绑定'))
+            }}</strong></span
           ><small :class="{ pending }">{{
-            saving ? '正在保存…' : pending ? '有未保存的选择' : '选择后点击保存绑定'
+            saving ? tr('正在保存…') : pending ? tr('有未保存的选择') : tr('选择后点击保存绑定')
           }}</small>
         </div>
         <button
@@ -140,10 +146,10 @@ async function close() {
           :disabled="saving"
           @click="close"
         >
-          取消
+          {{ tr(' 取消 ') }}
         </button>
         <button class="button primary" type="submit" :disabled="!canSave">
-          {{ saving ? '正在保存…' : '保存绑定' }}
+          {{ saving ? tr('正在保存…') : tr('保存绑定') }}
         </button>
       </footer>
     </form>

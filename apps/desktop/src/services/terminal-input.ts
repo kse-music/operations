@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 // A bounded queue with generation isolation: reconnect never replays or consumes old input.
 export class TerminalInputQueue {
   private target?: string;
@@ -12,7 +13,7 @@ export class TerminalInputQueue {
     private failed: (error: unknown) => void,
   ) {}
   reset(target?: string): void {
-    this.settle(new Error('终端会话已改变，输入已取消。'));
+    this.settle(new Error(tr('终端会话已改变，输入已取消。')));
     this.target = target;
     this.generation++;
     this.queue = [];

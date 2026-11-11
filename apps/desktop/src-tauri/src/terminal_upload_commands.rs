@@ -69,13 +69,18 @@ pub async fn terminal_upload_pick<R: tauri::Runtime>(
     application: tauri::State<'_, Application>,
     id: String,
 ) -> Result<TerminalUploadSelection, IpcError> {
+    let english = application.bootstrap().await?.config.product.language == "en-US";
     let target = application.terminal_upload_target(&id)?;
     let token = application.terminal_upload_begin(&id)?;
     let result = async {
         let paths = tauri::async_runtime::spawn_blocking(move || {
             app.dialog()
                 .file()
-                .set_title(format!("ServerDeck：ZMODEM 上传（SSH {target}）"))
+                .set_title(if english {
+                    format!("ServerDeck: ZMODEM upload (SSH {target})")
+                } else {
+                    format!("ServerDeck：ZMODEM 上传（SSH {target}）")
+                })
                 .blocking_pick_files()
                 .unwrap_or_default()
                 .into_iter()

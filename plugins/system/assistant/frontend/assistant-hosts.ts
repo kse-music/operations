@@ -1,3 +1,4 @@
+import { tr } from './i18n/messages';
 import { ref } from 'vue';
 import { useAssistantApi } from './api';
 import { useHostCatalog, hostDisplayName, type Host } from './platform-state';
@@ -23,10 +24,10 @@ export function useAssistantHosts() {
     signal: AbortSignal,
     onMatch: (ids: string[]) => void,
   ) {
-    phase.value = '正在匹配相关主机…';
+    phase.value = tr('正在匹配相关主机…');
     cleanupError.value = '';
     const check = () => {
-      if (signal.aborted) throw new DOMException('已停止', 'AbortError');
+      if (signal.aborted) throw new DOMException(tr('已停止'), 'AbortError');
     };
     await catalog.load();
     check();
@@ -48,14 +49,14 @@ export function useAssistantHosts() {
       check();
       matched.value = route.hostIds.map((id) => {
         const host = catalog.catalog.hosts.find((host) => host.id === id);
-        if (!host) throw new Error('命中主机已发生变化');
+        if (!host) throw new Error(tr('命中主机已发生变化'));
         return { ...host };
       });
       onMatch(route.hostIds);
       const failures: string[] = [];
       for (const host of matched.value) {
         check();
-        phase.value = '正在连接 ' + hostDisplayName(host) + '…';
+        phase.value = tr('正在连接 ') + hostDisplayName(host) + '…';
         try {
           await ensureConnection(host.id);
         } catch (cause) {
@@ -65,7 +66,7 @@ export function useAssistantHosts() {
       }
       if (failures.length) throw new Error(failures.join('\n'));
       check();
-      phase.value = '正在读取主机上下文…';
+      phase.value = tr('正在读取主机上下文…');
       return { route, sessionIds: route.hostIds };
     } finally {
       signal.removeEventListener('abort', abort);

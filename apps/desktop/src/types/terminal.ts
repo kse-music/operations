@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 export interface TerminalSize {
   cols: number;
   rows: number;
@@ -37,12 +38,31 @@ export type TerminalEvent =
   | { type: 'data'; sequence: number; data: number[] }
   | { type: 'exit'; status: number | null };
 export const stateLabels: Record<string, string> = {
-  idle: '未连接',
-  opening: '准备连接',
-  connecting: '连接中',
-  awaiting_trust: '等待指纹确认',
-  authenticating: '认证中',
-  connected: '已连接',
-  closed: '已关闭',
-  failed: '连接失败',
+  get idle() {
+    return tr('未连接');
+  },
+  get opening() {
+    return tr('准备连接');
+  },
+  get connecting() {
+    return tr('连接中');
+  },
+  get awaiting_trust() {
+    return tr('等待指纹确认');
+  },
+  get authenticating() {
+    return tr('认证中');
+  },
+  get connected() {
+    return tr('已连接');
+  },
+  get closing() {
+    return tr('正在关闭');
+  },
+  get closed() {
+    return tr('已关闭');
+  },
+  get failed() {
+    return tr('连接失败');
+  },
 };

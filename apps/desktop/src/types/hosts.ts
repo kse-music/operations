@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 export type AuthType = 'password' | 'private_key' | 'agent';
 export interface HostInput {
   ssh: import('./connection').SshOptions;
@@ -69,9 +70,15 @@ export interface ImportPreview {
   warnings: string[];
 }
 export const authLabels: Record<AuthType, string> = {
-  password: 'SSH 密码',
-  private_key: '公钥认证（PublicKey）',
-  agent: '系统 SSH Agent',
+  get password() {
+    return tr('SSH 密码');
+  },
+  get private_key() {
+    return tr('公钥认证（PublicKey）');
+  },
+  get agent() {
+    return tr('系统 SSH Agent');
+  },
 };
 export function hostDisplayName(
   host: Pick<HostInput, 'name' | 'hostname' | 'port'> | null | undefined,

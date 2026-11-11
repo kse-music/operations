@@ -21,7 +21,7 @@ npm run package
 
 ```text
 <plugin>/
-  manifest.json            # schema1, apiVersion ^5.2.0
+  manifest.json            # schema1, apiVersion ^5.4.0
   ui.json                  # UI4、frontend入口、页面与动作声明
   frontend/main.ts         # mountPlugin(App)
   frontend/App.vue         # 业务页面/类型/样式/测试

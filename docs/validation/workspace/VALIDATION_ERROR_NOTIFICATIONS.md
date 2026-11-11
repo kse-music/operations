@@ -35,3 +35,26 @@ Vitest 默认临时目录在沙箱中发生 EPERM，设置当前命令的 TEMP/T
 - 修改文件的 Prettier 检查及 `git diff --check`：通过。
 
 原生布局夹具首次保存截图因缺少 Cairo foreign struct converter 失败，改用现有 GTK 截图接口后通过；最初内联夹具未解析 SDK 主题导入，改为加载实际主题后完成上述最终复验。夹具只验证通知布局，不读写主机或用户配置。未重建桌面二进制和安装包，未重验真实主机保存全链路、Windows WebView2 或其他平台。无新增依赖、数据库或通知业务逻辑变化，未发现本次新增风险；当前修复无后续功能依赖，分发给已安装应用仍需常规桌面构建。
+
+## 2026-11-11 关闭终端后偶发记录不存在
+
+用户报告偶发“记录不存在或已被删除”，补充可能发生在关闭本地终端后。该文案是通用 `NOT_FOUND`；现有应用日志没有这次通知的调用来源，无法还原截图当时的唯一触发顺序。
+
+通过真实 `TerminalPane`、终端 Store 和通知 Store 的组件回归，固定“已发出 resize → 会话关闭 → resize 返回 NOT_FOUND”的顺序，在原实现中复现相同通知。本地与 SSH 终端共用的实现均受影响：关闭等待后端完成期间仍保持 connected，resize 的迟到错误直接写入通知；已移除窗格的 xterm 缓冲回调也会继续发出 ACK。原实现下首批 14 项回归中 10 项失败、4 项通过。
+
+### 修复范围
+
+- `apps/desktop/src/stores/terminals.ts`：上传安全停止后、请求关闭前将窗格置为 closing。关闭失败保留窗格，只在仍处于 closing 时恢复原状态，不覆盖后端已经报告的 failed/closed。
+- `apps/desktop/src/components/TerminalPane.vue`：离开 connected 时同步停止尺寸定时器、清除待粘贴内容并取消旧输入队列；重新进入 connected 时绑定当前输入会话。resize 绑定发起时的连接代号和 Session ID，迟到失败仅作用于仍然有效的会话；ACK 在发送和错误处理时均检查会话生命周期。
+- `apps/desktop/src/types/terminal.ts`：closing 展示为“正在关闭”。不全局屏蔽 NOT_FOUND；有效会话的真实错误、进程失败和关闭失败继续通知。
+- 新增 `apps/desktop/src/components/terminal-lifecycle.test.ts`：本地/SSH 共 20 项，覆盖关闭事件到达前的输入/resize/ACK、关闭后的 resize 错误、移除后的缓冲 ACK、替换会话、有效会话真实错误、关闭失败后继续输入，以及后端已失败时不恢复 connected。
+
+### 验证与限制
+
+- Windows 本机执行 `npm test -- --run terminal src/composables/error-notifications.test.ts src/components/notification-toasts.test.ts`：16 文件、143 项通过。最终测试夹具声明修正后单独复验生命周期文件，20 项通过。
+- `npm run lint`、`npm run typecheck`：通过。检查期间修正了新增测试夹具的未用参数及回调类型声明。
+- 在 `apps/desktop` 执行 `npx vite build`：前端生产构建通过，保留既有的大 chunk 提醒；构建前 D 盘可用空间约 149.5 GiB。未重建 WASM 插件。
+- 本次修改文件的 Prettier 检查及 `git diff --check`：通过。
+- 首次测试因沙箱默认 TEMP 下的缓存 rename 返回 EPERM 而未进入测试；仅为当前测试进程设置 TEMP/TMP 到 `.local/qa/terminal-close/tmp` 后执行上述检查，未修改系统环境。
+
+验证使用可控 IPC 与 xterm 回调夹具，运行生产 Vue/Pinia 逻辑；未重新执行原生 Windows PowerShell/ConPTY、真实 SSH 或其他平台全链路。未修改 Rust、数据库、持久配置或用户数据，未执行 Rust 构建/测试及桌面 EXE/安装包打包。已确定并覆盖上述关闭竞态，截图原始事件仍缺少精确追踪证据；已安装应用获得此修复依赖后续常规桌面构建和分发，本阶段不启动下一阶段。

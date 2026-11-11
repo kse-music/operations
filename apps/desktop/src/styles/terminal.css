@@ -49,8 +49,30 @@
   opacity: 0.65;
   margin-left: 6px;
 }
-.terminal-rename-input:focus-visible {
-  outline: none;
+.modal.terminal-rename-dialog {
+  width: min(420px, calc(100vw - 24px));
+  padding: 20px;
+}
+.terminal-rename-dialog .modal-heading {
+  margin-bottom: 16px;
+}
+.terminal-rename-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--font-size-body);
+  line-height: 1.5;
+}
+.terminal-rename-form .terminal-rename-input {
+  width: 100%;
+}
+.terminal-rename-form .dialog-actions {
+  margin-top: 20px;
+  padding-top: 0;
+  border-top: 0;
+}
+.terminal-rename-form .button {
+  min-width: 72px;
 }
 .terminal-pane {
   position: relative;

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { locale } from '../i18n';
+import { tr } from '../i18n/messages';
+
 import { computed } from 'vue';
 const props = defineProps<{
   points: { sampledAt: number; [field: string]: number | null }[];
@@ -33,13 +36,15 @@ const segments = computed(() => {
   <figure class="trend-chart">
     <figcaption>
       {{ label }}
-      <span class="subtle">{{ maximum.toFixed(1) }} {{ unit }} · {{ points.length }} 点</span>
+      <span class="subtle"
+        >{{ maximum.toFixed(1) }} {{ unit }} · {{ points.length }}{{ tr(' 点') }}</span
+      >
     </figcaption>
     <svg
       viewBox="0 0 600 120"
       preserveAspectRatio="none"
       role="img"
-      :aria-label="`${label}趋势；缺失采样留空`"
+      :aria-label="tr('{0}趋势；缺失采样留空', label)"
     >
       <path d="M0 110H600M0 60H600M0 10H600" class="chart-grid" />
       <polyline
@@ -52,8 +57,10 @@ const segments = computed(() => {
         vector-effect="non-scaling-stroke"
       /></svg
     ><small class="subtle"
-      >{{ points[0] ? new Date(points[0].sampledAt).toLocaleTimeString() : '等待采样' }} —
-      {{ points.at(-1) ? new Date(points.at(-1)!.sampledAt).toLocaleTimeString() : '' }}</small
+      >{{ points[0] ? new Date(points[0].sampledAt).toLocaleTimeString(locale) : tr('等待采样') }} —
+      {{
+        points.at(-1) ? new Date(points.at(-1)!.sampledAt).toLocaleTimeString(locale) : ''
+      }}</small
     >
   </figure>
 </template>

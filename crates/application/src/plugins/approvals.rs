@@ -21,7 +21,7 @@ pub(super) struct ConfirmationDetails {
     pub description: String,
 }
 impl Application {
-    pub(super) fn plugin_auto_read(
+    pub(super) fn plugin_mode_preapproves(
         &self,
         call: &Call,
         plugin: &InstalledPlugin,
@@ -30,6 +30,9 @@ impl Application {
     ) -> Result<bool, Error> {
         if call.collecting || call.has_batch()? {
             return Ok(false);
+        }
+        if self.plugin_full_access(call, plugin, grant, operation)? {
+            return Ok(true);
         }
         if !plugin
             .manifest
@@ -61,9 +64,58 @@ impl Application {
                 Request::ReadFile { .. } | Request::TransferPrepare { .. } => true,
                 Request::Execute { command, .. } => {
                     plugin.manifest.preapproved_commands.contains(command)
+                        || (plugin
+                            .manifest
+                            .permissions
+                            .contains(&Permission::OperationsReadArgumentsPreapproved)
+                            && grant
+                                .permissions
+                                .contains(&Permission::OperationsReadArgumentsPreapproved)
+                            && grant
+                                .operations
+                                .iter()
+                                .any(|op| op == "operations.read.arguments.preapproved")
+                            && plugin
+                                .manifest
+                                .preapproved_commands
+                                .iter()
+                                .any(|template| template.matches_argument_template(command)))
                 }
                 _ => false,
             })
+    }
+
+    pub(super) fn plugin_full_access(
+        &self,
+        call: &Call,
+        plugin: &InstalledPlugin,
+        grant: &Grant,
+        operation: &Capability,
+    ) -> Result<bool, Error> {
+        if !plugin
+            .manifest
+            .permissions
+            .contains(&Permission::OperationsFullPreapproved)
+            || !grant
+                .permissions
+                .contains(&Permission::OperationsFullPreapproved)
+            || !grant
+                .operations
+                .iter()
+                .any(|op| op == "operations.full.preapproved")
+        {
+            return Ok(false);
+        }
+        let Capability::Platform { bindings, .. } = operation;
+        let data = self.plugin_host.lock()?;
+        Ok(bindings.iter().any(|id| {
+            data.bindings.get(id).is_some_and(|binding| {
+                binding.plugin == call.id
+                    && binding.owner == call.owner
+                    && binding.generation == call.generation
+                    && binding.target == state::RevisionTarget::ApprovalMode(ApprovalMode::Full)
+            })
+        }))
     }
 
     pub(super) fn plugin_confirm_details(
@@ -157,6 +209,7 @@ impl Application {
         &self,
         call: &Call,
         plugin: &InstalledPlugin,
+        grant: &Grant,
         operations: Vec<ApprovalOperation>,
         bindings: Vec<String>,
     ) -> Result<Value, Error> {
@@ -238,17 +291,19 @@ impl Application {
             description.truncate(end);
             description.push_str("\n（内容较长，已省略后部；请结合聊天中的完整计划核对）");
         }
-        if let Some(approval) = self.plugin_confirm_details(
-            call,
-            plugin,
-            &operation,
-            ConfirmationDetails {
-                host_id: String::new(),
-                binding: Some(binding),
-                target: Some(targets.join("\n")),
-                description,
-            },
-        )? {
+        if !self.plugin_full_access(call, plugin, grant, &operation)?
+            && let Some(approval) = self.plugin_confirm_details(
+                call,
+                plugin,
+                &operation,
+                ConfirmationDetails {
+                    host_id: String::new(),
+                    binding: Some(binding),
+                    target: Some(targets.join("\n")),
+                    description,
+                },
+            )?
+        {
             return Ok(json!({"confirmationRequired":approval}));
         }
         *call.batch.lock().map_err(|_| Error::Busy)? = Some(state::BatchConsent {

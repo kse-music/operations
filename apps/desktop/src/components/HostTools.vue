@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { FolderSync, SquareTerminal } from '@lucide/vue';
 import { computed } from 'vue';
-import { messages, type WorkspaceView } from '../types/product';
+import { viewLabels, type WorkspaceView } from '../types/product';
 import { usePluginsStore } from '../stores/plugins';
 import { hasPluginFunction, primaryPluginPage } from '../services/plugin-pages';
 import PluginIcon from './PluginIcon.vue';
@@ -13,8 +15,20 @@ defineEmits<{
   plugin: [id: string, contribution: string];
 }>();
 const tools = [
-  { view: 'terminals', label: 'SSH 终端', icon: SquareTerminal },
-  { view: 'files', label: 'SFTP 文件', icon: FolderSync },
+  {
+    view: 'terminals',
+    get label() {
+      return tr('SSH 终端');
+    },
+    icon: SquareTerminal,
+  },
+  {
+    view: 'files',
+    get label() {
+      return tr('SFTP 文件');
+    },
+    icon: FolderSync,
+  },
 ] as const;
 const enabled = computed(() =>
   plugins.installed.filter((plugin) => plugin.enabled && hasPluginFunction(plugin)),
@@ -22,17 +36,17 @@ const enabled = computed(() =>
 </script>
 
 <template>
-  <nav class="host-tools" aria-label="当前主机工具">
+  <nav class="host-tools" :aria-label="tr('当前主机工具')">
     <button
       v-for="tool in tools.filter((item) => !local || item.view === 'terminals')"
       :key="tool.view"
       :class="['host-tool', { active: active === tool.view }]"
-      :aria-label="messages['zh-CN'][tool.view]"
+      :aria-label="viewLabels[tool.view]"
       :aria-current="active === tool.view ? 'page' : undefined"
       @click="$emit('navigate', tool.view)"
     >
       <component :is="tool.icon" :size="16" aria-hidden="true" />{{
-        local ? '本地终端' : tool.label
+        local ? tr('本地终端') : tool.label
       }}
     </button>
     <button
@@ -49,7 +63,7 @@ const enabled = computed(() =>
       @click="$emit('plugin', plugin.manifest.id, primaryPluginPage(plugin))"
     >
       <PluginIcon :manifest="plugin.manifest" :source="plugin.source" />
-      <span>{{ plugin.manifest.name }}</span>
+      <span>{{ plugins.metadata(plugin, plugin.manifest.name) }}</span>
     </button>
   </nav>
 </template>

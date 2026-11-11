@@ -103,6 +103,52 @@ function loadSidebarConfig(): void {
     },
   };
 }
+
+it('switches the shell and built-in plugin labels while preserving sessions and user names', async () => {
+  loadSidebarConfig();
+  const application = useApplicationStore();
+  const workspace = useWorkspaceStore();
+  const terminals = useTerminalsStore();
+  const host = useHostsStore().catalog!.hosts[0]!;
+  host.name = '通用';
+  terminals.open(host);
+  terminals.update(terminals.focused, { state: 'connected', sessionId: 'live-language-test' });
+  workspace.navigate('terminals', host.id);
+  const snapshot = JSON.stringify(terminals.tabs);
+  const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  await openNavigation('通用');
+  const tree = document.querySelector('.host-tree-section');
+  const field = document.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')!;
+  field.value = 'en-US';
+  field.dispatchEvent(new Event('change', { bubbles: true }));
+  await flush();
+  document
+    .querySelector<HTMLFormElement>('.settings-form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(application.state!.config.product.language).toBe('en-US'));
+  await flush();
+  expect(document.querySelector('dialog[aria-label="Settings"]')).not.toBeNull();
+  expect(
+    [...document.querySelectorAll('.settings-dialog-navigation .nav-item')].map((item) =>
+      item.textContent?.trim(),
+    ),
+  ).toEqual(['General', 'Terminal', 'Shortcuts', 'Data and storage', 'Models', 'Plugins', 'About']);
+  expect(document.querySelector('.host-tree-section')).toBe(tree);
+  expect(document.querySelector('.host-tree-section')?.textContent).toContain('通用');
+  expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
+  const plugins = usePluginsStore();
+  const builtin = plugins.installed.find((item) => item.manifest.id.endsWith('.assistant'))!;
+  expect(plugins.metadata(builtin, builtin.manifest.name)).toBe('AI operations assistant');
+  expect(plugins.metadata({ ...builtin, source: 'user' }, builtin.manifest.name)).toBe(
+    'AI 运维助手',
+  );
+  await workspace.closeSettings();
+  await flush();
+  expect(document.querySelector('.host-tools')?.textContent).toContain('Docker management');
+  expect(document.querySelector('.terminal-tab')?.textContent).toContain('Session 1');
+  expect(close).not.toHaveBeenCalled();
+});
 beforeEach(async () => {
   vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
     installed: await pluginsApi.list(),

@@ -11,6 +11,8 @@ pub const OPERATIONS: &[&str] = &[
     "ssh.execute",
     "ssh.execute.preapproved",
     "operations.read.preapproved",
+    "operations.read.arguments.preapproved",
+    "operations.full.preapproved",
     "ssh.interactive.preapproved",
     "sftp.read",
     "sftp.write",

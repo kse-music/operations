@@ -1,3 +1,5 @@
+import { tr } from '../i18n/messages';
+import { isStreamControl } from '@serverdeck/plugin-sdk/streaming';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from './plugins';
 import { actionPayload, safeConfirmation } from './plugin-ui';
@@ -17,11 +19,16 @@ export async function pluginPlatformRequest<T>(
 ): Promise<T> {
   const plugins = usePluginsStore();
   const version = plugins.contextVersion(id);
-  return queued(id, async () => {
+  const work = async () => {
     if (plugins.contextVersion(id) !== version)
-      throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
-    if (!isActive() && !['stream_stop', 'close_file', 'result_close'].includes(request.kind))
-      throw { code: 'PLUGIN_CANCELLED', message: '插件页面已隐藏' };
+      throw { code: 'PLUGIN_CANCELLED', message: tr('插件上下文已变化') };
+    if (
+      !isActive() &&
+      !['stream_stop', 'close_file', 'result_close'].includes(request.kind) &&
+      !(request.kind === 'approval_mode' && request.mode === 'request') &&
+      !isStreamControl(request)
+    )
+      throw { code: 'PLUGIN_CANCELLED', message: tr('插件页面已隐藏') };
     const operation = { kind: 'platform' as const, request, bindings: [] };
     const run = () =>
       pluginsApi.capability(
@@ -34,23 +41,24 @@ export async function pluginPlatformRequest<T>(
       const approval = (reply.result as { confirmationRequired: PluginApproval })
         .confirmationRequired;
       if (!isActive() || plugins.contextVersion(id) !== version)
-        throw { code: 'PLUGIN_CANCELLED', message: '页面已隐藏或上下文已变化' };
+        throw { code: 'PLUGIN_CANCELLED', message: tr('页面已隐藏或上下文已变化') };
       const accepted = await plugins.ask(
-        '插件操作需要单独确认',
+        tr('插件操作需要单独确认'),
         `${approval.pluginName} ${approval.pluginVersion}\n${approval.description}`,
         undefined,
         owner,
       );
       const confirmed = accepted && isActive() && plugins.contextVersion(id) === version;
       await pluginsApi.approve(approval.id, confirmed);
-      if (!confirmed) throw { code: 'PLUGIN_USER_CANCELLED', message: '操作已取消' };
+      if (!confirmed) throw { code: 'PLUGIN_USER_CANCELLED', message: tr('操作已取消') };
       reply = await run();
     }
     if (reply.error) throw reply.error;
     if (plugins.contextVersion(id) !== version)
-      throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
+      throw { code: 'PLUGIN_CANCELLED', message: tr('插件上下文已变化') };
     return (await expanded(id, reply.result, owner)) as T;
-  });
+  };
+  return isStreamControl(request) ? work() : queued(id, work);
 }
 async function queued<T>(id: string, work: () => Promise<T>): Promise<T> {
   let queue = queues.get(id);
@@ -58,7 +66,7 @@ async function queued<T>(id: string, work: () => Promise<T>): Promise<T> {
     queue = { tail: Promise.resolve(), count: 0, last: 0 };
     queues.set(id, queue);
   }
-  if (queue.count >= 24) throw new Error('插件请求正忙，请稍后重试');
+  if (queue.count >= 24) throw new Error(tr('插件请求正忙，请稍后重试'));
   queue.count++;
   const current = queue;
   const job = current.tail.then(async () => {
@@ -96,7 +104,7 @@ async function expanded(id: string, value: unknown, owner = 'default'): Promise<
     resource.bytes > 1024 * 1024 ||
     resource.chunks !== Math.ceil(resource.bytes / 32768)
   )
-    throw new Error('插件结果描述无效');
+    throw new Error(tr('插件结果描述无效'));
   const bytes = new Uint8Array(resource.bytes);
   let position = 0;
   let failure: unknown, result: unknown;
@@ -120,13 +128,13 @@ async function expanded(id: string, value: unknown, owner = 'default'): Promise<
       if (reply.error) throw reply.error;
       const data = reply.result as { chunk: number; dataBase64: string };
       if (data.chunk !== chunk || typeof data.dataBase64 !== 'string')
-        throw new Error('插件结果分块无效');
+        throw new Error(tr('插件结果分块无效'));
       const decoded = Uint8Array.from(atob(data.dataBase64), (c) => c.charCodeAt(0));
-      if (position + decoded.length > bytes.length) throw new Error('插件结果超过声明大小');
+      if (position + decoded.length > bytes.length) throw new Error(tr('插件结果超过声明大小'));
       bytes.set(decoded, position);
       position += decoded.length;
     }
-    if (position !== bytes.length) throw new Error('插件结果不完整');
+    if (position !== bytes.length) throw new Error(tr('插件结果不完整'));
     result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   } catch (cause) {
     failed = true;
@@ -152,7 +160,7 @@ async function expanded(id: string, value: unknown, owner = 'default'): Promise<
     )
       throw closed.error;
   } catch (cause) {
-    if (failed) throw new AggregateError([failure, cause], '插件结果读取与清理失败', { cause });
+    if (failed) throw new AggregateError([failure, cause], tr('插件结果读取与清理失败'), { cause });
     throw cause;
   }
   if (failed) throw failure;
@@ -175,17 +183,17 @@ export async function pluginInvokeRequest<T>(
   const presentation = safeConfirmation(confirmation);
   const verify = () => {
     if (plugins.contextVersion(id) !== version)
-      throw { code: 'PLUGIN_CANCELLED', message: '插件上下文已变化' };
+      throw { code: 'PLUGIN_CANCELLED', message: tr('插件上下文已变化') };
   };
   return queued(id, async () => {
     verify();
-    if (!isActive()) throw { code: 'PLUGIN_CANCELLED', message: '插件页面已隐藏或关闭' };
+    if (!isActive()) throw { code: 'PLUGIN_CANCELLED', message: tr('插件页面已隐藏或关闭') };
     let reply = await pluginsApi.call(id, payload, owner);
     while (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
       const approval = reply.result as PluginApproval & { continuation: string };
       if (!isActive() || typeof approval.continuation !== 'string') {
         if (typeof approval.continuation !== 'string')
-          throw { code: 'PLUGIN_CANCELLED', message: '审批续接无效' };
+          throw { code: 'PLUGIN_CANCELLED', message: tr('审批续接无效') };
         await pluginsApi.approve(approval.id, false);
         reply = await pluginsApi.continue(id, approval.continuation, owner, true);
         continue;
@@ -195,19 +203,19 @@ export async function pluginInvokeRequest<T>(
         readable
           ? presentation.title
           : approval.operation === 'ui.contribute'
-            ? '确认执行本次计划'
-            : '插件操作需要单独确认',
+            ? tr('确认执行本次计划')
+            : tr('插件操作需要单独确认'),
         readable
-          ? `主机：${approval.target}\n\n${presentation.message}`
+          ? tr('主机：{0}\n\n{1}', approval.target, presentation.message)
           : `${approval.pluginName} ${approval.pluginVersion}\n${approval.description}`,
         undefined,
         owner,
         readable
           ? {
-              confirmLabel: presentation.confirmLabel ?? '确认',
+              confirmLabel: presentation.confirmLabel ?? tr('确认'),
             }
           : approval.operation === 'ui.contribute'
-            ? { confirmLabel: '确认执行' }
+            ? { confirmLabel: tr('确认执行') }
             : undefined,
       );
       const confirmed = accepted && isActive();

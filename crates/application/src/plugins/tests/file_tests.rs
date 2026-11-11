@@ -113,8 +113,81 @@ async fn assist_mode_auto_reads_only_with_independent_grant_and_never_auto_saves
         .operations
         .retain(|op| op != "operations.read.preapproved");
     let call = app.plugin_host.start_scoped(id, "page").unwrap();
-    assert!(!app.plugin_auto_read(&call, &plugin, &grant, &read).unwrap());
+    assert!(
+        !app.plugin_mode_preapproves(&call, &plugin, &grant, &read)
+            .unwrap()
+    );
     drop(call);
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn full_mode_reads_and_saves_without_repeated_approval_but_cannot_escape_file_roots() {
+    use serverdeck_plugin_sdk::platform::ApprovalMode;
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture
+        .install_with_commands(
+            "dev.full-files",
+            &[Permission::OperationsFullPreapproved],
+            vec![],
+        )
+        .await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let server = server(app, Duration::ZERO).await;
+    let path = server.root.path().join("etc/fixture/x.yaml");
+    std::fs::write(&path, "x: old\n").unwrap();
+    let mode = Primitive::ApprovalMode {
+        mode: ApprovalMode::Full,
+    };
+    let pending = call(app, id, "page", mode.clone()).await;
+    assert_eq!(pending.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    app.plugin_approve(
+        pending.result["confirmationRequired"]["id"]
+            .as_str()
+            .unwrap(),
+        true,
+    )
+    .unwrap();
+    let policy = call(app, id, "page", mode).await;
+    let binding = policy.result["binding"].as_str().unwrap().to_owned();
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    let read = bound(
+        app,
+        &scoped,
+        Primitive::ReadFile {
+            host_id: server.host.id.clone(),
+            path: "/etc/fixture/x.yaml".into(),
+        },
+        vec![binding.clone()],
+    )
+    .await;
+    assert!(read.error.is_none(), "{read:?}");
+    let saved = bound(
+        app,
+        &scoped,
+        Primitive::SaveFile {
+            document_id: read.result["id"].as_str().unwrap().into(),
+            content: "x: new\n".into(),
+        },
+        vec![binding.clone()],
+    )
+    .await;
+    assert!(saved.error.is_none(), "{saved:?}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "x: new\n");
+    let escaped = bound(
+        app,
+        &scoped,
+        Primitive::ReadFile {
+            host_id: server.host.id.clone(),
+            path: "/outside/secret".into(),
+        },
+        vec![binding],
+    )
+    .await;
+    assert_eq!(escaped.error.unwrap().code, "PLUGIN_PERMISSION_DENIED");
+    drop(scoped);
     app.shutdown().await;
 }
 
@@ -220,6 +293,70 @@ async fn server(app: &Application, delay: Duration) -> support::Server {
     std::fs::create_dir_all(server.root.path().join("etc/fixture")).unwrap();
     server.open().await;
     server
+}
+
+#[tokio::test]
+async fn virtual_file_size_is_reported_without_creating_an_editable_document() {
+    use serverdeck_plugin_sdk::platform::ApprovalMode;
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture.install("dev.virtual-file").await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let server = server(app, Duration::ZERO).await;
+    let path = "/etc/fixture/cpuinfo";
+    std::fs::write(
+        server.root.path().join("etc/fixture/cpuinfo"),
+        "model name : fixture CPU\n",
+    )
+    .unwrap();
+    server
+        .faults
+        .reported_sizes
+        .lock()
+        .unwrap()
+        .insert(path.into(), 0);
+    let policy = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    let response = bound(
+        app,
+        &scoped,
+        Primitive::ReadFile {
+            host_id: server.host.id.clone(),
+            path: path.into(),
+        },
+        vec![policy.result["binding"].as_str().unwrap().into()],
+    )
+    .await;
+    assert_eq!(response.error.unwrap().code, "TEXT_SIZE_MISMATCH");
+    assert!(app.plugin_host.lock().unwrap().documents.is_empty());
+    assert_eq!(server.faults.open_handles.load(Ordering::SeqCst), 0);
+    // A genuine empty regular file remains readable, with the usual edit binding.
+    server.faults.reported_sizes.lock().unwrap().clear();
+    std::fs::write(server.root.path().join("etc/fixture/cpuinfo"), "").unwrap();
+    let response = bound(
+        app,
+        &scoped,
+        Primitive::ReadFile {
+            host_id: server.host.id.clone(),
+            path: path.into(),
+        },
+        vec![policy.result["binding"].as_str().unwrap().into()],
+    )
+    .await;
+    assert!(response.error.is_none(), "{response:?}");
+    assert_eq!(response.result["content"], "");
+    assert!(response.result["id"].is_string());
+    drop(scoped);
+    app.shutdown().await;
 }
 
 #[tokio::test]

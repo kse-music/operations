@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { computed, onScopeDispose, ref, shallowRef } from 'vue';
 import { defineStore } from 'pinia';
 import { pluginsApi } from '../services/plugins';
@@ -36,7 +37,7 @@ export const usePluginsStore = defineStore('plugins', () => {
   }
   async function schema(id: string): Promise<PluginUi> {
     const plugin = installed.value.find((p) => p.manifest.id === id);
-    if (!plugin) throw new Error('插件已卸载');
+    if (!plugin) throw new Error(tr('插件已卸载'));
     if (schemas.value[id]?.revision === plugin.revision) return schemas.value[id]!.ui;
     const ui = await pluginsApi.ui(id, plugin.revision);
     schemas.value[id] = { revision: plugin.revision, ui };
@@ -60,7 +61,8 @@ export const usePluginsStore = defineStore('plugins', () => {
         ? p.manifest.contributions.map((c) => ({
             ...c,
             pluginId: p.manifest.id,
-            pluginName: p.manifest.name,
+            pluginName: metadata(p, p.manifest.name),
+            label: metadata(p, c.label),
             source: p.source ?? 'user',
           }))
         : [];
@@ -68,6 +70,10 @@ export const usePluginsStore = defineStore('plugins', () => {
   );
   const t = (zh: string, en: string) => (locale.value === 'en-US' ? en : zh);
   const label = (value: PluginLabel) => (typeof value === 'string' ? value : value[locale.value]);
+  // Only bundled metadata is application-owned. Uploaded names remain untouched.
+  function metadata(plugin: InstalledPlugin, value: string): string {
+    return plugin.source === 'system' ? tr(value) : value;
+  }
   let timer: ReturnType<typeof setInterval> | undefined;
   const bindings = new Map<string, Promise<void>>();
   const contexts = new Map<string, string>();
@@ -199,7 +205,9 @@ export const usePluginsStore = defineStore('plugins', () => {
       busy.value = false;
       await refresh();
       if (failure)
-        error.value = error.value ? `${failure}；刷新插件列表失败：${error.value}` : failure;
+        error.value = error.value
+          ? tr('{0}；刷新插件列表失败：{1}', failure, error.value)
+          : failure;
     }
     return ok;
   }
@@ -235,6 +243,8 @@ export const usePluginsStore = defineStore('plugins', () => {
   onScopeDispose(stop);
   return {
     installed,
+    locale,
+    metadata,
     problems,
     dirtyPages,
     dirty,

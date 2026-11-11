@@ -24,7 +24,7 @@ impl AgentHost for Host {
     async fn query(&self, request: Request) -> Result<Response, Error> {
         let output = self
             .context
-            .execute(&self.id, Command::script(request.command()?))
+            .execute(&self.id, request.platform_command()?)
             .await?
             .checked()?;
         let mut response = crate::parse::response(&request, output.stdout.as_bytes())?;
@@ -35,6 +35,7 @@ impl AgentHost for Host {
     }
 }
 struct Pending {
+    progress_id: Option<String>,
     scope: String,
     at: u64,
     root: String,
@@ -149,18 +150,33 @@ async fn completion(
     pending: &Pending,
     messages: Vec<platform::Message>,
 ) -> Result<Value, Error> {
-    let fitted = crate::budget::fit(messages, &pending.model, 44 * 1024)?;
-    let mut result = context
-        .with_bindings(pending.bindings.clone())
-        .request(platform::Request::ModelComplete {
-            model_id: pending.model["id"]
-                .as_str()
-                .ok_or(Error::Validation("模型 ID 无效"))?
-                .into(),
-            expected_revision: pending.model["revision"].as_str().map(str::to_owned),
-            messages: fitted.messages,
-        })
-        .await?;
+    let fitted = if pending.progress_id.is_some() {
+        crate::budget::fit_stream(messages, &pending.model, 44 * 1024)?
+    } else {
+        crate::budget::fit(messages, &pending.model, 44 * 1024)?
+    };
+    let context = context.with_bindings(pending.bindings.clone());
+    let mut result = if let Some(progress_id) = &pending.progress_id {
+        crate::streaming::complete(
+            &context,
+            &pending.model,
+            fitted.messages,
+            &pending.redactor,
+            progress_id,
+        )
+        .await?
+    } else {
+        context
+            .request(platform::Request::ModelComplete {
+                model_id: pending.model["id"]
+                    .as_str()
+                    .ok_or(Error::Validation("模型ID无效"))?
+                    .into(),
+                expected_revision: pending.model["revision"].as_str().map(str::to_owned),
+                messages: fitted.messages,
+            })
+            .await?
+    };
     result["contextWarnings"] = json!(fitted.warnings);
     Ok(result)
 }
@@ -205,6 +221,7 @@ pub async fn dispatch(context: Context, action: String, value: Value) -> Result<
                 let mut metadata = json!({"question":request.question,"assets":assets,"previousHostIds":request.previous_host_ids});
                 redactor.value(&mut metadata);
                 let pending = Pending {
+                    progress_id: None,
                     scope: scope(&info)?.into(),
                     at: now(&info),
                     root: request.request_id,
@@ -354,7 +371,7 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
         return Err(Error::Validation("每轮最多八台主机"));
     }
     let mut bindings = vec![model_binding];
-    if request.approval_mode == platform::ApprovalMode::Assist {
+    if request.approval_mode != platform::ApprovalMode::Request {
         let policy = context
             .request(platform::Request::ApprovalMode {
                 mode: request.approval_mode,
@@ -449,10 +466,7 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
                 .command()?,
             )
         } else if plan.journal {
-            Some(format!(
-                "{}exec journalctl --system --no-pager --quiet -n 100 -o short-iso",
-                ops::PRELUDE
-            ))
+            Some(format!("{}{}", ops::PRELUDE, ops::SYSTEM_JOURNAL))
         } else {
             None
         };
@@ -514,7 +528,11 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
         content: json!({"question":redactor.text(&request.question),"context":evidence})
             .to_string(),
     });
-    let fitted = crate::budget::fit(messages, &model, 40 * 1024)?;
+    let fitted = if request.progress_id.is_some() {
+        crate::budget::fit_stream(messages, &model, 40 * 1024)?
+    } else {
+        crate::budget::fit(messages, &model, 40 * 1024)?
+    };
     warnings.extend(fitted.warnings);
     let messages = fitted.messages;
     let key = id(&info)?;
@@ -529,6 +547,7 @@ async fn prepare(context: Context, request: PrepareInput, info: Value) -> Result
     };
     let preview = json!({"id":key,"modelId":request.model_id,"destination":model["config"]["baseUrl"],"model":model["config"]["model"],"body":serde_json::to_string(&messages).map_err(|e|Error::Worker(Box::new(e)))?,"estimatedInputTokens":fitted.input_tokens,"maxOutputTokens":model["config"]["maxOutputTokens"],"warnings":warnings,"task":snapshot});
     let pending = Pending {
+        progress_id: request.progress_id,
         scope: scope(&info)?.into(),
         at: now(&info),
         root: key.clone(),
@@ -637,14 +656,35 @@ async fn send_inner(
                     let tool = request.tool()?;
                     let request = match request {
                         tools::Query::Files(query) => {
-                            let (value, count) = resources
+                            let result = resources
                                 .query(
                                     &host.context,
                                     query.clone(),
                                     &pending.hosts,
                                     &pending.redactor,
                                 )
-                                .await?;
+                                .await;
+                            let (value, count) = match result {
+                                Ok(value) => value,
+                                Err(Error::Platform(error))
+                                    if matches!(query, files::Query::FileRead { .. })
+                                        && error.code == "TEXT_SIZE_MISMATCH" =>
+                                {
+                                    let message = pending.redactor.text(&error.message);
+                                    observations.push(AgentObservation {
+                                        query: tool.label().into(),
+                                        records: 0,
+                                        result: ToolResult {
+                                            tool,
+                                            status: ToolStatus::Failed,
+                                            message: Some(message.clone()),
+                                        },
+                                    });
+                                    results.push(json!({"tool":tool,"status":ToolStatus::Failed,"request":query,"result":{"code":error.code,"message":message}}));
+                                    continue;
+                                }
+                                Err(error) => return Err(error),
+                            };
                             observations.push(AgentObservation {
                                 query: tool.label().into(),
                                 records: count,
@@ -661,7 +701,15 @@ async fn send_inner(
                     };
                     let response = tools::query(&host, request.clone()).await?;
                     let count = response.records.len();
-                    let mut value = json!(response);
+                    // Keep full evidence for plan validation; only the model's
+                    // bounded row selection needs copying and redaction.
+                    let mut value = json!({
+                        "success": response.success,
+                        "code": response.code,
+                        "message": response.message,
+                        "records": response.records.iter().take(20).collect::<Vec<_>>(),
+                        "detail": response.detail,
+                    });
                     pending.redactor.value(&mut value);
                     observations.push(AgentObservation {
                         query: tool.label().into(),
@@ -676,9 +724,6 @@ async fn send_inner(
                             message: response.message.as_ref().map(|s| pending.redactor.text(s)),
                         },
                     });
-                    if let Some(rows) = value["records"].as_array_mut() {
-                        rows.truncate(20);
-                    }
                     value["totalRecords"] = json!(count);
                     value["omittedRecords"] = json!(count.saturating_sub(20));
                     if value.to_string().len() > 8192 {
@@ -1035,7 +1080,7 @@ fn plan_operations(
             for step in steps {
                 add(platform::Request::Execute {
                     host_id: pending.hosts[0].clone(),
-                    command: Command::script(step.read.command()?),
+                    command: step.read.platform_command()?,
                 })?;
                 add(platform::Request::Execute {
                     host_id: pending.hosts[0].clone(),
@@ -1043,7 +1088,7 @@ fn plan_operations(
                 })?;
                 add(platform::Request::Execute {
                     host_id: pending.hosts[0].clone(),
-                    command: Command::script(agent::verification_request(step).command()?),
+                    command: agent::verification_request(step).platform_command()?,
                 })?;
             }
         }

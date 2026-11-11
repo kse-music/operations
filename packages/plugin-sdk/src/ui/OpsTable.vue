@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { locale } from '../i18n';
+import { tr } from '../i18n/messages';
+
 import { computed, ref, watch } from 'vue';
 const props = defineProps<{
   rows: Record<string, unknown>[];
@@ -26,7 +29,7 @@ const filtered = computed(() =>
       const n =
         typeof left === 'number' && typeof right === 'number'
           ? left - right
-          : String(left ?? '').localeCompare(String(right ?? ''), undefined, { numeric: true });
+          : String(left ?? '').localeCompare(String(right ?? ''), locale.value, { numeric: true });
       return descending.value ? -n : n;
     }),
 );
@@ -44,7 +47,7 @@ function changeSort(key: string): void {
 </script>
 <template>
   <div class="ops-table" :aria-busy="loading">
-    <p v-if="loading" class="host-empty" role="status">正在读取列表…</p>
+    <p v-if="loading" class="host-empty" role="status">{{ tr('正在读取列表…') }}</p>
     <table v-else>
       <thead>
         <tr>
@@ -53,7 +56,7 @@ function changeSort(key: string): void {
               {{ column.label }} {{ order === column.key ? (descending ? '↓' : '↑') : '' }}
             </button>
           </th>
-          <th>操作</th>
+          <th>{{ tr('操作') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -63,7 +66,9 @@ function changeSort(key: string): void {
           :data-ops-target="String(row[rowKey])"
         >
           <td v-for="column in columns" :key="column.key" :title="String(row[column.key] ?? '')">
-            <slot name="cell" :row="row" :column="column">{{ row[column.key] ?? '不可用' }}</slot>
+            <slot name="cell" :row="row" :column="column">{{
+              row[column.key] ?? tr('不可用')
+            }}</slot>
           </td>
           <td>
             <div class="ops-row-actions"><slot name="actions" :row="row" /></div>
@@ -71,11 +76,11 @@ function changeSort(key: string): void {
         </tr>
       </tbody>
     </table>
-    <p v-if="!loading && !filtered.length" class="host-empty">没有匹配项目。</p>
+    <p v-if="!loading && !filtered.length" class="host-empty">{{ tr('没有匹配项目。') }}</p>
     <div v-if="!loading && pages > 1" class="ops-toolbar">
-      <button class="button" :disabled="page === 1" @click="page--">上一页</button
-      ><span>{{ page }} / {{ pages }} · {{ filtered.length }} 项</span
-      ><button class="button" :disabled="page === pages" @click="page++">下一页</button>
+      <button class="button" :disabled="page === 1" @click="page--">{{ tr('上一页') }}</button
+      ><span>{{ page }} / {{ pages }} · {{ filtered.length }}{{ tr(' 项') }}</span
+      ><button class="button" :disabled="page === pages" @click="page++">{{ tr('下一页') }}</button>
     </div>
   </div>
 </template>

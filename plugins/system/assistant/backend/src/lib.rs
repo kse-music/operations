@@ -16,6 +16,7 @@ mod prompts;
 mod redact;
 mod routing;
 mod summary;
+mod streaming;
 mod task;
 mod tools;
 mod types;

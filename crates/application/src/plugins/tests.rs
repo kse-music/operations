@@ -18,6 +18,7 @@ use std::{
 use zeroize::Zeroizing;
 mod file_tests;
 mod ssh_tests;
+mod streaming_tests;
 
 #[tokio::test]
 #[ignore = "requires an independently built package and explicit QA action/expected result"]
@@ -115,6 +116,16 @@ impl Fixture {
         Self { dir, app }
     }
     async fn install(&self, id: &str) -> InstalledPlugin {
+        self.install_with_commands(id, &[], vec![]).await
+    }
+    async fn install_with_commands(
+        &self,
+        id: &str,
+        extra: &[Permission],
+        commands: Vec<Command>,
+    ) -> InstalledPlugin {
+        let mut declared = permissions();
+        declared.extend_from_slice(extra);
         let manifest = Manifest {
             schema_version: 1,
             id: id.into(),
@@ -128,8 +139,8 @@ impl Fixture {
                 backend: None,
                 ui: None,
             },
-            permissions: permissions(),
-            preapproved_commands: vec![],
+            permissions: declared,
+            preapproved_commands: commands,
             contributions: vec![],
             platforms: vec![std::env::consts::OS.into()],
             files: vec![],

@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { aiApi } from '../services/ai';
@@ -45,7 +46,7 @@ export const useModelsStore = defineStore('models', () => {
       const result = await aiApi.modelSave(input);
       models.value = [...models.value.filter((m) => m.id !== result.value.id), result.value];
       loaded.value = true;
-      message.value = ['模型已保存', ...result.warnings].join('；');
+      message.value = [tr('模型已保存'), ...result.warnings].join('；');
       return true;
     } catch (e) {
       error.value = errorMessage(e);
@@ -63,7 +64,7 @@ export const useModelsStore = defineStore('models', () => {
       const result = await aiApi.modelDelete(model.id, model.revision, true);
       models.value = models.value.filter((m) => m.id !== model.id);
       if (selectedId.value === model.id) selectedId.value = '';
-      message.value = ['模型已删除', ...result.warnings].join('；');
+      message.value = [tr('模型已删除'), ...result.warnings].join('；');
       return true;
     } catch (e) {
       error.value = errorMessage(e);

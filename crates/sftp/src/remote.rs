@@ -212,8 +212,14 @@ impl Remote {
                 }
             }
             let after = self.attrs(path).await?;
-            if !same(&before, &after) || before.size != Some(content.len() as u64) {
+            if !same(&before, &after) {
                 return Err(Error::Conflict);
+            }
+            if before.size != Some(content.len() as u64) {
+                return Err(fail(
+                    "TEXT_SIZE_MISMATCH",
+                    "文件实际长度与报告大小不一致，不能作为可编辑文件读取；/proc、/sys 等动态信息请使用系统采样查询",
+                ));
             }
             if content.contains(&0) {
                 return Err(fail("TEXT_BINARY", "文件含 NUL，不能作为文本编辑"));

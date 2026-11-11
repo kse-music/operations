@@ -1,4 +1,5 @@
 import { readonly, shallowReactive, type DeepReadonly } from 'vue';
+import type { PluginLocale } from './types/plugins';
 export interface HostMetadata {
   id: string;
   name: string;
@@ -21,6 +22,7 @@ export interface ModelMetadata {
   config: { provider: string; model: string; maxOutputTokens: number; contextWindowTokens: number };
 }
 export interface PlatformContext {
+  language: PluginLocale;
   hostId: string;
   hosts: HostMetadata[];
   groups: { id: string; name: string; parentId: string | null }[];
@@ -30,6 +32,7 @@ export interface PlatformContext {
   visible: boolean;
 }
 const state = shallowReactive<PlatformContext>({
+  language: 'zh-CN',
   hostId: '',
   hosts: [],
   groups: [],

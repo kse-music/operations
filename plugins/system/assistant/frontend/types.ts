@@ -1,3 +1,4 @@
+import { tr } from './i18n/messages';
 import type { LogSource } from './ops-types';
 import type { TransferPreview, TransferState } from '@serverdeck/plugin-sdk/types/platform';
 export interface AiConfig {
@@ -58,7 +59,8 @@ export interface AiSelection {
   logLines: number;
 }
 export interface AiPrepare {
-  approvalMode?: 'request' | 'assist';
+  progressId?: string;
+  approvalMode?: 'request' | 'assist' | 'full';
   modelId: string;
   sessionId: string | null;
   question: string;
@@ -84,7 +86,8 @@ export interface AiResolveHosts {
   redactValues: string[];
 }
 export interface AiTurn {
-  approvalMode?: 'request' | 'assist';
+  streamText?: string;
+  approvalMode?: 'request' | 'assist' | 'full';
   id: string;
   question: string;
   state: 'pending' | 'complete' | 'failed' | 'cancelled';
@@ -116,17 +119,39 @@ export interface AiTask {
   expiresAt: number;
 }
 export const taskStatusLabels: Record<AiTaskStatus, string> = {
-  prepared: '已准备',
-  running: '正在查询与分析',
-  awaiting_approval: '等待审核',
-  executing: '正在执行',
-  transferring: '正在传输',
-  verifying: '正在复查',
-  succeeded: '已完成',
-  failed: '失败',
-  cancelled: '已停止',
-  unverified: '结果未确认，请核对实际状态',
-  expired: '已过期，请重新提问',
+  get prepared() {
+    return tr('已准备');
+  },
+  get running() {
+    return tr('正在查询与分析');
+  },
+  get awaiting_approval() {
+    return tr('等待审核');
+  },
+  get executing() {
+    return tr('正在执行');
+  },
+  get transferring() {
+    return tr('正在传输');
+  },
+  get verifying() {
+    return tr('正在复查');
+  },
+  get succeeded() {
+    return tr('已完成');
+  },
+  get failed() {
+    return tr('失败');
+  },
+  get cancelled() {
+    return tr('已停止');
+  },
+  get unverified() {
+    return tr('结果未确认，请核对实际状态');
+  },
+  get expired() {
+    return tr('已过期，请重新提问');
+  },
 };
 export type AiToolId =
   | 'diagnostic'

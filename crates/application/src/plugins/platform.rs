@@ -94,6 +94,7 @@ impl Application {
             .closed_owners
             .insert((id.to_owned(), owner.to_owned()));
         self.plugin_host.stop_scope(id, owner).await?;
+        self.plugin_close_streaming(id, Some(owner)).await?;
         self.plugin_close_copies(id, Some(owner)).await?;
         let (documents, streams, terminals) = {
             let mut data = self.plugin_host.lock()?;
@@ -105,6 +106,8 @@ impl Application {
                 .retain(|_, result| result.plugin != id || result.owner != owner);
             data.bindings
                 .retain(|_, binding| binding.plugin != id || binding.owner != owner);
+            data.full_access_sessions
+                .remove(&(id.to_owned(), owner.to_owned()));
             data.outputs
                 .retain(|_, result| result.plugin != id || result.owner != owner);
             data.platform_terminals
@@ -192,9 +195,12 @@ impl Application {
             return Err(failure("USER_CANCELLED", "动作已取消，未启动新的平台操作"));
         }
         if !cancelled
+            && !matches!(&request, Request::Streaming { request } if request.cleanup())
             && !matches!(
                 request,
-                Request::ResultRead { .. }
+                Request::ApprovalMode {
+                    mode: serverdeck_plugin_sdk::platform::ApprovalMode::Request
+                } | Request::ResultRead { .. }
                     | Request::ResultClose { .. }
                     | Request::OutputOpen { .. }
                     | Request::OutputPart { .. }
@@ -220,13 +226,76 @@ impl Application {
         }
         match request {
             Request::ApprovalMode { mode } => {
-                let binding =
-                    self.plugin_revision_binding(call, state::RevisionTarget::ApprovalMode(mode))?;
+                use serverdeck_plugin_sdk::platform::ApprovalMode;
+                let key = (call.id.clone(), call.owner.clone());
+                let session = if mode == ApprovalMode::Full {
+                    if !self.plugin_scope_visible(call)? {
+                        return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面启用完全访问权限"));
+                    }
+                    let (cached, session) = {
+                        let mut data = self.plugin_host.lock()?;
+                        let cached = data.bindings.iter().find_map(|(id, binding)| {
+                            (binding.plugin == call.id
+                                && binding.owner == call.owner
+                                && binding.generation == call.generation
+                                && binding.target == state::RevisionTarget::ApprovalMode(mode))
+                            .then(|| id.clone())
+                        });
+                        if !data.full_access_sessions.contains_key(&key)
+                            && data.full_access_sessions.len() >= 256
+                        {
+                            return Err(Error::Busy);
+                        }
+                        let session = data
+                            .full_access_sessions
+                            .entry(key)
+                            .or_insert_with(|| uuid::Uuid::new_v4().to_string())
+                            .clone();
+                        (cached, session)
+                    };
+                    if let Some(binding) = cached {
+                        return Ok(json!({"binding":binding,"mode":mode}));
+                    }
+                    let operation = Capability::Platform {
+                        request: Request::ApprovalMode { mode },
+                        bindings: vec![],
+                    };
+                    if let Some(approval) = self.plugin_confirmation_bound(
+                        call,
+                        plugin,
+                        &operation,
+                        Some(&session),
+                        None,
+                    )? {
+                        return Ok(json!({"confirmationRequired":approval}));
+                    }
+                    Some(session)
+                } else {
+                    let mut data = self.plugin_host.lock()?;
+                    data.full_access_sessions.remove(&key);
+                    data.bindings.retain(|_, binding| {
+                        binding.plugin != call.id
+                            || binding.owner != call.owner
+                            || binding.target
+                                != state::RevisionTarget::ApprovalMode(ApprovalMode::Full)
+                    });
+                    data.approvals.retain(|_, pending| {
+                        pending.public.plugin_id != call.id
+                            || pending.owner != call.owner
+                            || pending.public.operation != "operations.full.preapproved"
+                    });
+                    None
+                };
+                let binding = self.plugin_revision_binding_for_session(
+                    call,
+                    state::RevisionTarget::ApprovalMode(mode),
+                    session.as_deref(),
+                )?;
                 return Ok(json!({"binding":binding,"mode":mode}));
             }
             Request::ConfirmOperations { operations } => {
                 return self
-                    .plugin_confirm_operations(call, plugin, operations, bindings)
+                    .plugin_confirm_operations(call, plugin, grant, operations, bindings)
                     .await;
             }
             _ => (),
@@ -305,7 +374,7 @@ impl Application {
             && (call.collecting
                 || call.has_batch()?
                 || !(grant.preapproves(plugin, &operation)
-                    || self.plugin_auto_read(call, plugin, grant, &operation)?))
+                    || self.plugin_mode_preapproves(call, plugin, grant, &operation)?))
             && let Some(approval) = self.plugin_confirmation_bound(
                 call,
                 plugin,
@@ -455,27 +524,8 @@ impl Application {
                 self.operations_host.log_close(&stream_id).await?;
                 self.plugin_host.lock()?.logs.remove(&stream_id);Value::Null
             }
-            Request::ModelComplete {model_id,expected_revision,mut messages}=>{
-                if messages.is_empty() || messages.len()>64 || messages.iter().any(|message|message.content.len()>48*1024)
-                    || serde_json::to_vec(&messages).map_err(|e|Error::Worker(Box::new(e)))?.len()>48*1024 {return Err(Error::Validation("模型消息超过平台限制"));}
-                let (record,key)=self.ai_credentials(model_id.clone()).await?;
-                if expected_revision.as_ref().is_some_and(|revision|revision!=&record.revision) {return Err(Error::Conflict);}
-                let model_call=self.models_runtime.begin(&model_id)?;
-                let (current,_)=self.ai_credentials(model_id.clone()).await?;
-                if current.revision!=record.revision{return Err(Error::Conflict);}
-                if record.config.provider==serverdeck_core::ai::Provider::OpenaiCompatible&&let Ok(secret)=std::str::from_utf8(&key)&&!secret.is_empty(){for message in &mut messages{message.content=message.content.replace(secret,"[REDACTED]");}}
-                let body=json!({"model":record.config.model,"messages":messages,"max_completion_tokens":record.config.max_output_tokens,"stream":false,"store":false});
-                let work=serverdeck_ai::provider::complete(&record.config,&key,&body);
-                let completion=tokio::select! {
-                    _=model_call.cancel.cancelled()=>return Err(Error::Conflict),
-                    result=tokio::time::timeout(Duration::from_secs(150),work)=>result.map_err(|_|failure("MODEL_TIMEOUT","模型调用超时"))??,
-                    _=call.cancel.cancelled()=>return Err(if call.user_cancelled.load(std::sync::atomic::Ordering::Acquire){failure("USER_CANCELLED","模型调用已取消")}else{failure("PLUGIN_CANCELLED","模型调用已停止")}),
-                };
-                let (current,_)=self.ai_credentials(model_id).await?;
-                if current.revision!=record.revision {return Err(Error::Conflict);}
-                let binding=self.plugin_model_binding(call,&record.id,&record.revision)?;
-                json!({"text":completion.text,"usage":completion.usage,"incomplete":completion.incomplete,"binding":binding})
-            }
+            Request::Streaming {request}=>self.plugin_streaming(call,request).await?,
+            Request::ModelComplete {model_id,expected_revision,messages}=>self.plugin_model_complete(call,model_id,expected_revision,messages).await?,
             Request::SettingsRead=>{let repo=self.plugins.clone();let id=call.id.clone();self.blocking(move|_|repo.settings_read(&id)).await?},
             Request::SettingsWrite {value}=>{let repo=self.plugins.clone();let id=call.id.clone();self.blocking(move|_|repo.settings_write(&id,&value)).await?;Value::Null}
             Request::Notify {message}=>{
@@ -523,6 +573,19 @@ impl Application {
         };
         self.plugin_host.verify(call)?;
         self.plugin_authorize(call, &operation).await?;
+        if matches!(
+            &operation,
+            Capability::Platform {
+                request: Request::Streaming { .. },
+                ..
+            }
+        ) && serde_json::to_vec(&value)
+            .map_err(|e| Error::Worker(Box::new(e)))?
+            .len()
+            <= 56 * 1024
+        {
+            return Ok(value);
+        }
         if matches!(
             operation,
             Capability::Platform {
@@ -810,7 +873,7 @@ impl Application {
         Ok(session)
     }
 
-    fn plugin_model_binding(
+    pub(super) fn plugin_model_binding(
         &self,
         call: &Call,
         model: &str,
@@ -829,9 +892,32 @@ impl Application {
         call: &Call,
         target: state::RevisionTarget,
     ) -> Result<String, Error> {
+        self.plugin_revision_binding_for_session(call, target, None)
+    }
+    pub(super) fn plugin_revision_binding_for_session(
+        &self,
+        call: &Call,
+        target: state::RevisionTarget,
+        session: Option<&str>,
+    ) -> Result<String, Error> {
         let mut data = self.plugin_host.lock()?;
-        data.bindings
-            .retain(|_, binding| binding.at.elapsed() < Duration::from_secs(600));
+        if target
+            == state::RevisionTarget::ApprovalMode(
+                serverdeck_plugin_sdk::platform::ApprovalMode::Full,
+            )
+            && (session.is_none()
+                || data
+                    .full_access_sessions
+                    .get(&(call.id.clone(), call.owner.clone()))
+                    .map(String::as_str)
+                    != session)
+        {
+            return Err(failure(
+                "PLUGIN_APPROVAL_REVOKED",
+                "完全访问授权已撤销，请重新选择模式",
+            ));
+        }
+        data.bindings.retain(|_, binding| !binding.expired());
         if let Some((id, binding)) = data.bindings.iter_mut().find(|(_, binding)| {
             binding.plugin == call.id
                 && binding.owner == call.owner
@@ -879,7 +965,7 @@ impl Application {
                     if binding.plugin != call.id
                         || binding.owner != call.owner
                         || binding.generation != call.generation
-                        || binding.at.elapsed() > Duration::from_secs(600)
+                        || binding.expired()
                     {
                         return Err(denied());
                     }

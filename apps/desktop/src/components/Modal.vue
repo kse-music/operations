@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { onMounted, ref } from 'vue';
 import { X } from '@lucide/vue';
 const props = defineProps<{
@@ -29,8 +31,8 @@ function close(): void {
           <button
             class="icon-button"
             type="button"
-            aria-label="关闭对话框"
-            title="关闭对话框"
+            :aria-label="tr('关闭对话框')"
+            :title="tr('关闭对话框')"
             :disabled="busy"
             @click="close"
           >

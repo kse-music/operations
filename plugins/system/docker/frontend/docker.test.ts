@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import Docker from './App.vue';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 
 const api = vi.hoisted(() => ({
   query: vi.fn(),
@@ -62,6 +63,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  setLocale('zh-CN');
   app?.unmount();
   if (pinia) disposePinia(pinia);
   root?.remove();
@@ -70,6 +72,36 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+it('updates English labels without reloading data or translating container names', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    code: null,
+    message: null,
+    detail: request.kind === 'capabilities' ? { dockerState: 'running' } : null,
+    records:
+      request.kind === 'containers'
+        ? [{ ID: 'language-container', Names: '容器', Image: '用户镜像', State: 'running' }]
+        : [],
+  }));
+  mountDocker();
+  await settle();
+  const count = api.query.mock.calls.length;
+  const row = root.querySelector('[data-ops-target="language-container"]');
+  setLocale('en-US');
+  await settle();
+  expect(root.textContent).toContain('All containers');
+  expect(root.textContent).toContain('Compose projects');
+  expect(root.textContent).toContain('用户镜像');
+  expect(root.querySelector('[data-ops-target="language-container"]')).toBe(row);
+  expect(row?.textContent).toContain('容器');
+  expect(api.query).toHaveBeenCalledTimes(count);
+  setLocale('zh-CN');
+  await settle();
+  expect(root.textContent).toContain('全部容器');
+  expect(api.query).toHaveBeenCalledTimes(count);
 });
 it('opens the selected container shell with its name, short ID and actual shell context', async () => {
   pinia = createPinia();

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import { useNotificationsStore } from '../stores/notifications';
 
@@ -59,7 +61,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport :to="target">
-    <div ref="stack" class="toast-stack" popover="manual" aria-label="全局通知">
+    <div ref="stack" class="toast-stack" popover="manual" :aria-label="tr('全局通知')">
       <div
         v-for="item in notifications.items"
         :key="item.id"
@@ -67,7 +69,11 @@ onBeforeUnmount(() => {
         :role="item.error ? 'alert' : 'status'"
       >
         <span>{{ item.text }}</span>
-        <button class="text-button" aria-label="关闭通知" @click="notifications.dismiss(item.id)">
+        <button
+          class="text-button"
+          :aria-label="tr('关闭通知')"
+          @click="notifications.dismiss(item.id)"
+        >
           ×
         </button>
       </div>

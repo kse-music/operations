@@ -393,6 +393,10 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.ai-approval-mode.ai-full-access,
+.ai-approval-mode.ai-full-access select {
+  color: var(--error);
+}
 .ai-chat-composer-footer > span {
   color: var(--muted);
   font-size: var(--font-size-caption);

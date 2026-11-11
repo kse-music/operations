@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import { computed, onActivated, onDeactivated, onBeforeUnmount, ref, watch } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 const pluginVisible = usePluginVisibility();
@@ -19,10 +21,18 @@ import { useErrorNotifications } from '@serverdeck/plugin-sdk/composables/error-
 const hostDisplayName = (host: { name: string; hostname: string } | undefined) =>
   host?.name || host?.hostname || '';
 const stateLabels: Record<string, string> = {
-  connected: '已连接',
-  idle: '未连接',
-  connecting: '连接中',
-  failed: '连接失败',
+  get connected() {
+    return tr('已连接');
+  },
+  get idle() {
+    return tr('未连接');
+  },
+  get connecting() {
+    return tr('连接中');
+  },
+  get failed() {
+    return tr('连接失败');
+  },
 };
 import type { OpsRequest, OpsResponse, LogInput } from './types';
 import type { PluginConfirmation } from '@serverdeck/plugin-sdk/types/plugins';
@@ -72,7 +82,7 @@ let generation = 0,
   detailGeneration = 0,
   disposed = false;
 function session() {
-  if (!connection.value?.session || !connected.value) throw new Error('请先连接主机');
+  if (!connection.value?.session || !connected.value) throw new Error(tr('请先连接主机'));
   return connection.value.session.id;
 }
 async function query(request: OpsRequest, confirmation?: PluginConfirmation): Promise<OpsResponse> {
@@ -82,7 +92,7 @@ async function query(request: OpsRequest, confirmation?: PluginConfirmation): Pr
     confirmation ? { confirmation } : undefined,
   );
   if (!value.success)
-    throw new Error(`${value.code ?? '操作失败'}：${value.message ?? '请刷新核对状态'}`);
+    throw new Error(`${value.code ?? tr('操作失败')}：${value.message ?? tr('请刷新核对状态')}`);
   if (value.message) notice.value = value.message;
   return value;
 }
@@ -146,7 +156,7 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
     } else {
       const value = await query(request, mutationConfirmation(request, targetName));
       await load();
-      if (!error.value) notice.value = value.message || '请求完成，请核对刷新后的目标状态。';
+      if (!error.value) notice.value = value.message || tr('请求完成，请核对刷新后的目标状态。');
     }
   } catch (cause) {
     if (
@@ -157,7 +167,7 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
       error.value =
         errorMessage(cause) +
         (request.kind === 'compose_action' || request.kind === 'container_maintenance'
-          ? '；操作可能部分完成，请刷新核对实际状态，勿直接重复执行。'
+          ? tr('；操作可能部分完成，请刷新核对实际状态，勿直接重复执行。')
           : '');
     notice.value = null;
   } finally {
@@ -257,9 +267,9 @@ const slotContext = {
 };
 </script>
 <template>
-  <section class="operations-view" aria-label="主机运维工作区">
+  <section class="operations-view" :aria-label="tr('主机运维工作区')">
     <p class="ops-connection-status" role="status">
-      {{ hostDisplayName(connection?.host) || '当前主机尚未连接' }} ·
+      {{ hostDisplayName(connection?.host) || tr('当前主机尚未连接') }} ·
       {{ stateLabels[connection?.state ?? 'idle'] ?? connection?.state }}
     </p>
     <p v-if="notice" class="banner success" role="status">{{ notice }}</p>
@@ -273,23 +283,23 @@ const slotContext = {
           @click="
             closeDetail();
             detail = capabilities;
-            detailTitle = 'Docker信息';
+            detailTitle = tr('Docker信息');
             detailOpen = true;
           "
         >
-          Docker信息
+          {{ tr(' Docker信息 ') }}
         </button>
       </div>
       <div class="ops-toolbar">
         <label class="ops-search"
           ><Search :size="15" aria-hidden="true" /><input
             v-model="filter"
-            aria-label="运维项目搜索"
-            :placeholder="searchPlaceholder ?? '搜索名称、镜像、状态或端口…'"
+            :aria-label="tr('运维项目搜索')"
+            :placeholder="searchPlaceholder ?? tr('搜索名称、镜像、状态或端口…')"
         /></label>
         <slot name="toolbar" :execute="execute" :busy="busy" />
         <button class="button" :disabled="busy" @click="load">
-          <RefreshCw :size="14" aria-hidden="true" />{{ busy ? '正在读取…' : '刷新' }}
+          <RefreshCw :size="14" aria-hidden="true" />{{ busy ? tr('正在读取…') : tr('刷新') }}
         </button>
         <span v-if="hint" class="subtle">{{ hint }}</span>
       </div>
@@ -303,7 +313,7 @@ const slotContext = {
       >
         <template #cell="context"
           ><slot name="cell" v-bind="context">{{
-            context.row[context.column.key] ?? '不可用'
+            context.row[context.column.key] ?? tr('不可用')
           }}</slot></template
         >
         <template #actions="{ row }"
@@ -312,7 +322,7 @@ const slotContext = {
       </OpsTable>
       <Modal v-if="detailOpen" :title="detailTitle" wide :busy="busy" @close="closeDetail">
         <div class="ops-detail-content" :aria-busy="detailLoading">
-          <p v-if="detailLoading" class="host-empty" role="status">正在读取详情…</p>
+          <p v-if="detailLoading" class="host-empty" role="status">{{ tr('正在读取详情…') }}</p>
           <p v-else-if="detailError" class="banner error" role="alert">{{ detailError }}</p>
           <template v-else-if="detail">
             <slot name="detail-content" v-bind="slotContext" :detail="detail">
@@ -323,10 +333,12 @@ const slotContext = {
         </div>
       </Modal>
     </template>
-    <p v-else class="host-empty">请选择主机并建立运维连接后查看。</p>
+    <p v-else class="host-empty">{{ tr('请选择主机并建立运维连接后查看。') }}</p>
     <footer class="ops-footer">
       <span class="subtle"
-        ><ShieldCheck :size="13" aria-hidden="true" />当前 SSH 账号执行 · 不自动提权</span
+        ><ShieldCheck :size="13" aria-hidden="true" />{{
+          tr('当前 SSH 账号执行 · 不自动提权')
+        }}</span
       >
     </footer>
     <StreamDialog v-if="log" :stream-id="log.id" :title="log.title" @close="log = undefined" />

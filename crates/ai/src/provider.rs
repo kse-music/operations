@@ -75,56 +75,7 @@ impl ModelProvider for OpenAiCompatible {
         key: &[u8],
         body: &Value,
     ) -> Result<Completion, Error> {
-        let url = endpoint(config)?;
-        let wire = serde_json::to_vec(body).map_err(|error| Error::Worker(Box::new(error)))?;
-        let output_tokens = body["max_completion_tokens"]
-            .as_u64()
-            .ok_or(Error::Validation("模型请求缺少输出上限"))?;
-        check_request_budget(config, wire.len(), output_tokens)?;
-        let mut authorization = Vec::with_capacity(key.len() + 7);
-        authorization.extend_from_slice(b"Bearer ");
-        authorization.extend_from_slice(key);
-        let authorization = zeroize::Zeroizing::new(authorization);
-        let mut header = HeaderValue::from_bytes(&authorization)
-            .map_err(|_| Error::Validation("API Key 包含非法字符"))?;
-        header.set_sensitive(true);
-        // No redirects (even same-origin), retries or ambient proxies carrying private context.
-        let client = Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .no_proxy()
-            .connect_timeout(Duration::from_secs(8))
-            .timeout(Duration::from_secs(60))
-            .build()
-            .map_err(transport)?;
-        let mut response = client
-            .post(url)
-            .header(AUTHORIZATION, header)
-            .header(CONTENT_TYPE, "application/json")
-            .body(wire)
-            .send()
-            .await
-            .map_err(transport)?;
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            tracing::warn!(
-                operation = "ai_http",
-                status,
-                "AI request rejected; body not logged"
-            );
-            return Err(match status {
-                401 | 403 => failure("AI_AUTH", "模型认证失败，请检查 API Key 和权限"),
-                429 => failure("AI_RATE_LIMIT", "模型限流或额度不足，请稍后手动重试"),
-                300..=399 => failure(
-                    "AI_REDIRECT",
-                    "模型地址发生重定向；为防止泄露上下文，已拒绝跟随",
-                ),
-                _ => failure(
-                    "AI_HTTP",
-                    "模型服务返回错误，请检查服务和模型 ID；未自动重试",
-                ),
-            });
-        }
+        let mut response = response(config, key, body).await?;
         let mut bytes = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(transport)? {
             if bytes.len() + chunk.len() > 256 * 1024 {
@@ -169,14 +120,71 @@ impl ModelProvider for OpenAiCompatible {
         })
     }
 }
-fn protocol(source: Option<Box<dyn std::error::Error + Send + Sync>>) -> Error {
+pub(super) async fn response(
+    config: &Config,
+    key: &[u8],
+    body: &Value,
+) -> Result<reqwest::Response, Error> {
+    let url = endpoint(config)?;
+    let wire = serde_json::to_vec(body).map_err(|error| Error::Worker(Box::new(error)))?;
+    let output_tokens = body["max_completion_tokens"]
+        .as_u64()
+        .ok_or(Error::Validation("模型请求缺少输出上限"))?;
+    check_request_budget(config, wire.len(), output_tokens)?;
+    let mut authorization = Vec::with_capacity(key.len() + 7);
+    authorization.extend_from_slice(b"Bearer ");
+    authorization.extend_from_slice(key);
+    let authorization = zeroize::Zeroizing::new(authorization);
+    let mut header = HeaderValue::from_bytes(&authorization)
+        .map_err(|_| Error::Validation("API Key 包含非法字符"))?;
+    header.set_sensitive(true);
+    // No redirects (even same-origin), retries or ambient proxies carrying private context.
+    let client = Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never())
+        .no_proxy()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(transport)?;
+    let response = client
+        .post(url)
+        .header(AUTHORIZATION, header)
+        .header(CONTENT_TYPE, "application/json")
+        .body(wire)
+        .send()
+        .await
+        .map_err(transport)?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        tracing::warn!(
+            operation = "ai_http",
+            status,
+            "AI request rejected; body not logged"
+        );
+        return Err(match status {
+            401 | 403 => failure("AI_AUTH", "模型认证失败，请检查 API Key 和权限"),
+            429 => failure("AI_RATE_LIMIT", "模型限流或额度不足，请稍后手动重试"),
+            300..=399 => failure(
+                "AI_REDIRECT",
+                "模型地址发生重定向；为防止泄露上下文，已拒绝跟随",
+            ),
+            _ => failure(
+                "AI_HTTP",
+                "模型服务返回错误，请检查服务和模型 ID；未自动重试",
+            ),
+        });
+    }
+    Ok(response)
+}
+pub(super) fn protocol(source: Option<Box<dyn std::error::Error + Send + Sync>>) -> Error {
     Error::Connection {
         code: "AI_PROTOCOL",
         message: "模型响应格式无效，未生成可执行建议",
         source,
     }
 }
-fn transport(error: reqwest::Error) -> Error {
+pub(super) fn transport(error: reqwest::Error) -> Error {
     let timeout = error.is_timeout();
     tracing::warn!(
         operation = "ai_transport",

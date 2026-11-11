@@ -1,3 +1,5 @@
+import { locale } from '@serverdeck/plugin-sdk/i18n';
+import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
@@ -17,7 +19,7 @@ export function filterHosts(hosts: Host[], search: string): Host[] {
         ),
     )
     .sort((a, b) => {
-      const value = hostDisplayName(a).localeCompare(hostDisplayName(b), 'zh-CN');
+      const value = hostDisplayName(a).localeCompare(hostDisplayName(b), locale.value);
       return value || a.id.localeCompare(b.id);
     });
 }
@@ -70,7 +72,7 @@ export const useHostsStore = defineStore('hosts', () => {
         try {
           await reload();
         } catch {
-          error.value = '操作已完成，但列表刷新失败，请点击刷新。';
+          error.value = tr('操作已完成，但列表刷新失败，请点击刷新。');
         }
       }
       return { ok: true, value };
@@ -89,7 +91,7 @@ export const useHostsStore = defineStore('hosts', () => {
       (groupId !== null && !catalog.value?.groups.some((group) => group.id === groupId))
     )
       return;
-    await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), '主机分组已更新。');
+    await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), tr('主机分组已更新。'));
   }
   useErrorNotifications(error);
   return {

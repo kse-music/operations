@@ -14,6 +14,8 @@ pub struct ContextSelection {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PrepareInput {
     #[serde(default)]
+    pub progress_id: Option<String>,
+    #[serde(default)]
     pub approval_mode: serverdeck_plugin_sdk::platform::ApprovalMode,
     pub model_id: String,
     pub session_id: Option<String>,

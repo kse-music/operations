@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import { nextTick, ref } from 'vue';
 import { serverSections, type ServerSection } from './types';
 const props = defineProps<{ sections: readonly ServerSection[]; modelValue: ServerSection }>();
@@ -24,7 +26,13 @@ async function key(event: KeyboardEvent) {
 }
 </script>
 <template>
-  <div ref="tabs" class="server-tabs" role="tablist" aria-label="插件功能分类" @keydown="key">
+  <div
+    ref="tabs"
+    class="server-tabs"
+    role="tablist"
+    :aria-label="tr('插件功能分类')"
+    @keydown="key"
+  >
     <button
       v-for="section in sections"
       :id="`server-tab-${section}`"

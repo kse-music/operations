@@ -333,3 +333,43 @@ fn file_roots_use_path_component_boundaries_and_cannot_escape() {
         .is_err()
     );
 }
+
+#[test]
+fn argument_templates_require_an_explicit_new_permission_and_do_not_change_fixed_ssh_grants() {
+    let mut plugin = plugin();
+    let template = Command::script("printf '%s' \"$1\"")
+        .arg("read")
+        .arg("{{sd:uint:2:2147483647}}");
+    plugin.manifest.preapproved_commands = vec![template.clone()];
+    plugin
+        .manifest
+        .permissions
+        .push(Permission::SshExecutePreapproved);
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
+    plugin.manifest.permissions.extend([
+        Permission::OperationsReadPreapproved,
+        Permission::OperationsReadArgumentsPreapproved,
+    ]);
+    plugin.manifest.validate(std::env::consts::OS).unwrap();
+    let mut input = input();
+    input.permissions = plugin.manifest.permissions.clone();
+    input.operations.extend([
+        "ssh.execute.preapproved".into(),
+        "operations.read.preapproved".into(),
+        "operations.read.arguments.preapproved".into(),
+    ]);
+    let grant = Grant::new(&plugin, input).unwrap();
+    let concrete = Command::script("printf '%s' \"$1\"").arg("read").arg("42");
+    assert!(!grant.preapproves(
+        &plugin,
+        &Capability::Platform {
+            request: Primitive::Execute {
+                host_id: "host".into(),
+                command: concrete
+            },
+            bindings: vec![]
+        }
+    ));
+    plugin.manifest.preapproved_commands = vec![Command::script("{{sd:identifier:256:}}")];
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
+}

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "5.2.0";
+pub const API_VERSION: &str = "5.4.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -165,7 +165,9 @@ impl Manifest {
         {
             return Err(invalid("交互会话预授权需要 SSH 权限"));
         }
-        if self.preapproved_commands.len() > 16
+        let arguments = permissions.contains(&Permission::OperationsReadArgumentsPreapproved);
+        if (arguments && !permissions.contains(&Permission::OperationsReadPreapproved))
+            || self.preapproved_commands.len() > if arguments { 32 } else { 16 }
             || (!self.preapproved_commands.is_empty()
                 && (!permissions.contains(&Permission::SshExecute)
                     || !(permissions.contains(&Permission::SshExecutePreapproved)
@@ -173,13 +175,21 @@ impl Manifest {
             || (permissions.contains(&Permission::SshExecutePreapproved)
                 && self.preapproved_commands.is_empty())
         {
-            return Err(invalid("固定命令预授权需要 SSH 权限和 1–16 条完整命令"));
+            return Err(invalid(
+                "命令预授权需要 SSH 与对应权限，固定命令最多16条，带参数模板最多32条",
+            ));
         }
         let mut commands = BTreeSet::new();
         for command in &self.preapproved_commands {
             command
                 .validate()
                 .map_err(|_| invalid("预授权命令参数无效"))?;
+            let parameterized = command
+                .validate_argument_template()
+                .map_err(|_| invalid("预授权参数模板无效"))?;
+            if parameterized && !arguments {
+                return Err(invalid("参数化读取模板需要独立声明读取参数预授权"));
+            }
             if !commands.insert(command.shell().map_err(|_| invalid("预授权命令参数无效"))?)
             {
                 return Err(invalid("预授权命令重复"));

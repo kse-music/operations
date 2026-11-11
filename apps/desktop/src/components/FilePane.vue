@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+import { locale } from '@serverdeck/plugin-sdk/i18n';
+
 import {
   ArrowDown,
   ArrowUp,
@@ -35,7 +38,11 @@ const localColumns = [
 ] as const;
 const remoteColumns = [...localColumns, ['permissions', '权限'], ['owner', '拥有者']] as const;
 type SortKey = (typeof remoteColumns)[number][0];
-const columns = computed(() => (props.side === 'local' ? localColumns : remoteColumns));
+const columns = computed(() =>
+  (props.side === 'local' ? localColumns : remoteColumns).map(
+    ([key, label]) => [key, tr(label)] as const,
+  ),
+);
 const sort = ref<SortKey>('name'),
   descending = ref(false);
 
@@ -62,7 +69,7 @@ const entries = computed(() => {
         ? (a[key] ?? -1) - (b[key] ?? -1)
         : key === 'modified'
           ? (a.modified ?? 0) - (b.modified ?? 0)
-          : sortText(a, key).localeCompare(sortText(b, key), 'zh-CN', { numeric: true });
+          : sortText(a, key).localeCompare(sortText(b, key), locale.value, { numeric: true });
     return descending.value ? -value : value;
   });
 });
@@ -110,10 +117,30 @@ function beginDrag(entry: FileEntry, event: PointerEvent): void {
     emit('drag', entry, event);
 }
 const kinds = {
-  file: { label: '文件', icon: File },
-  directory: { label: '目录', icon: Folder },
-  symlink: { label: '链接', icon: FileSymlink },
-  other: { label: '特殊', icon: FileQuestionMark },
+  file: {
+    get label() {
+      return tr('文件');
+    },
+    icon: File,
+  },
+  directory: {
+    get label() {
+      return tr('目录');
+    },
+    icon: Folder,
+  },
+  symlink: {
+    get label() {
+      return tr('链接');
+    },
+    icon: FileSymlink,
+  },
+  other: {
+    get label() {
+      return tr('特殊');
+    },
+    icon: FileQuestionMark,
+  },
 };
 const fileIcons = [
   {
@@ -186,17 +213,20 @@ function entryIcon(entry: FileEntry) {
 </script>
 <template>
   <div class="file-list-tools">
-    <span>{{ loading ? '—' : entries.length }} 项 · {{ loading ? 0 : selected.length }} 已选</span>
+    <span
+      >{{ loading ? '—' : entries.length }}{{ tr(' 项 · ') }}{{ loading ? 0 : selected.length
+      }}{{ tr(' 已选') }}</span
+    >
   </div>
   <div class="file-table" :aria-busy="loading">
-    <table :aria-label="side === 'local' ? '本地文件' : '远程文件'">
+    <table :aria-label="side === 'local' ? tr('本地文件') : tr('远程文件')">
       <thead>
         <tr>
           <th>
             <input
               type="checkbox"
               :disabled="loading || !visibleEntries.length"
-              :aria-label="`全选当前页${side === 'local' ? '本地' : '远程'}文件`"
+              :aria-label="tr('全选当前页{0}文件', side === 'local' ? tr('本地') : tr('远程'))"
               :checked="
                 visibleEntries.length > 0 && visibleEntries.every((e) => selected.includes(e.path))
               "
@@ -242,7 +272,7 @@ function entryIcon(entry: FileEntry) {
           <td>
             <input
               type="checkbox"
-              :aria-label="`选择 ${entry.name}`"
+              :aria-label="tr('选择 {0}', entry.name)"
               :checked="selected.includes(entry.path)"
               @click.stop="toggle(entry.path)"
             />
@@ -267,7 +297,9 @@ function entryIcon(entry: FileEntry) {
           <td>{{ entry.kind === 'directory' ? '—' : bytes(entry.size) }}</td>
           <td>{{ kinds[entry.kind].label }}</td>
           <td>
-            {{ entry.modified === null ? '—' : new Date(entry.modified * 1000).toLocaleString() }}
+            {{
+              entry.modified === null ? '—' : new Date(entry.modified * 1000).toLocaleString(locale)
+            }}
           </td>
           <template v-if="side === 'remote'">
             <td class="file-metadata">
@@ -280,18 +312,18 @@ function entryIcon(entry: FileEntry) {
         </tr>
       </tbody>
     </table>
-    <p v-if="!loading && !listing" class="host-empty">尚未读取目录。</p>
+    <p v-if="!loading && !listing" class="host-empty">{{ tr('尚未读取目录。') }}</p>
     <p v-if="listing && !loading && !entries.length" class="host-empty">
-      {{ listing.entries.length ? '当前目录只有隐藏项' : '空目录' }}
+      {{ listing.entries.length ? tr('当前目录只有隐藏项') : tr('空目录') }}
     </p>
     <div v-if="loading" class="file-list-loading" role="status">
       <LoaderCircle class="file-list-spinner" :size="20" aria-hidden="true" />
-      <span>正在读取目录…</span>
+      <span>{{ tr('正在读取目录…') }}</span>
     </div>
   </div>
   <div v-if="!loading && pages > 1" class="file-pagination">
-    <button class="button" :disabled="page === 1" @click="page--">上一页</button
-    ><span>第 {{ page }} / {{ pages }} 页，每页 200 项</span
-    ><button class="button" :disabled="page === pages" @click="page++">下一页</button>
+    <button class="button" :disabled="page === 1" @click="page--">{{ tr('上一页') }}</button
+    ><span>{{ tr('第 ') }}{{ page }} / {{ pages }}{{ tr(' 页，每页 200 项') }}</span
+    ><button class="button" :disabled="page === pages" @click="page++">{{ tr('下一页') }}</button>
   </div>
 </template>

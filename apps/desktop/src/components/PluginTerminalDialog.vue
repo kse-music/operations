@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, nextTick, ref } from 'vue';
 import {
   Eraser,
@@ -29,7 +31,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>();
 const terminal = ref<InstanceType<typeof TerminalPane>>();
 const expanded = ref(false);
-const title = computed(() => props.presentation?.title || '插件终端');
+const title = computed(() => props.presentation?.title || tr('插件终端'));
 const hostAddress = computed(() => {
   const address = props.host.hostname.includes(':')
     ? `[${props.host.hostname}]`
@@ -49,7 +51,7 @@ const connecting = computed(() =>
 const ended = computed(() => ['closed', 'disconnected', 'failed'].includes(pane.value.state));
 const status = computed(() =>
   pane.value.state === 'disconnected'
-    ? '已断开'
+    ? tr('已断开')
     : (stateLabels[pane.value.state] ?? pane.value.state),
 );
 async function toggleExpanded(): Promise<void> {
@@ -70,7 +72,7 @@ async function toggleExpanded(): Promise<void> {
         <div class="plugin-terminal-identity">
           <div class="plugin-terminal-title">
             <h2 :title="title">{{ title }}</h2>
-            <span class="plugin-terminal-kind">终端</span>
+            <span class="plugin-terminal-kind">{{ tr('终端') }}</span>
           </div>
           <p :title="`${hostDisplayName(host)} · ${hostAddress}`">
             {{ hostDisplayName(host) }}<span aria-hidden="true"> · </span>{{ hostAddress }}
@@ -84,23 +86,28 @@ async function toggleExpanded(): Promise<void> {
         <div class="plugin-terminal-window-actions">
           <button
             class="icon-button"
-            :aria-label="expanded ? '还原终端窗口' : '最大化终端窗口'"
-            :title="expanded ? '还原终端窗口' : '最大化终端窗口'"
+            :aria-label="expanded ? tr('还原终端窗口') : tr('最大化终端窗口')"
+            :title="expanded ? tr('还原终端窗口') : tr('最大化终端窗口')"
             :aria-pressed="expanded"
             @click="toggleExpanded"
           >
             <Minimize2 v-if="expanded" :size="16" aria-hidden="true" />
             <Maximize2 v-else :size="16" aria-hidden="true" />
           </button>
-          <button class="icon-button" aria-label="关闭终端" title="关闭终端" @click="emit('close')">
+          <button
+            class="icon-button"
+            :aria-label="tr('关闭终端')"
+            :title="tr('关闭终端')"
+            @click="emit('close')"
+          >
             <X :size="18" aria-hidden="true" />
           </button>
         </div>
       </header>
     </template>
-    <div class="plugin-terminal-toolbar" role="toolbar" aria-label="终端工具栏">
+    <div class="plugin-terminal-toolbar" role="toolbar" :aria-label="tr('终端工具栏')">
       <span class="plugin-terminal-context" :title="presentation?.description">
-        {{ presentation?.description || '交互式 Shell' }}
+        {{ presentation?.description || tr('交互式 Shell') }}
       </span>
       <div class="plugin-terminal-tools">
         <button
@@ -108,13 +115,13 @@ async function toggleExpanded(): Promise<void> {
           :aria-pressed="terminal?.finding ?? false"
           @click="terminal?.toggleFind()"
         >
-          <Search :size="14" aria-hidden="true" />查找
+          <Search :size="14" aria-hidden="true" />{{ tr('查找 ') }}
         </button>
         <span class="plugin-terminal-tool-divider" aria-hidden="true"></span>
         <button
           class="icon-button"
-          aria-label="缩小终端字号"
-          title="缩小字号"
+          :aria-label="tr('缩小终端字号')"
+          :title="tr('缩小字号')"
           :disabled="(terminal?.fontSize ?? 16) <= 10"
           @click="terminal?.zoom('zoomOut')"
         >
@@ -122,16 +129,16 @@ async function toggleExpanded(): Promise<void> {
         </button>
         <button
           class="plugin-terminal-font tool-button"
-          aria-label="重置终端字号"
-          title="重置字号"
+          :aria-label="tr('重置终端字号')"
+          :title="tr('重置字号')"
           @click="terminal?.zoom('zoomReset')"
         >
           {{ terminal?.fontSize ?? 16 }}<span>px</span>
         </button>
         <button
           class="icon-button"
-          aria-label="放大终端字号"
-          title="放大字号"
+          :aria-label="tr('放大终端字号')"
+          :title="tr('放大字号')"
           :disabled="(terminal?.fontSize ?? 16) >= 32"
           @click="terminal?.zoom('zoomIn')"
         >
@@ -140,8 +147,8 @@ async function toggleExpanded(): Promise<void> {
         <span class="plugin-terminal-tool-divider" aria-hidden="true"></span>
         <button
           class="icon-button"
-          aria-label="清空终端显示"
-          title="清空显示（保留远端进程）"
+          :aria-label="tr('清空终端显示')"
+          :title="tr('清空显示（保留远端进程）')"
           @click="terminal?.clearScreen()"
         >
           <Eraser :size="15" aria-hidden="true" />
@@ -156,9 +163,8 @@ async function toggleExpanded(): Promise<void> {
     >
       {{
         terminal?.message ||
-        (pane.state === 'failed' ? '终端连接失败。' : '终端会话已结束，历史输出已保留。')
-      }}
-      关闭后可从原入口重新打开。
+        (pane.state === 'failed' ? tr('终端连接失败。') : tr('终端会话已结束，历史输出已保留。'))
+      }}{{ tr(' 关闭后可从原入口重新打开。 ') }}
     </p>
     <div class="plugin-terminal">
       <TerminalPane
@@ -175,8 +181,9 @@ async function toggleExpanded(): Promise<void> {
         "
       />
       <div v-if="connecting" class="plugin-terminal-loading" role="status">
-        <LoaderCircle :size="22" class="spinning" aria-hidden="true" />
-        正在建立终端会话…
+        <LoaderCircle :size="22" class="spinning" aria-hidden="true" />{{
+          tr(' 正在建立终端会话… ')
+        }}
       </div>
     </div>
   </Modal>

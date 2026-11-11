@@ -1,3 +1,5 @@
+import { tr } from '../i18n/messages';
+import { isStreamControl } from '@serverdeck/plugin-sdk/streaming';
 import { watch } from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
@@ -50,7 +52,7 @@ export function createPluginUiBridge(input: {
       !grant.permissions.includes('ui.contribute') ||
       !grant.operations.includes('ui.contribute')
     )
-      throw { code: 'PLUGIN_PERMISSION_DENIED', message: '插件权限或页面已失效' };
+      throw { code: 'PLUGIN_PERMISSION_DENIED', message: tr('插件权限或页面已失效') };
   }
   function has(permission: PluginPermission) {
     const grant = plugins.grants[input.id];
@@ -62,6 +64,7 @@ export function createPluginUiBridge(input: {
       canConnect = has('ssh.execute') || has('sftp.read') || has('sftp.write');
     return {
       theme: document.documentElement.dataset.theme ?? 'dark',
+      language: plugins.locale,
       interfaceFontScale: Number(
         document.documentElement.style.getPropertyValue('--interface-font-scale') || 1,
       ),
@@ -112,17 +115,17 @@ export function createPluginUiBridge(input: {
   async function ensure(hostId: string, file: boolean) {
     check(true);
     if (!has(file ? 'sftp.read' : 'ssh.execute') && !(file && has('sftp.write')))
-      throw { code: 'PLUGIN_PERMISSION_DENIED', message: '插件没有连接权限' };
+      throw { code: 'PLUGIN_PERMISSION_DENIED', message: tr('插件没有连接权限') };
     if (!hosts.catalog) await hosts.load();
     check(true);
     const host = hosts.catalog?.hosts.find((h) => h.id === hostId);
-    if (!host) throw new Error('目标主机未登记');
+    if (!host) throw new Error(tr('目标主机未登记'));
     const checkFileIdentity = () => {
       const connection = files.connections[hostId];
       if (file && (connection?.elevated || connection?.switchingUser))
         throw {
           code: 'PLUGIN_SFTP_IDENTITY',
-          message: '请先在 SFTP 文件页切回原登录用户，再使用插件文件功能。',
+          message: tr('请先在 SFTP 文件页切回原登录用户，再使用插件文件功能。'),
         };
     };
     checkFileIdentity();
@@ -142,7 +145,7 @@ export function createPluginUiBridge(input: {
         else resolve();
       };
       const cancel = () =>
-        finish({ code: 'PLUGIN_CANCELLED', message: '页面已离开，停止等待连接' });
+        finish({ code: 'PLUGIN_CANCELLED', message: tr('页面已离开，停止等待连接') });
       cleanup.add(cancel);
       const inspect = async () => {
         if (finished) return;
@@ -150,18 +153,18 @@ export function createPluginUiBridge(input: {
           check(true);
           checkFileIdentity();
           const c = file ? files.connections[hostId] : ops.connections[hostId];
-          if (!c) throw new Error('连接未建立');
+          if (!c) throw new Error(tr('连接未建立'));
           if (c.state === 'connected') {
             finish();
             return;
           }
           if (['failed', 'closed', 'disconnected'].includes(c.state))
-            throw new Error(c.error || '连接已结束');
+            throw new Error(c.error || tr('连接已结束'));
           if (c.trust && !trusting) {
             trusting = true;
             const trust = c.trust;
             const accepted = await plugins.ask(
-              '核验 SSH 主机指纹',
+              tr('核验 SSH 主机指纹'),
               trust.hostname +
                 ':' +
                 trust.port +
@@ -169,13 +172,13 @@ export function createPluginUiBridge(input: {
                 trust.algorithm +
                 '\n' +
                 trust.fingerprint +
-                '\n请通过可信渠道核对此真实指纹。',
+                tr('\n请通过可信渠道核对此真实指纹。'),
               undefined,
               owner,
             );
             const id = file ? files.connections[hostId]?.id : ops.connections[hostId]?.session?.id;
             if (id) await terminalApi.trust(id, accepted && active());
-            if (!accepted || !active()) throw new Error('未确认主机指纹');
+            if (!accepted || !active()) throw new Error(tr('未确认主机指纹'));
             trusting = false;
           }
         } catch (error) {
@@ -190,7 +193,7 @@ export function createPluginUiBridge(input: {
         () => void inspect(),
         { deep: true },
       );
-      const timer = setTimeout(() => finish(new Error('连接超时')), 120000);
+      const timer = setTimeout(() => finish(new Error(tr('连接超时'))), 120000);
       void inspect();
     });
     check(true);
@@ -200,11 +203,14 @@ export function createPluginUiBridge(input: {
     const primitive =
       method === 'platform.request' ? (args.operation as PlatformRequest | undefined) : undefined;
     const resourceCleanup =
-      primitive && ['close_file', 'stream_stop', 'result_close'].includes(primitive.kind);
+      primitive &&
+      (['close_file', 'stream_stop', 'result_close'].includes(primitive.kind) ||
+        (primitive.kind === 'approval_mode' && primitive.mode === 'request') ||
+        isStreamControl(primitive));
     check(!resourceCleanup);
     switch (method) {
       case 'invoke': {
-        if (typeof args.action !== 'string') throw new Error('插件动作无效');
+        if (typeof args.action !== 'string') throw new Error(tr('插件动作无效'));
         const result = await pluginInvokeRequest(
           input.id,
           input.page,
@@ -216,11 +222,11 @@ export function createPluginUiBridge(input: {
         );
         check();
         if (!active() && !input.canRetain?.())
-          throw { code: 'PLUGIN_CANCELLED', message: '页面已隐藏' };
+          throw { code: 'PLUGIN_CANCELLED', message: tr('页面已隐藏') };
         return result;
       }
       case 'platform.request': {
-        if (!primitive || typeof primitive.kind !== 'string') throw new Error('平台请求无效');
+        if (!primitive || typeof primitive.kind !== 'string') throw new Error(tr('平台请求无效'));
         const result = await pluginPlatformRequest(input.id, primitive, active, owner);
         if (primitive.kind === 'settings_write')
           plugins.settingsRevisions[input.id] = (plugins.settingsRevisions[input.id] ?? 0) + 1;
@@ -235,7 +241,7 @@ export function createPluginUiBridge(input: {
           typeof args.hostId !== 'string' ||
           (args.files !== undefined && typeof args.files !== 'boolean')
         )
-          throw new Error('连接目标无效');
+          throw new Error(tr('连接目标无效'));
         return ensure(args.hostId, args.files === true);
       case 'terminal.open': {
         if (
@@ -244,7 +250,7 @@ export function createPluginUiBridge(input: {
           typeof args.hostId !== 'string' ||
           !has('ssh.execute')
         )
-          throw new Error('终端票据无效');
+          throw new Error(tr('终端票据无效'));
         let presentation: TerminalPresentation | undefined;
         if (args.presentation !== undefined) {
           const value = args.presentation;
@@ -261,7 +267,7 @@ export function createPluginUiBridge(input: {
                 /\p{Cc}/u.test(text),
             )
           )
-            throw new Error('终端显示信息无效');
+            throw new Error(tr('终端显示信息无效'));
           const display = value as TerminalPresentation;
           presentation = {
             ...(display.title ? { title: display.title.trim() } : {}),
@@ -272,35 +278,36 @@ export function createPluginUiBridge(input: {
         return null;
       }
       case 'workspace.draft':
-        if (typeof args.dirty !== 'boolean' || !input.contextKey) throw new Error('草稿作用域无效');
+        if (typeof args.dirty !== 'boolean' || !input.contextKey)
+          throw new Error(tr('草稿作用域无效'));
         plugins.setDraftDirty(input.contextKey, input.id, args.dirty);
         return null;
       case 'clipboard.write':
         if (typeof args.text !== 'string' || args.text.length > 1024 * 1024)
-          throw new Error('复制内容超过限制');
+          throw new Error(tr('复制内容超过限制'));
         await clipboardApi.writeText(args.text);
         return null;
       case 'workspace.navigate':
-        if (args.view !== 'models') throw new Error('导航目标无效');
+        if (args.view !== 'models') throw new Error(tr('导航目标无效'));
         if (input.settingsAction) input.settingsAction('models');
         else workspace.navigate('models');
         return null;
       case 'settings.close':
-        if (!input.settingsAction) throw new Error('当前页面不是插件设置');
+        if (!input.settingsAction) throw new Error(tr('当前页面不是插件设置'));
         input.settingsAction('close');
         return null;
       case 'ui.notify':
         if (typeof args.message !== 'string' || args.message.length > 2048)
-          throw new Error('通知超过限制');
+          throw new Error(tr('通知超过限制'));
         notifications.push(args.message, args.error === true);
         return null;
       case 'ui.export':
         if (typeof args.name !== 'string' || !/^[\w.-]{1,120}$/.test(args.name))
-          throw new Error('导出文件名无效');
+          throw new Error(tr('导出文件名无效'));
         downloadResult(args.name, args.value);
         return null;
       default:
-        throw { code: 'PLUGIN_PERMISSION_DENIED', message: '未公开的平台能力' };
+        throw { code: 'PLUGIN_PERMISSION_DENIED', message: tr('未公开的平台能力') };
     }
   }
   function suspend() {

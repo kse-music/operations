@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
@@ -246,7 +247,7 @@ export const useFilesStore = defineStore('files', () => {
       document.value?.sessionId === id ||
       externalDocument.value?.sessionId === id
     ) {
-      error.value = '请先保存并关闭编辑文档，再切换 SFTP 用户。';
+      error.value = tr('请先保存并关闭编辑文档，再切换 SFTP 用户。');
       return false;
     }
     connection.switchingUser = true;
@@ -300,7 +301,7 @@ export const useFilesStore = defineStore('files', () => {
   async function edit(path: string, size: number | null = null): Promise<void> {
     if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value)) return;
     if (document.value || externalDocument.value) {
-      error.value = '请先保存或关闭当前编辑文档。';
+      error.value = tr('请先保存或关闭当前编辑文档。');
       return;
     }
     const sessionId = current.value.id;
@@ -310,7 +311,7 @@ export const useFilesStore = defineStore('files', () => {
       openIssue.value = {
         sessionId,
         path,
-        message: '文件超过内置编辑器的 2 MiB 上限，可使用系统应用编辑。',
+        message: tr('文件超过内置编辑器的 2 MiB 上限，可使用系统应用编辑。'),
       };
       return;
     }
@@ -343,13 +344,13 @@ export const useFilesStore = defineStore('files', () => {
   function offerExternal(path: string): void {
     if (!current.value?.id) return;
     if (document.value || externalDocument.value || editorBusy.value) {
-      error.value = '请先保存或关闭当前编辑文档。';
+      error.value = tr('请先保存或关闭当前编辑文档。');
       return;
     }
     openIssue.value = {
       sessionId: current.value.id,
       path,
-      message: '使用本机应用编辑远程文件，保存后返回此处确认回传。',
+      message: tr('使用本机应用编辑远程文件，保存后返回此处确认回传。'),
     };
   }
   async function openLocal(path: string): Promise<void> {
@@ -384,7 +385,7 @@ export const useFilesStore = defineStore('files', () => {
     const task = tasks.value.find((task) => task.id === old.transferId);
     if (!task || unfinished(task)) return;
     if (task.state !== 'completed') {
-      externalError.value = task.message ?? '外部编辑副本下载未完成，请结束本次编辑后重试。';
+      externalError.value = task.message ?? tr('外部编辑副本下载未完成，请结束本次编辑后重试。');
       return;
     }
     externalBusy.value = true;
@@ -407,10 +408,14 @@ export const useFilesStore = defineStore('files', () => {
     try {
       const result = await filesApi.externalSave(external.token, true);
       if (!result.document) {
-        externalError.value = `${result.message ?? '回传失败'}；恢复路径：${result.recoveryPath ?? '无'}`;
+        externalError.value = tr(
+          '{0}；恢复路径：{1}',
+          result.message ?? tr('回传失败'),
+          result.recoveryPath ?? tr('无'),
+        );
         return;
       }
-      notifications.push('外部编辑的文件已回传并校验；继续编辑后需再次确认回传。');
+      notifications.push(tr('外部编辑的文件已回传并校验；继续编辑后需再次确认回传。'));
       void refresh();
     } catch (cause) {
       externalError.value = errorMessage(cause);
@@ -445,7 +450,7 @@ export const useFilesStore = defineStore('files', () => {
       await filesApi.closeEditor(external.token, true);
       externalDocument.value = null;
       externalError.value = null;
-      notifications.push(`已结束外部编辑，本地副本保留于：${external.localPath}`);
+      notifications.push(tr('已结束外部编辑，本地副本保留于：{0}', external.localPath));
     } catch (cause) {
       externalError.value = errorMessage(cause);
     } finally {
@@ -469,15 +474,18 @@ export const useFilesStore = defineStore('files', () => {
         (externalDocument.value && ids.has(externalDocument.value.sessionId)) ||
         (editorBusy.value && active.value === hostId)
       ) {
-        error.value = '请先关闭此主机的编辑文档，再关闭主机。';
+        error.value = tr('请先关闭此主机的编辑文档，再关闭主机。');
         return false;
       }
       const count = latest.filter((task) => task.hostId === hostId && unfinished(task)).length;
       if (
         count &&
         !(await usePluginsStore().ask(
-          '取消传输并关闭主机',
-          `此主机还有 ${count} 个未完成的传输。确认后取消传输并关闭主机，已完成文件保留，传输记录将清除。提交中的单个文件会等待结果。`,
+          tr('取消传输并关闭主机'),
+          tr(
+            '此主机还有 {0} 个未完成的传输。确认后取消传输并关闭主机，已完成文件保留，传输记录将清除。提交中的单个文件会等待结果。',
+            count,
+          ),
         ))
       )
         return false;
@@ -538,7 +546,7 @@ export const useFilesStore = defineStore('files', () => {
           !live.some((c) => c.id === connection.id)
         ) {
           connection.state = 'failed';
-          connection.error = 'SSH 文件连接已关闭，请重新连接。';
+          connection.error = tr('SSH 文件连接已关闭，请重新连接。');
         }
       }
       const before = new Map(tasks.value.map((t) => [t.id, t.state]));
@@ -566,15 +574,15 @@ export const useFilesStore = defineStore('files', () => {
     const related = Object.values(connections.value).filter(
       (c) => c.host.id === id || c.routeHostIds?.includes(id),
     );
-    if (state === '已连接' || related.some((c) => c.state === 'connected')) return '已连接';
+    if (state === tr('已连接') || related.some((c) => c.state === 'connected')) return tr('已连接');
     if (
-      state === '连接中' ||
+      state === tr('连接中') ||
       related.some((c) =>
         ['opening', 'connecting', 'authenticating', 'awaiting_trust'].includes(c.state),
       )
     )
-      return '连接中';
-    return '未连接';
+      return tr('连接中');
+    return tr('未连接');
   }
   useErrorNotifications(() => [
     error.value,
@@ -583,7 +591,14 @@ export const useFilesStore = defineStore('files', () => {
       .filter((task) => task.state === 'failed' || task.recoveryPaths.length > 0)
       .map((task) =>
         task.message || task.recoveryPaths.length
-          ? `文件传输 ${task.id}（HostId=${task.hostId}）：${[task.message, ...task.recoveryPaths.map((path) => `待检查临时文件：${path}`)].filter(Boolean).join('；')}`
+          ? tr(
+              '文件传输 {0}（HostId={1}）：{2}',
+              task.id,
+              task.hostId,
+              [task.message, ...task.recoveryPaths.map((path) => tr('待检查临时文件：{0}', path))]
+                .filter(Boolean)
+                .join('；'),
+            )
           : null,
       ),
   ]);

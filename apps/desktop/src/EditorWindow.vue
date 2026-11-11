@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
+
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import RemoteEditorHost from './components/RemoteEditorHost.vue';
@@ -30,6 +33,7 @@ async function load(): Promise<void> {
     const value = await editorApi.load();
     if (disposed) return;
     data.value = value;
+    setLocale(value.language);
     const scale =
       interfaceFontSizes.find((size) => size.value === value.interfaceFontSize)?.scale ?? 1;
     document.documentElement.style.setProperty('--interface-font-scale', String(scale));
@@ -60,11 +64,11 @@ onBeforeUnmount(() => {
   <main class="editor-window-shell">
     <RemoteEditorHost v-if="data" ref="editor" :document="data.document" />
     <div v-else class="editor-window-message">
-      <p v-if="loading" role="status">正在打开远程文本编辑器…</p>
+      <p v-if="loading" role="status">{{ tr('正在打开远程文本编辑器…') }}</p>
       <p v-if="error" role="alert">{{ error }}</p>
       <template v-if="error">
-        <button class="button" :disabled="loading" @click="load">重试</button>
-        <button class="button" :disabled="loading" @click="close">关闭编辑器</button>
+        <button class="button" :disabled="loading" @click="load">{{ tr('重试') }}</button>
+        <button class="button" :disabled="loading" @click="close">{{ tr('关闭编辑器') }}</button>
       </template>
     </div>
     <NotificationToasts />

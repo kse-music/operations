@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
 import type { OpsRequest, OpsResponse } from './types';
@@ -44,7 +46,7 @@ async function load(fallback = inspectOnly.value) {
       !('services' in data.configuration) ||
       data.environmentRevealed !== true
     )
-      throw new Error('未能读取此容器的启动配置。');
+      throw new Error(tr('未能读取此容器的启动配置。'));
     detail.value = data;
   } catch (cause) {
     if (token === generation) error.value = errorMessage(cause);
@@ -61,13 +63,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="docker-startup">
-    <p v-if="loading" class="host-empty" role="status">正在读取启动配置…</p>
+    <p v-if="loading" class="host-empty" role="status">{{ tr('正在读取启动配置…') }}</p>
     <template v-else-if="error">
       <p class="banner error" role="alert">{{ error }}</p>
       <div class="docker-startup-toolbar">
-        <button class="button" type="button" @click="load()">重试</button>
+        <button class="button" type="button" @click="load()">{{ tr('重试') }}</button>
         <button v-if="!inspectOnly" class="button" type="button" @click="load(true)">
-          使用容器信息转换
+          {{ tr(' 使用容器信息转换 ') }}
         </button>
       </div>
     </template>
@@ -77,14 +79,17 @@ onBeforeUnmount(() => {
           {{
             detail.source === 'compose'
               ? `Compose · ${detail.project} / ${detail.service}`
-              : '容器信息转换 · Compose 格式'
+              : tr('容器信息转换 · Compose 格式')
           }}
         </span>
       </div>
-      <p v-for="warning in warnings" :key="warning" class="subtle">{{ warning }}</p>
-      <p class="subtle">环境变量可能包含敏感值，切换标签或关闭详情时会清除。</p>
-      <pre class="docker-startup-yaml" aria-label="Compose 启动配置"><code>{{ yaml }}</code></pre>
+      <p v-for="warning in warnings" :key="warning" class="subtle">{{ tr(warning) }}</p>
+      <p class="subtle">{{ tr('环境变量可能包含敏感值，切换标签或关闭详情时会清除。') }}</p>
+      <pre
+        class="docker-startup-yaml"
+        :aria-label="tr('Compose 启动配置')"
+      ><code>{{ yaml }}</code></pre>
     </template>
-    <p v-else class="host-empty">此容器没有可用的启动配置。</p>
+    <p v-else class="host-empty">{{ tr('此容器没有可用的启动配置。') }}</p>
   </div>
 </template>

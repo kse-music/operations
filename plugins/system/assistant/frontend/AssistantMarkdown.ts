@@ -1,3 +1,4 @@
+import { tr } from './i18n/messages';
 import { defineComponent, h, type VNodeChild } from 'vue';
 import { Lexer, type MarkedToken, type Token } from 'marked';
 
@@ -82,7 +83,7 @@ function nodes(tokens: Token[], depth = 0): VNodeChild[] {
           : h('span', nested(t.tokens));
       }
       case 'image':
-        return h('span', { class: 'ai-image-alt' }, `[图片：${t.text || '未加载'}]`);
+        return h('span', { class: 'ai-image-alt' }, tr('[图片：{0}]', t.text || tr('未加载')));
       case 'table':
         return h('div', { class: 'ai-markdown-table', tabindex: 0 }, [
           h('table', [
@@ -120,7 +121,7 @@ export default defineComponent({
         );
       } catch {
         return h('div', { class: 'ai-markdown' }, [
-          h('p', { role: 'status' }, '格式解析失败，已按文本显示。'),
+          h('p', { role: 'status' }, tr('格式解析失败，已按文本显示。')),
           h('pre', props.content),
         ]);
       }

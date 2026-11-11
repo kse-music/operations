@@ -44,6 +44,7 @@ fn additive_preferences_and_logical_window_size_survive_reopen() {
     let mut config = db.load_config().unwrap();
     config.product.download_directory = Some(dir.path().to_string_lossy().into_owned());
     config.product.ssh_defaults.keepalive_interval_secs = 42;
+    config.product.language = "en-US".into();
     db.save_config(&config).unwrap();
     db.save_window_geometry(WindowGeometry {
         width: 1100.0,

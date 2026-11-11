@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { aiApi } from '../services/ai';
 import { errorMessage } from '../services/ipc';
@@ -59,10 +60,10 @@ export function useModelForm(model: AiModel | undefined, saved: () => void) {
       const result = await aiApi.modelTest(payload);
       if (disposed || current !== version) return;
       receipt.value = result;
-      testMessage.value = `连接成功 · ${result.elapsedMs} ms · 当前配置可保存`;
+      testMessage.value = tr('连接成功 · {0} ms · 当前配置可保存', result.elapsedMs);
       expiry = setTimeout(() => {
         invalidate();
-        testMessage.value = '测试结果已过期，请重新测试。';
+        testMessage.value = tr('测试结果已过期，请重新测试。');
       }, result.expiresInSeconds * 1000);
     } catch (e) {
       if (!disposed && current === version) testError.value = errorMessage(e);

@@ -264,7 +264,7 @@ impl Application {
                 let profile =
                     serde_json::to_string(&sessions).map_err(|e| Error::Worker(Box::new(e)))?;
                 let target = format!("{source_target} → {target}");
-                if !self.plugin_auto_read(call, plugin, grant, &operation)?
+                if !self.plugin_mode_preapproves(call, plugin, grant, &operation)?
                     && let Some(approval) = self.plugin_confirmation_bound(
                         call,
                         plugin,
@@ -393,13 +393,15 @@ impl Application {
                     labels.get(1).map(String::as_str).unwrap_or("本机"),
                     labels.first().ok_or(Error::Conflict)?
                 );
-                if let Some(approval) = self.plugin_confirmation_bound(
-                    call,
-                    plugin,
-                    &operation,
-                    Some(&profile),
-                    Some(&target),
-                )? {
+                if !self.plugin_mode_preapproves(call, plugin, grant, &operation)?
+                    && let Some(approval) = self.plugin_confirmation_bound(
+                        call,
+                        plugin,
+                        &operation,
+                        Some(&profile),
+                        Some(&target),
+                    )?
+                {
                     return Ok(serde_json::json!({"confirmationRequired":approval}));
                 }
                 let guard = Arc::new(Authorization {

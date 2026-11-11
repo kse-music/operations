@@ -1,6 +1,7 @@
+import { tr } from '../i18n/messages';
 import { defaultSshOptions, type SshOptions } from './connection';
 export interface ProductPreferences {
-  language: 'zh-CN';
+  language: 'zh-CN' | 'en-US';
   downloadDirectory: string | null;
   sshDefaults: SshOptions;
   shortcuts: Record<string, string>;
@@ -11,28 +12,71 @@ export const defaultProductPreferences = (): ProductPreferences => ({
   sshDefaults: defaultSshOptions(),
   shortcuts: { search: 'Ctrl+K', settings: 'Ctrl+,' },
 });
-// Locale registry: add a complete dictionary before advertising another UI language.
-export const messages = {
-  'zh-CN': {
-    models: '模型',
-    settings: '通用',
-    settingsTerminal: '终端',
-    settingsShortcuts: '快捷键',
-    settingsStorage: '数据与存储',
-    terminals: 'SSH 终端',
-    files: 'SFTP 文件',
-    server: '服务器管理',
-    about: '关于',
-    plugins: '插件管理',
-    extension: '插件工作区',
+export const viewLabels = {
+  get models() {
+    return tr('模型');
+  },
+  get settings() {
+    return tr('通用');
+  },
+  get settingsTerminal() {
+    return tr('终端');
+  },
+  get settingsShortcuts() {
+    return tr('快捷键');
+  },
+  get settingsStorage() {
+    return tr('数据与存储');
+  },
+  get terminals() {
+    return tr('SSH 终端');
+  },
+  get files() {
+    return tr('SFTP 文件');
+  },
+  get server() {
+    return tr('服务器管理');
+  },
+  get about() {
+    return tr('关于');
+  },
+  get plugins() {
+    return tr('插件管理');
+  },
+  get extension() {
+    return tr('插件工作区');
   },
 } as const;
-export type WorkspaceView = keyof (typeof messages)['zh-CN'];
+export type WorkspaceView = keyof typeof viewLabels;
 export const settingsCategories = [
-  { id: 'general', view: 'settings', label: messages['zh-CN'].settings },
-  { id: 'terminal', view: 'settingsTerminal', label: messages['zh-CN'].settingsTerminal },
-  { id: 'shortcuts', view: 'settingsShortcuts', label: messages['zh-CN'].settingsShortcuts },
-  { id: 'storage', view: 'settingsStorage', label: messages['zh-CN'].settingsStorage },
+  {
+    id: 'general',
+    view: 'settings',
+    get label() {
+      return viewLabels.settings;
+    },
+  },
+  {
+    id: 'terminal',
+    view: 'settingsTerminal',
+    get label() {
+      return viewLabels.settingsTerminal;
+    },
+  },
+  {
+    id: 'shortcuts',
+    view: 'settingsShortcuts',
+    get label() {
+      return viewLabels.settingsShortcuts;
+    },
+  },
+  {
+    id: 'storage',
+    view: 'settingsStorage',
+    get label() {
+      return viewLabels.settingsStorage;
+    },
+  },
 ] as const;
 export type SettingsCategory = (typeof settingsCategories)[number]['id'];
 export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'server']);

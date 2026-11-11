@@ -79,7 +79,15 @@ impl Application {
         let call = if matches!(
             &request.operation,
             Capability::Platform {
-                request: serverdeck_plugin_sdk::platform::Request::TransferCancel { .. },
+                request: serverdeck_plugin_sdk::platform::Request::Streaming { request }, ..
+            } if request.cleanup()
+        ) || matches!(
+            &request.operation,
+            Capability::Platform {
+                request: serverdeck_plugin_sdk::platform::Request::TransferCancel { .. }
+                    | serverdeck_plugin_sdk::platform::Request::ApprovalMode {
+                        mode: serverdeck_plugin_sdk::platform::ApprovalMode::Request,
+                    },
                 ..
             }
         ) {
@@ -125,6 +133,13 @@ impl Application {
                     batch.operations.clear();
                 }
                 let ipc = serverdeck_core::IpcError::from(error);
+                tracing::warn!(
+                    operation = "plugin_capability_failed",
+                    plugin_id = %call.id,
+                    capability = %operation_name,
+                    code = ipc.code,
+                    "Plugin capability failed"
+                );
                 self.plugin_host.event(Event {
                     plugin_id: call.id.clone(),
                     kind: if ipc.code == "PLUGIN_PERMISSION_DENIED" {
@@ -203,6 +218,9 @@ impl Application {
         let data = self.plugin_host.lock()?;
         let Capability::Platform { request, .. } = operation;
         let description = match request {
+            serverdeck_plugin_sdk::platform::Request::ApprovalMode {
+                mode: serverdeck_plugin_sdk::platform::ApprovalMode::Full,
+            } => "启用当前会话的完全访问权限。\n在已授予的主机、目录和平台能力范围内，读取、文件修改/覆盖、上传中转及远程命令将不再逐次请求批准，可能包含删除或服务启停。\n授权持续生效，直到切换模式、新建对话或关闭会话；撤销插件权限或插件重启也会撤销授权。".into(),
             serverdeck_plugin_sdk::platform::Request::ReadFile { path, .. } => format!(
                 "读取远程文本文件：{path}（最多 32 KiB）；插件可使用已授予的模型能力处理内容"
             ),
@@ -314,6 +332,7 @@ impl Application {
     }
     pub(crate) async fn plugin_stop_resources(&self, id: &str) -> Result<(), Error> {
         self.plugin_host.stop(id).await?;
+        self.plugin_close_streaming(id, None).await?;
         self.plugin_close_copies(id, None).await?;
         let (documents, streams, terminals) = {
             let mut data = self.plugin_host.lock()?;
@@ -322,6 +341,8 @@ impl Application {
             data.results.retain(|_, r| r.plugin != id);
             data.outputs.retain(|_, r| r.plugin != id);
             data.bindings.retain(|_, r| r.plugin != id);
+            data.full_access_sessions
+                .retain(|(plugin, _), _| plugin != id);
             data.platform_terminals.retain(|_, r| r.plugin != id);
             data.visible_owners.retain(|(plugin, _), _| plugin != id);
             (

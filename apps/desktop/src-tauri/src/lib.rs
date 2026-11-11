@@ -68,8 +68,9 @@ pub fn run() {
             })();
             if let Err(error) = &initialized {
                 use tauri_plugin_dialog::DialogExt;
-                app.dialog().message(format!("无法打开应用数据：{error}\n请检查已配置的目录、磁盘和权限。不会切换到替代空数据库。"))
-                    .title("ServerDeck 启动失败").kind(tauri_plugin_dialog::MessageDialogKind::Error).blocking_show();
+                // The saved language may be inaccessible when initialization fails.
+                app.dialog().message(format!("无法打开应用数据 / Cannot open application data: {error}\n请检查已配置的目录、磁盘和权限。不会切换到替代空数据库。\nCheck the configured directory, disk and permissions. No empty replacement database will be used."))
+                    .title("ServerDeck 启动失败 / Startup failed").kind(tauri_plugin_dialog::MessageDialogKind::Error).blocking_show();
             }
             initialized
         })

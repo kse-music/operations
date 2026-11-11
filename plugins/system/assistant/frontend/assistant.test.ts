@@ -12,11 +12,15 @@ const api = vi.hoisted(() => ({
   localToolInstallCancel: vi.fn(),
   settings: vi.fn(),
   prepare: vi.fn(),
+  progressOpen: vi.fn(),
+  progressRead: vi.fn(),
+  progressClose: vi.fn(),
   send: vi.fn(),
   execute: vi.fn(),
   task: vi.fn(),
   poll: vi.fn(),
   cancelTransfer: vi.fn(),
+  revokeFullAccess: vi.fn(),
   cancel: vi.fn(),
   resolveHosts: vi.fn(),
   hostList: vi.fn(),
@@ -51,6 +55,7 @@ const navigation = vi.hoisted(() => vi.fn());
 vi.mock('@serverdeck/plugin-sdk/transport', () => ({ request: navigation }));
 import AssistantView from './AssistantView.vue';
 import SettingsView from './SettingsView.vue';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import { useAssistant } from './assistant';
 import { usePlatformContext, updatePlatformContext } from '@serverdeck/plugin-sdk/context';
 const hostInput = () => ({ port: 22, username: 'ops', description: '', groupId: null });
@@ -322,6 +327,9 @@ beforeEach(() => {
     message: '请先授权使用本地 Claude Code',
   });
   api.localClaudeCodeAuthorize.mockResolvedValue(undefined);
+  api.progressOpen.mockResolvedValue({ id: 'progress-a' });
+  api.progressRead.mockResolvedValue({ revision: 1, text: '', offset: 0 });
+  api.progressClose.mockResolvedValue(undefined);
   api.prepare.mockResolvedValue(preview);
   api.resolveHosts.mockResolvedValue({ hostIds: [], message: '', modelRevision: 'r1' });
   api.hostList.mockResolvedValue({
@@ -334,6 +342,7 @@ beforeEach(() => {
   api.trust.mockResolvedValue(undefined);
   api.send.mockResolvedValue(answer);
   api.cancel.mockResolvedValue(undefined);
+  api.revokeFullAccess.mockResolvedValue(undefined);
   api.execute.mockResolvedValue({ success: true, output: 'readonly-output' });
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -343,9 +352,31 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  setLocale('zh-CN');
   app?.unmount();
   root?.remove();
   disposePinia(pinia);
+});
+it('switches assistant language while retaining the question draft and model binding', async () => {
+  await mount();
+  const input = root.querySelector<HTMLTextAreaElement>('#assistant-question')!;
+  input.value = '保留我输入的问题 {0}';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  const requests = api.models.mock.calls.length;
+  setLocale('en-US');
+  await settle();
+  expect(root.querySelector('#assistant-question')).toBe(input);
+  expect(input.value).toBe('保留我输入的问题 {0}');
+  expect(root.textContent).toContain('Request approval');
+  expect(root.textContent).toContain('Full access');
+  expect(root.textContent).toContain('What would you like to troubleshoot?');
+  expect(api.models).toHaveBeenCalledTimes(requests);
+  expect(api.send).not.toHaveBeenCalled();
+  setLocale('zh-CN');
+  await settle();
+  expect(root.textContent).toContain('请求批准');
+  expect(input.value).toBe('保留我输入的问题 {0}');
 });
 it('delegates context selection to the host without a configuration panel or send dialog', async () => {
   await mount();
@@ -447,6 +478,92 @@ it('freezes approval mode per new task and assist opens the host plan confirmati
   expect(api.prepare.mock.lastCall![0].approvalMode).toBe('assist');
   expect(api.execute).toHaveBeenCalledExactlyOnceWith('read', true, null);
   expect(root.querySelector('.ai-command-review')).toBeNull();
+});
+it('offers all three modes and full access automatically executes only the new task', async () => {
+  await mount();
+  const mode = root.querySelector<HTMLSelectElement>('[aria-label="审批模式"]')!;
+  expect([...mode.options].map((option) => [option.value, option.textContent])).toEqual([
+    ['request', '请求批准'],
+    ['assist', '帮我批准'],
+    ['full', '完全访问权限'],
+  ]);
+  await send();
+  expect(api.prepare.mock.lastCall![0].approvalMode).toBe('request');
+  expect(api.execute).not.toHaveBeenCalled();
+  mode.value = 'full';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(api.execute).not.toHaveBeenCalled();
+  await send();
+  expect(api.prepare.mock.lastCall![0].approvalMode).toBe('full');
+  expect(api.execute).toHaveBeenCalledExactlyOnceWith('read', true, null);
+  expect(mode.title).toContain('首次启用须宿主授权');
+  expect(mode.title).toContain('持续生效直到切换模式或关闭会话');
+  expect(mode.title).not.toContain('10分钟');
+});
+it('revokes full access on either mode switch and waits for the native acknowledgement', async () => {
+  await mount();
+  const mode = root.querySelector<HTMLSelectElement>('[aria-label="审批模式"]')!;
+  mode.value = 'full';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await send();
+  let acknowledge!: () => void;
+  api.revokeFullAccess.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      }),
+  );
+  mode.value = 'assist';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(api.revokeFullAccess).toHaveBeenCalledTimes(1);
+  expect(root.textContent).toContain('上下文已切换，请重新提问');
+  await send();
+  expect(api.prepare).toHaveBeenCalledTimes(1);
+  acknowledge();
+  await settle();
+  await send();
+  expect(api.prepare.mock.lastCall![0].approvalMode).toBe('assist');
+  mode.value = 'full';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  mode.value = 'request';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(api.revokeFullAccess).toHaveBeenCalledTimes(2);
+});
+it('blocks new work after revocation failure and permits an explicit retry', async () => {
+  await mount();
+  const mode = root.querySelector<HTMLSelectElement>('[aria-label="审批模式"]')!;
+  mode.value = 'full';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  api.revokeFullAccess.mockRejectedValueOnce({ message: '宿主暂时不可用' });
+  mode.value = 'request';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  expect(root.textContent).toContain('完全访问授权撤销失败');
+  await send();
+  expect(api.prepare).not.toHaveBeenCalled();
+  button('重试撤销授权').click();
+  await settle();
+  await send();
+  expect(api.prepare.mock.lastCall![0].approvalMode).toBe('request');
+});
+it('starts a new conversation in request mode and revokes the previous full session', async () => {
+  await mount();
+  const mode = root.querySelector<HTMLSelectElement>('[aria-label="审批模式"]')!;
+  mode.value = 'full';
+  mode.dispatchEvent(new Event('change', { bubbles: true }));
+  await send();
+  button('新对话').click();
+  await settle();
+  expect(mode.value).toBe('request');
+  expect(root.querySelectorAll('.ai-chat-turn')).toHaveLength(0);
+  expect(api.revokeFullAccess).toHaveBeenCalledTimes(1);
+  await send();
+  expect(api.prepare.mock.lastCall![0]).toMatchObject({ approvalMode: 'request', history: [] });
 });
 it('shows task approval and uncertain completion without presenting a failed change as completed', async () => {
   api.prepare.mockResolvedValue({ ...preview, task: taskSnapshot('prepared') });
@@ -585,6 +702,8 @@ it('revokes a late preview after the view has been disposed', async () => {
     redactValues: [],
   };
   const task = state.send(input);
+  await settle();
+  expect(api.prepare).toHaveBeenCalledTimes(1);
   app.unmount();
   resolve(preview);
   await task;
@@ -1220,3 +1339,81 @@ it.each(['local-codex', 'local-claude-code'])(
     expect(api.prepare.mock.lastCall![0].modelId).toBe(id);
   },
 );
+
+it('displays actual streamed text before send completes and replaces it exactly once on success', async () => {
+  let finish!: (value: AiAnswer) => void;
+  api.send.mockImplementationOnce(
+    () =>
+      new Promise<AiAnswer>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  api.progressRead.mockResolvedValueOnce({ revision: 2, text: '第一段诊断内容', offset: 21 });
+  await mount();
+  await send();
+  expect(root.querySelector('.ai-stream-preview')?.textContent).toContain('第一段诊断内容');
+  expect(root.textContent).toContain('正在生成回答');
+  expect(root.querySelector('.ai-proposal')).toBeNull();
+  expect(api.execute).not.toHaveBeenCalled();
+  finish({ ...answer, text: '完整诊断结果' });
+  await settle();
+  expect(root.querySelector('.ai-stream-preview')).toBeNull();
+  expect(root.textContent?.match(/完整诊断结果/g)).toHaveLength(1);
+  expect(api.progressClose).toHaveBeenCalledWith('progress-a');
+});
+it('keeps partial text after interruption and excludes it from the next question history', async () => {
+  let fail!: (error: unknown) => void;
+  api.send.mockImplementationOnce(
+    () =>
+      new Promise<AiAnswer>((_, reject) => {
+        fail = reject;
+      }),
+  );
+  api.progressRead.mockResolvedValueOnce({ revision: 2, text: '未完成的诊断片段', offset: 24 });
+  await mount();
+  await send();
+  expect(root.textContent).toContain('未完成的诊断片段');
+  fail({ message: '模型流连接中断' });
+  await settle();
+  expect(root.textContent).toContain('未完成的诊断片段');
+  expect(root.textContent).toContain('模型流连接中断');
+  expect(api.execute).not.toHaveBeenCalled();
+  await send();
+  expect(JSON.stringify(api.prepare.mock.lastCall![0].history)).not.toContain('未完成的诊断片段');
+});
+it('does not wait for a stalled progress read or accept its late update after completion', async () => {
+  let late!: (value: { revision: number; text: string; offset: number }) => void;
+  api.progressRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        late = resolve;
+      }),
+  );
+  await mount();
+  await send();
+  expect(api.progressClose).toHaveBeenCalledWith('progress-a');
+  expect(root.textContent).toContain('诊断证据不足');
+  late({ revision: 2, text: '迟到的旧片段', offset: 18 });
+  await settle();
+  expect(root.textContent).not.toContain('迟到的旧片段');
+});
+it('stops rendering an old stream when a new conversation is started', async () => {
+  let finish!: (value: AiAnswer) => void;
+  api.send.mockImplementationOnce(
+    () =>
+      new Promise<AiAnswer>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  api.progressRead.mockResolvedValueOnce({ revision: 2, text: '旧对话片段', offset: 15 });
+  await mount();
+  await send();
+  expect(root.textContent).toContain('旧对话片段');
+  button('新对话').click();
+  await settle();
+  finish(answer);
+  await settle();
+  expect(root.querySelectorAll('.ai-chat-turn')).toHaveLength(0);
+  expect(root.textContent).not.toContain('旧对话片段');
+  expect(api.progressClose).toHaveBeenCalledWith('progress-a');
+});

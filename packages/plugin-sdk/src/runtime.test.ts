@@ -4,12 +4,30 @@ import { mountPlugin } from './runtime';
 import { request } from './transport';
 import { usePlatformContext } from './context';
 import { usePluginVisibility } from './visibility';
+import { createTranslator, setLocale, locale } from './i18n';
 afterEach(() => {
+  setLocale('zh-CN');
   window.dispatchEvent(new Event('pagehide'));
   document.body.innerHTML = '';
   document.documentElement.style.removeProperty('--interface-font-scale');
   vi.restoreAllMocks();
   vi.useRealTimers();
+});
+
+it('applies the authenticated host language without remounting or sending requests', async () => {
+  const fixture = mount();
+  fixture.connect();
+  const translate = createTranslator({ 设置: 'Settings' });
+  for (const language of ['en-US', 'zh-CN', 'en-US']) {
+    fixture.context({ language });
+    await nextTick();
+    expect(locale.value).toBe(language);
+    expect(usePlatformContext().language).toBe(language);
+    expect(document.documentElement.lang).toBe(language);
+    expect(translate('设置')).toBe(language === 'en-US' ? 'Settings' : '设置');
+  }
+  expect(fixture.rendered).toHaveBeenCalledOnce();
+  expect(fixture.sent.filter((packet) => packet.kind === 'request')).toHaveLength(0);
 });
 function mount() {
   const sent: Record<string, unknown>[] = [];

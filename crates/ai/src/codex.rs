@@ -372,6 +372,14 @@ pub async fn snapshot_with_directory(
 }
 
 pub async fn complete(config: &Config, runtime: &[u8], body: &Value) -> Result<Completion, Error> {
+    complete_with_sink(config, runtime, body, None).await
+}
+pub async fn complete_with_sink(
+    config: &Config,
+    runtime: &[u8],
+    body: &Value,
+    sink: Option<crate::streaming::TextSink>,
+) -> Result<Completion, Error> {
     let runtime: Runtime = serde_json::from_slice(runtime)
         .map_err(|_| failure("AI_CODEX_CONFIG", "本地 Codex 运行配置无效，请重新授权"))?;
     check_request_budget(
@@ -396,14 +404,23 @@ pub async fn complete(config: &Config, runtime: &[u8], body: &Value) -> Result<C
         if revision != runtime.revision {
             return Err(Error::Conflict);
         }
-        client.completion(config, body).await
+        client.completion_with_sink(config, body, sink).await
     })
     .await
     .map_err(|_| failure("AI_CODEX_TIMEOUT", "本地 Codex 回答超时，已停止本次进程"))?
 }
 
 impl Client {
+    #[cfg(test)]
     async fn completion(&mut self, config: &Config, body: &Value) -> Result<Completion, Error> {
+        self.completion_with_sink(config, body, None).await
+    }
+    async fn completion_with_sink(
+        &mut self,
+        config: &Config,
+        body: &Value,
+        sink: Option<crate::streaming::TextSink>,
+    ) -> Result<Completion, Error> {
         let model = if config.model == "default" {
             None
         } else {
@@ -449,11 +466,31 @@ impl Client {
         )
         .await?;
         let mut text = String::new();
+        let mut streamed = String::new();
+        let mut item_id = String::new();
         let mut usage = None;
         loop {
             let event = self.read().await?;
             self.reject_request(&event).await?;
             match event["method"].as_str() {
+                Some("item/agentMessage/delta") => {
+                    let delta = event["params"]["delta"]
+                        .as_str()
+                        .ok_or_else(|| failure("AI_CODEX_PROTOCOL", "Codex文本增量无效"))?;
+                    let id = event["params"]["itemId"]
+                        .as_str()
+                        .ok_or_else(|| failure("AI_CODEX_PROTOCOL", "Codex文本项无效"))?;
+                    let reset = item_id != id;
+                    if reset {
+                        streamed.clear();
+                        item_id = id.into();
+                    }
+                    if streamed.len() + delta.len() > 256 * 1024 {
+                        return Err(failure("AI_OUTPUT_LIMIT", "Codex回答超过256 KiB"));
+                    }
+                    streamed.push_str(delta);
+                    crate::streaming::emit(sink.as_ref(), delta, reset).await?;
+                }
                 Some("item/completed") if event["params"]["item"]["type"] == "agentMessage" => {
                     if let Some(value) = event["params"]["item"]["text"].as_str() {
                         text = value.to_owned();
@@ -461,6 +498,15 @@ impl Client {
                     if text.len() > 256 * 1024 {
                         return Err(failure("AI_OUTPUT_LIMIT", "Codex 回答超过 256 KiB"));
                     }
+                    let same_item =
+                        event["params"]["item"]["id"].as_str() == Some(item_id.as_str());
+                    if same_item && text.starts_with(&streamed) {
+                        crate::streaming::emit(sink.as_ref(), &text[streamed.len()..], false)
+                            .await?;
+                    } else {
+                        crate::streaming::emit(sink.as_ref(), &text, true).await?;
+                    }
+                    streamed.clone_from(&text);
                 }
                 Some("thread/tokenUsage/updated") => {
                     let tokens = &event["params"]["tokenUsage"]["last"];
@@ -516,6 +562,28 @@ mod tests {
         (config, body)
     }
 
+    #[tokio::test]
+    async fn native_text_deltas_arrive_before_the_completed_turn() {
+        let mut client = fixture("stream").await;
+        let config = Config {
+            provider: Provider::LocalCodex,
+            ..Default::default()
+        };
+        let body = crate::tests::messages(&config, "test", json!({}));
+        let (sink, mut receiver) = tokio::sync::mpsc::channel(16);
+        let result = tokio::spawn(async move {
+            client
+                .completion_with_sink(&config, &body, Some(sink))
+                .await
+        });
+        let first = receiver.recv().await.unwrap();
+        assert_eq!(first.text, "{\"answer\":\"");
+        assert!(!result.is_finished());
+        assert_eq!(
+            result.await.unwrap().unwrap().text,
+            "{\"answer\":\"OK\",\"commands\":[]}"
+        );
+    }
     #[tokio::test]
     async fn subprocess_requires_completed_turn_and_preserves_usage() {
         let (config, body) = request();

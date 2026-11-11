@@ -168,7 +168,15 @@ impl Process {
         }
         Ok(value)
     }
+    #[cfg(test)]
     async fn completion(&mut self) -> Result<Completion, Error> {
+        self.completion_with_sink(None).await
+    }
+    async fn completion_with_sink(
+        &mut self,
+        sink: Option<crate::streaming::TextSink>,
+    ) -> Result<Completion, Error> {
+        let mut streamed = String::new();
         let mut result = None;
         let mut initialized = false;
         while let Some(line) = local_cli::read_line(&mut self.output, &mut self.received).await? {
@@ -190,6 +198,34 @@ impl Process {
                         ));
                     }
                     initialized = true;
+                }
+                Some("stream_event") => {
+                    if !initialized {
+                        return Err(failure("AI_CLAUDE_PROTOCOL", "Claude文本流未初始化"));
+                    }
+                    let inner = &event["event"];
+                    match inner["type"].as_str() {
+                        Some("message_start") => {
+                            streamed.clear();
+                            crate::streaming::emit(sink.as_ref(), "", true).await?;
+                        }
+                        Some("content_block_start")
+                            if inner["content_block"]["type"] == "tool_use" =>
+                        {
+                            return Err(failure("AI_CLAUDE_TOOL", "Claude Code请求了未授权工具"));
+                        }
+                        Some("content_block_delta") if inner["delta"]["type"] == "text_delta" => {
+                            let delta = inner["delta"]["text"].as_str().ok_or_else(|| {
+                                failure("AI_CLAUDE_PROTOCOL", "Claude文本增量无效")
+                            })?;
+                            if streamed.len() + delta.len() > 256 * 1024 {
+                                return Err(failure("AI_OUTPUT_LIMIT", "Claude回答超过256 KiB"));
+                            }
+                            streamed.push_str(delta);
+                            crate::streaming::emit(sink.as_ref(), delta, false).await?;
+                        }
+                        _ => (),
+                    }
                 }
                 Some("assistant")
                     if event["message"]["content"].as_array().is_some_and(|items| {
@@ -223,6 +259,12 @@ impl Process {
                         })?;
                     if text.len() > 256 * 1024 {
                         return Err(failure("AI_OUTPUT_LIMIT", "Claude Code 回答超过 256 KiB"));
+                    }
+                    if text.starts_with(&streamed) {
+                        crate::streaming::emit(sink.as_ref(), &text[streamed.len()..], false)
+                            .await?;
+                    } else {
+                        crate::streaming::emit(sink.as_ref(), text, true).await?;
                     }
                     let usage = &event["usage"];
                     let usage = usage["input_tokens"]
@@ -390,6 +432,14 @@ pub async fn snapshot_with_directory(directory: Option<&Path>) -> Result<Snapsho
 }
 
 pub async fn complete(config: &Config, runtime: &[u8], body: &Value) -> Result<Completion, Error> {
+    complete_with_sink(config, runtime, body, None).await
+}
+pub async fn complete_with_sink(
+    config: &Config,
+    runtime: &[u8],
+    body: &Value,
+    sink: Option<crate::streaming::TextSink>,
+) -> Result<Completion, Error> {
     let runtime: Runtime = serde_json::from_slice(runtime)
         .map_err(|_| failure("AI_CLAUDE_CONFIG", "Claude Code 运行快照无效，请刷新后重试"))?;
     check_request_budget(
@@ -449,9 +499,12 @@ pub async fn complete(config: &Config, runtime: &[u8], body: &Value) -> Result<C
                 "--system-prompt-file",
             ])
             .arg(&prompt_path);
+        if sink.is_some() {
+            command.arg("--include-partial-messages");
+        }
         Process::start(command, directory, Some(&input))
             .await?
-            .completion()
+            .completion_with_sink(sink)
             .await
     })
     .await
@@ -476,6 +529,22 @@ mod tests {
         .unwrap()
     }
 
+    #[tokio::test]
+    async fn native_text_deltas_arrive_before_the_result_and_successful_exit() {
+        let mut process = fixture("stream").await;
+        let (sink, mut receiver) = tokio::sync::mpsc::channel(16);
+        let result = tokio::spawn(async move { process.completion_with_sink(Some(sink)).await });
+        loop {
+            if receiver.recv().await.unwrap().text == "{\"answer\":\"" {
+                break;
+            }
+        }
+        assert!(!result.is_finished());
+        assert_eq!(
+            result.await.unwrap().unwrap().text,
+            "{\"answer\":\"OK\",\"commands\":[]}"
+        );
+    }
     #[tokio::test]
     async fn native_stream_requires_successful_exit_and_rejects_tools_and_partial_answers() {
         let result = fixture("success").await.completion().await.unwrap();

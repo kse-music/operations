@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { onMounted, onBeforeUnmount, ref, reactive, computed, nextTick } from 'vue';
 import { Save, RotateCw, Search, WrapText } from '@lucide/vue';
 import * as monaco from 'monaco-editor/editor/editor.api';
@@ -54,7 +56,7 @@ const languageLabel = computed(
       html: 'HTML',
       css: 'CSS',
       json: 'JSON',
-      plaintext: '纯文本',
+      plaintext: tr('纯文本'),
     })[language(document.value.path)],
 );
 function updateStatus(): void {
@@ -212,12 +214,16 @@ async function save(): Promise<boolean> {
       model.getValue(monaco.editor.EndOfLinePreference.TextDefined, true),
     );
     if (!result.document) {
-      error.value = `${result.message ?? '保存失败'}；恢复路径：${result.recoveryPath ?? '无'}`;
+      error.value = tr(
+        '{0}；恢复路径：{1}',
+        result.message ?? tr('保存失败'),
+        result.recoveryPath ?? tr('无'),
+      );
       return false;
     }
     store.document = result.document;
     store.dirty = false;
-    notifications.push('远程文件已保存并校验。');
+    notifications.push(tr('远程文件已保存并校验。'));
     return true;
   } catch (cause) {
     error.value = errorMessage(cause);
@@ -280,13 +286,13 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectDraft));
 defineExpose({ requestClose: () => request('close') });
 </script>
 <template>
-  <section class="remote-editor-window" aria-label="远程文本编辑">
-    <div class="editor-toolbar" role="toolbar" aria-label="编辑操作">
+  <section class="remote-editor-window" :aria-label="tr('远程文本编辑')">
+    <div class="editor-toolbar" role="toolbar" :aria-label="tr('编辑操作')">
       <button
         type="button"
         class="tool-button editor-save"
-        aria-label="保存"
-        :title="`保存 (${shortcutModifier}+S)`"
+        :aria-label="tr('保存')"
+        :title="tr('保存 ({0}+S)', shortcutModifier)"
         :disabled="busy || !document.atomicSave"
         @click="save"
       >
@@ -295,8 +301,8 @@ defineExpose({ requestClose: () => request('close') });
       <button
         type="button"
         class="tool-button"
-        aria-label="重新加载"
-        title="重新加载"
+        :aria-label="tr('重新加载')"
+        :title="tr('重新加载')"
         :disabled="busy"
         @click="request('reload')"
       >
@@ -306,8 +312,8 @@ defineExpose({ requestClose: () => request('close') });
       <button
         type="button"
         class="tool-button"
-        aria-label="查找文本"
-        :title="`查找文本 (${shortcutModifier}+F)`"
+        :aria-label="tr('查找文本')"
+        :title="tr('查找文本 ({0}+F)', shortcutModifier)"
         :disabled="busy"
         @click="find"
       >
@@ -316,8 +322,8 @@ defineExpose({ requestClose: () => request('close') });
       <button
         type="button"
         class="tool-button"
-        aria-label="自动换行"
-        title="自动换行"
+        :aria-label="tr('自动换行')"
+        :title="tr('自动换行')"
         :aria-pressed="wrap"
         :disabled="busy"
         @click="toggleWrap"
@@ -326,43 +332,47 @@ defineExpose({ requestClose: () => request('close') });
       </button>
     </div>
     <p v-if="error || !document.atomicSave" class="editor-feedback" role="alert">
-      {{ error || '服务器缺少原子替换扩展，此文件只可查看。' }}
+      {{ error || tr('服务器缺少原子替换扩展，此文件只可查看。') }}
     </p>
-    <div ref="container" class="remote-editor" aria-label="Monaco 远程编辑器"></div>
-    <footer class="editor-statusbar" aria-label="编辑器状态">
+    <div ref="container" class="remote-editor" :aria-label="tr('Monaco 远程编辑器')"></div>
+    <footer class="editor-statusbar" :aria-label="tr('编辑器状态')">
       <span class="editor-sync-state" :class="{ modified: store.dirty }"
         ><span class="editor-status-dot" aria-hidden="true"></span
         >{{
           busy
-            ? '正在处理…'
+            ? tr('正在处理…')
             : !document.atomicSave
-              ? '只读'
+              ? tr('只读')
               : store.dirty
-                ? '有未保存的修改'
-                : '已与远程文件同步'
+                ? tr('有未保存的修改')
+                : tr('已与远程文件同步')
         }}</span
       >
       <div class="editor-document-status">
-        <span>行 {{ position.lineNumber }}，列 {{ position.column }}</span
-        ><span>{{ lineCount }} 行</span><span>UTF-8</span><span>{{ lineEnding }}</span
+        <span>{{ tr('行 ') }}{{ position.lineNumber }}{{ tr('，列 ') }}{{ position.column }}</span
+        ><span>{{ lineCount }}{{ tr(' 行') }}</span
+        ><span>UTF-8</span><span>{{ lineEnding }}</span
         ><span>{{ languageLabel }}</span>
       </div>
     </footer>
   </section>
-  <Modal v-if="pending" title="未保存内容" :busy="busy" @close="cancelReview"
-    ><p>当前修改尚未保存。{{ pending === 'close' ? '关闭' : '重新加载' }}将丢弃修改。</p>
+  <Modal v-if="pending" :title="tr('未保存内容')" :busy="busy" @close="cancelReview"
+    ><p>
+      {{ tr('当前修改尚未保存。') }}{{ pending === 'close' ? tr('关闭') : tr('重新加载')
+      }}{{ tr('将丢弃修改。') }}
+    </p>
     <p v-if="error" class="error-text" role="alert">{{ error }}</p>
     <footer class="dialog-actions">
-      <button class="button" :disabled="busy" @click="cancelReview">返回编辑</button>
+      <button class="button" :disabled="busy" @click="cancelReview">{{ tr('返回编辑') }}</button>
       <button
         class="button primary"
         :disabled="busy || !document.atomicSave"
         @click="saveAndPerform"
       >
-        保存并{{ pending === 'close' ? '关闭' : '重新加载' }}
+        {{ tr(' 保存并') }}{{ pending === 'close' ? tr('关闭') : tr('重新加载') }}
       </button>
       <button class="button danger" :disabled="busy" @click="perform(pending!, true)">
-        放弃修改并{{ pending === 'close' ? '关闭' : '重新加载' }}
+        {{ tr(' 放弃修改并') }}{{ pending === 'close' ? tr('关闭') : tr('重新加载') }}
       </button>
     </footer></Modal
   >

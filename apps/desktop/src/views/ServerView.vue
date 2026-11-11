@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, onMounted, ref } from 'vue';
 import { Server } from '@lucide/vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -46,19 +48,24 @@ async function load() {
 onMounted(() => void load());
 </script>
 <template>
-  <section class="server-view page-view" aria-label="服务器管理">
+  <section class="server-view page-view" :aria-label="tr('服务器管理')">
     <header class="server-heading">
       <div class="server-emblem"><Server :size="22" aria-hidden="true" /></div>
       <div>
-        <h1>服务器管理</h1>
-        <p class="subtle">{{ hostDisplayName(host) || '当前主机' }} · 选择服务器插件</p>
+        <h1>{{ tr('服务器管理') }}</h1>
+        <p class="subtle">
+          {{ hostDisplayName(host) || tr('当前主机') }}{{ tr(' · 选择服务器插件') }}
+        </p>
       </div>
     </header>
-    <p v-if="plugins.loading" role="status">正在读取插件…</p>
+    <p v-if="plugins.loading" role="status">{{ tr('正在读取插件…') }}</p>
     <p v-if="error || plugins.error" role="status">
-      插件列表读取失败。<button class="text-button" @click="load">重试</button>
+      {{ tr(' 插件列表读取失败。')
+      }}<button class="text-button" @click="load">{{ tr('重试') }}</button>
     </p>
-    <p v-if="plugins.loaded && !entries.length" class="host-empty">尚未安装服务器插件。</p>
+    <p v-if="plugins.loaded && !entries.length" class="host-empty">
+      {{ tr('尚未安装服务器插件。') }}
+    </p>
     <div class="plugin-list">
       <article
         v-for="{ plugin, entry, ready } in entries"
@@ -66,21 +73,21 @@ onMounted(() => void load());
         class="plugin-card"
       >
         <h2>
-          {{ plugin.manifest.name }}
+          {{ plugins.metadata(plugin, plugin.manifest.name) }}
         </h2>
-        <p>{{ plugin.manifest.description }}</p>
+        <p>{{ plugins.metadata(plugin, plugin.manifest.description) }}</p>
         <button
           v-if="ready"
           class="button primary"
           @click="emit('plugin', plugin.manifest.id, entry.id, hostId)"
         >
-          打开 {{ entry.label }}
+          {{ tr(' 打开 ') }}{{ plugins.metadata(plugin, entry.label) }}
         </button>
         <button v-else class="button" @click="emit('settings', plugin.manifest.id)">
-          {{ plugin.enabled ? '插件设置' : '启用并设置' }}
+          {{ plugin.enabled ? tr('插件设置') : tr('启用并设置') }}
         </button>
       </article>
     </div>
-    <button class="button" @click="emit('manage')">插件管理</button>
+    <button class="button" @click="emit('manage')">{{ tr('插件管理') }}</button>
   </section>
 </template>

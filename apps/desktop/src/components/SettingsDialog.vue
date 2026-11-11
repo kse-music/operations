@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, defineAsyncComponent, nextTick, onUnmounted } from 'vue';
 import { Boxes, Info, Keyboard, PanelsTopLeft, Puzzle, Settings2, Terminal } from '@lucide/vue';
 import Modal from './Modal.vue';
@@ -36,12 +38,13 @@ const category = computed(() =>
 );
 </script>
 <template>
-  <Modal title="设置" :busy="busy" @close="workspace.closeSettings()">
+  <Modal :title="tr('设置')" :busy="busy" @close="workspace.closeSettings()">
     <div class="settings-dialog-body">
-      <nav class="settings-dialog-navigation" aria-label="设置分类">
+      <nav class="settings-dialog-navigation" :aria-label="tr('设置分类')">
         <button
           v-for="item in settingsNavigation"
           :key="item.view"
+          :data-settings-view="item.view"
           class="nav-item"
           :class="{ active: workspace.settingsView === item.view }"
           :aria-label="item.label"

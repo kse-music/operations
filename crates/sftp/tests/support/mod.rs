@@ -58,6 +58,7 @@ pub struct FileFaults {
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
     pub links: Mutex<HashMap<String, String>>,
+    pub reported_sizes: Mutex<HashMap<String, u64>>,
     pub sudo_password: Mutex<Option<String>>,
     pub sudo_commands: Mutex<Vec<String>>,
     pub reject_sudo: std::sync::atomic::AtomicBool,
@@ -135,13 +136,17 @@ impl russh_sftp::server::Handler for Disk {
                 },
             });
         }
+        let mut attributes = attrs(
+            &tokio::fs::symlink_metadata(self.path(&path)?)
+                .await
+                .map_err(io)?,
+        );
+        if let Some(size) = self.faults.reported_sizes.lock().unwrap().get(&path) {
+            attributes.size = Some(*size);
+        }
         Ok(Attrs {
             id,
-            attrs: attrs(
-                &tokio::fs::symlink_metadata(self.path(&path)?)
-                    .await
-                    .map_err(io)?,
-            ),
+            attrs: attributes,
         })
     }
     async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, StatusCode> {

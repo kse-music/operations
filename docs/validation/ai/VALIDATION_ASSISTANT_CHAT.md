@@ -1,5 +1,123 @@
 # 助手直接对话验证
 
+## 2026-11-11 硬件查询触发文件冲突
+
+助手 **2.5.1**，SDK保持 **5.4.0**。用户报告发送“输出一下硬件信息”后出现通用`CONFLICT`。现场`plugin_events`确认失败能力为`sftp.read`；在同一主机文件页打开`/proc/cpuinfo`复现同样错误，目录元数据显示0字节。读取实现要求实际字节数等于属性大小，原本将此情况与真实修订变化混为一类；同时“硬件/hardware”未触发既有系统采样，文件工具错误直接终止整轮。
+
+修复：硬件问题先采样；提示词明确使用system/metrics证据。属性稳定但字节数不符单独返回`TEXT_SIZE_MISMATCH`，不创建可编辑文档；助手保留脱敏失败观察并继续推理。真实属性/模型/主机变化仍拒绝，未放宽目录、权限、原文保存或取消校验。插件能力失败在Native边界记录能力名和错误码，不记录路径、文件内容、提示词或凭据。无数据库/配置格式迁移。
+
+环境：Windows、稳定Rust；构建前D盘超过140 GiB可用。原生编译复用根`target/`，测试EXE复制到`.local/qa/assistant-conflict/`运行；WASM复用现有插件缓存。本机回环测试因沙箱网络限制改在获准环境执行，未连接用户主机或真实模型。真实主机只读UI复现另行记录，不视作隔离测试。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 修复前复现 | 三项新增回归失败：硬件问题采样0次；大小不符返回通用CONFLICT；文件查询失败后没有第二轮模型调用。见`hardware-before.log`、`file-before.log`、`recovery-before.log`。 |
+| 应用层 | `cargo test -p serverdeck-application --lib --no-run --locked`后运行QA副本：78通过、2原有ignored。覆盖原生文件大小错误/句柄释放/普通空文件，以及真实WASM、Native、回环SSH/SSE连续两轮回答。见`application-after.log`。 |
+| 正式插件包 | `node tools/build-system-plugins.mjs`成功生成助手2.5.1与Docker包；`platform_plugins` QA副本21通过、1原有ignored。硬件中英文问题均采样两次并带入CPU型号、核数及内存；大小错误反馈给第二轮且脱敏，真正CONFLICT不继续调用模型。见`plugins-build.log`、`wasm-after.log`。 |
+| SFTP | `cargo test -p serverdeck-sftp --test files --no-run --locked`后运行QA副本：15通过，覆盖文件读取、原文冲突、原子保存、权限、取消与传输。见`sftp-after.log`。 |
+| 静态检查 | 修改的Rust文件通过`rustfmt --check`，JSON通过Prettier，`git diff --check`通过。严格Clippy在未修改的`crates/core/src/openssh.rs:289`被既有`single_element_loop`警告阻断，未夹带无关修复；见`rustfmt.log`、`prettier.log`、`diff-check.log`、`clippy.log`。 |
+| 真实环境复测 | 2026-11-11，用户在助手2.5.1重新发送“输出一下硬件信息”，明确反馈“已正常返回硬件信息”。此项为用户现场确认，覆盖本次原始故障场景。 |
+
+本轮共114项通过、3项原有ignored（真实sudo SFTP、独立外部插件包、真实Docker Compose），原始问题已获用户真实环境复测确认。未实测其他平台和安装器。动态系统文件仍不支持作为编辑文档；这次修复使用现有系统采样，并保留失败证据。当前验证不表示所有模型输出路径均已覆盖。
+
+## 2026-11-11 助手流式回答
+
+助手 **2.5.0**、Host/Rust/Vue SDK **5.4.0**。此前模型请求stream=false且前端等整轮完成，本轮按用户要求接入真实增量；不使用一次性结果模拟打字。当前规则见[流式回答](../../architecture/ASSISTANT_AGENT.md#流式回答)、[SDK](../../plugins/PLUGIN_SDK.md#模型流与文本进度54)、[ADR0040](../../architecture/decisions/0040-assistant-streaming.md)。没有新增权限、依赖、持久字段、配置或数据库迁移，Full会话授权生命周期保持。
+
+主要文件：[模型传输](../../../crates/ai/src/streaming.rs)及provider/codex/claude、[Native资源](../../../crates/application/src/plugins/streaming.rs)及state/platform/capabilities、[SDK](../../../crates/plugin-sdk/src/streaming.rs)及[Vue客户端](../../../packages/plugin-sdk/src/streaming.ts)、[WASM增量处理](../../../plugins/system/assistant/backend/src/streaming.rs)及workflow/redact/budget、[聊天状态](../../../plugins/system/assistant/frontend/assistant.ts)及progress/api/AssistantView，另有对应测试、版本和文档。
+
+Native仅传输原始模型文本；WASM逐片提取回答/计划说明、解码转义与代理对并复用脱敏，暂留未完成词及秘密前缀，发布owner/VM绑定的显示文本。UI在模型动作尚在执行时读取进度，完成后替换一次；停止/失败保留已显示内容和明确状态，片段不进入历史、完整校验前不开放计划。模式/模型/对话切换和关闭后忽略迟到响应。流式字段和progressId计入实际请求预算，普通调用仍限96次，模型轮询/进度发布独立限1024次且跨批准续接保留；180秒动作、fuel及原权限/审批不变。
+
+环境：Windows、稳定Rust、Node22；构建前D盘约147GiB可用。原生复用根target，测试EXE复制到 `.local/qa/assistant-streaming/`；WASM使用既有插件缓存。当前共 **255项通过，3项原有测试ignored**（两个真实账号模型测试和一个独立外部插件包验收），未关闭这些门禁。
+
+| 检查                 | 实际结果与关键断言                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 模型传输             | 21项通过、2项原有ignored。回环SSE服务器在测试放行前不发结束帧，客户端已接到首段；覆盖单字节UTF-8/CRLF、usage、缺少DONE、截断、错误/工具调用拒绝。Codex/Claude Node协议夹具在最终完成前发文本增量，保留原成功退出/工具隔离检查。`ai-tests.log`、`sse-tests-full.log`。没有真实计费请求。                                                              |
+| Native与内置包       | 31+5项通过、1项原有ignored。生成未完成时能取到首段，取消释放资源并关闭连接；进度在Guest忙碌时可读，UTF-8偏移/修订重置、跨owner拒绝及关闭清理通过。100次流式I/O可完成，100次普通请求仍在96处拒绝；原Full首批/长会话/切换撤销、SSH/SFTP审批和保存保护保持。`native-plugins.log`、`native-bundled.log`。                                                |
+| 实际打包WASM         | 15项通过。当前2.5.0包在模型完成前发布脱敏片段；超过24 KiB的大段回答、501处秘密脱敏、完整结尾及默认fuel/内存限制通过；包括之前CPU/内存大清单、重复问答、文件/传输及冻结任务回归。`wasm-tests.log`、`wasm-stream-small.log`、`wasm-stream-large.log`、`wasm-truncated.log`；截断建议明确失败且任务为failed，不能标为完成。平台返回值是明确的测试夹具。 |
+| 助手单元             | 33项通过，覆盖增量JSON/Unicode、拆片秘密/地址、完整结果原校验和实际stream/usage字段的预算边界。`assistant-tests.log`。                                                                                                                                                                                                                               |
+| SDK / core / runtime | 7/27/12项通过，覆盖严格字段、权限、取消清理、独立I/O预算类别、包与VM既有隔离。`sdk-tests.log`、`core-tests.log`、`runtime-tests.log`。                                                                                                                                                                                                               |
+| 前端与可信桥         | 104项通过：完成前显示片段且无执行按钮，结束只替换一次；中断保留/不进历史，悬挂读不阻塞完成/新会话，旧读丢弃；同插件主动作排队未结束时能读进度。`frontend-tests.log`。                                                                                                                                                                                |
+| 打包UI浏览器         | 无头Edge加载当前实际包JS/CSS，通过本机隔离MessageChannel夹具暂扣最终响应。正文先出现且completed=0、最终替换一次、停止后保留片段及关闭进度均通过；1440×900、960×600/1.45、390×844/1.45、960×400四种布局无横向溢出，无pageerror。`browser.log`、`ui-result.json`、`stream-*.png`。不连接用户主机或模型。                                               |
+| 编译与静态           | 系统插件/测试包、Native/Guest测试编译、桌面与SDK类型检查、变更前端ESLint、Native相关包和Guest全目标Clippy `-D warnings`通过；Prettier、Rustfmt、`git diff --check`及501个本地文档链接/锚点检查通过；开发包中5个分发路径按源码核对，未重建开发包ZIP。                                                                                                 |
+
+首次SSE沙箱回环连接未能建立、runtime测试使用默认沙箱临时目录遭拒，分别在允许的本机回环权限及QA临时目录复验通过；Windows链接/SSH夹具同样仅在本机审查允许的权限下运行。实现回归中发现进度被原动作队列和大结果包装阻塞，已改为只读控制通道及有界单消息片段，并用Native和前端断言捕获。新增WASM测试初版遗漏激活、测试helper名称错误，补齐夹具设置后通过；收尾发现通用建议分支原先会将长度截断标为完成，流式路径已明确拒绝并添加failed状态回归；静态检查指出未使用导入/可合并条件，已修正。早期失败未计入通过数。
+
+Windows Release `node tools/tauri.mjs build --no-bundle -- --offline --locked` 成功。交付 [ServerDeck-streaming.exe](../../../.local/qa/assistant-streaming/ServerDeck-streaming.exe)，46,078,976字节，SHA-256 `82833d67fe49105622e988d3c5e5afb4ee7f8b47765813810a13732b58807681`；已直接提取并校验EXE内嵌2.5.0包，复制与捕获的根输出一致。内嵌backend.wasm与15项WASM回归使用的版本逐字节相同；并行SDK前端修改导致工作区包的JS摘要变化，因此浏览器已改用提取包重新验证（`browser-embedded.log`），不以另一个工作区前端冒充交付验证。统计和哈希见[delivery.json](../../../.local/qa/assistant-streaming/delivery.json)，构建见 `release-build.log`。
+
+本轮保留工作区原有及并行的终端、Docker国际化等修改，构建包含当前工作区，不将这些改动列为本轮功能验收。
+
+未验证真实模型账号、实际安装CLI的登录/版本、用户主机、原生WebView手工交互及macOS/Linux客户端；没有生成安装器或独立开发包ZIP。提供方必须支持其流式协议，不自动重试/退回非流式；部分文本始终不是执行授权。后续真实环境验证需正常退出旧版并运行新版EXE、沿用已有模型配置与登录；远端已提交操作仍按原规则收尾，不保证回滚。新阶段Skill/MCP等未开始。
+
+## 2026-11-11 完全访问会话生命周期
+
+用户明确要求取消完全访问10分钟限制，选中后一直生效到主动切换模式或关闭会话。本轮助手 **2.4.1**、Host/Rust/Vue SDK **5.3.1**，复用现有 `approval_mode` wire；没有持久字段、配置或数据库迁移。此前三种模式的10分钟限制证据保留在下节，当前规则见[SDK](../../plugins/PLUGIN_SDK.md#审批模式与计划确认53)、[ADR0039](../../architecture/decisions/0039-session-full-access.md)。
+
+主要变化：Native的Full句柄不计时过期，修订绑定清理不会误删Full；request/assist移除同owner的Full句柄及待批准项，启用会话随机标识阻止撤销前的迟到批准。关闭owner/撤权/插件停止继续清理，隐藏/返回保留授权。前端退出Full后冻结旧Full计划，等待Native撤销确认；失败阻止新请求并支持重试，新对话默认request并撤销旧授权。主机/模型修订10分钟、单次批准60秒和预览/计划5分钟等限制保持。
+
+主要文件：[Native平台策略](../../../crates/application/src/plugins/platform.rs)、[运行期状态](../../../crates/application/src/plugins/state.rs)、[审批](../../../crates/application/src/plugins/approvals.rs)、[SDK请求](../../../crates/plugin-sdk/src/platform.rs)、[助手页面](../../../plugins/system/assistant/frontend/AssistantView.vue)、[会话状态](../../../plugins/system/assistant/frontend/assistant.ts)、前端可信桥及对应测试；同步SDK/助手版本和当前文档。
+
+环境：Windows、稳定Rust、Node22，构建前D盘约148GiB空闲；原生复用根 `target/`，测试EXE复制到 `.local/qa/assistant-full-session/`，WASM复用既有插件缓存。以下当前检查共 **189项通过，1项原有外部包测试ignored**。
+
+| 检查                 | 实际结果及关键断言                                                                                                                                                                                                                                                                                                                                 |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native插件与内置包   | 28+5项通过，1项原有ignored。真实回环SSH：首次拒绝无Full策略、批准后复用；Full时间回拨7天，刷新主机信息触发句柄清理、隐藏/返回后仍直接执行；主机修订回拨601秒仍拒绝。Guest占用busy时可降权，旧Full不能执行，旧启用标识不能迟到签发，切换清除待批准项，关闭owner清除Full。原目录/原文/单次计划保护保留。`native-plugins.log`、`native-bundled.log`。 |
+| SDK / core / runtime | 6/27/12项通过；取消后只允许request降权，不允许assist/full启用；核心包、路径链接拒绝、模板权限和运行时边界回归。`sdk.log`、`core.log`、`runtime.log`。                                                                                                                                                                                              |
+| 实际WASM助手包       | 12项通过：三模式参数化进程读取、CPU/内存大清单、重复问答、文件编辑、传输与任务冻结等。`wasm-assistant.log`。                                                                                                                                                                                                                                       |
+| 前端与可信桥         | 99项通过（助手、UI bridge、server三份测试）。Full退出到request/assist调用真实降权接口，撤销未返回前不能发送，失败提示并阻止新动作，显式重试可恢复；旧Full计划失效，新对话回到request且不带历史。隐藏页可降权而不能启用Full。`frontend-final.log`。                                                                                                 |
+| 打包UI浏览器         | 本机无头Edge加载实际2.4.1包的JS/CSS与隔离MessageChannel夹具。4种窗口/字号布局无溢出，无pageerror；Full显示持续有效，模拟计划自动执行后切换触发一次降权，新对话再次降权并重置request。`browser.log`、`ui-result.json`、`composer-*.png`。夹具不连接用户主机或模型。                                                                                 |
+| 编译与静态           | 系统插件/测试包构建、Native测试编译、桌面与SDK `npm run typecheck`、变更前端文件ESLint、相关Rust全目标Clippy `-D warnings` 通过。`packages-build.log`、`tests-build.jsonl`、`typecheck.log`、`eslint.log`、`clippy.log`。                                                                                                                          |
+
+第一次前端测试从仓库根直接调用Vitest，在沙箱临时目录rename报EPERM且没有执行用例；改用项目desktop配置及QA临时目录后通过。新增bridge测试初版缺少capability响应的requestId，被TypeScript捕获；补齐真实DTO后通过。Clippy发现测试中不必要clone，改为from_ref后通过。这些失败不计入通过数。原生SSH/Windows链接夹具和无头Edge按已知沙箱限制在审查允许的本机权限下运行，不连接192.168.1.159等用户主机。
+
+Windows Release `node tools/tauri.mjs build --no-bundle -- --offline --locked` 成功，见 `release-build.log`。交付 [ServerDeck-fixed.exe](../../../.local/qa/assistant-full-session/ServerDeck-fixed.exe)，45,627,392字节，SHA-256 `d270117637403635ec0eb331d85b084254bc1990d9e33cffabe8de09967f6f4e`；已验证包含当前2.4.1助手包的逐字节内容，复制后与根输出完全一致。测试计数、版本和哈希见 [delivery.json](../../../.local/qa/assistant-full-session/delivery.json)。Rustfmt、Prettier、`git diff --check` 及473个文档链接/锚点检查通过（开发包中5个分发文档路径按对应源码检查，未重建独立开发包ZIP）。未验证实际用户主机、真实模型账号、原生WebView手工点击及其他客户端平台；没有生成安装器，不关闭已有跨平台和外部包门禁。已提交远端操作沿用安全收尾边界，不承诺切换时回滚。后续真实使用需要在新版EXE打开会话；首次Full仍由可信宿主确认一次。
+
+## 2026-11-11 三种审批模式与参数化读取
+
+用户报告“帮我审批”仍反复确认带 PID 的进程详情，并明确要求按参考图增加请求批准、帮我批准、完全访问权限三种模式。原实现只精确匹配固定命令，动态 PID 不在预授权清单；本轮助手 **2.4.0**、Host/Rust/Vue SDK **5.3.0**。当前语义见[使用指南](../../guides/AI_ASSISTANT.md#计划与执行)，安全与公开契约取舍见 [ADR0038](../../architecture/decisions/0038-three-approval-modes.md)。
+
+- `crates/plugin-sdk/src/{lib,platform}.rs`、`plugin-core/src/{manifest,permissions}.rs`：新增独立参数读取、完全访问权限；仅 `sh -c` 固定脚本后完整 argv 项可用有界整数/十六进制/标识符模板，普通 SSH 预授权保持精确匹配。ABI/wire、UI、Manifest/包及授权记录字段格式不变，无数据库/配置迁移，也不向旧上传授权补入新权限。
+- `crates/application/src/plugins/{approvals,platform,capabilities,file_transfers}.rs` 与 `bundled_plugins.rs`：帮我批准直接执行已授权读取；完全访问须可信宿主首次确认，复用当前插件/owner/VM最长10分钟的策略，仍校验原权限、目录、连接/配置及原文。固定计划仍预检、按摘要/次数消费和复查，不能扩大或重放。
+- 助手 `backend/src/{ops,workflow}.rs`、`frontend/{AssistantView.vue,assistant.ts,types.ts,assistant.css}`、manifest：进程/容器/systemd详情使用安全位置参数，清单包括13条固定采集与5条参数读取模板；三种模式按新任务冻结，帮我批准/完全访问在可见页自动进入计划执行路径，完全访问显示区别颜色。同步前端权限说明、SDK类型/版本/锁文件、开发包和相关需求/架构/计划，保留期间出现的并行终端及应用版本修改。
+
+环境为 Windows、稳定 Rust、Node22，构建盘约149 GiB空闲。原生复用根 `target/`，测试EXE复制到QA目录运行；WASM沿用原插件缓存。验证共 **161项通过，1项原有独立外部包测试ignored**，未关闭该门禁。
+
+| 检查                  | 结果与关键断言                                                                                                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SDK / 插件核心        | SDK 5项、core 27项通过；整段脚本/程序/参数数量固定，PID范围、命令注入、错误后缀、未知/嵌入模板拒绝；新增模板不扩大普通固定SSH授权。`sdk-tests.log`、`core-tests-unsandboxed.log`。                                                                                                                                                                           |
+| Native 插件与内置升级 | 28项通过、1项原有ignored。真实回环SSH连续不同PID免确认，脚本或参数变化仍确认且无执行；Full首次拒绝无策略，批准后复用，跨owner/过期/关闭后拒绝；计划只消费两次，超次拒绝。真实回环SFTP在Full下读取、保存临时文件并核对实际字节，越过授权目录明确返回权限拒绝；Assist写入仍确认。内置升级保留设置/启停、上传包及损坏记录隔离通过。`native-plugins-final.log`。 |
+| 正式打包WASM / 运行时 | 助手12项、runtime12项通过：三种模式下两个PID详情使用清单完整argv；三模式的计划绑定、单次执行、拒绝、文件/传输与原Fuel回归通过；死循环/启动Fuel、trap、内存/消息/取消边界保持。`wasm-assistant-final.log`、`runtime-final.log`。                                                                                                                              |
+| 助手业务              | 原生单元29项通过，固定/参数读取清单与生成命令完全一致，脱敏、预算、任务、文件及计划回归通过。`assistant-final.log`。                                                                                                                                                                                                                                         |
+| 前端 / 布局           | 助手与权限面板48项通过，断言三项模式文案、只对新任务生效、自动执行及原审批行为。实际打包Vue界面在1440×900、960×600超大字号、390×844超大字号和960×400四组检查通过，Full提示/颜色、完整输入区及无横向溢出已人工检查；UI使用内存夹具，不计作原生审批点击验收。`frontend-final.log`、`ui-result.json`及截图。                                                    |
+| 静态 / 构建           | 桌面/SDK TypeScript、改动前端ESLint、相关Rust/Prettier格式、diff检查通过；SDK/core/runtime/application严格Clippy和助手严格Clippy通过。`node tools/tauri.mjs build --no-bundle -- --offline --locked` 成功，包含最终插件、类型检查、前端及Windows Release EXE，保留既有编辑器大分块提示。                                                                     |
+
+证据位于 [QA目录](../../../.local/qa/assistant-approval-modes-v3/)。交付 `ServerDeck-fixed.exe` 与根 `target/release/serverdeck-desktop.exe` 字节一致，已验证EXE嵌入当前2.4.0完整包；版本/测试计数/摘要见 `delivery.json`，构建见 `desktop-release-build.log`。首次沙箱内回环SSH和Windows目录联接测试受环境限制，改在获准的沙箱外用同一QA副本通过；SDK升级曾暴露旧版本断言，已更新为5.3并保留有效断言，未删除安全检查。
+
+未连接用户主机或生产模型、未执行原生WebView2审批点击、跨平台或安装器验收；SSH命令结果是本机协议夹具，SFTP写入只发生于QA临时文件。完全访问在有效期内可自动执行已授予范围内的风险操作，这是用户选定语义；未知结果、取消和原平台限额继续有效。使用本轮结果需正常退出旧客户端后运行新EXE，并为新任务选择模式；设置沿既有内置升级流程保留。本阶段无新增外部依赖，完成后不进入Skill/MCP等后续阶段。
+
+## 2026-11-11 CPU 内存排查触发 PLUGIN_FUEL
+
+用户提问“帮我排查当前主机 CPU 和内存使用异常的可能原因。”后出现 WASM 资源配额失败，随后任务状态读取提示插件未激活。只读核对本机安装记录为系统助手 2.3.1；未读取模型凭据、修改用户插件记录或连接用户主机。
+
+本轮助手包为 **2.3.2**，不修改 SDK、IPC、权限、数据库或配置格式，保留通用每入口 20,000,000 fuel、16 MiB 和 2 秒限制。
+
+- `backend/src/disk.rs`：原先每一行 df 都扫描全部挂载点，多挂载主机的资源采样出现平方级匹配。改为完整挂载路径索引，按最长完整后缀匹配，保留带空格、Unicode 路径和缺失容量的处理。
+- `backend/src/workflow.rs`：原先对完整工具结果复制、脱敏后才截取 20 条模型明细；改为先选择完整记录构造模型副本，再对所选原值脱敏。原始查询证据和完整计数继续保留，未截断秘密后再脱敏，审批、目标指纹及执行复查不变。
+- `crates/plugin-runtime/tests/platform_plugins.rs`：增加正式打包 WASM 的原问题采集/查询/回答、较大工具结果和接近历史上限的回归；`disk.rs` 增加路径语义回归。更新当前助手架构、使用指南与内置版本说明，保留本轮开始前的会话弹窗修改。
+
+实际验证（Windows、Rust 稳定版、Node 22，D 盘约 149 GiB 空闲；原生复用根 `target/`，WASM 复用既有插件缓存，原生测试均复制到 QA 后运行）：
+
+| 检查             | 结果与断言                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 故障基线         | 原 2.3.1 正式包在 128 条容器查询结果返回时真实触发 `PLUGIN_FUEL / OutOfFuel`；修复该路径后，原问题配合 256 个挂载点、128 个进程仍在采样 `info` 续接时触发同样故障。分别保留 `query-baseline.log`、`cpu-memory-baseline.log`。                                                                                                                                           |
+| 正式打包 WASM    | 助手 11 项通过：原问题完成两次 CPU 采样、进程采集、模型追加查询和回答，断言 CPU 100%、内存 90%、256 个挂载点与 128 个进程完整计数；工具结果只发送 20 条脱敏明细、完整计数 128/省略 108，从第 128 条完整证据冻结计划且不执行变更；长历史、原有文件/传输/审批/绑定及 health 通过。`platform-final.log`。                                                                  |
+| 助手原生单元测试 | 29 项通过，包括最长完整挂载后缀、空格/Unicode 路径、脱敏、预算、取消、任务及执行确认回归；`assistant-final.log`。                                                                                                                                                                                                                                                       |
+| 助手前端         | 42 项通过，包含任务失败、停止、重试与执行防重放；`frontend-final.log`。                                                                                                                                                                                                                                                                                                 |
+| 内置插件升级     | 5 项通过，包含系统插件升级保留设置/启停、上传包隔离、损坏记录显式重装、生命周期与默认授权；`bundled-upgrade-final.log`。                                                                                                                                                                                                                                                |
+| 静态检查         | 助手 `cargo clippy --all-targets -- -D warnings` 与 runtime 包级测试 `cargo clippy --no-deps -- -D warnings` 通过；Rust 格式检查通过。                                                                                                                                                                                                                                  |
+| Windows Release  | `node tools/tauri.mjs build --no-bundle -- --offline --locked` 通过，包含系统包构建、Vue 类型检查、前端生产构建和 Release EXE；保留既有编辑器大分块提示。交付副本 `ServerDeck-fixed.exe` 与根 `target/release/serverdeck-desktop.exe` 字节一致，并验证 EXE 包含当前助手 2.3.2 包的完整字节；版本/摘要及路径见 `delivery.json`，构建日志为 `desktop-release-build.log`。 |
+
+命令与证据保存在 [QA 目录](../../../.local/qa/assistant-fuel-repeat/)。测试响应为隔离协议夹具，实际执行正式 WASM 和原生运行时；没有向用户服务器发命令或调用付费模型。未验证实际主机、生产模型、原生 WebView2 点击或其他操作系统；极端输入仍受现有资源限额约束。当前源码修复无新增依赖，使用新包需正常退出旧客户端并启动包含 2.3.2 的新 EXE，由既有启动流程升级系统插件并保留设置。
+
 ## 2026-11-10 审批模式与单次计划确认
 
 用户实测删除 `/work/compose.middleware.yml` 第315行后要求减少按钮与输入确认，并明确选择“自动读取，文件修改/传输及其他变更合并为一次确认”。本轮助手2.3.0、SDK5.2.0，增加输入区请求批准/帮我审批，移除插件重复审核/复选框/文字输入；真实变更仍由Native一次确认。没有接入独立AI审批模型、Skill、MCP或持久设置。

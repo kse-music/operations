@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import ProductSettings from './ProductSettings.vue';
 import Modal from './Modal.vue';
@@ -168,9 +170,11 @@ function restoreDefaults(): void {
     <div class="section-heading">
       <div>
         <h1 id="settings-title">{{ categoryLabel }}</h1>
-        <p class="section-description">界面字号可即时预览，连接参数在新建连接时生效。</p>
+        <p class="section-description">
+          {{ tr('界面字号可即时预览，连接参数在新建连接时生效。') }}
+        </p>
       </div>
-      <span class="subtle">仅保存在此设备</span>
+      <span class="subtle">{{ tr('仅保存在此设备') }}</span>
     </div>
     <form v-if="draft" class="settings-form" novalidate @submit.prevent="submit">
       <div v-show="category === 'general'" id="settings-panel-general" class="settings-category">
@@ -180,15 +184,15 @@ function restoreDefaults(): void {
           :disabled="application.saving || busy"
         >
           <label
-            >外观主题
-            <select v-model="draft.theme" data-testid="theme-select">
-              <option value="dark">深色</option>
-              <option value="light">浅色</option>
-              <option value="system">跟随系统</option>
+            >{{ tr('外观主题 ')
+            }}<select v-model="draft.theme" data-testid="theme-select">
+              <option value="dark">{{ tr('深色') }}</option>
+              <option value="light">{{ tr('浅色') }}</option>
+              <option value="system">{{ tr('跟随系统') }}</option>
             </select>
           </label>
           <div class="settings-field interface-font-size">
-            <label for="interface-font-size">界面字号</label>
+            <label for="interface-font-size">{{ tr('界面字号') }}</label>
             <div class="interface-font-ticks">
               <button
                 v-for="(size, step) in interfaceFontSizes"
@@ -212,11 +216,11 @@ function restoreDefaults(): void {
           </div>
           <label
             ><span class="settings-label"
-              >侧边栏宽度 <span class="subtle">{{ draft.sidebarWidth }} px</span></span
+              >{{ tr('侧边栏宽度 ') }}<span class="subtle">{{ draft.sidebarWidth }} px</span></span
             >
             <input
               v-model.number="draft.sidebarWidth"
-              aria-label="侧边栏宽度"
+              :aria-label="tr('侧边栏宽度')"
               type="range"
               min="200"
               max="400"
@@ -226,10 +230,11 @@ function restoreDefaults(): void {
       </div>
       <div v-show="category === 'terminal'" id="settings-panel-terminal" class="settings-category">
         <fieldset :disabled="application.saving || busy">
-          <legend>终端显示</legend>
+          <legend>{{ tr('终端显示') }}</legend>
           <div class="settings-fields">
             <label
-              >终端字号<input
+              >{{ tr('终端字号')
+              }}<input
                 v-model.number="draft.terminalFontSize"
                 type="number"
                 min="10"
@@ -237,55 +242,63 @@ function restoreDefaults(): void {
                 required
             /></label>
             <label
-              >终端字体<input
+              >{{ tr('终端字体')
+              }}<input
                 v-model="draft.terminal.fontFamily"
                 maxlength="128"
                 required
-                aria-label="终端字体"
+                :aria-label="tr('终端字体')"
             /></label>
             <label
-              >终端行高（%）<input
+              >{{ tr('终端行高（%）')
+              }}<input
                 v-model.number="draft.terminal.lineHeight"
                 type="number"
                 min="100"
                 max="200"
                 required
-                aria-label="终端行高"
+                :aria-label="tr('终端行高')"
             /></label>
             <label
-              >滚动历史行数<input
+              >{{ tr('滚动历史行数')
+              }}<input
                 v-model.number="draft.terminal.scrollback"
                 type="number"
                 min="0"
                 max="20000"
                 required
-                aria-label="滚动历史行数"
+                :aria-label="tr('滚动历史行数')"
             /></label>
             <label
-              >终端主题<select v-model="draft.terminal.theme" aria-label="终端主题">
-                <option value="deck">ServerDeck 深色</option>
-                <option value="light">浅色</option>
+              >{{ tr('终端主题')
+              }}<select v-model="draft.terminal.theme" :aria-label="tr('终端主题')">
+                <option value="deck">{{ tr('ServerDeck 深色') }}</option>
+                <option value="light">{{ tr('浅色') }}</option>
                 <option value="nord">Nord</option>
                 <option value="solarized">Solarized Dark</option>
               </select></label
             >
             <label
-              >光标样式<select v-model="draft.terminal.cursorStyle" aria-label="光标样式">
-                <option value="block">方块</option>
-                <option value="bar">竖线</option>
-                <option value="underline">下划线</option>
+              >{{ tr('光标样式')
+              }}<select v-model="draft.terminal.cursorStyle" :aria-label="tr('光标样式')">
+                <option value="block">{{ tr('方块') }}</option>
+                <option value="bar">{{ tr('竖线') }}</option>
+                <option value="underline">{{ tr('下划线') }}</option>
               </select></label
             >
             <label class="checkbox-label"
-              ><input v-model="draft.terminal.cursorBlink" type="checkbox" />光标闪烁</label
+              ><input v-model="draft.terminal.cursorBlink" type="checkbox" />{{
+                tr('光标闪烁')
+              }}</label
             >
           </div>
         </fieldset>
         <fieldset :disabled="application.saving || busy">
-          <legend>输入与粘贴</legend>
+          <legend>{{ tr('输入与粘贴') }}</legend>
           <div class="settings-fields">
             <label
-              >大文本粘贴确认阈值（字符）<input
+              >{{ tr('大文本粘贴确认阈值（字符）')
+              }}<input
                 v-model.number="draft.terminal.pasteConfirmChars"
                 type="number"
                 min="256"
@@ -298,10 +311,10 @@ function restoreDefaults(): void {
                   v-model="draft.terminal.quickCopyPaste"
                   type="checkbox"
                   aria-describedby="quick-copy-paste-help"
-                />选中即复制，右键即粘贴</label
+                />{{ tr('选中即复制，右键即粘贴') }}</label
               >
               <p id="quick-copy-paste-help" class="subtle settings-help">
-                默认关闭，仅在终端内容区生效；大文本粘贴仍需确认。
+                {{ tr(' 默认关闭，仅在终端内容区生效；大文本粘贴仍需确认。 ') }}
               </p>
             </div>
           </div>
@@ -312,8 +325,8 @@ function restoreDefaults(): void {
           :disabled="application.saving || busy"
         >
           <label
-            >SSH 连接超时（秒）
-            <input
+            >{{ tr('SSH 连接超时（秒） ')
+            }}<input
               v-model.number="draft.connectTimeoutSecs"
               type="number"
               min="1"
@@ -329,18 +342,21 @@ function restoreDefaults(): void {
         class="settings-category settings-shortcuts"
       >
         <fieldset :disabled="application.saving || busy">
-          <legend>终端快捷键</legend>
+          <legend>{{ tr('终端快捷键') }}</legend>
           <div class="settings-fields">
             <p class="subtle full-width">
-              选中后按新组合键。使用 Ctrl+Shift、Meta+Shift 或 Ctrl+Alt，避免拦截远端 Ctrl+C / Z
-              等常用按键。
+              {{
+                tr(
+                  ' 选中后按新组合键。使用 Ctrl+Shift、Meta+Shift 或 Ctrl+Alt，避免拦截远端 Ctrl+C / Z 等常用按键。 ',
+                )
+              }}
             </p>
             <label v-for="(label, action) in shortcutLabels" :key="action"
               >{{ label
               }}<input
                 :value="draft.terminal.shortcuts[action]"
                 readonly
-                :aria-label="`${label}快捷键`"
+                :aria-label="tr('{0}快捷键', label)"
                 @keydown="capture(action, $event)"
             /></label>
           </div>
@@ -353,35 +369,46 @@ function restoreDefaults(): void {
       </div>
       <div v-show="category === 'storage'" id="settings-panel-storage" class="settings-category">
         <fieldset v-if="application.state?.storage" :disabled="application.saving || busy">
-          <legend>应用数据位置</legend>
+          <legend>{{ tr('应用数据位置') }}</legend>
           <div class="settings-fields">
             <div class="full-width settings-field">
-              <label for="data-root-directory">数据根目录</label>
+              <label for="data-root-directory">{{ tr('数据根目录') }}</label>
               <div class="input-action">
-                <input id="data-root-directory" v-model="target" aria-label="数据根目录" required />
-                <button type="button" class="button" @click="migration.browse">选择数据目录</button>
+                <input
+                  id="data-root-directory"
+                  v-model="target"
+                  :aria-label="tr('数据根目录')"
+                  required
+                />
+                <button type="button" class="button" @click="migration.browse">
+                  {{ tr('选择数据目录') }}
+                </button>
               </div>
             </div>
             <dl class="full-width storage-paths">
               <div>
-                <dt>数据库</dt>
+                <dt>{{ tr('数据库') }}</dt>
                 <dd>{{ application.state.storage.databasePath }}</dd>
               </div>
               <div>
-                <dt>插件</dt>
+                <dt>{{ tr('插件') }}</dt>
                 <dd>{{ application.state.storage.pluginDirectory }}</dd>
               </div>
               <div>
-                <dt>日志</dt>
+                <dt>{{ tr('日志') }}</dt>
                 <dd>{{ application.state.storage.logDirectory }}</dd>
               </div>
               <div>
-                <dt>WebView 数据与缓存</dt>
+                <dt>{{ tr('WebView 数据与缓存') }}</dt>
                 <dd>{{ application.state.storage.webviewDirectory }}</dd>
               </div>
             </dl>
             <p class="subtle full-width">
-              选择空的专用目录。确认后将关闭窗口，在重启期间迁移并校验数据；新目录启动成功后清理旧副本。系统凭据和已下载文件保留原位置。
+              {{
+                tr(
+                  ' 选择空的专用目录。确认后将关闭窗口，在重启期间迁移并校验数据；新目录启动成功后清理旧副本。系统凭据和已下载文件保留原位置。 ',
+                )
+              }}
             </p>
             <p
               v-if="application.state.storage.notice && !changed && !busy"
@@ -397,20 +424,22 @@ function restoreDefaults(): void {
           :disabled="application.saving || busy"
         />
         <fieldset :disabled="application.saving || busy">
-          <legend>传输与日志</legend>
+          <legend>{{ tr('传输与日志') }}</legend>
           <div class="settings-fields">
             <label
-              >每主机并发传输数<input
+              >{{ tr('每主机并发传输数')
+              }}<input
                 v-model.number="draft.transferConcurrency"
-                aria-label="每主机并发传输数"
+                :aria-label="tr('每主机并发传输数')"
                 type="number"
                 min="1"
                 max="6"
                 required
             /></label>
             <label
-              ><span class="settings-label">日志级别 <span class="subtle">重启后生效</span></span
-              ><select v-model="draft.logLevel" aria-label="日志级别">
+              ><span class="settings-label"
+                >{{ tr('日志级别 ') }}<span class="subtle">{{ tr('重启后生效') }}</span></span
+              ><select v-model="draft.logLevel" :aria-label="tr('日志级别')">
                 <option value="error">ERROR</option>
                 <option value="warn">WARN</option>
                 <option value="info">INFO</option>
@@ -421,7 +450,7 @@ function restoreDefaults(): void {
         </fieldset>
       </div>
       <div class="form-footer">
-        <p class="subtle">统一保存所有分类。配置不包含密码、私钥或私钥口令。</p>
+        <p class="subtle">{{ tr('统一保存所有分类。配置不包含密码、私钥或私钥口令。') }}</p>
         <div class="action-row">
           <button
             class="button"
@@ -429,57 +458,76 @@ function restoreDefaults(): void {
             :disabled="application.saving || busy"
             @click="restoreDefaults"
           >
-            恢复默认
+            {{ tr(' 恢复默认 ') }}
           </button>
           <button class="button primary" type="submit" :disabled="application.saving || busy">
-            {{ application.saving || busy ? '处理中…' : changed ? '保存、迁移并重启' : '保存设置' }}
+            {{
+              application.saving || busy
+                ? tr('处理中…')
+                : changed
+                  ? tr('保存、迁移并重启')
+                  : tr('保存设置')
+            }}
           </button>
         </div>
       </div>
     </form>
-    <p v-else class="subtle">连接本地后端后即可读取和修改设置。</p>
-    <Modal v-if="closePrompt" title="设置尚未保存" @close="finishClose(false)">
-      <p>通用、终端、快捷键或数据与存储中有未保存的更改。关闭后将放弃这些更改。</p>
+    <p v-else class="subtle">{{ tr('连接本地后端后即可读取和修改设置。') }}</p>
+    <Modal v-if="closePrompt" :title="tr('设置尚未保存')" @close="finishClose(false)">
+      <p>{{ tr('通用、终端、快捷键或数据与存储中有未保存的更改。关闭后将放弃这些更改。') }}</p>
       <div class="dialog-actions">
-        <button type="button" class="button" @click="finishClose(false)">继续编辑</button>
+        <button type="button" class="button" @click="finishClose(false)">
+          {{ tr('继续编辑') }}
+        </button>
         <button type="button" class="button danger" @click="finishClose(true)">
-          放弃更改并关闭
+          {{ tr(' 放弃更改并关闭 ') }}
         </button>
       </div>
     </Modal>
-    <Modal v-if="preview" title="迁移数据并重启" :busy="busy" @close="preview = null">
-      <p class="storage-path">当前目录：{{ application.state?.storage?.rootDirectory }}</p>
-      <p class="storage-path">目标目录：{{ preview.targetDirectory }}</p>
+    <Modal v-if="preview" :title="tr('迁移数据并重启')" :busy="busy" @close="preview = null">
+      <p class="storage-path">
+        {{ tr('当前目录：') }}{{ application.state?.storage?.rootDirectory }}
+      </p>
+      <p class="storage-path">{{ tr('目标目录：') }}{{ preview.targetDirectory }}</p>
       <p>
-        预计迁移 {{ (preview.bytes / 1024 / 1024).toFixed(2) }} MiB，目标可用
-        {{ (preview.availableBytes / 1024 / 1024 / 1024).toFixed(2) }} GiB。
+        {{ tr(' 预计迁移 ') }}{{ (preview.bytes / 1024 / 1024).toFixed(2)
+        }}{{ tr(' MiB，目标可用 ')
+        }}{{ (preview.availableBytes / 1024 / 1024 / 1024).toFixed(2) }} GiB。
       </p>
       <p>
-        将保存所有分类设置，断开连接并安全结束后台任务（当前
-        {{ preview.unfinishedTasks }}
-        项未完成传输）。随后关闭窗口，在重启期间复制并校验数据；窗口关闭不代表迁移完成。新目录启动成功后自动清理旧副本。
+        {{ tr(' 将保存所有分类设置，断开连接并安全结束后台任务（当前 ')
+        }}{{ preview.unfinishedTasks
+        }}{{
+          tr(
+            ' 项未完成传输）。随后关闭窗口，在重启期间复制并校验数据；窗口关闭不代表迁移完成。新目录启动成功后自动清理旧副本。 ',
+          )
+        }}
       </p>
       <p v-if="busy" role="status">
         {{
           restarting
-            ? '正在安全结束任务并重启，数据将在重启期间复制和校验。请等待应用自动重新打开。'
-            : '正在保存设置并安排迁移，请稍候…'
+            ? tr('正在安全结束任务并重启，数据将在重启期间复制和校验。请等待应用自动重新打开。')
+            : tr('正在保存设置并安排迁移，请稍候…')
         }}
       </p>
       <label v-if="preview.dirtyDocuments" class="checkbox-label"
-        ><input v-model="discardDocuments" type="checkbox" :disabled="busy" />明确放弃
-        {{ preview.dirtyDocuments }} 份文档的未保存修改</label
+        ><input v-model="discardDocuments" type="checkbox" :disabled="busy" />{{ tr('明确放弃 ')
+        }}{{ preview.dirtyDocuments }}{{ tr(' 份文档的未保存修改') }}</label
       >
-      <p v-if="preview.dirtyDocuments" class="subtle">也可以取消本次操作，保存文档后再迁移。</p>
+      <p v-if="preview.dirtyDocuments" class="subtle">
+        {{ tr('也可以取消本次操作，保存文档后再迁移。') }}
+      </p>
       <div class="dialog-actions">
-        <button type="button" class="button" :disabled="busy" @click="preview = null">取消</button>
+        <button type="button" class="button" :disabled="busy" @click="preview = null">
+          {{ tr('取消') }}
+        </button>
         <button
           type="button"
           class="button danger"
           :disabled="busy || (!!preview.dirtyDocuments && !discardDocuments)"
           @click="migration.confirm"
         >
-          {{ busy ? (restarting ? '正在重启…' : '正在准备…') : '确认迁移并重启' }}
+          {{ busy ? (restarting ? tr('正在重启…') : tr('正在准备…')) : tr('确认迁移并重启') }}
         </button>
       </div>
     </Modal>

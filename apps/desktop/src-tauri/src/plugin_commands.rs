@@ -138,6 +138,14 @@ pub async fn plugin_save_development_kit<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
 ) -> Result<Option<String>, IpcError> {
     const NAME: &str = "serverdeck-plugin-development-kit.zip";
+    let english = window
+        .state::<Application>()
+        .bootstrap()
+        .await?
+        .config
+        .product
+        .language
+        == "en-US";
     tokio::task::spawn_blocking(move || -> Result<Option<String>, Error> {
         let archive = window
             .app_handle()
@@ -151,9 +159,9 @@ pub async fn plugin_save_development_kit<R: tauri::Runtime>(
             .dialog()
             .file()
             .set_parent(&window)
-            .set_title("保存插件开发包")
+            .set_title(if english { "Save plugin development kit" } else { "保存插件开发包" })
             .set_file_name(NAME)
-            .add_filter("ZIP 压缩包", &["zip"])
+            .add_filter(if english { "ZIP archive" } else { "ZIP 压缩包" }, &["zip"])
             .blocking_save_file()
         else {
             return Ok(None);

@@ -88,6 +88,55 @@ async function submit() {
   await nextTick();
 }
 
+it('saves English only after success, restores it on reopen and switches back to Chinese', async () => {
+  const application = useApplicationStore();
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  const language = '[aria-label="界面语言"]';
+  expect([...root.querySelectorAll(`${language} option`)].map((item) => item.textContent)).toEqual([
+    '简体中文',
+    'English',
+  ]);
+  await input(language, 'en-US', 'change');
+  expect(application.state!.config.product.language).toBe('zh-CN');
+  expect(root.querySelector('h1')?.textContent).toBe('通用');
+  await submit();
+  await vi.waitFor(() => expect(application.saving).toBe(false));
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({ product: expect.objectContaining({ language: 'en-US' }) }),
+  );
+  expect(root.querySelector('h1')?.textContent).toBe('General');
+  expect(root.querySelector<HTMLSelectElement>('[aria-label="Interface language"]')!.value).toBe(
+    'en-US',
+  );
+  expect(document.documentElement.lang).toBe('en-US');
+  expect(application.notice).toContain('Settings saved');
+  app.unmount();
+  app = createApp(SettingsPanel).use(pinia);
+  app.mount(root);
+  expect(root.querySelector<HTMLSelectElement>('[aria-label="Interface language"]')!.value).toBe(
+    'en-US',
+  );
+  root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!.click();
+  await nextTick();
+  expect(root.querySelector('h1')?.textContent).toBe('General');
+  await submit();
+  await vi.waitFor(() => expect(application.saving).toBe(false));
+  expect(root.querySelector('h1')?.textContent).toBe('通用');
+  expect(document.documentElement.lang).toBe('zh-CN');
+});
+
+it('keeps the saved language and the English draft when saving fails', async () => {
+  vi.spyOn(ipc, 'saveConfig').mockRejectedValue(new Error('disk failure'));
+  await input('[aria-label="界面语言"]', 'en-US', 'change');
+  await submit();
+  await vi.waitFor(() => expect(useApplicationStore().saving).toBe(false));
+  expect(useApplicationStore().state!.config.product.language).toBe('zh-CN');
+  expect(root.querySelector('h1')?.textContent).toBe('通用');
+  expect(root.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')!.value).toBe('en-US');
+  expect(useApplicationStore().error).toBe('disk failure');
+  expect(useApplicationStore().notice).toBeNull();
+});
+
 async function restoreDefaults() {
   const button = root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!;
   expect(button.textContent?.trim()).toBe('恢复默认');

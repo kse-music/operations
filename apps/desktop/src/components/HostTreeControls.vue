@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { ref } from 'vue';
 import HostDialog from './HostDialog.vue';
 import Modal from './Modal.vue';
@@ -22,7 +24,7 @@ function confirmDelete() {
 async function remove() {
   const host = deleting.value;
   if (!host) return;
-  const result = await store.run(() => hostsApi.remove(host.id), '主机已删除。');
+  const result = await store.run(() => hostsApi.remove(host.id), tr('主机已删除。'));
   if (result.ok) deleting.value = undefined;
 }
 defineExpose({ edit, confirmDelete });
@@ -35,17 +37,28 @@ defineExpose({ edit, confirmDelete });
     @saved="emit('saved', $event)"
     @close="editing = undefined"
   />
-  <Modal v-if="deleting" title="确认删除主机" :busy="store.busy" @close="deleting = undefined">
+  <Modal
+    v-if="deleting"
+    :title="tr('确认删除主机')"
+    :busy="store.busy"
+    @close="deleting = undefined"
+  >
     <p>
-      确认删除 {{ hostDisplayName(deleting) }}（{{ deleting.username }}@{{ deleting.hostname }}:{{
-        deleting.port
-      }}）？
+      {{ tr(' 确认删除 ') }}{{ hostDisplayName(deleting) }}（{{ deleting.username }}@{{
+        deleting.hostname
+      }}:{{ deleting.port }}）？
     </p>
-    <p class="subtle">在主机表单中保存且没有其他引用的密码或私钥会一并清理。已建立的连接会保留。</p>
+    <p class="subtle">
+      {{ tr('在主机表单中保存且没有其他引用的密码或私钥会一并清理。已建立的连接会保留。') }}
+    </p>
 
     <footer class="dialog-actions">
-      <button class="button" :disabled="store.busy" @click="deleting = undefined">取消</button>
-      <button class="button danger" :disabled="store.busy" @click="remove">确认删除主机</button>
+      <button class="button" :disabled="store.busy" @click="deleting = undefined">
+        {{ tr('取消') }}
+      </button>
+      <button class="button danger" :disabled="store.busy" @click="remove">
+        {{ tr('确认删除主机') }}
+      </button>
     </footer>
   </Modal>
 </template>

@@ -1,7 +1,9 @@
+import { tr } from './i18n/messages';
 import { createApp, h, reactive, type Component } from 'vue';
 import { connectTransport } from './transport';
 import { updateVisibility } from './visibility';
 import { updatePlatformContext, type PlatformContext } from './context';
+import { setLocale } from './i18n';
 /** One authenticated parent channel; no native IPC, host stores or service business logic. */
 export function mountPlugin(component: Component): void {
   const props = reactive<Record<string, unknown>>({});
@@ -20,14 +22,14 @@ export function mountPlugin(component: Component): void {
     <T>(method: string, args: Record<string, unknown> = {}) =>
       new Promise<T>((resolve, reject) => {
         if (!port || pending.size >= 32) {
-          reject(new Error('插件连接未就绪或请求过多'));
+          reject(new Error(tr('插件连接未就绪或请求过多')));
           return;
         }
         let input: Record<string, unknown>;
         try {
           const text = JSON.stringify(args);
           if (new TextEncoder().encode(text).length > 1024 * 1024)
-            throw new Error('插件请求超过限制');
+            throw new Error(tr('插件请求超过限制'));
           input = JSON.parse(text);
         } catch (error) {
           reject(error);
@@ -36,7 +38,7 @@ export function mountPlugin(component: Component): void {
         const id = ++nextId;
         const timer = setTimeout(() => {
           pending.delete(id);
-          reject(new Error('平台请求超时，请核对实际状态'));
+          reject(new Error(tr('平台请求超时，请核对实际状态')));
         }, 180000);
         pending.set(id, { resolve: (value) => resolve(value as T), reject, timer });
         try {
@@ -91,6 +93,7 @@ export function mountPlugin(component: Component): void {
           String(Number.isFinite(scale) && scale > 0 ? scale : 1),
         );
         const context: PlatformContext = {
+          language: state.language === 'en-US' ? 'en-US' : 'zh-CN',
           hostId: String(data.props.hostId ?? ''),
           hosts: state.hosts ?? [],
           groups: state.groups ?? [],
@@ -99,6 +102,7 @@ export function mountPlugin(component: Component): void {
           settingsRevision: state.settingsRevision,
           visible: data.visible !== false,
         };
+        setLocale(context.language);
         updatePlatformContext(context);
         updateVisibility(context.visible);
         if (!mounted) {
@@ -122,7 +126,7 @@ export function mountPlugin(component: Component): void {
     port?.close();
     for (const job of pending.values()) {
       clearTimeout(job.timer);
-      job.reject(new Error('插件页面已关闭'));
+      job.reject(new Error(tr('插件页面已关闭')));
     }
     pending.clear();
     if (mounted) app.unmount();

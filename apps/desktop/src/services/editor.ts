@@ -13,6 +13,7 @@ export interface EditorBootstrap {
   document: TextDocument;
   theme: Theme;
   interfaceFontSize: InterfaceFontSize;
+  language: 'zh-CN' | 'en-US';
 }
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   ensureDesktop();

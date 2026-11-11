@@ -5,6 +5,7 @@ mod local_cli;
 pub mod local_tools;
 mod model_test;
 pub mod provider;
+pub mod streaming;
 pub use model_test::ModelTestBinding;
 use provider::{ModelProvider, OpenAiCompatible};
 use serverdeck_core::{Error, ai::*};

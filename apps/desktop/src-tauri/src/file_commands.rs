@@ -138,11 +138,20 @@ pub async fn files_pick<R: tauri::Runtime>(
     if !["files", "folder"].contains(&kind.as_str()) {
         return Err(Error::Validation("选择器类型无效").into());
     }
+    let english = app
+        .state::<Application>()
+        .bootstrap()
+        .await?
+        .config
+        .product
+        .language
+        == "en-US";
     tauri::async_runtime::spawn_blocking(move || {
-        let picker = app
-            .dialog()
-            .file()
-            .set_title("ServerDeck：选择本地传输路径");
+        let picker = app.dialog().file().set_title(if english {
+            "ServerDeck: Select a local transfer path"
+        } else {
+            "ServerDeck：选择本地传输路径"
+        });
         let selected = if kind == "folder" {
             picker.blocking_pick_folder().map(|p| vec![p])
         } else {

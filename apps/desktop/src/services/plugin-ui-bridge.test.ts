@@ -506,3 +506,27 @@ it('preserves connection failure diagnostics and stops waiting when its page hid
   ui.suspend();
   await cancelled;
 });
+
+it('allows hidden-page reduction of full access while blocking hidden elevation', async () => {
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: '',
+    stream: vi.fn(),
+    contextKey: 'trusted',
+    isActive: () => false,
+  });
+  api.platform.mockResolvedValue(null);
+  await ui.call('platform.request', { operation: { kind: 'approval_mode', mode: 'request' } });
+  expect(api.platform).toHaveBeenCalledExactlyOnceWith(
+    id,
+    { kind: 'approval_mode', mode: 'request' },
+    expect.any(Function),
+    'trusted',
+  );
+  await expect(
+    ui.call('platform.request', { operation: { kind: 'approval_mode', mode: 'full' } }),
+  ).rejects.toThrow();
+  expect(api.platform).toHaveBeenCalledTimes(1);
+});

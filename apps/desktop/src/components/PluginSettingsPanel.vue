@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { ArrowLeft } from '@lucide/vue';
 import PluginIcon from './PluginIcon.vue';
@@ -86,22 +88,34 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       opener.focus();
     else
       document
-        .querySelector<HTMLButtonElement>('.settings-dialog-navigation [aria-label="插件"]')
+        .querySelector<HTMLButtonElement>(
+          '.settings-dialog-navigation [data-settings-view="plugins"]',
+        )
         ?.focus();
   }
 }
 </script>
 
 <template>
-  <section class="plugin-configuration" :aria-label="`${plugin?.manifest.name ?? '插件'} · 配置`">
+  <section
+    class="plugin-configuration"
+    :aria-label="
+      tr('{0} · 配置', plugin ? plugins.metadata(plugin, plugin.manifest.name) : tr('插件'))
+    "
+  >
     <header v-if="!standalone" class="plugin-configuration-heading">
-      <button class="button" aria-label="返回插件列表" :disabled="busy" @click="finish()">
-        <ArrowLeft :size="16" aria-hidden="true" />插件
+      <button class="button" :aria-label="tr('返回插件列表')" :disabled="busy" @click="finish()">
+        <ArrowLeft :size="16" aria-hidden="true" />{{ tr('插件 ') }}
       </button>
-      <h1>{{ plugin?.manifest.name ?? '插件' }}</h1>
+      <h1>{{ plugin?.manifest.name ?? tr('插件') }}</h1>
     </header>
     <div class="plugin-config-body plugin-settings-body">
-      <div class="plugin-config-nav" role="tablist" aria-label="插件详情" @keydown="navigateTabs">
+      <div
+        class="plugin-config-nav"
+        role="tablist"
+        :aria-label="tr('插件详情')"
+        @keydown="navigateTabs"
+      >
         <button
           id="plugin-tab-info"
           class="button"
@@ -112,7 +126,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
           :disabled="busy"
           @click="showPanel('info')"
         >
-          基本信息
+          {{ tr(' 基本信息 ') }}
         </button>
         <button
           id="plugin-tab-settings"
@@ -124,7 +138,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
           :disabled="busy"
           @click="showPanel('settings')"
         >
-          插件配置
+          {{ tr(' 插件配置 ') }}
         </button>
       </div>
       <div
@@ -135,10 +149,10 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
         aria-labelledby="plugin-tab-settings"
       >
         <label v-if="contribution && pages.length > 1" class="plugin-contribution-select">
-          <span>配置页面</span>
+          <span>{{ tr('配置页面') }}</span>
           <select
             :value="contribution?.id"
-            aria-label="插件配置页面"
+            :aria-label="tr('插件配置页面')"
             :disabled="busy"
             @change="select"
           >
@@ -162,15 +176,15 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
           <h2>
             {{
               plugin?.manifest.contributions.some((entry) => entry.kind === 'settings')
-                ? '配置暂不可用'
-                : '无需单独配置'
+                ? tr('配置暂不可用')
+                : tr('无需单独配置')
             }}
           </h2>
           <p>
             {{
               plugin?.manifest.contributions.some((entry) => entry.kind === 'settings')
-                ? '启用插件并授予所需权限后，可在此修改插件配置。'
-                : '此插件直接使用当前主机的连接与平台配置，可从主机工具栏打开使用。'
+                ? tr('启用插件并授予所需权限后，可在此修改插件配置。')
+                : tr('此插件直接使用当前主机的连接与平台配置，可从主机工具栏打开使用。')
             }}
           </p>
         </div>
@@ -190,18 +204,18 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
           <div>
             <p class="plugin-management-meta">
               <span class="plugin-source">{{
-                plugin.source === 'system' ? '系统内置' : '用户上传'
+                plugin.source === 'system' ? tr('系统内置') : tr('用户上传')
               }}</span>
               <span>v{{ plugin.manifest.version }}</span>
             </p>
-            <p v-if="plugin.manifest.description" class="subtle">
-              {{ plugin.manifest.description }}
+            <p v-if="plugins.metadata(plugin, plugin.manifest.description)" class="subtle">
+              {{ plugins.metadata(plugin, plugin.manifest.description) }}
             </p>
           </div>
         </header>
         <PluginSettings :plugin="plugin" />
       </section>
-      <p v-else class="host-empty" role="status">插件已卸载。</p>
+      <p v-else class="host-empty" role="status">{{ tr('插件已卸载。') }}</p>
     </div>
   </section>
 </template>

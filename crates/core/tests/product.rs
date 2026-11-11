@@ -11,8 +11,22 @@ fn global_shortcuts_cannot_capture_terminal_control_keys_or_collide() {
     assert!(p.validate().is_err());
     p.shortcuts.insert("search".into(), "Ctrl+Shift+P".into());
     p.validate().unwrap();
-    p.language = "en-US".into();
-    assert!(p.validate().is_err());
+}
+#[test]
+fn interface_language_accepts_chinese_and_english_but_rejects_unknown_values() {
+    for language in ["zh-CN", "en-US"] {
+        let mut config = AppConfig::default();
+        config.product.language = language.into();
+        config.validate().unwrap();
+        let serialized = serde_json::to_string(&config).unwrap();
+        let restored: AppConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(restored.product.language, language);
+    }
+    for language in ["", "en", "fr-FR", "EN-US"] {
+        let mut config = AppConfig::default();
+        config.product.language = language.into();
+        assert!(config.validate().is_err());
+    }
 }
 #[test]
 fn removed_task_shortcut_is_rejected_without_resetting_other_preferences() {

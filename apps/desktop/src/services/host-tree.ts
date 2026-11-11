@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import type { Host, HostGroup } from '../types/hosts';
 
 export function folderAncestors(groups: HostGroup[], id: string | null): string[] {
@@ -12,7 +13,7 @@ export function folderAncestors(groups: HostGroup[], id: string | null): string[
 
 export function folderPath(groups: HostGroup[], id: string | null): string {
   return [
-    '根目录',
+    tr('根目录'),
     ...folderAncestors(groups, id)
       .reverse()
       .map((key) => groups.find((g) => g.id === key)!.name),
@@ -52,7 +53,7 @@ export function hostFolderRows(
     byFolder.set(host.groupId, rows);
   }
   const result: HostFolderRow[] = [];
-  const stack = [{ id: null as string | null, name: '根目录', depth: 0 }];
+  const stack = [{ id: null as string | null, name: tr('根目录'), depth: 0 }];
   while (stack.length) {
     const row = stack.pop()!;
     result.push({ ...row, count: counts.get(row.id) ?? 0, hosts: byFolder.get(row.id) ?? [] });

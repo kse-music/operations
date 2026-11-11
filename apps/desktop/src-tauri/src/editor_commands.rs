@@ -109,20 +109,46 @@ fn notify<R: Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+fn window_title(path: &str, connection_caption: Option<&str>, language: &str) -> String {
+    let editor = if language == "en-US" {
+        "Editor"
+    } else {
+        "编辑器"
+    };
+    match connection_caption {
+        Some(connection) => format!("{path} — {connection} — {editor} — ServerDeck"),
+        None => format!("{path} — {editor} — ServerDeck"),
+    }
+    .replace(char::is_control, " ")
+}
+
+#[test]
+fn localized_window_title_preserves_user_paths_and_captions() {
+    assert_eq!(
+        window_title("/配置/server.conf", Some("中文主机"), "en-US"),
+        "/配置/server.conf — 中文主机 — Editor — ServerDeck"
+    );
+    assert_eq!(
+        window_title("/配置/server.conf", None, "zh-CN"),
+        "/配置/server.conf — 编辑器 — ServerDeck"
+    );
+    assert_eq!(
+        window_title("/config\nfile", Some("ops\r@server"), "en-US"),
+        "/config file — ops @server — Editor — ServerDeck"
+    );
+}
+
 /// Creates an ordinary top-level window: no native parent/owner, so it can move
 /// across monitors and remains usable while the main window is minimized.
 pub fn create_window<R: Runtime>(
     app: &tauri::AppHandle<R>,
     document: TextDocument,
     connection_caption: Option<&str>,
+    language: &str,
 ) -> Result<(), Error> {
     let state = app.state::<EditorWindows>();
     let label = format!("{PREFIX}{}", document.token);
-    let title = match connection_caption {
-        Some(connection) => format!("{} — {connection} — 编辑器 — ServerDeck", document.path),
-        None => format!("{} — 编辑器 — ServerDeck", document.path),
-    }
-    .replace(char::is_control, " ");
+    let title = window_title(&document.path, connection_caption, language);
     let session = Arc::new(EditorSession {
         label: label.clone(),
         document: Mutex::new(document),
@@ -190,8 +216,14 @@ pub async fn editor_open<R: Runtime>(
     if application.has_external_editors()? {
         return Err(Error::Validation("请先结束外部编辑，再打开内置编辑器").into());
     }
+    let language = application.bootstrap().await?.config.product.language;
     let document = application.text_read(&id, &path).await?;
-    if let Err(error) = create_window(&app, document.clone(), connection_caption.as_deref()) {
+    if let Err(error) = create_window(
+        &app,
+        document.clone(),
+        connection_caption.as_deref(),
+        &language,
+    ) {
         application.text_close(&document.token, false)?;
         return Err(error.into());
     }
@@ -217,7 +249,7 @@ pub async fn editor_load<R: Runtime>(
     // The frontend installs its close listener before requesting the document.
     session.loaded.store(true, Ordering::Release);
     Ok(
-        serde_json::json!({"document": document, "theme": config.theme, "interfaceFontSize": config.interface_font_size}),
+        serde_json::json!({"document": document, "theme": config.theme, "interfaceFontSize": config.interface_font_size, "language": config.product.language}),
     )
 }
 

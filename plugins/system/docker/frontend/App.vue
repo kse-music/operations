@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import { computed, ref, watch } from 'vue';
 import ResourceView from './ResourceView.vue';
 import ServerTabs from './ServerTabs.vue';
@@ -33,27 +35,40 @@ watch(section, (value) => emit('section', value));
 const columns = computed(() =>
   section.value === 'containers'
     ? [
-        { key: 'Names', label: '容器' },
-        { key: 'Image', label: '镜像' },
-        { key: 'State', label: '状态' },
-        { key: 'Ports', label: '端口映射' },
+        { key: 'Names', label: tr('容器') },
+        { key: 'Image', label: tr('镜像') },
+        { key: 'State', label: tr('状态') },
+        { key: 'Ports', label: tr('端口映射') },
       ]
     : section.value === 'compose'
       ? [
-          { key: 'Name', label: '项目' },
-          { key: 'Status', label: '状态' },
-          { key: 'ConfigFiles', label: '配置文件' },
+          { key: 'Name', label: tr('项目') },
+          { key: 'Status', label: tr('状态') },
+          { key: 'ConfigFiles', label: tr('配置文件') },
         ]
       : [
-          { key: 'Repository', label: '仓库' },
-          { key: 'Tag', label: '标签' },
-          { key: 'ID', label: '镜像 ID' },
-          { key: 'Size', label: '大小' },
-          { key: 'CreatedSince', label: '创建时间' },
+          { key: 'Repository', label: tr('仓库') },
+          { key: 'Tag', label: tr('标签') },
+          { key: 'ID', label: tr('镜像 ID') },
+          { key: 'Size', label: tr('大小') },
+          { key: 'CreatedSince', label: tr('创建时间') },
         ],
 );
 const activeStates = ['running', 'paused', 'restarting'];
-const actionLabels = { start: '启动', stop: '停止', restart: '重启', remove: '删除' };
+const actionLabels = {
+  get start() {
+    return tr('启动');
+  },
+  get stop() {
+    return tr('停止');
+  },
+  get restart() {
+    return tr('重启');
+  },
+  get remove() {
+    return tr('删除');
+  },
+};
 </script>
 <template>
   <div class="plugin-server-surface docker-workbench">
@@ -72,10 +87,12 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
         }"
         :columns="columns"
         :row-key="section === 'compose' ? 'Name' : 'ID'"
-        :search-placeholder="section === 'compose' ? '搜索项目名称、状态或配置文件…' : undefined"
+        :search-placeholder="
+          section === 'compose' ? tr('搜索项目名称、状态或配置文件…') : undefined
+        "
         :hint="
           section === 'compose'
-            ? '管理已有项目；启动不会重新部署，已删除全部容器的项目不在列表中。'
+            ? tr('管理已有项目；启动不会重新部署，已删除全部容器的项目不在列表中。')
             : undefined
         "
       >
@@ -88,10 +105,10 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
               <div>
                 <span>{{
                   section === 'compose'
-                    ? 'Compose 项目'
+                    ? tr('Compose 项目')
                     : section === 'images'
-                      ? '本地镜像'
-                      : '全部容器'
+                      ? tr('本地镜像')
+                      : tr('全部容器')
                 }}</span
                 ><strong>{{ loading || error ? '—' : rows.length }}</strong>
               </div>
@@ -99,7 +116,7 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
             <article v-if="section === 'containers'">
               <span class="docker-stat-icon active"><CircleCheck :size="19" /></span>
               <div>
-                <span>运行中</span
+                <span>{{ tr('运行中') }}</span
                 ><strong>{{
                   loading || error
                     ? '—'
@@ -110,7 +127,7 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
             <article v-if="section === 'containers'">
               <span class="docker-stat-icon"><Box :size="19" /></span>
               <div>
-                <span>其他状态</span
+                <span>{{ tr('其他状态') }}</span
                 ><strong>{{
                   loading || error
                     ? '—'
@@ -124,8 +141,8 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
           <template v-if="section === 'containers'">
             <button
               v-for="[action, label] in [
-                ['clear_logs', '清空容器日志'],
-                ['restart_exited', '重启已退出容器'],
+                ['clear_logs', tr('清空容器日志')],
+                ['restart_exited', tr('重启已退出容器')],
               ] as const"
               :key="action"
               class="button"
@@ -149,17 +166,17 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
             ><span class="resource-cell-sub">{{ row.Status }}</span></template
           >
           <span v-else :class="{ 'docker-image': column.key === 'Image' }">{{
-            row[column.key] ?? '不可用'
+            row[column.key] ?? tr('不可用')
           }}</span>
         </template>
         <template #capabilities="{ value }"
           ><span
             >Docker：{{
               value.dockerState === 'running'
-                ? '可用'
+                ? tr('可用')
                 : value.dockerInstalled
-                  ? '已安装，Daemon 不可用或权限不足'
-                  : '未安装'
+                  ? tr('已安装，Daemon 不可用或权限不足')
+                  : tr('未安装')
             }}</span
           ></template
         >
@@ -171,11 +188,11 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
               @click="
                 inspect(
                   { kind: 'compose_services', project: String(row.Name) },
-                  `${row.Name} · 服务状态`,
+                  tr('{0} · 服务状态', row.Name),
                 )
               "
             >
-              服务
+              {{ tr(' 服务 ') }}
             </button>
             <button
               class="text-button"
@@ -187,11 +204,11 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
                     lines: 200,
                     follow: true,
                   },
-                  `${row.Name} · 项目日志`,
+                  tr('{0} · 项目日志', row.Name),
                 )
               "
             >
-              日志
+              {{ tr(' 日志 ') }}
             </button>
             <button
               v-for="action in ['start', 'stop', 'restart'] as const"
@@ -208,7 +225,7 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
                 })
               "
             >
-              {{ { start: '启动', stop: '停止', restart: '重启' }[action] }}
+              {{ { start: tr('启动'), stop: tr('停止'), restart: tr('重启') }[action] }}
             </button>
           </template>
           <template v-else-if="section === 'containers'">
@@ -222,11 +239,11 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
                     id: String(row.ID),
                     revealEnv: false,
                   },
-                  '容器详情',
+                  tr('容器详情'),
                 )
               "
             >
-              详情
+              {{ tr(' 详情 ') }}
             </button>
             <button
               v-for="action in [
@@ -261,7 +278,7 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
                 )
               "
             >
-              日志
+              {{ tr(' 日志 ') }}
             </button>
             <button
               class="text-button"
@@ -288,7 +305,7 @@ const actionLabels = { start: '启动', stop: '停止', restart: '重启', remov
               )
             "
           >
-            删除
+            {{ tr(' 删除 ') }}
           </button>
         </template>
         <template #detail-content="{ detail, query }">

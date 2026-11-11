@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { useBackgroundStore } from '../stores/background';
 import { ChevronDown, ChevronRight, Folder, FolderOpen, Search, Server, Plus } from '@lucide/vue';
 const background = useBackgroundStore();
@@ -24,7 +26,7 @@ const props = withDefaults(defineProps<{ active?: boolean }>(), {
 const hostState = (id: string) =>
   background.connections
     ? background.hostState(id)
-    : operations.hostState(id) !== '未连接'
+    : operations.hostState(id) !== tr('未连接')
       ? operations.hostState(id)
       : files.hostState(id);
 const emit = defineEmits<{
@@ -215,22 +217,22 @@ const menuItems = computed<{ key: MenuAction; label: string; danger?: boolean }[
   if (!target) return [];
   if (target.kind === 'host')
     return [
-      { key: 'connect', label: '连接' },
-      { key: 'edit', label: '编辑' },
-      { key: 'copy', label: '复制' },
+      { key: 'connect', label: tr('连接') },
+      { key: 'edit', label: tr('编辑') },
+      { key: 'copy', label: tr('复制') },
       ...plugins.extensions
         .filter((e) => e.kind === 'host_menu')
         .map((e) => ({ key: `plugin:${e.pluginId}:${e.id}` as MenuAction, label: e.label })),
-      { key: 'deleteHost', label: '删除', danger: true },
+      { key: 'deleteHost', label: tr('删除'), danger: true },
     ];
   return [
-    { key: 'newHost', label: '新建主机' },
-    { key: 'newFolder', label: '新建文件夹' },
+    { key: 'newHost', label: tr('新建主机') },
+    { key: 'newFolder', label: tr('新建文件夹') },
     ...(target.id === null
-      ? [{ key: 'importOpenssh' as const, label: '导入 SSH 配置…' }]
+      ? [{ key: 'importOpenssh' as const, label: tr('导入 SSH 配置…') }]
       : [
-          { key: 'rename' as const, label: '重命名文件夹' },
-          { key: 'deleteFolder' as const, label: '删除文件夹', danger: true },
+          { key: 'rename' as const, label: tr('重命名文件夹') },
+          { key: 'deleteFolder' as const, label: tr('删除文件夹'), danger: true },
         ]),
   ];
 });
@@ -305,7 +307,7 @@ async function runContext(action: MenuAction): Promise<void> {
   if (target.kind === 'folder') {
     const group = store.catalog?.groups.find((group) => group.id === target.id);
     if (target.id !== null && !group) {
-      store.error = '目标文件夹已不存在，请刷新后重试。';
+      store.error = tr('目标文件夹已不存在，请刷新后重试。');
       return;
     }
     if (action === 'newHost') emit('create', target.id);
@@ -318,7 +320,7 @@ async function runContext(action: MenuAction): Promise<void> {
   }
   const host = store.catalog?.hosts.find((host) => host.id === target.id);
   if (!host) {
-    store.error = '目标主机已不存在，请刷新后重试。';
+    store.error = tr('目标主机已不存在，请刷新后重试。');
     return;
   }
   if (action.startsWith('plugin:')) {
@@ -330,7 +332,7 @@ async function runContext(action: MenuAction): Promise<void> {
   } else if (action === 'edit') controls.get(host.id)?.edit();
   else if (action === 'deleteHost') controls.get(host.id)?.confirmDelete();
   else if (action === 'copy') {
-    const result = await store.run(() => hostsApi.copy(host.id), '主机已复制。');
+    const result = await store.run(() => hostsApi.copy(host.id), tr('主机已复制。'));
     if (result.ok) emit('saved', result.value);
   }
 }
@@ -344,7 +346,7 @@ async function removeFolder(): Promise<void> {
   if (!group) return;
   const result = await store.run(
     () => hostsApi.groupRemove(group.id),
-    '文件夹已删除，主机和子文件夹已保留在父目录。',
+    tr('文件夹已删除，主机和子文件夹已保留在父目录。'),
   );
   if (result.ok) deletingFolder.value = undefined;
 }
@@ -370,19 +372,20 @@ onBeforeUnmount(() => {
     ref="tree"
     class="host-tree-section"
     :class="{ 'host-dragging': dragged }"
-    aria-label="主机树"
+    :aria-label="tr('主机树')"
     @keydown="keys"
     @click.capture="ignoreDragClick"
   >
     <div class="host-list-heading">
-      <span class="host-list-title">
-        主机<small v-if="store.catalog" class="host-count">{{ store.catalog.hosts.length }}</small>
+      <span class="host-list-title"
+        >{{ tr(' 主机')
+        }}<small v-if="store.catalog" class="host-count">{{ store.catalog.hosts.length }}</small>
       </span>
       <button
         type="button"
         class="shell-icon-button"
-        aria-label="新建主机"
-        title="新建主机"
+        :aria-label="tr('新建主机')"
+        :title="tr('新建主机')"
         @click="$emit('create', null)"
       >
         <Plus :size="16" aria-hidden="true" />
@@ -395,14 +398,18 @@ onBeforeUnmount(() => {
           id="host-tree-search"
           v-model="store.search"
           class="sidebar-search"
-          aria-label="搜索主机"
-          placeholder="搜索主机、地址、用户名…"
+          :aria-label="tr('搜索主机')"
+          :placeholder="tr('搜索主机、地址、用户名…')"
         />
       </label>
     </div>
     <div class="host-tree-scroll" :aria-busy="store.busy" @scroll="treeScrolled">
-      <p v-if="store.busy && !store.catalog" class="host-empty" role="status">正在读取主机…</p>
-      <p v-else-if="!store.catalog" class="host-empty" role="status">未能读取主机，请刷新重试。</p>
+      <p v-if="store.busy && !store.catalog" class="host-empty" role="status">
+        {{ tr('正在读取主机…') }}
+      </p>
+      <p v-else-if="!store.catalog" class="host-empty" role="status">
+        {{ tr('未能读取主机，请刷新重试。') }}
+      </p>
       <div
         v-for="group in store.catalog ? nodes : []"
         :key="group.id ?? 'root'"
@@ -439,7 +446,9 @@ onBeforeUnmount(() => {
                 selected: store.selectedId === host.id,
                 'drag-ready': pendingDrag?.host.id === host.id,
               }"
-              :title="`${host.username}@${host.hostname}:${host.port} · 拖动可移动到其他文件夹`"
+              :title="
+                tr('{0}@{1}:{2} · 拖动可移动到其他文件夹', host.username, host.hostname, host.port)
+              "
               :aria-current="store.selectedId === host.id ? 'true' : undefined"
               :draggable="false"
               @pointerdown="beginDrag(host, $event)"
@@ -452,7 +461,7 @@ onBeforeUnmount(() => {
               @keydown="contextKeys({ kind: 'host', id: host.id }, $event)"
             >
               <span
-                :class="['disconnected-dot', { connected: hostState(host.id) === '已连接' }]"
+                :class="['disconnected-dot', { connected: hostState(host.id) === tr('已连接') }]"
                 :aria-label="hostState(host.id)"
               ></span
               ><span class="host-label"
@@ -472,15 +481,17 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="store.catalog && !store.visible.length" class="host-empty">
         <Server :size="26" :stroke-width="1.3" aria-hidden="true" />
-        <p>{{ store.catalog.hosts.length ? '没有匹配的主机' : '尚未添加主机' }}</p>
-        <p v-if="!store.catalog.hosts.length" class="subtle">右键根目录新建主机或文件夹</p>
+        <p>{{ store.catalog.hosts.length ? tr('没有匹配的主机') : tr('尚未添加主机') }}</p>
+        <p v-if="!store.catalog.hosts.length" class="subtle">
+          {{ tr('右键根目录新建主机或文件夹') }}
+        </p>
       </div>
       <button
         v-if="store.visible.length > limit"
         class="button host-load-more"
         @click="limit += 200"
       >
-        显示更多主机（{{ limit }} / {{ store.visible.length }}）
+        {{ tr(' 显示更多主机（') }}{{ limit }} / {{ store.visible.length }}）
       </button>
     </div>
     <div
@@ -492,8 +503,13 @@ onBeforeUnmount(() => {
       {{ hostDisplayName(store.catalog?.hosts.find((h) => h.id === dragged)) }}
       <span>{{
         dropTarget
-          ? `移动到 ${dropTarget === 'root' ? '根目录' : store.catalog?.groups.find((g) => g.id === dropTarget)?.name}`
-          : '拖到其他文件夹，Esc 取消'
+          ? tr(
+              '移动到 {0}',
+              dropTarget === 'root'
+                ? tr('根目录')
+                : store.catalog?.groups.find((g) => g.id === dropTarget)?.name,
+            )
+          : tr('拖到其他文件夹，Esc 取消')
       }}</span>
     </div>
     <GroupManager
@@ -505,21 +521,20 @@ onBeforeUnmount(() => {
     />
     <Modal
       v-if="deletingFolder"
-      title="确认删除文件夹"
+      :title="tr('确认删除文件夹')"
       :busy="store.busy"
       @close="deletingFolder = undefined"
     >
       <p>
-        删除“{{
-          deletingFolder.name
-        }}”？其中的主机和子文件夹会保留并移到父目录，不会删除主机配置或关闭连接。
+        {{ tr(' 删除“') }}{{ deletingFolder.name
+        }}{{ tr('”？其中的主机和子文件夹会保留并移到父目录，不会删除主机配置或关闭连接。 ') }}
       </p>
       <footer class="dialog-actions">
         <button class="button" :disabled="store.busy" @click="deletingFolder = undefined">
-          取消
+          {{ tr(' 取消 ') }}
         </button>
         <button class="button danger" :disabled="store.busy" @click="removeFolder">
-          确认删除文件夹
+          {{ tr(' 确认删除文件夹 ') }}
         </button>
       </footer>
     </Modal>
@@ -527,7 +542,7 @@ onBeforeUnmount(() => {
       <template v-if="context">
         <button
           class="context-backdrop"
-          aria-label="关闭主机树菜单"
+          :aria-label="tr('关闭主机树菜单')"
           @click="dismissContext(true)"
           @contextmenu.prevent="dismissContext(true)"
         ></button>
@@ -535,7 +550,7 @@ onBeforeUnmount(() => {
           ref="menuElement"
           class="context-menu host-tree-menu"
           role="menu"
-          aria-label="主机树操作"
+          :aria-label="tr('主机树操作')"
           :style="{ left: `${context.x}px`, top: `${context.y}px` }"
           @keydown="menuKeys"
           @contextmenu.prevent

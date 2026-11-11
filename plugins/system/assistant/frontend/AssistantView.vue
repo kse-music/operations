@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import { computed, onMounted, ref, watch } from 'vue';
 import {
   Bot,
@@ -29,21 +31,39 @@ const props = defineProps<{ hostId?: string; keepRunning?: boolean }>();
 const suggestions = [
   {
     icon: Activity,
-    title: '资源异常',
-    description: '检查 CPU、内存与负载',
-    question: '帮我排查当前主机 CPU 和内存使用异常的可能原因。',
+    get title() {
+      return tr('资源异常');
+    },
+    get description() {
+      return tr('检查 CPU、内存与负载');
+    },
+    get question() {
+      return tr('帮我排查当前主机 CPU 和内存使用异常的可能原因。');
+    },
   },
   {
     icon: Boxes,
-    title: '容器排查',
-    description: '查询状态、规划操作并复查',
-    question: '查询当前主机 Docker 镜像，为删除 tag 为 <none> 的镜像生成计划，等我确认后执行。',
+    get title() {
+      return tr('容器排查');
+    },
+    get description() {
+      return tr('查询状态、规划操作并复查');
+    },
+    get question() {
+      return tr('查询当前主机 Docker 镜像，为删除 tag 为 <none> 的镜像生成计划，等我确认后执行。');
+    },
   },
   {
     icon: ListTree,
-    title: '服务诊断',
-    description: '梳理服务响应慢的原因',
-    question: '帮我整理服务响应缓慢的排查步骤。',
+    get title() {
+      return tr('服务诊断');
+    },
+    get description() {
+      return tr('梳理服务响应慢的原因');
+    },
+    get question() {
+      return tr('帮我整理服务响应缓慢的排查步骤。');
+    },
   },
 ];
 const hosts = useHostCatalog();
@@ -59,17 +79,44 @@ const { turns, busy, error, outputs, attempted, expired } = ai;
 const messages = ref<HTMLElement>(),
   chatForm = ref<HTMLFormElement>();
 watch(
-  [() => turns.value.map((t) => t.state).join(','), error],
+  [() => turns.value.map((t) => `${t.state}:${t.streamText?.length ?? 0}`).join(','), error],
   () => {
     if (messages.value) messages.value.scrollTop = messages.value.scrollHeight;
   },
   { flush: 'post' },
 );
 const question = ref('');
-const approvalMode = ref<'request' | 'assist'>('request');
+const approvalMode = ref<'request' | 'assist' | 'full'>('request');
+const approvalModeDescriptions = {
+  get request() {
+    return tr('访问外部文件、网络或执行命令时请求批准；仅对新任务生效');
+  },
+  get assist() {
+    return tr('安全校验通过的读取直接执行，仅对风险操作请求批准；仅对新任务生效');
+  },
+  get full() {
+    return tr(
+      '在已授予权限内自动执行，包括修改和删除；首次启用须宿主授权，持续生效直到切换模式或关闭会话',
+    );
+  },
+};
+watch(
+  approvalMode,
+  (mode, previous) => {
+    if (previous === 'full' || ai.accessResetError.value) void ai.revokeFullAccess();
+  },
+  { flush: 'sync' },
+);
+function newConversation() {
+  ai.invalidate();
+  approvalMode.value = 'request';
+  void ai.revokeFullAccess();
+}
 const ready = computed(
   () =>
     !busy.value &&
+    !ai.resettingAccess.value &&
+    !ai.accessResetError.value &&
     loaded.value &&
     !loading.value &&
     !bindingError.value &&
@@ -118,48 +165,50 @@ function enter(event: KeyboardEvent) {
   if (ready.value) chatForm.value?.requestSubmit();
 }
 const readinessHint = computed(() => {
-  if (loading.value || models.loading) return '正在读取模型配置…';
+  if (loading.value || models.loading) return tr('正在读取模型配置…');
   if (localSelected.value)
     return localSelected.value.status.model
-      ? `${localSelected.value.name} · Enter 发送 · Shift + Enter 换行`
+      ? tr('{0} · Enter 发送 · Shift + Enter 换行', localSelected.value.name)
       : localSelected.value.status.message;
-  if (bindingError.value || models.error) return '模型配置读取失败，请在插件设置中重试';
-  if (modelId.value && !selected.value) return '绑定模型已删除，请在插件设置中重新绑定';
-  if (!selected.value) return '请先在插件设置中绑定模型';
-  if (!selected.value.hasKey) return '绑定模型未配置 Key，请在模型管理中补充';
-  if (hosts.busy && !hosts.catalog) return '正在读取资产列表…';
-  return 'Enter 发送 · Shift + Enter 换行';
+  if (bindingError.value || models.error) return tr('模型配置读取失败，请在插件设置中重试');
+  if (modelId.value && !selected.value) return tr('绑定模型已删除，请在插件设置中重新绑定');
+  if (!selected.value) return tr('请先在插件设置中绑定模型');
+  if (!selected.value.hasKey) return tr('绑定模型未配置 Key，请在模型管理中补充');
+  if (hosts.busy && !hosts.catalog) return tr('正在读取资产列表…');
+  return tr('Enter 发送 · Shift + Enter 换行');
 });
 </script>
 <template>
-  <section class="view ai-view" aria-label="AI 运维助手">
+  <section class="view ai-view" :aria-label="tr('AI 运维助手')">
     <div class="ai-workspace">
-      <section class="ai-chat" aria-label="对话">
+      <section class="ai-chat" :aria-label="tr('对话')">
         <div class="ai-chat-heading">
           <div>
             <MessageSquare :size="17" aria-hidden="true" />
-            <h2>对话</h2>
-            <span>当前会话</span>
+            <h2>{{ tr('对话') }}</h2>
+            <span>{{ tr('当前会话') }}</span>
           </div>
           <button
             class="text-button"
             type="button"
             :disabled="busy === 'execute'"
-            @click="ai.invalidate"
+            @click="newConversation"
           >
-            <Plus :size="14" aria-hidden="true" />新对话
+            <Plus :size="14" aria-hidden="true" />{{ tr('新对话 ') }}
           </button>
         </div>
         <div
           ref="messages"
           class="ai-chat-messages"
           role="log"
-          aria-label="对话消息"
+          :aria-label="tr('对话消息')"
           aria-live="polite"
         >
           <p v-if="localSelected && !localSelected.status.model" class="banner">
             {{ localSelected.status.message }}
-            <button class="button" @click="binding.manageModels">打开平台模型设置</button>
+            <button class="button" @click="binding.manageModels">
+              {{ tr('打开平台模型设置') }}
+            </button>
           </p>
           <p
             v-if="bindingError || (!isLocalModel(modelId) && models.error)"
@@ -172,10 +221,14 @@ const readinessHint = computed(() => {
           <p v-if="ai.hostContext.cleanupError.value" class="error-text" role="alert">
             {{ ai.hostContext.cleanupError.value }}
           </p>
+          <p v-if="ai.accessResetError.value" class="error-text" role="alert">
+            {{ ai.accessResetError.value }}
+            <button class="button" @click="ai.revokeFullAccess">{{ tr('重试撤销授权') }}</button>
+          </p>
           <div v-if="!turns.length" class="ai-chat-empty">
             <div class="ai-empty-icon"><Bot :size="28" aria-hidden="true" /></div>
-            <h3>有什么需要一起排查？</h3>
-            <p>直接提问，或让助手自动匹配相关服务器。</p>
+            <h3>{{ tr('有什么需要一起排查？') }}</h3>
+            <p>{{ tr('直接提问，或让助手自动匹配相关服务器。') }}</p>
             <div class="ai-suggestions">
               <button
                 v-for="suggestion in suggestions"
@@ -198,11 +251,12 @@ const readinessHint = computed(() => {
               <div class="ai-user-text">{{ turn.question }}</div>
             </div>
             <p v-if="turn.hostIds.length" class="ai-turn-targets">
-              命中：{{
+              {{ tr(' 命中：')
+              }}{{
                 turn.hostIds
                   .map((id) => {
                     const host = hosts.catalog?.hosts.find((h) => h.id === id);
-                    return host ? hostDisplayName(host) : '已移除资产';
+                    return host ? hostDisplayName(host) : tr('已移除资产');
                   })
                   .join('、')
               }}
@@ -211,16 +265,23 @@ const readinessHint = computed(() => {
               <div class="ai-message-avatar"><Bot :size="18" aria-hidden="true" /></div>
               <div class="ai-message-content">
                 <p v-if="turn.task" class="ai-caption" role="status">
-                  任务状态：{{ taskStatusLabels[turn.task.status] }}
+                  {{ tr(' 任务状态：') }}{{ taskStatusLabels[turn.task.status] }}
                 </p>
+                <div v-if="turn.state !== 'complete' && turn.streamText" class="ai-stream-preview">
+                  <AssistantMarkdown :content="turn.streamText" />
+                </div>
                 <div v-if="turn.state === 'pending'" class="ai-chat-waiting" role="status">
                   <LoaderCircle :size="16" class="ai-spin" aria-hidden="true" />{{
                     busy === 'prepare'
-                      ? ai.hostContext.phase.value || '正在读取主机上下文…'
-                      : '正在思考…'
+                      ? ai.hostContext.phase.value || tr('正在读取主机上下文…')
+                      : turn.streamText
+                        ? tr('正在生成回答…')
+                        : tr('正在思考…')
                   }}
                 </div>
-                <p v-else-if="turn.state === 'cancelled'" class="ai-chat-cancelled">已停止回答</p>
+                <p v-else-if="turn.state === 'cancelled'" class="ai-chat-cancelled">
+                  {{ tr('已停止回答') }}
+                </p>
                 <div v-else-if="turn.error" class="ai-chat-error" role="alert">
                   <p>{{ turn.error }}</p>
                   <button
@@ -229,7 +290,7 @@ const readinessHint = computed(() => {
                     :disabled="!!busy"
                     @click="question = turn.question"
                   >
-                    重新编辑
+                    {{ tr(' 重新编辑 ') }}
                   </button>
                 </div>
                 <template v-else-if="turn.answer"
@@ -249,9 +310,9 @@ const readinessHint = computed(() => {
                   >
                     <summary>
                       <Terminal :size="14" aria-hidden="true" />{{
-                        turn.answer.agent?.steps.length ? '计划审批' : '命令建议'
+                        turn.answer.agent?.steps.length ? tr('计划审批') : tr('命令建议')
                       }}
-                      <span>{{ turn.answer.proposals.length }} 条 · 执行需审核</span>
+                      <span>{{ turn.answer.proposals.length }}{{ tr(' 条 · 执行需审核') }}</span>
                     </summary>
                     <article
                       v-for="proposal in turn.answer.proposals"
@@ -270,13 +331,13 @@ const readinessHint = computed(() => {
                             aria-hidden="true"
                           /><FileSearch v-else :size="13" aria-hidden="true" />{{
                             proposal.risk === 'read_only'
-                              ? '只读诊断'
+                              ? tr('只读诊断')
                               : proposal.risk === 'change'
-                                ? '系统变更 · 单独确认'
-                                : '仅供人工审阅'
+                                ? tr('系统变更 · 单独确认')
+                                : tr('仅供人工审阅')
                           }}</span
                         ><span class="ai-proposal-target" :title="proposal.target ?? ''">{{
-                          proposal.target ?? '无服务器目标'
+                          proposal.target ?? tr('无服务器目标')
                         }}</span>
                       </div>
                       <pre class="ai-command"><code>{{ proposal.command }}</code></pre>
@@ -288,18 +349,20 @@ const readinessHint = computed(() => {
                           :disabled="
                             !!busy ||
                             attempted.includes(proposal.id) ||
-                            expired.includes(proposal.id)
+                            expired.includes(proposal.id) ||
+                            ai.resettingAccess.value ||
+                            !!ai.accessResetError.value
                           "
                           @click="ai.inspect(proposal)"
                         >
                           {{
                             expired.includes(proposal.id)
-                              ? '上下文已切换，请重新提问'
+                              ? tr('上下文已切换，请重新提问')
                               : attempted.includes(proposal.id)
-                                ? '已提交，不自动重试'
+                                ? tr('已提交，不自动重试')
                                 : turn.answer.agent?.steps.length
-                                  ? '执行计划'
-                                  : '执行此操作'
+                                  ? tr('执行计划')
+                                  : tr('执行此操作')
                           }}
                         </button>
                       </div>
@@ -323,24 +386,25 @@ const readinessHint = computed(() => {
                             aria-hidden="true"
                           /><AlertTriangle v-else :size="14" aria-hidden="true" />{{
                             outputs[proposal.id]!.pending
-                              ? '文件传输进行中'
+                              ? tr('文件传输进行中')
                               : outputs[proposal.id]!.success
                                 ? outputs[proposal.id]!.agent
-                                  ? '计划已执行并完成复查'
-                                  : '执行成功'
-                                : '操作未确认成功，请核对实际状态'
+                                  ? tr('计划已执行并完成复查')
+                                  : tr('执行成功')
+                                : tr('操作未确认成功，请核对实际状态')
                           }}
                         </p>
                         <pre class="ai-output">{{ outputs[proposal.id]!.output }}</pre>
-                        <div v-if="outputs[proposal.id]!.transfer" aria-label="文件传输进度">
+                        <div v-if="outputs[proposal.id]!.transfer" :aria-label="tr('文件传输进度')">
                           <progress
                             :value="outputs[proposal.id]!.transfer!.transferredBytes"
                             :max="outputs[proposal.id]!.transfer!.totalBytes || 1"
                           />
                           <p>
                             {{ outputs[proposal.id]!.transfer!.transferredBytes }} /
-                            {{ outputs[proposal.id]!.transfer!.totalBytes }} 字节 ·
-                            {{ outputs[proposal.id]!.transfer!.bytesPerSecond }} 字节/秒
+                            {{ outputs[proposal.id]!.transfer!.totalBytes }}{{ tr(' 字节 · ')
+                            }}{{ outputs[proposal.id]!.transfer!.bytesPerSecond
+                            }}{{ tr(' 字节/秒 ') }}
                           </p>
                           <p v-if="outputs[proposal.id]!.transfer!.sha256">
                             SHA-256：{{ outputs[proposal.id]!.transfer!.sha256 }}
@@ -349,7 +413,7 @@ const readinessHint = computed(() => {
                             v-for="path in outputs[proposal.id]!.transfer!.recoveryPaths"
                             :key="path"
                           >
-                            需人工核对的恢复路径：{{ path }}
+                            {{ tr(' 需人工核对的恢复路径：') }}{{ path }}
                           </p>
                           <button
                             v-if="outputs[proposal.id]!.pending"
@@ -358,14 +422,14 @@ const readinessHint = computed(() => {
                             :disabled="ai.cancelling.value.includes(proposal.id)"
                             @click="ai.cancelTransfer(proposal.id)"
                           >
-                            取消传输
+                            {{ tr(' 取消传输 ') }}
                           </button>
                         </div>
                       </div>
                     </article>
                   </details>
                   <details v-if="turn.answer.warnings.length" class="ai-chat-notes">
-                    <summary>上下文与响应提示</summary>
+                    <summary>{{ tr('上下文与响应提示') }}</summary>
                     <p v-for="warning in turn.answer.warnings" :key="warning">{{ warning }}</p>
                   </details>
                 </template>
@@ -378,10 +442,10 @@ const readinessHint = computed(() => {
           id="assistant-chat-form"
           ref="chatForm"
           class="ai-chat-composer"
-          aria-label="发送消息"
+          :aria-label="tr('发送消息')"
           @submit.prevent="send"
         >
-          <label class="sr-only" for="assistant-question">问题</label
+          <label class="sr-only" for="assistant-question">{{ tr('问题') }}</label
           ><textarea
             id="assistant-question"
             v-model="question"
@@ -389,31 +453,28 @@ const readinessHint = computed(() => {
             rows="2"
             maxlength="8192"
             required
-            placeholder="输入问题，开始对话…"
+            :placeholder="tr('输入问题，开始对话…')"
             @keydown.enter="enter"
           />
           <div class="ai-chat-composer-footer">
-            <label class="ai-approval-mode">
+            <label class="ai-approval-mode" :class="{ 'ai-full-access': approvalMode === 'full' }">
               <ShieldCheck :size="14" aria-hidden="true" />
               <select
                 v-model="approvalMode"
-                aria-label="审批模式"
+                :aria-label="tr('审批模式')"
                 :disabled="!!busy"
-                :title="
-                  approvalMode === 'assist'
-                    ? '自动处理授权读取和预检，内容可交给已选模型；动态SSH仍按规则批准，变更计划确认一次；仅对新任务生效'
-                    : '读取按宿主规则请求批准，变更计划只确认一次；仅对新任务生效'
-                "
+                :title="approvalModeDescriptions[approvalMode]"
               >
-                <option value="request">请求批准</option>
-                <option value="assist">帮我审批</option>
+                <option value="request">{{ tr('请求批准') }}</option>
+                <option value="assist">{{ tr('帮我批准') }}</option>
+                <option value="full">{{ tr('完全访问权限') }}</option>
               </select>
             </label>
             <span>{{ readinessHint }}</span
             ><button v-if="busy" class="button" type="button" @click="ai.cancel">
-              <Square :size="12" aria-hidden="true" />停止</button
+              <Square :size="12" aria-hidden="true" />{{ tr('停止') }}</button
             ><button v-else class="button primary" type="submit" :disabled="!ready">
-              <Send :size="14" aria-hidden="true" />发送
+              <Send :size="14" aria-hidden="true" />{{ tr('发送 ') }}
             </button>
           </div>
         </form>

@@ -24,8 +24,8 @@ impl Default for ProductPreferences {
 }
 impl ProductPreferences {
     pub fn validate(&self) -> Result<(), Error> {
-        if self.language != "zh-CN" {
-            return Err(Error::Validation("当前界面语言仅支持简体中文"));
+        if !matches!(self.language.as_str(), "zh-CN" | "en-US") {
+            return Err(Error::Validation("界面语言仅支持简体中文或英文"));
         }
         if let Some(path) = &self.download_directory
             && (path.len() > 4096

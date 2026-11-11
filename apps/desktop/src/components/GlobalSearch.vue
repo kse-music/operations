@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, ref } from 'vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
-import { messages, type WorkspaceView } from '../types/product';
+import { viewLabels, type WorkspaceView } from '../types/product';
 import { hostDisplayName } from '../types/hosts';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
@@ -21,12 +23,12 @@ const hosts = useHostsStore(),
 const results = computed(() => {
   const q = query.value.trim().toLowerCase();
   return [
-    ...Object.entries(messages['zh-CN'])
+    ...Object.entries(viewLabels)
       .filter(([view]) => view !== 'extension')
       .map(([view, name]) => ({
         key: view,
         kind: 'view',
-        name: `${isSettingsView(view as WorkspaceView) ? '设置' : '工作区'} · ${name}`,
+        name: `${isSettingsView(view as WorkspaceView) ? tr('设置') : tr('工作区')} · ${name}`,
         view: view as WorkspaceView,
         hostId: hosts.selectedId ?? '',
         entryId: '',
@@ -34,7 +36,7 @@ const results = computed(() => {
     ...(hosts.catalog?.hosts ?? []).map((h) => ({
       key: h.id,
       kind: 'host',
-      name: `主机 · ${hostDisplayName(h)} · ${h.username}@${h.hostname}:${h.port}`,
+      name: tr('主机 · {0} · {1}@{2}:{3}', hostDisplayName(h), h.username, h.hostname, h.port),
       view: 'terminals' as WorkspaceView,
       hostId: h.id,
       entryId: '',
@@ -44,7 +46,7 @@ const results = computed(() => {
       .map((e) => ({
         key: `${e.pluginId}:${e.id}`,
         kind: 'plugin',
-        name: `插件命令 · ${e.pluginName} · ${e.label}`,
+        name: tr('插件命令 · {0} · {1}', e.pluginName, e.label),
         view: 'extension' as WorkspaceView,
         hostId: workspace.current?.hostId ?? '',
         entryId: e.id,
@@ -77,21 +79,21 @@ function key(e: KeyboardEvent) {
 }
 </script>
 <template>
-  <Modal title="全局搜索" @close="emit('close')"
+  <Modal :title="tr('全局搜索')" @close="emit('close')"
     ><input
       v-model="query"
       autofocus
       class="global-search-input"
-      aria-label="全局搜索内容"
-      placeholder="搜索主机、工作区和插件命令…"
+      :aria-label="tr('全局搜索内容')"
+      :placeholder="tr('搜索主机、工作区和插件命令…')"
       aria-controls="global-search-results"
       :aria-activedescendant="results[index] ? `result-${results[index]!.key}` : undefined"
       @input="index = 0"
       @keydown="key"
     />
-    <p class="subtle">↑↓ 选择，Enter 打开，Esc 关闭。任务执行仍需目标预览和确认。</p>
+    <p class="subtle">{{ tr('↑↓ 选择，Enter 打开，Esc 关闭。任务执行仍需目标预览和确认。') }}</p>
 
-    <div id="global-search-results" role="listbox" aria-label="全局搜索结果">
+    <div id="global-search-results" role="listbox" :aria-label="tr('全局搜索结果')">
       <button
         v-for="(r, n) in results"
         :id="`result-${r.key}`"
@@ -105,6 +107,6 @@ function key(e: KeyboardEvent) {
         {{ r.name }}
       </button>
     </div>
-    <p v-if="!results.length" class="host-empty">没有匹配结果</p></Modal
+    <p v-if="!results.length" class="host-empty">{{ tr('没有匹配结果') }}</p></Modal
   >
 </template>

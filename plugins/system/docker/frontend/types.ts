@@ -1,8 +1,24 @@
+import { tr } from './i18n/messages';
 export type ServerSection = 'containers' | 'images' | 'compose';
 export const serverSections = [
-  { key: 'containers', label: '容器' },
-  { key: 'images', label: '镜像' },
-  { key: 'compose', label: 'Compose 项目' },
+  {
+    key: 'containers',
+    get label() {
+      return tr('容器');
+    },
+  },
+  {
+    key: 'images',
+    get label() {
+      return tr('镜像');
+    },
+  },
+  {
+    key: 'compose',
+    get label() {
+      return tr('Compose 项目');
+    },
+  },
 ];
 export type OpsRequest =
   | { kind: 'capabilities' | 'containers' | 'images' | 'compose_projects' }

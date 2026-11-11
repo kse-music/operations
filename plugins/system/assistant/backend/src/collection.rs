@@ -17,6 +17,8 @@ impl Plan {
             || (has(&["cpu", "内存", "memory", "负载", "load"])
                 && has(&["高", "排查", "为什么", "原因", "why", "high"]));
         let metrics = has(&[
+            "硬件",
+            "hardware",
             "cpu",
             "负载",
             "load",

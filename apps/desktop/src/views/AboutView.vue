@@ -1,72 +1,82 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { useApplicationStore } from '../stores/application';
 import { RefreshCw } from '@lucide/vue';
+import { computed } from 'vue';
+import { locale } from '@serverdeck/plugin-sdk/i18n';
 
 const application = useApplicationStore();
 const releaseTimestamp = import.meta.env.APP_RELEASE_TIME;
-const releaseTime = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  dateStyle: 'medium',
-  timeStyle: 'medium',
-  hourCycle: 'h23',
-}).format(new Date(releaseTimestamp));
+const releaseTime = computed(() =>
+  new Intl.DateTimeFormat(locale.value, {
+    timeZone: 'Asia/Shanghai',
+    dateStyle: 'medium',
+    timeStyle: 'medium',
+    hourCycle: 'h23',
+  }).format(new Date(releaseTimestamp)),
+);
 </script>
 
 <template>
   <section class="about-view page-view" aria-labelledby="about-title">
     <header class="section-heading">
-      <h1 id="about-title">关于 ServerDeck</h1>
+      <h1 id="about-title">{{ tr('关于 ServerDeck') }}</h1>
       <button
         class="button"
         :disabled="application.loading || application.saving"
         @click="application.initialize"
       >
         <RefreshCw :size="14" aria-hidden="true" />{{
-          application.loading ? '检查中…' : '重新检查'
+          application.loading ? tr('检查中…') : tr('重新检查')
         }}
       </button>
     </header>
-    <section class="work-section" aria-label="产品信息">
+    <section class="work-section" :aria-label="tr('产品信息')">
       <h2>ServerDeck</h2>
-      <p>本地优先的服务器运维工作台，集成 SSH 终端、SFTP 文件管理和服务器监控。</p>
+      <p>{{ tr('本地优先的服务器运维工作台，集成 SSH 终端、SFTP 文件管理和服务器监控。') }}</p>
       <dl class="system-details">
         <div>
-          <dt>应用版本</dt>
+          <dt>{{ tr('应用版本') }}</dt>
           <dd v-if="application.state">v{{ application.state.appVersion }}</dd>
-          <dd v-else>{{ application.loading ? '读取中…' : '暂不可用（本地后端未就绪）' }}</dd>
+          <dd v-else>
+            {{ application.loading ? tr('读取中…') : tr('暂不可用（本地后端未就绪）') }}
+          </dd>
         </div>
         <div>
-          <dt>发布时间</dt>
+          <dt>{{ tr('发布时间') }}</dt>
           <dd>
             <time :datetime="releaseTimestamp">{{ releaseTime }}</time
-            >（北京时间）
+            >{{ tr('（北京时间） ') }}
           </dd>
         </div>
       </dl>
     </section>
     <section class="work-section" aria-labelledby="system-title">
-      <h2 id="system-title">本地环境</h2>
+      <h2 id="system-title">{{ tr('本地环境') }}</h2>
       <dl v-if="application.state" class="system-details" data-testid="backend-ready">
         <div>
           <dt>IPC / Rust</dt>
-          <dd><span class="status-dot"></span> 已连接</dd>
+          <dd><span class="status-dot"></span>{{ tr(' 已连接') }}</dd>
         </div>
         <div>
           <dt>SQLite</dt>
-          <dd>已初始化 · schema v{{ application.state.databaseVersion }}</dd>
+          <dd>{{ tr('已初始化 · schema v') }}{{ application.state.databaseVersion }}</dd>
         </div>
         <div>
-          <dt>数据目录</dt>
+          <dt>{{ tr('数据目录') }}</dt>
           <dd class="path">{{ application.state.dataDirectory }}</dd>
         </div>
         <div>
-          <dt>日志目录</dt>
+          <dt>{{ tr('日志目录') }}</dt>
           <dd class="path">{{ application.state.logDirectory }}</dd>
         </div>
       </dl>
       <p v-else class="subtle">
         {{
-          application.loading ? '正在通过 IPC 读取本地后端状态…' : '后端尚未就绪，暂无运行状态。'
+          application.loading
+            ? tr('正在通过 IPC 读取本地后端状态…')
+            : tr('后端尚未就绪，暂无运行状态。')
         }}
       </p>
     </section>

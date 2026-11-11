@@ -1,3 +1,4 @@
+import { progress } from '@serverdeck/plugin-sdk/streaming';
 import { inject, type InjectionKey } from 'vue';
 import { invoke } from '@serverdeck/plugin-sdk';
 import { cancelCurrent } from '@serverdeck/plugin-sdk/actions';
@@ -14,6 +15,9 @@ import type {
 } from './types';
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
 const api = {
+  progressOpen: progress.open,
+  progressRead: progress.read,
+  progressClose: progress.close,
   prepare: (input: AiPrepare) => invoke<AiPreview>('prepare', json(input)),
   resolveHosts: (input: AiResolveHosts) => invoke<AiHostRoute>('resolve_hosts', json(input)),
   send: (id: string, confirmed: boolean) => invoke<AiAnswer>('send', { id, confirmed }),
@@ -22,6 +26,7 @@ const api = {
   task: (id: string) => invoke<AiTask>('task', { id }),
   poll: (id: string) => invoke<AiExecution>('poll', { id }),
   cancelTransfer: (id: string) => call<TransferState>({ kind: 'transfer_cancel', id }),
+  revokeFullAccess: () => call({ kind: 'approval_mode', mode: 'request' }),
   async cancel(id: string) {
     await cancelCurrent();
     await invoke('cancel', { id });

@@ -8,12 +8,25 @@ pub struct Fitted {
     pub input_tokens: usize,
 }
 
-fn measure(messages: &[Message], model: &Value, limit: usize) -> Result<(bool, usize), Error> {
+fn measure(
+    messages: &[Message],
+    model: &Value,
+    limit: usize,
+    stream: bool,
+) -> Result<(bool, usize), Error> {
     let output = model["config"]["maxOutputTokens"].as_u64().unwrap_or(2048);
     let window = model["config"]["contextWindowTokens"]
         .as_u64()
         .unwrap_or(131072);
-    let wire = json!({"model":model["config"]["model"],"messages":messages,"max_completion_tokens":output,"stream":false,"store":false});
+    let mut wire = json!({"model":model["config"]["model"],"messages":messages,"max_completion_tokens":output,"stream":stream,"store":false});
+    if stream
+        && !matches!(
+            model["config"]["provider"].as_str(),
+            Some("local_codex" | "local_claude_code")
+        )
+    {
+        wire["stream_options"] = json!({"include_usage":true});
+    }
     let input = serde_json::to_vec(&wire)
         .map_err(|e| Error::Worker(Box::new(e)))?
         .len()
@@ -115,10 +128,21 @@ fn question_index(messages: &[Message]) -> Option<usize> {
     })
 }
 
-pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fitted, Error> {
+pub fn fit(messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fitted, Error> {
+    fit_transport(messages, model, limit, false)
+}
+pub fn fit_stream(messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fitted, Error> {
+    fit_transport(messages, model, limit, true)
+}
+fn fit_transport(
+    mut messages: Vec<Message>,
+    model: &Value,
+    limit: usize,
+    stream: bool,
+) -> Result<Fitted, Error> {
     let mut reduced = false;
     let mut dropped = 0;
-    let (mut fits, mut input_tokens) = measure(&messages, model, limit)?;
+    let (mut fits, mut input_tokens) = measure(&messages, model, limit, stream)?;
     for keep in [3, 0] {
         if fits {
             break;
@@ -138,7 +162,7 @@ pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fi
         }
         if changed {
             reduced = true;
-            (fits, input_tokens) = measure(&messages, model, limit)?;
+            (fits, input_tokens) = measure(&messages, model, limit, stream)?;
         }
     }
     while !fits {
@@ -165,7 +189,7 @@ pub fn fit(mut messages: Vec<Message>, model: &Value, limit: usize) -> Result<Fi
                 .saturating_add(1)
         );
         messages[index].content = value.to_string();
-        (fits, input_tokens) = measure(&messages, model, limit)?;
+        (fits, input_tokens) = measure(&messages, model, limit, stream)?;
     }
     let mut warnings = Vec::new();
     if reduced {
@@ -194,6 +218,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn stream_budget_counts_the_actual_transport_fields_before_sending() {
+        let mut model = json!({"config":{"provider":"openai_compatible","model":"fixture","contextWindowTokens":10000,"maxOutputTokens":256}});
+        let messages = vec![
+            message(Role::System, "policy"),
+            message(Role::User, "question"),
+        ];
+        let (_, base) = measure(&messages, &model, 44000, false).unwrap();
+        let (_, stream) = measure(&messages, &model, 44000, true).unwrap();
+        let wire = json!({"model":"fixture","messages":messages,"max_completion_tokens":256,"stream":true,"stream_options":{"include_usage":true},"store":false});
+        assert_eq!(stream, serde_json::to_vec(&wire).unwrap().len() + 64);
+        assert!(stream > base);
+        model["config"]["contextWindowTokens"] = json!(base + 256);
+        assert!(fit(messages.clone(), &model, 44000).is_ok());
+        assert!(fit_stream(messages, &model, 44000).is_err());
+    }
     #[test]
     fn compresses_current_optional_details_before_history_and_preserves_tool_failures() {
         let history = json!({"question":"old","context":{"hosts":[{"docker":{"records":["unchanged historical text"]}}]}}).to_string();

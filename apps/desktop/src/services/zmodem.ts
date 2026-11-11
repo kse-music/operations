@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import Zmodem from 'zmodem.js';
 import type { TerminalUploadSelection } from '../types/terminal';
 
@@ -80,7 +81,9 @@ export class ZmodemUpload {
           } catch (cause) {
             this.pending = [];
             this.ignoreXon = true;
-            this.options.failed(new Error('远端 ZMODEM 参数不受支持，请检查 rz 参数。', { cause }));
+            this.options.failed(
+              new Error(tr('远端 ZMODEM 参数不受支持，请检查 rz 参数。'), { cause }),
+            );
             void this.options
               .send(Uint8Array.of(24, 24, 24, 24, 24, 8, 8, 8, 8, 8))
               .catch((error: unknown) => this.options.failed(error));
@@ -106,7 +109,7 @@ export class ZmodemUpload {
     this.outgoing = Promise.resolve();
     session.on('garbage', (data) => this.options.write(Uint8Array.from(data)));
     session.on('session_end', () => {
-      if (session.aborted()) this.stop(new Error('远端已取消 ZMODEM 上传。'));
+      if (session.aborted()) this.stop(new Error(tr('远端已取消 ZMODEM 上传。')));
     });
     session.set_sender((data) => {
       // The shared input queue preserves ordering and enforces its byte limit.
@@ -114,7 +117,7 @@ export class ZmodemUpload {
       void this.outgoing.catch((error: unknown) => this.stop(error));
     });
     if (session.type !== 'send') {
-      this.stop(new Error('当前 ZMODEM 支持 rz 上传；下载请使用 SFTP 文件页面。'));
+      this.stop(new Error(tr('当前 ZMODEM 支持 rz 上传；下载请使用 SFTP 文件页面。')));
       void this.finish();
       return;
     }
@@ -157,11 +160,11 @@ export class ZmodemUpload {
       }
       let offset = transfer.get_offset();
       if (!Number.isSafeInteger(offset) || offset < 0 || offset > file.size)
-        throw new Error('远端请求的文件偏移无效。');
+        throw new Error(tr('远端请求的文件偏移无效。'));
       while (offset < file.size) {
         const data = await this.wait(this.options.read(this.selection.token, index, offset));
         if (!data.length || data.length > 8192 || offset + data.length > file.size)
-          throw new Error('本地文件读取长度异常，请重新选择文件。');
+          throw new Error(tr('本地文件读取长度异常，请重新选择文件。'));
         transfer.send(Uint8Array.from(data));
         await this.wait(this.outgoing);
         offset += data.length;
@@ -175,8 +178,8 @@ export class ZmodemUpload {
     await this.wait(this.outgoing);
     this.options.notice(
       this.selection.files.length
-        ? `ZMODEM 上传完成：${uploaded} 个文件，远端跳过 ${skipped} 个文件。`
-        : '已取消 ZMODEM 文件选择。',
+        ? tr('ZMODEM 上传完成：{0} 个文件，远端跳过 {1} 个文件。', uploaded, skipped)
+        : tr('已取消 ZMODEM 文件选择。'),
     );
   }
   private wait<T>(promise: Promise<T>, timeout = true): Promise<T> {
@@ -201,7 +204,7 @@ export class ZmodemUpload {
       if (timeout)
         timer = setTimeout(() => {
           cleanup();
-          reject(new Error('ZMODEM 上传等待响应超时，传输已停止。'));
+          reject(new Error(tr('ZMODEM 上传等待响应超时，传输已停止。')));
         }, TIMEOUT);
       promise.then(
         (value) => {
@@ -228,8 +231,8 @@ export class ZmodemUpload {
     }
   }
   cancel(): void {
-    this.stop(new Error('已取消 ZMODEM 上传，远端可能保留未完成的文件。'), false);
-    this.options.notice('已取消 ZMODEM 上传，远端可能保留未完成的文件。');
+    this.stop(new Error(tr('已取消 ZMODEM 上传，远端可能保留未完成的文件。')), false);
+    this.options.notice(tr('已取消 ZMODEM 上传，远端可能保留未完成的文件。'));
   }
   private async finish(): Promise<void> {
     const selection = this.selection;
@@ -249,6 +252,6 @@ export class ZmodemUpload {
     // Closing/reconnecting will cancel the old SSH channel; no protocol data
     // from this instance may be sent to the replacement terminal.
     this.session?.set_sender(() => {});
-    this.stop(new Error('终端会话已结束，ZMODEM 上传已停止。'), false);
+    this.stop(new Error(tr('终端会话已结束，ZMODEM 上传已停止。')), false);
   }
 }

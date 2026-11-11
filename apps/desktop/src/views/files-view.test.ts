@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, type Pinia } from 'pinia';
 import FilesView from './FilesView.vue';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import { useFilesStore } from '../stores/files';
 import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
@@ -72,6 +73,7 @@ beforeEach(async () => {
   await mountView();
 });
 afterEach(() => {
+  setLocale('zh-CN');
   app?.unmount();
   disposePinia(pinia);
   root.remove();
@@ -167,6 +169,22 @@ it('replaces the folder browser with a drive selector immediately after the pare
   expect(driveOptions().every((option) => option.firstElementChild?.tagName === 'svg')).toBe(true);
   expect(driveName()).toBe('D: 本地磁盘');
   expect(root.querySelector('[aria-label="选择上传文件夹…"]')).not.toBeNull();
+});
+
+it('updates generated drive captions without reloading drives or translating file names', async () => {
+  await vi.waitFor(() => expect(driveName()).toBe('D: 本地磁盘'));
+  const files = useFilesStore(pinia);
+  files.local!.entries = [{ ...entry, name: '本地磁盘', path: 'D:/test/本地磁盘' }];
+  const requests = vi.mocked(filesApi.localDrives).mock.calls.length;
+  setLocale('en-US');
+  await nextTick();
+  expect(root.querySelector('.file-location-value')?.textContent?.trim()).toBe('D: Local disk');
+  expect(root.querySelector('[title="本地磁盘"]')).not.toBeNull();
+  expect(files.local!.path).toBe('D:/test');
+  expect(filesApi.localDrives).toHaveBeenCalledTimes(requests);
+  setLocale('zh-CN');
+  await nextTick();
+  expect(driveName()).toBe('D: 本地磁盘');
 });
 
 it('navigates to the selected drive root and preserves local back navigation', async () => {
@@ -507,8 +525,8 @@ it('confirms a sudo identity, clears the password immediately, and displays the 
         finish = resolve;
       }),
   );
-  const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-    button.getAttribute('aria-label') === '切换用户',
+  const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.getAttribute('aria-label') === '切换用户',
   )!;
   button.click();
   await nextTick();
@@ -646,8 +664,9 @@ it.each(['local', 'remote'] as const)(
     table.querySelector<HTMLInputElement>('tbody input')!.click();
     await nextTick();
     const toolbar = table.closest('.file-side')!.querySelector('.toolbar')!;
-    const transfer = [...toolbar.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.getAttribute('aria-label') === (side === 'local' ? '上传选中' : '下载选中'),
+    const transfer = [...toolbar.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) =>
+        button.getAttribute('aria-label') === (side === 'local' ? '上传选中' : '下载选中'),
     )!;
     expect(transfer.disabled).toBe(false);
     let reject!: (cause: unknown) => void;

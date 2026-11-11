@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { call } from '../platform';
 import { errorMessage } from '../services/ipc';
@@ -206,43 +208,43 @@ onBeforeUnmount(() => {
   <Modal :title="title" wide @close="close">
     <section class="platform-stream-dialog">
       <div class="stream-toolbar">
-        <input v-model="filter" aria-label="过滤输出" placeholder="过滤输出" /><button
+        <input v-model="filter" :aria-label="tr('过滤输出')" :placeholder="tr('过滤输出')" /><button
           class="button"
           :disabled="['closed', 'failed'].includes(state)"
           @click="pause"
         >
-          {{ paused ? '继续' : '暂停' }}</button
-        ><button class="button" @click="copy">复制</button
-        ><button class="button" @click="download">导出</button>
+          {{ paused ? tr('继续') : tr('暂停') }}</button
+        ><button class="button" @click="copy">{{ tr('复制') }}</button
+        ><button class="button" @click="download">{{ tr('导出') }}</button>
         <button class="button" :disabled="following && !paused" @click="followLatest">
-          最新日志
+          {{ tr(' 最新日志 ') }}
         </button>
       </div>
       <p v-if="error" role="alert" class="error-text">{{ error }}</p>
       <p role="status" class="subtle">
         {{
           state === 'failed'
-            ? '读取失败'
+            ? tr('读取失败')
             : state === 'closed'
-              ? '已结束'
+              ? tr('已结束')
               : paused
-                ? '已暂停'
+                ? tr('已暂停')
                 : following
-                  ? '实时跟踪 · 自动滚动到最新'
-                  : '查看历史 · 新日志继续接收'
+                  ? tr('实时跟踪 · 自动滚动到最新')
+                  : tr('查看历史 · 新日志继续接收')
         }}
       </p>
       <pre
         ref="output"
         class="platform-stream-output"
         role="region"
-        aria-label="日志输出"
+        :aria-label="tr('日志输出')"
         tabindex="0"
         @scroll="onScroll"
         @wheel.passive="markScrollIntent"
         @pointerdown="markScrollIntent"
         @keydown="onScrollKey"
-        >{{ text || (filter ? '没有匹配的日志。' : '等待输出…') }}</pre>
+        >{{ text || (filter ? tr('没有匹配的日志。') : tr('等待输出…')) }}</pre>
     </section>
   </Modal>
 </template>

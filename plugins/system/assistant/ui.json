@@ -1,14 +1,25 @@
 {
   "uiVersion": 4,
-  "title": "AI 运维助手",
+  "title": {
+    "zh-CN": "AI 运维助手",
+    "en-US": "AI operations assistant"
+  },
   "pages": [
     {
       "id": "assistant",
-      "title": "AI 运维助手",
+      "title": {
+        "zh-CN": "AI 运维助手",
+        "en-US": "AI operations assistant"
+      },
       "initialAction": null,
       "fields": [],
       "actions": [
-        { "id": "poll", "label": "poll", "discardDirty": false, "enabledWhen": null },
+        {
+          "id": "poll",
+          "label": "poll",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
         {
           "id": "tools",
           "label": "tools",
@@ -59,7 +70,10 @@
     },
     {
       "id": "settings",
-      "title": "模型绑定",
+      "title": {
+        "zh-CN": "模型绑定",
+        "en-US": "Model binding"
+      },
       "initialAction": null,
       "fields": [],
       "actions": [],

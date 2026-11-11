@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { Settings2 } from '@lucide/vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -127,7 +129,7 @@ async function load() {
     schema.value = await plugins.schema(props.pluginId);
     if (!props.active || !available.value || disposed.value) return;
     const selected = page.value;
-    if (!selected) throw { message: '插件贡献页面不存在' };
+    if (!selected) throw { message: tr('插件贡献页面不存在') };
     if (props.hostId && !connectionChanged.value) await connect();
     await bind();
   } catch (cause) {
@@ -149,9 +151,9 @@ async function connect() {
     if (changed) {
       if (
         !(await plugins.ask(
-          plugins.t('重新连接主机？', 'Reconnect host?'),
+          plugins.t(tr('重新连接主机？'), 'Reconnect host?'),
           plugins.t(
-            '旧运维/SFTP 租约将关闭，终端保持连接。',
+            tr('旧运维/SFTP 租约将关闭，终端保持连接。'),
             'Closes old operations/SFTP leases; terminals remain connected.',
           ),
         ))
@@ -260,9 +262,17 @@ useErrorNotifications(error);
     :data-host-id="hostId"
   >
     <header v-if="!settingsPage" class="plugin-heading">
-      <h1>{{ schema ? plugins.label(schema.title) : plugin?.manifest.name }}</h1>
-      <button class="button" aria-label="插件设置" @click="emit('settings')">
-        <Settings2 :size="15" aria-hidden="true" />插件设置
+      <h1>
+        {{
+          schema
+            ? plugins.label(schema.title)
+            : plugin
+              ? plugins.metadata(plugin, plugin.manifest.name)
+              : ''
+        }}
+      </h1>
+      <button class="button" :aria-label="tr('插件设置')" @click="emit('settings')">
+        <Settings2 :size="15" aria-hidden="true" />{{ tr('插件设置 ') }}
       </button>
     </header>
     <label
@@ -272,10 +282,10 @@ useErrorNotifications(error);
           1
       "
       class="plugin-contribution-select"
-    >
-      插件页面<select
+      >{{ tr(' 插件页面')
+      }}<select
         :value="contributionId"
-        aria-label="插件页面"
+        :aria-label="tr('插件页面')"
         @change="emit('contribution', ($event.target as HTMLSelectElement).value)"
       >
         <option
@@ -285,11 +295,13 @@ useErrorNotifications(error);
           :key="entry.id"
           :value="entry.id"
         >
-          {{ entry.label }}
+          {{ plugin ? plugins.metadata(plugin, entry.label) : entry.label }}
         </option>
       </select>
     </label>
-    <p v-if="!available" class="host-empty">此插件尚未启用或授权，请在插件设置中配置。</p>
+    <p v-if="!available" class="host-empty">
+      {{ tr('此插件尚未启用或授权，请在插件设置中配置。') }}
+    </p>
     <div
       v-else-if="
         hostId && needsConnection && (connectionChanged || operations?.state !== 'connected')
@@ -298,21 +310,23 @@ useErrorNotifications(error);
     >
       <span>{{
         connectionChanged
-          ? '主机配置已更新，请重新连接以使用新配置。'
+          ? tr('主机配置已更新，请重新连接以使用新配置。')
           : operations?.state === 'failed'
-            ? '主机连接失败'
-            : '正在连接当前主机…'
+            ? tr('主机连接失败')
+            : tr('正在连接当前主机…')
       }}</span>
       <button class="button" :disabled="busy" @click="connect">
-        {{ connectionChanged ? '重新连接' : '重试连接' }}
+        {{ connectionChanged ? tr('重新连接') : tr('重试连接') }}
       </button>
     </div>
     <p v-if="available && loading" role="status">
-      {{ plugins.t('正在加载插件…', 'Loading plugin…') }}
+      {{ plugins.t(tr('正在加载插件…'), 'Loading plugin…') }}
     </p>
     <div v-else-if="available && (failed || runtime?.state === 'crashed')" class="host-empty">
-      <p>{{ plugins.t('插件暂不可用', 'Plugin unavailable') }} {{ runtime?.errorCode ?? '' }}</p>
-      <button class="button" @click="restart">{{ plugins.t('重新激活', 'Restart') }}</button>
+      <p>
+        {{ plugins.t(tr('插件暂不可用'), 'Plugin unavailable') }} {{ runtime?.errorCode ?? '' }}
+      </p>
+      <button class="button" @click="restart">{{ plugins.t(tr('重新激活'), 'Restart') }}</button>
     </div>
     <template v-else-if="available && page">
       <PluginFrame
@@ -335,19 +349,20 @@ useErrorNotifications(error);
         @retry="restart"
       />
       <p v-if="!frameOpened || !contextReady" class="host-empty" role="status">
-        正在准备插件，请稍候…
+        {{ tr(' 正在准备插件，请稍候… ') }}
       </p>
     </template>
     <Modal
       v-if="active && trust"
-      :title="plugins.t('核验 SSH 主机指纹', 'Verify SSH host key')"
+      :title="plugins.t(tr('核验 SSH 主机指纹'), 'Verify SSH host key')"
       @close="acceptTrust(false)"
       ><p>{{ trust.hostname }}:{{ trust.port }} · {{ trust.algorithm }}</p>
       <code class="fingerprint">{{ trust.fingerprint }}</code>
       <footer class="action-row">
-        <button class="button" @click="acceptTrust(false)">{{ plugins.t('拒绝', 'Reject') }}</button
+        <button class="button" @click="acceptTrust(false)">
+          {{ plugins.t(tr('拒绝'), 'Reject') }}</button
         ><button class="button primary" @click="acceptTrust(true)">
-          {{ plugins.t('已核对，信任并连接', 'Verified, trust and connect') }}
+          {{ plugins.t(tr('已核对，信任并连接'), 'Verified, trust and connect') }}
         </button>
       </footer></Modal
     >

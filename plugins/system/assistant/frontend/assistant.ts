@@ -1,3 +1,5 @@
+import { tr } from './i18n/messages';
+import { followProgress } from './progress';
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 import { useAssistantApi } from './api';
@@ -35,11 +37,42 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   let version = 0,
     disposed = false,
     requestId = '';
+  let stopCurrentProgress: (() => Promise<void>) | null = null;
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
   let polling = false;
   let pollOffset = 0;
   let cleanup: Promise<void> | null = null;
   const cancelling = ref<string[]>([]);
+  const resettingAccess = ref(false),
+    accessResetError = ref('');
+  let accessReset: Promise<void> | null = null;
+  function revokeFullAccess(): Promise<void> {
+    if (accessReset) return accessReset;
+    for (const turn of turns.value) {
+      if (turn.approvalMode !== 'full') continue;
+      for (const proposal of turn.answer?.proposals ?? [])
+        if (!expired.value.includes(proposal.id)) expired.value.push(proposal.id);
+    }
+    resettingAccess.value = true;
+    accessResetError.value = '';
+    const resetting = Promise.resolve()
+      .then(() => aiApi.revokeFullAccess())
+      .then(
+        () => undefined,
+        (cause: unknown) => {
+          if (!disposed)
+            accessResetError.value = tr('完全访问授权撤销失败，请重试：{0}', errorMessage(cause));
+        },
+      )
+      .finally(() => {
+        if (accessReset === resetting) {
+          accessReset = null;
+          resettingAccess.value = false;
+        }
+      });
+    accessReset = resetting;
+    return resetting;
+  }
   function schedulePoll() {
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
@@ -76,7 +109,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
         current === version &&
         !['BUSY', 'PLUGIN_BUSY', 'PLUGIN_RATE_LIMIT'].includes(code ?? '')
       )
-        error.value = `传输状态读取失败：${errorMessage(cause)}`;
+        error.value = tr('传输状态读取失败：{0}', errorMessage(cause));
     } finally {
       polling = false;
       schedulePoll();
@@ -109,7 +142,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     } catch (cause) {
       if (disposed || current !== version) return;
       turn.task = { ...turn.task, status: fallback };
-      error.value = [error.value, `任务状态读取失败：${errorMessage(cause)}`]
+      error.value = [error.value, tr('任务状态读取失败：{0}', errorMessage(cause))]
         .filter(Boolean)
         .join('\n');
     }
@@ -124,6 +157,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     }
   }
   function invalidate() {
+    void stopCurrentProgress?.();
+    stopCurrentProgress = null;
     if (pollTimer) clearTimeout(pollTimer);
     for (const value of Object.values(outputs.value))
       if (value.pending && value.transfer) {
@@ -165,7 +200,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       if (output.pending) {
         output.pending = false;
         output.success = false;
-        output.output = '所属页面已释放，传输结果未确认，请独立核对目标文件';
+        output.output = tr('所属页面已释放，传输结果未确认，请独立核对目标文件');
       }
     for (const turn of turns.value) {
       turn.requestId = '';
@@ -180,7 +215,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   async function send(input: AiPrepare, initialHostIds: string[] = []) {
     const submitted = version;
     if (cleanup) await cleanup;
-    if (disposed || submitted !== version) return;
+    if (accessReset) await accessReset;
+    if (disposed || submitted !== version || accessResetError.value) return;
     if (busy.value) return;
     const current = version;
     const previousHostIds =
@@ -211,6 +247,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     busy.value = 'prepare';
     let retained = false;
     let automatic: AiProposal | undefined;
+    let progressId = '';
+    let stopProgress: (() => Promise<void>) | undefined;
     try {
       if (keepRunning.value && aiApi.begin) {
         await aiApi.begin();
@@ -247,11 +285,15 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
           expectedModelRevision: route.modelRevision,
         };
       }
+      const progress = await aiApi.progressOpen();
+      progressId = progress.id;
+      if (disposed || current !== version) return;
+      targetInput = { ...targetInput, progressId };
       const previous = history(turns.value, targetInput);
       const historyOmitted =
         turns.value.filter((turn) => turn.state === 'complete' && turn.answer).length >
         previous.length / 2;
-      const prepared = await aiApi.prepare({ ...targetInput, history: previous });
+      const prepared = await aiApi.prepare({ ...targetInput, history: previous, progressId });
       if (disposed || current !== version) {
         await revoke(prepared.id);
         return;
@@ -261,7 +303,21 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       entry.task = prepared.task ? { ...prepared.task, status: 'running' } : null;
       busy.value = 'send';
       // Sending consumes the frozen native request; command execution is reviewed separately.
+      stopProgress = followProgress(
+        (revision, offset) => aiApi.progressRead(progressId, revision, offset),
+        () => visible.value,
+        (text) => {
+          if (!disposed && current === version) entry.streamText = text;
+        },
+        (cause) => {
+          if (disposed || current !== version) return;
+          entry.error = tr('流式显示读取失败：{0}', errorMessage(cause));
+          void revoke(prepared.id);
+        },
+      );
+      stopCurrentProgress = stopProgress;
       const answer = await aiApi.send(prepared.id, true);
+      if (entry.error) throw new Error(entry.error);
       if (!disposed && current === version) {
         entry.answer = {
           ...answer,
@@ -269,13 +325,13 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
             ...new Set([
               ...prepared.warnings,
               ...answer.warnings,
-              ...(historyOmitted ? ['已按请求预算省略较早的完整历史轮次。'] : []),
+              ...(historyOmitted ? [tr('已按请求预算省略较早的完整历史轮次。')] : []),
             ]),
           ],
         };
         entry.state = 'complete';
         entry.task = answer.task ?? entry.task;
-        if (entry.approvalMode === 'assist' && visible.value)
+        if (entry.approvalMode !== 'request' && visible.value)
           automatic = answer.proposals.find((p) => p.risk !== 'manual_only');
       }
     } catch (e) {
@@ -285,6 +341,16 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
         await refreshTask(entry, 'failed');
       }
     } finally {
+      await stopProgress?.();
+      if (stopCurrentProgress === stopProgress) stopCurrentProgress = null;
+      if (progressId) {
+        try {
+          await aiApi.progressClose(progressId);
+        } catch (cause) {
+          if (!disposed && current === version)
+            error.value = tr('关闭回答进度失败：{0}', errorMessage(cause));
+        }
+      }
       if (retained) await end();
       busy.value = '';
       requestId = '';
@@ -302,6 +368,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     }
   }
   async function cancel() {
+    void stopCurrentProgress?.();
+    stopCurrentProgress = null;
     controller?.abort();
     const id = requestId;
     if (busy.value === 'execute') {
@@ -330,7 +398,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   async function executeProposal(proposal: AiProposal) {
     const submitted = version;
     if (cleanup) await cleanup;
-    if (disposed || submitted !== version) return;
+    if (accessReset) await accessReset;
+    if (disposed || submitted !== version || accessResetError.value) return;
     if (
       !proposal ||
       expired.value.includes(proposal.id) ||
@@ -390,5 +459,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     invalidate,
     cancelling,
     cancelTransfer,
+    resettingAccess,
+    accessResetError,
+    revokeFullAccess,
   };
 }

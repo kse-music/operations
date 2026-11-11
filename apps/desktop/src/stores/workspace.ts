@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { defineStore } from 'pinia';
 import { computed, ref, shallowRef } from 'vue';
 import { hostViews, type WorkspaceView } from '../types/product';
@@ -87,7 +88,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (contribution.kind === 'settings') return openPluginSettings(pluginId, contribution.id);
     if (!target && ['server', 'host_menu'].includes(contribution.kind)) target = hostId.value;
     if (!target && ['server', 'host_menu'].includes(contribution.kind)) {
-      plugins.error = '请先选择主机，再打开此工具。';
+      plugins.error = tr('请先选择主机，再打开此工具。');
       return;
     }
     const key = pluginPageKey({ pluginId, contributionId, hostId: target });
@@ -171,8 +172,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         if (
           pages.some((page) => plugins.dirtyPages[page.key]) &&
           !(await plugins.ask(
-            '插件配置尚未保存',
-            '关闭工作区会放弃插件中未保存的文本。是否继续关闭？',
+            tr('插件配置尚未保存'),
+            tr('关闭工作区会放弃插件中未保存的文本。是否继续关闭？'),
           ))
         )
           continue;

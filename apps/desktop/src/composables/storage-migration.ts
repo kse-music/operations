@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { computed, ref, watch } from 'vue';
 import { useApplicationStore } from '../stores/application';
 import { filesApi } from '../services/files';
@@ -60,8 +61,8 @@ export function useStorageMigration() {
         discardDocuments.value,
       );
       application.notice = restarting.value
-        ? '设置已保存，正在安全结束任务并重启；窗口关闭后开始迁移，请等待应用自动重新打开。'
-        : '设置已保存，数据目录未变化，无需重启。';
+        ? tr('设置已保存，正在安全结束任务并重启；窗口关闭后开始迁移，请等待应用自动重新打开。')
+        : tr('设置已保存，数据目录未变化，无需重启。');
       if (restarting.value) return;
       if (application.state) {
         application.state.config = config;

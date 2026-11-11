@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -39,13 +41,27 @@ let unlisten: UnlistenFn | undefined;
 let disposed = false;
 const id = props.sessionId;
 const phaseNames: Record<DropProgress['phase'], string> = {
-  preparing: '正在准备文件与目录…',
-  starting: '等待当前 Shell 接收…',
-  uploading: '正在上传…',
-  verifying: '正在校验并解包…',
-  committing: '正在提交文件…',
-  cancelling: '正在停止上传并恢复终端…',
-  blocked: '接收状态未确定，请关闭此会话后重新打开。',
+  get preparing() {
+    return tr('正在准备文件与目录…');
+  },
+  get starting() {
+    return tr('等待当前 Shell 接收…');
+  },
+  get uploading() {
+    return tr('正在上传…');
+  },
+  get verifying() {
+    return tr('正在校验并解包…');
+  },
+  get committing() {
+    return tr('正在提交文件…');
+  },
+  get cancelling() {
+    return tr('正在停止上传并恢复终端…');
+  },
+  get blocked() {
+    return tr('接收状态未确定，请关闭此会话后重新打开。');
+  },
 };
 function eligible(): boolean {
   return !disposed && props.enabled && props.canReceive() && !props.area?.closest('[inert]');
@@ -68,7 +84,7 @@ async function drag(event: TerminalFileDrag): Promise<void> {
   if (!hit || event.type === 'over') return;
   over.value = false;
   if (busy.value) {
-    emit('error', new Error('当前终端已有待确认或进行中的上传。'));
+    emit('error', new Error(tr('当前终端已有待确认或进行中的上传。')));
     return;
   }
   emit('activate', id);
@@ -169,7 +185,7 @@ function dispose(): void {
   const interrupted = confirmed.value && !!progress.value;
   disposed = true;
   transfer?.dispose();
-  if (interrupted) failure.value = '终端会话已结束，上传已停止。请核对远端已提交的文件。';
+  if (interrupted) failure.value = tr('终端会话已结束，上传已停止。请核对远端已提交的文件。');
   else if (!confirmed.value) void dismiss();
   progress.value = null;
   claiming.value = false;
@@ -213,7 +229,7 @@ onMounted(async () => {
     if (disposed) release();
     else unlisten = release;
   } catch (error) {
-    emit('error', new Error('终端拖放入口不可用：' + errorMessage(error)));
+    emit('error', new Error(tr('终端拖放入口不可用：') + errorMessage(error)));
   }
 });
 onBeforeUnmount(() => {
@@ -222,22 +238,29 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div v-if="over" class="terminal-drop-overlay" role="status">松开后确认上传到当前 Shell 目录</div>
+  <div v-if="over" class="terminal-drop-overlay" role="status">
+    {{ tr('松开后确认上传到当前 Shell 目录') }}
+  </div>
   <Modal
     v-if="dialogOpen"
-    :title="confirmed ? '终端文件上传' : '确认终端拖放上传'"
+    :title="confirmed ? tr('终端文件上传') : tr('确认终端拖放上传')"
     :busy="!!progress"
     @close="dismiss"
   >
-    <p>{{ confirmed ? '上传到' : '将上传到' }} {{ target }} 的当前 Shell 目录：</p>
+    <p>
+      {{ confirmed ? tr('上传到') : tr('将上传到') }} {{ target }}{{ tr(' 的当前 Shell 目录：') }}
+    </p>
     <ul v-if="selected" class="terminal-drop-items">
       <li v-for="(item, index) in selected.names" :key="index">{{ item }}</li>
     </ul>
     <template v-if="!confirmed">
-      <p>请先回到空白 Shell 提示符，不要停留在编辑器、运行中的命令或密码输入界面。</p>
+      <p>{{ tr('请先回到空白 Shell 提示符，不要停留在编辑器、运行中的命令或密码输入界面。') }}</p>
       <p class="subtle">
-        使用当前 Shell 的用户身份；sudo -i
-        后使用切换后的身份和目录。遇到同名文件或文件夹即停止，不覆盖、不合并。上传期间占用此窗格输入。
+        {{
+          tr(
+            ' 使用当前 Shell 的用户身份；sudo -i 后使用切换后的身份和目录。遇到同名文件或文件夹即停止，不覆盖、不合并。上传期间占用此窗格输入。 ',
+          )
+        }}
       </p>
     </template>
     <div v-if="progress" class="terminal-drop-progress" role="status" aria-live="polite">
@@ -249,35 +272,37 @@ onBeforeUnmount(() => {
         v-if="progress.phase === 'uploading'"
         :value="progress.sent"
         :max="progress.size || 1"
-        aria-label="拖放上传进度"
+        :aria-label="tr('拖放上传进度')"
       ></progress>
       <progress
         v-else-if="!['blocked', 'cancelling'].includes(progress.phase)"
-        aria-label="拖放上传进度"
+        :aria-label="tr('拖放上传进度')"
       ></progress>
       <span v-if="progress.size">{{ bytes(progress.sent) }} / {{ bytes(progress.size) }}</span>
-      <span v-if="progress.phase === 'uploading'" aria-label="平均上传速度">
-        平均 {{ bytes(progress.bytesPerSecond) }}/s
+      <span v-if="progress.phase === 'uploading'" :aria-label="tr('平均上传速度')"
+        >{{ tr(' 平均 ') }}{{ bytes(progress.bytesPerSecond) }}/s
       </span>
     </div>
     <p v-if="failure" class="banner error" role="alert">{{ failure }}</p>
     <footer class="dialog-actions">
       <template v-if="!confirmed">
-        <button class="button" @click="dismiss">取消</button>
-        <button class="button primary" @click="start">确认上传</button>
+        <button class="button" @click="dismiss">{{ tr('取消') }}</button>
+        <button class="button primary" @click="start">{{ tr('确认上传') }}</button>
       </template>
       <button v-else-if="progress?.phase === 'blocked'" class="button" @click="closeSession">
-        关闭此终端会话
+        {{ tr(' 关闭此终端会话 ') }}
       </button>
       <button
         v-else-if="progress && progress.phase !== 'cancelling'"
         class="button"
         @click="cancel"
       >
-        取消上传
+        {{ tr(' 取消上传 ') }}
       </button>
-      <button v-else-if="progress || !failure" class="button" disabled>正在结束上传…</button>
-      <button v-else class="button" @click="dismiss">关闭</button>
+      <button v-else-if="progress || !failure" class="button" disabled>
+        {{ tr('正在结束上传…') }}
+      </button>
+      <button v-else class="button" @click="dismiss">{{ tr('关闭') }}</button>
     </footer>
   </Modal>
 </template>

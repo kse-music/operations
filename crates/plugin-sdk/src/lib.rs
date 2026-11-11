@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 pub mod backend;
 pub mod platform;
+pub mod streaming;
 pub mod ui;
 pub const API_VERSION: u32 = 1;
 pub const MAX_MESSAGE: usize = 64 * 1024;
@@ -25,6 +26,10 @@ pub enum Permission {
     SftpTransfer,
     #[serde(rename = "operations.read.preapproved")]
     OperationsReadPreapproved,
+    #[serde(rename = "operations.read.arguments.preapproved")]
+    OperationsReadArgumentsPreapproved,
+    #[serde(rename = "operations.full.preapproved")]
+    OperationsFullPreapproved,
     #[serde(rename = "models.use")]
     ModelsUse,
     #[serde(rename = "network.connect")]

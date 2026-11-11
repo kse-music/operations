@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import type { TerminalDropPrepared } from '../types/terminal';
 
 export interface DropProgress {
@@ -24,18 +25,42 @@ const encoder = new TextEncoder();
 const decode = new TextDecoder('utf-8', { fatal: true });
 const TIMEOUT = 30000;
 const errors: Record<string, string> = {
-  DEPENDENCY: '服务器缺少上传所需的 GNU 基础命令或参数，未安装额外软件。',
-  PERMISSION: '当前 Shell 用户不能在当前目录创建上传临时目录，请检查权限和磁盘空间。',
-  CONFLICT: '目标存在同名文件、文件夹或链接，上传已停止，未覆盖已有内容。',
-  CHECKSUM: '远端归档校验失败，未提交本次文件。',
-  EXTRACT: '远端解包失败，请检查磁盘空间及目录权限。',
-  RECEIVE: '远端接收失败或超时，上传已停止。',
-  DECODE: '远端解码失败，上传已停止。',
-  COMMIT: '远端提交失败，请检查权限和磁盘空间。',
-  TTY: '无法设置当前终端的接收模式。',
-  TTY_RESTORE: '无法恢复终端设置，请关闭此会话后重新打开。',
-  CANCELLED: '已取消上传。',
-  CLEANUP: '上传临时目录清理失败。',
+  get DEPENDENCY() {
+    return tr('服务器缺少上传所需的 GNU 基础命令或参数，未安装额外软件。');
+  },
+  get PERMISSION() {
+    return tr('当前 Shell 用户不能在当前目录创建上传临时目录，请检查权限和磁盘空间。');
+  },
+  get CONFLICT() {
+    return tr('目标存在同名文件、文件夹或链接，上传已停止，未覆盖已有内容。');
+  },
+  get CHECKSUM() {
+    return tr('远端归档校验失败，未提交本次文件。');
+  },
+  get EXTRACT() {
+    return tr('远端解包失败，请检查磁盘空间及目录权限。');
+  },
+  get RECEIVE() {
+    return tr('远端接收失败或超时，上传已停止。');
+  },
+  get DECODE() {
+    return tr('远端解码失败，上传已停止。');
+  },
+  get COMMIT() {
+    return tr('远端提交失败，请检查权限和磁盘空间。');
+  },
+  get TTY() {
+    return tr('无法设置当前终端的接收模式。');
+  },
+  get TTY_RESTORE() {
+    return tr('无法恢复终端设置，请关闭此会话后重新打开。');
+  },
+  get CANCELLED() {
+    return tr('已取消上传。');
+  },
+  get CLEANUP() {
+    return tr('上传临时目录清理失败。');
+  },
 };
 function unbase64(text: string): string {
   return decode.decode(Uint8Array.from(atob(text), (c) => c.charCodeAt(0)));
@@ -126,7 +151,7 @@ export class TerminalDropUpload {
         }
         if (this.pending.length > 16384) {
           this.pending.shift();
-          this.rejectExpected(new Error('上传响应超过长度限制。'));
+          this.rejectExpected(new Error(tr('上传响应超过长度限制。')));
           continue;
         }
         if (byte === 31 && this.pending.length > prefix.length) {
@@ -144,22 +169,22 @@ export class TerminalDropUpload {
     const parts = frame.split(':');
     if (frame === 'RETURN') {
       if (!this.reported) {
-        this.endError = new Error('接收进程未报告最终结果，请关闭此会话后重新打开。');
+        this.endError = new Error(tr('接收进程未报告最终结果，请关闭此会话后重新打开。'));
         this.unsafeTerminal = true;
       }
       this.ended = true;
       this.redrawPrompt = true;
-      if (this.expected) this.rejectExpected(this.endError ?? new Error('上传接收端已结束。'));
+      if (this.expected) this.rejectExpected(this.endError ?? new Error(tr('上传接收端已结束。')));
       this.endWaiter?.();
       return;
     }
     if (this.reported) return;
     if (parts[0] === 'FAIL') {
       this.peerFailure = new Error(
-        (errors[parts[1]!] ?? '远端接收失败。') +
-          ' 已确认提交 ' +
+        (errors[parts[1]!] ?? tr('远端接收失败。')) +
+          tr(' 已确认提交 ') +
           (Number(parts[2]) || 0) +
-          ' 个项目。',
+          tr(' 个项目。'),
       );
       this.rejectExpected(this.peerFailure);
       this.endReject?.(this.peerFailure);
@@ -171,33 +196,33 @@ export class TerminalDropUpload {
       if (parts[0] === 'ERROR') {
         this.unsafeTerminal = parts[1] === 'TTY_RESTORE';
         this.endCode = parts[1];
-        let message = errors[parts[1]!] ?? '远端上传失败，请检查当前 Shell 和目录。';
+        let message = errors[parts[1]!] ?? tr('远端上传失败，请检查当前 Shell 和目录。');
         if (parts[1] === 'CLEANUP' && parts[3]) {
           try {
-            message += ' 临时目录：' + unbase64(parts[3]);
+            message += tr(' 临时目录：') + unbase64(parts[3]);
           } catch {
-            message += ' 临时目录响应无效，请检查远端 .serverdeck-upload.* 目录。';
+            message += tr(' 临时目录响应无效，请检查远端 .serverdeck-upload.* 目录。');
           }
         }
-        this.endError = new Error(message + ' 已确认提交 ' + this.count + ' 个项目。');
+        this.endError = new Error(message + tr(' 已确认提交 ') + this.count + tr(' 个项目。'));
       } else if (this.value.sent !== this.value.size || this.value.phase !== 'committing') {
-        this.endError = new Error('远端提前报告完成，上传结果未经确认。');
+        this.endError = new Error(tr('远端提前报告完成，上传结果未经确认。'));
       }
       return;
     }
     if (parts[0] === 'READY') {
       if (this.expected?.key !== 'READY' || !/^\d+$/.test(parts[1] ?? '')) {
-        this.rejectExpected(new Error('上传接收端身份响应无效。'));
+        this.rejectExpected(new Error(tr('上传接收端身份响应无效。')));
         return;
       }
       try {
         const directory = unbase64(parts.slice(2).join(':'));
         if (!directory.startsWith('/') || !directory.endsWith('\n'))
-          throw new Error('上传接收端目录响应无效。');
+          throw new Error(tr('上传接收端目录响应无效。'));
         this.value.uid = parts[1];
         this.value.directory = directory.slice(0, -1);
       } catch {
-        this.rejectExpected(new Error('上传接收端目录响应无效。'));
+        this.rejectExpected(new Error(tr('上传接收端目录响应无效。')));
         return;
       }
     } else if (frame === 'VERIFYING') {
@@ -214,7 +239,7 @@ export class TerminalDropUpload {
       const resolve = this.expected.resolve;
       this.expected = undefined;
       resolve();
-    } else this.rejectExpected(new Error('上传接收端响应顺序无效。'));
+    } else this.rejectExpected(new Error(tr('上传接收端响应顺序无效。')));
   }
   private rejectExpected(error: Error): void {
     const pending = this.expected;
@@ -225,14 +250,14 @@ export class TerminalDropUpload {
   }
   private async exchange(key: string, bytes: Uint8Array): Promise<void> {
     if (this.peerFailure) throw this.peerFailure;
-    if (this.cancelled || this.disposed || this.ended) throw new Error('上传已停止。');
+    if (this.cancelled || this.disposed || this.ended) throw new Error(tr('上传已停止。'));
     const response = new Promise<void>((resolve, reject) => {
       this.expected = {
         key,
         resolve,
         reject,
         timer: setTimeout(
-          () => this.rejectExpected(new Error('等待上传接收端响应超时。')),
+          () => this.rejectExpected(new Error(tr('等待上传接收端响应超时。'))),
           TIMEOUT,
         ),
       };
@@ -249,7 +274,7 @@ export class TerminalDropUpload {
       const timer = setTimeout(() => {
         this.endWaiter = undefined;
         this.endReject = undefined;
-        reject(new Error('无法确认远端接收进程已结束，请关闭此会话后重新打开。'));
+        reject(new Error(tr('无法确认远端接收进程已结束，请关闭此会话后重新打开。')));
       }, timeout);
       this.endWaiter = () => {
         clearTimeout(timer);
@@ -276,7 +301,7 @@ export class TerminalDropUpload {
         !/^[a-f0-9]{32}$/.test(prepared.nonce) ||
         !/^[a-f0-9]{64}$/.test(prepared.sha256)
       )
-        throw new Error('本地上传归档信息无效。');
+        throw new Error(tr('本地上传归档信息无效。'));
       this.nonce = prepared.nonce;
       this.value.size = prepared.size;
       this.progress('starting');
@@ -284,10 +309,10 @@ export class TerminalDropUpload {
       await this.exchange('READY', encoder.encode(prepared.command));
       this.uploadStartedAt = performance.now();
       for (let offset = 0, seq = 0; offset < prepared.size; seq++) {
-        if (this.cancelled || this.disposed) throw new Error('上传已取消。');
+        if (this.cancelled || this.disposed) throw new Error(tr('上传已取消。'));
         const bytes = await this.options.read(offset);
         if (bytes.length !== Math.min(65536, prepared.size - offset))
-          throw new Error('本地归档读取长度无效，上传已停止。');
+          throw new Error(tr('本地归档读取长度无效，上传已停止。'));
         // Progress advances only after the corresponding ACK. Set it before
         // exchange resolves so an immediate DONE in the final packet is valid.
         const next = offset + bytes.length;
@@ -298,14 +323,14 @@ export class TerminalDropUpload {
         offset = next;
         if (this.value.phase === 'uploading') this.progress('uploading');
       }
-      if (this.cancelled) throw new Error('上传已取消。');
+      if (this.cancelled) throw new Error(tr('上传已取消。'));
       await this.waitEnd(TIMEOUT);
       if (this.disposed) return;
       if (this.endError) throw this.endError;
-      this.options.notice?.('上传完成：' + this.count + ' 个项目。');
+      this.options.notice?.(tr('上传完成：') + this.count + tr(' 个项目。'));
     } catch (error) {
       if (this.disposed) return;
-      this.rejectExpected(new Error('上传已停止。'));
+      this.rejectExpected(new Error(tr('上传已停止。')));
       if (this.unsafeTerminal) {
         this.progress('blocked');
         this.options.failed(this.endError ?? error);
@@ -325,7 +350,7 @@ export class TerminalDropUpload {
       }
       if (!this.cancelled) this.options.failed(error);
       else if (this.endError && this.endCode !== 'CANCELLED') this.options.failed(this.endError);
-      else this.options.notice?.('已取消上传。');
+      else this.options.notice?.(tr('已取消上传。'));
     } finally {
       await this.release();
       if (this.value.phase !== 'blocked' || this.disposed) {
@@ -337,7 +362,7 @@ export class TerminalDropUpload {
   cancel(): void {
     if (this.cancelled || this.disposed) return;
     this.cancelled = true;
-    const error = new Error('上传已取消。');
+    const error = new Error(tr('上传已取消。'));
     this.rejectExpected(error);
     this.endReject?.(error);
     if (!this.started) {
@@ -358,7 +383,7 @@ export class TerminalDropUpload {
   dispose(): void {
     this.disposed = true;
     this.cancel();
-    this.rejectExpected(new Error('终端会话已结束。'));
+    this.rejectExpected(new Error(tr('终端会话已结束。')));
     this.endWaiter?.();
     void this.release();
     this.running = false;

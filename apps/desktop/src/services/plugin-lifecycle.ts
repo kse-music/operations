@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { usePluginsStore } from '../stores/plugins';
 import type { InstalledPlugin } from '../types/plugins';
 import { pluginsApi } from './plugins';
@@ -7,8 +8,8 @@ export async function togglePlugin(plugin: InstalledPlugin): Promise<boolean> {
   if (
     plugin.enabled &&
     !(await plugins.ask(
-      '禁用插件？',
-      '将停止插件调用并放弃未保存的插件编辑。已打开的终端不受影响。',
+      tr('禁用插件？'),
+      tr('将停止插件调用并放弃未保存的插件编辑。已打开的终端不受影响。'),
     ))
   )
     return false;

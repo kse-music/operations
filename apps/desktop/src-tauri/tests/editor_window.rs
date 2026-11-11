@@ -74,7 +74,13 @@ fn document() -> TextDocument {
 #[test]
 fn independent_editor_is_singleton_and_status_does_not_copy_file_content() {
     let (_directory, app, main) = fixture();
-    create_window(app.handle(), document(), Some("ops@server.example")).unwrap();
+    create_window(
+        app.handle(),
+        document(),
+        Some("ops@server.example"),
+        "zh-CN",
+    )
+    .unwrap();
     assert!(app.state::<EditorWindows>().is_open());
     assert!(
         create_window(
@@ -84,6 +90,7 @@ fn independent_editor_is_singleton_and_status_does_not_copy_file_content() {
                 ..document()
             },
             None,
+            "zh-CN",
         )
         .is_err()
     );
@@ -109,9 +116,31 @@ fn independent_editor_is_singleton_and_status_does_not_copy_file_content() {
 }
 
 #[test]
+fn english_editor_keeps_document_names_and_loads_the_saved_language() {
+    let (_directory, app, _main) = fixture();
+    let application = app.state::<Application>();
+    tauri::async_runtime::block_on(async {
+        let mut config = application.bootstrap().await.unwrap().config;
+        config.product.language = "en-US".into();
+        application.save_config(config).await.unwrap();
+    });
+    create_window(app.handle(), document(), Some("中文主机"), "en-US").unwrap();
+    let editor = app
+        .get_webview_window("remote-editor-test-document")
+        .unwrap();
+    let loaded = get_ipc_response(&editor, request("editor_load", json!({}), false))
+        .unwrap()
+        .deserialize::<Value>()
+        .unwrap();
+    assert_eq!(loaded["language"], "en-US");
+    assert_eq!(loaded["document"]["path"], "/配置/server.conf");
+    assert_eq!(loaded["document"]["content"], document().content);
+}
+
+#[test]
 fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
     let (_directory, app, main) = fixture();
-    create_window(app.handle(), document(), None).unwrap();
+    create_window(app.handle(), document(), None, "zh-CN").unwrap();
     let editor = app
         .get_webview_window("remote-editor-test-document")
         .unwrap();
@@ -129,6 +158,7 @@ fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
     assert_eq!(loaded["document"]["token"], "test-document");
     assert_eq!(loaded["document"]["path"], "/配置/server.conf");
     assert_eq!(loaded["document"]["content"], document().content);
+    assert_eq!(loaded["language"], "zh-CN");
     assert!(loaded.get("config").is_none());
     assert!(loaded.get("dataDirectory").is_none());
     for (command, body) in [
@@ -162,7 +192,7 @@ fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
 #[test]
 fn an_editor_shaped_window_has_no_document_authority_without_a_backend_binding() {
     let (_directory, app, _main) = fixture();
-    create_window(app.handle(), document(), None).unwrap();
+    create_window(app.handle(), document(), None, "zh-CN").unwrap();
     let other = tauri::WebviewWindowBuilder::new(&app, "remote-editor-forged", Default::default())
         .build()
         .unwrap();
@@ -200,13 +230,13 @@ fn a_failed_open_does_not_reserve_the_single_editor_slot() {
         .is_err()
     );
     assert!(!app.state::<EditorWindows>().is_open());
-    create_window(app.handle(), document(), None).unwrap();
+    create_window(app.handle(), document(), None, "zh-CN").unwrap();
 }
 
 #[test]
 fn unconfirmed_exit_reviews_an_open_editor_even_before_dirty_events_arrive() {
     let (_directory, app, main) = fixture();
-    create_window(app.handle(), document(), None).unwrap();
+    create_window(app.handle(), document(), None, "zh-CN").unwrap();
     let reviewed = std::sync::Arc::new(AtomicBool::new(false));
     let flag = reviewed.clone();
     main.listen("app-exit-review", move |_| {

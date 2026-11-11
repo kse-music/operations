@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 export interface CpuUsage {
   name: string;
   usage: number | null;
@@ -77,14 +78,28 @@ export interface MonitorSnapshot {
   history: HistoryPoint[];
 }
 export const monitorLabels: Record<string, string> = {
-  connecting: '连接中',
-  sampling: '正在采集',
-  running: '采样正常',
-  partial: '部分指标不可用',
-  paused: '已暂停',
-  failed: '连接已结束',
-  error: '采集失败，旧值已过期',
+  get connecting() {
+    return tr('连接中');
+  },
+  get sampling() {
+    return tr('正在采集');
+  },
+  get running() {
+    return tr('采样正常');
+  },
+  get partial() {
+    return tr('部分指标不可用');
+  },
+  get paused() {
+    return tr('已暂停');
+  },
+  get failed() {
+    return tr('连接已结束');
+  },
+  get error() {
+    return tr('采集失败，旧值已过期');
+  },
 };
 export function percent(value: number | null | undefined): string {
-  return value == null ? '待计算' : `${value.toFixed(1)}%`;
+  return value == null ? tr('待计算') : `${value.toFixed(1)}%`;
 }

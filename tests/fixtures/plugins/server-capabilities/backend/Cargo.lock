@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck-plugin-sdk"
-version = "5.2.0"
+version = "5.4.0"
 dependencies = [
  "base64",
  "serde",

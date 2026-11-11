@@ -1,3 +1,4 @@
+import { tr } from './i18n/messages';
 import { computed, onScopeDispose, reactive, ref, watch } from 'vue';
 import { call } from '@serverdeck/plugin-sdk/platform';
 import { request } from '@serverdeck/plugin-sdk/transport';
@@ -33,7 +34,18 @@ export function useModelBinding() {
         models.models = catalog.models;
         localSources.value = catalog.sources.map((source) => ({
           ...source,
-          description: '使用平台管理的本地模型配置和登录状态',
+          get name() {
+            return tr(source.name);
+          },
+          get description() {
+            return tr('使用平台管理的本地模型配置和登录状态');
+          },
+          status: {
+            ...source.status,
+            get message() {
+              return tr(source.status.message);
+            },
+          },
         }));
         models.loaded = true;
       } catch (cause) {
@@ -62,10 +74,10 @@ export function useModelBinding() {
       ]);
       if (current !== version || !visible.value) return;
       if (!value || typeof value !== 'object' || Array.isArray(value))
-        throw new Error('插件设置无效');
+        throw new Error(tr('插件设置无效'));
       settings = value as typeof settings;
       if (settings.modelId != null && typeof settings.modelId !== 'string')
-        throw new Error('模型绑定无效');
+        throw new Error(tr('模型绑定无效'));
       modelId.value = typeof settings.modelId === 'string' ? settings.modelId : '';
       loaded.value = true;
     } catch (cause) {
@@ -77,11 +89,11 @@ export function useModelBinding() {
   async function save(id: string) {
     if (!loaded.value || loading.value || saving.value || !visible.value) return false;
     if (!id) {
-      error.value = '请选择已就绪的模型';
+      error.value = tr('请选择已就绪的模型');
       return false;
     }
     if (!models.models.some((model) => model.id === id && model.hasKey)) {
-      error.value = '模型未就绪，请在平台模型设置中检查';
+      error.value = tr('模型未就绪，请在平台模型设置中检查');
       return false;
     }
     saving.value = true;
@@ -92,7 +104,7 @@ export function useModelBinding() {
       await call({ kind: 'settings_write', value });
       settings = value;
       modelId.value = id;
-      message.value = '模型绑定已保存';
+      message.value = tr('模型绑定已保存');
       return true;
     } catch (cause) {
       error.value = errorMessage(cause);

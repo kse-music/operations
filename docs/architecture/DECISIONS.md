@@ -6,28 +6,31 @@
 
 [0037：单文档独立 SFTP 编辑器](decisions/0037-independent-file-editor.md)：接受；独立顶层窗口、按窗口绑定文档的最小权限、保存/关闭/退出保护，保留单文档范围。
 
-| ADR                                               | 决策                                 | 状态与关系                                                                 |
-| ------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
-| [0016](decisions/0016-plugin-platform.md)         | 插件拥有业务，宿主只提供通用原语     | 有效；SDK5 替代旧领域 SDK、声明式宿主业务 UI 和内置 ID 特权                |
-| [0017](decisions/0017-current-data-contract.md)   | 严格当前契约与保留用户数据           | 数据库/持久配置策略由 0028 替代；插件契约、故障隔离和身份/秘密边界继续有效 |
-| [0018](decisions/0018-workspace-lifecycle.md)     | 主机工作区与资源生命周期分离         | 有效；替代旧模块导航/设置标签和终端布局持久化，关闭主机显式排空传输        |
-| [0019](decisions/0019-model-runtime.md)           | 本地模型授权与有界外部运行时         | 有效；CLI 管理登录，SDK5 下业务编排由插件负责                              |
-| [0020](decisions/0020-command-preapproval.md)     | 完整命令预授权独立于业务风险判断     | Execute 精确匹配继续有效；流/PTY 的逐次确认限制由 0030 部分替代            |
-| [0030](decisions/0030-interactive-preapproval.md) | 交互会话采用独立预授权               | 有效；单独授权任意流/PTY 命令，Execute 变更仍须宿主确认                    |
-| [0036](decisions/0036-compose-config-preapproval.md) | Compose 启动配置固定读取预授权 | 有效；补充 0020，插件内固定只读快照与旧版选项检测，不扩展宿主匹配 |
-| [0021](decisions/0021-builtin-distribution.md)    | 从完整源码目录生成内置分发           | 有效；构建期自动发现，不运行时扫描或维护手工名单                           |
-| [0022](decisions/0022-feature-retirement.md)      | 移除产品能力时保留共享基础与用户数据 | 有效；记录退出范围及旧退役兼容方案的替代关系                               |
-| [0023](decisions/0023-wasm-sandbox.md)            | 无 WASI 的 Wasmi 能力沙箱            | 有效；保留选型理由和非 OS 隔离/非抢占边界                                  |
-| [0024](decisions/0024-package-commit.md)          | 受限 JSON 包与原子安装指针           | 有效；保留格式、来源确认和失败不切换当前版本的取舍                         |
-| [0025](decisions/0025-storage-relocation.md)      | 定位文件与确认启动后清理源           | 有效；主动迁移区别于旧身份兼容，Committed 后不回退部分清理源               |
-| [0027](decisions/0027-assistant-policy.md)        | 有界助手计划与最小上下文             | 有效；脱敏顺序、资产范围及预算压缩已补齐专项回归                           |
-| [0028](decisions/0028-safe-data-upgrades.md)      | 版本化数据升级与升级前一致备份       | 有效；已知结构/配置自动升级，原子提交、保留数据，未知及未来格式拒绝        |
-| [0033](decisions/0033-assistant-tools-tasks.md)   | 助手工具目录与运行期任务             | 有效；目录与运行期任务继续使用，文件/传输由0034补充，持久恢复待后续阶段    |
-| [0034](decisions/0034-plugin-file-transfers.md)   | 文件版本预览与宿主流式传输           | 有效；补充0033的第二阶段，复用SFTP及宿主审批，后台字节不经模型/Guest       |
+| ADR                                                  | 决策                                 | 状态与关系                                                                 |
+| ---------------------------------------------------- | ------------------------------------ | -------------------------------------------------------------------------- |
+| [0016](decisions/0016-plugin-platform.md)            | 插件拥有业务，宿主只提供通用原语     | 有效；SDK5 替代旧领域 SDK、声明式宿主业务 UI 和内置 ID 特权                |
+| [0017](decisions/0017-current-data-contract.md)      | 严格当前契约与保留用户数据           | 数据库/持久配置策略由 0028 替代；插件契约、故障隔离和身份/秘密边界继续有效 |
+| [0018](decisions/0018-workspace-lifecycle.md)        | 主机工作区与资源生命周期分离         | 有效；替代旧模块导航/设置标签和终端布局持久化，关闭主机显式排空传输        |
+| [0019](decisions/0019-model-runtime.md)              | 本地模型授权与有界外部运行时         | 有效；CLI 管理登录，SDK5 下业务编排由插件负责                              |
+| [0020](decisions/0020-command-preapproval.md)        | 完整命令预授权独立于业务风险判断     | Execute 精确匹配继续有效；流/PTY 的逐次确认限制由 0030 部分替代            |
+| [0030](decisions/0030-interactive-preapproval.md)    | 交互会话采用独立预授权               | 有效；单独授权任意流/PTY 命令，Execute 变更仍须宿主确认                    |
+| [0036](decisions/0036-compose-config-preapproval.md) | Compose 启动配置固定读取预授权       | 有效；补充 0020，插件内固定只读快照与旧版选项检测，不扩展宿主匹配          |
+| [0021](decisions/0021-builtin-distribution.md)       | 从完整源码目录生成内置分发           | 有效；构建期自动发现，不运行时扫描或维护手工名单                           |
+| [0022](decisions/0022-feature-retirement.md)         | 移除产品能力时保留共享基础与用户数据 | 有效；记录退出范围及旧退役兼容方案的替代关系                               |
+| [0023](decisions/0023-wasm-sandbox.md)               | 无 WASI 的 Wasmi 能力沙箱            | 有效；保留选型理由和非 OS 隔离/非抢占边界                                  |
+| [0024](decisions/0024-package-commit.md)             | 受限 JSON 包与原子安装指针           | 有效；保留格式、来源确认和失败不切换当前版本的取舍                         |
+| [0025](decisions/0025-storage-relocation.md)         | 定位文件与确认启动后清理源           | 有效；主动迁移区别于旧身份兼容，Committed 后不回退部分清理源               |
+| [0027](decisions/0027-assistant-policy.md)           | 有界助手计划与最小上下文             | 有效；脱敏顺序、资产范围及预算压缩已补齐专项回归                           |
+| [0028](decisions/0028-safe-data-upgrades.md)         | 版本化数据升级与升级前一致备份       | 有效；已知结构/配置自动升级，原子提交、保留数据，未知及未来格式拒绝        |
+| [0033](decisions/0033-assistant-tools-tasks.md)      | 助手工具目录与运行期任务             | 有效；目录与运行期任务继续使用，文件/传输由0034补充，持久恢复待后续阶段    |
+| [0034](decisions/0034-plugin-file-transfers.md)      | 文件版本预览与宿主流式传输           | 有效；补充0033的第二阶段，复用SFTP及宿主审批，后台字节不经模型/Guest       |
 
 ## 连接、文件与验证基础
 
-- [0035：任务审批模式](decisions/0035-task-approval-modes.md)：独立读取预授权、同一动作内固定计划的一次确认；补充0034，保留权限和目标复验。
+- [0035：任务审批模式](decisions/0035-task-approval-modes.md)：模式与动态读取限制由0038部分替代；同一动作内固定计划的一次授权与消费继续有效。
+- [0038：三种审批模式](decisions/0038-three-approval-modes.md)：有界参数化读取，完全访问须可信宿主首次授权；保留基础权限、页面/VM归属和计划复验；有效期与切换撤销由0039部分替代。
+- [0040：助手流式回答](decisions/0040-assistant-streaming.md)：Native通用模型流与有界文本进度，WASM解析/脱敏，完整校验后开放计划，保留取消及owner隔离。
+- [0039：完全访问会话生命周期](decisions/0039-session-full-access.md)：取消Full计时过期，切换模式、新建对话或关闭时撤销；拒绝迟到批准，保持其他资源和计划限额。
 
 以下早期 ADR 保留原正文，文件顶部说明当前适用范围；原文中的版本、阶段“不做项”和验证结果均为当时事实。
 

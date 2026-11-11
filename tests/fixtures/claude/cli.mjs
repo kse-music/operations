@@ -24,6 +24,22 @@ if (scenario === 'auth' || scenario === 'logged-out') {
     });
   if (scenario === 'tool-use')
     emit({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } });
+  if (scenario === 'stream') {
+    emit({ type: 'stream_event', event: { type: 'message_start' } });
+    emit({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: '{"answer":"' } },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    emit({
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        delta: { type: 'text_delta', text: 'OK","commands":[]}' },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
   const result = {
     type: 'result',
     subtype: scenario === 'failed' ? 'error_max_turns' : 'success',

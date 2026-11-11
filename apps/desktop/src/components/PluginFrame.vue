@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core';
 import { createPluginUiBridge } from '../services/plugin-ui-bridge';
@@ -92,7 +94,7 @@ const bridge = createPluginUiBridge({
   settingsAction: props.settingsPage ? (action) => emit('settingsAction', action) : undefined,
   terminal: (ticket, hostId, presentation) => {
     const host = hosts.catalog?.hosts.find((h) => h.id === hostId);
-    if (!host) throw new Error('终端目标主机已删除');
+    if (!host) throw new Error(tr('终端目标主机已删除'));
     terminal.value = { host, ticket, presentation };
   },
 });
@@ -196,7 +198,7 @@ function connect(event: MessageEvent) {
       port?.postMessage({
         kind: 'response',
         id,
-        error: { code: 'PLUGIN_INVALID', message: '插件请求格式无效' },
+        error: { code: 'PLUGIN_INVALID', message: tr('插件请求格式无效') },
       });
       return;
     }
@@ -204,7 +206,7 @@ function connect(event: MessageEvent) {
       port?.postMessage({
         kind: 'response',
         id,
-        error: { code: 'PLUGIN_LIMIT', message: '插件请求超过限制' },
+        error: { code: 'PLUGIN_LIMIT', message: tr('插件请求超过限制') },
       });
       return;
     }
@@ -255,6 +257,7 @@ watch(
     files.connections,
     models.models,
     plugins.settingsRevisions[props.pluginId],
+    plugins.locale,
     application.state?.config.monitorIntervalSecs,
     props.initialSection,
     props.page,
@@ -279,7 +282,7 @@ onMounted(() => {
     if (frame.value) intersection.observe(frame.value);
   }
   loadingTimer = setTimeout(() => {
-    if (!ready.value) error.value = '插件界面加载超时，请重新加载。';
+    if (!ready.value) error.value = tr('插件界面加载超时，请重新加载。');
   }, 15000);
   void models.refresh();
 });
@@ -296,14 +299,14 @@ onBeforeUnmount(() => {
 <template>
   <div class="plugin-frame-container" :data-plugin-id="pluginId">
     <div v-if="error" class="banner error" role="alert">
-      {{ error }}<button class="button" @click="emit('retry')">重新加载界面</button>
+      {{ error }}<button class="button" @click="emit('retry')">{{ tr('重新加载界面') }}</button>
     </div>
-    <p v-else-if="!ready" role="status">正在加载插件界面…</p>
+    <p v-else-if="!ready" role="status">{{ tr('正在加载插件界面…') }}</p>
     <iframe
       ref="frame"
       :inert="!active"
       :src="source"
-      :title="typeof page.title === 'string' ? page.title : page.title['zh-CN']"
+      :title="plugins.label(page.title)"
       sandbox="allow-scripts allow-forms"
       referrerpolicy="no-referrer"
       class="plugin-frame"

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, type Pinia } from 'pinia';
 import { editorApi, type EditorBootstrap } from './services/editor';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 const mock = vi.hoisted(() => ({
   close: vi.fn(),
   unlisten: vi.fn(),
@@ -40,6 +41,7 @@ const loaded: EditorBootstrap = {
   },
   theme: 'light',
   interfaceFontSize: 'ultraLarge',
+  language: 'zh-CN',
 };
 beforeEach(() => {
   vi.clearAllMocks();
@@ -55,10 +57,17 @@ beforeEach(() => {
   app = createApp(EditorWindow).use(pinia);
 });
 afterEach(() => {
+  setLocale('zh-CN');
   app?.unmount();
   disposePinia(pinia);
   root.remove();
   vi.unstubAllGlobals();
+});
+it('initializes the standalone editor with the saved interface language', async () => {
+  vi.mocked(editorApi.load).mockResolvedValue({ ...loaded, language: 'en-US' });
+  app.mount(root);
+  await vi.waitFor(() => expect(root.querySelector('.fixture-editor')).not.toBeNull());
+  expect(document.documentElement.lang).toBe('en-US');
 });
 it('routes native close requests to the editor draft review and applies saved theme and font size', async () => {
   app.mount(root);

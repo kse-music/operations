@@ -112,16 +112,16 @@ pub fn parse(mountinfo: &str, df: &str, warnings: &mut Vec<String>) -> Vec<Disk>
         });
     }
     // Match the complete decoded mount suffix; never split a path containing spaces.
+    let by_mount: HashMap<_, _> = disks
+        .iter()
+        .enumerate()
+        .map(|(index, disk)| (disk.mount.clone(), index))
+        .collect();
     for line in df.lines().skip(1) {
-        let matched = disks
-            .iter()
-            .enumerate()
-            .filter(|(_, d)| {
-                line.strip_suffix(&d.mount)
-                    .is_some_and(|p| p.ends_with(char::is_whitespace))
-            })
-            .max_by_key(|(_, d)| d.mount.len())
-            .map(|(i, _)| i);
+        let matched = line
+            .char_indices()
+            .filter(|(_, c)| c.is_whitespace())
+            .find_map(|(index, c)| by_mount.get(&line[index + c.len_utf8()..]).copied());
         let Some(i) = matched else {
             continue;
         };
@@ -167,4 +167,28 @@ pub fn parse(mountinfo: &str, df: &str, warnings: &mut Vec<String>) -> Vec<Disk>
         }
     }
     disks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn df_matches_complete_mounts_with_spaces_and_unicode_using_longest_suffix() {
+        let mounts = "1 0 8:1 / / rw - ext4 /dev/root rw\n2 0 8:2 / /space\\040中文 rw - xfs /dev/data rw\n3 0 8:3 / /parent\\040/child rw - ext4 /dev/parent rw\n4 0 8:4 / /child rw - ext4 /dev/child rw";
+        let df = "Filesystem Type 1024-blocks Used Available Capacity Mounted on\n/dev/root ext4 1000 900 100 90% /\n/dev/data xfs 2000 100 1900 5% /space 中文\n/dev/parent ext4 3000 200 2800 7% /parent /child\n/dev/child ext4 4000 300 3700 8% /child\n/dev/unknown ext4 5000 400 4600 8% /not-listed";
+        let mut warnings = vec![];
+        let disks = parse(mounts, df, &mut warnings);
+        assert!(warnings.is_empty());
+        for (mount, total) in [
+            ("/", 1000),
+            ("/space 中文", 2000),
+            ("/parent /child", 3000),
+            ("/child", 4000),
+        ] {
+            let disk = disks.iter().find(|disk| disk.mount == mount).unwrap();
+            assert_eq!(disk.total, Some(total * 1024));
+            assert!(disk.error.is_none());
+        }
+    }
 }

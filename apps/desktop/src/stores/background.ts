@@ -1,3 +1,4 @@
+import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
 import { ref, shallowRef } from 'vue';
@@ -33,7 +34,11 @@ export const useBackgroundStore = defineStore('background', () => {
   function hostState(id: string) {
     const rows =
       connections.value?.filter((c) => c.hostId === id || c.routeHostIds.includes(id)) ?? [];
-    return rows.some((c) => c.state === 'connected') ? '已连接' : rows.length ? '连接中' : '未连接';
+    return rows.some((c) => c.state === 'connected')
+      ? tr('已连接')
+      : rows.length
+        ? tr('连接中')
+        : tr('未连接');
   }
   useErrorNotifications(error);
   return { connections, hostState, error, start, stop };

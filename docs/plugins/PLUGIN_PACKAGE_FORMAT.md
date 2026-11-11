@@ -1,12 +1,12 @@
 # 本地插件包 v1
 
-当前 Host/Rust/Vue SDK 为 5.2.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；只使用当前契约，见[版本策略](PLUGIN_API_VERSIONING.md)。
+当前 Host/Rust/Vue SDK 为 5.4.0，包格式和 WASM ABI 仍为 1。网络诊断权限、工具和 UI 分类已删除，新包不能声明；只使用当前契约，见[版本策略](PLUGIN_API_VERSIONING.md)。
 
 ## UI v4 前端入口
 
 包格式仍为 1。`entry.ui` 仍指向严格 JSON，不接收包内 HTML。`uiVersion:4` 必须声明 `frontend:{"script":"frontend.js","style":"frontend.css"}`，二者必须是包内真实普通文件，进入 files 的长度/SHA256 校验和现有单文件/总量上限。入口仅允许最长 80 字节的平面 ASCII 文件名，分别以 `.js`/`.css` 结束，不允许点开头、`..`、路径、URL 或额外资源入口。
 
-宿主提供固定 HTML 壳并使用受限本地协议加载这两个入口；包内 JS/CSS 不进入宿主 DOM。构建工具把 Vue 和普通库打入单文件，图片可使用 data URI，运行时不能加载远程资源、动态分块或任意本地路径。新包需 `apiVersion:^5.2.0`；图标规则不变。仅接受 UI v4，缺少包内 frontend 或页面 surface 的声明直接拒绝。完整页面契约见[UI v4](PLUGIN_UI_EXTENSION.md)。
+宿主提供固定 HTML 壳并使用受限本地协议加载这两个入口；包内 JS/CSS 不进入宿主 DOM。构建工具把 Vue 和普通库打入单文件，图片可使用 data URI，运行时不能加载远程资源、动态分块或任意本地路径。新包需 `apiVersion:^5.4.0`；图标规则不变。仅接受 UI v4，缺少包内 frontend 或页面 surface 的声明直接拒绝。完整页面契约见[UI v4](PLUGIN_UI_EXTENSION.md)。
 
 ## 可选插件图标（Host API 1.3.0）
 
@@ -14,7 +14,7 @@
 
 ```json
 {
-  "apiVersion": "^5.2.0",
+  "apiVersion": "^5.4.0",
   "icon": "rocket"
 }
 ```
@@ -23,11 +23,11 @@
 
 名称最多 64 字节，使用小写字母、数字和单个连字符分隔，首字符为字母。空串、路径、URL、标记文本及其他类型无效。当前支持：`activity`、`archive`、`bot`、`boxes`、`calendar-clock`、`chart-no-axes-combined`、`cloud`、`code`、`container`、`cpu`、`database`、`file-text`、`folder`、`globe`、`hard-drive`、`layers`、`list-tree`、`network`、`radio`、`rocket`、`scroll-text`、`search`、`server`、`settings-2`、`shield`、`terminal`、`wrench`。这些名称对应宿主静态内置的 Lucide 图标，大小与颜色随界面统一控制。
 
-插件声明 `apiVersion: "^5.2.0"`，icon 为当前契约中的可选配置；包/Manifest 格式及 WASM ABI 为 1，UI 为 v4。
+插件声明 `apiVersion: "^5.4.0"`，icon 为当前契约中的可选配置；包/Manifest 格式及 WASM ABI 为 1，UI 为 v4。
 
 ## SDK5 贡献
 
-可选 `preapprovedCommands` 是最多 16 条完整 `{program,args,timeoutSecs}` 的数组，合计 JSON 编码不超过 48 KiB。需同时声明 `ssh.execute`、`ssh.execute.preapproved`，后者不得在无命令时声明。每条命令遵守 SDK Command 的参数和超时限制，重复实际命令拒绝。声明是包摘要的一部分，升级重新绑定授权；预授权匹配不支持参数模板、通配符或动态参数替换，脚本内容按原样匹配。宿主在用户另行授权后才对完全匹配的 Execute 免除逐次确认；该声明不能证明命令只读，也不适用于流、终端或文件写入。
+可选 `preapprovedCommands` 使用既有 `{program,args,timeoutSecs}` 数组，普通固定命令至多16条；声明独立参数化读取权限后，可包含受限完整argv模板，总数至多32条，合计JSON仍≤48 KiB。普通 `ssh.execute.preapproved` 仍须独立授予且只精确匹配，不因新模板扩大已有授权。固定脚本、参数约束及完全访问首次授权见[SDK审批合同](PLUGIN_SDK.md#审批模式与计划确认53)。
 
 `ssh.interactive.preapproved` 是独立可选权限，必须同时声明 `ssh.execute`。授予同名权限和 operation 后，当前安装修订可直接启动任意 StreamOpen/Terminal 命令，不匹配固定命令清单；上传包默认不授予，升级重新绑定授权。它不免除 Execute、文件保存或本机 TCP 连接的确认，详见 [SDK](PLUGIN_SDK.md)。
 

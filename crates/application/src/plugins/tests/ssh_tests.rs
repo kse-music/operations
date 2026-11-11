@@ -16,6 +16,365 @@ struct Handler {
 }
 
 #[tokio::test]
+async fn assist_parameterized_reads_skip_prompts_but_script_and_argument_changes_do_not() {
+    use serverdeck_plugin_sdk::platform::ApprovalMode;
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let template = Command::script("printf '%s' \"$1\"")
+        .arg("fixture-read")
+        .arg("{{sd:uint:2:2147483647}}");
+    let plugin = fixture
+        .install_with_commands(
+            "dev.argument-read",
+            &[Permission::OperationsReadArgumentsPreapproved],
+            vec![template.clone()],
+        )
+        .await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let ssh = ssh(app).await;
+    let make = |value: &str| {
+        Command::script("printf '%s' \"$1\"")
+            .arg("fixture-read")
+            .arg(value)
+    };
+    let ordinary = call(
+        app,
+        id,
+        "page",
+        Primitive::Execute {
+            host_id: ssh.host.id.clone(),
+            command: make("835251"),
+        },
+    )
+    .await;
+    assert_eq!(ordinary.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    app.plugin_approve(
+        ordinary.result["confirmationRequired"]["id"]
+            .as_str()
+            .unwrap(),
+        false,
+    )
+    .unwrap();
+    let policy = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    let binding = policy.result["binding"].as_str().unwrap().to_owned();
+    for value in ["835251", "42"] {
+        let reply = app
+            .plugin_capability_scoped(
+                id,
+                "page",
+                request(Capability::Platform {
+                    request: Primitive::Execute {
+                        host_id: ssh.host.id.clone(),
+                        command: make(value),
+                    },
+                    bindings: vec![binding.clone()],
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(reply.error.is_none(), "{reply:?}");
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    for command in [
+        make("1"),
+        make("42;reboot"),
+        Command::script("reboot").arg("fixture-read").arg("42"),
+    ] {
+        let reply = app
+            .plugin_capability_scoped(
+                id,
+                "page",
+                request(Capability::Platform {
+                    request: Primitive::Execute {
+                        host_id: ssh.host.id.clone(),
+                        command,
+                    },
+                    bindings: vec![binding.clone()],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+        app.plugin_approve(
+            reply.result["confirmationRequired"]["id"].as_str().unwrap(),
+            false,
+        )
+        .unwrap();
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    let mut grant = app.plugins.grant(id).unwrap().unwrap();
+    grant
+        .permissions
+        .retain(|p| *p != Permission::OperationsReadArgumentsPreapproved);
+    let op = Capability::Platform {
+        request: Primitive::Execute {
+            host_id: ssh.host.id.clone(),
+            command: make("42"),
+        },
+        bindings: vec![binding],
+    };
+    assert!(
+        !app.plugin_mode_preapproves(&scoped, &plugin, &grant, &op)
+            .unwrap()
+    );
+    drop(scoped);
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn full_access_requires_native_consent_then_reuses_owner_bound_authority_and_exact_plans() {
+    use serverdeck_plugin_sdk::platform::{ApprovalMode, ApprovalOperation};
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture
+        .install_with_commands(
+            "dev.full-mode",
+            &[Permission::OperationsFullPreapproved],
+            vec![],
+        )
+        .await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let ssh = ssh(app).await;
+    let mode = Primitive::ApprovalMode {
+        mode: ApprovalMode::Full,
+    };
+    let first = call(app, id, "page", mode.clone()).await;
+    assert_eq!(first.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    assert!(
+        first.result["confirmationRequired"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("完全访问")
+    );
+    app.plugin_approve(
+        first.result["confirmationRequired"]["id"].as_str().unwrap(),
+        false,
+    )
+    .unwrap();
+    assert!(app.plugin_host.lock().unwrap().bindings.is_empty());
+    let pending = call(app, id, "page", mode.clone()).await;
+    app.plugin_approve(
+        pending.result["confirmationRequired"]["id"]
+            .as_str()
+            .unwrap(),
+        true,
+    )
+    .unwrap();
+    let allowed = call(app, id, "page", mode.clone()).await;
+    assert!(allowed.error.is_none(), "{allowed:?}");
+    let binding = allowed.result["binding"].as_str().unwrap().to_owned();
+    assert_eq!(
+        call(app, id, "page", mode.clone()).await.result["binding"],
+        binding
+    );
+    assert!(ssh.calls.lock().unwrap().is_empty());
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    let execute = Primitive::Execute {
+        host_id: ssh.host.id.clone(),
+        command: Command::new("fixture-change"),
+    };
+    let run = |operation| {
+        app.plugin_dispatch(
+            &scoped,
+            request(Capability::Platform {
+                request: operation,
+                bindings: vec![binding.clone()],
+            }),
+        )
+    };
+    let plan = run(Primitive::ConfirmOperations {
+        operations: vec![ApprovalOperation {
+            request: Box::new(execute.clone()),
+            count: 2,
+        }],
+    })
+    .await
+    .unwrap();
+    assert!(plan.error.is_none(), "{plan:?}");
+    assert!(plan.result.is_null());
+    for _ in 0..2 {
+        assert!(run(execute.clone()).await.unwrap().error.is_none());
+    }
+    assert_eq!(
+        run(execute.clone()).await.unwrap().error.unwrap().code,
+        "PLUGIN_PLAN_CHANGED"
+    );
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    drop(scoped);
+    let stolen = app
+        .plugin_capability_scoped(
+            id,
+            "other-page",
+            request(Capability::Platform {
+                request: execute.clone(),
+                bindings: vec![binding.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(stolen.error.is_some());
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    app.plugin_host
+        .lock()
+        .unwrap()
+        .bindings
+        .get_mut(&binding)
+        .unwrap()
+        .at = Instant::now() - Duration::from_secs(7 * 24 * 60 * 60);
+    // Refreshing host/model bindings prunes expired revisions, but must preserve Full.
+    let refreshed = call(
+        app,
+        id,
+        "page",
+        Primitive::Host {
+            host_id: ssh.host.id.clone(),
+        },
+    )
+    .await;
+    assert!(refreshed.error.is_none(), "{refreshed:?}");
+    app.plugin_scope_visibility(id, "page", false)
+        .await
+        .unwrap();
+    app.plugin_scope_visibility(id, "page", true).await.unwrap();
+    let persistent = app
+        .plugin_capability_scoped(
+            id,
+            "page",
+            request(Capability::Platform {
+                request: execute.clone(),
+                bindings: vec![binding.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(persistent.error.is_none(), "{persistent:?}");
+    assert_eq!(ssh.calls.lock().unwrap().len(), 3);
+    assert_eq!(
+        call(app, id, "page", mode.clone()).await.result["binding"],
+        binding
+    );
+    let host_binding = refreshed.result["binding"].as_str().unwrap();
+    app.plugin_host
+        .lock()
+        .unwrap()
+        .bindings
+        .get_mut(host_binding)
+        .unwrap()
+        .at = Instant::now() - Duration::from_secs(601);
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    assert!(
+        app.plugin_binding_targets(&scoped, &[host_binding.to_owned()])
+            .is_err()
+    );
+    let session = app
+        .plugin_host
+        .lock()
+        .unwrap()
+        .full_access_sessions
+        .get(&(id.clone(), "page".into()))
+        .unwrap()
+        .clone();
+    // Reducing authority remains possible while a Guest action owns the busy slot.
+    let reduced = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Request,
+        },
+    )
+    .await;
+    assert!(reduced.error.is_none(), "{reduced:?}");
+    assert!(
+        app.plugin_binding_targets(&scoped, std::slice::from_ref(&binding))
+            .is_err()
+    );
+    assert!(
+        app.plugin_revision_binding_for_session(
+            &scoped,
+            state::RevisionTarget::ApprovalMode(ApprovalMode::Full),
+            Some(&session),
+        )
+        .is_err(),
+        "a late consent cannot restore a revoked session"
+    );
+    drop(scoped);
+    let revoked = app
+        .plugin_capability_scoped(
+            id,
+            "page",
+            request(Capability::Platform {
+                request: execute,
+                bindings: vec![binding.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(revoked.error.is_some());
+    assert_eq!(ssh.calls.lock().unwrap().len(), 3);
+    let renew = call(app, id, "page", mode.clone()).await;
+    assert_eq!(renew.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    let pending = renew.result["confirmationRequired"]["id"].as_str().unwrap();
+    let reduced = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    assert!(reduced.error.is_none());
+    assert!(
+        app.plugin_approve(pending, true).is_err(),
+        "switching also revokes pending consent"
+    );
+    let renew = call(app, id, "page", mode).await;
+    app.plugin_approve(
+        renew.result["confirmationRequired"]["id"].as_str().unwrap(),
+        true,
+    )
+    .unwrap();
+    let allowed = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Full,
+        },
+    )
+    .await;
+    let closing_binding = allowed.result["binding"].as_str().unwrap().to_owned();
+    app.plugin_close_scope(id, "page").await.unwrap();
+    assert!(
+        !app.plugin_host
+            .lock()
+            .unwrap()
+            .bindings
+            .contains_key(&closing_binding)
+    );
+    assert!(
+        !app.plugin_host
+            .lock()
+            .unwrap()
+            .full_access_sessions
+            .contains_key(&(id.clone(), "page".into()))
+    );
+    app.shutdown().await;
+}
+
+#[tokio::test]
 async fn a_confirmed_command_batch_cannot_expand_or_replay_and_assist_cannot_run_arbitrary_commands()
  {
     use serverdeck_plugin_sdk::platform::{ApprovalMode, ApprovalOperation};
@@ -496,6 +855,129 @@ async fn docker_page_queries_repeat_without_confirmation_over_real_ssh() {
         .await
         .is_err()
     );
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn assistant_packaged_sends_repeated_questions_over_native_stream_and_ssh() {
+    use serverdeck_plugin_sdk::streaming::Request as Stream;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    app.provision_bundled_plugins().unwrap();
+    let ssh = ssh(app).await;
+    let id = "cn.hiboot.plugins.assistant";
+    app.plugin_activate(id).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut chunk).await.unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&chunk[..n]);
+                if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let headers = std::str::from_utf8(&bytes[..at]).unwrap();
+                    let length: usize = headers
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length: ")
+                                .map(str::to_owned)
+                        })
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    if bytes.len() >= at + 4 + length {
+                        let body: Value =
+                            serde_json::from_slice(&bytes[at + 4..at + 4 + length]).unwrap();
+                        assert_eq!(body["stream"], true);
+                        break;
+                    }
+                }
+            }
+            let delta = json!({"choices":[{"index":0,"delta":{"content":json!({"kind":"answer","text":"fixture answer"}).to_string()},"finish_reason":null}]});
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {delta}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+    app.secrets
+        .write("assistant-stream-key", b"fixture-key")
+        .unwrap();
+    let revision = uuid::Uuid::new_v4().to_string();
+    app.database
+        .ai_model_save(
+            serverdeck_storage::ai::ModelRecord {
+                id: "assistant-stream-model".into(),
+                name: "fixture".into(),
+                config: serverdeck_core::ai::Config {
+                    base_url: format!("http://{address}/v1"),
+                    model: "fixture".into(),
+                    allow_insecure_http: true,
+                    ..Default::default()
+                },
+                secret_ref: Some("assistant-stream-key".into()),
+                revision: revision.clone(),
+            },
+            None,
+        )
+        .unwrap();
+    for _ in 0..2 {
+        let progress = call(
+            app,
+            id,
+            "page",
+            Primitive::Streaming {
+                request: Stream::ProgressOpen,
+            },
+        )
+        .await;
+        assert!(progress.error.is_none(), "{progress:?}");
+        let prepared = app.plugin_call_scoped(id, "page", json!({"action":"prepare","input":{
+            "progressId":progress.result["id"],"approvalMode":"assist",
+            "modelId":"assistant-stream-model","expectedModelRevision":revision,
+            "sessionId":ssh.host.id,"question":"输出一下硬件信息","autoHosts":true,
+            "selection":{"server":true,"metrics":true,"processes":false,"docker":false,"log":null,"logLines":100},
+            "maskAddresses":false,"redactValues":[]
+        }})).await.unwrap();
+        assert!(prepared.error.is_none(), "prepare: {prepared:?}");
+        let reply = app
+            .plugin_call_scoped(
+                id,
+                "page",
+                json!({"action":"send","input":{
+                    "id":prepared.result["id"],"confirmed":true
+                }}),
+            )
+            .await
+            .unwrap();
+        assert!(
+            reply.error.is_none(),
+            "send: {reply:?}; events: {:?}",
+            app.plugin_events().unwrap()
+        );
+        assert_eq!(reply.result["text"], "fixture answer");
+        assert_eq!(reply.result["task"]["status"], "succeeded");
+        let close = call(
+            app,
+            id,
+            "page",
+            Primitive::Streaming {
+                request: Stream::ProgressClose {
+                    id: progress.result["id"].as_str().unwrap().into(),
+                },
+            },
+        )
+        .await;
+        assert!(close.error.is_none(), "{close:?}");
+    }
+    assert!(!ssh.calls.lock().unwrap().is_empty());
+    server.await.unwrap();
     app.shutdown().await;
 }
 #[tokio::test]

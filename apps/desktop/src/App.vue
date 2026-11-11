@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from './i18n/messages';
+
 import {
   computed,
   defineAsyncComponent,
@@ -35,7 +37,7 @@ import { useBackgroundStore } from './stores/background';
 import { useOpsStore } from './stores/ops';
 import { sameHostConnection } from './services/product-links';
 import {
-  messages,
+  viewLabels,
   globalKey,
   defaultProductPreferences,
   hostViews,
@@ -152,14 +154,16 @@ function setContext(hostId: string, connectShell = false) {
 }
 function tabName(tab: WorkspaceTab) {
   if (isHostTab(tab))
-    return tab.hostId ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机' : '本地终端';
-  if (tab.pluginId)
-    return plugins.installed.find((p) => p.manifest.id === tab.pluginId)?.manifest.name ?? '插件';
+    return tab.hostId ? hostDisplayName(knownHost(tab.hostId)) || tr('已删除主机') : tr('本地终端');
+  if (tab.pluginId) {
+    const plugin = plugins.installed.find((p) => p.manifest.id === tab.pluginId);
+    return plugin ? plugins.metadata(plugin, plugin.manifest.name) : tr('插件');
+  }
   return hostViews.has(tab.view)
     ? tab.hostId
-      ? hostDisplayName(knownHost(tab.hostId)) || '已删除主机'
-      : '本地设备'
-    : messages['zh-CN'][tab.view];
+      ? hostDisplayName(knownHost(tab.hostId)) || tr('已删除主机')
+      : tr('本地设备')
+    : viewLabels[tab.view];
 }
 function activate(tab: WorkspaceTab) {
   if (tab.view === 'terminals' && tab.hostId) navigate(tab.view, tab.hostId, tab.section);
@@ -180,10 +184,30 @@ const hasTabsToRight = computed(
 );
 const hasOtherTabs = computed(() => workspace.tabs.length > 1);
 const tabCloseActions: { scope: WorkspaceCloseScope; label: string }[] = [
-  { scope: 'current', label: '关闭' },
-  { scope: 'right', label: '关闭右侧' },
-  { scope: 'others', label: '关闭其它' },
-  { scope: 'all', label: '关闭所有' },
+  {
+    scope: 'current',
+    get label() {
+      return tr('关闭');
+    },
+  },
+  {
+    scope: 'right',
+    get label() {
+      return tr('关闭右侧');
+    },
+  },
+  {
+    scope: 'others',
+    get label() {
+      return tr('关闭其它');
+    },
+  },
+  {
+    scope: 'all',
+    get label() {
+      return tr('关闭所有');
+    },
+  },
 ];
 function dismissTabMenu(event?: Event) {
   if (event?.target instanceof Node && tabMenuElement.value?.contains(event.target)) return;
@@ -339,7 +363,9 @@ function currentConfiguration(host: Host): boolean {
   const configured = store.catalog?.hosts.find((h) => h.id === host.id);
   if (!configured || !sameHostConnection(host, configured)) {
     notifications.push(
-      '主机连接配置已变更。当前会话保持原连接；请从主机树确认新配置后打开模块，或先断开并重新连接。',
+      tr(
+        '主机连接配置已变更。当前会话保持原连接；请从主机树确认新配置后打开模块，或先断开并重新连接。',
+      ),
       true,
     );
     return false;
@@ -441,7 +467,7 @@ onMounted(async () => {
       releaseEditorSaved = await listen('remote-editor-saved', () => void files.refresh());
       await files.syncEditorState();
     } catch (cause) {
-      files.error = `关闭确认入口注册失败：${errorMessage(cause)}`;
+      files.error = tr('关闭确认入口注册失败：{0}', errorMessage(cause));
     }
   }
 });
@@ -489,7 +515,7 @@ async function surfaceNavigate(section: NonNullable<WorkspaceTab['section']>) {
     const entry = await serverPluginFor(currentHostId.value, section);
     if (entry) openPlugin(entry.pluginId, entry.id, currentHostId.value, section);
     else {
-      notifications.push('请先在“设置 → 插件”中启用并授权提供此功能的插件。', true);
+      notifications.push(tr('请先在“设置 → 插件”中启用并授权提供此功能的插件。'), true);
       navigate('plugins');
     }
   } catch (cause) {
@@ -573,7 +599,7 @@ watch(
       @sidebar="toggleSidebar"
       @search="searching = true"
     />
-    <aside id="host-sidebar" class="sidebar" aria-label="主机管理侧栏">
+    <aside id="host-sidebar" class="sidebar" :aria-label="tr('主机管理侧栏')">
       <AppNavigation
         :local-active="isHostWorkspace && view === 'terminals' && !currentHostId"
         :settings-open="settingsOpen"
@@ -597,7 +623,7 @@ watch(
       v-if="sidebarOpen"
       class="sidebar-resizer"
       role="separator"
-      aria-label="调整主机侧栏宽度"
+      :aria-label="tr('调整主机侧栏宽度')"
       aria-orientation="vertical"
       tabindex="0"
       :aria-valuenow="sidebarDraft ?? application.state?.config.sidebarWidth ?? 248"
@@ -611,7 +637,7 @@ watch(
         <div
           class="tabbar workspace-tabs"
           role="tablist"
-          aria-label="工作区"
+          :aria-label="tr('工作区')"
           @keydown="workspaceKeys"
         >
           <div
@@ -644,8 +670,8 @@ watch(
             ><button
               class="tab-close"
               :disabled="workspace.closing.includes(tab.key)"
-              :aria-label="`关闭工作区标签 ${tabName(tab)}`"
-              :title="isHostTab(tab) ? '关闭该设备的连接和临时传输记录' : '关闭此页面'"
+              :aria-label="tr('关闭工作区标签 {0}', tabName(tab))"
+              :title="isHostTab(tab) ? tr('关闭该设备的连接和临时传输记录') : tr('关闭此页面')"
               @click="workspace.close(tab.key)"
             >
               <X :size="14" aria-hidden="true" />
@@ -666,15 +692,16 @@ watch(
           @navigate="navigate($event)"
           @plugin="openPlugin"
         />
-        <strong v-if="isHostWorkspace && !currentHost" class="workspace-local-label"
-          >本地终端</strong
-        >
+        <strong v-if="isHostWorkspace && !currentHost" class="workspace-local-label">{{
+          tr('本地终端')
+        }}</strong>
       </div>
       <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
       <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
-        当前仍操作建立时的连接：{{ currentHost?.username }}@{{ currentHost?.hostname }}:{{
-          currentHost?.port
-        }}。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。
+        {{ tr(' 当前仍操作建立时的连接：') }}{{ currentHost?.username }}@{{
+          currentHost?.hostname
+        }}:{{ currentHost?.port
+        }}{{ tr('。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。 ') }}
       </p>
       <div
         v-show="view !== 'terminals'"
@@ -683,12 +710,14 @@ watch(
         :inert="workspace.closing.includes(workspace.active)"
         :aria-busy="workspace.closing.includes(workspace.active)"
       >
-        <section v-if="view === null" class="workspace-empty" aria-label="欢迎页面">
-          <h1>欢迎使用 ServerDeck</h1>
-          <p>打开本地终端，或从左侧主机列表连接服务器。</p>
+        <section v-if="view === null" class="workspace-empty" :aria-label="tr('欢迎页面')">
+          <h1>{{ tr('欢迎使用 ServerDeck') }}</h1>
+          <p>{{ tr('打开本地终端，或从左侧主机列表连接服务器。') }}</p>
           <div class="action-row">
-            <button class="button primary" @click="navigate('terminals', '')">打开本地终端</button>
-            <button class="button" @click="openHost()">新建主机</button>
+            <button class="button primary" @click="navigate('terminals', '')">
+              {{ tr('打开本地终端') }}
+            </button>
+            <button class="button" @click="openHost()">{{ tr('新建主机') }}</button>
           </div>
         </section>
         <PluginView
@@ -752,12 +781,16 @@ watch(
       <span
         ><span :class="['status-dot', { offline: !application.ready }]"></span
         >{{
-          application.ready ? '本地后端已就绪' : application.loading ? '初始化中' : '后端未连接'
+          application.ready
+            ? tr('本地后端已就绪')
+            : application.loading
+              ? tr('初始化中')
+              : tr('后端未连接')
         }}</span
       >
       <span
-        >{{ store.catalog ? `${store.catalog.hosts.length} 台主机` : '主机列表未加载' }} ·
-        {{ store.busy ? '操作中' : `${terminals.connectedCount} 个已连接终端` }}</span
+        >{{ store.catalog ? tr('{0} 台主机', store.catalog.hosts.length) : tr('主机列表未加载') }} ·
+        {{ store.busy ? tr('操作中') : tr('{0} 个已连接终端', terminals.connectedCount) }}</span
       >
     </footer>
   </div>
@@ -768,8 +801,8 @@ watch(
     :key="workspace.pluginConfiguration.pluginId"
     :plugin-id="workspace.pluginConfiguration.pluginId"
   />
-  <Modal v-if="pluginTarget" title="选择使用工具的主机" @close="pluginTarget = null">
-    <p>选择主机后，工具将在该主机工作区打开。</p>
+  <Modal v-if="pluginTarget" :title="tr('选择使用工具的主机')" @close="pluginTarget = null">
+    <p>{{ tr('选择主机后，工具将在该主机工作区打开。') }}</p>
     <div class="action-row">
       <button
         v-for="host in store.catalog?.hosts ?? []"
@@ -782,7 +815,7 @@ watch(
       >
         {{ hostDisplayName(host) }}
       </button>
-      <p v-if="!store.catalog?.hosts.length">暂无主机，请先在主机管理中添加。</p>
+      <p v-if="!store.catalog?.hosts.length">{{ tr('暂无主机，请先在主机管理中添加。') }}</p>
     </div>
   </Modal>
   <PluginDialogs />
@@ -796,44 +829,44 @@ watch(
   <FileOpenDialogs />
   <Modal
     v-if="files.exitReview"
-    title="确认退出 ServerDeck"
+    :title="tr('确认退出 ServerDeck')"
     :busy="exitBusy"
     focus-heading
     @close="files.exitReview = false"
   >
     <div class="exit-review-body">
-      <ul class="exit-review-effects" aria-label="退出影响">
+      <ul class="exit-review-effects" :aria-label="tr('退出影响')">
         <li>
           <Unplug :size="16" aria-hidden="true" />
           <div>
-            <strong>连接与会话</strong>
-            <p>断开所有模块连接，结束 SSH 和本地终端会话。</p>
+            <strong>{{ tr('连接与会话') }}</strong>
+            <p>{{ tr('断开所有模块连接，结束 SSH 和本地终端会话。') }}</p>
           </div>
         </li>
         <li>
           <ListTodo :size="16" aria-hidden="true" />
           <div>
-            <strong>未完成的任务</strong>
-            <p>请求取消未完成的传输和诊断。</p>
+            <strong>{{ tr('未完成的任务') }}</strong>
+            <p>{{ tr('请求取消未完成的传输和诊断。') }}</p>
           </div>
         </li>
         <li>
           <FileWarning :size="16" aria-hidden="true" />
           <div>
-            <strong>未保存的修改</strong>
-            <p>关闭独立编辑器，放弃未保存的文本编辑。</p>
+            <strong>{{ tr('未保存的修改') }}</strong>
+            <p>{{ tr('关闭独立编辑器，放弃未保存的文本编辑。') }}</p>
           </div>
         </li>
       </ul>
       <p class="exit-review-note">
         <Info :size="14" aria-hidden="true" />
-        <span>已完成的文件会保留。远端命令是否停止仍需核对。</span>
+        <span>{{ tr('已完成的文件会保留。远端命令是否停止仍需核对。') }}</span>
       </p>
     </div>
     <p v-if="exitError" class="error-text" role="alert">{{ exitError }}</p>
     <footer class="dialog-actions exit-review-actions">
       <button class="button danger" type="button" :disabled="exitBusy" @click="confirmExit">
-        确认
+        {{ tr(' 确认 ') }}
       </button>
     </footer>
   </Modal>
@@ -850,7 +883,7 @@ watch(
       ref="tabMenuElement"
       class="context-menu workspace-tab-menu"
       role="menu"
-      aria-label="工作区标签操作"
+      :aria-label="tr('工作区标签操作')"
       :style="{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }"
       @keydown="tabMenuKeys"
     >

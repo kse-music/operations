@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { tr } from '../i18n/messages';
+
 import { clipboardApi } from '../services/clipboard';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { opsApi } from '../services/ops';
@@ -39,7 +41,7 @@ const emit = defineEmits<{
 }>();
 const application = useApplicationStore();
 const store = useTerminalsStore();
-const name = computed(() => (props.tab.host ? hostDisplayName(props.tab.host) : '本地设备'));
+const name = computed(() => (props.tab.host ? hostDisplayName(props.tab.host) : tr('本地设备')));
 const container = ref<HTMLElement>();
 const searchInput = ref<HTMLInputElement>();
 const message = ref<string | null>(null);
@@ -72,8 +74,8 @@ function canReceiveDrop(): boolean {
 const menu = ref<{ x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuActions = computed(() => [
-  { key: 'copy', label: '复制', disabled: false },
-  { key: 'paste', label: '粘贴', disabled: props.tab.state !== 'connected' },
+  { key: 'copy', label: tr('复制'), disabled: false },
+  { key: 'paste', label: tr('粘贴'), disabled: props.tab.state !== 'connected' },
 ]);
 let terminal: Terminal;
 let fit: FitAddon;
@@ -95,6 +97,9 @@ let forceBottomScroll = false;
 const encoder = new TextEncoder();
 let unregisterUpload: (() => void) | undefined;
 
+function isConnected(attempt: number): boolean {
+  return !disposed && attempt === generation && props.tab.state === 'connected';
+}
 function fitTerminal(forceBottom = false): void {
   if (!props.active || !container.value?.clientWidth || !container.value.clientHeight || !terminal)
     return;
@@ -228,7 +233,7 @@ function queueInput(data: Uint8Array): void {
     return;
   }
   if (!inputQueue.enqueue(data, approvedPaste))
-    message.value = '输入队列已满或已断线，本次输入未发送。';
+    message.value = tr('输入队列已满或已断线，本次输入未发送。');
 }
 async function connect(): Promise<void> {
   if (working.value) return;
@@ -286,7 +291,7 @@ async function connect(): Promise<void> {
     const ready = async () => {
       await Promise.resolve();
       const value = await opening;
-      if (disposed || attempt !== generation) throw new Error('终端会话已改变，上传已取消。');
+      if (disposed || attempt !== generation) throw new Error(tr('终端会话已改变，上传已取消。'));
       return value.id;
     };
     const receiver = props.tab.host
@@ -294,7 +299,7 @@ async function connect(): Promise<void> {
           write: (data) => terminal.write(data),
           send: async (data) => {
             await ready();
-            if (!inputQueue.enqueue(data)) throw new Error('ZMODEM 输入队列已满，上传已停止。');
+            if (!inputQueue.enqueue(data)) throw new Error(tr('ZMODEM 输入队列已满，上传已停止。'));
             await inputQueue.flush();
           },
           pick: async () => terminalApi.uploadPick(await ready()),
@@ -324,18 +329,17 @@ async function connect(): Promise<void> {
         else terminal.write(ordinary);
         terminal.write(new Uint8Array(), () => {
           void opening
-            .then((value) => terminalApi.ack(value.id, event.sequence))
+            .then((value) => {
+              if (isConnected(attempt)) return terminalApi.ack(value.id, event.sequence);
+            })
             .catch((cause: unknown) => {
-              if (attempt === generation && props.tab.state === 'connected')
-                message.value = errorMessage(cause);
+              if (isConnected(attempt)) message.value = errorMessage(cause);
             });
         });
       } else if (event.type === 'state') {
         if (['closed', 'failed', 'disconnected'].includes(event.state)) {
           dropUpload.value?.dispose();
           receiver?.dispose();
-          pendingPaste.value = null;
-          inputQueue.reset();
         }
         update({ state: event.state });
         if (event.message) message.value = event.message;
@@ -345,7 +349,10 @@ async function connect(): Promise<void> {
         dropUpload.value?.dispose();
         receiver?.dispose();
         terminal.write(
-          `\r\n\x1b[90m[Shell 已结束${event.status === null ? '' : `，退出码 ${event.status}`}]\x1b[0m\r\n`,
+          tr(
+            '\r\n\u001b[90m[Shell 已结束{0}]\u001b[0m\r\n',
+            event.status === null ? '' : tr('，退出码 {0}', event.status),
+          ),
         );
       }
     };
@@ -359,7 +366,7 @@ async function connect(): Promise<void> {
       return;
     }
     session = value;
-    inputQueue.reset(value.id);
+    inputQueue.reset(props.tab.state === 'connected' ? value.id : undefined);
     focusTerminal();
     update({
       sessionId: value.id,
@@ -387,7 +394,7 @@ async function copy(): Promise<void> {
   try {
     await clipboardApi.writeText(terminal.getSelection());
   } catch {
-    message.value = '无法写入剪贴板，请检查系统权限。';
+    message.value = tr('无法写入剪贴板，请检查系统权限。');
   }
 }
 function copySelection(): void {
@@ -462,7 +469,7 @@ function runMenuAction(key: string): void {
 }
 async function paste(): Promise<void> {
   if (props.tab.state !== 'connected') {
-    message.value = '请先连接终端再粘贴。';
+    message.value = tr('请先连接终端再粘贴。');
     return;
   }
   const attempt = generation;
@@ -470,20 +477,20 @@ async function paste(): Promise<void> {
     const text = await clipboardApi.readText();
     if (!disposed && attempt === generation) requestPaste(text);
   } catch {
-    message.value = '无法读取剪贴板，请检查系统权限。';
+    message.value = tr('无法读取剪贴板，请检查系统权限。');
   }
 }
 function requestPaste(text: string): void {
   if (upload?.busy) {
-    message.value = 'ZMODEM 上传期间无法粘贴，请先完成或取消上传。';
+    message.value = tr('ZMODEM 上传期间无法粘贴，请先完成或取消上传。');
     return;
   }
   if (props.tab.state !== 'connected') {
-    message.value = '请先连接终端再粘贴。';
+    message.value = tr('请先连接终端再粘贴。');
     return;
   }
   if (encoder.encode(text).length > 2 * 1024 * 1024) {
-    message.value = '单次粘贴最多 2 MiB，请分批粘贴。';
+    message.value = tr('单次粘贴最多 2 MiB，请分批粘贴。');
     return;
   }
   if (text.length >= preferences.value.pasteConfirmChars || text.split(/\r?\n/).length > 50) {
@@ -494,7 +501,7 @@ function requestPaste(text: string): void {
 }
 function sendPaste(text: string): void {
   if (props.tab.state !== 'connected') {
-    message.value = '请先连接终端再粘贴。';
+    message.value = tr('请先连接终端再粘贴。');
     return;
   }
   message.value = null;
@@ -522,12 +529,12 @@ function nativePaste(event: ClipboardEvent): void {
 }
 async function sendDrop(id: string, data: Uint8Array): Promise<void> {
   if (disposed || session?.id !== id || props.tab.state !== 'connected')
-    throw new Error('终端会话已改变，上传已停止。');
-  if (!inputQueue.enqueue(data)) throw new Error('终端输入队列已满，上传已停止。');
+    throw new Error(tr('终端会话已改变，上传已停止。'));
+  if (!inputQueue.enqueue(data)) throw new Error(tr('终端输入队列已满，上传已停止。'));
   await inputQueue.flush();
 }
 async function interruptDrop(id: string): Promise<void> {
-  if (disposed || session?.id !== id) throw new Error('终端会话已结束。');
+  if (disposed || session?.id !== id) throw new Error(tr('终端会话已结束。'));
   inputQueue.reset(id);
   await sendDrop(id, Uint8Array.of(3));
 }
@@ -545,7 +552,7 @@ function terminalOptions() {
 function find(backward = false): void {
   if (!query.value) return;
   const found = backward ? search.findPrevious(query.value) : search.findNext(query.value);
-  message.value = found ? null : '滚动缓冲中没有匹配内容。';
+  message.value = found ? null : tr('滚动缓冲中没有匹配内容。');
 }
 function activateLink(event: MouseEvent, url: string): void {
   event.preventDefault();
@@ -595,12 +602,15 @@ onMounted(() => {
   terminal.onBinary((data) => queueInput(Uint8Array.from(data, (char) => char.charCodeAt(0))));
   terminal.onResize((size) => {
     clearTimeout(resizeTimer);
+    const attempt = generation;
+    const id = session?.id;
+    if (!id || !isConnected(attempt)) return;
     resizeTimer = setTimeout(() => {
-      if (session && props.tab.state === 'connected')
+      if (isConnected(attempt))
         void terminalApi
-          .resize(session.id, { cols: size.cols, rows: size.rows })
+          .resize(id, { cols: size.cols, rows: size.rows })
           .catch((cause: unknown) => {
-            message.value = errorMessage(cause);
+            if (isConnected(attempt)) message.value = errorMessage(cause);
           });
     }, 80);
   });
@@ -641,6 +651,18 @@ onMounted(() => {
   fitTerminal();
   if (props.tab.connectRequested) void connect();
 });
+watch(
+  () => props.tab.state,
+  (state) => {
+    if (state === 'connected') inputQueue.reset(session?.id);
+    else {
+      clearTimeout(resizeTimer);
+      pendingPaste.value = null;
+      inputQueue.reset();
+    }
+  },
+  { flush: 'sync' },
+);
 watch(
   () => props.tab.connectRequested,
   (requested) => {
@@ -714,7 +736,7 @@ defineExpose({
 <template>
   <section
     class="terminal-pane"
-    :aria-label="`终端 ${name}`"
+    :aria-label="tr('终端 {0}', name)"
     :aria-description="stateLabels[tab.state] ?? tab.state"
     :data-host-id="tab.host?.id ?? ''"
     :data-state="tab.state"
@@ -723,13 +745,23 @@ defineExpose({
       <input
         ref="searchInput"
         v-model="query"
-        aria-label="终端查找内容"
-        placeholder="在终端滚动缓冲中查找"
+        :aria-label="tr('终端查找内容')"
+        :placeholder="tr('在终端滚动缓冲中查找')"
         @keydown.enter="find()"
         @keydown.esc.stop.prevent="toggleFind"
-      /><button class="tool-button" aria-label="上一个" title="上一个匹配" @click="find(true)">
+      /><button
+        class="tool-button"
+        :aria-label="tr('上一个')"
+        :title="tr('上一个匹配')"
+        @click="find(true)"
+      >
         <ArrowUp :size="14" aria-hidden="true" /></button
-      ><button class="tool-button" aria-label="下一个" title="下一个匹配" @click="find()">
+      ><button
+        class="tool-button"
+        :aria-label="tr('下一个')"
+        :title="tr('下一个匹配')"
+        @click="find()"
+      >
         <ArrowDown :size="14" aria-hidden="true" />
       </button>
     </div>
@@ -737,7 +769,7 @@ defineExpose({
     <div
       ref="container"
       class="xterm-container"
-      aria-label="交互式 Shell"
+      :aria-label="tr('交互式 Shell')"
       :data-state="tab.state"
       :style="{ backgroundColor: terminalThemes[preferences.theme].background }"
       @wheel.capture="zoomWithWheel"
@@ -760,57 +792,67 @@ defineExpose({
       @closed="restoreDropFocus"
     />
     <div v-if="uploadProgress" class="terminal-upload" role="status" aria-live="polite">
-      <span v-if="uploadProgress.phase === 'choosing'">ZMODEM：请选择要上传的本地文件…</span>
+      <span v-if="uploadProgress.phase === 'choosing'">{{
+        tr('ZMODEM：请选择要上传的本地文件…')
+      }}</span>
       <template v-else-if="uploadProgress.phase === 'uploading'">
         <span>{{ uploadProgress.name }}</span>
         <progress
           :value="uploadProgress.sent"
           :max="uploadProgress.size || 1"
-          aria-label="ZMODEM 上传进度"
+          :aria-label="tr('ZMODEM 上传进度')"
         ></progress>
-        <span>{{ uploadProgress.sent }} / {{ uploadProgress.size }} 字节</span>
+        <span>{{ uploadProgress.sent }} / {{ uploadProgress.size }}{{ tr(' 字节') }}</span>
       </template>
-      <span v-else>ZMODEM：等待远端确认完成…</span>
-      <button class="button" @click="upload?.cancel()">取消上传</button>
+      <span v-else>{{ tr('ZMODEM：等待远端确认完成…') }}</span>
+      <button class="button" @click="upload?.cancel()">{{ tr('取消上传') }}</button>
     </div>
     <Modal
       v-if="trust && active && (standalone || store.focused === tab.key)"
-      title="确认 SSH 主机指纹"
+      :title="tr('确认 SSH 主机指纹')"
       @close="confirm(false)"
     >
       <p>
-        首次连接 {{ trust.hostname }}:{{
-          trust.port
-        }}。请从服务器控制台或其他可信渠道核对指纹后再信任。
+        {{ tr(' 首次连接 ') }}{{ trust.hostname }}:{{ trust.port
+        }}{{ tr('。请从服务器控制台或其他可信渠道核对指纹后再信任。 ') }}
       </p>
       <p>{{ trust.algorithm }}</p>
       <code class="fingerprint">{{ trust.fingerprint }}</code>
-      <p class="subtle">确认后保存至本机。以后检测到密钥变化将阻止连接；60 秒未确认则取消。</p>
+      <p class="subtle">
+        {{ tr('确认后保存至本机。以后检测到密钥变化将阻止连接；60 秒未确认则取消。') }}
+      </p>
       <footer class="dialog-actions">
-        <button class="button" @click="confirm(false)">拒绝连接</button
-        ><button class="button primary" @click="confirm(true)">已核对，信任并连接</button>
+        <button class="button" @click="confirm(false)">{{ tr('拒绝连接') }}</button
+        ><button class="button primary" @click="confirm(true)">
+          {{ tr('已核对，信任并连接') }}
+        </button>
       </footer>
     </Modal>
-    <Modal v-if="pendingPaste !== null" title="确认大文本粘贴" @close="pendingPaste = null"
+    <Modal v-if="pendingPaste !== null" :title="tr('确认大文本粘贴')" @close="pendingPaste = null"
       ><p>
-        将向 {{ name }} 发送 {{ pendingPaste.length }} 个字符、约
-        {{ pendingPaste.split(/\r?\n/).length }} 行。换行可能执行命令，请核对目标和内容。
+        {{ tr(' 将向 ') }}{{ name }}{{ tr(' 发送 ') }}{{ pendingPaste.length
+        }}{{ tr(' 个字符、约 ') }}{{ pendingPaste.split(/\r?\n/).length
+        }}{{ tr(' 行。换行可能执行命令，请核对目标和内容。 ') }}
       </p>
       <pre class="paste-preview"
         >{{ pendingPaste.slice(0, 300) }}{{ pendingPaste.length > 300 ? '…' : '' }}</pre>
       <p class="subtle">
-        终端启用 Bracketed Paste 时将保留粘贴边界。Shell 的启动配置和应用行为由目标设备决定。
+        {{
+          tr(
+            ' 终端启用 Bracketed Paste 时将保留粘贴边界。Shell 的启动配置和应用行为由目标设备决定。 ',
+          )
+        }}
       </p>
       <footer class="dialog-actions">
-        <button class="button" @click="pendingPaste = null">取消</button
-        ><button class="button primary" @click="approvePaste">确认粘贴</button>
+        <button class="button" @click="pendingPaste = null">{{ tr('取消') }}</button
+        ><button class="button primary" @click="approvePaste">{{ tr('确认粘贴') }}</button>
       </footer></Modal
     >
     <Teleport :to="standalone ? (container?.closest('dialog') ?? 'body') : 'body'">
       <template v-if="menu">
         <button
           class="context-backdrop"
-          aria-label="关闭终端菜单"
+          :aria-label="tr('关闭终端菜单')"
           @click="closeMenu"
           @contextmenu.prevent="closeMenu"
           @wheel.prevent
@@ -819,7 +861,7 @@ defineExpose({
           ref="menuElement"
           class="context-menu terminal-context-menu"
           role="menu"
-          aria-label="终端操作"
+          :aria-label="tr('终端操作')"
           :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
           @keydown="menuKey"
         >
