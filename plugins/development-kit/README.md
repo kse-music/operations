@@ -21,14 +21,14 @@ npm run package
 
 需要直接打开流或终端时，可另声明 `ssh.interactive.preapproved`，用户单独授予同名权限和 operation 后才对 StreamOpen/Terminal 免除逐次确认，仍需基础 `ssh.execute` 授权。这会允许当前安装修订启动任意交互命令，上传包默认未选；不能代替 Execute、文件写入或本机 TCP 的确认。完整边界见 SDK。
 
-SDK5.3提供“请求批准/帮我批准/完全访问权限”三种任务模式。带参数的读取必须单独声明并授权受限argv模板；完全访问还须可信宿主首次授权，仍限于已授予能力和目录，在当前会话持续生效，切换到request/assist或关闭owner时撤销；新建对话需调用request，不以页面隐藏代替关闭。完整模式、模板及失效规则见SDK文档；上传包不默认获得新增权限。
+SDK 提供“请求批准/帮我批准/完全访问权限”三种任务模式。带参数的读取必须单独声明并授权受限argv模板；完全访问还须可信宿主首次授权，仍限于已授予能力和目录，在当前会话持续生效，切换到request/assist或关闭owner时撤销；新建对话需调用request，不以页面隐藏代替关闭。完整模式、模板及失效规则见SDK文档；上传包不默认获得这些权限。
 
-SDK5.4增加 `streaming` 平台请求和Vue `progress` 客户端，支持有界模型文本流及插件显示进度；句柄绑定原owner/VM，工具/审批权限不变。先在WASM解析并脱敏回答，再发布显示片段；完整结果校验前不能执行计划。字段、取消及配额见SDK文档。
+`streaming` 平台请求和 Vue `progress` 客户端支持有界模型文本流及插件显示进度；句柄绑定原owner/VM，工具仍须独立授权和审批。先在WASM解析并脱敏回答，再发布显示片段；完整结果校验前不能执行计划。字段、取消及配额见SDK文档。
 
 需要易懂的操作确认时，前端可使用 `invoke(action, input, { confirmation: { title, message, confirmLabel } })`。例如标题“停止容器？”，正文说明容器名称和服务中断影响，按钮“停止”。宿主显示原生取得的实际目标和业务说明，不提供执行详情或命令脚本入口；完整命令仍由原生审批绑定，这些纯文本不参与授权，也不传给 WASM。字段限额和完整契约见 SDK 的 UI 说明。
 
 前端测试`npm test`，类型检查`npm run typecheck`。后端可用`cargo test --manifest-path example/backend/Cargo.toml --no-run --target-dir <QA共享target>`编译，Windows将EXE复制到QA目录运行；WASM产物在.local/plugin-build/example。工具默认locked/offline打包，先fetch依赖，不通过改锁掩盖失败。
 
-2026-11-09 的开发包修复了 SDK5 前端加载握手：恢复就绪通知和连接确认，API/UI/ABI 契约不变。用修复前开发包打出的 UI 需更新公开 SDK 并重新打包，提高插件版本后上传升级；无需修改插件业务或宿主服务接口。
+前端通过 `mountPlugin` 完成 SDK 就绪通知、MessageChannel 连接确认和可信上下文接收后挂载；不要在握手完成前自行调用平台。
 
-参考[SDK](docs/plugins/PLUGIN_SDK.md)、[开发规范](docs/plugins/PLUGIN_DEVELOPMENT.md)、[UI](docs/plugins/PLUGIN_UI_EXTENSION.md)、[安全](docs/plugins/PLUGIN_SECURITY.md)、[包格式](docs/plugins/PLUGIN_PACKAGE_FORMAT.md)。新增MySQL/Redis等服务能力属于插件；不需要给SDK或宿主新增服务枚举、私有Store或原生业务接口。
+解压后的 `docs/plugins/` 包含 `PLUGIN_SDK.md`、`PLUGIN_DEVELOPMENT.md`、`PLUGIN_UI_EXTENSION.md`、`PLUGIN_SECURITY.md` 和 `PLUGIN_PACKAGE_FORMAT.md` 等规范。MySQL/Redis 等服务业务属于插件，不需要给 SDK 或宿主增加服务枚举、私有 Store 或原生业务接口。

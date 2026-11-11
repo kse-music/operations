@@ -20,10 +20,10 @@ WASM审批保存原Future及请求，批准/拒绝原地续接。用户取消以
 
 ## 沙箱与数据
 
-WASM没有WASI或原生导入，受线性内存/fuel/消息/并发限制。UI在无same-origin的受限iframe，包资源需摘要验证，认证MessageChannel绑定真实iframe；桥拒绝任意原生IPC和旧AI/系统业务API。公开资产DTO不含凭据/认证/代理/租约，模型Key和CLI登录数据不进入Guest。主机Key始终通过可信父页面显式核验。
+WASM没有WASI或原生导入，受线性内存/fuel/消息/并发限制。UI在无same-origin的受限iframe，包资源需摘要验证，认证MessageChannel绑定真实iframe；桥只开放当前公共契约，拒绝任意原生 IPC。公开资产DTO不含凭据/认证/代理/租约，模型Key和CLI登录数据不进入Guest。主机Key始终通过可信父页面显式核验。
 
 输出、模型消息、通知、队列、结果池均有界，详见[SDK](PLUGIN_SDK.md)。记录错误码和安全原因，不记录密码/私钥/模型Key/敏感载荷。stdout/stderr超限标记截断，不能当成功；取消/断线无法保证远端程序绝未执行，不自动重试变更。
 
 此机制不提供独立OS进程隔离，不抵御同用户进程改写仓库或运行时漏洞。Web UI没有CPU/内存硬限额，原生Windows之外的平台尚需单独验收。真实模型账号、远端工具版本/权限由部署环境决定。
 
-任务读取预授权通过 `operations.read.preapproved` 单独声明并授予，免审SSH仍须完整匹配清单，不接受readOnly或confirmed自述。原生计划确认先做无执行预检，摘要包括完整请求、owner/VM/安装/目标绑定及次数；批准仅在原动作内消费，请求变化/次数耗尽则撤销剩余集合。读取免审不能跳过目录/身份/主机指纹，写入不自动批准。完整协议见[SDK](PLUGIN_SDK.md#审批模式与计划确认52)。
+任务读取预授权通过 `operations.read.preapproved` 单独声明并授予，免审SSH仍须完整匹配清单，不接受readOnly或confirmed自述。原生计划确认先做无执行预检，摘要包括完整请求、owner/VM/安装/目标绑定及次数；批准仅在原动作内消费，请求变化/次数耗尽则撤销剩余集合。读取免审不能跳过目录/身份/主机指纹，写入不自动批准。完整协议见[SDK](PLUGIN_SDK.md#审批模式与计划确认)。

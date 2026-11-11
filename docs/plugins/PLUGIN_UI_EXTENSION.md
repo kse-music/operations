@@ -21,7 +21,7 @@ UI v4必须携带独立Vue前端，Host API为5.4.0。`entry.ui`指向严格JSON
 }
 ```
 
-manifest贡献ID对应页面ID；kind支持workspace、navigation、host_menu、command、settings、server。server/host_menu从明确主机打开；workspace可全局打开。可选`routes`声明本插件导航标识，最多32个、无重复合法标识符；SDK页面section/navigate事件只接受该贡献声明值，新增分类无需改宿主枚举。旧tool、operations/monitor标准视图被拒绝。
+manifest贡献ID对应页面ID；kind支持workspace、navigation、host_menu、command、settings、server。server/host_menu从明确主机打开；workspace可全局打开。可选`routes`声明本插件导航标识，最多32个、无重复合法标识符；SDK页面section/navigate事件只接受该贡献声明值，新增分类无需改宿主枚举。所有贡献均使用本包独立 frontend 页面，不加载宿主领域视图。
 
 `main.ts`使用`mountPlugin(App)`。SDK注入page、hostId、initialSection、keepRunning等可信页面参数，推送公开context、主题、字号与visibility。组件通过`invoke(action, structuredInput)`调用本包WASM，动作必须在页面声明；业务输入不是JSON字符串或宿主票据。表单fields仍是可选schema元数据，不由宿主渲染业务页面。
 

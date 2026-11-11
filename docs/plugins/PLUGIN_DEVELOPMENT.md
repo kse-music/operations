@@ -36,7 +36,7 @@ npm run package
 
 在 `plugins/system/<小写目录名>/` 新增上述完整目录，ID唯一。运行 `npm run plugins:build` 或正常桌面构建；工具扫描目录、独立编译 WASM/Vue、生成 `.sdplugin` 及嵌入注册表，Rust构建同样读取发现结果。无需修改 Cargo workspace、构建脚本、注册数组或宿主页面。
 
-`plugins/system/packages` 是生成产物，`plugins/compat` 不作为新插件来源。系统来源仅影响发行及预置授权策略，执行契约与上传包相同。新增完整目录后需重新构建客户端；不是运行中的桌面自动监听源码热安装。
+`plugins/system/packages` 是生成产物。系统来源仅影响发行及预置授权策略，执行契约与上传包相同。新增完整目录后需重新构建客户端；不是运行中的桌面自动监听源码热安装。
 
 ## 完成标准
 

@@ -1,6 +1,6 @@
 # Plugin SDK 5.4.0
 
-Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.4.0**；WASM ABI / wire 为 1，界面为 UI v4。当前开发期直接拒绝旧主版本、旧业务能力和旧 UI，不提供兼容层。
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.4.0**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
 
 ## 职责边界
 
@@ -18,11 +18,11 @@ SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 St
 | 本包声明的 WASM 动作             | `invoke<T>(action, input, options?)`                 |
 | 平台原语                         | `platform` → `call<T>(request)`                      |
 | 安全公开元数据                   | `context` → `usePlatformContext()`                   |
-| 界面语言与词典                   | `i18n` → `locale` / `createTranslator(english)`       |
+| 界面语言与词典                   | `i18n` → `locale` / `createTranslator(english)`      |
 | 连接 / 终端 / 取消 / 草稿        | `connections` / `terminal` / `actions` / `drafts`    |
 | 通用组件                         | `ui/{Modal,OpsTable,TrendChart,StreamDialog}.vue`    |
 
-`StreamDialog` 使用宽弹窗，固定标题/工具栏并让输出区独立滚动。首次打开和默认跟随时滚到最新输出，用户向上翻阅后停止自动滚动但继续接收；“最新日志”或暂停后的“继续”恢复跟随。窗口尺寸/字号变化时仅在跟随模式重新定位末尾。过滤、复制、导出、1 MiB/5000 行缓存及隐藏/卸载释放自有流的边界不变，组件 props 与平台协议不变。
+`StreamDialog` 使用宽弹窗，固定标题/工具栏并让输出区独立滚动。首次打开和默认跟随时滚到最新输出，用户向上翻阅后停止自动滚动但继续接收；“最新日志”或暂停后的“继续”恢复跟随。窗口尺寸/字号变化时仅在跟随模式重新定位末尾。过滤、复制、导出、1 MiB/5000 行缓存及隐藏/卸载释放自有流的边界不变，显示操作不改变流的执行和释放规则。
 
 下载的开发包包含上述两端 SDK、工具、锁文件、文档和完整样例，无需 ServerDeck 源码或 Tauri 工具链。
 
@@ -30,7 +30,7 @@ SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 St
 
 ```ts
 import { createTranslator } from '@serverdeck/plugin-sdk/i18n';
-const tr = createTranslator({ '刷新': 'Refresh', '主机 {0}': 'Host {0}' });
+const tr = createTranslator({ 刷新: 'Refresh', '主机 {0}': 'Host {0}' });
 // 在模板或 computed 中调用以响应语言变化；参数保持原文。
 // <button>{{ tr('刷新') }}</button>
 // <span>{{ tr('主机 {0}', host.name) }}</span>
@@ -99,9 +99,9 @@ StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.prea
 
 `models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
 
-### 模型流与文本进度（5.4）
+### 模型流与文本进度
 
-`{kind:"streaming",request:{kind:...}}` 提供下表原语，仍经platform调用。Rust见 `serverdeck_plugin_sdk::streaming`，Vue见 `@serverdeck/plugin-sdk/streaming`（`streaming<T>`、`progress.open/read/close`）。没有新增权限、ABI/UI或持久格式；需要新原语的包最低声明`^5.4.0`。
+`{kind:"streaming",request:{kind:...}}` 提供下表原语，仍经platform调用。Rust见 `serverdeck_plugin_sdk::streaming`，Vue见 `@serverdeck/plugin-sdk/streaming`（`streaming<T>`、`progress.open/read/close`）。需要这些原语的包最低声明 `^5.4.0`，权限按下表校验。
 
 | 内层kind         | 字段与结果                                                                           | 既有权限/operation |
 | ---------------- | ------------------------------------------------------------------------------------ | ------------------ |
@@ -121,9 +121,7 @@ progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取�
 
 ## 前端闭环
 
-<a id="审批模式与计划确认52"></a>
-
-### 审批模式与计划确认（5.3）
+### 审批模式与计划确认
 
 `approval_mode {mode:"request"|"assist"|"full"}` 返回当前插件/owner/VM绑定的opaque `binding`；WASM放入 `Context::with_bindings`，不得交给模型。request/assist需ui.contribute；full另需声明并独立授予 `operations.full.preapproved` permission和operation。模式仅当前运行期有效，不是额外的SSH/文件权限。
 
@@ -131,7 +129,7 @@ progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取�
 - assist在manifest与grant均有 `operations.read.preapproved` permission及operation时，自动处理 `read_file`、`transfer_prepare` 与完整固定读取。参数化读取还需下面的独立参数权限；未匹配命令和写入仍需批准。
 - full的首次请求必须在可见页面经可信宿主确认，插件不能自行生成Full策略。批准后同一owner/VM持续复用binding，不设计时过期，免除已授予范围内执行、文件读写、传输及TCP请求的逐次确认。切换到request/assist会撤销Full binding及未完成的Full首次批准，新建对话须调用request撤销；关闭owner、撤权、插件停止/升级同样失效，隐藏后返回保留。request可作为降权清理请求在取消后和Guest忙碌时发起，不能借此启用full；启用会话标识拒绝已撤销的迟到批准。模型/主机等修订绑定仍为10分钟，计划有效期不变；基础授权、目录、真实连接/修订和文件原文检查保持。首次指纹确认不受影响。
 
-5.3增加 `operations.read.arguments.preapproved` permission和同名operation，依赖 `operations.read.preapproved` 与基础SSH授权。仅assist模式使用以下模板匹配；普通 `ssh.execute.preapproved` 仍只精确匹配。`preapprovedCommands` 在声明参数权限时最多32条，其他情况最多16条，全部编码合计≤48 KiB。
+`operations.read.arguments.preapproved` permission 和同名 operation 用于参数化读取，依赖 `operations.read.preapproved` 与基础SSH授权。仅assist模式使用以下模板匹配；普通 `ssh.execute.preapproved` 仍只精确匹配。`preapprovedCommands` 在声明参数权限时最多32条，其他情况最多16条，全部编码合计≤48 KiB。
 
 模板只允许 `sh -c`、固定脚本文本和固定 `$0`，从后续完整argv项选择以下形式；变量通过引用的 `$1`、`$2` 读取，不进行Shell文本插值，程序名/脚本/超时/参数数量及常量均须完全相同。保留命名空间 `{{sd:`，非法或嵌入式模板拒绝。
 
@@ -147,7 +145,7 @@ progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取�
 
 文件保存确认含实际路径、摘要和原文/候选差异；差异超过显示限额明确标注省略，调用方仍须提供完整业务预览。读取免确认不等于秘密不会进入模型，应在模式说明中告知数据用途。不提供独立AI审批模型；完全访问来自用户在可信宿主中的授权，不能替代主机指纹、目录授权或服务端冲突检测。
 
-### 文件与传输（5.1）
+### 文件与传输
 
 `read_file {hostId,path}` 按审批模式和独立读取预授权读取≤32 KiB 的 UTF-8 普通文本，拒绝链接/别名路径。文档 ID 绑定页面、VM、登录身份、原文和插件配置；`save_file {documentId,content}` 经宿主按模式授权、复验配置/目录/原文版本，原子提交并读回复查。不能用新路径或跨页面句柄保存。未标记 dirty 的文档五分钟后可回收，dirty 文档沿用退出保护，过期须重新读取。`info.activeScopes` 返回当前插件仍打开页面的 opaque scope，仅供 Guest 清理遗留状态，不是授权凭证。
 
