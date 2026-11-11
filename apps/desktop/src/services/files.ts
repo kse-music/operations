@@ -56,7 +56,8 @@ export const filesApi = {
   retry: (id: string, sessionId: string, conflict: ConflictPolicy, confirmed: boolean) =>
     call<TransferInfo>('transfer_retry', { id, sessionId, conflict, confirmed }),
   read: (id: string, path: string) => call<TextDocument>('text_read', { id, path }),
-  openEditor: (id: string, path: string) => call<EditorDocument>('editor_open', { id, path }),
+  openEditor: (id: string, path: string, connectionCaption: string) =>
+    call<EditorDocument>('editor_open', { id, path, connectionCaption }),
   editorStatus: () => call<EditorStatus>('editor_status'),
   openLocal: (path: string) => call<boolean>('files_open_local', { path }),
   externalPrepare: (id: string, path: string) =>

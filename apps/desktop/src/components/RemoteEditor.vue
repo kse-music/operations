@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, reactive, computed, nextTick } from 'vue';
-import { FileCode2, Save, RotateCw, Search, WrapText, X } from '@lucide/vue';
+import { Save, RotateCw, Search, WrapText } from '@lucide/vue';
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/editor/contrib/find/browser/findController';
 import 'monaco-editor/languages/definitions/javascript/register';
@@ -39,8 +39,6 @@ let editor: monaco.editor.IStandaloneCodeEditor,
 let appearance: MutationObserver | undefined;
 let dirtyUpdates = Promise.resolve();
 const document = computed(() => store.document!);
-const fileName = computed(() => document.value.path.split('/').pop() || document.value.path);
-const directory = computed(() => document.value.path.slice(0, -fileName.value.length) || '/');
 const languageLabel = computed(
   () =>
     ({
@@ -283,42 +281,30 @@ defineExpose({ requestClose: () => request('close') });
 </script>
 <template>
   <section class="remote-editor-window" aria-label="远程文本编辑">
-    <header class="editor-titlebar">
-      <span class="editor-file-icon"><FileCode2 :size="22" aria-hidden="true" /></span>
-      <div class="editor-file-heading">
-        <div class="editor-file-name">
-          <h2 :title="fileName">{{ fileName }}</h2>
-          <span v-if="store.dirty" class="editor-modified">未保存</span
-          ><span v-if="!document.atomicSave" class="editor-readonly">只读</span>
-        </div>
-        <p :title="document.path">{{ directory }}</p>
-      </div>
-      <div class="editor-window-actions">
-        <button
-          class="icon-button"
-          aria-label="关闭编辑器"
-          title="关闭编辑器"
-          :disabled="busy"
-          @click="request('close')"
-        >
-          <X :size="18" aria-hidden="true" />
-        </button>
-      </div>
-    </header>
     <div class="editor-toolbar" role="toolbar" aria-label="编辑操作">
       <button
-        class="button primary editor-save"
+        type="button"
+        class="tool-button editor-save"
+        aria-label="保存"
+        :title="`保存 (${shortcutModifier}+S)`"
         :disabled="busy || !document.atomicSave"
         @click="save"
       >
-        <Save :size="15" aria-hidden="true" />{{ busy ? '处理中…' : '保存'
-        }}<kbd>{{ shortcutModifier }}+S</kbd>
+        <Save :size="16" aria-hidden="true" />
       </button>
-      <button class="button editor-action" :disabled="busy" @click="request('reload')">
-        <RotateCw :size="15" aria-hidden="true" /><span>重新加载</span>
+      <button
+        type="button"
+        class="tool-button"
+        aria-label="重新加载"
+        title="重新加载"
+        :disabled="busy"
+        @click="request('reload')"
+      >
+        <RotateCw :size="16" aria-hidden="true" />
       </button>
       <span class="editor-toolbar-divider" aria-hidden="true"></span>
       <button
+        type="button"
         class="tool-button"
         aria-label="查找文本"
         :title="`查找文本 (${shortcutModifier}+F)`"
@@ -328,6 +314,7 @@ defineExpose({ requestClose: () => request('close') });
         <Search :size="16" aria-hidden="true" />
       </button>
       <button
+        type="button"
         class="tool-button"
         aria-label="自动换行"
         title="自动换行"
@@ -337,7 +324,6 @@ defineExpose({ requestClose: () => request('close') });
       >
         <WrapText :size="16" aria-hidden="true" />
       </button>
-      <span class="editor-toolbar-label">远程文本编辑</span>
     </div>
     <p v-if="error || !document.atomicSave" class="editor-feedback" role="alert">
       {{ error || '服务器缺少原子替换扩展，此文件只可查看。' }}

@@ -114,9 +114,15 @@ fn notify<R: Runtime>(app: &tauri::AppHandle<R>) {
 pub fn create_window<R: Runtime>(
     app: &tauri::AppHandle<R>,
     document: TextDocument,
+    connection_caption: Option<&str>,
 ) -> Result<(), Error> {
     let state = app.state::<EditorWindows>();
     let label = format!("{PREFIX}{}", document.token);
+    let title = match connection_caption {
+        Some(connection) => format!("{} — {connection} — 编辑器 — ServerDeck", document.path),
+        None => format!("{} — 编辑器 — ServerDeck", document.path),
+    }
+    .replace(char::is_control, " ");
     let session = Arc::new(EditorSession {
         label: label.clone(),
         document: Mutex::new(document),
@@ -137,7 +143,7 @@ pub fn create_window<R: Runtime>(
         &label,
         tauri::WebviewUrl::App("index.html?remote-editor".into()),
     )
-    .title("远程文本编辑 — ServerDeck")
+    .title(title)
     .inner_size(1000.0, 740.0)
     .min_inner_size(560.0, 380.0)
     .resizable(true)
@@ -160,6 +166,7 @@ pub async fn editor_open<R: Runtime>(
     application: tauri::State<'_, Application>,
     id: String,
     path: String,
+    connection_caption: Option<String>,
 ) -> Result<serde_json::Value, IpcError> {
     if app
         .state::<crate::file_commands::ExitApproval>()
@@ -184,7 +191,7 @@ pub async fn editor_open<R: Runtime>(
         return Err(Error::Validation("请先结束外部编辑，再打开内置编辑器").into());
     }
     let document = application.text_read(&id, &path).await?;
-    if let Err(error) = create_window(&app, document.clone()) {
+    if let Err(error) = create_window(&app, document.clone(), connection_caption.as_deref()) {
         application.text_close(&document.token, false)?;
         return Err(error.into());
     }

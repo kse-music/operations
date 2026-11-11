@@ -12,7 +12,7 @@ pub mod openssh;
 pub mod terminal;
 
 pub const CONFIG_VERSION: u32 = 2;
-pub const DATABASE_VERSION: u32 = 10;
+pub const DATABASE_VERSION: u32 = 11;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

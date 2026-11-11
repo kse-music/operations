@@ -316,8 +316,10 @@ export const useFilesStore = defineStore('files', () => {
     }
     editorBusy.value = true;
     const generation = editorGeneration;
+    const { host, username } = current.value;
+    const connectionCaption = `${username ?? host.username}@${host.hostname}`;
     try {
-      const opened = await filesApi.openEditor(sessionId, path);
+      const opened = await filesApi.openEditor(sessionId, path, connectionCaption);
       if (generation === editorGeneration) {
         document.value = opened;
         dirty.value = false;

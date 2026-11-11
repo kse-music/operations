@@ -1,5 +1,13 @@
 # 数据库与配置安全升级验证
 
+## 2026-11-11 保留已应用的数据库 11
+
+回到只支持 schema 10 的提交后，已升级数据库在应用初始化时返回 UnsupportedDatabase(11)。使用隔离夹具重现。恢复原 SQL011 及其版本和迁移历史注册，保留原表与已有记录。助手功能仍为前两阶段。
+
+新增回归在独立夹具写入原历史校验和以及主机和退役记录。修复前复现版本错误，修复后可读取主机、通过只读校验，数据库文件字节保持一致且无新增备份。存储全量26项通过，含历史1–10升级、并发/WAL、备份失败、回滚、未来版本拒绝和 Windows Junction 保护。应用初始化与关闭测试1项通过。
+
+测试及构建均使用本机缓存，原生测试从根 target 编译并复制到[本轮QA目录](../../../.local/qa/database-v11-offline/)。用户数据库未用于验证。repro.log、storage-tests.log、application-startup.log 保留实际结果。 Rustfmt、Storage全目标Clippy和 Windows Debug 离线构建通过。产物 ServerDeck-db11-offline.exe 的 SHA-256 见 artifacts.json。Windows 桌面产物未用用户数据启动。
+
 ## 2026-11-09 已知结构与配置自动升级
 
 ### 实现范围

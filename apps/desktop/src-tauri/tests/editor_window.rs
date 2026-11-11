@@ -74,7 +74,7 @@ fn document() -> TextDocument {
 #[test]
 fn independent_editor_is_singleton_and_status_does_not_copy_file_content() {
     let (_directory, app, main) = fixture();
-    create_window(app.handle(), document()).unwrap();
+    create_window(app.handle(), document(), Some("ops@server.example")).unwrap();
     assert!(app.state::<EditorWindows>().is_open());
     assert!(
         create_window(
@@ -82,7 +82,8 @@ fn independent_editor_is_singleton_and_status_does_not_copy_file_content() {
             TextDocument {
                 token: "second".into(),
                 ..document()
-            }
+            },
+            None,
         )
         .is_err()
     );
@@ -110,7 +111,7 @@ fn independent_editor_is_singleton_and_status_does_not_copy_file_content() {
 #[test]
 fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
     let (_directory, app, main) = fixture();
-    create_window(app.handle(), document()).unwrap();
+    create_window(app.handle(), document(), None).unwrap();
     let editor = app
         .get_webview_window("remote-editor-test-document")
         .unwrap();
@@ -161,7 +162,7 @@ fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
 #[test]
 fn an_editor_shaped_window_has_no_document_authority_without_a_backend_binding() {
     let (_directory, app, _main) = fixture();
-    create_window(app.handle(), document()).unwrap();
+    create_window(app.handle(), document(), None).unwrap();
     let other = tauri::WebviewWindowBuilder::new(&app, "remote-editor-forged", Default::default())
         .build()
         .unwrap();
@@ -199,13 +200,13 @@ fn a_failed_open_does_not_reserve_the_single_editor_slot() {
         .is_err()
     );
     assert!(!app.state::<EditorWindows>().is_open());
-    create_window(app.handle(), document()).unwrap();
+    create_window(app.handle(), document(), None).unwrap();
 }
 
 #[test]
 fn unconfirmed_exit_reviews_an_open_editor_even_before_dirty_events_arrive() {
     let (_directory, app, main) = fixture();
-    create_window(app.handle(), document()).unwrap();
+    create_window(app.handle(), document(), None).unwrap();
     let reviewed = std::sync::Arc::new(AtomicBool::new(false));
     let flag = reviewed.clone();
     main.listen("app-exit-review", move |_| {

@@ -67,6 +67,11 @@ const MIGRATIONS: &[Migration] = &[
         name: "migration_history",
         sql: include_str!("../migrations/010_migration_history.sql"),
     },
+    Migration {
+        version: 11,
+        name: "agent_reliability",
+        sql: include_str!("../migrations/011_agent_reliability.sql"),
+    },
 ];
 
 pub(super) fn failure(stage: &'static str, source: Error) -> Error {

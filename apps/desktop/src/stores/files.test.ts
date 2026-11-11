@@ -26,7 +26,12 @@ import { usePluginsStore } from './plugins';
 import type { Host } from '../types/hosts';
 import type { TransferInfo, TextDocument } from '../types/files';
 import { useNotificationsStore } from './notifications';
-const host = { id: 'host', name: 'Actual host' } as Host;
+const host = {
+  id: 'host',
+  name: 'Actual host',
+  hostname: 'server.example',
+  username: 'ops',
+} as Host;
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.resetAllMocks();
@@ -101,6 +106,7 @@ describe('file opening and external editing', () => {
   });
   it('shows read progress, keeps ini eligible and offers a fallback with the actual error', async () => {
     const store = connected();
+    store.connections[host.id]!.username = 'root';
     let reject!: (error: unknown) => void;
     mocks.openEditor.mockImplementation(
       () =>
@@ -111,7 +117,7 @@ describe('file opening and external editing', () => {
     const request = store.edit('/config.ini', 100);
     expect(store.editorBusy).toBe(true);
     expect(store.openingPath).toBe('/config.ini');
-    expect(mocks.openEditor).toHaveBeenCalledWith('session', '/config.ini');
+    expect(mocks.openEditor).toHaveBeenCalledWith('session', '/config.ini', 'root@server.example');
     reject({ code: 'TEXT_ENCODING', message: '文件不是有效 UTF-8，未进行有损解码' });
     await request;
     expect(store.editorBusy).toBe(false);

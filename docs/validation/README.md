@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[SFTP 编辑器系统标题与紧凑工具栏](files/VALIDATION_STAGE4.md#2026-11-11-编辑器紧凑工具栏)。
+
 最新：[SFTP 单文档独立编辑器、窗口权限与关闭保护](files/VALIDATION_STAGE4.md#2026-11-10-单文档独立编辑器窗口)。
 
 最新：[Release EXE 产物核对、首次打开立即迁移及跨盘原生验收](workspace/VALIDATION_SETTINGS_NAVIGATION.md#2026-11-10-release-exe-与首次启动迁移)。
@@ -46,7 +48,7 @@
 
 最新：[Docker 移除操作反馈入口、历史动作及内存记录，保留即时结果与确认](plugins/PLUGIN_TEST_REPORT.md#2026-11-09-docker-移除操作反馈)。
 
-最新：[数据库和配置安全自动升级：一致备份、事务回滚、历史版本/模型隔离及业务启动](foundation/VALIDATION_DATA_UPGRADES.md)。
+[保留已应用的数据库 11](foundation/VALIDATION_DATA_UPGRADES.md#2026-11-11-保留已应用的数据库-11)及[数据库和配置安全自动升级验证](foundation/VALIDATION_DATA_UPGRADES.md)。
 
 最新：[产品版本收敛为 Cargo 单一来源，开发/打包入口自动同步与检查](foundation/VALIDATION_BUILD_CACHE.md#2026-11-09-产品版本单一来源)。
 

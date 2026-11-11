@@ -1,5 +1,12 @@
 # SFTP 文件管理阶段验收
 
+## 2026-11-11 编辑器紧凑工具栏
+
+- 系统标题栏显示远程文件完整路径、当前 SFTP 用户和主机地址。窗口内改为一行保存、重新加载、查找和自动换行图标，悬停显示名称和已有快捷键。系统关闭继续进入未保存审核。
+- 编辑器、窗口入口及文件 Store 的 53 项回归通过，覆盖图标操作、切换用户后的标题文字、原子保存、加载失败及关闭保护。窗口 IPC 的 5 项回归从 QA 副本执行通过。ESLint、相关 Prettier 与差异检查通过。
+- 使用生产前端和真实 Monaco，在 1000×740 深色标准字号与 600×430 浅色 145% 字号下验证。两组工具栏均高 35 CSS 像素，代码区从工具栏下方开始，页面无横向溢出。取消关闭后可继续输入，保存失败保留草稿。受控 IPC 的脚本、结果和截图位于 `.local/qa/remote-editor-toolbar/`。
+- `cargo check -p serverdeck-desktop --tests` 通过。Debug 构建首次遇到运行版占用 EXE 的 Windows 错误 5，确认进程正常退出后重跑 `node tools/tauri.mjs build --debug --no-bundle` 通过，产物为 `target/debug/serverdeck-desktop.exe`。保留既有 Monaco 大 chunk 提示。系统标题栏外观、物理双屏和真实 SFTP 尚未实机核验。
+
 ## 2026-11-10 单文档独立编辑器窗口
 
 - 内置编辑改用无 parent/owner 的 Tauri 顶层窗口，一次一个文档；独立入口按需加载 Monaco，沿用既有 2 MiB/UTF-8、只读降级及冲突检测/原子保存。主窗口只同步摘要和 dirty，窗口实际标签绑定唯一文档；专用 capability 不授予主机、凭据、终端或任意文件命令。窗口加载/关闭/尺寸事件与主窗口清理、退出和几何记录隔离。取舍见 [ADR 0037](../../architecture/decisions/0037-independent-file-editor.md)。

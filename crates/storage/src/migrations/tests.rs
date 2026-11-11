@@ -31,6 +31,16 @@ fn fixture(path: &Path, version: u32) -> String {
     connection
         .pragma_update(None, "user_version", version)
         .unwrap();
+    if version >= 10 {
+        for migration in MIGRATIONS.iter().filter(|m| m.version <= version) {
+            connection
+                .execute(
+                    "INSERT INTO schema_migrations(version,name,checksum) VALUES(?1,?2,?3)",
+                    params![migration.version, migration.name, checksum(migration)],
+                )
+                .unwrap();
+        }
+    }
     let config = old_config();
     connection.execute("INSERT INTO application_settings(key,value,updated_at) VALUES('app_config',?1,'retained-time'),('plugin:fixture',?2,'retained-time')", params![config, r#"{"custom":"keep","enabled":false}"#]).unwrap();
     connection
@@ -72,8 +82,49 @@ fn raw(connection: &Connection) -> String {
 }
 
 #[test]
+fn opens_an_already_upgraded_schema_eleven_without_rewriting_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("serverdeck.sqlite3");
+    fixture(&path, 10);
+    {
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(include_str!("../../migrations/011_agent_reliability.sql"))
+            .unwrap();
+        // Digest recorded by the historical release, independent of the active registry.
+        connection
+            .execute(
+                "INSERT INTO schema_migrations(version,name,checksum) VALUES(11,'agent_reliability',?1)",
+                ["e0f1b61af516d076fc3fd9a6f7f992d1529d39b4d422e4dea4df3af3e59da507"],
+            )
+            .unwrap();
+        connection.pragma_update(None, "user_version", 11).unwrap();
+        connection
+            .execute(
+                "UPDATE application_settings SET value=?1 WHERE key='app_config'",
+                [serde_json::to_string(&AppConfig::default()).unwrap()],
+            )
+            .unwrap();
+        connection
+            .execute_batch(
+                "INSERT INTO plugin_mcp_servers VALUES('assistant','service','revision','Fixture','https://fixture.invalid/mcp','2025-11-25',0,'opaque-reference');
+                 INSERT INTO plugin_agent_tasks VALUES('assistant','task','revision','run','owner','model','[]','[]','executing',NULL,1,2,1,0);
+                 INSERT INTO plugin_agent_audit VALUES(1,'assistant','task','mcp.use','started',2);",
+            )
+            .unwrap();
+    }
+    let original = fs::read(&path).unwrap();
+    let db = Database::open(&path).unwrap();
+    assert_eq!(db.version().unwrap(), 11);
+    assert_eq!(db.host("host").unwrap().config.port, 2222);
+    Database::verify_file(&path).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), original);
+    assert!(backups(&path).is_empty());
+}
+
+#[test]
 fn all_recorded_schema_versions_upgrade_with_data_references_and_durable_original_backup() {
-    for version in 1..=9 {
+    for version in 1..DATABASE_VERSION {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("serverdeck.sqlite3");
         let original = fixture(&path, version);

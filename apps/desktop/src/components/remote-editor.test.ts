@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
-import { createApp, h, nextTick, type App } from 'vue';
+import { createApp, h, nextTick, shallowRef, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import type { TextDocument } from '../types/files';
 
@@ -81,6 +81,7 @@ import { useNotificationsStore } from '../stores/notifications';
 import { editorApi } from '../services/editor';
 
 let app: App, pinia: Pinia, root: HTMLDivElement, currentDoc: TextDocument;
+const component = shallowRef<InstanceType<typeof RemoteEditor>>();
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 const doc: TextDocument = {
   token: 'file',
@@ -122,7 +123,9 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 async function mount() {
-  app = createApp({ render: () => h(RemoteEditor, { initialDocument: currentDoc }) }).use(pinia);
+  app = createApp({
+    render: () => h(RemoteEditor, { initialDocument: currentDoc, ref: component }),
+  }).use(pinia);
   app.mount(root);
   await nextTick();
 }
@@ -135,8 +138,12 @@ function saveButton(): HTMLButtonElement {
 
 it('fills an independent editor surface and shows actual cursor, line endings and dirty state', async () => {
   await mount();
-  expect(document.querySelector('.editor-file-heading')?.textContent).toContain('deploy.sh');
-  expect(document.querySelector('.editor-file-heading p')?.getAttribute('title')).toBe(doc.path);
+  const toolbar = root.querySelector('[role="toolbar"]');
+  expect(toolbar?.previousElementSibling).toBeNull();
+  expect([...toolbar!.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(
+    ['保存', '重新加载', '查找文本', '自动换行'],
+  );
+  expect(button('保存').title).toBe('保存 (Ctrl+S)');
   mock.change('one\r\ntwo\r\nthree');
   mock.move(3, 6);
   await nextTick();
@@ -228,11 +235,8 @@ it.each(['关闭编辑器', '重新加载'])(
     const read = vi.spyOn(editorApi, 'reload');
     await mount();
     mock.change('unsaved');
-    if (action === '关闭编辑器') button(action).click();
-    else
-      [...document.querySelectorAll<HTMLButtonElement>('.editor-toolbar button')]
-        .find((b) => b.textContent?.includes(action))!
-        .click();
+    if (action === '关闭编辑器') component.value!.requestClose();
+    else button(action).click();
     await nextTick();
     const review = document.querySelector<HTMLDialogElement>('dialog[aria-label="未保存内容"]')!;
     expect(review.open).toBe(true);
@@ -282,7 +286,7 @@ it('expands minified CSS colors before passing a light theme to Monaco', async (
 
 it('requests a clean native close without authorizing draft discard', async () => {
   await mount();
-  button('关闭编辑器').click();
+  component.value!.requestClose();
   await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(false));
   app.unmount();
   app = undefined!;
@@ -301,7 +305,7 @@ it('saves before closing a dirty native editor and leaves the draft open when sa
   const save = vi.spyOn(editorApi, 'save').mockRejectedValueOnce({ message: '远端内容已变化' });
   await mount();
   mock.change('draft to protect');
-  button('关闭编辑器').click();
+  component.value!.requestClose();
   await nextTick();
   reviewButton('保存并关闭').click();
   await vi.waitFor(() =>
@@ -323,7 +327,7 @@ it('closes a dirty editor only after explicit discard and keeps it open if close
   vi.mocked(editorApi.close).mockRejectedValueOnce({ message: '关闭失败，请重试' });
   await mount();
   mock.change('unsaved');
-  button('关闭编辑器').click();
+  component.value!.requestClose();
   await nextTick();
   reviewButton('放弃修改并关闭').click();
   await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(true));
@@ -352,14 +356,14 @@ it('ignores close requests during a save and waits for dirty updates before savi
   saveButton().click();
   await nextTick();
   expect(save).not.toHaveBeenCalled();
-  button('关闭编辑器').click();
+  component.value!.requestClose();
   expect(editorApi.close).not.toHaveBeenCalled();
   expect(document.querySelector('dialog')).toBeNull();
   markDirty();
   await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
   finish({ document: { ...doc, content: 'pending' }, recoveryPath: null, message: null });
   await vi.waitFor(() => expect(saveButton().disabled).toBe(false));
-  button('关闭编辑器').click();
+  component.value!.requestClose();
   await vi.waitFor(() => expect(editorApi.close).toHaveBeenCalledExactlyOnceWith(false));
 });
 
@@ -367,10 +371,7 @@ it('reloads only the bound document after discard and preserves the draft when r
   const reload = vi.spyOn(editorApi, 'reload').mockRejectedValueOnce({ message: '连接已断开' });
   await mount();
   mock.change('local draft');
-  const trigger = () =>
-    [...document.querySelectorAll<HTMLButtonElement>('.editor-toolbar button')]
-      .find((b) => b.textContent?.includes('重新加载'))!
-      .click();
+  const trigger = () => button('重新加载').click();
   trigger();
   await nextTick();
   reviewButton('放弃修改并重新加载').click();
