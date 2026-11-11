@@ -536,10 +536,11 @@ impl Engine {
             })
             .await
             .map_err(|_| failure("SSH_TIMEOUT", "PTY 或 Shell 请求超时"))??;
-            Ok::<_, Error>((channel, alive))
+            Ok::<_, Error>((channel, alive, handle.cipher.clone()))
         };
-        let (channel, alive) =
+        let (channel, alive, mut cipher) =
             tokio::select! { result=setup => result?, _=control.cancel.cancelled()=>return Ok(()) };
+        send_cipher(sink, &mut cipher)?;
         control.ready.store(true, Ordering::Release);
         state(sink, "connected", None);
         let (mut reader, writer) = channel.split();
@@ -548,8 +549,20 @@ impl Engine {
             let mut ack = ack;
             let mut status = None;
             let mut exited_by_signal = false;
+            let mut watching_cipher = true;
             loop {
-                match reader.wait().await {
+                let message = tokio::select! {
+                    message = reader.wait() => message,
+                    changed = cipher.changed(), if watching_cipher => {
+                        if changed.is_err() {
+                            watching_cipher = false;
+                        } else {
+                            send_cipher(sink, &mut cipher)?;
+                        }
+                        continue;
+                    }
+                };
+                match message {
                     Some(ChannelMsg::Data { data })
                     | Some(ChannelMsg::ExtendedData { data, .. }) => {
                         for chunk in data.chunks(16 * 1024) {
@@ -733,6 +746,15 @@ impl Engine {
             let _ = self.close(&id).await;
         }
     }
+}
+
+fn send_cipher(sink: &Sink, cipher: &mut watch::Receiver<Option<String>>) -> Result<(), Error> {
+    if let Some(cipher) = cipher.borrow_and_update().clone()
+        && !sink(TerminalEvent::Connection { cipher })
+    {
+        return Err(failure("SSH_VIEW_CLOSED", "终端视图已关闭"));
+    }
+    Ok(())
 }
 
 async fn accepted(channel: &mut Channel<client::Msg>) -> Result<(), Error> {

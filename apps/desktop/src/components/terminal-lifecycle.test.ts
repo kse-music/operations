@@ -14,10 +14,12 @@ const xterm = vi.hoisted(() => ({
   input: vi.fn() as (data: string) => void,
   parsed: [] as (() => void)[],
   options: {} as ITerminalOptions,
+  cursorMove: () => {},
+  buffer: { type: 'normal', baseY: 0, viewportY: 0, cursorX: 0, cursorY: 0 },
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
-    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
+    buffer = { active: xterm.buffer };
     constructor(public options: ITerminalOptions) {
       xterm.options = options;
     }
@@ -30,9 +32,16 @@ vi.mock('@xterm/xterm', () => ({
     dispose() {}
     onBinary() {}
     onSelectionChange() {}
+    onCursorMove(callback: () => void) {
+      xterm.cursorMove = callback;
+    }
     attachCustomKeyEventHandler() {}
     onResize(callback: (size: TerminalSize) => void) {
-      xterm.resize = callback;
+      xterm.resize = (size) => {
+        this.cols = size.cols;
+        this.rows = size.rows;
+        callback(size);
+      };
     }
     onData(callback: (data: string) => void) {
       xterm.input = callback;
@@ -75,6 +84,8 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
   beforeEach(async () => {
     vi.clearAllMocks();
     xterm.parsed = [];
+    xterm.buffer.cursorX = 0;
+    xterm.buffer.cursorY = 0;
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -149,6 +160,34 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
       expect(terminalApi.ack).toHaveBeenCalledWith(id, 1);
     }
   }
+
+  it('publishes one-based cursor coordinates and current dimensions, including pending wrap', () => {
+    expect(store.panes[0]?.screen).toEqual({ rows: 24, cols: 80, cursorRow: 1, cursorCol: 1 });
+    xterm.buffer.cursorX = 9;
+    xterm.buffer.cursorY = 16;
+    xterm.cursorMove();
+    expect(store.panes[0]?.screen).toEqual({ rows: 24, cols: 80, cursorRow: 17, cursorCol: 10 });
+    xterm.resize(size);
+    expect(store.panes[0]?.screen).toEqual({ ...size, cursorRow: 17, cursorCol: 10 });
+    xterm.buffer.cursorX = size.cols;
+    xterm.cursorMove();
+    expect(store.panes[0]?.screen?.cursorCol).toBe(size.cols);
+  });
+
+  it('clears negotiated metadata on reconnect and ignores old connection events', async () => {
+    receive({ type: 'connection', cipher: 'aes256-ctr' });
+    expect(store.panes[0]?.cipher).toBe('aes256-ctr');
+    const previous = receive;
+    await store.disconnect(store.active);
+    expect(store.panes[0]?.cipher).toBeUndefined();
+    previous({ type: 'connection', cipher: 'old-connection' });
+    expect(store.panes[0]?.cipher).toBeUndefined();
+    await store.reconnect(store.active);
+    expect(store.panes[0]?.cipher).toBeUndefined();
+    receive({ type: 'connection', cipher: 'aes128-gcm@openssh.com' });
+    previous({ type: 'connection', cipher: 'old-connection' });
+    expect(store.panes[0]?.cipher).toBe('aes128-gcm@openssh.com');
+  });
 
   it.each(['closing', 'disconnected', 'closed', 'failed'])(
     'stops cursor blinking and makes the terminal read-only in the %s state',

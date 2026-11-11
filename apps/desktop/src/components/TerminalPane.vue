@@ -101,6 +101,24 @@ let unregisterConnection: (() => void) | undefined;
 function isConnected(attempt: number): boolean {
   return !disposed && attempt === generation && props.tab.state === 'connected';
 }
+function updateScreen(): void {
+  const buffer = terminal.buffer.active;
+  const screen = {
+    rows: terminal.rows,
+    cols: terminal.cols,
+    cursorRow: Math.min(buffer.cursorY + 1, terminal.rows),
+    cursorCol: Math.min(buffer.cursorX + 1, terminal.cols),
+  };
+  const previous = props.tab.screen;
+  if (
+    !previous ||
+    previous.rows !== screen.rows ||
+    previous.cols !== screen.cols ||
+    previous.cursorRow !== screen.cursorRow ||
+    previous.cursorCol !== screen.cursorCol
+  )
+    update({ screen });
+}
 function fitTerminal(forceBottom = false): void {
   if (!props.active || !container.value?.clientWidth || !container.value.clientHeight || !terminal)
     return;
@@ -256,6 +274,7 @@ async function connect(): Promise<void> {
       transportId: undefined,
       routeHostIds: undefined,
       cwd: undefined,
+      cipher: undefined,
       connectRequested: false,
       state: 'opening',
     });
@@ -344,6 +363,8 @@ async function connect(): Promise<void> {
               if (isConnected(attempt)) message.value = errorMessage(cause);
             });
         });
+      } else if (event.type === 'connection') {
+        update({ cipher: event.cipher });
       } else if (event.type === 'state') {
         if (['closed', 'failed', 'disconnected'].includes(event.state)) {
           dropUpload.value?.dispose();
@@ -418,6 +439,7 @@ async function changeConnection(action: 'reconnect' | 'disconnect'): Promise<voi
       transportId: undefined,
       routeHostIds: undefined,
       cwd: undefined,
+      cipher: undefined,
     });
   } catch (cause) {
     if (props.tab.state === 'closing') update({ state: previousState });
@@ -653,9 +675,11 @@ onMounted(() => {
   });
   container.value!.addEventListener('paste', nativePaste, true);
   terminal.onSelectionChange(copySelection);
+  terminal.onCursorMove(updateScreen);
   terminal.onData((data) => queueInput(encoder.encode(data)));
   terminal.onBinary((data) => queueInput(Uint8Array.from(data, (char) => char.charCodeAt(0))));
   terminal.onResize((size) => {
+    updateScreen();
     clearTimeout(resizeTimer);
     const attempt = generation;
     const id = session?.id;
@@ -704,6 +728,7 @@ onMounted(() => {
   observer.observe(container.value!);
   window.addEventListener('resize', resizeTerminal);
   fitTerminal();
+  updateScreen();
   if (props.tab.connectRequested) void connect();
 });
 watch(

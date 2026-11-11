@@ -19,6 +19,8 @@ export interface TerminalPaneModel {
   transportId?: string;
   routeHostIds?: string[];
   cwd?: string;
+  cipher?: string;
+  screen?: import('../types/terminal').TerminalScreen;
   fileAction?: import('../types/files').FileTerminalAction;
   containerShell?: import('../types/ops').ContainerShell;
   pluginTerminal?: { pluginId: string; owner: string; ticket: string };

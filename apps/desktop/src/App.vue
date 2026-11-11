@@ -14,6 +14,7 @@ import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
 import { interfaceFontSizes } from './types/preferences';
 import SettingsDialog from './components/SettingsDialog.vue';
+import TerminalStatus from './components/TerminalStatus.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
@@ -124,6 +125,12 @@ const isHostWorkspace = computed(() => {
   return !!tab && isHostTab(tab);
 });
 const settingsOpen = computed(() => workspace.settingsView !== null);
+const statusPane = computed(() => {
+  if (view.value !== 'terminals') return;
+  const tab = terminals.tabs.find((tab) => tab.key === terminals.active);
+  if (!tab || (tab.panes[0]?.host?.id ?? '') !== currentHostId.value) return;
+  return tab.panes.find((pane) => pane.key === terminals.focused) ?? tab.panes[0];
+});
 const cachedPluginPages = computed(() => workspace.pluginPages);
 function navigate(
   value: View,
@@ -792,6 +799,7 @@ watch(
         >{{ store.catalog ? tr('{0} 台主机', store.catalog.hosts.length) : tr('主机列表未加载') }} ·
         {{ store.busy ? tr('操作中') : tr('{0} 个已连接终端', terminals.connectedCount) }}</span
       >
+      <TerminalStatus v-if="statusPane" :pane="statusPane" />
     </footer>
   </div>
   <NotificationToasts />

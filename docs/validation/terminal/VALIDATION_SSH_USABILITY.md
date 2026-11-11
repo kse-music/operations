@@ -1,5 +1,38 @@
 # SSH 日常使用增强验收
 
+## 2026-11-11 底部当前终端状态栏
+
+### 状态栏实现与范围
+
+应用底部右侧展示当前主机、会话与焦点窗格的真实协商算法（SSH2）或本地 Shell、从 1 开始的光标行列、终端行列数、`xterm-256color` 和本机 CAP/NUM。断开/失败显示状态，重连清除旧算法并隔离旧事件；文件/插件页及无当前会话不显示。键盘锁定初始及失焦/重新聚焦后标记未知，下一键盘事件更新，不吞键或使用全局钩子。状态不持久化，不执行额外远端命令。
+
+SSH 使用 russh 公开 `kex_done` 的算法名称和每个目标连接的 watch 通道；不接触共享秘密，不改算法偏好、指纹校验或认证策略。终端各自订阅，共享 Transport、跳板最终目标及重协商均沿原生命周期工作。内部终端事件与 TypeScript 类型同步，SDK/数据库/配置版本不变。布局与浏览器回归入口为 [ui-terminal-status-e2e.mjs](../../../tools/ui-terminal-status-e2e.mjs)。
+
+### 状态栏验证结果
+
+环境：Windows、Node 22.17.0、Rust 1.99.1 稳定版、Edge 151.0.4129.107、xterm 6.0.0。构建前 D 盘约 145 GiB 可用，复用根目录 `target/` 及现有 Cargo 配置，无新增依赖或第二套原生缓存。
+
+| 实际检查                                                                                                   | 结果                                                                                                                                                                                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm test`                                                                                                 | 65 个文件、775 项通过。新增状态组件、会话/主机/分屏切换、同主机多会话、关闭焦点窗格、非终端页隐藏、英文文案、初始/失焦键盘未知状态、不中断按键，以及光标/尺寸/待换行边界和重连迟到事件回归；既有剪贴板、插件弹窗、ZMODEM 与字号测试继续通过。jsdom 输出既有 canvas 未实现提示，真实画布由下述浏览器检查覆盖。   |
+| `cargo test -p serverdeck-ssh --test engine --no-run --locked --offline`，复制 EXE 后运行                  | 20 项通过；真实本机 SSH 协议覆盖 `aes256-ctr`、`aes256-gcm@openssh.com`、共享 Transport 各窗格元数据、关闭首个窗格后的重协商、跳板最终目标算法、认证失败/指纹变化、ACK/resize/断线及资源释放。运行副本为 [ssh-engine-tests.exe](../../../.local/qa/terminal-status/ssh-engine-tests.exe)，未从 `target/` 运行。 |
+| `node tools/ui-terminal-status-e2e.mjs`                                                                    | 5 组通过：1280×820 深色中文/浅色英文，960×600 浅色中文、超大字号深色中文/浅色英文。真实 xterm 校验坐标和尺寸、指针切换分屏、后台输出不覆盖焦点、按键发送、失焦未知、resize、多会话、断线/重连、旧事件隔离、文件页隐藏和本地 Shell。右侧布局无页面横向溢出；长算法独立滚动、固定锁定标签宽度下的方向键访问通过。 |
+| `npm run build`、`npm run typecheck`、`npm run lint`                                                       | 通过。生产前端及现有系统插件完成构建，保留既有大 chunk 提示。                                                                                                                                                                                                                                                   |
+| `cargo check -p serverdeck-desktop --locked --offline`                                                     | 通过，覆盖终端事件的 Rust 调用链。                                                                                                                                                                                                                                                                              |
+| 修改源码/测试/脚本 Prettier、`cargo fmt --all -- --check`、`git diff --check`、文档新增章节与本地链接/锚点 | 通过；18 项新增或更新的本地链接/锚点有效，已有文档格式保留。                                                                                                                                                                                                                                                    |
+| `cargo clippy -p serverdeck-core -p serverdeck-ssh --all-targets --locked --offline`                       | 完成；`core/openssh.rs:289` 有原有 `single_element_loop` 告警。本次修改文件无新告警。增加 `-- -D warnings` 的严格检查被该原有告警阻断，未作为通过。                                                                                                                                                             |
+
+浏览器原始结果为 [browser-results.json](../../../.local/qa/terminal-status/browser-results.json)，无页面脚本异常；已查看 [常规中文布局](../../../.local/qa/terminal-status/1280-dark-standard-zh-CN.png)、[最小窗口超大字号分屏](../../../.local/qa/terminal-status/960-dark-ultraLarge-zh-CN-split.png) 与 [英文长状态滚动](../../../.local/qa/terminal-status/960-light-ultraLarge-en-US-split.png)。浏览器连接/输出来自明确的内存夹具，不代表真实服务器或原生 WebView2 已验收；算法握手独立由真实回环 SSH 测试验证。
+
+### 状态栏失败记录与限制
+
+- 首次 Vitest 在沙箱临时目录原子重命名失败（EPERM），将本次进程 TEMP/TMP 指向 `.local/qa/terminal-status/tmp/` 后通过；未更改项目测试配置。
+- 沙箱中本机 SSH TCP 连接均为 `SSH_NETWORK`，独立 Edge 因管道权限启动失败；在获准的沙箱外执行同一 QA EXE/浏览器脚本后通过。最初强制 `aes128-gcm@openssh.com` 的夹具与客户端现有默认算法集合无交集，改用已有 `aes256-gcm@openssh.com` 后两种算法和跳板回归通过，未放宽产品加密设置。
+- 严格 Clippy 的原有告警保持未修复，不夹带 OpenSSH 导入代码变更。没有打包安装器、重建/替换正在运行的日常 EXE，未操作截图中的服务器。
+- 当前没有同一次原生 WebView2→Tauri→真实 SSH 的完整状态栏验收，也未实测实体键盘在系统切换后的 CAP/NUM、macOS/Linux 原生行为及长期高吞吐性能。键盘锁定依赖 WebView 对 modifier 状态的支持，未知期明确显示 `?`。
+
+需求与实现状态已分别同步 PRD、架构、使用说明和实施计划。
+
 ## 2026-11-10 终端网址点击
 
 ### 实现与行为

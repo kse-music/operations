@@ -25,7 +25,9 @@ const xterm = vi.hoisted(() => ({
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
-    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0, length: 24 } };
+    buffer = {
+      active: { type: 'normal', baseY: 0, viewportY: 0, length: 24, cursorX: 0, cursorY: 0 },
+    };
     scrollLines = vi.fn();
     keyHandler: (event: KeyboardEvent) => boolean = () => true;
     parser = { registerOscHandler: vi.fn() };
@@ -47,6 +49,7 @@ vi.mock('@xterm/xterm', () => ({
     onData() {}
     onBinary() {}
     onResize() {}
+    onCursorMove() {}
     focus() {}
     dispose() {}
   },

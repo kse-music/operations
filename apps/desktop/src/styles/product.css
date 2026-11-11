@@ -463,6 +463,35 @@ kbd {
   overflow: auto;
   gap: 14px;
 }
+.statusbar > span {
+  flex-shrink: 0;
+}
+.terminal-status {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+  overflow-x: auto;
+  font-variant-numeric: tabular-nums;
+}
+.terminal-status > span {
+  flex-shrink: 0;
+  padding: 0 10px;
+}
+.terminal-status > span + span {
+  border-left: 1px solid var(--border);
+}
+.terminal-status > span:last-child {
+  padding-right: 0;
+}
+.terminal-status-locks {
+  display: flex;
+  gap: 8px;
+}
+.terminal-status-locks .locked {
+  color: var(--accent);
+  font-weight: 600;
+}
 .settings-form > fieldset {
   min-width: 0;
 }

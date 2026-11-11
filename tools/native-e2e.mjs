@@ -198,11 +198,7 @@ try {
       description: '端到端修改与重启验证',
     });
     await row('E2E-Host').getByText('updated.example.com', { exact: true }).waitFor();
-    assert(
-      (await row('E2E-Host').locator('.tree-host').getAttribute('title')).includes(
-        'ops@updated.example.com:22',
-      ),
-    );
+    assert.equal(await row('E2E-Host').locator('.tree-host').getAttribute('title'), null);
     results.push('native host update via real IPC, reflected in the sidebar');
     await showHostTree(page);
     const expand = page.getByRole('button', { name: '展开主机栏', exact: true });

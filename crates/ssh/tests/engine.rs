@@ -276,6 +276,16 @@ impl Server {
         Self::start_with_delay(Duration::ZERO).await
     }
     async fn start_with_delay(auth_delay: Duration) -> Self {
+        Self::start_with_options(auth_delay, None, Default::default()).await
+    }
+    async fn start_with_cipher(cipher: russh::cipher::Name) -> Self {
+        Self::start_with_options(Duration::ZERO, Some(cipher), Default::default()).await
+    }
+    async fn start_with_options(
+        auth_delay: Duration,
+        cipher: Option<russh::cipher::Name>,
+        limits: russh::Limits,
+    ) -> Self {
         let host_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("host key");
         let user_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("user key");
         let key = host_key.public_key().to_openssh().expect("public");
@@ -288,12 +298,17 @@ impl Server {
         let sizes = Arc::new(Mutex::new(vec![]));
         let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("listen");
         let port = listener.local_addr().expect("address").port();
-        let config = Arc::new(server::Config {
+        let mut config = server::Config {
             keys: vec![host_key],
             auth_rejection_time: Duration::ZERO,
             auth_rejection_time_initial: Some(Duration::ZERO),
+            limits,
             ..Default::default()
-        });
+        };
+        if let Some(cipher) = cipher {
+            config.preferred.cipher = vec![cipher].into();
+        }
+        let config = Arc::new(config);
         let (pw, public, attempts2, sizes2) = (
             password.clone(),
             user_key.public_key().clone(),
@@ -377,10 +392,103 @@ async fn state(shell: &mut Shell, expected: &str) -> Option<&'static str> {
         }
     }
 }
+async fn connected_cipher(shell: &mut Shell) -> String {
+    let mut cipher = None;
+    loop {
+        match event(shell).await {
+            TerminalEvent::Connection { cipher: value } => cipher = Some(value),
+            TerminalEvent::State {
+                state: "connected", ..
+            } => return cipher.expect("negotiated cipher before connected"),
+            TerminalEvent::State {
+                state: "failed",
+                code,
+                ..
+            } => panic!("unexpected SSH failure {code:?}"),
+            _ => (),
+        }
+    }
+}
 fn database() -> (tempfile::TempDir, Database) {
     let dir = tempfile::tempdir().expect("tempdir");
     let db = Database::open(dir.path().join("db")).expect("db");
     (dir, db)
+}
+
+#[tokio::test]
+async fn terminal_metadata_uses_negotiated_cipher_for_new_and_shared_transports() {
+    for cipher in [russh::cipher::AES_256_CTR, russh::cipher::AES_256_GCM] {
+        let server = Server::start_with_cipher(cipher).await;
+        let (_dir, db) = database();
+        server.trust(&db);
+        let host = server.host(&db);
+        let engine = Engine::new(db);
+        let mut first = open(&engine, host.clone(), server.password());
+        assert_eq!(connected_cipher(&mut first).await, cipher.as_ref());
+        let mut second = open(&engine, host, server.password());
+        assert_eq!(connected_cipher(&mut second).await, cipher.as_ref());
+        assert_eq!(first.info.transport_id, second.info.transport_id);
+        assert_eq!(server.attempts.load(Ordering::SeqCst), 1);
+        engine.close(&first.info.id).await.expect("close first");
+        engine
+            .input(&second.info.id, b"metadata-keeps-channel-open".to_vec())
+            .expect("input");
+        loop {
+            if let TerminalEvent::Data { sequence, data } = event(&mut second).await {
+                assert_eq!(data, b"metadata-keeps-channel-open");
+                engine.acknowledge(&second.info.id, sequence).expect("ack");
+                break;
+            }
+        }
+        engine.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn rekey_metadata_reaches_a_shared_terminal_after_the_original_terminal_closes() {
+    let server = Server::start_with_options(
+        Duration::ZERO,
+        Some(russh::cipher::AES_256_CTR),
+        russh::Limits {
+            rekey_read_limit: 1024,
+            rekey_write_limit: 1024,
+            rekey_time_limit: Duration::from_secs(3600),
+        },
+    )
+    .await;
+    let (_dir, db) = database();
+    server.trust(&db);
+    let host = server.host(&db);
+    let engine = Engine::new(db);
+    let mut first = open(&engine, host.clone(), server.password());
+    assert_eq!(connected_cipher(&mut first).await, "aes256-ctr");
+    let mut second = open(&engine, host, server.password());
+    assert_eq!(connected_cipher(&mut second).await, "aes256-ctr");
+    engine
+        .close(&first.info.id)
+        .await
+        .expect("close original terminal");
+    engine
+        .input(&second.info.id, vec![b'x'; 4096])
+        .expect("trigger rekey");
+    loop {
+        match event(&mut second).await {
+            TerminalEvent::Connection { cipher } => {
+                assert_eq!(cipher, "aes256-ctr");
+                break;
+            }
+            TerminalEvent::Data { sequence, .. } => {
+                engine.acknowledge(&second.info.id, sequence).expect("ack")
+            }
+            TerminalEvent::State {
+                state: "failed" | "closed",
+                code,
+                ..
+            } => panic!("unexpected session end {code:?}"),
+            _ => (),
+        }
+    }
+    engine.shutdown().await;
 }
 
 #[tokio::test]
@@ -879,8 +987,8 @@ async fn local_remote_dynamic_forward_transfer_conflicts_stop_and_session_cleanu
 
 #[tokio::test]
 async fn proxyjump_verifies_both_hosts_and_closes_entire_chain() {
-    let jump = Server::start().await;
-    let target = Server::start().await;
+    let jump = Server::start_with_cipher(russh::cipher::AES_256_GCM).await;
+    let target = Server::start_with_cipher(russh::cipher::AES_256_CTR).await;
     let (_dir, db) = database();
     jump.trust(&db);
     target.trust(&db);
@@ -911,7 +1019,7 @@ async fn proxyjump_verifies_both_hosts_and_closes_entire_chain() {
         )
         .expect("jump plan");
     let mut shell = Shell { info, events };
-    state(&mut shell, "connected").await;
+    assert_eq!(connected_cipher(&mut shell).await, "aes256-ctr");
     assert_eq!(jump.attempts.load(Ordering::SeqCst), 1);
     assert_eq!(target.attempts.load(Ordering::SeqCst), 1);
     engine

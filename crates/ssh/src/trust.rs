@@ -23,9 +23,20 @@ pub(crate) struct Verifier {
     pub confirming: watch::Sender<bool>,
     pub alive: CancellationToken,
     pub remotes: forward::RemoteRoutes,
+    pub cipher: watch::Sender<Option<String>>,
 }
 impl client::Handler for Verifier {
     type Error = russh::Error;
+    async fn kex_done(
+        &mut self,
+        _shared_secret: Option<&[u8]>,
+        names: &russh::Names,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        self.cipher
+            .send_replace(Some(names.cipher.as_ref().to_owned()));
+        Ok(())
+    }
     async fn disconnected(
         &mut self,
         reason: client::DisconnectReason<Self::Error>,

@@ -147,7 +147,75 @@ it('switches the shell and built-in plugin labels while preserving sessions and 
   await flush();
   expect(document.querySelector('.host-tools')?.textContent).toContain('Docker management');
   expect(document.querySelector('.terminal-tab')?.textContent).toContain('Session 1');
+  expect(document.querySelector('.terminal-status')?.textContent).toContain(
+    'SSH2 · Reading cipher',
+  );
   expect(close).not.toHaveBeenCalled();
+});
+
+it('keeps terminal status on the active host, session and focused split pane only', async () => {
+  const terminals = useTerminalsStore();
+  const workspace = useWorkspaceStore();
+  const [firstHost, secondHost] = useHostsStore().catalog!.hosts;
+  terminals.open(firstHost!);
+  workspace.navigate('terminals', firstHost!.id);
+  const firstTab = terminals.active;
+  const firstPane = terminals.focused;
+  terminals.update(firstPane, {
+    state: 'connected',
+    cipher: 'aes256-ctr',
+    screen: { rows: 53, cols: 142, cursorRow: 17, cursorCol: 10 },
+  });
+  await flush();
+  const status = () => root.querySelector('.statusbar .terminal-status');
+  expect(status()?.textContent).toContain('aes256-ctr');
+  expect(status()?.textContent).toContain('光标 17:10');
+  terminals.split(firstPane, 'columns');
+  const splitPane = terminals.focused;
+  terminals.update(splitPane, {
+    state: 'connected',
+    cipher: 'aes128-gcm@openssh.com',
+    screen: { rows: 53, cols: 70, cursorRow: 2, cursorCol: 3 },
+  });
+  await flush();
+  expect(status()?.textContent).toContain('aes128-gcm@openssh.com');
+  expect(status()?.textContent).toContain('53 行 × 70 列');
+  terminals.focused = firstPane;
+  await flush();
+  expect(status()?.textContent).toContain('aes256-ctr');
+  terminals.open(firstHost!);
+  terminals.update(terminals.focused, { state: 'connected', cipher: 'aes192-ctr' });
+  await flush();
+  expect(status()?.textContent).toContain('aes192-ctr');
+  terminals.select(firstTab);
+  terminals.focused = splitPane;
+  await terminals.closePane(splitPane);
+  await flush();
+  expect(status()?.textContent).toContain('aes256-ctr');
+  terminals.open(secondHost!);
+  terminals.update(terminals.focused, { state: 'failed' });
+  await flush();
+  expect(status()).toBeNull();
+  workspace.navigate('terminals', secondHost!.id);
+  await flush();
+  expect(status()?.textContent).toContain('连接失败');
+  expect(status()?.textContent).not.toContain('aes256-ctr');
+  terminals.select(firstTab);
+  workspace.navigate('terminals', firstHost!.id);
+  await flush();
+  expect(status()?.textContent).toContain('aes256-ctr');
+  workspace.navigate('files', firstHost!.id);
+  await flush();
+  expect(status()).toBeNull();
+  workspace.navigate('terminals', firstHost!.id);
+  terminals.open(null);
+  terminals.update(terminals.focused, { state: 'connected', shell: 'PowerShell' });
+  workspace.navigate('terminals', '');
+  await flush();
+  expect(status()?.textContent).toContain('PowerShell');
+  await terminals.close(terminals.active);
+  await flush();
+  expect(status()).toBeNull();
 });
 beforeEach(async () => {
   vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({

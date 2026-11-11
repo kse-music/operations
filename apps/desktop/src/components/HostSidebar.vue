@@ -451,14 +451,6 @@ onBeforeUnmount(() => {
                 selected: store.selectedId === host.id,
                 'drag-ready': pendingDrag?.host.id === host.id,
               }"
-              :title="
-                tr(
-                  '{0}@{1}:{2} · 双击打开，拖动可移动到其他文件夹',
-                  host.username,
-                  host.hostname,
-                  host.port,
-                )
-              "
               :aria-current="store.selectedId === host.id ? 'true' : undefined"
               :draggable="false"
               @pointerdown="beginDrag(host, $event)"

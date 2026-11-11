@@ -23,7 +23,7 @@ vi.mock('../services/clipboard', () => ({
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
-    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
+    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0, cursorX: 0, cursorY: 0 } };
     cols = 80;
     rows = 24;
     options = {};
@@ -40,6 +40,7 @@ vi.mock('@xterm/xterm', () => ({
     open() {}
     dispose() {}
     onResize() {}
+    onCursorMove() {}
     onBinary() {}
     onSelectionChange() {}
     attachCustomKeyEventHandler() {}

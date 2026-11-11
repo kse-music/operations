@@ -46,3 +46,12 @@
 - `host-tree.test.ts` 与 `App.test.ts` 覆盖单击不创建会话、不切换工作区，双击打开/复用当前主机，仅连接当前空闲窗格，键盘打开以及拖动保持不触发连接。现有浏览器/原生导航辅助与依赖脚本同步双击入口。
 - 当前完整前端测试 64 文件、727 项通过；类型检查、全量 ESLint 和前端生产构建通过。隔离 Edge 五组尺寸/主题检查均验证单击没有标签、双击打开一个标签；完整命令、环境失败和产物见[会话连接操作验证](../terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-会话重连断开与断线图标)。
 - 未重建原生 EXE/安装包，未执行真实 SSH 或跨平台验收；原生脚本同步不代表原生已验收。本次无 Rust、IPC、持久数据或依赖变化，无新增后续实现依赖。
+
+## 2026-11-11 移除主机行悬停文案
+
+- 移除 `HostSidebar.vue` 主机行的原生 `title` 提示及对应英文翻译，悬停不再显示用户名、连接地址和操作说明；名称、地址、状态与单击选择、双击打开、键盘、右键和拖动逻辑保持。
+- `tools/native-e2e.mjs` 保留更新后地址显示的检查，并将旧提示断言改为主机行没有 `title`。同步主机目录需求、实施状态及验证索引；无 Rust、IPC、持久格式或依赖变化。
+- `npm test -- src/components/host-tree.test.ts src/components/host-tree-menu.test.ts src/components/host-tree-controls.test.ts src/services/host-tree.test.ts src/i18n/i18n.test.ts`：5 文件、35 项通过，覆盖列表显示、选择/双击、键盘、右键、拖动、目录及翻译。首次执行在测试收集阶段遇到沙箱临时目录 `EPERM rename`，将该进程 TEMP/TMP 指向 `.local/host-hover-qa/tmp/` 后通过。
+- `npm run typecheck -w @serverdeck/desktop`、`npm exec -w @serverdeck/desktop -- vite build`、HostSidebar 的 ESLint、修改代码的 Prettier、原生脚本 `node --check` 和 `git diff --check` 通过。构建前 D 盘约 145 GiB 可用；Vite 保留大 chunk 提示。本次仅构建前端，未重新构建内置插件。
+- 验证报告及索引的 Prettier 检查通过；实施计划检查未通过。内存中撤销本次两处文本修改后仍未通过，确认存在原有格式问题，保留已有排版，未对总览进行整体格式化。
+- 未进行原生 WebView 悬停实测、原生 E2E、EXE/安装包构建或跨平台验收；现有组件测试用于交互回归，不代表原生悬停已验收。未发现新增功能风险，无下一阶段实现依赖。

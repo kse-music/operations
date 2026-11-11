@@ -163,6 +163,9 @@ pub struct TerminalSession {
     rename_all_fields = "camelCase"
 )]
 pub enum TerminalEvent {
+    Connection {
+        cipher: String,
+    },
     State {
         state: &'static str,
         code: Option<&'static str>,

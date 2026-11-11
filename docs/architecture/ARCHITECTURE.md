@@ -108,6 +108,8 @@ NativeStore 使用系统凭据库，当前服务为 `cn.hiboot.desktop.credentia
 
 PTY 每块最多 16 KiB，经 Tauri Channel 交给 xterm，`xterm.write(callback)` 完成后 ACK 才读取下一块。输入/resize 独立运行，输出等待不能阻止 Ctrl+C 和取消；输入队列、单次大小和粘贴确认均有界，resize 合并最新尺寸。russh 内部仍有非全有界队列，不承诺恶意服务器下的进程硬内存限额。
 
+应用全局状态栏的 `TerminalStatus` 只绑定当前主机、活动会话中的焦点窗格；非终端页面或无当前会话不挂载。`TerminalPane` 通过 xterm 公开的 `onCursorMove`、`onResize` 和活动缓冲更新运行期 `screen`（行列数与从 1 开始的光标行列；待换行时限制在最后一列），不改变 PTY 生命周期或持久配置。SSH `Verifier::kex_done` 只提取协商算法名称，不读取/保存共享秘密；逐跳握手各有 watch 通道，仅最终目标的算法进入 Connection。每个终端订阅其 Transport 的算法，Shell 就绪前及后续重协商时发出内部 `TerminalEvent::Connection { cipher }`，共享会话和首个窗格关闭后仍可更新。前端沿用 generation 丢弃旧事件，重连清除旧算法，断开/失败显示连接状态；本地使用真实 Shell 名称，仿真标记统一为 `xterm-256color`。CAP/NUM 只监听 WebView 的 keydown/keyup，不拦截按键；初始与窗口 blur/focus 后为未知，下一键盘事件同步。状态区独立可横向滚动并可键盘聚焦，不增加 IPC 命令、SDK 版本、数据库字段、远端采集或全局键盘钩子。
+
 前端区分会话标签、PaneKey 和 Session。二叉树仅计算分屏几何，固定 PaneKey 保持 xterm 挂载；每标签最多八窗格，全应用最多 32。后台终端持续消费 ACK。编号按主机运行内计数，最后会话成功关闭后重置；不持久化终端布局、标题、正文或会话，不保留旧 workspace_load/save 接口。xterm 的 cursorBlink/disableStdin 随连接状态同步：仅 connected 允许输入并沿用用户闪烁偏好；非连接状态同时停止光标 CSS 动画，覆盖远端 DECSCUSR 模式对本地闪烁选项的覆盖，保留光标所在字符和历史正文。重连恢复原偏好，不重建 xterm 或写回配置。
 
 `TerminalsView` 挂载会话新建、拖动排序、双击重命名、关闭、分屏快捷键及绑定目标 TabKey 的会话菜单；菜单复用 store 的重命名/断开/重新连接/关闭/按主机关闭所有；任一窗格处于 closed/failed/disconnected 时，名称前显示红色圆形白横杠图标。复制只调用普通 `open(host)`，不复制动作或票据。菜单支持右键和键盘、视口限位与焦点恢复。重新连接的菜单禁用态与 store 执行入口共用 `canReconnect`，仅当全部窗格属于 closed/failed/disconnected 且没有动作/票据或进行中的连接操作时允许；已连接或未曾连接的标签与混合状态分屏均拒绝重连。`TerminalPane` 不挂载底部操作栏、快捷键提示及其重连/转发/SFTP/导出界面，内容区菜单仅复制/粘贴，查找和字号快捷键保留；SFTP 使用主机工具栏入口。默认键位由 `core::terminal::default_shortcuts` 与前端偏好共同约束，关闭的是当前窗格而非整个工作区。

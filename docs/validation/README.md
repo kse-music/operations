@@ -1,5 +1,7 @@
 # 验证记录索引
 
+最新：[底部右侧当前终端状态栏：真实算法、光标/尺寸、分屏切换及键盘锁定](terminal/VALIDATION_SSH_USABILITY.md#2026-11-11-底部当前终端状态栏)。
+
 最新：[重新连接仅对已结束会话可用，其他状态置灰并阻止执行](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-重连操作仅对已结束会话可用)。
 
 最新：[重连清空旧画面、滚动历史及备用屏幕，隔离排队/迟到输出](terminal/VALIDATION_SESSION_TAB_MENU.md#2026-11-11-重连清空终端历史)。
@@ -256,7 +258,7 @@
 
 ## 主机与目录
 
-- [点击主机直接连接 Shell 验收](hosts/VALIDATION_HOST_CLICK_CONNECT.md)
+- [点击主机直接连接 Shell 验收](hosts/VALIDATION_HOST_CLICK_CONNECT.md)（含[移除主机行悬停文案](hosts/VALIDATION_HOST_CLICK_CONNECT.md#2026-11-11-移除主机行悬停文案)）
 - [主机总数徽标位置验收](hosts/VALIDATION_HOST_COUNT.md)
 - [侧栏主机跨组拖动验收](hosts/VALIDATION_HOST_DRAG.md)
 - [主机优先布局验证（2026-11-03）](hosts/VALIDATION_HOST_FIRST_LAYOUT.md)

@@ -3,6 +3,10 @@ export interface TerminalSize {
   cols: number;
   rows: number;
 }
+export interface TerminalScreen extends TerminalSize {
+  cursorRow: number;
+  cursorCol: number;
+}
 export interface TerminalUploadSelection {
   token: string;
   files: { name: string; size: number }[];
@@ -33,6 +37,7 @@ export interface LocalTerminalSession {
   shell: string;
 }
 export type TerminalEvent =
+  | { type: 'connection'; cipher: string }
   | { type: 'state'; state: string; code: string | null; message: string | null }
   | { type: 'trust'; hostname: string; port: number; algorithm: string; fingerprint: string }
   | { type: 'data'; sequence: number; data: number[] }

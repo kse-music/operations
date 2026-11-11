@@ -13,7 +13,7 @@ const xterm = vi.hoisted(() => ({
 }));
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
-    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0 } };
+    buffer = { active: { type: 'normal', baseY: 0, viewportY: 0, cursorX: 0, cursorY: 0 } };
     options = {};
     cols = 80;
     rows = 24;
@@ -23,6 +23,7 @@ vi.mock('@xterm/xterm', () => ({
     focus() {}
     dispose() {}
     onResize() {}
+    onCursorMove() {}
     onBinary() {}
     onSelectionChange() {}
     attachCustomKeyEventHandler() {}
