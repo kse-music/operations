@@ -28,7 +28,6 @@ import {
   Info,
   ListTodo,
   ListX,
-  Monitor,
   PanelRightClose,
   Puzzle,
   Server,
@@ -201,12 +200,12 @@ const tabMenu = ref<{ key: string; x: number; y: number } | null>(null);
 const tabMenuElement = ref<HTMLElement>();
 let tabMenuTrigger: HTMLButtonElement | null = null;
 const tabMenuIndex = computed(() =>
-  workspace.tabs.findIndex((tab) => tab.key === tabMenu.value?.key),
+  workspace.homeTabs.findIndex((tab) => tab.key === tabMenu.value?.key),
 );
 const hasTabsToRight = computed(
-  () => tabMenuIndex.value >= 0 && tabMenuIndex.value < workspace.tabs.length - 1,
+  () => tabMenuIndex.value >= 0 && tabMenuIndex.value < workspace.homeTabs.length - 1,
 );
-const hasOtherTabs = computed(() => workspace.tabs.length > 1);
+const hasOtherTabs = computed(() => workspace.homeTabs.length > 1);
 const tabCloseActions: {
   scope: WorkspaceCloseScope;
   label: string;
@@ -683,10 +682,10 @@ watch(
             :tabindex="!workspace.active ? 0 : -1"
             @click="workspace.showHome(true)"
           >
-            {{ tr('起步页') }}
+            {{ tr('首页') }}
           </button>
           <div
-            v-for="tab in workspace.tabs"
+            v-for="tab in workspace.homeTabs"
             :key="tab.key"
             :data-host-id="isHostTab(tab) ? tab.hostId : undefined"
             :data-view="tab.view"
@@ -709,7 +708,6 @@ watch(
               @click="activate(tab)"
             >
               <Server v-if="isHostTab(tab) && tab.hostId" :size="14" aria-hidden="true" />
-              <Monitor v-else-if="isHostTab(tab)" :size="14" aria-hidden="true" />
               <Puzzle v-else-if="tab.view === 'plugins'" :size="14" aria-hidden="true" />
               {{ tabName(tab) }}</button
             ><button

@@ -30,8 +30,8 @@ const emit = defineEmits<{
         <SquareTerminal class="welcome-card-icon" :size="23" aria-hidden="true" />
         <h2>{{ tr('本地终端') }}</h2>
         <p>{{ tr('在本机打开新的终端会话。') }}</p>
-        <button type="button" class="button primary" @click="emit('localTerminal')">
-          {{ tr('打开本地终端') }}<ArrowUpRight :size="14" aria-hidden="true" />
+        <button type="button" class="button" @click="emit('localTerminal')">
+          {{ tr('本地终端') }}<ArrowUpRight :size="14" aria-hidden="true" />
         </button>
       </article>
       <article class="welcome-card">

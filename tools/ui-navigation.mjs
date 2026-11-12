@@ -202,16 +202,12 @@ export async function closeApplicationSettings(page) {
 export async function bindAssistantModel(page, modelId) {
   const dialog = await openPluginSettings(page, 'AI 运维助手');
   const settings = dialog.frameLocator('iframe');
-  await settings
-    .locator(`label:has(input[type="radio"][value=${JSON.stringify(modelId)}])`)
-    .click();
-  const save = settings.getByRole('button', { name: '保存绑定', exact: true });
-  if (await save.isEnabled()) {
-    await save.click();
-    await dialog.locator('.plugin-configuration').waitFor({ state: 'hidden' });
-  } else {
-    await closePluginSettings(page);
+  const option = settings.locator(`input[type="radio"][value=${JSON.stringify(modelId)}]`);
+  if (!(await option.isChecked())) {
+    await option.check();
+    await settings.getByText('模型绑定已保存', { exact: true }).waitFor();
   }
+  await closePluginSettings(page);
   await closeApplicationSettings(page);
 }
 

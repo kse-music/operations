@@ -6,6 +6,7 @@ import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
 import {
   closeApplicationSettings,
+  closePluginSettings,
   openPluginDetails,
   openPluginFunction,
   openPluginSettings,
@@ -389,11 +390,12 @@ try {
       assert.equal(await page.locator('.workspace-tab').count(), 0);
       const settings = configuration.frameLocator('iframe');
       await settings.getByRole('group', { name: '使用模型' }).waitFor();
-      await settings
-        .locator('.binding-current strong')
-        .getByText('默认模型', { exact: true })
-        .waitFor();
-      assert(await settings.getByRole('button', { name: '保存绑定', exact: true }).isVisible());
+      await settings.locator('input[value="layout-model-0"]:checked').waitFor();
+      assert.equal(await settings.locator('.binding-footer').count(), 0);
+      assert.equal(
+        await settings.getByRole('button', { name: '保存绑定', exact: true }).count(),
+        0,
+      );
       const settingsFrame = page.frames().find((f) => f.url().includes('/settings/index.html'));
       if (fontSizeOnly) {
         for (const preview of [0.95, scale]) {
@@ -414,13 +416,8 @@ try {
         height: innerHeight,
         contentHeight: document.documentElement.scrollHeight,
         overflow: document.documentElement.scrollWidth > innerWidth,
-        footerBottom: document.querySelector('footer').getBoundingClientRect().bottom,
       }));
       assert.equal(settingsGeometry.overflow, false);
-      assert(
-        settingsGeometry.footerBottom <= settingsGeometry.height + 1,
-        `Settings footer clipped: ${JSON.stringify(settingsGeometry)}`,
-      );
       assert(
         settingsGeometry.contentHeight <= settingsGeometry.height + 1,
         `Nested settings scroll: ${JSON.stringify(settingsGeometry)}`,
@@ -446,7 +443,6 @@ try {
       });
       await settings.locator('.binding-count').getByText('100', { exact: true }).waitFor();
       const crowdedGeometry = await settingsFrame.evaluate(() => ({
-        footerBottom: document.querySelector('footer').getBoundingClientRect().bottom,
         height: innerHeight,
         contentHeight: document.documentElement.scrollHeight,
         listScrollable:
@@ -454,17 +450,15 @@ try {
           document.querySelector('.binding-content').clientHeight,
       }));
       assert(crowdedGeometry.listScrollable);
-      assert(crowdedGeometry.footerBottom <= crowdedGeometry.height + 1);
       assert(crowdedGeometry.contentHeight <= crowdedGeometry.height + 1);
       await page.evaluate(async () => {
         const { useModelsStore } = await import('/src/stores/models.ts');
         window.layoutModels = window.layoutModels.slice(0, 2);
         await useModelsStore().refresh();
       });
-      await settings.locator('label:has(input[value="layout-model-1"])').click();
       const holdSave = theme === 'dark';
       if (holdSave) await page.evaluate(() => (window.holdLayoutSave = true));
-      await settings.getByRole('button', { name: '保存绑定', exact: true }).click();
+      await settings.locator('label:has(input[value="layout-model-1"])').click();
       if (holdSave) {
         await page.waitForFunction(() => typeof window.releaseLayoutSave === 'function');
         assert(
@@ -486,7 +480,8 @@ try {
           window.releaseLayoutSave();
         });
       }
-      await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
+      await settings.getByText('模型绑定已保存', { exact: true }).waitFor();
+      await closePluginSettings(page);
       assert.deepEqual(await page.evaluate(() => window.layoutSettings), {
         modelId: 'layout-model-1',
         retained: true,
@@ -729,24 +724,22 @@ try {
       assert.equal(await configuration.locator('.plugin-state-section').count(), 0);
       assert.equal(await configuration.locator('iframe').count(), 0);
       await configuration.getByRole('button', { name: '插件配置', exact: true }).click();
-      await settings.locator('label:has(input[value="layout-model-0"])').click();
       assert.equal(await page.locator('.workspace-tab').count(), tabsBefore);
-      await settings.getByRole('button', { name: '取消', exact: true }).click();
+      await closePluginSettings(page);
       await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
       await closeApplicationSettings(page);
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-1');
       assert.equal(await question.inputValue(), draft);
       assert(await gear.evaluate((button) => document.activeElement === button));
       await gear.click();
-      await settings.locator('label:has(input[value="layout-model-0"])').click();
-      const save = settings.getByRole('button', { name: '保存绑定', exact: true });
       await page.evaluate(() => (window.layoutSaveError = true));
-      await save.click();
+      await settings.locator('label:has(input[value="layout-model-0"])').click();
       await settings.getByText('模型绑定写入失败', { exact: true }).waitFor();
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-1');
       await page.evaluate(() => (window.layoutSaveError = false));
-      await save.click();
-      await configuration.locator('.plugin-configuration').waitFor({ state: 'hidden' });
+      await settings.locator('label:has(input[value="layout-model-0"])').click();
+      await settings.getByText('模型绑定已保存', { exact: true }).waitFor();
+      await closePluginSettings(page);
       await closeApplicationSettings(page);
       assert.equal(await question.inputValue(), draft);
       assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'layout-model-0');

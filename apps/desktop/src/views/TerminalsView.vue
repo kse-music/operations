@@ -116,8 +116,7 @@ async function openMenu(key: string | null, event: MouseEvent | KeyboardEvent): 
   const target = event.currentTarget as HTMLElement;
   menuTrigger = target.querySelector<HTMLElement>('[role=tab]') ?? target;
   const bounds = target.getBoundingClientRect();
-  const anchored =
-    key === null || event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  const anchored = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
   menu.value = {
     key,
     x: anchored ? bounds.left : event.clientX,

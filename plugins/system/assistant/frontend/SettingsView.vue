@@ -3,27 +3,20 @@ import { tr } from './i18n/messages';
 
 import { computed, ref, watch } from 'vue';
 import { Bot, Boxes, Check, RefreshCw, ShieldCheck } from '@lucide/vue';
-import { request } from '@serverdeck/plugin-sdk/transport';
 import { useModelBinding } from './model-binding';
 import { isLocalModel } from './types';
-defineProps<{ settingsDialog?: boolean }>();
 const binding = useModelBinding();
 const { modelId, models, loading, saving, error, message, loaded, localSources } = binding;
 const draft = ref('');
 const remoteModels = computed(() => models.models.filter((model) => !isLocalModel(model.id)));
 const current = computed(() => models.models.find((model) => model.id === modelId.value));
-const pending = computed(() => draft.value !== modelId.value);
-const canSave = computed(
-  () =>
-    loaded.value &&
-    !loading.value &&
-    !saving.value &&
-    models.models.some((model) => model.id === draft.value && model.hasKey),
-);
 const sourceReady = (id: string) => models.models.some((model) => model.id === id && model.hasKey);
 watch(modelId, (id) => (draft.value = id), { immediate: true });
-async function close() {
-  await request('settings.close');
+async function selectModel(id: string) {
+  if (!loaded.value || loading.value || saving.value || id === modelId.value) return;
+  draft.value = id;
+  await binding.save(id);
+  draft.value = modelId.value;
 }
 </script>
 <template>
@@ -32,7 +25,7 @@ async function close() {
       <span class="binding-emblem"><Bot :size="21" aria-hidden="true" /></span>
       <div class="binding-intro">
         <h2>{{ tr('助手模型绑定') }}</h2>
-        <p>{{ tr('为所有主机共用的助手选择模型，保存后生效。') }}</p>
+        <p>{{ tr('为所有主机共用的助手选择模型，选中后立即保存。') }}</p>
       </div>
       <div class="binding-heading-actions">
         <button class="button" :disabled="loading || saving" @click="binding.load">
@@ -42,11 +35,15 @@ async function close() {
         </button>
       </div>
     </header>
-    <form class="binding-form" @submit.prevent="binding.save(draft)">
+    <div class="binding-form">
       <div class="binding-content">
         <p v-if="loading" class="binding-feedback" role="status">{{ tr('正在读取模型配置…') }}</p>
+        <p v-if="saving" class="binding-feedback" role="status">{{ tr('正在保存…') }}</p>
         <p v-if="error" class="binding-feedback error-text" role="alert">{{ error }}</p>
         <p v-if="message" class="binding-feedback binding-success" role="status">{{ message }}</p>
+        <p v-if="loaded && !loading && !current?.hasKey" class="binding-feedback" role="status">
+          {{ modelId ? tr('模型已不可用') : tr('未绑定') }}
+        </p>
         <fieldset :disabled="!loaded || loading || saving" :aria-label="tr('使用模型')">
           <section
             v-if="localSources.length"
@@ -54,7 +51,7 @@ async function close() {
             aria-labelledby="binding-local-title"
           >
             <div class="binding-group-heading">
-              <h3 id="binding-local-title">{{ tr('本地来源') }}</h3>
+              <h3 id="binding-local-title">{{ tr('本地CLI') }}</h3>
               <span>{{ tr('沿用本机工具配置与登录') }}</span>
             </div>
             <div class="binding-local-options">
@@ -65,11 +62,12 @@ async function close() {
                 :class="{ unavailable: !sourceReady(source.id) }"
               >
                 <input
-                  v-model="draft"
+                  :checked="draft === source.id"
                   type="radio"
                   name="assistant-model"
                   :value="source.id"
                   :disabled="!sourceReady(source.id)"
+                  @change="selectModel(source.id)"
                 />
                 <span class="binding-option-label"
                   ><strong>{{ source.name }}</strong
@@ -96,11 +94,12 @@ async function close() {
                 :class="{ unavailable: !model.hasKey }"
               >
                 <input
-                  v-model="draft"
+                  :checked="draft === model.id"
                   type="radio"
                   name="assistant-model"
                   :value="model.id"
                   :disabled="!model.hasKey"
+                  @change="selectModel(model.id)"
                 />
                 <span class="binding-model-icon"><Boxes :size="17" aria-hidden="true" /></span>
                 <span class="binding-option-label"
@@ -128,31 +127,7 @@ async function close() {
           <p>{{ tr('模型凭据、CLI 安装与授权统一在平台管理，插件无法读取登录凭据。') }}</p>
         </div>
       </div>
-      <footer class="binding-footer">
-        <div class="binding-current">
-          <span
-            >{{ tr('当前绑定 ')
-            }}<strong>{{
-              current?.name ?? (modelId ? tr('模型已不可用') : tr('未绑定'))
-            }}</strong></span
-          ><small :class="{ pending }">{{
-            saving ? tr('正在保存…') : pending ? tr('有未保存的选择') : tr('选择后点击保存绑定')
-          }}</small>
-        </div>
-        <button
-          v-if="settingsDialog"
-          class="button"
-          type="button"
-          :disabled="saving"
-          @click="close"
-        >
-          {{ tr(' 取消 ') }}
-        </button>
-        <button class="button primary" type="submit" :disabled="!canSave">
-          {{ saving ? tr('正在保存…') : tr('保存绑定') }}
-        </button>
-      </footer>
-    </form>
+    </div>
   </section>
 </template>
 <style scoped>
@@ -314,10 +289,6 @@ h3 {
   border-color: var(--accent);
   background: var(--accent-bg);
 }
-.binding-option:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
 .binding-registered {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -399,39 +370,6 @@ h3 {
 .binding-success {
   color: var(--accent);
 }
-.binding-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  padding: 16px 28px;
-  border-top: 1px solid var(--border);
-  background: var(--panel);
-}
-.binding-current {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  gap: 5px;
-  font-size: var(--font-size-caption);
-  color: var(--muted);
-}
-.binding-current > span {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.binding-current strong {
-  color: var(--text);
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-.binding-current small {
-  font-size: inherit;
-}
-.binding-current .pending {
-  color: var(--accent);
-}
 .binding-spinning {
   animation: binding-spin 1s linear infinite;
 }
@@ -457,21 +395,11 @@ h3 {
   .binding-content {
     padding: 0 16px 20px;
   }
-  .binding-footer {
-    padding: 12px 16px;
-    flex-wrap: wrap;
-  }
   .binding-local-options {
     grid-template-columns: minmax(0, 1fr);
   }
   .binding-group-heading > span {
     display: none;
-  }
-  .binding-current {
-    flex-basis: 100%;
-  }
-  .binding-footer > button:first-of-type {
-    margin-left: auto;
   }
   .binding-model-icon {
     display: none;

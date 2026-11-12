@@ -5,6 +5,7 @@ import SettingsPanel from './SettingsPanel.vue';
 import { useApplicationStore } from '../stores/application';
 import { useWorkspaceStore } from '../stores/workspace';
 import * as ipc from '../services/ipc';
+import { filesApi } from '../services/files';
 import {
   defaultProductPreferences,
   settingsCategories,
@@ -14,6 +15,19 @@ import { defaultTerminalPreferences } from '../types/preferences';
 
 let app: App, pinia: Pinia, root: HTMLDivElement;
 const category = ref<SettingsCategory>('general');
+function mountSettingsPanel(): App {
+  const mounted = createApp({
+    render: () =>
+      h(SettingsPanel, {
+        category: category.value,
+        onCategory: (value) => {
+          category.value = value;
+        },
+      }),
+  }).use(pinia);
+  mounted.mount(root);
+  return mounted;
+}
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
@@ -46,16 +60,7 @@ beforeEach(() => {
   };
   root = document.createElement('div');
   document.body.append(root);
-  app = createApp({
-    render: () =>
-      h(SettingsPanel, {
-        category: category.value,
-        onCategory: (value) => {
-          category.value = value;
-        },
-      }),
-  }).use(pinia);
-  app.mount(root);
+  app = mountSettingsPanel();
 });
 afterEach(() => {
   app.unmount();
@@ -88,28 +93,33 @@ async function submit() {
   await nextTick();
 }
 
-it('saves English only after success, restores it on reopen and switches back to Chinese', async () => {
+async function restoreDefaults() {
+  const button = root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!;
+  expect(button.textContent?.trim()).toBe('恢复默认');
+  button.click();
+  await nextTick();
+}
+
+it('removes save buttons from all four automatic categories', async () => {
+  for (let index = 0; index < settingsCategories.length; index++) {
+    await select(index);
+    expect(visiblePanels()).toHaveLength(1);
+    expect(root.querySelector('h1')?.textContent).toBe(settingsCategories[index]!.label);
+    expect(root.querySelector('[type="submit"]')).toBeNull();
+    expect(root.querySelector('.form-footer .primary')).toBeNull();
+  }
+});
+
+it('automatically saves language, restores it on reopen and automatically restores defaults', async () => {
   const application = useApplicationStore();
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
-  const language = '[aria-label="界面语言"]';
-  expect([...root.querySelectorAll(`${language} option`)].map((item) => item.textContent)).toEqual([
-    '简体中文',
-    'English',
-  ]);
-  await input(language, 'en-US', 'change');
+  await input('[aria-label="界面语言"]', 'en-US', 'change');
   expect(application.state!.config.product.language).toBe('zh-CN');
-  expect(root.querySelector('h1')?.textContent).toBe('通用');
-  await submit();
-  await vi.waitFor(() => expect(application.saving).toBe(false));
-  expect(save).toHaveBeenCalledWith(
+  await vi.waitFor(() => expect(root.querySelector('h1')?.textContent).toBe('General'));
+  expect(save).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({ product: expect.objectContaining({ language: 'en-US' }) }),
   );
-  expect(root.querySelector('h1')?.textContent).toBe('General');
-  expect(root.querySelector<HTMLSelectElement>('[aria-label="Interface language"]')!.value).toBe(
-    'en-US',
-  );
   expect(document.documentElement.lang).toBe('en-US');
-  expect(application.notice).toContain('Settings saved');
   app.unmount();
   app = createApp(SettingsPanel).use(pinia);
   app.mount(root);
@@ -117,60 +127,47 @@ it('saves English only after success, restores it on reopen and switches back to
     'en-US',
   );
   root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!.click();
-  await nextTick();
-  expect(root.querySelector('h1')?.textContent).toBe('General');
-  await submit();
-  await vi.waitFor(() => expect(application.saving).toBe(false));
-  expect(root.querySelector('h1')?.textContent).toBe('通用');
+  await vi.waitFor(() => expect(root.querySelector('h1')?.textContent).toBe('通用'));
   expect(document.documentElement.lang).toBe('zh-CN');
 });
 
-it('keeps the saved language and the English draft when saving fails', async () => {
-  vi.spyOn(ipc, 'saveConfig').mockRejectedValue(new Error('disk failure'));
+it('retains a failed automatic edit and saved language, then allows retry without a save button', async () => {
+  const save = vi
+    .spyOn(ipc, 'saveConfig')
+    .mockRejectedValueOnce(new Error('disk failure'))
+    .mockImplementation(async (config) => config);
   await input('[aria-label="界面语言"]', 'en-US', 'change');
-  await submit();
-  await vi.waitFor(() => expect(useApplicationStore().saving).toBe(false));
+  await vi.waitFor(() => expect(useApplicationStore().error).toBe('disk failure'));
   expect(useApplicationStore().state!.config.product.language).toBe('zh-CN');
-  expect(root.querySelector('h1')?.textContent).toBe('通用');
   expect(root.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')!.value).toBe('en-US');
-  expect(useApplicationStore().error).toBe('disk failure');
-  expect(useApplicationStore().notice).toBeNull();
+  expect(root.querySelector('[role="status"]')?.textContent).toContain('自动保存失败');
+  expect(root.querySelector('[type="submit"]')).toBeNull();
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '重试')!
+    .click();
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.product.language).toBe('en-US'),
+  );
+  expect(save).toHaveBeenCalledTimes(2);
 });
 
-async function restoreDefaults() {
-  const button = root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!;
-  expect(button.textContent?.trim()).toBe('恢复默认');
-  expect(button.nextElementSibling).toBe(root.querySelector('.form-footer [type="submit"]'));
-  button.click();
-  await nextTick();
-}
-
-it('shows the selected menu category and saves drafts from all four categories together', async () => {
+it('coalesces rapid edits across all four categories without starting migration', async () => {
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
-  expect(root.querySelector('[role="tablist"]')).toBeNull();
-  for (let index = 0; index < settingsCategories.length; index++) {
-    await select(index);
-    expect(visiblePanels()).toHaveLength(1);
-    expect(root.querySelector('h1')?.textContent).toBe(settingsCategories[index]!.label);
-    expect(visiblePanels()[0]!.id).toBe(`settings-panel-${settingsCategories[index]!.id}`);
-  }
+  const preview = vi.spyOn(ipc, 'storagePreview');
+  const migrate = vi.spyOn(ipc, 'storageMigrate');
+  await storageDraft();
   await input('[aria-label="默认下载目录"]', 'D:\\Downloads');
+  await input('[aria-label="每主机并发传输数"]', '5');
+  await input('[aria-label="日志级别"]', 'debug', 'change');
   await select(2);
   root
     .querySelector('[aria-label="复制快捷键"]')!
-    .dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', ctrlKey: true, shiftKey: true }),
-    );
+    .dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', ctrlKey: true, shiftKey: true }));
   await select(1);
   await input('[aria-label="终端字体"]', 'Consolas');
   await select(0);
   await input('[data-testid="theme-select"]', 'light', 'change');
-  expect(useApplicationStore().state?.config.theme).toBe('dark');
-  await select(1);
-  expect(root.querySelector<HTMLInputElement>('[aria-label="终端字体"]')!.value).toBe('Consolas');
-  expect(save).not.toHaveBeenCalled();
-  await submit();
-  await vi.waitFor(() => expect(useApplicationStore().saving).toBe(false));
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.theme).toBe('light'));
   expect(save).toHaveBeenCalledExactlyOnceWith(
     expect.objectContaining({
       theme: 'light',
@@ -178,176 +175,288 @@ it('shows the selected menu category and saves drafts from all four categories t
         fontFamily: 'Consolas',
         shortcuts: expect.objectContaining({ copy: 'Ctrl+Shift+X' }),
       }),
+      transferConcurrency: 5,
+      logLevel: 'debug',
       product: expect.objectContaining({ downloadDirectory: 'D:\\Downloads' }),
     }),
   );
-  expect(useApplicationStore().notice).toContain('设置已保存');
-  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
-  expect(document.querySelector('dialog')).toBeNull();
+  expect(preview).not.toHaveBeenCalled();
+  expect(migrate).not.toHaveBeenCalled();
+  await select(3);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="默认下载目录"]')!.value).toBe(
+    'D:\\Downloads',
+  );
+  expect(root.querySelector<HTMLInputElement>('[aria-label="每主机并发传输数"]')!.value).toBe('5');
+  await reviewMigration();
+  await vi.waitFor(() => expect(preview).toHaveBeenCalledWith('D:\\ServerDeck'));
 });
 
-it('allows closing unchanged, reverted and externally updated settings without a prompt', async () => {
-  const workspace = useWorkspaceStore();
-  expect(await workspace.settingsCloseGuard!()).toBe(true);
-  await input('[data-testid="theme-select"]', 'light', 'change');
-  await input('[data-testid="theme-select"]', 'dark', 'change');
-  expect(await workspace.settingsCloseGuard!()).toBe(true);
-  const application = useApplicationStore();
-  application.state!.config = { ...application.state!.config, sidebarWidth: 300 };
-  await nextTick();
-  expect(await workspace.settingsCloseGuard!()).toBe(true);
-  expect(document.querySelector('dialog')).toBeNull();
-});
-
-it.each(['cancel', 'close'])('keeps one close prompt and preserves edits on %s', async (action) => {
-  const workspace = useWorkspaceStore();
-  await restoreDefaults();
-  const closing = workspace.settingsCloseGuard!();
-  const repeated = workspace.settingsCloseGuard!();
-  await nextTick();
-  expect(document.querySelectorAll('dialog[aria-label="设置尚未保存"]')).toHaveLength(1);
-  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
-  if (action === 'cancel') dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
-  else dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
-  expect(await closing).toBe(false);
-  expect(await repeated).toBe(false);
-  await nextTick();
-  expect(document.querySelector('dialog')).toBeNull();
-  expect(root.querySelector<HTMLInputElement>('[aria-label="侧边栏宽度"]')!.value).toBe('248');
-  expect(useApplicationStore().state!.config.sidebarWidth).toBe(260);
-});
-
-it('restores general, terminal and shortcut defaults independently in the shared draft', async () => {
+it('flushes a pending automatic change before closing without a discard prompt', async () => {
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
-  const theme = await input('[data-testid="theme-select"]', 'light', 'change');
-  const width = await input('[aria-label="侧边栏宽度"]', '320');
-  const interfaceSize = await input('#interface-font-size', '4');
-  const font = await input('[aria-label="终端字体"]', 'Consolas');
-  const proxy = await input('[aria-label="全局默认代理"]', 'socks5', 'change');
-  const download = await input('[aria-label="默认下载目录"]', 'D:\\Downloads');
-  await select(2);
-  const copy = root.querySelector<HTMLInputElement>('[aria-label="复制快捷键"]')!;
-  const openSettings = root.querySelector<HTMLInputElement>('[aria-label="打开设置全局快捷键"]')!;
-  copy.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', ctrlKey: true, shiftKey: true }));
-  openSettings.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true }));
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
+  expect(save).toHaveBeenCalledOnce();
+  expect(useApplicationStore().state!.config.theme).toBe('light');
+  expect(document.querySelector('dialog')).toBeNull();
+});
 
+it('accepts external saved changes while preserving unrelated pending edits', async () => {
+  const application = useApplicationStore();
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  application.state!.config = {
+    ...application.state!.config,
+    sidebarWidth: 300,
+    terminalFontSize: 20,
+  };
+  await nextTick();
+  await vi.waitFor(() => expect(application.state!.config.theme).toBe('light'));
+  expect(save).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ sidebarWidth: 300, terminalFontSize: 20 }),
+  );
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
+});
+
+it('restores each automatic category independently and persists its defaults', async () => {
+  const application = useApplicationStore();
+  vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await input('[aria-label="终端字体"]', 'Consolas');
+  await input('[aria-label="默认下载目录"]', 'D:\\Downloads');
+  await select(2);
+  root
+    .querySelector('[aria-label="复制快捷键"]')!
+    .dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyX', ctrlKey: true, shiftKey: true }));
   await select(0);
   await restoreDefaults();
-  expect(theme.value).toBe('dark');
-  expect(width.value).toBe('248');
-  expect(interfaceSize.getAttribute('aria-valuetext')).toBe('标准');
-  expect(font.value).toBe('Consolas');
-  expect(proxy.value).toBe('socks5');
-
+  await vi.waitFor(() => expect(application.state!.config.sidebarWidth).toBe(248));
+  expect(application.state!.config.theme).toBe('dark');
+  expect(application.state!.config.monitorIntervalSecs).toBe(5);
+  expect(application.state!.config.terminal.fontFamily).toBe('Consolas');
+  expect(application.state!.config.terminal.shortcuts.copy).toBe('Ctrl+Shift+X');
   await select(1);
   await restoreDefaults();
-  expect(font.value).toBe(defaultTerminalPreferences().fontFamily);
-  expect(proxy.value).toBe('direct');
-  expect(copy.value).toBe('Ctrl+Shift+X');
-  expect(openSettings.value).toBe('Ctrl+J');
-
-  await input('[aria-label="终端字体"]', 'Consolas');
+  await vi.waitFor(() =>
+    expect(application.state!.config.terminal.fontFamily).toBe(
+      defaultTerminalPreferences().fontFamily,
+    ),
+  );
+  expect(application.state!.config.terminal.shortcuts.copy).toBe('Ctrl+Shift+X');
   await select(2);
-  const resetButtons = [
-    ...root.querySelectorAll('#settings-panel-shortcuts button, .form-footer button'),
-  ].filter((button) => button.textContent?.trim().startsWith('恢复默认'));
-  expect(resetButtons).toHaveLength(1);
   await restoreDefaults();
-  expect(copy.value).toBe('Ctrl+Shift+C');
-  expect(openSettings.value).toBe('Ctrl+,');
-  expect(font.value).toBe('Consolas');
-  expect(download.value).toBe('D:\\Downloads');
-  expect(useApplicationStore().state!.config.sidebarWidth).toBe(260);
-  expect(save).not.toHaveBeenCalled();
-
-  await submit();
-  expect(save).toHaveBeenCalledExactlyOnceWith(
-    expect.objectContaining({
-      theme: 'dark',
-      interfaceFontSize: 'standard',
-      sidebarWidth: 248,
-      monitorIntervalSecs: 5,
-      connectTimeoutSecs: 15,
-      terminal: { ...defaultTerminalPreferences(), fontFamily: 'Consolas' },
-      product: { ...defaultProductPreferences(), downloadDirectory: 'D:\\Downloads' },
-    }),
+  await vi.waitFor(() =>
+    expect(application.state!.config.terminal.shortcuts.copy).toBe('Ctrl+Shift+C'),
+  );
+  expect(application.state!.config.product.downloadDirectory).toBe('D:\\Downloads');
+  expect(root.querySelector<HTMLInputElement>('[aria-label="默认下载目录"]')!.value).toBe(
+    'D:\\Downloads',
   );
 });
 
-it('keeps quick copy and paste off by default and saves it only after enabling and submitting', async () => {
-  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+it('automatically saves quick copy and paste after enabling it', async () => {
+  vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
   await select(1);
   const checkbox = [...root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
-    (input) => input.parentElement?.textContent?.includes('选中即复制，右键即粘贴'),
+    (field) => field.parentElement?.textContent?.includes('选中即复制，右键即粘贴'),
   )!;
   expect(checkbox.checked).toBe(false);
   checkbox.click();
-  await nextTick();
-  await select(0);
-  expect(useApplicationStore().state?.config.terminal.quickCopyPaste).toBe(false);
-  expect(save).not.toHaveBeenCalled();
-  await submit();
-  await vi.waitFor(() => expect(useApplicationStore().saving).toBe(false));
-  expect(save).toHaveBeenCalledWith(
-    expect.objectContaining({ terminal: expect.objectContaining({ quickCopyPaste: true }) }),
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.terminal.quickCopyPaste).toBe(true),
   );
-  expect(useApplicationStore().state?.config.terminal.quickCopyPaste).toBe(true);
 });
 
-it('requests the menu containing an invalid field before reporting validity', async () => {
-  const save = vi.spyOn(ipc, 'saveConfig');
+it('does not save incomplete or out of range inputs, and resumes after correction', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
   await select(1);
-  const invalid = await input('[aria-label="终端行高"]', '99');
-  const report = vi.spyOn(invalid, 'reportValidity');
-  await select(0);
-  await submit();
-  expect(category.value).toBe('terminal');
-  expect(visiblePanels()[0]!.contains(invalid)).toBe(true);
-  expect(document.activeElement).toBe(invalid);
-  expect(report).toHaveBeenCalledOnce();
-  expect(save).not.toHaveBeenCalled();
-});
-
-it('validates conditional proxy fields even after switching to another tab', async () => {
-  const save = vi.spyOn(ipc, 'saveConfig');
-  await select(1);
+  await input('[aria-label="终端行高"]', '99');
   await input('[aria-label="全局默认代理"]', 'socks5', 'change');
-  const invalid = await input('[aria-label="默认代理地址"]', '');
-  await select(2);
-  await submit();
-  expect(visiblePanels()[0]!.id).toBe('settings-panel-terminal');
-  expect(document.activeElement).toBe(invalid);
+  await input('[aria-label="默认代理地址"]', '');
+  await new Promise((resolve) => setTimeout(resolve, 400));
   expect(save).not.toHaveBeenCalled();
+  await input('[aria-label="终端行高"]', '125');
+  await input('[aria-label="默认代理地址"]', '127.0.0.1');
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.terminal.lineHeight).toBe(125));
+  expect(save).toHaveBeenCalledOnce();
 });
 
-it('disables every category during saving and retains edits after a failed save', async () => {
-  let rejectSave: (error: Error) => void;
-  vi.spyOn(ipc, 'saveConfig').mockImplementation(
-    () => new Promise((_resolve, reject) => (rejectSave = reject)),
-  );
-  await input('[data-testid="theme-select"]', 'light', 'change');
-  await submit();
-  expect([...root.querySelectorAll('fieldset')].every((field) => field.disabled)).toBe(true);
-  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(false);
-  expect(document.querySelector('dialog')).toBeNull();
-  expect(root.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
+it('rejects invalid storage values and saves corrected values automatically', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
   await select(3);
-  expect(visiblePanels()[0]!.querySelector('fieldset')!.disabled).toBe(true);
-  rejectSave!(new Error('保存失败，请重试'));
-  await vi.waitFor(() => expect(useApplicationStore().saving).toBe(false));
+  await input('[aria-label="每主机并发传输数"]', '0');
   await select(0);
-  expect(root.querySelector<HTMLSelectElement>('[data-testid="theme-select"]')!.value).toBe(
-    'light',
-  );
-  expect(useApplicationStore().error).toBe('保存失败，请重试');
-  expect(useApplicationStore().notice).toBeNull();
-  expect(root.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(false);
-  const closing = useWorkspaceStore().settingsCloseGuard!();
-  await nextTick();
-  expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).not.toBeNull();
-  document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭对话框"]')!.click();
-  expect(await closing).toBe(false);
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(save).not.toHaveBeenCalled();
+  expect(useApplicationStore().state!.config.transferConcurrency).toBe(3);
+  await select(3);
+  await input('[aria-label="每主机并发传输数"]', '4');
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.theme).toBe('light'));
+  expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ transferConcurrency: 4 }));
 });
+
+it('does not let an unconfirmed or empty migration target block ordinary automatic saves', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  const preview = vi.spyOn(ipc, 'storagePreview');
+  const migrate = vi.spyOn(ipc, 'storageMigrate');
+  await storageDraft();
+  await input('[aria-label="数据根目录"]', '');
+  await input('[aria-label="每主机并发传输数"]', '5');
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.transferConcurrency).toBe(5));
+  expect(save).toHaveBeenCalledOnce();
+  expect(useApplicationStore().state!.storage!.rootDirectory).toBe('C:\\ServerDeck');
+  expect(preview).not.toHaveBeenCalled();
+  expect(migrate).not.toHaveBeenCalled();
+});
+
+it.each([
+  ['默认下载目录', 'D:\\Downloads', 'input'],
+  ['每主机并发传输数', '5', 'input'],
+  ['日志级别', 'debug', 'change'],
+])('keeps failed %s changes and retries automatic saving', async (label, value, event) => {
+  const save = vi
+    .spyOn(ipc, 'saveConfig')
+    .mockRejectedValueOnce({ message: '无法写入设置' })
+    .mockImplementation(async (config) => config);
+  const before = JSON.parse(JSON.stringify(useApplicationStore().state!.config));
+  await select(3);
+  await input(`[aria-label="${label}"]`, value, event);
+  await vi.waitFor(() => expect(useApplicationStore().error).toBe('无法写入设置'));
+  expect(useApplicationStore().state!.config).toEqual(before);
+  expect(root.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!.value).toBe(value);
+  expect(root.querySelector('[role="status"]')?.textContent).toContain('自动保存失败');
+  expect(root.querySelector('[type="submit"]')).toBeNull();
+  [...root.querySelectorAll<HTMLButtonElement>('.form-footer button')]
+    .find((button) => button.textContent?.trim() === '重试')!
+    .click();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(useWorkspaceStore().settingsDirty).toBe(false));
+  expect(useApplicationStore().error).toBeNull();
+});
+
+it('automatically saves a picked download directory and restores it when reopened', async () => {
+  vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  const pick = vi.spyOn(filesApi, 'pick').mockResolvedValue(['D:\\Downloads']);
+  await select(3);
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '选择下载目录')!
+    .click();
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.product.downloadDirectory).toBe('D:\\Downloads'),
+  );
+  expect(pick).toHaveBeenCalledExactlyOnceWith('folder');
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
+  app.unmount();
+  app = mountSettingsPanel();
+  expect(root.querySelector<HTMLInputElement>('[aria-label="默认下载目录"]')!.value).toBe(
+    'D:\\Downloads',
+  );
+});
+
+it('queues storage edits made during a write without mutating the in-flight values', async () => {
+  let finish!: () => void;
+  const save = vi
+    .spyOn(ipc, 'saveConfig')
+    .mockImplementationOnce(
+      (config) =>
+        new Promise((resolve) => {
+          finish = () => resolve(config);
+        }),
+    )
+    .mockImplementation(async (config) => config);
+  await select(3);
+  await input('[aria-label="默认下载目录"]', 'D:\\First');
+  await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(
+    root.querySelector<HTMLInputElement>('[aria-label="默认下载目录"]')!.matches(':disabled'),
+  ).toBe(false);
+  await input('[aria-label="默认下载目录"]', 'D:\\Latest');
+  await input('[aria-label="每主机并发传输数"]', '5');
+  await input('[aria-label="日志级别"]', 'debug', 'change');
+  expect(save.mock.calls[0]![0].product.downloadDirectory).toBe('D:\\First');
+  expect(save.mock.calls[0]![0].transferConcurrency).toBe(3);
+  finish();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.product.downloadDirectory).toBe('D:\\Latest'),
+  );
+  expect(useApplicationStore().state!.config.transferConcurrency).toBe(5);
+  expect(useApplicationStore().state!.config.logLevel).toBe('debug');
+});
+
+it.each(['Latest', defaultTerminalPreferences().fontFamily])(
+  'keeps edits or reversions to %s during a save and writes detached snapshots in order',
+  async (latest) => {
+    let finish!: () => void;
+    const save = vi
+      .spyOn(ipc, 'saveConfig')
+      .mockImplementationOnce(
+        (config) =>
+          new Promise((resolve) => {
+            finish = () => resolve(config);
+          }),
+      )
+      .mockImplementation(async (config) => config);
+    await input('[aria-label="终端字体"]', 'First');
+    await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+    expect(root.querySelector('#settings-panel-terminal fieldset')?.hasAttribute('disabled')).toBe(
+      false,
+    );
+    await input('[aria-label="终端字体"]', latest);
+    await input('[data-testid="theme-select"]', 'light', 'change');
+    expect(save.mock.calls[0]![0].terminal.fontFamily).toBe('First');
+    finish();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(useApplicationStore().state!.config.terminal.fontFamily).toBe(latest),
+    );
+    expect(useApplicationStore().state!.config.theme).toBe('light');
+    expect(root.querySelector<HTMLInputElement>('[aria-label="终端字体"]')!.value).toBe(latest);
+  },
+);
+
+it('waits for another configuration write instead of dropping pending edits', async () => {
+  const application = useApplicationStore();
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  application.saving = true;
+  await input('[data-testid="theme-select"]', 'light', 'change');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(save).not.toHaveBeenCalled();
+  application.state!.config = { ...application.state!.config, sidebarWidth: 330 };
+  application.saving = false;
+  await vi.waitFor(() => expect(application.state!.config.theme).toBe('light'));
+  expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sidebarWidth: 330 }));
+});
+
+it('retains shortcut conflicts after a rejected save and saves a corrected combination', async () => {
+  const save = vi
+    .spyOn(ipc, 'saveConfig')
+    .mockRejectedValueOnce({ message: '快捷键须唯一' })
+    .mockImplementation(async (config) => config);
+  await select(2);
+  const field = root.querySelector<HTMLInputElement>('[aria-label="复制快捷键"]')!;
+  field.dispatchEvent(
+    new KeyboardEvent('keydown', { code: 'KeyV', ctrlKey: true, shiftKey: true }),
+  );
+  await vi.waitFor(() => expect(useApplicationStore().error).toBe('快捷键须唯一'));
+  expect(useApplicationStore().state!.config.terminal.shortcuts.copy).toBe('Ctrl+Shift+C');
+  expect(field.value).toBe('Ctrl+Shift+V');
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  expect(save).toHaveBeenCalledOnce();
+  field.dispatchEvent(
+    new KeyboardEvent('keydown', { code: 'KeyX', ctrlKey: true, shiftKey: true }),
+  );
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.terminal.shortcuts.copy).toBe('Ctrl+Shift+X'),
+  );
+});
+
+async function reviewMigration() {
+  const button = root.querySelector<HTMLButtonElement>('.form-footer .primary')!;
+  expect(button.textContent?.trim()).toBe('迁移并重启');
+  button.click();
+  await nextTick();
+}
 
 async function storageDraft() {
   useApplicationStore().state!.storage = {
@@ -397,8 +506,7 @@ it('formats storage and download directories without changing saved paths or sch
   );
   expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
   await input('[aria-label="每主机并发传输数"]', '4');
-  await submit();
-  await vi.waitFor(() => expect(application.saving).toBe(false));
+  await vi.waitFor(() => expect(application.state!.config.transferConcurrency).toBe(4));
   expect(save).toHaveBeenCalledWith(
     expect.objectContaining({
       product: expect.objectContaining({ downloadDirectory: '\\\\?\\UNC\\server\\share\\下载' }),
@@ -406,6 +514,20 @@ it('formats storage and download directories without changing saved paths or sch
   );
   expect(application.state!.storage.rootDirectory).toBe(prefix);
   expect(preview).not.toHaveBeenCalled();
+});
+
+it('saves ordinary preferences on form submit without opening migration review', async () => {
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  const preview = vi.spyOn(ipc, 'storagePreview');
+  const migrate = vi.spyOn(ipc, 'storageMigrate');
+  await storageDraft();
+  await input('[aria-label="日志级别"]', 'debug', 'change');
+  await submit();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledOnce());
+  expect(useApplicationStore().state!.config.logLevel).toBe('debug');
+  expect(preview).not.toHaveBeenCalled();
+  expect(migrate).not.toHaveBeenCalled();
+  expect(document.querySelector('dialog')).toBeNull();
 });
 
 it('formats both migration preview paths while submitting the original target', async () => {
@@ -419,7 +541,7 @@ it('formats both migration preview paths while submitting the original target', 
     dirtyDocuments: 0,
   });
   const migrate = vi.spyOn(ipc, 'storageMigrate').mockResolvedValue(true);
-  await submit();
+  await reviewMigration();
   await vi.waitFor(() =>
     expect(document.querySelector('dialog[aria-label="迁移数据并重启"]')).not.toBeNull(),
   );
@@ -438,8 +560,9 @@ it('warns for a changed data root alone without previewing or starting migration
   const migrate = vi.spyOn(ipc, 'storageMigrate');
   await storageDraft();
   const closing = useWorkspaceStore().settingsCloseGuard!();
-  await nextTick();
-  expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).not.toBeNull();
+  await vi.waitFor(() =>
+    expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).not.toBeNull(),
+  );
   document.querySelector<HTMLButtonElement>('dialog [aria-label="关闭对话框"]')!.click();
   expect(await closing).toBe(false);
   expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
@@ -460,6 +583,7 @@ it('restores storage preferences and clears a pending directory change without m
   const concurrency = await input('[aria-label="每主机并发传输数"]', '6');
   const logLevel = await input('[aria-label="日志级别"]', 'debug', 'change');
 
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.transferConcurrency).toBe(6));
   await restoreDefaults();
   expect(download.value).toBe('');
   expect(concurrency.value).toBe('3');
@@ -467,11 +591,12 @@ it('restores storage preferences and clears a pending directory change without m
   expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
     'C:\\ServerDeck',
   );
-  expect(root.querySelector('[type="submit"]')?.textContent?.trim()).toBe('保存设置');
-  expect(save).not.toHaveBeenCalled();
-  await submit();
+  expect(root.querySelector('[type="submit"]')).toBeNull();
+  expect(root.querySelector('.form-footer .primary')).toBeNull();
+  await vi.waitFor(() => expect(useApplicationStore().state!.config.transferConcurrency).toBe(3));
   expect(preview).not.toHaveBeenCalled();
-  expect(save).toHaveBeenCalledExactlyOnceWith(
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(save).toHaveBeenLastCalledWith(
     expect.objectContaining({
       theme: 'light',
       transferConcurrency: 3,
@@ -512,7 +637,8 @@ it('previews migration without saving and cancellation preserves all drafts', as
   await storageDraft();
   await select(0);
   await input('[data-testid="theme-select"]', 'light', 'change');
-  await submit();
+  await select(3);
+  await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   expect(preview).toHaveBeenCalledWith('D:\\ServerDeck');
   expect(save).not.toHaveBeenCalled();
@@ -539,7 +665,7 @@ it('requires explicit document discard and sends all preferences with confirmed 
   });
   const migrate = vi.spyOn(ipc, 'storageMigrate').mockResolvedValue(true);
   await storageDraft();
-  await submit();
+  await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   const button = [...document.querySelectorAll<HTMLButtonElement>('dialog button')].find(
     (b) => b.textContent?.trim() === '确认迁移并重启',
@@ -565,7 +691,7 @@ it('retains target and preferences when migration preflight fails', async () => 
   vi.spyOn(ipc, 'storagePreview').mockRejectedValue({ message: '目标目录必须为空' });
   const migrate = vi.spyOn(ipc, 'storageMigrate');
   await storageDraft();
-  await submit();
+  await reviewMigration();
   await vi.waitFor(() => expect(useApplicationStore().error).toBe('目标目录必须为空'));
   expect(migrate).not.toHaveBeenCalled();
   expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
@@ -590,7 +716,7 @@ it('keeps migration visible and locked after restart is scheduled until the proc
   const application = useApplicationStore();
   application.state!.storage!.notice = '数据迁移完成，旧副本已清理。';
   application.notice = '上次迁移完成';
-  await submit();
+  await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
   const discard = dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
@@ -641,7 +767,8 @@ it('retains the migration dialog and drafts on preparation failure and allows re
   await storageDraft();
   await select(0);
   await input('[data-testid="theme-select"]', 'light', 'change');
-  await submit();
+  await select(3);
+  await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
   const confirm = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
@@ -683,7 +810,8 @@ it('applies saved preferences immediately when a path alias requires no restart'
   await storageDraft();
   await select(0);
   await input('[data-testid="theme-select"]', 'light', 'change');
-  await submit();
+  await select(3);
+  await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   [...document.querySelectorAll<HTMLButtonElement>('dialog button')]
     .find((b) => b.textContent?.trim() === '确认迁移并重启')!

@@ -62,6 +62,46 @@ it('blocks area switches and resource activation while settings are busy', () =>
   expect(workspace.area).toBe('home');
 });
 
+it('keeps the local workspace out of home tabs while retaining it across navigation', () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('terminals', '');
+  const local = workspace.current;
+  workspace.showHome();
+  expect(workspace.homeTabs).toEqual([]);
+  expect(workspace.current).toBeUndefined();
+  workspace.navigate('files', 'a');
+  expect(workspace.homeTabs.map((tab) => tab.key)).toEqual(['host:a']);
+  workspace.navigate('terminals', '');
+  expect(workspace.current).toBe(local);
+  workspace.showHome();
+  expect(workspace.current?.key).toBe('host:a');
+});
+
+it.each(['current', 'right', 'others', 'all'] as const)(
+  'keeps local sessions running when closing the %s home tab range',
+  async (scope) => {
+    const workspace = useWorkspaceStore(),
+      terminals = useTerminalsStore();
+    workspace.navigate('files', 'a');
+    terminals.open(null);
+    terminals.update(terminals.focused, { sessionId: 'local-session' });
+    const local = terminals.tabs[0]!;
+    workspace.navigate('terminals', '');
+    workspace.navigate('files', 'b');
+    workspace.activate(scope === 'others' ? 'host:b' : 'host:a');
+    const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+    await workspace.close('host:a', scope);
+    expect(workspace.area).toBe('home');
+    expect(workspace.current?.key ?? '').toBe(
+      scope === 'all' ? '' : scope === 'current' ? 'host:b' : 'host:a',
+    );
+    expect(terminals.tabs).toEqual([local]);
+    expect(close).not.toHaveBeenCalled();
+    workspace.navigate('terminals', '');
+    expect(terminals.focused).toBe(local.panes[0]?.key);
+  },
+);
+
 it('returns to an existing plugin configuration without replacing its draft', () => {
   const workspace = useWorkspaceStore();
   workspace.openPluginSettings('cn.hiboot.plugins.assistant');
@@ -255,8 +295,8 @@ it.each([
     'extension:cn.hiboot.plugins.assistant:assistant:',
   ],
   ['right', ['host:', 'host:a'], 'host:a'],
-  ['others', ['host:a'], 'host:a'],
-  ['all', [], ''],
+  ['others', ['host:', 'host:a'], 'host:a'],
+  ['all', ['host:'], ''],
 ] as const)('closes %s relative to the requested inactive tab', async (scope, keys, active) => {
   const workspace = openTabs();
   await workspace.close('host:a', scope);
@@ -266,13 +306,16 @@ it.each([
   if (active === 'host:a') expect(workspace.hostId).toBe('a');
 });
 
-it('closes all workspaces to the right and preserves the active tab', async () => {
+it('closes home tabs to the right and preserves the active local workspace', async () => {
   const workspace = openTabs();
   workspace.activate('host:');
-  await workspace.close('host:', 'right');
+  await workspace.close('host:a', 'right');
   expect(workspace.active).toBe('host:');
   expect(workspace.hostId).toBe('');
-  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:']);
+  expect(workspace.area).toBe('local');
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:', 'host:a']);
+  workspace.showHome();
+  expect(workspace.current?.key).toBe('host:a');
 });
 
 it('keeps adjacent-tab selection for closing the current tab', async () => {
@@ -282,8 +325,10 @@ it('keeps adjacent-tab selection for closing the current tab', async () => {
   expect(workspace.active).toBe('extension:cn.hiboot.plugins.assistant:assistant:');
   expect(workspace.tabs.some((tab) => tab.view === 'plugins')).toBe(false);
   await workspace.close('extension:cn.hiboot.plugins.assistant:assistant:');
-  expect(workspace.active).toBe('host:');
-  expect(workspace.hostId).toBe('');
+  expect(workspace.active).toBe('');
+  expect(workspace.area).toBe('home');
+  expect(workspace.homeTabs).toEqual([]);
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:']);
 });
 
 it.each(['current', 'right', 'others', 'all'] as const)(

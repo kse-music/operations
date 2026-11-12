@@ -211,6 +211,9 @@
 .terminal-find input {
   flex: 1;
 }
+.terminal-find input:focus-visible {
+  outline: none;
+}
 .fingerprint {
   display: block;
   overflow-wrap: anywhere;

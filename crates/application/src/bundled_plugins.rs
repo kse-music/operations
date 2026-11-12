@@ -393,6 +393,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn docker_search_styles_upgrade_from_installed_2_3_4_without_resetting_settings() {
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+        use sha2::{Digest, Sha256};
+
+        let id = "cn.hiboot.plugins.docker";
+        let (_, bytes) = bundled(id);
+        let mut previous: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        let css = previous["files"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|file| file["path"] == "frontend.css")
+            .unwrap();
+        let current_css = STANDARD.decode(css["content"].as_str().unwrap()).unwrap();
+        let mut old_css = current_css.clone();
+        old_css.extend_from_slice(b"\n.operations-view .ops-search input:focus-visible{outline:2px solid var(--accent);outline-offset:3px}\n");
+        css["content"] = json!(STANDARD.encode(&old_css));
+        let css_digest = previous["manifest"]["files"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|file| file["path"] == "frontend.css")
+            .unwrap();
+        css_digest["size"] = json!(old_css.len());
+        css_digest["sha256"] = json!(format!("{:x}", Sha256::digest(&old_css)));
+        previous["manifest"]["version"] = json!("2.3.4");
+
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let logs = dir.path().join("logs");
+        let app = Application::initialize(data.clone(), logs.clone()).unwrap();
+        app.provision_bundled_plugin(id, &serde_json::to_vec(&previous).unwrap(), false)
+            .unwrap();
+        app.database.mark_bundled_plugin_provisioned(id).unwrap();
+        app.plugins
+            .settings_write(id, &json!({"keep":"search-style-upgrade"}))
+            .unwrap();
+        let original = app.plugins.detail(id).unwrap();
+        assert_eq!(original.manifest.version, "2.3.4");
+        assert_eq!(
+            app.plugin_frontend_asset(id, &original.revision, "server", "frontend.css")
+                .unwrap(),
+            old_css
+        );
+        app.shutdown().await;
+
+        let restarted = Application::initialize(data, logs).unwrap();
+        restarted.provision_bundled_plugins().unwrap();
+        let upgraded = restarted.plugins.detail(id).unwrap();
+        let current: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        assert_eq!(
+            upgraded.manifest.version,
+            current["manifest"]["version"].as_str().unwrap()
+        );
+        assert_ne!(upgraded.manifest.version, original.manifest.version);
+        assert_ne!(upgraded.revision, original.revision);
+        assert!(upgraded.enabled);
+        assert_eq!(
+            restarted.plugins.settings_read(id).unwrap()["keep"],
+            "search-style-upgrade"
+        );
+        assert_eq!(
+            restarted
+                .plugin_frontend_asset(id, &upgraded.revision, "server", "frontend.css")
+                .unwrap(),
+            current_css
+        );
+        assert!(
+            restarted
+                .plugin_frontend_asset(id, &original.revision, "server", "frontend.css")
+                .is_err()
+        );
+        restarted.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn bundled_update_preserves_settings_enable_choices_uploads_and_uninstall() {
         let packages = [
             bundled("cn.hiboot.plugins.docker"),

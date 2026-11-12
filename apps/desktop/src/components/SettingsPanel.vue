@@ -6,6 +6,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import ProductSettings from './ProductSettings.vue';
 import Modal from './Modal.vue';
 import { useStorageMigration } from '../composables/storage-migration';
+import { useSettingsAutosave } from '../composables/settings-autosave';
 import {
   defaultProductPreferences,
   settingsCategories,
@@ -13,7 +14,6 @@ import {
 } from '../types/product';
 import { useApplicationStore } from '../stores/application';
 import { useWorkspaceStore } from '../stores/workspace';
-import type { AppConfig } from '../types/ipc';
 import {
   defaultInterfaceFontSize,
   defaultTerminalPreferences,
@@ -37,31 +37,20 @@ const emit = defineEmits<{ category: [category: SettingsCategory] }>();
 const categoryLabel = computed(
   () => settingsCategories.find((item) => item.id === props.category)!.label,
 );
-const draft = ref<AppConfig | null>(null);
-const baseline = ref('');
-const submitting = ref(false);
-watch(
-  () => application.state?.config,
-  (config) => {
-    if (
-      config &&
-      draft.value &&
-      !submitting.value &&
-      JSON.stringify(draft.value) !== baseline.value
-    ) {
-      draft.value.sidebarWidth = config.sidebarWidth;
-      baseline.value = JSON.stringify(config);
-      return;
-    }
-    draft.value = config ? (JSON.parse(JSON.stringify(config)) as AppConfig) : null;
-    if (draft.value) {
-      draft.value.product ??= defaultProductPreferences();
-      draft.value.interfaceFontSize ??= defaultInterfaceFontSize;
-    }
-    baseline.value = JSON.stringify(draft.value);
-  },
-  { immediate: true },
+const form = ref<HTMLFormElement>();
+const reviewing = ref(false);
+function invalidField(includeDataRoot = false) {
+  return form.value?.querySelector<HTMLInputElement | HTMLSelectElement>(
+    includeDataRoot
+      ? 'input:invalid, select:invalid'
+      : 'input:invalid:not(#data-root-directory), select:invalid',
+  );
+}
+const autosave = useSettingsAutosave(
+  () => !!form.value && !invalidField(),
+  () => reviewing.value || busy.value || !!preview.value,
 );
+const { draft, pending, failed } = autosave;
 
 const fontSizeStep = computed({
   get: () =>
@@ -81,9 +70,7 @@ watch(
   (preview) => (application.interfaceFontSizePreview = preview),
   { immediate: true },
 );
-const unsaved = computed(
-  () => changed.value || (!!draft.value && JSON.stringify(draft.value) !== baseline.value),
-);
+const unsaved = computed(() => changed.value || pending.value);
 const closePrompt = ref(false);
 watch(
   () => application.saving || busy.value,
@@ -93,9 +80,10 @@ watch(
 watch(unsaved, (value) => (workspace.settingsDirty = value), { immediate: true, flush: 'sync' });
 let closeDecision: Promise<boolean> | null = null;
 let resolveClose: ((discard: boolean) => void) | undefined;
-function confirmClose(): Promise<boolean> {
-  if (application.saving || busy.value) return Promise.resolve(false);
-  if (!unsaved.value) return Promise.resolve(true);
+async function confirmClose(): Promise<boolean> {
+  if (application.saving || busy.value) return false;
+  await autosave.flush();
+  if (!unsaved.value) return true;
   if (!closeDecision) {
     closePrompt.value = true;
     closeDecision = new Promise((resolve) => (resolveClose = resolve));
@@ -117,11 +105,8 @@ onBeforeUnmount(() => {
   finishClose(false);
 });
 
-async function submit(event: Event): Promise<void> {
-  const form = event.currentTarget as HTMLFormElement;
-  const invalid = form.querySelector<HTMLInputElement | HTMLSelectElement>(
-    'input:invalid, select:invalid',
-  );
+async function validate(includeDataRoot = false): Promise<boolean> {
+  const invalid = invalidField(includeDataRoot);
   if (invalid) {
     const panel = invalid.closest('.settings-category');
     const category = settingsCategories.find((item) => panel?.id === `settings-panel-${item.id}`);
@@ -129,16 +114,21 @@ async function submit(event: Event): Promise<void> {
     await nextTick();
     invalid.focus();
     invalid.reportValidity();
-    return;
+    return false;
   }
-  if (draft.value) {
-    submitting.value = true;
-    try {
-      if (changed.value) await migration.review(draft.value);
-      else await application.save(draft.value);
-    } finally {
-      submitting.value = false;
-    }
+  return true;
+}
+async function submit(): Promise<void> {
+  if (await validate()) await autosave.flush();
+}
+async function reviewMigration(): Promise<void> {
+  if (!changed.value || application.saving || busy.value || reviewing.value) return;
+  if (!(await validate(true)) || !draft.value) return;
+  reviewing.value = true;
+  try {
+    await migration.review(draft.value);
+  } finally {
+    reviewing.value = false;
   }
 }
 function capture(action: string, event: KeyboardEvent): void {
@@ -186,18 +176,18 @@ function restoreDefaults(): void {
       <div>
         <h1 id="settings-title">{{ categoryLabel }}</h1>
         <p class="section-description">
-          {{ tr('界面字号可即时预览，连接参数在新建连接时生效。') }}
+          {{
+            category === 'storage'
+              ? tr('设置修改后自动保存；更改数据根目录需确认迁移并重启。')
+              : tr('设置修改后自动保存，连接参数在新建连接时生效。')
+          }}
         </p>
       </div>
       <span class="subtle">{{ tr('仅保存在此设备') }}</span>
     </div>
-    <form v-if="draft" class="settings-form" novalidate @submit.prevent="submit">
+    <form v-if="draft" ref="form" class="settings-form" novalidate @submit.prevent="submit">
       <div v-show="category === 'general'" id="settings-panel-general" class="settings-category">
-        <ProductSettings
-          v-model="draft.product"
-          section="general"
-          :disabled="application.saving || busy"
-        >
+        <ProductSettings v-model="draft.product" section="general" :disabled="reviewing || busy">
           <label
             >{{ tr('外观主题 ')
             }}<select v-model="draft.theme" data-testid="theme-select">
@@ -244,7 +234,7 @@ function restoreDefaults(): void {
         </ProductSettings>
       </div>
       <div v-show="category === 'terminal'" id="settings-panel-terminal" class="settings-category">
-        <fieldset :disabled="application.saving || busy">
+        <fieldset :disabled="reviewing || busy">
           <legend>{{ tr('终端显示') }}</legend>
           <div class="settings-fields">
             <label
@@ -308,7 +298,7 @@ function restoreDefaults(): void {
             >
           </div>
         </fieldset>
-        <fieldset :disabled="application.saving || busy">
+        <fieldset :disabled="reviewing || busy">
           <legend>{{ tr('输入与粘贴') }}</legend>
           <div class="settings-fields">
             <label
@@ -334,11 +324,7 @@ function restoreDefaults(): void {
             </div>
           </div>
         </fieldset>
-        <ProductSettings
-          v-model="draft.product"
-          section="connection"
-          :disabled="application.saving || busy"
-        >
+        <ProductSettings v-model="draft.product" section="connection" :disabled="reviewing || busy">
           <label
             >{{ tr('SSH 连接超时（秒） ')
             }}<input
@@ -356,7 +342,7 @@ function restoreDefaults(): void {
         id="settings-panel-shortcuts"
         class="settings-category settings-shortcuts"
       >
-        <fieldset :disabled="application.saving || busy">
+        <fieldset :disabled="reviewing || busy">
           <legend>{{ tr('终端快捷键') }}</legend>
           <div class="settings-fields">
             <p class="subtle full-width">
@@ -379,11 +365,11 @@ function restoreDefaults(): void {
         <ProductSettings
           v-model="draft.product"
           section="shortcuts"
-          :disabled="application.saving || busy"
+          :disabled="reviewing || busy"
         />
       </div>
       <div v-show="category === 'storage'" id="settings-panel-storage" class="settings-category">
-        <fieldset v-if="application.state?.storage" :disabled="application.saving || busy">
+        <fieldset v-if="application.state?.storage" :disabled="reviewing || busy">
           <legend>{{ tr('应用数据位置') }}</legend>
           <div class="settings-fields">
             <div class="full-width settings-field">
@@ -433,12 +419,8 @@ function restoreDefaults(): void {
             </p>
           </div>
         </fieldset>
-        <ProductSettings
-          v-model="draft.product"
-          section="storage"
-          :disabled="application.saving || busy"
-        />
-        <fieldset :disabled="application.saving || busy">
+        <ProductSettings v-model="draft.product" section="storage" :disabled="reviewing || busy" />
+        <fieldset :disabled="reviewing || busy">
           <legend>{{ tr('传输与日志') }}</legend>
           <div class="settings-fields">
             <label
@@ -465,24 +447,43 @@ function restoreDefaults(): void {
         </fieldset>
       </div>
       <div class="form-footer">
-        <p class="subtle">{{ tr('统一保存所有分类。配置不包含密码、私钥或私钥口令。') }}</p>
+        <p class="subtle" role="status" aria-live="polite">
+          {{
+            application.saving
+              ? tr('正在自动保存…')
+              : failed && pending
+                ? tr('自动保存失败，修改已保留，请重试。')
+                : pending
+                  ? tr('等待自动保存，请确保填写完整且数值有效。')
+                  : tr('更改会自动保存到此设备。')
+          }}
+        </p>
         <div class="action-row">
           <button
             class="button"
             type="button"
-            :disabled="application.saving || busy"
+            :disabled="reviewing || busy"
             @click="restoreDefaults"
           >
             {{ tr(' 恢复默认 ') }}
           </button>
-          <button class="button primary" type="submit" :disabled="application.saving || busy">
-            {{
-              application.saving || busy
-                ? tr('处理中…')
-                : changed
-                  ? tr('保存、迁移并重启')
-                  : tr('保存设置')
-            }}
+          <button
+            v-if="category === 'storage' && changed"
+            class="button primary"
+            type="button"
+            :disabled="application.saving || busy"
+            @click="reviewMigration"
+          >
+            {{ busy ? tr('处理中…') : tr('迁移并重启') }}
+          </button>
+          <button
+            v-if="failed && pending"
+            class="button"
+            type="button"
+            :disabled="application.saving || busy"
+            @click="autosave.flush"
+          >
+            {{ tr('重试') }}
           </button>
         </div>
       </div>

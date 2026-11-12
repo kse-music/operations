@@ -5,9 +5,9 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { nextTick, ref, watch } from 'vue';
 import { Eye, FileText, ShieldCheck } from '@lucide/vue';
 import Modal from './Modal.vue';
+import HostFolderPicker from './HostFolderPicker.vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
-import { folderPath } from '../services/host-tree';
 import { authLabels, type ImportPreview } from '../types/hosts';
 const emit = defineEmits<{ close: [] }>();
 const store = useHostsStore();
@@ -99,12 +99,13 @@ useErrorNotifications(fileError);
       <div class="import-controls">
         <div class="import-destination">
           <label for="openssh-import-group">{{ tr('导入到') }}</label>
-          <select id="openssh-import-group" v-model="group" :disabled="store.busy">
-            <option :value="null">{{ tr('根目录') }}</option>
-            <option v-for="g in store.catalog?.groups" :key="g.id" :value="g.id">
-              {{ folderPath(store.catalog?.groups ?? [], g.id) }}
-            </option>
-          </select>
+          <HostFolderPicker
+            id="openssh-import-group"
+            v-model="group"
+            :label="tr('导入到')"
+            :groups="store.catalog?.groups ?? []"
+            :disabled="store.busy"
+          />
         </div>
         <button
           class="button"

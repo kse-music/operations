@@ -2,6 +2,7 @@
 import { tr } from '../i18n/messages';
 
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { Download, LoaderCircle, ShieldCheck, ShieldOff, SquareTerminal, X } from '@lucide/vue';
 import { aiApi } from '../services/ai';
 import { errorMessage } from '../services/ipc';
 import { usePluginsStore } from '../stores/plugins';
@@ -33,6 +34,14 @@ const statuses = ref<Record<string, LocalCodexStatus>>({}),
   message = ref('');
 let installation = '',
   disposed = false;
+function sourceState(id: string): string {
+  if (installation && busy.value === id) return tr('下载中');
+  const status = statuses.value[id];
+  if (!status) return tr('等待状态检测');
+  if (status.installed === false) return tr('未安装');
+  if (!status.authorized) return tr('未授权');
+  return status.model ? tr('已就绪') : tr('未就绪');
+}
 async function refresh() {
   loading.value = true;
   error.value = '';
@@ -118,65 +127,150 @@ onBeforeUnmount(() => {
     console.error('Local model installation cancellation failed', errorMessage(cause)),
   );
 });
+defineExpose({ refresh, loading, busy });
 </script>
 <template>
-  <section class="asset-panel local-model-sources" :aria-label="tr('本地模型来源')">
-    <div class="toolbar">
-      <h2>{{ tr('本地模型来源') }}</h2>
-      <button class="button" :disabled="loading || !!busy" @click="refresh">
-        {{ tr('刷新状态') }}
-      </button>
-    </div>
-    <p class="subtle">
+  <section class="local-model-sources" :aria-label="tr('本地CLI')">
+    <p class="subtle local-sources-note">
       {{ tr('所有插件共用平台配置。插件只能读取公开状态并调用模型，无法读取登录凭据。') }}
     </p>
-    <p v-if="loading" role="status">{{ tr('正在检测本地工具…') }}</p>
-    <p v-if="error" class="error-text" role="alert">{{ error }}</p>
-    <p v-if="message" role="status">{{ message }}</p>
-    <article v-for="source in definitions" :key="source.id" class="local-model-source">
-      <div>
-        <strong>{{ source.name }}</strong>
-        <p>{{ tr(statuses[source.id]?.message || '等待状态检测') }}</p>
-      </div>
-      <button
-        v-if="statuses[source.id]?.installed === false"
-        class="button"
-        :disabled="!!busy || statuses[source.id]?.installSupported === false"
-        @click="install(source)"
-      >
-        {{ busy === source.id ? tr('正在下载…') : tr('下载安装') }}</button
-      ><button
-        v-else
-        class="button"
-        :disabled="!!busy || loading || !statuses[source.id]"
-        @click="authorize(source, !statuses[source.id]?.authorized)"
-      >
-        {{ statuses[source.id]?.authorized ? tr('撤销授权') : tr('授权使用') }}</button
-      ><button v-if="installation && busy === source.id" class="button" @click="cancel">
-        {{ tr(' 取消下载 ') }}
-      </button>
-    </article>
+    <p v-if="loading" class="asset-feedback" role="status">{{ tr('正在检测本地工具…') }}</p>
+    <p v-if="error" class="asset-feedback error-text" role="alert">{{ error }}</p>
+    <p v-if="message" class="asset-feedback success" role="status">{{ message }}</p>
+    <div class="local-source-list">
+      <article v-for="source in definitions" :key="source.id" class="local-model-source">
+        <header class="local-source-heading">
+          <span class="local-source-icon"><SquareTerminal :size="22" aria-hidden="true" /></span>
+          <div class="local-source-title">
+            <h3>{{ source.name }}</h3>
+            <span class="local-source-state" :class="{ ready: !!statuses[source.id]?.model }">
+              {{ sourceState(source.id) }}
+            </span>
+          </div>
+        </header>
+        <p class="local-source-message">{{ tr(statuses[source.id]?.message || '等待状态检测') }}</p>
+        <div class="local-source-actions">
+          <button
+            v-if="statuses[source.id]?.installed === false"
+            class="button primary"
+            :disabled="!!busy || statuses[source.id]?.installSupported === false"
+            @click="install(source)"
+          >
+            <LoaderCircle
+              v-if="installation && busy === source.id"
+              :size="15"
+              class="model-spin"
+              aria-hidden="true"
+            />
+            <Download v-else :size="15" aria-hidden="true" />
+            {{ busy === source.id ? tr('正在下载…') : tr('下载安装') }}
+          </button>
+          <button
+            v-else
+            class="button"
+            :class="{ primary: !statuses[source.id]?.authorized }"
+            :disabled="!!busy || loading || !statuses[source.id]"
+            @click="authorize(source, !statuses[source.id]?.authorized)"
+          >
+            <ShieldOff v-if="statuses[source.id]?.authorized" :size="15" aria-hidden="true" />
+            <ShieldCheck v-else :size="15" aria-hidden="true" />
+            {{ statuses[source.id]?.authorized ? tr('撤销授权') : tr('授权使用') }}
+          </button>
+          <button v-if="installation && busy === source.id" class="button" @click="cancel">
+            <X :size="15" aria-hidden="true" />{{ tr(' 取消下载 ') }}
+          </button>
+        </div>
+      </article>
+    </div>
   </section>
 </template>
 <style scoped>
 .local-model-sources {
-  padding: 20px;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.local-sources-note {
+  margin: 0;
+  line-height: 1.65;
+}
+.local-model-sources > .asset-feedback {
+  margin: 0;
+}
+.local-source-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
 .local-model-source {
   display: flex;
-  gap: 12px;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.local-source-heading {
+  display: flex;
   align-items: center;
-  border-top: 1px solid var(--line);
-  padding: 14px 0;
+  gap: 12px;
 }
-.local-model-source > div {
-  flex: 1;
+.local-source-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--accent-bg);
+  color: var(--accent);
 }
-.local-model-source p {
-  margin: 6px 0;
+.local-source-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+}
+.local-source-title h3 {
+  margin: 0;
+  font-size: var(--font-size-section);
+  overflow-wrap: anywhere;
+}
+.local-source-state {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
   color: var(--muted);
+  font-size: var(--font-size-caption);
+  line-height: 1.5;
 }
-h2 {
-  font-size: 16px;
+.local-source-state.ready {
+  border-color: transparent;
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.local-source-message {
+  flex: 1;
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-size-body);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.local-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+@container workspace (max-width: 740px) {
+  .local-source-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

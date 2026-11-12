@@ -6,6 +6,7 @@ import { chromium } from 'playwright-core';
 import { createServer } from 'vite';
 import {
   closeApplicationSettings,
+  closePluginSettings,
   openPluginSettings,
   openPluginFunction,
 } from './ui-navigation.mjs';
@@ -316,6 +317,9 @@ try {
     assert.equal(await config.locator('.plugin-config-footer').count(), 0);
     const settings = config.frameLocator('iframe');
     await settings.getByRole('group', { name: '使用模型' }).waitFor();
+    await settings.getByRole('heading', { name: '本地CLI', exact: true }).waitFor();
+    assert.equal(await settings.locator('.binding-footer').count(), 0);
+    assert.equal(await settings.getByRole('button', { name: '保存绑定', exact: true }).count(), 0);
     assert.equal(await settings.locator('input[value=""]').count(), 0);
     await settings.locator('input[value="remote-a"]:checked').waitFor();
     assert(await settings.locator('input[value="local-codex"]').isDisabled());
@@ -326,19 +330,16 @@ try {
     const geometry = await frame.evaluate(() => ({
       overflow: document.documentElement.scrollWidth > innerWidth,
       outerScroll: document.documentElement.scrollHeight > innerHeight + 1,
-      footerBottom: document.querySelector('.binding-footer').getBoundingClientRect().bottom,
-      height: innerHeight,
     }));
     assert.equal(geometry.overflow, false);
     assert.equal(geometry.outerScroll, false);
-    assert(geometry.footerBottom <= geometry.height + 1);
-    await settings.locator('input[value="local-claude-code"]').check();
-    await settings.getByText('有未保存的选择', { exact: true }).waitFor();
     await page.evaluate(() => {
       window.holdSave = true;
     });
-    await settings.getByRole('button', { name: '保存绑定', exact: true }).click();
+    await settings.locator('input[value="local-claude-code"]').check();
     await page.waitForFunction(() => !!window.releaseSave);
+    await settings.getByText('正在保存…', { exact: true }).waitFor();
+    assert(await settings.locator('input[value="remote-a"]').isDisabled());
     assert(await config.getByRole('tab', { name: '基本信息', exact: true }).isDisabled());
     assert(await config.getByRole('button', { name: '返回插件列表', exact: true }).isDisabled());
     await page.evaluate(() => {
@@ -359,19 +360,19 @@ try {
     await config.getByRole('tab', { name: '插件配置', exact: true }).click();
     const reopened = config.frameLocator('iframe');
     await reopened.locator('input[value="local-claude-code"]:checked').waitFor();
-    await reopened.locator('input[value="remote-a"]').check();
     await page.evaluate(() => {
       window.failSave = true;
     });
-    await reopened.getByRole('button', { name: '保存绑定', exact: true }).click();
+    await reopened.locator('input[value="remote-a"]').check();
     await reopened.getByRole('alert').filter({ hasText: '模型绑定写入失败' }).waitFor();
     assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'local-claude-code');
+    await reopened.locator('input[value="local-claude-code"]:checked').waitFor();
     await page.evaluate(() => {
       window.failSave = false;
     });
-    await reopened.getByRole('button', { name: '保存绑定', exact: true }).click();
+    await reopened.locator('input[value="remote-a"]').check();
     await reopened.getByText('模型绑定已保存', { exact: true }).waitFor();
-    // A long catalog scrolls inside the content area and keeps save/cancel visible.
+    // A long catalog scrolls inside the content area without a bottom binding bar.
     await page.evaluate(() => {
       window.layoutModels.push(
         ...Array.from({ length: 98 }, (_, i) => ({
@@ -383,10 +384,15 @@ try {
     });
     await reopened.getByRole('button', { name: '刷新', exact: true }).click();
     await reopened.locator('.binding-count').getByText('100', { exact: true }).waitFor();
-    assert(await reopened.getByRole('button', { name: '保存绑定', exact: true }).isVisible());
+    assert(
+      await reopened
+        .locator('.binding-content')
+        .evaluate((content) => content.scrollHeight > content.clientHeight),
+    );
     await reopened.locator('input[value="local-claude-code"]').check();
-    await reopened.getByRole('button', { name: '取消', exact: true }).click();
-    assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'remote-a');
+    await reopened.getByText('模型绑定已保存', { exact: true }).waitFor();
+    await closePluginSettings(page);
+    assert.equal(await page.evaluate(() => window.layoutSettings.modelId), 'local-claude-code');
     await config.locator('.plugin-configuration').waitFor({ state: 'hidden' });
     const dockerConfig = await openPluginSettings(page, 'Docker 管理');
     await dockerConfig.getByRole('tab', { name: '插件配置', exact: true }).click();
@@ -487,20 +493,17 @@ try {
       .locator('.plugin-workspace:visible > .plugin-heading')
       .getByRole('button', { name: '插件设置', exact: true })
       .click();
-    const assistantConfig = page.getByRole('dialog', {
-      name: 'AI 运维助手 · 插件设置',
-      exact: true,
-    });
+    const assistantConfig = page.locator('.settings-page');
     const assistantSettings = assistantConfig.frameLocator('iframe');
-    await assistantSettings.locator('input[value="remote-a"]:checked').waitFor();
-    await assistantSettings.locator('input[value="local-claude-code"]').check();
-    await assistantSettings.getByRole('button', { name: '保存绑定', exact: true }).click();
+    await assistantSettings.locator('input[value="local-claude-code"]:checked').waitFor();
+    await assistantSettings.locator('input[value="remote-a"]').check();
     await assistantSettings.getByText('模型绑定已保存', { exact: true }).waitFor();
     await shot('assistant-standalone-settings');
-    await assistantSettings.getByRole('button', { name: '取消', exact: true }).click();
+    await closePluginSettings(page);
+    await closeApplicationSettings(page);
     await assistantConfig.waitFor({ state: 'hidden' });
     await assistant
-      .getByText('本地 Claude Code · Enter 发送 · Shift + Enter 换行', { exact: true })
+      .getByText('日常诊断模型 · Enter 发送 · Shift + Enter 换行', { exact: true })
       .waitFor();
     assert.equal(await question.inputValue(), questionDraft);
     for (const surface of page.frames().filter((f) => f.url().includes('sdplugin.localhost'))) {

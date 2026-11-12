@@ -161,6 +161,10 @@
   flex: 1 1 230px;
   max-width: 380px;
 }
+.ops-search:focus-within {
+  border-color: var(--border);
+  color: var(--accent);
+}
 .operations-view .ops-search input {
   border: 0;
   padding: 8px 0;
@@ -169,6 +173,9 @@
   width: 100%;
   min-width: 0;
   outline-offset: 0;
+}
+.operations-view .ops-search input:focus-visible {
+  outline: none;
 }
 .ops-toolbar {
   gap: 10px;

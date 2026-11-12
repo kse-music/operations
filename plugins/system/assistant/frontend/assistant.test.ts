@@ -1191,7 +1191,7 @@ function chooseModel(id: string) {
   field.checked = true;
   field.dispatchEvent(new Event('change', { bubbles: true }));
 }
-it('shows model identity and disables models without credentials, without changing saved settings', async () => {
+it('shows model identity, disables unavailable models and saves a ready selection immediately', async () => {
   const original = (await api.models())[0] as AiModel;
   api.models.mockResolvedValue([
     original,
@@ -1209,27 +1209,36 @@ it('shows model identity and disables models without credentials, without changi
   expect(root.querySelector<HTMLInputElement>('input[value="missing"]')!.disabled).toBe(true);
   expect(root.querySelector<HTMLInputElement>('input[value="model-a"]')!.checked).toBe(true);
   expect(root.textContent).not.toContain('不绑定模型');
+  expect(root.textContent).toContain('本地CLI');
+  expect(root.textContent).not.toContain('本地来源');
+  expect(root.querySelector('.binding-footer')).toBeNull();
+  expect(root.querySelector('button[type="submit"]')).toBeNull();
   expect(root.querySelector('input[type="radio"][value=""]')).toBeNull();
+  root.querySelector<HTMLInputElement>('input[value="missing"]')!.click();
+  expect(api.settings.mock.calls.some(([op]) => op.kind === 'settings_write')).toBe(false);
   chooseModel('model-b');
   await settle();
-  expect(api.settings.mock.calls.some(([op]) => op.kind === 'settings_write')).toBe(false);
+  expect(api.settings).toHaveBeenCalledWith({
+    kind: 'settings_write',
+    value: { modelId: 'model-b' },
+  });
+  expect(root.querySelector<HTMLInputElement>('input[value="model-b"]')!.checked).toBe(true);
+  const writes = api.settings.mock.calls.filter(([op]) => op.kind === 'settings_write').length;
+  chooseModel('model-b');
+  await settle();
+  expect(api.settings.mock.calls.filter(([op]) => op.kind === 'settings_write')).toHaveLength(
+    writes,
+  );
 });
 it.each([null, 'removed-model'])(
   'requires a ready selection without replacing an unset or unavailable binding: %s',
   async (modelId) => {
     api.settings.mockResolvedValue({ modelId });
     await mountSettings();
-    expect(button('保存绑定').disabled).toBe(true);
+    expect(root.textContent).toContain(modelId ? '模型已不可用' : '未绑定');
     expect(root.querySelector('input[type="radio"]:checked')).toBeNull();
-    root
-      .querySelector('form')!
-      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-    await settle();
     expect(api.settings.mock.calls.some(([op]) => op.kind === 'settings_write')).toBe(false);
     chooseModel('model-a');
-    await settle();
-    expect(button('保存绑定').disabled).toBe(false);
-    button('保存绑定').click();
     await settle();
     expect(api.settings).toHaveBeenCalledWith({
       kind: 'settings_write',
@@ -1249,8 +1258,6 @@ it('persists a plugin binding across remounts while preserving other settings', 
   await mountSettings();
   chooseModel('model-a');
   await settle();
-  button('保存绑定').click();
-  await settle();
   expect(value).toEqual({ otherSetting: 'keep', modelId: 'model-a' });
   expect(root.textContent).toContain('模型绑定已保存');
   app.unmount();
@@ -1263,8 +1270,6 @@ it('persists a plugin binding across remounts while preserving other settings', 
 it('keeps successful save feedback when its own settings revision is broadcast', async () => {
   api.settings.mockResolvedValue({});
   await mountSettings();
-  chooseModel('model-a');
-  await settle();
   const reads = api.settings.mock.calls.filter(([op]) => op.kind === 'settings_read').length;
   api.settings.mockImplementation(async (op: { kind: string }) => {
     expect(op.kind).toBe('settings_write');
@@ -1275,7 +1280,7 @@ it('keeps successful save feedback when its own settings revision is broadcast',
     await nextTick();
     return null;
   });
-  button('保存绑定').click();
+  chooseModel('model-a');
   await settle();
   expect(root.textContent).toContain('模型绑定已保存');
   expect(api.settings.mock.calls.filter(([op]) => op.kind === 'settings_read')).toHaveLength(reads);
@@ -1284,20 +1289,18 @@ it('preserves the previous model binding when saving fails and allows retry', as
   const original = (await api.models())[0] as AiModel;
   api.models.mockResolvedValue([original, { ...original, id: 'model-b', name: '模型 B' }]);
   await mountSettings();
-  chooseModel('model-b');
-  await settle();
   api.settings.mockRejectedValueOnce({ message: '无法保存插件设置' });
-  button('保存绑定').click();
+  chooseModel('model-b');
   await settle();
   expect(root.textContent).toContain('无法保存插件设置');
   expect(root.textContent).not.toContain('模型绑定已保存');
-  expect(root.querySelector('.binding-current strong')?.textContent).toBe('模型 A');
-  expect(button('保存绑定').disabled).toBe(false);
+  expect(root.querySelector<HTMLInputElement>('input[value="model-a"]')!.checked).toBe(true);
+  expect(root.querySelector<HTMLInputElement>('input[value="model-b"]')!.checked).toBe(false);
   api.settings.mockResolvedValueOnce(null);
-  button('保存绑定').click();
+  chooseModel('model-b');
   await settle();
   expect(root.textContent).toContain('模型绑定已保存');
-  expect(root.querySelector('.binding-current strong')?.textContent).toBe('模型 B');
+  expect(root.querySelector<HTMLInputElement>('input[value="model-b"]')!.checked).toBe(true);
 });
 it('keeps model refresh in settings without a platform model navigation shortcut', async () => {
   await mountSettings();
@@ -1317,18 +1320,52 @@ it('clears earlier success feedback when a later binding save fails', async () =
   await mountSettings();
   chooseModel('model-b');
   await settle();
-  button('保存绑定').click();
-  await settle();
   expect(root.textContent).toContain('模型绑定已保存');
-  chooseModel('model-a');
-  await settle();
   api.settings.mockRejectedValueOnce({ message: '无法保存插件设置' });
-  button('保存绑定').click();
+  chooseModel('model-a');
   await settle();
   expect(root.textContent).toContain('无法保存插件设置');
   expect(root.textContent).not.toContain('模型绑定已保存');
-  expect(button('保存绑定').disabled).toBe(false);
+  expect(root.querySelector<HTMLInputElement>('input[value="model-b"]')!.checked).toBe(true);
 });
+it('blocks duplicate saves and model changes while an immediate save is pending', async () => {
+  const original = (await api.models())[0] as AiModel;
+  api.models.mockResolvedValue([original, { ...original, id: 'model-b', name: '模型 B' }]);
+  await mountSettings();
+  let finish!: () => void;
+  api.settings.mockImplementationOnce(() => new Promise<void>((resolve) => (finish = resolve)));
+  chooseModel('model-b');
+  await settle();
+  expect(root.textContent).toContain('正在保存…');
+  expect(root.querySelector('fieldset')!.disabled).toBe(true);
+  expect(button('刷新').disabled).toBe(true);
+  root.querySelector<HTMLInputElement>('input[value="model-a"]')!.click();
+  chooseModel('model-b');
+  await settle();
+  expect(api.settings.mock.calls.filter(([op]) => op.kind === 'settings_write')).toHaveLength(1);
+  finish();
+  await settle();
+  expect(root.querySelector('fieldset')!.disabled).toBe(false);
+  expect(root.querySelector<HTMLInputElement>('input[value="model-b"]')!.checked).toBe(true);
+  expect(root.textContent).toContain('模型绑定已保存');
+});
+it.each(['local-codex', 'local-claude-code'])(
+  'saves a ready local CLI selection immediately: %s',
+  async (id) => {
+    const original = (await api.models())[0] as AiModel;
+    api.models.mockResolvedValue([original, { ...original, id, name: id }]);
+    await mountSettings();
+    chooseModel(id);
+    await settle();
+    expect(api.settings).toHaveBeenCalledWith({
+      kind: 'settings_write',
+      value: { modelId: id },
+    });
+    expect(root.querySelector<HTMLInputElement>(`input[value="${id}"]`)!.checked).toBe(true);
+    expect(root.textContent).toContain('模型绑定已保存');
+    expect(navigation).not.toHaveBeenCalled();
+  },
+);
 it.each(['local-codex', 'local-claude-code'])(
   'uses an authorized local model from the same generic catalog: %s',
   async (id) => {

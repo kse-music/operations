@@ -24,6 +24,7 @@
   container: plugin-manager / inline-size;
 }
 .plugin-manager > .plugin-heading {
+  flex-wrap: wrap;
   padding-bottom: 18px;
   border-bottom: 1px solid var(--border);
 }
@@ -41,12 +42,6 @@
   flex-shrink: 0;
   flex-wrap: wrap;
   max-width: 100%;
-}
-.plugin-manager-footer {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
 }
 .plugin-manager .plugin-heading > div > .subtle {
   margin: 8px 0 0;
@@ -107,7 +102,7 @@
 }
 .plugin-card-content {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
   gap: 14px;
   padding: 20px 18px;
@@ -117,7 +112,7 @@
 .plugin-card-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   padding: 10px 18px;
   border-top: 1px solid var(--border);
@@ -127,6 +122,10 @@
 }
 .plugin-identifier {
   min-width: 0;
+  max-width: 100%;
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -136,15 +135,65 @@
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 .plugin-filterbar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-soft);
 }
-.plugin-filterbar > select {
-  width: auto;
+.plugin-filter-select {
+  position: relative;
+  min-width: 0;
+  color: var(--muted);
+}
+.plugin-filter-select > select,
+.plugin-search > input {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  padding: 5px 12px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+}
+.plugin-filter-select > select {
+  appearance: none;
+  padding-right: 34px;
+  cursor: pointer;
+}
+@supports (appearance: base-select) {
+  .plugin-filter-select > select {
+    appearance: base-select;
+  }
+  .plugin-filter-select > select::picker-icon {
+    display: none;
+  }
+}
+.plugin-filter-select > svg {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.plugin-filter-select > select:hover,
+.plugin-search > input:hover {
+  border-color: var(--border-strong);
+}
+.plugin-filter-select:focus-within,
+.plugin-search:focus-within {
+  color: var(--accent);
 }
 .plugin-search {
   position: relative;
@@ -160,13 +209,18 @@
   pointer-events: none;
 }
 .plugin-search > input {
-  width: 100%;
-  min-width: 0;
-  text-indent: 24px;
+  padding-left: 34px;
+}
+.plugin-search > input::placeholder {
+  color: var(--muted);
+}
+.plugin-search > input:focus-visible {
+  outline: none;
 }
 .plugin-filter-summary {
   margin: 0 0 0 auto;
   font-size: var(--font-size-caption);
+  line-height: 1.5;
 }
 .plugin-row-main {
   min-width: 0;
@@ -228,23 +282,11 @@
   align-items: center;
 }
 .plugin-toggle-button {
-  min-height: 28px;
-  padding: 3px 9px;
-  white-space: nowrap;
-}
-.plugin-remove-button {
-  border: 0;
-  color: var(--muted);
-  background: transparent;
-  display: grid;
-  place-items: center;
-  width: 30px;
   height: 30px;
-  border-radius: 5px;
-}
-.plugin-remove-button:hover {
-  color: var(--error);
-  background: var(--hover);
+  min-height: 30px;
+  border-radius: 6px;
+  padding: 0 9px;
+  white-space: nowrap;
 }
 .plugin-empty {
   display: grid;
@@ -264,6 +306,9 @@
   .plugin-installed-list {
     grid-template-columns: minmax(0, 1fr);
   }
+  .plugin-search {
+    flex-grow: 1;
+  }
   .plugin-filter-summary {
     flex-basis: 100%;
     margin-left: 0;
@@ -276,6 +321,10 @@
   }
   .plugin-search {
     flex-basis: 100%;
+    min-width: 0;
+  }
+  .plugin-filter-select {
+    flex: 1 1 0;
   }
   .plugin-card-content {
     padding: 16px 12px;
@@ -286,17 +335,10 @@
     width: 36px;
     height: 36px;
   }
-  .plugin-row-actions {
-    grid-column: 2;
-    justify-self: end;
-  }
   .plugin-card-footer {
     padding-inline: 12px;
     flex-wrap: wrap;
     gap: 8px;
-  }
-  .plugin-identifier {
-    flex-basis: 100%;
   }
 }
 .plugin-preview {
@@ -560,9 +602,6 @@
 }
 .plugin-permission-option:has(input:checked) {
   background: var(--hover);
-}
-.plugin-permission-option:has(input:focus-visible) {
-  border-color: var(--accent);
 }
 .plugin-permission-option input {
   accent-color: var(--accent);

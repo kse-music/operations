@@ -3,7 +3,16 @@ import { tr } from '../i18n/messages';
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { Download, Puzzle, PackagePlus, RefreshCw, Search, Settings2, Trash2 } from '@lucide/vue';
+import {
+  ChevronDown,
+  Download,
+  Puzzle,
+  PackagePlus,
+  RefreshCw,
+  Search,
+  Settings,
+  Trash2,
+} from '@lucide/vue';
 import PluginIcon from '../components/PluginIcon.vue';
 import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
@@ -178,6 +187,14 @@ onBeforeUnmount(() => {
         >
           <RefreshCw :size="15" aria-hidden="true" />{{ tr('刷新 ') }}
         </button>
+        <button
+          class="button"
+          type="button"
+          :disabled="savingDevelopmentKit"
+          @click="saveDevelopmentKit"
+        >
+          <Download :size="16" aria-hidden="true" />{{ tr('下载插件开发包 ') }}
+        </button>
         <button class="button primary" :disabled="plugins.busy || inspecting" @click="pick">
           <PackagePlus :size="16" aria-hidden="true" />{{ tr('安装插件 ') }}
         </button>
@@ -214,16 +231,22 @@ onBeforeUnmount(() => {
     </section>
     <section class="plugin-installed" :aria-label="tr('已安装插件')">
       <div class="plugin-filterbar" role="search" :aria-label="tr('筛选已安装插件')">
-        <select v-model="source" :aria-label="tr('插件来源')">
-          <option value="all">{{ tr('所有来源') }}</option>
-          <option value="system">{{ tr('系统内置') }}</option>
-          <option value="user">{{ tr('用户上传') }}</option>
-        </select>
-        <select v-model="status" :aria-label="tr('插件状态')">
-          <option value="all">{{ tr('所有状态') }}</option>
-          <option value="enabled">{{ tr('已启用') }}</option>
-          <option value="disabled">{{ tr('已禁用') }}</option>
-        </select>
+        <div class="plugin-filter-select">
+          <select v-model="source" :aria-label="tr('插件来源')">
+            <option value="all">{{ tr('所有来源') }}</option>
+            <option value="system">{{ tr('系统内置') }}</option>
+            <option value="user">{{ tr('用户上传') }}</option>
+          </select>
+          <ChevronDown :size="14" aria-hidden="true" />
+        </div>
+        <div class="plugin-filter-select">
+          <select v-model="status" :aria-label="tr('插件状态')">
+            <option value="all">{{ tr('所有状态') }}</option>
+            <option value="enabled">{{ tr('已启用') }}</option>
+            <option value="disabled">{{ tr('已禁用') }}</option>
+          </select>
+          <ChevronDown :size="14" aria-hidden="true" />
+        </div>
         <div class="plugin-search">
           <Search :size="16" aria-hidden="true" />
           <input
@@ -285,6 +308,17 @@ onBeforeUnmount(() => {
                 <button class="plugin-name-button" @click="emit('settings', plugin.manifest.id)">
                   {{ plugins.metadata(plugin, plugin.manifest.name) }}</button
                 ><span class="plugin-version">v{{ plugin.manifest.version }}</span>
+                <div class="plugin-card-badges">
+                  <span class="plugin-source">{{
+                    plugin.source === 'system' ? tr('系统内置') : tr('用户上传')
+                  }}</span>
+                  <span :class="['plugin-status', { enabled: plugin.enabled }]">{{
+                    plugin.enabled ? tr('已启用') : tr('已禁用')
+                  }}</span>
+                </div>
+                <span class="plugin-identifier" :title="plugin.manifest.id">{{
+                  plugin.manifest.id
+                }}</span>
               </div>
               <p>
                 {{
@@ -293,6 +327,8 @@ onBeforeUnmount(() => {
                 }}
               </p>
             </div>
+          </div>
+          <footer class="plugin-card-footer">
             <div class="plugin-row-actions">
               <button
                 class="button plugin-toggle-button"
@@ -303,15 +339,15 @@ onBeforeUnmount(() => {
                 {{ plugin.enabled ? tr('禁用') : tr('启用') }}
               </button>
               <button
-                class="tool-button"
+                class="icon-button"
                 :aria-label="tr('配置 {0}', plugins.metadata(plugin, plugin.manifest.name))"
                 :title="tr('插件配置')"
                 @click="emit('settings', plugin.manifest.id)"
               >
-                <Settings2 :size="16" aria-hidden="true" />
+                <Settings :size="16" aria-hidden="true" />
               </button>
               <button
-                class="plugin-remove-button"
+                class="icon-button danger plugin-remove-button"
                 :disabled="plugins.busy"
                 :aria-label="tr('卸载 {0}', plugins.metadata(plugin, plugin.manifest.name))"
                 :title="tr('卸载插件')"
@@ -323,33 +359,10 @@ onBeforeUnmount(() => {
                 <Trash2 :size="16" aria-hidden="true" />
               </button>
             </div>
-          </div>
-          <footer class="plugin-card-footer">
-            <span class="plugin-identifier" :title="plugin.manifest.id">{{
-              plugin.manifest.id
-            }}</span>
-            <div class="plugin-card-badges">
-              <span class="plugin-source">{{
-                plugin.source === 'system' ? tr('系统内置') : tr('用户上传')
-              }}</span>
-              <span :class="['plugin-status', { enabled: plugin.enabled }]">{{
-                plugin.enabled ? tr('已启用') : tr('已禁用')
-              }}</span>
-            </div>
           </footer>
         </article>
       </div>
     </section>
-    <footer class="plugin-manager-footer">
-      <button
-        class="button"
-        type="button"
-        :disabled="savingDevelopmentKit"
-        @click="saveDevelopmentKit"
-      >
-        <Download :size="16" aria-hidden="true" />{{ tr('下载插件开发包 ') }}
-      </button>
-    </footer>
     <Modal
       v-if="recovering"
       :title="tr('备份并重装内置插件')"

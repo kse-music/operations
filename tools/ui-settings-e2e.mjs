@@ -90,21 +90,25 @@ try {
       assert.equal(await settings.locator('h1').textContent(), categories[index]);
       const restore = settings.getByRole('button', { name: '恢复默认', exact: true });
       const save = settings.getByRole('button', { name: '保存设置', exact: true });
-      const restoreBox = await restore.boundingBox();
-      const saveBox = await save.boundingBox();
-      assert(
-        restoreBox &&
-          saveBox &&
-          restoreBox.y === saveBox.y &&
-          restoreBox.x + restoreBox.width < saveBox.x,
-        `${name}: ${categories[index]} must place restore defaults to the left of save`,
+      assert(await restore.isVisible(), `${name}: restore defaults is missing`);
+      assert.equal(await save.count(), 0, `${name}: ${categories[index]} must save automatically`);
+      assert(await settings.getByRole('status').isVisible());
+      assert.equal(
+        await settings.getByRole('button', { name: '迁移并重启', exact: true }).count(),
+        0,
       );
       const layout = await settings.locator('.settings-category:visible').evaluate((panel) => {
         const rect = (el) => el.getBoundingClientRect();
         const groups = [...panel.querySelectorAll(':scope > fieldset')];
+        const workspace = panel.closest('.settings-page');
+        const workspaceStyle = getComputedStyle(workspace);
         return {
           category: panel.id,
           shortcuts: panel.classList.contains('settings-shortcuts'),
+          workspaceWidth:
+            workspace.clientWidth -
+            parseFloat(workspaceStyle.paddingLeft) -
+            parseFloat(workspaceStyle.paddingRight),
           overflows: panel.scrollWidth > panel.clientWidth,
           groupGaps: groups.slice(1).map((group, i) => rect(group).top - rect(groups[i]).bottom),
           headingGaps: groups
@@ -152,7 +156,7 @@ try {
         `${name}: inconsistent heading spacing ${JSON.stringify(layout)}`,
       );
       for (const field of layout.fields) {
-        if (layout.shortcuts && field.gridWidth > 460)
+        if (layout.shortcuts && layout.workspaceWidth > 640)
           assert(field.inline, `${name}: shortcut labels must sit beside their controls`);
         assert(
           field.controlHeight >= 36 && field.controlHeight <= 38,
@@ -203,7 +207,10 @@ try {
     await settings.getByLabel('终端行高', { exact: true }).fill('99');
     await select(0);
     await dismissNotices();
-    await settings.getByRole('button', { name: '保存设置', exact: true }).click();
+    await select(3);
+    await settings.locator('form').evaluate((form) => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
     assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
     assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
     assert.equal(
@@ -220,7 +227,10 @@ try {
     await settings.getByLabel('默认代理地址', { exact: true }).fill('');
     await select(0);
     await dismissNotices();
-    await settings.getByRole('button', { name: '保存设置', exact: true }).click();
+    await select(3);
+    await settings.locator('form').evaluate((form) => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
     assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
     assert.equal(await activeMenu().getAttribute('aria-label'), '终端');
     assert.equal(
@@ -254,7 +264,7 @@ try {
     const about = page.locator('.about-view');
     assert.match(await about.textContent(), /本地环境/);
     assert.match(await about.textContent(), /vui-test/);
-    assert.match(await about.textContent(), /schema v5/);
+    assert.match(await about.textContent(), /schema v10/);
     assert.equal(await about.getByRole('button', { name: '重新检查', exact: true }).count(), 1);
     assert.equal(await about.evaluate((el) => el.scrollWidth > el.clientWidth), false);
     assert.equal(await page.locator('.settings-navigation [aria-label="本地环境"]').count(), 0);
@@ -283,6 +293,22 @@ try {
       !storageGeometry.pageOverflows && !storageGeometry.formOverflows,
       `${name}: storage paths overflow`,
     );
+    await settings.getByLabel('数据根目录', { exact: true }).fill('D:\\PendingMigration');
+    const migrationAction = settings.getByRole('button', { name: '迁移并重启', exact: true });
+    assert(await migrationAction.isVisible(), `${name}: migration must keep an explicit action`);
+    assert.equal(await settings.getByRole('button', { name: '保存设置', exact: true }).count(), 0);
+    await settings
+      .getByLabel('数据根目录', { exact: true })
+      .fill(
+        await page.evaluate(
+          () =>
+            document
+              .querySelector('#app')
+              .__vue_app__.config.globalProperties.$pinia._s.get('application').state.storage
+              .rootDirectory,
+        ),
+      );
+    assert.equal(await migrationAction.count(), 0);
     await page.screenshot({ path: `${output}/${name}-storage.png` });
 
     await select(0);

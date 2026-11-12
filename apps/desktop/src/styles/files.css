@@ -121,7 +121,8 @@
   border-radius: 3px;
   padding-inline-start: min(calc(7px + var(--location-depth, 0) * 16px), 40%);
 }
-.file-location-option.active {
+.file-location-option.active,
+.file-location-option[aria-selected='true'] {
   background: var(--accent-bg);
 }
 .file-location-option > span {
@@ -427,6 +428,10 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+.remote-editor .monaco-editor .find-widget .monaco-inputbox.synthetic-focus,
+.remote-editor .find-widget :is(input, textarea):focus-visible {
+  outline: none;
 }
 .editor-statusbar {
   display: flex;

@@ -33,10 +33,7 @@ try {
     await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
     const welcome = page.getByRole('region', { name: '欢迎页面', exact: true });
     assert.equal(await welcome.locator('.welcome-card').count(), 3);
-    assert.equal(
-      await welcome.getByRole('button', { name: '打开本地终端', exact: true }).count(),
-      1,
-    );
+    assert.equal(await welcome.getByRole('button', { name: '本地终端', exact: true }).count(), 1);
     assert.equal(await welcome.getByRole('button', { name: '新建主机', exact: true }).count(), 1);
     assert.equal(await welcome.getByRole('button', { name: '导入配置', exact: true }).count(), 1);
     assert.equal(await page.locator('.workspace-group-tab').count(), 0);

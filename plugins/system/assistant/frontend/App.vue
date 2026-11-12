@@ -6,10 +6,9 @@ defineProps<{
   page?: PluginUiPage;
   hostId?: string;
   keepRunning?: boolean;
-  settingsDialog?: boolean;
 }>();
 </script>
 <template>
-  <SettingsView v-if="page?.id === 'settings'" :settings-dialog="settingsDialog" />
+  <SettingsView v-if="page?.id === 'settings'" />
   <AssistantView v-else :host-id="hostId" :keep-running="keepRunning" />
 </template>

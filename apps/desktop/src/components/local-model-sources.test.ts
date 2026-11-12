@@ -12,7 +12,9 @@ const api = vi.hoisted(() => ({
 vi.mock('../services/ai', () => ({ aiApi: api }));
 import LocalModelSources from './LocalModelSources.vue';
 import { usePluginsStore } from '../stores/plugins';
+import { defaultAiConfig } from '../types/ai';
 let app: App | undefined, root: HTMLElement, pinia: Pinia;
+let sources: InstanceType<typeof LocalModelSources>;
 const settle = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await nextTick();
@@ -36,7 +38,7 @@ async function mount() {
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(LocalModelSources).use(pinia);
-  app.mount(root);
+  sources = app.mount(root) as InstanceType<typeof LocalModelSources>;
   await settle();
 }
 function click(text: string, index = 0) {
@@ -44,6 +46,47 @@ function click(text: string, index = 0) {
     .filter((button) => button.textContent?.trim() === text)
     [index]!.click();
 }
+it('distinguishes missing tools, authorization and actual model readiness', async () => {
+  api.localCodexStatus.mockResolvedValue({
+    installed: false,
+    authorized: false,
+    model: null,
+    message: '尚未安装',
+  });
+  api.localClaudeCodeStatus.mockResolvedValue({
+    installed: true,
+    authorized: true,
+    model: null,
+    message: '请先登录 CLI',
+  });
+  await mount();
+  const states = () =>
+    [...root.querySelectorAll('.local-source-state')].map((state) => state.textContent?.trim());
+  expect(states()).toEqual(['未安装', '未就绪']);
+  expect(root.textContent).toContain('请先登录 CLI');
+  api.localCodexStatus.mockResolvedValue({
+    installed: true,
+    authorized: false,
+    model: null,
+    message: '等待授权',
+  });
+  api.localClaudeCodeStatus.mockResolvedValue({
+    installed: true,
+    authorized: true,
+    model: {
+      id: 'local-claude-code',
+      name: '本地 Claude Code',
+      revision: 'r1',
+      config: { ...defaultAiConfig(), provider: 'local_claude_code' },
+      hasKey: false,
+    },
+    message: '已连接本地 Claude Code',
+  });
+  await sources.refresh();
+  await settle();
+  expect(states()).toEqual(['未授权', '已就绪']);
+  expect(root.querySelectorAll('.local-source-state.ready')).toHaveLength(1);
+});
 it.each([0, 1])(
   'requires trusted approval before using source %s and revokes only that source',
   async (index) => {
@@ -107,6 +150,7 @@ it('cancels only the active download on explicit cancel and dispose', async () =
   await mount();
   click('下载安装');
   await settle();
+  expect(root.querySelector('.local-source-state')?.textContent).toContain('下载中');
   const request = api.localToolInstall.mock.lastCall![1];
   click('取消下载');
   await settle();

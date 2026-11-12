@@ -249,26 +249,36 @@ try {
       await page.locator('.settings-navigation [aria-current="page"]').getAttribute('aria-label'),
       '模型',
     );
-    await models.getByRole('heading', { name: '内网诊断模型', exact: true }).waitFor();
-    const localTab = models.getByRole('tab', { name: '本地来源', exact: true });
+    await models.getByRole('heading', { name: 'diagnostics-v1', exact: true }).waitFor();
+    const localTab = models.getByRole('tab', { name: '本地CLI', exact: true });
     const remoteTab = models.getByRole('tab', { name: '远程模型 2', exact: true });
     const remotePanel = models.getByRole('tabpanel', { name: '远程模型 2', exact: true });
-    const localPanel = models.getByRole('tabpanel', { name: '本地来源', exact: true });
+    const localPanel = models.getByRole('tabpanel', { name: '本地CLI', exact: true });
     assert.equal(await remoteTab.getAttribute('aria-selected'), 'true');
     assert(await remotePanel.isVisible());
     assert(!(await localPanel.isVisible()));
     assert.equal(await models.locator('h1 .asset-count').count(), 0);
-    assert(await remotePanel.getByRole('button', { name: '注册模型', exact: true }).isVisible());
-    assert(await remotePanel.locator('.model-page-note').isVisible());
-    assert(!(await models.getByRole('button', { name: '刷新状态', exact: true }).isVisible()));
+    const modelToolbar = models.locator('.section-heading .model-toolbar');
+    assert(await modelToolbar.getByRole('button', { name: '注册模型', exact: true }).isVisible());
+    assert.equal(await remotePanel.locator('.model-page-note').count(), 0);
+    assert.equal(await modelToolbar.getByRole('button', { name: '刷新', exact: true }).count(), 1);
     assert.equal(await models.locator('.model-list-heading').isVisible(), expectedColumns === 2);
+    const modelSearch = models.getByRole('searchbox', { name: '搜索模型', exact: true });
+    await modelSearch.fill(' DIAGNOSTICS-V1 ');
+    assert.equal(await models.locator('.model-list > li').count(), 1);
+    await models.getByText('显示 1 / 2 个模型', { exact: true }).waitFor();
+    await modelSearch.fill('no-matching-model');
+    await models.getByRole('heading', { name: '没有匹配的模型', exact: true }).waitFor();
+    await models.getByRole('button', { name: '清除搜索', exact: true }).click();
+    assert.equal(await models.locator('.model-list > li').count(), 2);
     await inspect(page, `${name}: models`);
     await screenshot('models');
     await localTab.click();
     assert(await localPanel.isVisible());
     assert(!(await remotePanel.isVisible()));
-    assert(await localPanel.getByRole('button', { name: '刷新状态', exact: true }).isVisible());
-    await localPanel.getByRole('button', { name: '刷新状态', exact: true }).click();
+    assert(await modelToolbar.isVisible());
+    assert(await modelToolbar.getByRole('button', { name: '刷新', exact: true }).isVisible());
+    await modelToolbar.getByRole('button', { name: '刷新', exact: true }).click();
     await localPanel.getByText('已连接本地 Claude Code，使用已有配置与登录状态').waitFor();
     await inspect(page, `${name}: local sources`);
     await screenshot('local-sources');
@@ -281,8 +291,11 @@ try {
     assert(await remotePanel.isVisible());
     await models.getByRole('button', { name: '编辑模型 内网诊断模型', exact: true }).click();
     const modelDialog = page.getByRole('dialog', { name: '编辑模型', exact: true });
-    await modelDialog.locator('.model-advanced summary').click();
+    assert.equal(await modelDialog.locator('.model-form-section').count(), 0);
     const contextWindow = modelDialog.getByLabel('上下文窗口（Token）', { exact: true });
+    assert.equal(await modelDialog.locator('details').count(), 0);
+    assert(await contextWindow.isVisible());
+    assert(await modelDialog.getByLabel('最大输出 Token', { exact: true }).isVisible());
     assert.equal(await contextWindow.inputValue(), '131072');
     assert.equal(await modelDialog.getByLabel(/单价/).count(), 0);
     await contextWindow.fill('1024');
@@ -292,11 +305,31 @@ try {
         .evaluate((input) => input.validity.rangeOverflow),
     );
     await contextWindow.fill('8192');
+    const modelActions = modelDialog.locator('.model-form-footer');
+    assert.deepEqual(
+      (await modelActions.getByRole('button').allTextContents()).map((label) => label.trim()),
+      ['测试连接', '取消', '保存模型'],
+    );
+    assert.equal(await modelDialog.locator('.model-test-panel').count(), 0);
+    const statusGeometry = await modelActions.evaluate((footer) => {
+      const status = footer.querySelector('.model-form-status');
+      const bounds = status.getBoundingClientRect();
+      const actions = footer.querySelector('.model-form-actions').getBoundingClientRect();
+      return {
+        visible: bounds.height > 0 && bounds.top >= 0 && bounds.bottom <= innerHeight,
+        beforeButtons: bounds.right <= actions.left + 1 || bounds.bottom <= actions.top + 1,
+        overflow: status.scrollWidth > status.clientWidth + 1,
+      };
+    });
+    assert.equal(statusGeometry.visible, true, `${name}: test status remains visible`);
+    assert.equal(statusGeometry.beforeButtons, true, `${name}: status precedes footer actions`);
+    assert.equal(statusGeometry.overflow, false, `${name}: test status wraps within the footer`);
     await inspect(page, `${name}: model dialog`);
     await screenshot('model-context');
-    await modelDialog.getByRole('button', { name: '测试连接', exact: true }).click();
-    await modelDialog.getByText(/当前配置可保存/).waitFor();
-    await modelDialog.getByRole('button', { name: '保存模型', exact: true }).click();
+    await modelActions.getByRole('button', { name: '测试连接', exact: true }).click();
+    await modelActions.getByText(/当前配置可保存/).waitFor();
+    await screenshot('model-test-result');
+    await modelActions.getByRole('button', { name: '保存模型', exact: true }).click();
     await modelDialog.waitFor({ state: 'hidden' });
     await models
       .getByRole('listitem')

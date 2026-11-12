@@ -298,4 +298,7 @@ onBeforeUnmount(() => {
   flex: 1 1 180px;
   min-width: 0;
 }
+.stream-toolbar input:focus-visible {
+  outline: none;
+}
 </style>

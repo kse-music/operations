@@ -227,6 +227,56 @@ it.each([false, true])(
   },
 );
 
+it.each([
+  { x: 180, y: 80, left: 180, top: 80 },
+  { x: 270, y: 90, left: 270, top: 90 },
+  {
+    x: window.innerWidth - 1,
+    y: window.innerHeight - 1,
+    left: window.innerWidth - 208,
+    top: window.innerHeight - 88,
+  },
+])('positions the local session menu at click $x,$y within the viewport', async (point) => {
+  const store = useTerminalsStore();
+  hostId.value = '';
+  store.open(null);
+  await flush();
+  const plus = button('新建终端会话');
+  const bounds = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    if (this === plus) return new DOMRect(40, 60, 248, 36);
+    return this.classList.contains('terminal-session-menu')
+      ? new DOMRect(0, 0, 200, 80)
+      : bounds.call(this);
+  });
+  plus.dispatchEvent(
+    new MouseEvent('click', { bubbles: true, clientX: point.x, clientY: point.y }),
+  );
+  await flush();
+  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="新建终端会话"]')!;
+  expect(menu.style.left).toBe(`${point.left}px`);
+  expect(menu.style.top).toBe(`${point.top}px`);
+  expect(native.openLocal).toHaveBeenCalledTimes(1);
+});
+
+it('anchors the local session menu below its button when activated without pointer coordinates', async () => {
+  const store = useTerminalsStore();
+  hostId.value = '';
+  store.open(null);
+  await flush();
+  const plus = button('新建终端会话');
+  vi.spyOn(plus, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 60, 248, 36));
+  plus.click();
+  await flush();
+  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="新建终端会话"]')!;
+  expect(menu.style.left).toBe('40px');
+  expect(menu.style.top).toBe('96px');
+  expect(document.activeElement).toBe(menu.querySelector('[role="menuitem"]'));
+  expect(native.openLocal).toHaveBeenCalledTimes(1);
+});
+
 it('dismisses the plus menu with Escape or outside click, restores focus and never creates a session', async () => {
   const store = useTerminalsStore();
   hostId.value = '';

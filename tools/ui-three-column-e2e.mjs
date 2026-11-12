@@ -148,13 +148,34 @@ try {
     await page.locator('.terminal-pane[data-state="connected"]:visible').waitFor();
     const local = await page.locator('.split-pane:visible').elementHandle();
     const newSession = async () => {
-      await page
+      const trigger = page
         .locator('.local-session-sidebar')
-        .getByRole('button', { name: '新建终端会话', exact: true })
-        .click();
+        .getByRole('button', { name: '新建终端会话', exact: true });
+      const bounds = await trigger.boundingBox();
+      assert(bounds);
+      const position = { x: bounds.width * 0.75, y: bounds.height / 2 };
+      await trigger.click({ position });
       const menu = page.getByRole('menu', { name: '新建终端会话', exact: true });
-      if (await menu.isVisible())
+      if (await menu.isVisible()) {
+        const menuBounds = await menu.boundingBox();
+        assert(menuBounds);
+        assert(
+          Math.abs(
+            menuBounds.x -
+              Math.max(8, Math.min(bounds.x + position.x, width - menuBounds.width - 8)),
+          ) <= 1,
+          `${name}: new session menu must follow the click horizontally`,
+        );
+        assert(
+          Math.abs(
+            menuBounds.y -
+              Math.max(8, Math.min(bounds.y + position.y, height - menuBounds.height - 8)),
+          ) <= 1,
+          `${name}: new session menu must follow the click vertically`,
+        );
+        await page.screenshot({ path: path.join(output, `${name}-new-session-menu.png`) });
         await menu.getByRole('menuitem', { name: '新建普通会话', exact: true }).click();
+      }
     };
     await newSession();
     await page.locator('.local-session-sidebar .terminal-tab').nth(1).waitFor();

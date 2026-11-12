@@ -272,6 +272,11 @@
   padding: 24px;
   container: workspace / inline-size;
 }
+.settings-page > :is(.page-view, .plugin-manager, .plugin-configuration) {
+  width: 100%;
+  max-width: 960px;
+  margin-inline: auto;
+}
 .settings-page:has(> .plugin-configuration) {
   display: flex;
   flex-direction: column;

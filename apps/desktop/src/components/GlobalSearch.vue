@@ -19,7 +19,7 @@ const emit = defineEmits<{
 }>();
 const hosts = useHostsStore(),
   query = ref(''),
-  index = ref(0);
+  index = ref(-1);
 const results = computed(() => {
   const q = query.value.trim().toLowerCase();
   return [
@@ -69,9 +69,10 @@ function choose(n: number) {
 function key(e: KeyboardEvent) {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
-    index.value =
-      (index.value + (e.key === 'ArrowDown' ? 1 : -1) + results.value.length) %
-      Math.max(1, results.value.length);
+    const length = results.value.length;
+    if (!length) index.value = -1;
+    else if (index.value < 0) index.value = e.key === 'ArrowDown' ? 0 : length - 1;
+    else index.value = (index.value + (e.key === 'ArrowDown' ? 1 : -1) + length) % length;
   } else if (e.key === 'Enter') {
     e.preventDefault();
     choose(index.value);
@@ -88,7 +89,7 @@ function key(e: KeyboardEvent) {
       :placeholder="tr('搜索主机、工作区和插件命令…')"
       aria-controls="global-search-results"
       :aria-activedescendant="results[index] ? `result-${results[index]!.key}` : undefined"
-      @input="index = 0"
+      @input="index = -1"
       @keydown="key"
     />
     <p class="subtle">{{ tr('↑↓ 选择，Enter 打开，Esc 关闭。任务执行仍需目标预览和确认。') }}</p>
@@ -102,6 +103,8 @@ function key(e: KeyboardEvent) {
         :class="{ selected: n === index }"
         role="option"
         :aria-selected="n === index"
+        @pointermove="index = n"
+        @focus="index = n"
         @click="choose(n)"
       >
         {{ r.name }}

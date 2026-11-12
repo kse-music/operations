@@ -19,6 +19,9 @@ export interface WorkspaceTab {
 export function isHostTab(tab: WorkspaceTab): boolean {
   return hostViews.has(tab.view) || (tab.view === 'extension' && !!tab.hostId);
 }
+function isLocalTab(tab: WorkspaceTab): boolean {
+  return isHostTab(tab) && !tab.hostId;
+}
 export function pluginPageKey(
   tab: Pick<WorkspaceTab, 'pluginId' | 'contributionId' | 'hostId'>,
 ): string {
@@ -30,6 +33,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const tabs = ref<WorkspaceTab[]>([]),
     active = ref(''),
     hostId = ref('');
+  const homeTabs = computed(() => tabs.value.filter((tab) => !isLocalTab(tab)));
   const settingsView = ref<SettingsView | null>(null);
   const area = ref<WorkspaceArea>('home');
   const settingsBusy = ref(false);
@@ -57,7 +61,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
     active.value = key;
-    area.value = isHostTab(tab) && !tab.hostId ? 'local' : 'home';
+    area.value = isLocalTab(tab) ? 'local' : 'home';
     if (area.value === 'home') homeKey = key;
     if (isHostTab(tab)) hostId.value = tab.hostId;
     if (tab.view === 'terminals') useTerminalsStore().activateHost(tab.hostId);
@@ -181,15 +185,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (pluginSettingsBusy.value || usePluginsStore().busy) return;
     pluginConfiguration.value = undefined;
     settingsView.value = null;
-    area.value =
-      current.value && isHostTab(current.value) && !current.value.hostId ? 'local' : 'home';
+    area.value = current.value && isLocalTab(current.value) ? 'local' : 'home';
   }
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
     if (navigationBlocked.value) return;
     const previousArea = area.value;
-    const index = tabs.value.findIndex((t) => t.key === key);
-    if (index < 0) return;
-    const targets = tabs.value.filter((tab, i) => {
+    const target = tabs.value.find((tab) => tab.key === key);
+    if (!target) return;
+    const siblings = isLocalTab(target) ? [target] : homeTabs.value;
+    const index = siblings.findIndex((tab) => tab.key === key);
+    const targets = siblings.filter((tab, i) => {
       switch (scope) {
         case 'current':
           return tab.key === key;
@@ -257,15 +262,20 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     if (!removed.size) return;
     tabs.value = tabs.value.filter((tab) => !removed.has(tab));
-    if (!tabs.value.length) {
-      active.value = '';
-    } else if (active.value && !tabs.value.some((tab) => tab.key === active.value)) {
-      activate(tabs.value[Math.min(index, tabs.value.length - 1)]!.key);
+    const next = homeTabs.value[Math.min(index, homeTabs.value.length - 1)];
+    if (!homeTabs.value.some((tab) => tab.key === homeKey)) homeKey = next?.key ?? '';
+    if (active.value && !tabs.value.some((tab) => tab.key === active.value)) {
+      if (next) activate(next.key);
+      else {
+        active.value = '';
+        area.value = 'home';
+      }
     }
     if (previousArea === 'settings') area.value = 'settings';
   }
   return {
     tabs,
+    homeTabs,
     active,
     hostId,
     current,

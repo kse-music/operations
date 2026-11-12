@@ -75,6 +75,18 @@
   color: var(--error);
   border-color: var(--error);
 }
+.plugin-row-actions > button,
+.model-row-actions > button {
+  background: transparent;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+.plugin-row-actions > button:not(:disabled):hover,
+.model-row-actions > button:not(:disabled):hover {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
 @container workspace (max-width: 740px) {
   .asset-panel {
     padding: 16px;

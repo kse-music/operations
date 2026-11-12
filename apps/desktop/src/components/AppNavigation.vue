@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { House, Settings2, SquareTerminal } from '@lucide/vue';
+import { House, Settings, SquareTerminal } from '@lucide/vue';
 import { tr } from '../i18n/messages';
 import type { WorkspaceArea } from '../stores/workspace';
 defineProps<{ area: WorkspaceArea; disabled?: boolean }>();
@@ -41,7 +41,7 @@ defineEmits<{ home: []; local: []; settings: [] }>();
         :disabled="disabled"
         @click="$emit('settings')"
       >
-        <Settings2 :size="20" aria-hidden="true" />
+        <Settings :size="20" aria-hidden="true" />
       </button>
     </div>
   </nav>

@@ -90,6 +90,8 @@ it('opens remote models by default and scopes counts, actions and feedback to th
   const remoteTab = root.querySelector<HTMLButtonElement>('#model-tab-remote')!;
   const localPanel = root.querySelector<HTMLElement>('#model-panel-local')!;
   const remotePanel = root.querySelector<HTMLElement>('#model-panel-remote')!;
+  expect(localTab.textContent?.trim()).toBe('本地CLI');
+  const toolbar = root.querySelector<HTMLElement>('.section-heading .model-toolbar')!;
   expect(remoteTab.getAttribute('aria-selected')).toBe('true');
   expect(remoteTab.querySelector('.asset-count')?.textContent).toBe('2');
   expect(localTab.querySelector('.asset-count')).toBeNull();
@@ -97,28 +99,34 @@ it('opens remote models by default and scopes counts, actions and feedback to th
   expect(localPanel.style.display).toBe('none');
   expect(remotePanel.style.display).not.toBe('none');
   expect(remotePanel.textContent).toContain('模型 A');
-  expect(remotePanel.textContent).toContain('注册模型');
-  expect(remotePanel.textContent).toContain('Key 保存于系统凭据库');
+  expect(toolbar.style.display).not.toBe('none');
+  expect(toolbar.textContent).toContain('刷新');
+  expect(toolbar.textContent).toContain('注册模型');
+  expect(remotePanel.textContent).not.toContain('Key 保存于系统凭据库');
   expect(remotePanel.textContent).not.toContain('本地 Codex');
   useModelsStore().error = '远程模型读取失败';
   localTab.click();
   await settle();
   expect(localPanel.style.display).not.toBe('none');
   expect(remotePanel.style.display).toBe('none');
-  expect(localPanel.textContent).toContain('刷新状态');
+  expect(toolbar.style.display).not.toBe('none');
+  expect(toolbar.textContent?.trim()).toBe('刷新');
+  expect(localPanel.textContent).not.toContain('刷新');
+  expect(localPanel.querySelector('h2')).toBeNull();
   expect(localPanel.textContent).toContain('无法读取登录凭据');
   expect(localPanel.textContent).not.toContain('远程模型读取失败');
   expect(localPanel.textContent).not.toContain('注册模型');
   expect(localPanel.textContent).not.toContain('Key 保存于系统凭据库');
-  button('刷新状态').click();
+  button('刷新').click();
   await settle();
   expect(api.models).toHaveBeenCalledOnce();
   expect(api.localCodexStatus).toHaveBeenCalledTimes(2);
   remoteTab.click();
   await settle();
   expect(remotePanel.style.display).not.toBe('none');
+  expect(toolbar.style.display).not.toBe('none');
   expect(remotePanel.textContent).toContain('远程模型读取失败');
-  button('刷新模型').click();
+  button('刷新').click();
   await settle();
   expect(api.models).toHaveBeenCalledTimes(2);
   expect(api.localCodexStatus).toHaveBeenCalledTimes(2);
@@ -146,6 +154,115 @@ it('supports arrow, Home and End keys with one tab stop and linked panels', asyn
     expect(panel.style.display).not.toBe('none');
   }
 });
+it('shows API model IDs, aliases, separate token limits and key status without duplicating names', async () => {
+  const primary = model('internal-a', '生产诊断');
+  primary.config = {
+    ...primary.config,
+    model: 'vendor/atlas',
+    contextWindowTokens: 256000,
+    maxOutputTokens: 8192,
+  };
+  const backup = model('internal-b', 'vendor/backup');
+  backup.config = {
+    ...backup.config,
+    model: 'vendor/backup',
+    baseUrl: 'http://backup.example/v1',
+    allowInsecureHttp: true,
+  };
+  backup.hasKey = false;
+  api.models.mockResolvedValue([primary, backup]);
+  await mount();
+  const rows = root.querySelectorAll('.model-list > li');
+  expect(rows[0]!.querySelector('h2')?.textContent?.trim()).toBe('vendor/atlas');
+  expect(rows[0]!.querySelector('.model-name')?.textContent).toBe('生产诊断');
+  expect([...rows[0]!.querySelectorAll('.model-limit strong')].map((el) => el.textContent)).toEqual(
+    ['256,000', '8,192'],
+  );
+  expect(rows[0]!.querySelector('.model-key-status .model-badge')?.getAttribute('title')).toBe(
+    'Key 已存系统凭据库',
+  );
+  expect(rows[0]!.textContent).not.toContain('internal-a');
+  expect(rows[0]!.textContent).not.toContain('OpenAI 兼容 API');
+  expect(rows[1]!.querySelector('h2')?.textContent?.trim()).toBe('vendor/backup');
+  expect(rows[1]!.querySelector('.model-name')).toBeNull();
+  expect(rows[1]!.querySelector('.model-endpoint')?.textContent).toBe('http://backup.example/v1');
+  expect(rows[1]!.querySelector('.model-key-status')?.textContent).toContain('未设置 Key');
+  expect(rows[1]!.querySelector('.model-badges')?.textContent).toContain('HTTP 明文');
+});
+it('filters locally by model ID, name and endpoint, preserves the query across tabs and refreshes, and clears no-match results', async () => {
+  const primary = model('a', '生产诊断');
+  primary.config = {
+    ...primary.config,
+    model: 'Vendor/Atlas-Primary',
+    baseUrl: 'https://gateway.internal/v1',
+  };
+  const backup = model('b', '备用模型');
+  backup.config = {
+    ...backup.config,
+    model: 'vendor/LLM-Beta',
+    baseUrl: 'https://backup.example/v1',
+  };
+  api.models.mockResolvedValue([primary, backup]);
+  await mount();
+  const search = root.querySelector<HTMLInputElement>('[aria-label="搜索模型"]')!;
+  const ids = () =>
+    [...root.querySelectorAll('.model-list h2')].map((el) => el.textContent?.trim());
+  async function query(value: string) {
+    search.value = value;
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+  }
+  for (const [value, expected] of [
+    ['  生产 ', ['Vendor/Atlas-Primary']],
+    ['llm-BETA', ['vendor/LLM-Beta']],
+    [' GATEWAY.INTERNAL ', ['Vendor/Atlas-Primary']],
+    ['   ', ['Vendor/Atlas-Primary', 'vendor/LLM-Beta']],
+  ] as const) {
+    await query(value);
+    expect(ids()).toEqual(expected);
+    expect(root.querySelector('.model-filter-summary')?.textContent?.trim()).toBe(
+      `显示 ${expected.length} / 2 个模型`,
+    );
+    expect(root.querySelector('#model-tab-remote .asset-count')?.textContent).toBe('2');
+  }
+  await query('no-match');
+  expect(root.textContent).toContain('没有匹配的模型');
+  expect(root.textContent).not.toContain('尚未注册模型');
+  expect(root.querySelector('.model-catalog')).toBeNull();
+  expect(useModelsStore().models).toHaveLength(2);
+  button('清除搜索').click();
+  await settle();
+  expect(search.value).toBe('');
+  expect(ids()).toHaveLength(2);
+  expect(api.models).toHaveBeenCalledOnce();
+  await query('llm-beta');
+  root.querySelector<HTMLButtonElement>('[aria-label="编辑模型 备用模型"]')!.click();
+  await settle();
+  expect(document.querySelector<HTMLInputElement>('dialog input[maxlength="200"]')?.value).toBe(
+    'vendor/LLM-Beta',
+  );
+  button('取消').click();
+  await settle();
+  expect(search.value).toBe('llm-beta');
+  expect(api.modelSave).not.toHaveBeenCalled();
+  await query('atlas');
+  root.querySelector<HTMLButtonElement>('#model-tab-local')!.click();
+  await settle();
+  expect(root.querySelector<HTMLElement>('#model-panel-remote')?.style.display).toBe('none');
+  root.querySelector<HTMLButtonElement>('#model-tab-remote')!.click();
+  await settle();
+  expect(search.value).toBe('atlas');
+  expect(ids()).toEqual(['Vendor/Atlas-Primary']);
+  api.models.mockResolvedValue([backup]);
+  button('刷新').click();
+  await settle();
+  expect(search.value).toBe('atlas');
+  expect(root.textContent).toContain('没有匹配的模型');
+  expect(root.querySelector('.model-filter-summary')?.textContent?.trim()).toBe(
+    '显示 0 / 1 个模型',
+  );
+  expect(api.models).toHaveBeenCalledTimes(2);
+});
 it('keeps a local download alive when switching tabs and shows its completion on return', async () => {
   let finish!: () => void;
   api.localToolInstall.mockImplementationOnce(() => new Promise<void>((r) => (finish = r)));
@@ -155,6 +272,7 @@ it('keeps a local download alive when switching tabs and shows its completion on
   await settle();
   button('下载安装').click();
   await settle();
+  expect(button('刷新').disabled).toBe(true);
   expect(api.localToolInstall).toHaveBeenCalledExactlyOnceWith('local-codex', expect.any(String));
   root.querySelector<HTMLButtonElement>('#model-tab-remote')!.click();
   await settle();
@@ -175,6 +293,16 @@ it('registers and lists real returned models, sends the key only in the transien
   expect(root.textContent).toContain('尚未注册模型');
   button('注册模型').click();
   await settle();
+  const actions = document.querySelector('.model-form-footer')!;
+  expect(document.querySelector('.model-form-section')).toBeNull();
+  expect(document.querySelector('.model-form details')).toBeNull();
+  expect(document.querySelector('.model-test-panel')).toBeNull();
+  expect(actions.querySelector('.model-form-status')?.textContent?.trim()).toBe('请先完成连接测试');
+  expect([...actions.querySelectorAll('button')].map((b) => b.textContent?.trim())).toEqual([
+    '测试连接',
+    '取消',
+    '保存模型',
+  ]);
   await fill('模型名称', '诊断模型');
   await fill('模型 ID', 'remote-model');
   await fill('API Key', 'fixture-key');
@@ -203,7 +331,9 @@ it('registers and lists real returned models, sends the key only in the transien
     config: { model: 'remote-model' },
   });
   expect(root.textContent).toContain('诊断模型');
-  expect(root.textContent).toContain('Key 已存系统凭据库');
+  expect(root.querySelector('.model-key-status .model-badge')?.getAttribute('title')).toBe(
+    'Key 已存系统凭据库',
+  );
   expect(root.textContent).toContain('模型已保存');
   expect(document.querySelector('dialog')).toBeNull();
   expect(JSON.stringify(useModelsStore().models)).not.toContain('fixture-key');
@@ -288,7 +418,7 @@ it('shows loading and retryable list errors without pretending to load an empty 
   expect(root.textContent).toContain('模型列表读取失败');
   expect(button('注册模型').disabled).toBe(true);
   expect(root.textContent).not.toContain('尚未注册模型');
-  button('刷新模型').click();
+  button('刷新').click();
   await settle();
   expect(root.textContent).toContain('尚未注册模型');
   expect(button('注册模型').disabled).toBe(false);
@@ -304,12 +434,13 @@ it('blocks failed tests and invalidates success when configuration or key change
   api.modelTest.mockRejectedValueOnce({ message: '模型认证失败' });
   button('测试连接').click();
   await settle();
-  expect(document.body.textContent).toContain('模型认证失败');
+  const status = document.querySelector('.model-form-status')!;
+  expect(status.querySelector('[role="alert"]')?.textContent).toBe('模型认证失败');
   expect(button('保存模型').disabled).toBe(true);
   expect(useModelsStore().models).toHaveLength(0);
   button('测试连接').click();
   await settle();
-  expect(document.body.textContent).toContain('连接成功');
+  expect(status.querySelector('[role="status"]')?.textContent).toContain('连接成功');
   expect(button('保存模型').disabled).toBe(false);
   await fill('模型 ID', 'another-model');
   expect(button('保存模型').disabled).toBe(true);
@@ -335,6 +466,9 @@ it('ignores late tests after changes and expires test results', async () => {
   );
   button('测试连接').click();
   await settle();
+  const status = document.querySelector('.model-form-status')!;
+  expect(status.getAttribute('aria-busy')).toBe('true');
+  expect(status.querySelector('[role="status"]')?.textContent).toContain('正在验证地址');
   expect(button('保存模型').disabled).toBe(true);
   await fill('模型 ID', 'changed-during-request');
   resolve({ id: 'late', elapsedMs: 12, expiresInSeconds: 300 });
@@ -345,5 +479,6 @@ it('ignores late tests after changes and expires test results', async () => {
   await settle();
   await settle();
   expect(button('保存模型').disabled).toBe(true);
-  expect(document.body.textContent).toContain('测试结果已过期');
+  expect(status.querySelector('[role="status"]')?.textContent).toContain('测试结果已过期');
+  expect(status.getAttribute('aria-busy')).toBe('false');
 });

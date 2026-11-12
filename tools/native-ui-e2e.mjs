@@ -112,7 +112,7 @@ async function start() {
     (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
       text.trim(),
     ),
-    ['起步页', '本地终端'],
+    ['首页', '本地终端'],
   );
 }
 const active = () => page.locator('.terminal-pane:visible');
@@ -573,7 +573,10 @@ try {
   );
   assert.equal(await page.locator('.workspace-tabs [role=tab]').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
-  await page.getByRole('button', { name: '打开本地终端', exact: true }).click();
+  await page
+    .getByRole('region', { name: '欢迎页面', exact: true })
+    .getByRole('button', { name: '本地终端', exact: true })
+    .click();
   await command("[Console]::WriteLine(('SD_WELCOME_' + ($null -eq $sdValue)))", 'SD_WELCOME_True');
   assert.equal(await page.getByRole('tab', { name: /^会话 1/ }).count(), 1);
   passed.push(

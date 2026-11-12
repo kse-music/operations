@@ -2,20 +2,20 @@
 import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { tr } from '../i18n/messages';
 
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useModelsStore } from '../stores/models';
 import type { AiModel } from '../types/ai';
 import ModelDialog from '../components/ModelDialog.vue';
 import Modal from '../components/Modal.vue';
 import LocalModelSources from '../components/LocalModelSources.vue';
-import { Boxes, Plus, RefreshCw, Pencil, Trash2, ShieldCheck, KeyRound } from '@lucide/vue';
+import { Boxes, Plus, RefreshCw, Pencil, Trash2, ShieldCheck, KeyRound, Search } from '@lucide/vue';
 import '../styles/models.css';
 const store = useModelsStore();
 const tabs = [
   {
     id: 'local',
     get label() {
-      return tr('本地来源');
+      return tr('本地CLI');
     },
   },
   {
@@ -26,6 +26,18 @@ const tabs = [
   },
 ] as const;
 const activeTab = ref<(typeof tabs)[number]['id']>('remote');
+const search = ref('');
+const filteredModels = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase();
+  return store.models.filter(
+    (model) =>
+      !query ||
+      [model.config.model, model.name, model.config.baseUrl].some((value) =>
+        value.toLocaleLowerCase().includes(query),
+      ),
+  );
+});
+const localSources = ref<InstanceType<typeof LocalModelSources>>();
 const dialog = ref(false),
   editing = ref<AiModel>(),
   deleting = ref<AiModel | null>(null);
@@ -62,11 +74,34 @@ onMounted(() => void store.refresh());
 <template>
   <section class="asset-view page-view models-view" :aria-label="tr('模型')">
     <div class="section-heading">
-      <div>
-        <h1 class="asset-title">{{ tr('模型') }}</h1>
-        <p class="section-description">
-          {{ tr(' 管理平台模型服务、API Key 与本地模型来源，供已授权插件调用。 ') }}
-        </p>
+      <h1 class="asset-title">{{ tr('模型') }}</h1>
+      <div class="toolbar model-toolbar">
+        <button
+          v-if="activeTab === 'local'"
+          class="button"
+          :disabled="!localSources || localSources.loading || !!localSources.busy"
+          @click="localSources?.refresh()"
+        >
+          <RefreshCw
+            :size="15"
+            :class="{ 'model-spin': localSources?.loading }"
+            aria-hidden="true"
+          />
+          {{ tr('刷新 ') }}
+        </button>
+        <template v-else>
+          <button class="button" :disabled="store.loading || store.busy" @click="store.refresh">
+            <RefreshCw :size="14" :class="{ 'model-spin': store.loading }" aria-hidden="true" />{{
+              tr('刷新 ')
+            }}</button
+          ><button
+            class="button primary"
+            :disabled="store.busy || store.loading || !store.loaded"
+            @click="open()"
+          >
+            <Plus :size="15" aria-hidden="true" />{{ tr('注册模型 ') }}
+          </button>
+        </template>
       </div>
     </div>
     <div class="model-tabs" role="tablist" :aria-label="tr('模型来源')" @keydown="navigateTabs">
@@ -94,7 +129,7 @@ onMounted(() => void store.refresh());
       role="tabpanel"
       aria-labelledby="model-tab-local"
     >
-      <LocalModelSources />
+      <LocalModelSources ref="localSources" />
     </div>
     <div
       v-show="activeTab === 'remote'"
@@ -103,18 +138,19 @@ onMounted(() => void store.refresh());
       role="tabpanel"
       aria-labelledby="model-tab-remote"
     >
-      <div class="toolbar model-toolbar">
-        <button class="button" :disabled="store.loading || store.busy" @click="store.refresh">
-          <RefreshCw :size="14" :class="{ 'model-spin': store.loading }" aria-hidden="true" />{{
-            tr('刷新模型')
-          }}</button
-        ><button
-          class="button primary"
-          :disabled="store.busy || store.loading || !store.loaded"
-          @click="open()"
-        >
-          <Plus :size="15" aria-hidden="true" />{{ tr('注册模型 ') }}
-        </button>
+      <div class="model-filterbar" role="search" :aria-label="tr('筛选远程模型')">
+        <label class="model-search">
+          <Search :size="16" aria-hidden="true" />
+          <input
+            v-model="search"
+            type="search"
+            :aria-label="tr('搜索模型')"
+            :placeholder="tr('搜索模型 ID、名称或连接地址')"
+          />
+        </label>
+        <p v-if="store.loaded" class="model-filter-summary" role="status">
+          {{ tr('显示 {0} / {1} 个模型', filteredModels.length, store.models.length) }}
+        </p>
       </div>
       <p v-if="store.loading" class="asset-feedback" role="status">{{ tr('正在读取模型列表…') }}</p>
       <p v-if="store.error && !dialog && !deleting" class="asset-feedback error-text" role="alert">
@@ -132,43 +168,64 @@ onMounted(() => void store.refresh());
           </div>
         </div>
       </div>
-      <div v-if="store.models.length" class="model-catalog">
+      <div
+        v-if="store.loaded && !store.loading && store.models.length && !filteredModels.length"
+        class="asset-panel"
+        role="status"
+      >
+        <div class="asset-empty">
+          <span class="asset-icon"><Search :size="18" aria-hidden="true" /></span>
+          <div>
+            <h2>{{ tr('没有匹配的模型') }}</h2>
+            <p class="subtle">{{ tr('试试其他关键词，或清空搜索。') }}</p>
+          </div>
+        </div>
+        <div>
+          <button class="button" @click="search = ''">{{ tr('清除搜索') }}</button>
+        </div>
+      </div>
+      <div v-if="filteredModels.length" class="model-catalog">
         <div class="model-list-heading">
-          <span>{{ tr('模型 / 提供商') }}</span
+          <span>{{ tr('模型 ID') }}</span
           ><span>{{ tr('连接地址') }}</span
-          ><span>{{ tr('Token 限制') }}</span
+          ><span>{{ tr('上下文窗口') }}</span
+          ><span>{{ tr('最大输出 Token') }}</span
+          ><span>{{ tr('Key 状态') }}</span
           ><span>{{ tr('操作') }}</span>
         </div>
         <ul class="model-list">
-          <li v-for="model in store.models" :key="model.id">
-            <div class="model-identity asset-identity">
-              <span class="asset-icon"><Boxes :size="18" aria-hidden="true" /></span>
-              <div>
-                <h2>{{ model.name }}</h2>
+          <li v-for="model in filteredModels" :key="model.id">
+            <div class="model-identity">
+              <h2>
                 <code class="model-id">{{ model.config.model }}</code>
-                <p class="muted model-provider">{{ tr('OpenAI 兼容 API') }}</p>
-              </div>
+              </h2>
+              <p v-if="model.name !== model.config.model" class="model-name">{{ model.name }}</p>
             </div>
             <div class="model-connection">
               <p class="model-endpoint" :title="model.config.baseUrl">{{ model.config.baseUrl }}</p>
-              <div class="model-badges">
-                <span class="model-badge" :class="{ ready: model.hasKey }"
-                  ><ShieldCheck v-if="model.hasKey" :size="12" aria-hidden="true" /><KeyRound
-                    v-else
-                    :size="12"
-                    aria-hidden="true"
-                  />{{ model.hasKey ? tr('Key 已存系统凭据库') : tr('未设置 Key') }}</span
-                ><span v-if="model.config.baseUrl.startsWith('http:')" class="model-badge">{{
-                  tr('HTTP 明文')
-                }}</span>
+              <div v-if="model.config.baseUrl.startsWith('http:')" class="model-badges">
+                <span class="model-badge">{{ tr('HTTP 明文') }}</span>
               </div>
             </div>
             <div class="model-limit">
               <strong>{{ model.config.contextWindowTokens.toLocaleString(locale) }}</strong>
-              <span>{{ tr('上下文窗口') }}</span>
+              <span class="model-field-label">{{ tr('上下文窗口') }}</span>
+            </div>
+            <div class="model-limit model-output-limit">
+              <strong>{{ model.config.maxOutputTokens.toLocaleString(locale) }}</strong>
+              <span class="model-field-label">{{ tr('最大输出 Token') }}</span>
+            </div>
+            <div class="model-key-status">
+              <span class="model-field-label">{{ tr('Key 状态') }}</span>
               <span
-                >{{ tr('输出 ≤ ') }}{{ model.config.maxOutputTokens.toLocaleString(locale) }}</span
+                class="model-badge"
+                :class="{ ready: model.hasKey }"
+                :title="model.hasKey ? tr('Key 已存系统凭据库') : tr('未设置 Key')"
               >
+                <ShieldCheck v-if="model.hasKey" :size="12" aria-hidden="true" />
+                <KeyRound v-else :size="12" aria-hidden="true" />
+                {{ model.hasKey ? tr('已配置') : tr('未设置 Key') }}
+              </span>
             </div>
             <div class="model-row-actions">
               <button
@@ -195,11 +252,6 @@ onMounted(() => void store.refresh());
           </li>
         </ul>
       </div>
-      <p class="asset-feedback model-page-note">
-        <ShieldCheck :size="14" aria-hidden="true" />{{
-          tr('Key 保存于系统凭据库。注册后，可在 AI 运维助手的插件设置中绑定模型。 ')
-        }}
-      </p>
     </div>
     <ModelDialog v-if="dialog" :model="editing" @close="dialog = false" @saved="dialog = false" />
     <Modal v-if="deleting" :title="tr('确认删除模型')" :busy="store.busy" @close="deleting = null">
