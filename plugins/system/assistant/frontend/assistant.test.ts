@@ -1775,3 +1775,58 @@ it('uses the cancellation result after the backend has retired the active job ha
   expect(state.turns.value[0]?.task?.status).toBe('unverified');
   expect(state.error.value).toBe('');
 });
+
+it.each([false, true])(
+  'retained Assist work continues while hidden and pauses a risky next plan=%s',
+  async (risky) => {
+    vi.useFakeTimers();
+    const { updateVisibility } = await import('@serverdeck/plugin-sdk/visibility');
+    try {
+      updateVisibility(true);
+      const state = mountState(true);
+      const first = composedAnswer('first');
+      first.proposals[0]!.risk = 'routine';
+      const second = composedAnswer('second');
+      second.proposals[0]!.risk = risky ? 'change' : 'routine';
+      api.send.mockResolvedValue(first);
+      api.execute
+        .mockResolvedValueOnce({
+          success: false,
+          pending: true,
+          jobId: 'job',
+          output: 'running',
+          task: taskSnapshot('executing'),
+        })
+        .mockResolvedValueOnce(verifiedPhase());
+      api.poll.mockResolvedValueOnce(verifiedPhase());
+      api.resume.mockResolvedValueOnce(second).mockResolvedValueOnce({
+        text: 'done',
+        proposals: [],
+        warnings: [],
+        usage: null,
+        task: taskSnapshot('succeeded'),
+      });
+      await state.send(composedInput('assist'));
+      updateVisibility(false);
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(1100);
+      await nextTick();
+      expect(api.poll).toHaveBeenCalled();
+      expect(api.cancel).not.toHaveBeenCalled();
+      if (risky) {
+        expect(api.execute).toHaveBeenCalledTimes(1);
+        expect(state.turns.value[0]?.task?.status).toBe('awaiting_approval');
+        updateVisibility(true);
+        await nextTick();
+        await vi.advanceTimersByTimeAsync(0);
+        await nextTick();
+      }
+      expect(api.execute.mock.calls.map((call) => call[0])).toEqual(['first', 'second']);
+      expect(state.turns.value[0]?.task?.status).toBe('succeeded');
+      expect(state.turns.value[0]?.error).toBe('');
+    } finally {
+      updateVisibility(true);
+      vi.useRealTimers();
+    }
+  },
+);

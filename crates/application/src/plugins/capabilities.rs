@@ -388,6 +388,7 @@ impl Application {
                 .retain(|(plugin, _), _| plugin != id);
             data.platform_terminals.retain(|_, r| r.plugin != id);
             data.visible_owners.retain(|(plugin, _), _| plugin != id);
+            data.retained_owners.retain(|(plugin, _)| plugin != id);
             (
                 data.documents
                     .iter()

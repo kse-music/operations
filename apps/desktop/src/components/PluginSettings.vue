@@ -185,6 +185,18 @@ async function revoke() {
             :key="index"
           ><code>{{ JSON.stringify(command, null, 2) }}</code></pre>
         </details>
+        <details v-if="plugin.manifest.assistCommands?.length" class="plugin-preset-commands">
+          <summary>{{ tr('帮我审批的受限命令模板') }}</summary>
+          <p class="subtle">
+            {{
+              tr('需独立授予变更预授权；仅在帮我审批模式匹配完整模板时自动执行，其他命令仍需确认。')
+            }}
+          </p>
+          <pre
+            v-for="(command, index) in plugin.manifest.assistCommands"
+            :key="index"
+          ><code>{{ JSON.stringify(command, null, 2) }}</code></pre>
+        </details>
         <p class="plugin-all-hosts subtle">
           {{
             tr(

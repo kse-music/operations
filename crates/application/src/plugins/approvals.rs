@@ -34,6 +34,56 @@ impl Application {
         if self.plugin_full_access(call, plugin, grant, operation)? {
             return Ok(true);
         }
+        let Capability::Platform { request, bindings } = operation;
+        let data = self.plugin_host.lock()?;
+        let assist = bindings.iter().any(|id| {
+            data.bindings.get(id).is_some_and(|binding| {
+                binding.plugin == call.id
+                    && binding.owner == call.owner
+                    && binding.generation == call.generation
+                    && binding.at.elapsed() < Duration::from_secs(600)
+                    && binding.target == state::RevisionTarget::ApprovalMode(ApprovalMode::Assist)
+            })
+        });
+        drop(data);
+        if !assist {
+            return Ok(false);
+        }
+        let changes = plugin
+            .manifest
+            .permissions
+            .contains(&Permission::OperationsFullPreapproved)
+            && grant
+                .permissions
+                .contains(&Permission::OperationsFullPreapproved)
+            && grant
+                .operations
+                .iter()
+                .any(|op| op == "operations.full.preapproved");
+        if changes {
+            match request {
+                Request::TransferStart { id } => {
+                    let data = self.plugin_host.lock()?;
+                    if data.copies.get(id).is_some_and(|copy| {
+                        copy.plugin == call.id
+                            && copy.owner == call.owner
+                            && copy.generation == call.generation
+                            && !copy.preview.overwrite
+                            && !copy.preview.target_exists
+                    }) {
+                        return Ok(true);
+                    }
+                }
+                Request::Execute { command, .. } | Request::StreamOpen { command, .. }
+                    if plugin.manifest.assist_commands.iter().any(|template| {
+                        template == command || template.matches_argument_template(command)
+                    }) =>
+                {
+                    return Ok(true);
+                }
+                _ => (),
+            }
+        }
         if !plugin
             .manifest
             .permissions
@@ -48,41 +98,29 @@ impl Application {
         {
             return Ok(false);
         }
-        let Capability::Platform { request, bindings } = operation;
-        let data = self.plugin_host.lock()?;
-        let assist = bindings.iter().any(|id| {
-            data.bindings.get(id).is_some_and(|binding| {
-                binding.plugin == call.id
-                    && binding.owner == call.owner
-                    && binding.generation == call.generation
-                    && binding.at.elapsed() < Duration::from_secs(600)
-                    && binding.target == state::RevisionTarget::ApprovalMode(ApprovalMode::Assist)
-            })
-        });
-        Ok(assist
-            && match request {
-                Request::ReadFile { .. } | Request::TransferPrepare { .. } => true,
-                Request::Execute { command, .. } | Request::StreamOpen { command, .. } => {
-                    plugin.manifest.preapproved_commands.contains(command)
-                        || (plugin
-                            .manifest
+        Ok(match request {
+            Request::ReadFile { .. } | Request::TransferPrepare { .. } => true,
+            Request::Execute { command, .. } | Request::StreamOpen { command, .. } => {
+                plugin.manifest.preapproved_commands.contains(command)
+                    || (plugin
+                        .manifest
+                        .permissions
+                        .contains(&Permission::OperationsReadArgumentsPreapproved)
+                        && grant
                             .permissions
                             .contains(&Permission::OperationsReadArgumentsPreapproved)
-                            && grant
-                                .permissions
-                                .contains(&Permission::OperationsReadArgumentsPreapproved)
-                            && grant
-                                .operations
-                                .iter()
-                                .any(|op| op == "operations.read.arguments.preapproved")
-                            && plugin
-                                .manifest
-                                .preapproved_commands
-                                .iter()
-                                .any(|template| template.matches_argument_template(command)))
-                }
-                _ => false,
-            })
+                        && grant
+                            .operations
+                            .iter()
+                            .any(|op| op == "operations.read.arguments.preapproved")
+                        && plugin
+                            .manifest
+                            .preapproved_commands
+                            .iter()
+                            .any(|template| template.matches_argument_template(command)))
+            }
+            _ => false,
+        })
     }
 
     pub(super) fn plugin_full_access(
@@ -232,9 +270,6 @@ impl Application {
                 "计划须包含1–96个固定执行、保存或传输请求，最多128次调用",
             ));
         }
-        if !self.plugin_scope_visible(call)? {
-            return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面确认本次计划"));
-        }
         let collect = call.collector();
         let mut hashes = BTreeMap::<String, u16>::new();
         let mut descriptions = Vec::new();
@@ -291,7 +326,35 @@ impl Application {
             description.truncate(end);
             description.push_str("\n（内容较长，已省略后部；请结合聊天中的完整计划核对）");
         }
-        if !self.plugin_full_access(call, plugin, grant, &operation)?
+        let mut automatic = self.plugin_full_access(call, plugin, grant, &operation)?;
+        if !automatic {
+            automatic = true;
+            let Capability::Platform {
+                request: Request::ConfirmOperations { operations },
+                bindings,
+            } = &operation
+            else {
+                return Err(Error::Validation("计划无效"));
+            };
+            for op in operations {
+                if !self.plugin_mode_preapproves(
+                    call,
+                    plugin,
+                    grant,
+                    &Capability::Platform {
+                        request: *op.request.clone(),
+                        bindings: bindings.clone(),
+                    },
+                )? {
+                    automatic = false;
+                    break;
+                }
+            }
+        }
+        if !automatic && !self.plugin_scope_visible(call)? {
+            return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面确认本次计划"));
+        }
+        if !automatic
             && let Some(approval) = self.plugin_confirm_details(
                 call,
                 plugin,

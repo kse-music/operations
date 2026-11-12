@@ -2,7 +2,7 @@
 
 | 契约                               | 当前版本 |
 | ---------------------------------- | -------- |
-| Host 语义 API / Rust SDK / Vue SDK | 5.6.0    |
+| Host 语义 API / Rust SDK / Vue SDK | 5.7.0    |
 | Manifest schema / sdplugin format  | 1        |
 | WASM ABI / wire                    | 1        |
 | UI                                 | 4        |

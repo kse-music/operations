@@ -453,7 +453,13 @@ async fn remote_copy_path_preflight_errors_preserve_native_authority_and_allow_c
     use serverdeck_plugin_sdk::platform::{ApprovalMode, RemotePath, TransferSource};
     let fixture = Fixture::new();
     let app = &fixture.app;
-    let plugin = fixture.install("dev.remote-copy-preflight").await;
+    let plugin = fixture
+        .install_with_commands(
+            "dev.remote-copy-preflight",
+            &[Permission::OperationsFullPreapproved],
+            vec![],
+        )
+        .await;
     fixture.grant(&plugin).await;
     let id = &plugin.manifest.id;
     let source = server(app, Duration::ZERO).await;
@@ -521,7 +527,7 @@ async fn remote_copy_path_preflight_errors_preserve_native_authority_and_allow_c
             },
             overwrite: false,
         },
-        vec![binding],
+        vec![binding.clone()],
     )
     .await;
     assert!(preview.error.is_none(), "{preview:?}");
@@ -530,8 +536,37 @@ async fn remote_copy_path_preflight_errors_preserve_native_authority_and_allow_c
         "/etc/fixture/image.tar"
     );
     let key = preview.result["id"].as_str().unwrap();
+    app.plugin_scope_visibility(id, "page", false, true)
+        .await
+        .unwrap();
+    let consent = bound(
+        app,
+        &scoped,
+        Primitive::ConfirmOperations {
+            operations: vec![serverdeck_plugin_sdk::platform::ApprovalOperation {
+                request: Box::new(Primitive::TransferStart { id: key.into() }),
+                count: 1,
+            }],
+        },
+        vec![binding.clone()],
+    )
+    .await;
+    assert!(
+        consent.error.is_none(),
+        "routine plan must not prompt: {consent:?}"
+    );
+    let start = bound(
+        app,
+        &scoped,
+        Primitive::TransferStart { id: key.into() },
+        vec![binding.clone()],
+    )
+    .await;
+    assert!(
+        start.error.is_none(),
+        "routine non-overwriting transfer needs no extra prompt: {start:?}"
+    );
     drop(scoped);
-    approved_primitive(app, id, "page", Primitive::TransferStart { id: key.into() }).await;
     let done = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let state = call(
@@ -565,6 +600,53 @@ async fn remote_copy_path_preflight_errors_preserve_native_authority_and_allow_c
         bytes
     );
     assert_eq!(std::fs::read(&source_file).unwrap(), bytes);
+    // An overwrite remains a risk even with an Assist binding and a change grant.
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    let overwrite = bound(
+        app,
+        &scoped,
+        Primitive::TransferPrepare {
+            source: TransferSource::Remote {
+                host_id: source.host.id.clone(),
+                path: "/etc/fixture/job/image.tar".into(),
+            },
+            destination: RemotePath {
+                host_id: target.host.id.clone(),
+                path: "/etc/fixture".into(),
+            },
+            overwrite: true,
+        },
+        vec![binding.clone()],
+    )
+    .await;
+    assert!(overwrite.error.is_none(), "{overwrite:?}");
+    let overwrite_id = overwrite.result["id"].as_str().unwrap().to_owned();
+    let denied = bound(
+        app,
+        &scoped,
+        Primitive::TransferStart {
+            id: overwrite_id.clone(),
+        },
+        vec![binding.clone()],
+    )
+    .await;
+    assert!(denied.error.is_some());
+    app.plugin_scope_visibility(id, "page", true, true)
+        .await
+        .unwrap();
+    let confirm = bound(
+        app,
+        &scoped,
+        Primitive::TransferStart { id: overwrite_id },
+        vec![binding],
+    )
+    .await;
+    assert_eq!(confirm.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    assert_eq!(
+        std::fs::read(target.root.path().join("etc/fixture/image.tar")).unwrap(),
+        bytes
+    );
+    drop(scoped);
     app.plugin_close_scope(id, "page").await.unwrap();
     assert!(app.plugin_host.lock().unwrap().copies.is_empty());
     app.shutdown().await;

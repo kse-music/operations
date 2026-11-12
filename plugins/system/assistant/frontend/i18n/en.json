@@ -162,5 +162,9 @@
   "导出 Docker 镜像归档": "Save Docker image archive",
   "导入并核对 Docker 镜像": "Load and verify Docker image",
   "所属页面已释放，任务结果未确认，请独立核对实际状态": "The owning page was released. Task result is unconfirmed; verify the actual state independently",
-  "执行记录 · ": "Execution record · "
+  "执行记录 · ": "Execution record · ",
+  "常规操作自动执行；删除、覆盖、未知命令等高风险操作请求批准；仅对新任务生效": "Run routine operations automatically; request approval for deletion, overwrite, unknown commands and other high-risk operations; new tasks only",
+  "常规操作 · 按模式审批": "Routine operation · approval mode applies",
+  "高风险操作 · 按模式审批": "High-risk operation · approval mode applies",
+  "按模式处理": "Apply approval mode"
 }

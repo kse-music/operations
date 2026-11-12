@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "5.6.0";
+pub const API_VERSION: &str = "5.7.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,6 +22,9 @@ pub struct Manifest {
     pub permissions: Vec<Permission>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preapproved_commands: Vec<serverdeck_plugin_sdk::platform::Command>,
+    /// Exact guarded commands eligible only under Assist with an independent change grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assist_commands: Vec<serverdeck_plugin_sdk::platform::Command>,
     pub contributions: Vec<Contribution>,
     pub platforms: Vec<String>,
     pub files: Vec<FileDigest>,
@@ -206,6 +209,29 @@ impl Manifest {
             > 48 * 1024
         {
             return Err(invalid("预授权命令总量超过 48 KiB"));
+        }
+        if self.assist_commands.len() > 16
+            || (!self.assist_commands.is_empty()
+                && (!permissions.contains(&Permission::SshExecute)
+                    || !permissions.contains(&Permission::OperationsFullPreapproved)))
+        {
+            return Err(invalid("自动审批命令最多16条，需要 SSH 和独立变更预授权"));
+        }
+        let mut assist = BTreeSet::new();
+        for command in &self.assist_commands {
+            command
+                .validate_argument_template()
+                .map_err(|_| invalid("自动审批命令模板无效"))?;
+            if !assist.insert(command.shell().map_err(|_| invalid("自动审批命令无效"))?) {
+                return Err(invalid("自动审批命令重复"));
+            }
+        }
+        if serde_json::to_vec(&self.assist_commands)
+            .map_err(|_| invalid("自动审批命令编码失败"))?
+            .len()
+            > 48 * 1024
+        {
+            return Err(invalid("自动审批命令总量超过48 KiB"));
         }
         let mut contribution_ids = BTreeSet::new();
         for c in &self.contributions {

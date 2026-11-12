@@ -61,6 +61,7 @@ impl Fixture {
                 },
                 permissions: vec![],
                 preapproved_commands: vec![],
+                assist_commands: vec![],
                 contributions: vec![],
                 platforms: vec![std::env::consts::OS.into()],
                 files: vec![FileDigest {

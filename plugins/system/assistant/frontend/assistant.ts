@@ -73,17 +73,32 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     accessReset = resetting;
     return resetting;
   }
+  const canContinue = (turn: AiTurn) =>
+    visible.value || (keepRunning.value && !!turn.approvalMode && turn.approvalMode !== 'request');
+  const automaticProposal = (turn: AiTurn) =>
+    !turn.approvalMode || turn.approvalMode === 'request'
+      ? undefined
+      : turn.answer?.proposals.find(
+          (p) =>
+            p.risk !== 'manual_only' &&
+            (visible.value ||
+              (keepRunning.value && (p.risk === 'routine' || turn.approvalMode === 'full'))),
+        );
   function schedulePoll() {
     if (pollTimer) clearTimeout(pollTimer);
     pollTimer = null;
-    if (disposed || !visible.value || !Object.values(outputs.value).some((value) => value.pending))
+    if (
+      disposed ||
+      (!visible.value && !keepRunning.value) ||
+      !Object.values(outputs.value).some((value) => value.pending)
+    )
       return;
     pollTimer = setTimeout(() => {
       void pollTransfers();
     }, 1000);
   }
   async function pollTransfers() {
-    if (disposed || !visible.value || busy.value || polling) {
+    if (disposed || (!visible.value && !keepRunning.value) || busy.value || polling) {
       schedulePoll();
       return;
     }
@@ -360,8 +375,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
         };
         entry.state = 'complete';
         entry.task = answer.task ?? entry.task;
-        if (entry.approvalMode !== 'request' && visible.value)
-          automatic = answer.proposals.find((p) => p.risk !== 'manual_only');
+        automatic = automaticProposal(entry);
       }
     } catch (e) {
       if (!disposed && current === version) {
@@ -386,10 +400,9 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       hostContext.phase.value = '';
       controller = null;
     }
-    if (entry.answer?.continuation && !disposed && current === version && visible.value)
+    if (entry.answer?.continuation && !disposed && current === version && canContinue(entry))
       await continueTask(entry);
-    else if (automatic && !disposed && current === version && visible.value)
-      await executeProposal(automatic);
+    else if (automatic && !disposed && current === version) await executeProposal(automatic);
   }
   async function end() {
     try {
@@ -478,7 +491,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
   async function continueTask(turn: AiTurn, proposalId?: string) {
     if (
       disposed ||
-      !visible.value ||
+      !canContinue(turn) ||
       busy.value ||
       !turn.requestId ||
       turn.task?.status !== 'running'
@@ -540,8 +553,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
         turn.task = answer.task ?? turn.task;
         turn.state = 'complete';
         again = !!answer.continuation;
-        if (turn.approvalMode !== 'request')
-          automatic = answer.proposals.find((p) => p.risk !== 'manual_only');
+        automatic = automaticProposal(turn);
       }
     } catch (cause) {
       if (!disposed && current === version) {
@@ -566,7 +578,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       busy.value = '';
       requestId = '';
     }
-    if (disposed || current !== version || !visible.value) return;
+    if (disposed || current !== version || !canContinue(turn)) return;
     if (again) await continueTask(turn);
     else if (automatic) await executeProposal(automatic);
   }
@@ -586,6 +598,24 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
         turn,
         turn.answer?.proposals.find((proposal) => outputs.value[proposal.id]?.continuation)?.id,
       );
+    else {
+      const waiting = turns.value.find((turn) => {
+        const proposal = automaticProposal(turn);
+        return (
+          turn.task?.status === 'awaiting_approval' &&
+          proposal &&
+          !attempted.value.includes(proposal.id) &&
+          !expired.value.includes(proposal.id)
+        );
+      });
+      const proposal = waiting && automaticProposal(waiting);
+      if (
+        proposal &&
+        !attempted.value.includes(proposal.id) &&
+        !expired.value.includes(proposal.id)
+      )
+        void executeProposal(proposal);
+    }
   });
   onBeforeUnmount(() => {
     if (pollTimer) clearTimeout(pollTimer);

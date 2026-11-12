@@ -27,6 +27,7 @@ export interface PluginManifest {
   entry: { backend: string | null; ui: string | null };
   permissions: PluginPermission[];
   preapprovedCommands?: import('./platform').Command[];
+  assistCommands?: import('./platform').Command[];
   contributions: {
     id: string;
     label: string;

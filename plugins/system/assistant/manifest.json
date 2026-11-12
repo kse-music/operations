@@ -3,10 +3,10 @@
   "id": "cn.hiboot.plugins.assistant",
   "name": "AI 运维助手",
   "icon": "bot",
-  "version": "3.0.4",
+  "version": "3.1.0",
   "author": "ServerDeck",
   "description": "组合主机、命令、文件与镜像工具，按需加载 Skill，按审批模式执行并核对结果。",
-  "apiVersion": "^5.6.0",
+  "apiVersion": "^5.7.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"
@@ -201,12 +201,29 @@
       "program": "sh",
       "args": [
         "-c",
-        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; \ntest \"$#\" = 4 && test \"${#1}\" = 36 && test \"${#2}\" = 64 && test \"${#3}\" = 64 || exit 65\ncase \"$1\" in *[!0-9a-fA-F-]*) exit 65;; esac\ncase \"$2$3\" in *[!0-9a-fA-F]*) exit 65;; esac\ncase \"$4\" in ''|.|..|*/*|*\\\\*) exit 65;; esac\ncase \"$4\" in *.[tT][aA][rR]) ;; *) exit 65;; esac\n\numask 077\nsd_dir=\"/tmp/serverdeck-image-$1\"; sd_path=\"$sd_dir/$4\"; sd_child=\ntest -d /tmp && ! test -L /tmp || { echo 'Temporary directory is unavailable or linked' >&2; exit 1; }\nmkdir -- \"$sd_dir\" || exit\ncleanup() {\n    sd_status=$?\n    if test -n \"$sd_child\"; then\n        if kill -0 \"$sd_child\" 2>/dev/null; then kill -TERM \"$sd_child\" || sd_status=1; fi\n        wait \"$sd_child\" 2>/dev/null\n    fi\n    if test -L \"$sd_dir\" || ! rm -f -- \"$sd_path\" || ! rmdir -- \"$sd_dir\"; then\n        printf 'Archive cleanup incomplete: %s\\n' \"$sd_dir\" >&2; sd_status=1\n    fi\n    exit \"$sd_status\"\n}\ntrap cleanup 0\ntrap 'exit 1' HUP INT TERM\nrun_child() { \"$@\" & sd_child=$!; wait \"$sd_child\"; sd_result=$?; sd_child=; return \"$sd_result\"; }\nprintf 'SD_ARCHIVE_PREPARED:%s\\n' \"$1\"\n\nsd_id=\"sha256:$2\"; sd_reference_hash=$3\nsd_references=$(d image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' -- \"$sd_id\") || exit\nset -f\nsd_reference=\nfor sd_candidate in \"$sd_id\" \"${sd_id#sha256:}\" $sd_references; do\n    sd_hash=$(printf '%s' \"$sd_candidate\" | sha256sum) || exit\n    sd_hash=${sd_hash%% *}\n    if test \"$sd_hash\" = \"$sd_reference_hash\"; then sd_reference=$sd_candidate; break; fi\ndone\ntest -n \"$sd_reference\" || { echo 'Image reference changed; refresh the image list' >&2; exit 1; }\nsd_actual=$(d image inspect --format '{{.Id}}' -- \"$sd_reference\") || exit\ntest \"$sd_actual\" = \"$sd_id\" || { echo 'Image reference changed; refresh the image list' >&2; exit 1; }\nrun_child docker --host unix://$sd_socket image save --output \"$sd_path\" -- \"$sd_reference\" || exit\nsd_actual=$(d image inspect --format '{{.Id}}' -- \"$sd_reference\") || exit\ntest \"$sd_actual\" = \"$sd_id\" || { echo 'Image reference changed during export' >&2; exit 1; }\n\nprintf '\\nSD_ARCHIVE_READY:%s\\n' \"$1\"\nwhile :; do run_child sleep 1 || exit; done\n",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; \ntest \"$#\" = 4 && test \"${#1}\" = 36 && test \"${#2}\" = 64 && test \"${#3}\" = 64 || exit 65\ncase \"$1\" in *[!0-9a-fA-F-]*) exit 65;; esac\ncase \"$2$3\" in *[!0-9a-fA-F]*) exit 65;; esac\ncase \"$4\" in ''|.|..|*/*|*\\\\*) exit 65;; esac\ncase \"$4\" in *.[tT][aA][rR]) ;; *) exit 65;; esac\n\numask 077\nsd_dir=\"/tmp/serverdeck-image-$1\"; sd_path=\"$sd_dir/$4\"; sd_child=\ntest -d /tmp && ! test -L /tmp || { echo 'Temporary directory is unavailable or linked' >&2; exit 1; }\nmkdir -- \"$sd_dir\" || exit\ncleanup() {\n    sd_status=$?\n    if test -n \"$sd_child\"; then\n        if kill -0 \"$sd_child\" 2>/dev/null; then kill -TERM \"$sd_child\" || sd_status=1; fi\n        wait \"$sd_child\" 2>/dev/null\n    fi\n    if test -L \"$sd_dir\" || ! rm -f -- \"$sd_path\" || ! rmdir -- \"$sd_dir\"; then\n        printf 'Archive cleanup incomplete: %s\\n' \"$sd_dir\" >&2; sd_status=1\n    fi\n    exit \"$sd_status\"\n}\ntrap cleanup 0\ntrap 'exit 1' HUP INT TERM\nrun_child() { \"$@\" & sd_child=$!; wait \"$sd_child\"; sd_result=$?; sd_child=; return \"$sd_result\"; }\nprintf 'SD_ARCHIVE_PREPARED:%s\\n' \"$1\"\n\nsd_id=\"sha256:$2\"; sd_reference_hash=$3\nsd_references=$(d image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' -- \"$sd_id\") || exit\nset -f\nsd_reference=\nfor sd_candidate in \"$sd_id\" \"${sd_id#sha256:}\" $sd_references; do\n    sd_hash=$(printf '%s' \"$sd_candidate\" | sha256sum) || exit\n    sd_hash=${sd_hash%% *}\n    if test \"$sd_hash\" = \"$sd_reference_hash\"; then sd_reference=$sd_candidate; break; fi\ndone\ntest -n \"$sd_reference\" || { echo 'Image reference changed; refresh the image list' >&2; exit 1; }\nsd_actual=$(d image inspect --format '{{.Id}}' -- \"$sd_reference\") || exit\ntest \"$sd_actual\" = \"$sd_id\" || { echo 'Image reference changed; refresh the image list' >&2; exit 1; }\nrun_child docker --host unix://$sd_socket image save --output \"$sd_path\" -- \"$sd_reference\" || exit\nsd_actual=$(d image inspect --format '{{.Id}}' -- \"$sd_reference\") || exit\ntest \"$sd_actual\" = \"$sd_id\" || { echo 'Image reference changed during export' >&2; exit 1; }\nsd_archive_hash=$(sha256sum -- \"$sd_path\") || exit\nsd_archive_hash=${sd_archive_hash%% *}\nprintf 'SD_ARCHIVE_SHA256:%s:%s\\n' \"$1\" \"$sd_archive_hash\"\n\nprintf '\\nSD_ARCHIVE_READY:%s\\n' \"$1\"\nwhile :; do run_child sleep 1 || exit; done\n",
         "serverdeck-image-export",
         "{{sd:identifier:36:}}",
         "{{sd:hex:64}}",
         "{{sd:hex:64}}",
         "{{sd:identifier:240:.tar}}"
+      ],
+      "timeoutSecs": 30
+    }
+  ],
+  "assistCommands": [
+    {
+      "program": "sh",
+      "args": [
+        "-c",
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; export SYSTEMD_PAGER=cat SYSTEMD_COLORS=0; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH; sd_uid=$(id -u); sd_socket=/var/run/docker.sock; if test -S /run/user/$sd_uid/docker.sock; then sd_socket=/run/user/$sd_uid/docker.sock; fi; d() { command docker --host unix://$sd_socket \"$@\"; }; \ntest \"$#\" = 6 || exit 65\nsd_nonce=$1; sd_id=\"sha256:$2\"; sd_hash_expected=$3\nsd_input=$4; sd_reference=$5; sd_before_expected=$6; sd_child=\ncleanup() { if test -n \"$sd_child\"; then kill -TERM \"$sd_child\" 2>/dev/null; wait \"$sd_child\" 2>/dev/null; fi; }\ntrap 'cleanup; exit 1' HUP INT TERM\nrun_child() { \"$@\" & sd_child=$!; wait \"$sd_child\"; sd_result=$?; sd_child=; return \"$sd_result\"; }\nprintf 'SD_ARCHIVE_PREPARED:%s\\n' \"$sd_nonce\"\ntest -f \"$sd_input\" && ! test -L \"$sd_input\" || exit 65\nsd_hash=$(sha256sum -- \"$sd_input\") || exit\nsd_hash=${sd_hash%% *}\ntest \"$sd_hash\" = \"$sd_hash_expected\" || { echo 'Archive changed after transfer' >&2; exit 65; }\nsd_before=$(d image inspect --format '{{.Id}}' -- \"$sd_reference\" 2>/dev/null) || sd_before=\ntest \"$sd_before\" = \"$sd_before_expected\" || { echo 'Target image changed; query again' >&2; exit 65; }\nrun_child docker --host unix://$sd_socket image load --input \"$sd_input\" || exit\nsd_after=$(d image inspect --format '{{.Id}}' -- \"$sd_reference\") || exit\ntest \"$sd_after\" = \"$sd_id\" || { echo 'Loaded image verification failed' >&2; exit 65; }\nprintf '\\nSD_ARCHIVE_READY:%s\\n' \"$sd_nonce\"\n",
+        "serverdeck-image-load",
+        "{{sd:identifier:36:}}",
+        "{{sd:hex:64}}",
+        "{{sd:hex:64}}",
+        "{{sd:text:4096}}",
+        "{{sd:text:1024}}",
+        ""
       ],
       "timeoutSecs": 30
     }

@@ -11,6 +11,7 @@ serverdeck-ssh.workspace = true
 tokio.workspace = true
 tokio-util = { version = "0.7", features = ["rt"] }
 russh-sftp = "3.0.1"
+futures-util = "0.3"
 sha2 = "0.10"
 uuid.workspace = true
 tracing.workspace = true

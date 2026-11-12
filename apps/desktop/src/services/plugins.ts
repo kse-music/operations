@@ -64,9 +64,9 @@ export const pluginsApi = {
     ensureDesktop();
     return invoke('plugin_close_scope', { id, owner });
   },
-  scopeVisibility(id: string, owner: string, visible: boolean): Promise<void> {
+  scopeVisibility(id: string, owner: string, visible: boolean, retain = false): Promise<void> {
     ensureDesktop();
-    return invoke('plugin_scope_visibility', { id, owner, visible });
+    return invoke('plugin_scope_visibility', { id, owner, visible, retain });
   },
   previewInfo(path: string): Promise<PluginPackagePreview> {
     ensureDesktop();

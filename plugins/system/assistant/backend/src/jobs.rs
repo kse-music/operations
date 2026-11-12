@@ -18,11 +18,22 @@ pub struct Artifact {
     pub host: String,
     pub path: String,
     pub sha256: Option<String>,
+    pub image: Option<ImageOrigin>,
+}
+#[derive(Clone)]
+pub struct ImageOrigin {
+    pub id: String,
+    pub reference: String,
+    pub sha256: String,
 }
 #[derive(Clone)]
 enum Kind {
     Command,
-    Save { path: String },
+    Save {
+        path: String,
+        id: String,
+        reference: String,
+    },
     Load,
 }
 #[derive(Clone)]
@@ -32,6 +43,7 @@ pub struct Plan {
     pub command: Command,
     pub public: AgentStep,
     pub tool: ToolId,
+    pub routine: bool,
     kind: Kind,
 }
 struct Job {
@@ -41,6 +53,7 @@ struct Job {
     output: Vec<u8>,
     truncated: bool,
     done: bool,
+    archive_sha256: Option<String>,
 }
 impl Job {
     fn safe_output(&self, redactor: &Redactor) -> String {
@@ -48,11 +61,15 @@ impl Job {
         let prepared = format!("SD_ARCHIVE_PREPARED:{}", self.plan.id);
         let ready = format!("SD_ARCHIVE_READY:{}", self.plan.id);
         let exit = format!("SD_JOB_EXIT:{}:", self.plan.id);
+        let archive_hash = format!("SD_ARCHIVE_SHA256:{}:", self.plan.id);
         let text = raw
             .split_inclusive('\n')
             .filter(|line| {
                 let text = line.trim_end_matches(['\r', '\n']);
-                text != prepared && text != ready && !text.starts_with(&exit)
+                text != prepared
+                    && text != ready
+                    && !text.starts_with(&exit)
+                    && !text.starts_with(&archive_hash)
             })
             .collect::<String>();
         redactor.stream_text(&text, !self.truncated)
@@ -63,6 +80,24 @@ pub struct Resources {
     jobs: HashMap<String, Job>,
     pub artifacts: HashMap<String, Artifact>,
 }
+pub const LOAD_SCRIPT: &str = r#"test "$#" = 6 || exit 65
+sd_nonce=$1; sd_id="sha256:$2"; sd_hash_expected=$3
+sd_input=$4; sd_reference=$5; sd_before_expected=$6; sd_child=
+cleanup() { if test -n "$sd_child"; then kill -TERM "$sd_child" 2>/dev/null; wait "$sd_child" 2>/dev/null; fi; }
+trap 'cleanup; exit 1' HUP INT TERM
+run_child() { "$@" & sd_child=$!; wait "$sd_child"; sd_result=$?; sd_child=; return "$sd_result"; }
+printf 'SD_ARCHIVE_PREPARED:%s\n' "$sd_nonce"
+test -f "$sd_input" && ! test -L "$sd_input" || exit 65
+sd_hash=$(sha256sum -- "$sd_input") || exit
+sd_hash=${sd_hash%% *}
+test "$sd_hash" = "$sd_hash_expected" || { echo 'Archive changed after transfer' >&2; exit 65; }
+sd_before=$(d image inspect --format '{{.Id}}' -- "$sd_reference" 2>/dev/null) || sd_before=
+test "$sd_before" = "$sd_before_expected" || { echo 'Target image changed; query again' >&2; exit 65; }
+run_child docker --host unix://$sd_socket image load --input "$sd_input" || exit
+sd_after=$(d image inspect --format '{{.Id}}' -- "$sd_reference") || exit
+test "$sd_after" = "$sd_id" || { echo 'Loaded image verification failed' >&2; exit 65; }
+printf '\nSD_ARCHIVE_READY:%s\n' "$sd_nonce"
+"#;
 pub fn reference(value: &str) -> Result<(), Error> {
     if value.is_empty()
         || value.len() > 1024
@@ -163,7 +198,11 @@ exit "$sd_result"
                 )?;
                 (
                     command,
-                    Kind::Save { path },
+                    Kind::Save {
+                        path,
+                        id: normalized.clone(),
+                        reference: tag.clone(),
+                    },
                     format!("{host}: {tag} · {normalized}"),
                 )
             }
@@ -188,47 +227,31 @@ exit "$sd_result"
                     .ok_or(Error::Validation("归档未校验"))?;
                 let rows = image_snapshot(evidence.get(host).map(Vec::as_slice).unwrap_or(&[]))?;
                 let before = tag_id(rows, tag).unwrap_or_default();
-                let (archive_command, _, _) = image_archive::command(
-                    &image_archive::Archive::Import {
-                        file_name: "unused.tar".into(),
-                        confirmed: true,
-                    },
-                    &nonce,
-                )?;
-                let script = archive_command
-                    .args
-                    .get(1)
-                    .ok_or(Error::Validation("归档脚本不兼容"))?;
-                let start = script
-                    .find("while ! test -e")
-                    .ok_or(Error::Validation("归档脚本不兼容"))?;
-                let end = script[start..]
-                    .find("printf ")
-                    .map(|end| start + end)
-                    .ok_or(Error::Validation("归档脚本不兼容"))?;
-                let load = format!(
-                    r#"sd_input={path}
-test -f "$sd_input" && ! test -L "$sd_input" || exit 65
-sd_hash=$(sha256sum -- "$sd_input") || exit
-sd_hash=${{sd_hash%% *}}
-test "$sd_hash" = {hash} || {{ echo 'Archive changed after transfer' >&2; exit 65; }}
-sd_before=$(d image inspect --format '{{{{.Id}}}}' -- {tag} 2>/dev/null) || sd_before=
-test "$sd_before" = {before} || {{ echo 'Target image changed; query again' >&2; exit 65; }}
-run_child docker --host unix://$sd_socket image load --input "$sd_input" || exit
-sd_after=$(d image inspect --format '{{{{.Id}}}}' -- {tag}) || exit
-test "$sd_after" = {id} || {{ echo 'Loaded image verification failed' >&2; exit 65; }}
-"#,
-                    path = platform::quote(&artifact.path)?,
-                    hash = platform::quote(hash)?,
-                    tag = platform::quote(tag)?,
-                    before = platform::quote(&before)?,
-                    id = platform::quote(&format!(
-                        "sha256:{}",
-                        id.strip_prefix("sha256:").unwrap_or(id)
-                    ))?
-                );
-                let command =
-                    Command::script(format!("{}{}{}", &script[..start], load, &script[end..]));
+                let normalized = format!("sha256:{}", id.strip_prefix("sha256:").unwrap_or(id));
+                let trusted = artifact.image.as_ref().is_some_and(|origin| {
+                    origin.id == normalized && &origin.reference == tag && origin.sha256 == hash
+                });
+                let mut command = Command::script(format!("{}\n{}", ops::PRELUDE, LOAD_SCRIPT));
+                let single_tag = !tag.starts_with("sha256:")
+                    && tag
+                        .rsplit('/')
+                        .next()
+                        .is_some_and(|name| name.contains(':'));
+                if !trusted || !single_tag {
+                    command.args[1].insert_str(0, ": 'Archive origin requires manual review';\n");
+                }
+                command.args.extend([
+                    "serverdeck-image-load".into(),
+                    nonce.clone(),
+                    normalized
+                        .strip_prefix("sha256:")
+                        .unwrap_or(&normalized)
+                        .into(),
+                    hash.into(),
+                    artifact.path.clone(),
+                    tag.clone(),
+                    before,
+                ]);
                 command.validate()?;
                 (
                     command,
@@ -242,7 +265,12 @@ test "$sd_after" = {id} || {{ echo 'Loaded image verification failed' >&2; exit 
             _ => return Err(Error::Validation("不支持的独立工具")),
         };
         command.validate()?;
+        let routine = matches!(&kind, Kind::Save { .. })
+            || (matches!(&kind, Kind::Load)
+                && command.args[1] == format!("{}\n{}", ops::PRELUDE, LOAD_SCRIPT)
+                && command.args.last().is_some_and(String::is_empty));
         Ok(Plan {
+            routine,
             host: host.clone(),
             id: nonce,
             command,
@@ -269,6 +297,7 @@ test "$sd_after" = {id} || {{ echo 'Loaded image verification failed' >&2; exit 
                 output: vec![],
                 truncated: false,
                 done: false,
+                archive_sha256: None,
             },
         );
         let job = self.jobs.get_mut(&id).ok_or(Error::NotFound)?;
@@ -338,6 +367,16 @@ test "$sd_after" = {id} || {{ echo 'Loaded image verification failed' >&2; exit 
                                     }
                                     job.done = true;
                                 }
+                            } else if let Some(hash) =
+                                line.strip_prefix(&format!("SD_ARCHIVE_SHA256:{id}:"))
+                            {
+                                if !matches!(&job.plan.kind, Kind::Save { .. })
+                                    || hash.len() != 64
+                                    || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                                {
+                                    return Err(Error::Validation("导出归档摘要标记无效"));
+                                }
+                                job.archive_sha256 = Some(hash.to_ascii_lowercase());
                             } else if line == format!("SD_ARCHIVE_READY:{id}") {
                                 job.done = true;
                             }
@@ -363,13 +402,26 @@ test "$sd_after" = {id} || {{ echo 'Loaded image verification failed' >&2; exit 
             return Ok(None);
         }
         let mut result = json!({"jobId":id,"hostId":job.plan.host,"tool":job.plan.tool,"status":"verified","output":job.safe_output(redactor),"outputOmitted":job.truncated});
-        if let Kind::Save { path } = &job.plan.kind {
+        if let Kind::Save {
+            path,
+            id: image_id,
+            reference,
+        } = &job.plan.kind
+        {
             self.artifacts.insert(
                 id.into(),
                 Artifact {
                     host: job.plan.host.clone(),
                     path: path.clone(),
                     sha256: None,
+                    image: Some(ImageOrigin {
+                        id: image_id.clone(),
+                        reference: reference.clone(),
+                        sha256: job
+                            .archive_sha256
+                            .clone()
+                            .ok_or(Error::Validation("导出归档未返回完整SHA-256，不能确认成功"))?,
+                    }),
                 },
             );
             result["archiveId"] = json!(id);
@@ -411,12 +463,36 @@ test "$sd_after" = {id} || {{ echo 'Loaded image verification failed' >&2; exit 
         {
             return Err(Error::Validation("文件传输未通过完整校验"));
         }
+        let origins = match &preview.source {
+            platform::TransferSource::Remote { host_id, path } => self
+                .artifacts
+                .values()
+                .filter(|artifact| &artifact.host == host_id && &artifact.path == path)
+                .filter_map(|artifact| artifact.image.clone())
+                .collect::<Vec<_>>(),
+            _ => vec![],
+        };
+        let image = origins
+            .iter()
+            .find(|origin| Some(&origin.sha256) == state.sha256.as_ref())
+            .cloned();
+        self.artifacts.retain(|_, artifact| {
+            artifact.host != preview.destination.host_id
+                || artifact.path != preview.destination.path
+        });
+        if !origins.is_empty() && image.is_none() {
+            return Err(Error::Platform(serverdeck_plugin_sdk::ApiError::new(
+                "ARTIFACT_SOURCE_CHANGED",
+                "传输已完成，但归档与导出时的SHA-256不一致；停止后续导入，请核对目标文件",
+            )));
+        }
         self.artifacts.insert(
             preview.id.clone(),
             Artifact {
                 host: preview.destination.host_id.clone(),
                 path: preview.destination.path.clone(),
                 sha256: state.sha256.clone(),
+                image,
             },
         );
         Ok(

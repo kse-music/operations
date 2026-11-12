@@ -154,6 +154,7 @@ pub(super) struct Data {
     pub platform_terminals: BTreeMap<String, PlatformTerminalTicket>,
     pub open_terminals: BTreeMap<String, PlatformTerminalOwner>,
     pub visible_owners: BTreeMap<(String, String), bool>,
+    pub retained_owners: BTreeSet<(String, String)>,
     pub request_owners: BTreeMap<String, String>,
     pub continuations: BTreeMap<String, Continuation>,
     pub results: BTreeMap<String, ResultData>,

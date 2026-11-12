@@ -1115,5 +1115,7 @@
   "文件上传、下载与中转": "File upload, download and relay",
   "本机普通文件上传、远程文件下载或中转；默认准备和启动逐次确认，远程读写仍须独立权限与目录授权": "Upload local regular files, download or relay remote files. Preparation and start require confirmation by default; remote reads and writes still require separate permissions and directory grants.",
   "文件传输预授权": "File transfer preapproval",
-  "允许插件指定本机文件路径并直接准备、启动上传、下载或中转，无需逐次确认；仍受文件读写权限与远程目录范围限制": "Allow the plugin to specify local file paths and prepare and start uploads, downloads or relays without individual confirmations. File read/write permissions and remote directory scopes still apply."
+  "允许插件指定本机文件路径并直接准备、启动上传、下载或中转，无需逐次确认；仍受文件读写权限与远程目录范围限制": "Allow the plugin to specify local file paths and prepare and start uploads, downloads or relays without individual confirmations. File read/write permissions and remote directory scopes still apply.",
+  "帮我审批的受限命令模板": "Guarded templates for assisted approval",
+  "需独立授予变更预授权；仅在帮我审批模式匹配完整模板时自动执行，其他命令仍需确认。": "Requires an independent change grant. Only exact template matches run automatically in Assist mode; other commands still require confirmation."
 }

@@ -1,10 +1,14 @@
 use crate::*;
+use futures_util::{StreamExt, stream::FuturesOrdered};
 use russh_sftp::{
     client::{Config, RawSftpSession, error::Error as SftpError},
     protocol::{FileAttributes, OpenFlags, Packet, StatusCode},
 };
 use serverdeck_core::files::*;
 use sha2::{Digest, Sha256};
+
+pub(crate) const IO_CHUNK: usize = 32768;
+pub(crate) const IO_WINDOW: usize = 32;
 
 pub(crate) fn map(error: SftpError) -> Error {
     let (code, message) = match &error {
@@ -61,8 +65,8 @@ impl Remote {
             channel.channel.into_stream(),
             Config {
                 max_packet_len: 1024 * 1024,
-                max_concurrent_reads: 1,
-                max_concurrent_writes: 1,
+                max_concurrent_reads: IO_WINDOW,
+                max_concurrent_writes: IO_WINDOW,
                 max_write_packet_len: 32768,
                 request_timeout_secs: 15,
             },
@@ -242,12 +246,51 @@ impl Remote {
     pub async fn hash(&self, path: &str) -> Result<String, Error> {
         self.hash_cancellable(path, None).await
     }
+    pub async fn read_range(
+        &self,
+        handle: &str,
+        offset: u64,
+        length: usize,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<Vec<u8>, Error> {
+        let mut bytes = Vec::with_capacity(length);
+        while bytes.len() < length {
+            check_editor_cancel(cancel)?;
+            let remaining = length - bytes.len();
+            let data = self
+                .raw
+                .read(handle, offset + bytes.len() as u64, remaining as u32)
+                .await
+                .map_err(map)?
+                .data;
+            if data.is_empty() || data.len() > remaining {
+                return Err(fail("SFTP_SIZE_CHANGED", "远程数据块长度与文件快照不一致"));
+            }
+            bytes.extend_from_slice(&data);
+        }
+        Ok(bytes)
+    }
+    pub async fn verify_eof(&self, handle: &str, offset: u64) -> Result<(), Error> {
+        match self.raw.read(handle, offset, 1).await {
+            Ok(data) if data.data.is_empty() => Ok(()),
+            Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => Ok(()),
+            Ok(_) => Err(fail(
+                "SFTP_SIZE_CHANGED",
+                "远程文件实际长度超过快照，未确认校验",
+            )),
+            Err(error) => Err(map(error)),
+        }
+    }
     pub async fn hash_cancellable(
         &self,
         path: &str,
         cancel: Option<&CancellationToken>,
     ) -> Result<String, Error> {
         check_editor_cancel(cancel)?;
+        let before = self.attrs(path).await?;
+        let size = before
+            .size
+            .ok_or_else(|| fail("SFTP_ATTRIBUTES", "校验文件大小未知"))?;
         let handle = self
             .raw
             .open(path, OpenFlags::READ, FileAttributes::default())
@@ -256,21 +299,34 @@ impl Remote {
             .handle;
         let result = async {
             let mut digest = Sha256::new();
-            let mut offset = 0;
+            let mut offset = 0u64;
+            let mut reads = FuturesOrdered::new();
+            let mut failure = None;
             loop {
-                check_editor_cancel(cancel)?;
-                match self.raw.read(&handle, offset, 32768).await {
-                    Ok(value) if value.data.is_empty() => break,
-                    Ok(value) => {
-                        offset += value.data.len() as u64;
-                        digest.update(&value.data);
-                    }
-                    Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => {
-                        break;
-                    }
-                    Err(error) => return Err(map(error)),
+                if failure.is_none() {
+                    failure = check_editor_cancel(cancel).err();
+                }
+                while failure.is_none() && reads.len() < IO_WINDOW && offset < size {
+                    let length = (size - offset).min(IO_CHUNK as u64) as usize;
+                    reads.push_back(self.read_range(&handle, offset, length, cancel));
+                    offset += length as u64;
+                }
+                let Some(bytes) = reads.next().await else {
+                    break;
+                };
+                match bytes {
+                    Ok(bytes) if failure.is_none() => digest.update(bytes),
+                    Err(error) if failure.is_none() => failure = Some(error),
+                    _ => (), // Drain replies before closing the shared SFTP handle.
                 }
             }
+            if let Some(error) = failure {
+                return Err(error);
+            }
+            if !same(&before, &self.attrs(path).await?) {
+                return Err(Error::Conflict);
+            }
+            self.verify_eof(&handle, size).await?;
             Ok(format!("{:x}", digest.finalize()))
         }
         .await;

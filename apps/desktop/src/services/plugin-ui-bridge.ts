@@ -215,7 +215,11 @@ export function createPluginUiBridge(input: {
       ].includes(primitive.kind) ||
         (primitive.kind === 'approval_mode' && primitive.mode === 'request') ||
         isStreamControl(primitive));
-    check(!resourceCleanup);
+    const retainedProgress =
+      primitive?.kind === 'streaming' &&
+      primitive.request.kind === 'progress_open' &&
+      input.canRetain?.();
+    check(!resourceCleanup && !retainedProgress && !(method === 'invoke' && input.canRetain?.()));
     switch (method) {
       case 'invoke': {
         if (typeof args.action !== 'string') throw new Error(tr('插件动作无效'));
@@ -227,6 +231,7 @@ export function createPluginUiBridge(input: {
           active,
           owner,
           args.confirmation,
+          input.canRetain,
         );
         check();
         if (!active() && !input.canRetain?.())
@@ -235,7 +240,12 @@ export function createPluginUiBridge(input: {
       }
       case 'platform.request': {
         if (!primitive || typeof primitive.kind !== 'string') throw new Error(tr('平台请求无效'));
-        const result = await pluginPlatformRequest(input.id, primitive, active, owner);
+        const result = await pluginPlatformRequest(
+          input.id,
+          primitive,
+          () => active() || !!retainedProgress,
+          owner,
+        );
         if (primitive.kind === 'settings_write')
           plugins.settingsRevisions[input.id] = (plugins.settingsRevisions[input.id] ?? 0) + 1;
         return result;
@@ -329,12 +339,12 @@ export function createPluginUiBridge(input: {
     plugins.cancelPrompt(owner);
     for (const stop of cleanup) stop();
     void pluginsApi
-      .scopeVisibility(input.id, owner, false)
+      .scopeVisibility(input.id, owner, false, input.canRetain?.() ?? false)
       .catch((error) => notifications.push(errorMessage(error), true));
   }
   async function resume() {
     check();
-    await pluginsApi.scopeVisibility(input.id, owner, true);
+    await pluginsApi.scopeVisibility(input.id, owner, true, input.canRetain?.() ?? false);
   }
   async function dispose() {
     if (disposed) return;

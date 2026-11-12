@@ -252,7 +252,7 @@ impl Application {
                     ),
                     _ => return Err(Error::Validation("传输准备请求无效")),
                 };
-                if !self.plugin_scope_visible(call)? {
+                if !self.plugin_scope_available(call)? {
                     return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面准备文件传输"));
                 }
                 paths(plugin, grant, &source, &destination)?;
@@ -408,7 +408,7 @@ impl Application {
                 Ok(serde_json::json!(preview))
             }
             Request::TransferStart { id } => {
-                if !self.plugin_scope_visible(call)? {
+                if !self.plugin_scope_available(call)? {
                     return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面确认文件传输"));
                 }
                 let copy = self.plugin_copy(call, &id)?;

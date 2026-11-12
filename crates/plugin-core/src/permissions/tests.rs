@@ -29,6 +29,7 @@ fn plugin() -> InstalledPlugin {
                 Permission::SettingsWrite,
             ],
             preapproved_commands: vec![],
+            assist_commands: vec![],
             contributions: vec![],
             platforms: vec![std::env::consts::OS.into()],
             files: vec![],
@@ -459,5 +460,39 @@ fn argument_templates_require_an_explicit_new_permission_and_do_not_change_fixed
         }
     ));
     plugin.manifest.preapproved_commands = vec![Command::script("{{sd:identifier:256:}}")];
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
+}
+
+#[test]
+fn assisted_templates_require_explicit_change_authority_and_do_not_become_read_preapproval() {
+    let mut plugin = plugin();
+    let template = Command::script("test -f \"$1\"")
+        .arg("guarded")
+        .arg("{{sd:text:64}}");
+    plugin.manifest.assist_commands = vec![template];
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
+    plugin
+        .manifest
+        .permissions
+        .push(Permission::OperationsFullPreapproved);
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_ok());
+    let grant = Grant::new(&plugin, input()).unwrap();
+    let op = Capability::Platform {
+        request: Primitive::Execute {
+            host_id: "host".into(),
+            command: Command::script("test -f \"$1\"")
+                .arg("guarded")
+                .arg("/tmp/x"),
+        },
+        bindings: vec![],
+    };
+    assert!(
+        !grant.preapproves(&plugin, &op),
+        "Assist templates never authorize ordinary requests"
+    );
+    plugin
+        .manifest
+        .assist_commands
+        .push(plugin.manifest.assist_commands[0].clone());
     assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
 }

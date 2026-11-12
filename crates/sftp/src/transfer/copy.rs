@@ -1,5 +1,6 @@
 //! One-file copies with frozen source/target snapshots, using the existing queue and SFTP commits.
 use super::*;
+use futures_util::{StreamExt, stream::FuturesOrdered};
 use std::{future::Future, pin::Pin};
 
 #[derive(Clone, Debug)]
@@ -411,28 +412,6 @@ impl Reader {
             _ => Err(Error::Validation("源快照不匹配")),
         }
     }
-    async fn read(&mut self, offset: u64, buffer: &mut [u8]) -> Result<usize, Error> {
-        match self {
-            Self::Local(file) => file.read(buffer).await.map_err(local::io),
-            Self::Remote(remote, handle) => match remote
-                .raw
-                .read(handle.as_str(), offset, buffer.len() as u32)
-                .await
-            {
-                Ok(data) if data.data.len() <= buffer.len() => {
-                    buffer[..data.data.len()].copy_from_slice(&data.data);
-                    Ok(data.data.len())
-                }
-                Ok(_) => Err(fail("SFTP_FORMAT", "源返回的数据块超过请求大小")),
-                Err(russh_sftp::client::error::Error::Status(status))
-                    if status.status_code == russh_sftp::protocol::StatusCode::Eof =>
-                {
-                    Ok(0)
-                }
-                Err(error) => Err(remote::map(error)),
-            },
-        }
-    }
     async fn verify(&self, plan: &PreparedCopy) -> Result<(), Error> {
         let same = match (self, &plan.source, &plan.source_before) {
             (Self::Local(file), CopySource::Local { path }, Snapshot::Local(expected)) => {
@@ -538,47 +517,106 @@ pub(super) async fn run(
     let temp = remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?;
     let handle = target.stage(&temp).await?;
     task.temp(true, temp.clone())?;
-    let mut buffer = vec![0; 32768];
+    // Bounded SFTP request window. Hash results in file order even if replies arrive out of order.
+    type Block<'a> = Pin<Box<dyn Future<Output = Result<Vec<u8>, Error>> + Send + 'a>>;
+    let mut pending: FuturesOrdered<Block<'_>> = FuturesOrdered::new();
     let mut offset = 0u64;
     let mut digest = Sha256::new();
     let mut checked = Instant::now();
+    let mut failure = None;
     loop {
-        task.check_cancel()?;
-        if checked.elapsed() >= std::time::Duration::from_millis(500) {
-            guard.check().await?;
-            checked = Instant::now();
+        if failure.is_none() {
+            failure = task.check_cancel().err();
+            if failure.is_none() && checked.elapsed() >= std::time::Duration::from_millis(500) {
+                failure = guard.check().await.err();
+                checked = Instant::now();
+            }
         }
-        let n = source.read(offset, &mut buffer).await?;
-        if n == 0 {
+        while failure.is_none() && pending.len() < remote::IO_WINDOW && offset < plan.bytes {
+            let length = (plan.bytes - offset).min(remote::IO_CHUNK as u64) as usize;
+            let read: Block<'_> = match &mut source {
+                Reader::Local(file) => {
+                    let mut bytes = vec![0; length];
+                    if let Err(error) = file.read_exact(&mut bytes).await {
+                        failure = Some(local::io(error));
+                        break;
+                    }
+                    Box::pin(async move { Ok(bytes) })
+                }
+                Reader::Remote(remote, input) => {
+                    let remote = remote.clone();
+                    let input = input.clone();
+                    Box::pin(async move {
+                        remote
+                            .read_range(&input, offset, length, Some(&task.cancel))
+                            .await
+                    })
+                }
+            };
+            let output = handle.clone();
+            pending.push_back(Box::pin(async move {
+                task.check_cancel()?;
+                let bytes = read.await?;
+                task.check_cancel()?;
+                target
+                    .raw
+                    .write(&output, offset, bytes.clone())
+                    .await
+                    .map_err(remote::map)?;
+                Ok(bytes)
+            }));
+            offset += length as u64;
+        }
+        let Some(result) = pending.next().await else {
             break;
+        };
+        match result {
+            Ok(bytes) => {
+                digest.update(&bytes);
+                task.bytes(bytes.len());
+            }
+            Err(error) if failure.is_none() => failure = Some(error),
+            Err(_) => (), // Drain the bounded window before closing handles/removing the temporary file.
         }
-        if offset.saturating_add(n as u64) > plan.bytes {
-            return Err(Error::Conflict);
-        }
-        target
-            .raw
-            .write(&handle, offset, buffer[..n].to_vec())
-            .await
-            .map_err(remote::map)?;
-        digest.update(&buffer[..n]);
-        offset += n as u64;
-        task.bytes(n);
     }
-    if offset != plan.bytes {
-        return Err(Error::Conflict);
+    if failure.is_none() {
+        failure = match &mut source {
+            Reader::Local(file) => match file.read(&mut [0; 1]).await {
+                Ok(0) => None,
+                Ok(_) => Some(Error::Conflict),
+                Err(error) => Some(local::io(error)),
+            },
+            Reader::Remote(remote, input) => remote.verify_eof(input, plan.bytes).await.err(),
+        };
     }
-    source.verify(plan).await?;
-    if let Reader::Remote(remote, handle) = &source {
+    let input_close = if let Reader::Remote(remote, input) = &source {
         remote
             .raw
-            .close(handle.clone())
+            .close(input.clone())
             .await
-            .map_err(remote::map)?;
+            .map_err(remote::map)
+            .map(|_| ())
+    } else {
+        Ok(())
+    };
+    let output_close = target.close_write(handle).await;
+    if let Some(error) = failure {
+        for closing in [input_close, output_close] {
+            if let Err(closing) = closing {
+                tracing::warn!(operation="copy_drain_close", error=%closing, "transfer handle close failed after transfer failure");
+            }
+        }
+        task.check_cancel()?;
+        return Err(error);
     }
-    target.close_write(handle).await?;
+    input_close?;
+    output_close?;
+    source.verify(plan).await?;
     task.state("verifying");
     let checksum = format!("{:x}", digest.finalize());
-    if checksum != target.hash(&temp).await? {
+    let target_hash = target.hash_cancellable(&temp, Some(&task.cancel)).await;
+    task.check_cancel()?;
+    if checksum != target_hash? {
         return Err(fail("TRANSFER_HASH", "中转 SHA-256 校验失败，目标未替换"));
     }
     if let Some(attrs) = &plan.target_before {

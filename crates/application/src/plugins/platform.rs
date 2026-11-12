@@ -34,6 +34,7 @@ impl Application {
         id: &str,
         owner: &str,
         visible: bool,
+        retain: bool,
     ) -> Result<(), Error> {
         if owner.is_empty() || owner.len() > 512 {
             return Err(Error::Validation("插件页面标识无效"));
@@ -42,6 +43,15 @@ impl Application {
             .lock()?
             .visible_owners
             .insert((id.to_owned(), owner.to_owned()), visible);
+        {
+            let mut data = self.plugin_host.lock()?;
+            let key = (id.to_owned(), owner.to_owned());
+            if retain {
+                data.retained_owners.insert(key);
+            } else {
+                data.retained_owners.remove(&key);
+            }
+        }
         if visible {
             self.plugin_host
                 .lock()?
@@ -54,7 +64,7 @@ impl Application {
                 .lock()?
                 .logs
                 .iter()
-                .filter(|(_, stream)| stream.plugin == id && stream.owner == owner)
+                .filter(|(_, stream)| stream.plugin == id && stream.owner == owner && !retain)
                 .map(|(id, _)| id.clone())
                 .collect::<Vec<_>>();
             for stream in streams {
@@ -85,6 +95,14 @@ impl Application {
             .copied()
             .unwrap_or(true))
     }
+    pub(super) fn plugin_scope_available(&self, call: &Call) -> Result<bool, Error> {
+        Ok(self.plugin_scope_visible(call)?
+            || self
+                .plugin_host
+                .lock()?
+                .retained_owners
+                .contains(&(call.id.clone(), call.owner.clone())))
+    }
     pub async fn plugin_close_scope(&self, id: &str, owner: &str) -> Result<(), Error> {
         if owner.is_empty() || owner.len() > 512 {
             return Err(Error::Validation("插件页面标识无效"));
@@ -93,6 +111,10 @@ impl Application {
             .lock()?
             .closed_owners
             .insert((id.to_owned(), owner.to_owned()));
+        self.plugin_host
+            .lock()?
+            .retained_owners
+            .remove(&(id.to_owned(), owner.to_owned()));
         self.plugin_host.stop_scope(id, owner).await?;
         self.plugin_close_streaming(id, Some(owner)).await?;
         self.plugin_close_copies(id, Some(owner)).await?;
@@ -305,7 +327,7 @@ impl Application {
         let mut target = None;
         if let Some(host) = request.host() {
             if matches!(request, Request::ReadFile { .. }) {
-                if !self.plugin_scope_visible(call)? {
+                if !self.plugin_scope_available(call)? {
                     return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面读取文件"));
                 }
                 let session = self.plugin_platform_file_session(call, host).await?;
@@ -480,7 +502,7 @@ impl Application {
                 Value::Null
             }
             Request::StreamOpen {host_id,command}=>{
-                if !self.plugin_scope_visible(call)?{return Err(failure("PLUGIN_UI_HIDDEN","页面已隐藏，不能打开新的输出流"));}
+                if !self.plugin_scope_available(call)?{return Err(failure("PLUGIN_UI_HIDDEN","页面已隐藏，不能打开新的输出流"));}
                 let session=self.plugin_platform_session(call,&host_id).await?;
                 if self.plugin_host.lock()?.logs.len()>=8 {return Err(Error::Busy);}
                 let profile=self.terminals.ops_profile(&session)?;
@@ -495,7 +517,7 @@ impl Application {
                     sender.try_send(value).is_ok()
                 }))?;
                 if let Err(error)=self.plugin_host.verify(call){self.operations_host.log_close(&log.id).await?;return Err(error);}
-                if !self.plugin_scope_visible(call)?{self.operations_host.log_close(&log.id).await?;return Err(failure("PLUGIN_UI_HIDDEN","页面已隐藏，输出流已释放"));}
+                if !self.plugin_scope_available(call)?{self.operations_host.log_close(&log.id).await?;return Err(failure("PLUGIN_UI_HIDDEN","页面已隐藏，输出流已释放"));}
                 self.plugin_host.lock()?.logs.insert(log.id.clone(),state::Log {profile,owner:call.owner.clone(),plugin:call.id.clone(),generation:call.generation.clone(),host:host_id,receiver});
                 json!({"id":log.id})
             }

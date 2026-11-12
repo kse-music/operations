@@ -444,7 +444,7 @@ impl Transfers {
                 tokio::pin!(operation);
                 tokio::select! {
                     result = &mut operation => result,
-                    _ = task.cancel.cancelled() => { if task.committing.load(Ordering::Acquire) { operation.await } else { Err(fail("TRANSFER_CANCELLED", "任务已取消，已完成的文件保留")) } },
+                    _ = task.cancel.cancelled() => { if task.copy.is_some() || task.committing.load(Ordering::Acquire) { operation.await } else { Err(fail("TRANSFER_CANCELLED", "任务已取消，已完成的文件保留")) } },
                     _ = remote.owner_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "文件连接已关闭，传输失败")),
                     _ = remote.transport_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "网络中断，传输失败；可重新连接后从头重试")),
                 }

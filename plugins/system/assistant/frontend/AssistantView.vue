@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from './i18n/messages';
+import { megabytes } from './format';
 
 import { computed, onMounted, ref, watch } from 'vue';
 import {
@@ -92,7 +93,7 @@ const approvalModeDescriptions = {
     return tr('访问外部文件、网络或执行命令时请求批准；仅对新任务生效');
   },
   get assist() {
-    return tr('安全校验通过的读取直接执行，仅对风险操作请求批准；仅对新任务生效');
+    return tr('常规操作自动执行；删除、覆盖、未知命令等高风险操作请求批准；仅对新任务生效');
   },
   get full() {
     return tr(
@@ -334,7 +335,7 @@ const readinessHint = computed(() => {
                       <div class="ai-proposal-heading">
                         <span class="ai-risk" :class="proposal.risk"
                           ><ShieldCheck
-                            v-if="proposal.risk === 'read_only'"
+                            v-if="proposal.risk === 'read_only' || proposal.risk === 'routine'"
                             :size="13"
                             aria-hidden="true"
                           /><AlertTriangle
@@ -344,9 +345,11 @@ const readinessHint = computed(() => {
                           /><FileSearch v-else :size="13" aria-hidden="true" />{{
                             proposal.risk === 'read_only'
                               ? tr('只读诊断')
-                              : proposal.risk === 'change'
-                                ? tr('系统变更 · 单独确认')
-                                : tr('仅供人工审阅')
+                              : proposal.risk === 'routine'
+                                ? tr('常规操作 · 按模式审批')
+                                : proposal.risk === 'change'
+                                  ? tr('高风险操作 · 按模式审批')
+                                  : tr('仅供人工审阅')
                           }}</span
                         ><span class="ai-proposal-target" :title="proposal.target ?? ''">{{
                           proposal.target ?? tr('无服务器目标')
@@ -415,10 +418,9 @@ const readinessHint = computed(() => {
                             :max="outputs[proposal.id]!.transfer!.totalBytes || 1"
                           />
                           <p>
-                            {{ outputs[proposal.id]!.transfer!.transferredBytes }} /
-                            {{ outputs[proposal.id]!.transfer!.totalBytes }}{{ tr(' 字节 · ')
-                            }}{{ outputs[proposal.id]!.transfer!.bytesPerSecond
-                            }}{{ tr(' 字节/秒 ') }}
+                            {{ megabytes(outputs[proposal.id]!.transfer!.transferredBytes) }} /
+                            {{ megabytes(outputs[proposal.id]!.transfer!.totalBytes) }} MB ·
+                            {{ megabytes(outputs[proposal.id]!.transfer!.bytesPerSecond) }} MB/s
                           </p>
                           <p v-if="outputs[proposal.id]!.transfer!.sha256">
                             SHA-256：{{ outputs[proposal.id]!.transfer!.sha256 }}

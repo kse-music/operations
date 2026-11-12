@@ -1,6 +1,6 @@
-# Plugin SDK 5.6.0
+# Plugin SDK 5.7.0
 
-Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.6.0**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.7.0**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
 
 ## 职责边界
 
@@ -132,6 +132,8 @@ progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取�
 
 - request不使用任务读取免确认，普通固定命令/交互预授权仍遵守其独立合同；助手不声明普通SSH预授权，因而请求批准模式逐次确认外部读取和命令。
 - assist在manifest与grant均有 `operations.read.preapproved` permission及operation时，自动处理 `read_file`、`transfer_prepare` 与完整固定读取。固定命令和参数模板同时适用于 `execute` 与 `stream_open`，两条通道使用相同的程序、完整脚本、参数、超时和绑定校验；不包括 `terminal`。参数化读取还需下面的独立参数权限；未匹配命令和写入仍需批准。
+- API `^5.7.0` 的 assist 可在独立 `operations.full.preapproved` permission/operation 已声明并授予、且策略绑定属于当前 owner/VM 时，自动启动不覆盖既有文件的上传/下载/中转，以及完整匹配 manifest `assistCommands` 的 `execute/stream_open`。固定计划只有每项都满足当前自动审批条件才自动批准，次数和完整请求仍冻结；包含保存、覆盖或未知命令时统一请求确认。读取授权不能代替这项变更授权，插件/模型的 risk、readOnly 或显示文案不参与授权判断。
+
 - full的首次请求必须在可见页面经可信宿主确认，插件不能自行生成Full策略。批准后同一owner/VM持续复用binding，不设计时过期，免除已授予范围内执行、文件读写、传输及TCP请求的逐次确认。切换到request/assist会撤销Full binding及未完成的Full首次批准，新建对话须调用request撤销；关闭owner、撤权、插件停止/升级同样失效，隐藏后返回保留。request可作为降权清理请求在取消后和Guest忙碌时发起，不能借此启用full；启用会话标识拒绝已撤销的迟到批准。模型/主机等修订绑定仍为10分钟，计划有效期不变；基础授权、目录、真实连接/修订和文件原文检查保持。首次指纹确认不受影响。
 
 `operations.read.arguments.preapproved` permission 和同名 operation 用于参数化读取，依赖 `operations.read.preapproved` 与基础SSH授权。仅assist模式使用以下模板匹配；普通 `ssh.execute.preapproved` 仍只精确匹配。`preapprovedCommands` 在声明参数权限时最多32条，其他情况最多16条，全部编码合计≤48 KiB。
@@ -146,9 +148,11 @@ progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取�
 
 例如固定脚本 `cat "/proc/$1/status"` 的args为 `["-c", "cat \"/proc/$1/status\"", "read-process", "{{sd:uint:2:2147483647}}"]`；具体调用只替换最后一个argv值。参数模板不能证明脚本只读：清单作者负责脚本用途，上传包必须经用户核对并授予独立权限，宿主不接受readOnly/confirmed声明或命令通配符。
 
-`confirm_operations {operations:[{request,count}]}`（ui.contribute）供同一WASM动作内合并确认固定请求集合；request仅限execute/save_file/transfer_start，1–96个唯一条目、最多128次使用，完整消息仍≤60 KiB。重复请求可合并count，不能包含嵌套计划或其他能力。Native先按真实权限/句柄/配置和实际目标预检；request/assist返回常规宿主一次确认，full验证当前可信策略后直接授权，均沿原Future续接。授权后后续相同请求及绑定按次数消费，不再弹单项确认，新增/变化/超次数请求拒绝并撤销剩余授权。授权仅保存在当前原生动作中，不跨新invoke、owner、VM或重放；不要用多个独立前端call请求共享它。拒绝、超时或关闭沿原生命周期取消，写入与复查仍保留各自提交边界。
+`confirm_operations {operations:[{request,count}]}`（ui.contribute）供同一WASM动作内合并确认固定请求集合；request仅限execute/save_file/transfer_start，1–96个唯一条目、最多128次使用，完整消息仍≤60 KiB。重复请求可合并count，不能包含嵌套计划或其他能力。Native先按真实权限/句柄/配置和实际目标预检；request返回宿主一次确认，assist逐项验证自动审批条件后决定是否请求统一确认，full验证当前可信策略后直接授权，均沿原Future续接。授权后后续相同请求及绑定按次数消费，不再弹单项确认，新增/变化/超次数请求拒绝并撤销剩余授权。授权仅保存在当前原生动作中，不跨新invoke、owner、VM或重放；不要用多个独立前端call请求共享它。拒绝、超时或关闭沿原生命周期取消，写入与复查仍保留各自提交边界。
 
 文件保存确认含实际路径、摘要和原文/候选差异；差异超过显示限额明确标注省略，调用方仍须提供完整业务预览。读取免确认不等于秘密不会进入模型，应在模式说明中告知数据用途。不提供独立AI审批模型；完全访问来自用户在可信宿主中的授权，不能替代主机指纹、目录授权或服务端冲突检测。
+
+API `^5.7.0` 增加完整 argv 参数 `{{sd:text:N}}`，N 为1–4096字节：非空、无控制字符，允许路径中的空格及标点。程序、脚本及 argv 数量仍保持字面匹配，Native 按独立参数进行 Shell 引号处理；模板脚本须自行检查参数的业务条件，不能 eval 或重新拼接执行。不把受限文本解释为只读证明，安装修订授权保持显式。
 
 ### 文件与传输
 
@@ -173,7 +177,7 @@ const state = await call<TransferState>({ kind: 'transfer_start', id: preview.id
 
 `transfer_download_prepare {source:{hostId,path},destination}` 的 destination 是本机完整绝对文件路径，父目录必须存在且无链接/重解析点；目标已存在即拒绝，不提供覆盖。准备/启动默认分别由宿主确认真实 SSH 来源与本机目标，独立传输预授权可免除这两次确认；源受 `sftp.read` 目录范围约束，不需要远程写权限。返回 `TransferPreview<{localPath:string}>`，其 `destination.localPath` 为实际本机目标；普通上传/中转的 `TransferPreview` 仍返回原有 `{hostId,path}` 目标形状。两种预览复用相同状态、启动、取消和关闭接口。下载冻结远程源属性，校验远端、本机暂存 SHA-256 后不覆盖提交，提交前后复验权限、配置与目标修订。
 
-启动返回后任务在 Native 既有 SFTP 队列运行，复制使用固定32 KiB缓冲、同目录临时文件和目标读回 SHA-256；字节不通过 JS/WASM/模型。`transfer_status {id}` 返回原生状态、进度、速度、摘要、错误及恢复路径。`transfer_cancel {id}` 仅取消自有任务，可绕开同插件正在占用的 Guest 动作，不占用或释放其 busy 标记。`transfer_close {id}` 取消、等待安全收尾并释放句柄。状态/取消/关闭不依赖已过期的模型绑定，但仍验证当前权限、owner、VM代。启动后继续复验插件/模型/SSH修订、配置、目录授权和连接，关闭所属页面或撤权会取消并排空；运行中不受五分钟预览 TTL 截断，不支持跨重启恢复。提交已发生但复验失败为 `unverified`，不能自动重放或回滚。
+启动返回后任务在 Native 既有 SFTP 队列运行，上传/中转使用最多32个32 KiB分块的有界并发窗口，目标读回哈希同样按有界窗口读取并按偏移顺序计算；取消先停止调度并排空在途写入，再关闭句柄与清理暂存。复制保留同目录临时文件和目标读回 SHA-256；字节不通过 JS/WASM/模型。`transfer_status {id}` 返回原生状态、进度、速度、摘要、错误及恢复路径。`transfer_cancel {id}` 仅取消自有任务，可绕开同插件正在占用的 Guest 动作，不占用或释放其 busy 标记。`transfer_close {id}` 取消、等待安全收尾并释放句柄。状态/取消/关闭不依赖已过期的模型绑定，但仍验证当前权限、owner、VM代。启动后继续复验插件/模型/SSH修订、配置、目录授权和连接，关闭所属页面或撤权会取消并排空；运行中不受五分钟预览 TTL 截断，不支持跨重启恢复。提交已发生但复验失败为 `unverified`，不能自动重放或回滚。
 
 SFTP v3 缺少服务端 CAS，远端属性可能只有秒级时间；同属性并发改写仍有竞态。保存/覆盖是文件替换，inode、硬链接、ACL/xattr 的限制沿用文件页。目标临时文件无法清理时返回恢复路径。
 

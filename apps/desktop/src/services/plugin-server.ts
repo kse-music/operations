@@ -176,6 +176,7 @@ export async function pluginInvokeRequest<T>(
   isActive: () => boolean = () => true,
   owner = 'default',
   confirmation?: unknown,
+  canRetain: () => boolean = () => false,
 ): Promise<T> {
   const plugins = usePluginsStore();
   const version = plugins.contextVersion(id);
@@ -187,7 +188,8 @@ export async function pluginInvokeRequest<T>(
   };
   return queued(id, async () => {
     verify();
-    if (!isActive()) throw { code: 'PLUGIN_CANCELLED', message: tr('插件页面已隐藏或关闭') };
+    if (!isActive() && !canRetain())
+      throw { code: 'PLUGIN_CANCELLED', message: tr('插件页面已隐藏或关闭') };
     let reply = await pluginsApi.call(id, payload, owner);
     while (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
       const approval = reply.result as PluginApproval & { continuation: string };

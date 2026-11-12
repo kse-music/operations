@@ -100,6 +100,9 @@ test "$sd_actual" = "$sd_id" || { echo 'Image reference changed; refresh the ima
 run_child docker --host unix://$sd_socket image save --output "$sd_path" -- "$sd_reference" || exit
 sd_actual=$(d image inspect --format '{{.Id}}' -- "$sd_reference") || exit
 test "$sd_actual" = "$sd_id" || { echo 'Image reference changed during export' >&2; exit 1; }
+sd_archive_hash=$(sha256sum -- "$sd_path") || exit
+sd_archive_hash=${sd_archive_hash%% *}
+printf 'SD_ARCHIVE_SHA256:%s:%s\n' "$1" "$sd_archive_hash"
 "#.into()
         }
     };

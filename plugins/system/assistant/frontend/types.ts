@@ -208,7 +208,7 @@ export interface AiPreview {
 export interface AiProposal {
   id: string;
   command: string;
-  risk: 'read_only' | 'change' | 'manual_only';
+  risk: 'read_only' | 'routine' | 'change' | 'manual_only';
   reason: string;
   target: string | null;
   changeConfirmation: string | null;

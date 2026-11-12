@@ -116,6 +116,7 @@ impl Command {
 }
 
 enum ArgumentRule<'a> {
+    Text { max: usize },
     Uint { min: u32, max: u32 },
     Hex { len: usize },
     Identifier { max: usize, suffix: &'a str },
@@ -123,7 +124,7 @@ enum ArgumentRule<'a> {
 fn argument_template_error() -> ApiError {
     ApiError::new(
         "COMMAND_TEMPLATE",
-        "参数模板须为独立且有界的整数、十六进制或标识符参数",
+        "参数模板须为独立且有界的整数、十六进制、标识符或文本参数",
     )
 }
 impl<'a> ArgumentRule<'a> {
@@ -138,6 +139,9 @@ impl<'a> ArgumentRule<'a> {
         let parts = value.split(':').collect::<Vec<_>>();
         let number = |value: &str| value.parse::<u32>().map_err(|_| argument_template_error());
         let rule = match parts.as_slice() {
+            ["text", max] if (1..=4096).contains(&number(max)?) => Self::Text {
+                max: number(max)? as usize,
+            },
             ["uint", min, max] => {
                 let (min, max) = (number(min)?, number(max)?);
                 if min > max {
@@ -164,6 +168,9 @@ impl<'a> ArgumentRule<'a> {
     }
     fn matches(&self, value: &str) -> bool {
         match self {
+            Self::Text { max } => {
+                !value.is_empty() && value.len() <= *max && !value.chars().any(char::is_control)
+            }
             Self::Uint { min, max } => {
                 !value.is_empty()
                     && value.bytes().all(|c| c.is_ascii_digit())
@@ -524,6 +531,29 @@ impl Request {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn whole_text_arguments_are_bounded_and_never_change_program_or_script() {
+        let template = Command::script("test -f \"$1\"")
+            .arg("guarded")
+            .arg("{{sd:text:64}}");
+        for text in [
+            "/tmp/file name.tar",
+            "/tmp/\"$(touch injected).tar",
+            "registry/team/image:tag",
+        ] {
+            let command = Command::script("test -f \"$1\"").arg("guarded").arg(text);
+            assert!(template.matches_argument_template(&command));
+            let mut changed = command.clone();
+            changed.args[1].push_str("; reboot");
+            assert!(!template.matches_argument_template(&changed));
+        }
+        for text in ["".to_string(), "x".repeat(65), "/tmp/x\nfile".to_string()] {
+            assert!(!template.matches_argument_template(
+                &Command::script("test -f \"$1\"").arg("guarded").arg(text)
+            ));
+        }
+    }
+
     #[test]
     fn cancellation_allows_authority_reduction_but_never_elevation() {
         assert!(

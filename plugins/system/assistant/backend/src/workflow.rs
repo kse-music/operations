@@ -1054,11 +1054,16 @@ async fn send_inner(
                 let key = id(&info)?;
                 pending.at = now(&info);
                 STATE.with_borrow_mut(|s| s.tasks.renew(&pending.root, now(&info)))?;
+                let routine = match &work {
+                    Work::Job(plan) => plan.routine,
+                    Work::Transfer(preview) => !preview.overwrite && !preview.target_exists,
+                    _ => false,
+                };
                 let proposals = if public.is_empty() {
                     vec![]
                 } else {
                     vec![
-                        json!({"id":key,"command":format!("执行计划：{} 个操作，按模式批准后执行",public.len()),"risk":"change","reason":"冻结本批目标、参数和修订；真实结果返回智能体，未知结果不重放","target":target,"changeConfirmation":null}),
+                        json!({"id":key,"command":format!("执行计划：{} 个操作，按模式批准后执行",public.len()),"risk":if routine {"routine"} else {"change"},"reason":"冻结本批目标、参数和修订；真实结果返回智能体，未知结果不重放","target":target,"changeConfirmation":null}),
                     ]
                 };
                 memory.messages.push(platform::Message {
@@ -1480,7 +1485,7 @@ async fn poll_copy(context: Context, root: &str, info: &Value) -> Result<Value, 
         state.state.as_str(),
         "queued" | "scanning" | "running" | "verifying" | "cancelling"
     );
-    let (tool_status, status) = match state.state.as_str() {
+    let (tool_status, mut status) = match state.state.as_str() {
         "completed"
             if state.sha256.as_ref().is_some_and(|hash| {
                 hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit())
@@ -1514,8 +1519,23 @@ async fn poll_copy(context: Context, root: &str, info: &Value) -> Result<Value, 
             .memory
             .borrow_mut()
             .jobs
-            .record_transfer(&preview, &state)?;
-        value["result"] = artifact;
+            .record_transfer(&preview, &state);
+        match artifact {
+            Ok(artifact) => value["result"] = artifact,
+            Err(error) => {
+                status = Status::Unverified;
+                let message = task_pending.redactor.text(&error.message());
+                let code = match &error {
+                    Error::Platform(error) => error.code.as_str(),
+                    _ => "ARTIFACT_UNVERIFIED",
+                };
+                value["success"] = json!(false);
+                value["output"] = json!(message);
+                value["result"] = json!({"code":code,"message":message});
+                value["agent"]["steps"][0]["status"] = json!("unverified");
+                value["agent"]["steps"][0]["message"] = json!(message);
+            }
+        }
     }
     value = close_finished_copy(&context, root, value).await?;
     let result = finish_operation(context, task_pending, Ok((value, status)), info).await?;
@@ -1755,6 +1775,7 @@ mod tests {
         decisions: Vec<Value>,
         started: bool,
         composed: bool,
+        composed_reference: String,
         calls: Vec<Value>,
         streams: HashMap<String, (String, String, usize)>,
         transfer_started: bool,
@@ -1764,6 +1785,7 @@ mod tests {
         fail_cleanup: bool,
         fail_transfer_close: bool,
         corrupt_hash: bool,
+        changed_archive: bool,
         transfer_polls: usize,
         prepare_failure: Option<String>,
         prepare_failures: usize,
@@ -1790,6 +1812,7 @@ mod tests {
                 decisions: vec![],
                 started: false,
                 composed: false,
+                composed_reference: "stock:v1".into(),
                 calls: vec![],
                 streams: HashMap::new(),
                 transfer_started: false,
@@ -1799,6 +1822,7 @@ mod tests {
                 fail_cleanup: false,
                 fail_transfer_close: false,
                 corrupt_hash: false,
+                changed_archive: false,
                 transfer_polls: 0,
                 prepare_failure: None,
                 prepare_failures: 0,
@@ -1914,7 +1938,14 @@ mod tests {
                     let marker = format!(
                         "SD_ARCHIVE_PREPARED:{nonce}\n{}",
                         if ready {
-                            format!("SD_ARCHIVE_READY:{nonce}\n")
+                            format!(
+                                "{}SD_ARCHIVE_READY:{nonce}\n",
+                                if host == "source" {
+                                    format!("SD_ARCHIVE_SHA256:{nonce}:{}\n", "c".repeat(64))
+                                } else {
+                                    String::new()
+                                }
+                            )
                         } else {
                             String::new()
                         }
@@ -1967,7 +1998,7 @@ mod tests {
                         self.transfer_finished = self.transfer_polls > 1;
                     }
                     Ok(
-                        json!({"id":"image-copy","state":if self.transfer_finished {"completed"} else {"running"},"totalBytes":1024,"transferredBytes":if self.transfer_finished {1024} else {0},"bytesPerSecond":0,"sha256":if self.transfer_finished && !self.corrupt_hash {json!("c".repeat(64))} else {Value::Null},"message":null,"recoveryPaths":[]}),
+                        json!({"id":"image-copy","state":if self.transfer_finished {"completed"} else {"running"},"totalBytes":1024,"transferredBytes":if self.transfer_finished {1024} else {0},"bytesPerSecond":0,"sha256":if self.transfer_finished && !self.corrupt_hash {json!(if self.changed_archive {"d".repeat(64)} else {"c".repeat(64)})} else {Value::Null},"message":null,"recoveryPaths":[]}),
                     )
                 }
                 "transfer_close" => {
@@ -2015,7 +2046,7 @@ mod tests {
                                 json!({"kind":"clarify","text":"请选择实际存在的镜像及标签"})
                             }
                             2 => {
-                                json!({"kind":"plan","summary":"导出已查询的镜像","actions":[{"kind":"image_save","hostId":"source","id":"a".repeat(64),"reference":"stock:v1"}]})
+                                json!({"kind":"plan","summary":"导出已查询的镜像","actions":[{"kind":"image_save","hostId":"source","id":"a".repeat(64),"reference":self.composed_reference}]})
                             }
                             3 => {
                                 json!({"kind":"query","requests":[{"kind":"transfer_prepare","source":{"kind":"artifact","artifactId":archive},"destination":{"hostId":"destination","path":if self.prepare_failure.is_some() {"/tmp/new-image.tar"} else {"/tmp"}},"overwrite":false}]})
@@ -2027,7 +2058,7 @@ mod tests {
                                 json!({"kind":"query","requests":[{"kind":"host_query","hostId":"destination","query":{"kind":"images"}}]})
                             }
                             6 => {
-                                json!({"kind":"plan","summary":"导入已校验归档并核对镜像","actions":[{"kind":"image_load","hostId":"destination","artifactId":artifact,"id":"a".repeat(64),"reference":"stock:v1"}]})
+                                json!({"kind":"plan","summary":"导入已校验归档并核对镜像","actions":[{"kind":"image_load","hostId":"destination","artifactId":artifact,"id":"a".repeat(64),"reference":self.composed_reference}]})
                             }
                             _ => {
                                 json!({"kind":"answer","outcome":"completed","text":"镜像导入及ID、标签复查已完成"})
@@ -2579,6 +2610,19 @@ mod tests {
         let load_script = calls[load]["command"]["args"][1].as_str().unwrap();
         assert!(load_script.contains("Archive changed after transfer"));
         assert!(load_script.contains("Loaded image verification failed"));
+        let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+        let template: platform::Command =
+            serde_json::from_value(manifest["assistCommands"][0].clone()).unwrap();
+        let actual: platform::Command =
+            serde_json::from_value(calls[load]["command"].clone()).unwrap();
+        assert!(
+            template.matches_argument_template(&actual),
+            "verified export/copy to an empty target must match the guarded Assist template"
+        );
+        let mut overwrite = actual.clone();
+        overwrite.args[8] = format!("sha256:{}", "b".repeat(64));
+        assert!(!template.matches_argument_template(&overwrite));
+
         assert!(platform.action(&mut runtime, "resume", json!({"id":id}))["error"].is_object());
     }
     #[test]
@@ -2686,6 +2730,32 @@ mod tests {
         }
     }
     #[test]
+    fn image_id_export_does_not_auto_approve_a_load_that_may_restore_multiple_tags() {
+        let mut platform = composed_platform();
+        platform.composed_reference = "a".repeat(64);
+        let mut runtime = Runtime::new(crate::dispatch);
+        let (id, mut answer) = composed_plan(&mut platform, &mut runtime);
+        for _ in 0..2 {
+            let result = finish_phase(&mut platform, &mut runtime, &id, &answer);
+            assert_eq!(result["success"], true);
+            let response = platform.action(&mut runtime, "resume", json!({"id":id}));
+            assert!(response["error"].is_null(), "{response}");
+            answer = response["result"]["value"].clone();
+        }
+        assert_eq!(answer["proposals"][0]["risk"], "change");
+        let _ = finish_phase(&mut platform, &mut runtime, &id, &answer);
+        let load = platform
+            .calls
+            .iter()
+            .find(|c| c["kind"] == "stream_open" && c["hostId"] == "destination")
+            .unwrap();
+        let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+        let template: platform::Command =
+            serde_json::from_value(manifest["assistCommands"][0].clone()).unwrap();
+        let command: platform::Command = serde_json::from_value(load["command"].clone()).unwrap();
+        assert!(!template.matches_argument_template(&command));
+    }
+    #[test]
     fn composition_stops_on_save_failure_and_defers_ambiguous_image_selection() {
         let mut platform = composed_platform();
         platform.fail_save = true;
@@ -2784,23 +2854,27 @@ mod tests {
     }
     #[test]
     fn unverified_transfer_cannot_feed_an_import_and_failure_does_not_resume() {
-        let mut platform = composed_platform();
-        let mut runtime = Runtime::new(crate::dispatch);
-        let (id, answer) = composed_plan(&mut platform, &mut runtime);
-        finish_phase(&mut platform, &mut runtime, &id, &answer);
-        let answer =
-            platform.action(&mut runtime, "resume", json!({"id":id}))["result"]["value"].clone();
-        platform.corrupt_hash = true;
-        let result = finish_phase(&mut platform, &mut runtime, &id, &answer);
-        assert_eq!(result["task"]["status"], "unverified");
-        assert_ne!(result["continuation"], true);
-        assert!(
-            !platform
-                .streams
-                .values()
-                .any(|(host, _, _)| host == "destination")
-        );
-        assert!(platform.action(&mut runtime, "resume", json!({"id":id}))["error"].is_object());
+        for changed in [false, true] {
+            let mut platform = composed_platform();
+            let mut runtime = Runtime::new(crate::dispatch);
+            let (id, answer) = composed_plan(&mut platform, &mut runtime);
+            finish_phase(&mut platform, &mut runtime, &id, &answer);
+            let answer =
+                platform.action(&mut runtime, "resume", json!({"id":id}))["result"]["value"]
+                    .clone();
+            platform.corrupt_hash = !changed;
+            platform.changed_archive = changed;
+            let result = finish_phase(&mut platform, &mut runtime, &id, &answer);
+            assert_eq!(result["task"]["status"], "unverified");
+            assert_ne!(result["continuation"], true);
+            assert!(
+                !platform
+                    .streams
+                    .values()
+                    .any(|(host, _, _)| host == "destination")
+            );
+            assert!(platform.action(&mut runtime, "resume", json!({"id":id}))["error"].is_object());
+        }
     }
     #[test]
     fn failed_drain_keeps_producer_handles_until_cleanup_can_retry() {

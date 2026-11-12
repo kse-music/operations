@@ -124,6 +124,15 @@ impl Fixture {
         extra: &[Permission],
         commands: Vec<Command>,
     ) -> InstalledPlugin {
+        self.install_with_policy(id, extra, commands, vec![]).await
+    }
+    async fn install_with_policy(
+        &self,
+        id: &str,
+        extra: &[Permission],
+        commands: Vec<Command>,
+        assist: Vec<Command>,
+    ) -> InstalledPlugin {
         let mut declared = permissions();
         declared.extend_from_slice(extra);
         let manifest = Manifest {
@@ -141,6 +150,7 @@ impl Fixture {
             },
             permissions: declared,
             preapproved_commands: commands,
+            assist_commands: assist,
             contributions: vec![],
             platforms: vec![std::env::consts::OS.into()],
             files: vec![],

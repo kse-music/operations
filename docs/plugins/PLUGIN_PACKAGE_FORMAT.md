@@ -1,6 +1,6 @@
 # 本地插件包 v1
 
-当前 Host/Rust/Vue SDK 为 5.6.0，包格式和 WASM ABI 为 1，UI 为 4；版本约定见[版本规范](PLUGIN_API_VERSIONING.md)。
+当前 Host/Rust/Vue SDK 为 5.7.0，包格式和 WASM ABI 为 1，UI 为 4；版本约定见[版本规范](PLUGIN_API_VERSIONING.md)。
 
 ## UI v4 前端入口
 
@@ -52,3 +52,5 @@ files 校验清单每项为 path、size（解码字节数）、sha256（小写�
 server贡献必须对应UI4 frontend页面。安装记录的 source 由 Host 写入，不属于包 manifest；上传不能声明 system 来源。分发内置包使用相同 Package 校验和文件摘要，由宿主设置系统来源与预置权限；上传包默认禁用/未授权，来源标签不是数字签名。
 
 运行时版本内容按安装来源存放在应用数据目录 plugins/system/<ID>/versions/<revision> 或 plugins/upload/<ID>/versions/<revision>。packages/<ID>/record.json 为统一记录，备份保留其原来源/安装代；授权与个人数据仍共享 authorizations 和 data 路径。
+
+`assistCommands`（Host API `^5.7.0`）是最多16条受限命令或完整 argv 模板，总量≤48 KiB。必须声明 `ssh.execute` 和独立的 `operations.full.preapproved`，并由当前安装修订显式获得相应授权。它只参与 `assist` 策略，不能作为普通请求或只读预授权；模板不自行授予基础权限。命令内容、程序、超时及所有参数须完整匹配；受限文本参数和审批行为见[SDK](PLUGIN_SDK.md#审批模式与计划确认)。包更新仍使旧修订授权失效。

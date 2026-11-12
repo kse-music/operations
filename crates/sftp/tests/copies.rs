@@ -398,3 +398,218 @@ async fn post_commit_revocation_retains_an_explicit_uncertain_outcome_without_re
     );
     server.engine.shutdown().await;
 }
+
+#[tokio::test]
+async fn pipelined_relay_beats_serial_round_trips_without_changing_verified_bytes() {
+    use russh_sftp::{
+        client::RawSftpSession,
+        protocol::{FileAttributes, OpenFlags},
+    };
+    let source = Server::start(true, Duration::ZERO).await;
+    let target = Server::start_shared(
+        true,
+        Duration::ZERO,
+        Some((source.database.clone(), source.engine.clone())),
+    )
+    .await;
+    source.faults.wire_delay_ms.store(10, Ordering::SeqCst);
+    target.faults.wire_delay_ms.store(10, Ordering::SeqCst);
+    let src = source.open().await;
+    let dst = target.open().await;
+    let bytes = (0..2 * 1024 * 1024)
+        .map(|n| (n % 251) as u8)
+        .collect::<Vec<_>>();
+    std::fs::write(source.root.path().join("image.tar"), &bytes).unwrap();
+    let input = source.engine.open_sftp_channel(&src.id).await.unwrap();
+    let output = source.engine.open_sftp_channel(&dst.id).await.unwrap();
+    let input = RawSftpSession::new(input.channel.into_stream());
+    input.init().await.unwrap();
+    let output = RawSftpSession::new(output.channel.into_stream());
+    output.init().await.unwrap();
+    let reader = input
+        .open("/image.tar", OpenFlags::READ, FileAttributes::default())
+        .await
+        .unwrap()
+        .handle;
+    let writer = output
+        .open(
+            "/serial.tar",
+            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::EXCLUDE,
+            FileAttributes::default(),
+        )
+        .await
+        .unwrap()
+        .handle;
+    let started = std::time::Instant::now();
+    for offset in (0..bytes.len()).step_by(32768) {
+        let data = input
+            .read(&reader, offset as u64, 32768)
+            .await
+            .unwrap()
+            .data;
+        output.write(&writer, offset as u64, data).await.unwrap();
+    }
+    let serial = started.elapsed();
+    input.close(reader).await.unwrap();
+    output.close(writer).await.unwrap();
+    let files = Files::new(source.engine.clone(), 3);
+    let plan = files
+        .transfers
+        .prepare_copy(
+            CopySource::Remote {
+                session: src.id.clone(),
+                path: "/image.tar".into(),
+            },
+            &dst.id,
+            "/",
+            false,
+        )
+        .await
+        .unwrap();
+    let frozen = plan.clone();
+    let started = std::time::Instant::now();
+    let done = finished(&files.transfers.start_copy(plan, guard(usize::MAX)).unwrap()).await;
+    let parallel = started.elapsed();
+    assert_eq!(done.state, "completed", "{done:?}");
+    assert_eq!(
+        std::fs::read(target.root.path().join("image.tar")).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        std::fs::read(target.root.path().join("serial.tar")).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        frozen.sha256().unwrap(),
+        Some(format!("{:x}", Sha256::digest(&bytes)))
+    );
+    eprintln!(
+        "relay benchmark: {} bytes, 10 ms reply latency per endpoint; serial={serial:?}, pipelined={parallel:?}",
+        bytes.len()
+    );
+    assert!(
+        parallel.as_secs_f64() < serial.as_secs_f64() * 0.7,
+        "bounded pipelining must reduce round-trip stalls: serial={serial:?}, parallel={parallel:?}"
+    );
+    source.engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn zero_length_metadata_must_not_silently_truncate_dynamic_source_bytes() {
+    let source = Server::start(true, Duration::ZERO).await;
+    let target = Server::start_shared(
+        true,
+        Duration::ZERO,
+        Some((source.database.clone(), source.engine.clone())),
+    )
+    .await;
+    let src = source.open().await;
+    let dst = target.open().await;
+    let files = Files::new(source.engine.clone(), 3);
+    for (name, content, expected) in [
+        ("empty", "", "completed"),
+        ("dynamic", "actual bytes", "failed"),
+    ] {
+        std::fs::write(source.root.path().join(name), content).unwrap();
+        source
+            .faults
+            .reported_sizes
+            .lock()
+            .unwrap()
+            .insert(format!("/{name}"), 0);
+        let plan = files
+            .transfers
+            .prepare_copy(
+                CopySource::Remote {
+                    session: src.id.clone(),
+                    path: format!("/{name}"),
+                },
+                &dst.id,
+                "/",
+                false,
+            )
+            .await
+            .unwrap();
+        let frozen = plan.clone();
+        let done = finished(&files.transfers.start_copy(plan, guard(usize::MAX)).unwrap()).await;
+        assert_eq!(done.state, expected, "{done:?}");
+        if expected == "completed" {
+            assert!(
+                std::fs::read(target.root.path().join(name))
+                    .unwrap()
+                    .is_empty()
+            );
+        } else {
+            assert!(!target.root.path().join(name).exists());
+            assert!(!frozen.may_have_committed());
+        }
+    }
+    source.engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn cancelling_pipelined_readback_drains_handles_and_preserves_the_old_target() {
+    let source = Server::start(true, Duration::ZERO).await;
+    let target = Server::start_shared(
+        true,
+        Duration::from_millis(20),
+        Some((source.database.clone(), source.engine.clone())),
+    )
+    .await;
+    let src = source.open().await;
+    let dst = target.open().await;
+    std::fs::write(
+        source.root.path().join("image.tar"),
+        vec![b'x'; 1024 * 1024],
+    )
+    .unwrap();
+    std::fs::write(target.root.path().join("image.tar"), "original").unwrap();
+    let files = Files::new(source.engine.clone(), 3);
+    let plan = files
+        .transfers
+        .prepare_copy(
+            CopySource::Remote {
+                session: src.id.clone(),
+                path: "/image.tar".into(),
+            },
+            &dst.id,
+            "/",
+            true,
+        )
+        .await
+        .unwrap();
+    let frozen = plan.clone();
+    let handle = files.transfers.start_copy(plan, guard(usize::MAX)).unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let state = handle.info().unwrap();
+            if state.state == "verifying" {
+                break;
+            }
+            assert!(state.unfinished(), "{state:?}");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    handle.cancel_and_wait().await.unwrap();
+    let state = handle.info().unwrap();
+    assert_eq!(state.state, "cancelled", "{state:?}");
+    assert!(!frozen.may_have_committed());
+    assert_eq!(
+        std::fs::read_to_string(target.root.path().join("image.tar")).unwrap(),
+        "original"
+    );
+    assert!(
+        !std::fs::read_dir(target.root.path())
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".part"))
+    );
+    assert_eq!(target.faults.open_handles.load(Ordering::SeqCst), 0);
+    assert_eq!(source.faults.open_handles.load(Ordering::SeqCst), 0);
+    source.engine.shutdown().await;
+}

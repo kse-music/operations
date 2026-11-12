@@ -273,6 +273,7 @@ it('passes action and platform requests through the same owner-bound helpers', a
     expect.any(Function),
     'trusted',
     undefined,
+    undefined,
   );
   const confirmation = { title: '停止容器？', message: '容器：web', confirmLabel: '停止' };
   await ui.call('invoke', { action: 'greet', input: {}, confirmation, owner: 'forged' });
@@ -284,6 +285,7 @@ it('passes action and platform requests through the same owner-bound helpers', a
     expect.any(Function),
     'trusted',
     confirmation,
+    undefined,
   );
   await ui.call('platform.request', { operation: { kind: 'hosts' } });
   expect(api.platform).toHaveBeenCalledWith(id, { kind: 'hosts' }, expect.any(Function), 'trusted');
@@ -379,7 +381,7 @@ it.each(['system', 'user'] as const)(
   },
 );
 it.each(['system', 'user'] as const)(
-  'retains only started work for an open hidden workspace: %s',
+  'retains declared task actions for an open hidden workspace: %s',
   async (source) => {
     usePluginsStore().installed[0]!.source = source;
     let active = true;
@@ -399,10 +401,14 @@ it.each(['system', 'user'] as const)(
     ui.suspend();
     finish({ answer: 'complete' });
     expect(await job).toEqual({ answer: 'complete' });
-    await expect(ui.call('invoke', { action: 'greet', input: {} })).rejects.toMatchObject({
-      code: 'PLUGIN_PERMISSION_DENIED',
+    api.invoke.mockResolvedValue({ answer: 'continued' });
+    expect(await ui.call('invoke', { action: 'greet', input: {} })).toEqual({
+      answer: 'continued',
     });
-    expect(pluginsApi.scopeVisibility).toHaveBeenCalledWith(id, 'a', false);
+    await expect(
+      ui.call('platform.request', { operation: { kind: 'settings_write', value: {} } }),
+    ).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+    expect(pluginsApi.scopeVisibility).toHaveBeenCalledWith(id, 'a', false, true);
   },
 );
 it('rejects late results from replaced packages and disposed scopes', async () => {
@@ -561,4 +567,30 @@ it('allows hidden-page reduction of full access while blocking hidden elevation'
     ui.call('platform.request', { operation: { kind: 'approval_mode', mode: 'full' } }),
   ).rejects.toThrow();
   expect(api.platform).toHaveBeenCalledTimes(1);
+});
+
+it('retains background action polling and progress buffers without allowing hidden UI interactions', async () => {
+  grant('ui.contribute');
+  const scope = vi.spyOn(pluginsApi, 'scopeVisibility').mockResolvedValue();
+  // Use the same current revision as the trusted host snapshot.
+  const plugin = usePluginsStore().installed.find((plugin) => plugin.manifest.id === id)!;
+  const retained = createPluginUiBridge({
+    id,
+    revision: plugin.revision,
+    page,
+    hostId: '',
+    contextKey: 'retained',
+    isActive: () => false,
+    canRetain: () => true,
+  });
+  retained.suspend();
+  expect(scope).toHaveBeenCalledWith(id, 'retained', false, true);
+  await retained.call('invoke', { action: 'greet', input: {} });
+  expect(api.invoke).toHaveBeenCalled();
+  await retained.call('platform.request', {
+    operation: { kind: 'streaming', request: { kind: 'progress_open' } },
+  });
+  await expect(retained.call('localFiles.pick', { kind: 'files' })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
 });

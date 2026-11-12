@@ -344,7 +344,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!installed.enabled);
-        assert_eq!(installed.manifest.api_version, "^5.4.0");
+        assert!(installed.manifest.validate(std::env::consts::OS).is_ok());
         assert!(app.plugin_inventory().await.unwrap().problems.is_empty());
         assert_eq!(
             app.plugins.settings_read(id).unwrap()["modelId"],

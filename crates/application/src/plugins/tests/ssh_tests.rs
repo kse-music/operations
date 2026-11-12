@@ -16,6 +16,151 @@ struct Handler {
 }
 
 #[tokio::test]
+async fn assist_guarded_changes_bind_exact_arguments_and_retained_streams_survive_page_switches() {
+    use serverdeck_plugin_sdk::platform::ApprovalMode;
+    let f = Fixture::new();
+    let app = &f.app;
+    let manifest: Manifest = serde_json::from_str(include_str!(
+        "../../../../../plugins/system/assistant/manifest.json"
+    ))
+    .unwrap();
+    let template = manifest.assist_commands[0].clone();
+    let plugin = f
+        .install_with_policy(
+            "dev.assist-change",
+            &[Permission::OperationsFullPreapproved],
+            vec![],
+            vec![template.clone()],
+        )
+        .await;
+    f.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let ssh = ssh(app).await;
+    let mut command = template.clone();
+    command.args[3..].clone_from_slice(&[
+        "01234567-89ab-cdef-0123-456789abcdef".into(),
+        "a".repeat(64),
+        "b".repeat(64),
+        "/etc/fixture/file with spaces.tar".into(),
+        "registry/team/stock:v1".into(),
+        "".into(),
+    ]);
+    let op = Primitive::StreamOpen {
+        host_id: ssh.host.id.clone(),
+        command: command.clone(),
+    };
+    assert_eq!(
+        call(app, id, "page", op.clone()).await.error.unwrap().code,
+        "PLUGIN_CONFIRMATION_REQUIRED"
+    );
+    let policy = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    let binding = policy.result["binding"].as_str().unwrap().to_owned();
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    let run = |op| {
+        app.plugin_dispatch(
+            &scoped,
+            request(Capability::Platform {
+                request: op,
+                bindings: vec![binding.clone()],
+            }),
+        )
+    };
+    let mut missing_grant = app.plugins.grant(id).unwrap().unwrap();
+    missing_grant
+        .permissions
+        .retain(|permission| *permission != Permission::OperationsFullPreapproved);
+    assert!(
+        !app.plugin_mode_preapproves(
+            &scoped,
+            &plugin,
+            &missing_grant,
+            &Capability::Platform {
+                request: op.clone(),
+                bindings: vec![binding.clone()]
+            }
+        )
+        .unwrap()
+    );
+    let opened = run(op).await.unwrap();
+    assert!(opened.error.is_none(), "{opened:?}");
+    let stream = opened.result["id"].as_str().unwrap().to_owned();
+    for index in [1, 8] {
+        let mut changed = command.clone();
+        changed.args[index].push_str("changed");
+        let denied = run(Primitive::StreamOpen {
+            host_id: ssh.host.id.clone(),
+            command: changed,
+        })
+        .await
+        .unwrap();
+        assert_eq!(denied.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    app.plugin_scope_visibility(id, "page", false, true)
+        .await
+        .unwrap();
+    assert!(app.plugin_host.lock().unwrap().logs.contains_key(&stream));
+    let polled = run(Primitive::StreamPoll {
+        stream_id: stream.clone(),
+    })
+    .await
+    .unwrap();
+    assert!(polled.error.is_none(), "{polled:?}");
+    let background = run(Primitive::StreamOpen {
+        host_id: ssh.host.id.clone(),
+        command: command.clone(),
+    })
+    .await
+    .unwrap();
+    assert!(
+        background.error.is_none(),
+        "retained routine continuation may start the next exact guarded stream: {background:?}"
+    );
+    let mut unknown = command.clone();
+    unknown.args[1].push_str("; unknown");
+    let refused = run(Primitive::StreamOpen {
+        host_id: ssh.host.id.clone(),
+        command: unknown,
+    })
+    .await
+    .unwrap();
+    assert_eq!(refused.error.unwrap().code, "PLUGIN_UI_HIDDEN");
+    assert_eq!(ssh.calls.lock().unwrap().len(), 2);
+    drop(scoped);
+    assert!(
+        call(
+            app,
+            id,
+            "other",
+            Primitive::StreamPoll {
+                stream_id: stream.clone()
+            }
+        )
+        .await
+        .error
+        .is_some()
+    );
+    app.plugin_close_scope(id, "page").await.unwrap();
+    assert!(!app.plugin_host.lock().unwrap().logs.contains_key(&stream));
+    assert!(
+        !app.plugin_host
+            .lock()
+            .unwrap()
+            .retained_owners
+            .contains(&(id.clone(), "page".into()))
+    );
+    app.shutdown().await;
+}
+
+#[tokio::test]
 async fn assist_streams_require_the_exact_export_template_and_owner_grant() {
     use serverdeck_plugin_sdk::platform::ApprovalMode;
     let fixture = Fixture::new();
@@ -395,10 +540,12 @@ async fn full_access_requires_native_consent_then_reuses_owner_bound_authority_a
     )
     .await;
     assert!(refreshed.error.is_none(), "{refreshed:?}");
-    app.plugin_scope_visibility(id, "page", false)
+    app.plugin_scope_visibility(id, "page", false, false)
         .await
         .unwrap();
-    app.plugin_scope_visibility(id, "page", true).await.unwrap();
+    app.plugin_scope_visibility(id, "page", true, false)
+        .await
+        .unwrap();
     let persistent = app
         .plugin_capability_scoped(
             id,
@@ -1235,7 +1382,9 @@ async fn docker_interactive_sessions_skip_approval_but_mutations_require_one_dec
             );
         }
     }
-    app.plugin_scope_visibility(id, owner, false).await.unwrap();
+    app.plugin_scope_visibility(id, owner, false, false)
+        .await
+        .unwrap();
     assert!(!app.plugin_host.lock().unwrap().logs.contains_key(&stream));
     let hidden_ticket = app
         .plugin_platform_terminal_open(
@@ -1538,7 +1687,9 @@ async fn streams_and_terminal_tickets_are_owned_and_hidden_scope_cleanup_is_inde
     let ticket = call(app, id, "b", primitive).await;
     assert!(ticket.error.is_none());
     let token = ticket.result["ticket"].as_str().unwrap().to_owned();
-    app.plugin_scope_visibility(id, "a", false).await.unwrap();
+    app.plugin_scope_visibility(id, "a", false, false)
+        .await
+        .unwrap();
     assert!(!app.plugin_host.lock().unwrap().logs.contains_key(&stream));
     assert!(
         app.plugin_host

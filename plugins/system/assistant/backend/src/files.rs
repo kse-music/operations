@@ -540,6 +540,7 @@ mod tests {
                 host: "source".into(),
                 path: "/tmp/actual export/image.tar".into(),
                 sha256: None,
+                image: None,
             },
         );
         let source = Source::Artifact {

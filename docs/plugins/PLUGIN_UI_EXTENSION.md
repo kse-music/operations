@@ -1,6 +1,6 @@
 # 插件 UI v4
 
-UI v4必须携带独立Vue前端，Host API为5.6.0。`entry.ui`指向严格JSON，不接收插件HTML；`frontend.script/style`为包内平面ASCII文件名（≤80字节，以.js/.css结尾），长度及SHA256纳入files清单。
+UI v4必须携带独立Vue前端，Host API为5.7.0。`entry.ui`指向严格JSON，不接收插件HTML；`frontend.script/style`为包内平面ASCII文件名（≤80字节，以.js/.css结尾），长度及SHA256纳入files清单。
 
 ```json
 {
@@ -37,7 +37,7 @@ iframe采用`sandbox="allow-scripts allow-forms"`且无allow-same-origin；Guest
 
 父桥只开放声明action及通用platform.request、connections.ensure、terminal.open、actions.cancel、workspace.draft、复制/通知/导出、平台模型设置导航及设置关闭。身份、owner、修订由父窗口注入，Guest自述确认/租约/管理命令均不可信。CLI安装/账号授权/模型编辑在平台设置完成。
 
-隐藏页面停止新请求/审批、关闭流和PTY；已开始的保留动作可安全收尾，返回结果仍检查安装代及owner。页关闭拒绝所有pending并释放资源；其他页可继续。草稿用setDraftDirty报告，关闭所属工作区前提示；实际文档保存必须重新检查句柄、摘要与写入结果。
+隐藏页面停止交互请求和新审批、关闭PTY；宿主明确保留的已打开工作区可继续声明过的WASM任务动作、命令流、传输轮询和显示进度缓冲，返回结果仍检查安装代及owner。后台新外部操作仍由Native按原权限及精确自动审批规则判断；需要用户审批的后续计划等待页面返回。未获宿主保留的页面隐藏时关闭流，插件自报keepRunning不能获得保留权。页关闭拒绝所有pending并释放资源；其他页可继续。草稿用setDraftDirty报告，关闭所属工作区前提示；实际文档保存必须重新检查句柄、摘要与写入结果。
 
 工作区的运行期绑定与连接状态分开维护。SSH/SFTP 租约建立或更新只刷新连接上下文，不重新激活插件，也不因 SFTP 就绪将仍可见的页面临时隐藏。入口 SSH 断开时页面停止新请求，恢复后沿用原 owner；真实请求仍由 Native 校验目标、连接及配置修订。包、授权或页面 owner 变化继续按原生命周期释放或重新绑定。
 

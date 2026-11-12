@@ -23,6 +23,55 @@ use tokio::{
 };
 use zeroize::Zeroizing;
 
+// Delay response delivery, not request processing: concurrent requests share the same RTT.
+fn delayed_replies<T>(
+    stream: T,
+    delay: Duration,
+) -> (tokio::io::DuplexStream, tokio::task::JoinHandle<()>)
+where
+    T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+{
+    let (server, proxy) = tokio::io::duplex(2 * 1024 * 1024);
+    let worker = tokio::spawn(async move {
+        let (mut client_read, mut client_write) = tokio::io::split(stream);
+        let (mut server_read, mut server_write) = tokio::io::split(proxy);
+        let (sender, mut receiver) =
+            tokio::sync::mpsc::channel::<(tokio::time::Instant, Vec<u8>)>(64);
+        let incoming = tokio::io::copy(&mut client_read, &mut server_write);
+        let outgoing = async {
+            let produce = async {
+                loop {
+                    let length = server_read.read_u32().await?;
+                    if length > 1024 * 1024 {
+                        return Err(std::io::Error::other("fixture packet too large"));
+                    }
+                    let mut bytes = vec![0; length as usize + 4];
+                    bytes[..4].copy_from_slice(&length.to_be_bytes());
+                    server_read.read_exact(&mut bytes[4..]).await?;
+                    if sender
+                        .send((tokio::time::Instant::now() + delay, bytes))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok::<_, std::io::Error>(())
+            };
+            let consume = async {
+                while let Some((at, bytes)) = receiver.recv().await {
+                    tokio::time::sleep_until(at).await;
+                    client_write.write_all(&bytes).await?;
+                }
+                Ok::<_, std::io::Error>(())
+            };
+            tokio::try_join!(produce, consume).map(|_| ())
+        };
+        let _ = tokio::try_join!(incoming, outgoing); // Peer closure is the fixture shutdown path.
+    });
+    (server, worker)
+}
+
 fn status(id: u32) -> Status {
     Status {
         id,
@@ -54,6 +103,7 @@ fn attrs(m: &std::fs::Metadata) -> FileAttributes {
 }
 #[derive(Default)]
 pub struct FileFaults {
+    pub wire_delay_ms: std::sync::atomic::AtomicU64,
     pub corrupt_reads: std::sync::atomic::AtomicBool,
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
@@ -420,8 +470,19 @@ impl server::Handler for Handler {
                 atomic: self.atomic,
                 delay: self.delay,
             };
+            let wire_delay = self
+                .faults
+                .wire_delay_ms
+                .load(std::sync::atomic::Ordering::SeqCst);
             self.workers.push(tokio::spawn(async move {
-                russh_sftp::server::run(channel.into_stream(), disk).await;
+                if wire_delay == 0 {
+                    russh_sftp::server::run(channel.into_stream(), disk).await;
+                } else {
+                    let (server, proxy) =
+                        delayed_replies(channel.into_stream(), Duration::from_millis(wire_delay));
+                    russh_sftp::server::run(server, disk).await;
+                    proxy.await.expect("SFTP latency proxy");
+                }
             }));
         }
         Ok(())

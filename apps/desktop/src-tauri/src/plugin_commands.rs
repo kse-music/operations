@@ -62,9 +62,10 @@ pub async fn plugin_scope_visibility(
     id: String,
     owner: String,
     visible: bool,
+    retain: Option<bool>,
 ) -> Result<(), IpcError> {
     application
-        .plugin_scope_visibility(&id, &owner, visible)
+        .plugin_scope_visibility(&id, &owner, visible, retain.unwrap_or(false))
         .await
         .map_err(Into::into)
 }
