@@ -43,6 +43,21 @@ pub async fn terminal_local_open(
 }
 
 #[tauri::command]
+pub async fn terminal_local_open_elevated(
+    application: tauri::State<'_, Application>,
+    size: TerminalSize,
+    events: tauri::ipc::Channel<TerminalEvent>,
+) -> Result<serverdeck_core::terminal::LocalTerminalSession, IpcError> {
+    application
+        .terminal_local_open_elevated(
+            size,
+            std::sync::Arc::new(move |event| events.send(event).is_ok()),
+        )
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn terminal_open(
     application: tauri::State<'_, Application>,
     host_id: String,

@@ -8,6 +8,7 @@ import { defaultTerminalPreferences } from '../types/preferences';
 import { defaultProductPreferences } from '../types/product';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
+import { useNotificationsStore } from '../stores/notifications';
 import { useTerminalsStore } from '../stores/terminals';
 import TerminalsView from './TerminalsView.vue';
 import type { ITerminalOptions } from '@xterm/xterm';
@@ -117,6 +118,7 @@ async function tabMenu(index = 0) {
 }
 beforeEach(async () => {
   vi.clearAllMocks();
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
   native.receivers.length = 0;
   terminals.instances.length = 0;
   vi.stubGlobal(
@@ -143,7 +145,9 @@ beforeEach(async () => {
     return Promise.resolve({ id, hostId: 'host', transportId: 'transport', routeHostIds: [] });
   };
   native.open.mockImplementation(open);
-  native.openLocal.mockImplementation((size, receive) => open(null, size, receive));
+  native.openLocal.mockImplementation((size, receive, elevated) =>
+    open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: !!elevated })),
+  );
   pinia = createPinia();
   setActivePinia(pinia);
   useHostsStore().catalog = {
@@ -189,6 +193,122 @@ afterEach(async () => {
   root?.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+});
+
+it.each([false, true])(
+  'chooses local elevation=%s from the plus menu before opening a new session',
+  async (elevated) => {
+    const store = useTerminalsStore();
+    hostId.value = '';
+    store.open(null);
+    await flush();
+    const original = store.panes.at(-1)!;
+    const count = store.panes.length;
+    const plus = button('新建终端会话');
+    plus.click();
+    await flush();
+    expect(store.panes).toHaveLength(count);
+    expect(native.openLocal).toHaveBeenCalledTimes(1);
+    expect(plus.getAttribute('aria-haspopup')).toBe('menu');
+    expect(plus.getAttribute('aria-expanded')).toBe('true');
+    const menu = document.querySelector('[role="menu"][aria-label="新建终端会话"]')!;
+    expect(
+      [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
+    ).toEqual(['新建普通会话', '以管理员身份运行']);
+    button(elevated ? '以管理员身份运行' : '新建普通会话', menu).click();
+    await flush();
+    expect(document.querySelector('[role="menu"][aria-label="新建终端会话"]')).toBeNull();
+    expect(store.panes).toHaveLength(count + 1);
+    expect(store.panes.at(-1)?.elevated).toBe(elevated);
+    expect(native.openLocal).toHaveBeenCalledTimes(2);
+    expect(native.openLocal.mock.calls.at(-1)?.[2]).toBe(elevated ? true : undefined);
+    expect(store.panes).toContain(original);
+    expect(original.elevated).toBe(false);
+  },
+);
+
+it('dismisses the plus menu with Escape or outside click, restores focus and never creates a session', async () => {
+  const store = useTerminalsStore();
+  hostId.value = '';
+  store.open(null);
+  await flush();
+  const count = store.panes.length;
+  const plus = button('新建终端会话');
+  plus.focus();
+  plus.click();
+  await flush();
+  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="新建终端会话"]')!;
+  const items = [...menu.querySelectorAll('[role="menuitem"]')];
+  expect(document.activeElement).toBe(items[0]);
+  menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(document.activeElement).toBe(items[1]);
+  menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await flush();
+  expect(document.activeElement).toBe(plus);
+  expect(plus.getAttribute('aria-expanded')).toBe('false');
+  plus.click();
+  await flush();
+  button('关闭新建会话菜单').click();
+  await flush();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(store.panes).toHaveLength(count);
+  expect(native.openLocal).toHaveBeenCalledTimes(1);
+});
+
+it('closes the plus menu when switching hosts without applying the old local action to the new host', async () => {
+  const store = useTerminalsStore();
+  hostId.value = '';
+  store.open(null);
+  await flush();
+  button('新建终端会话').click();
+  await flush();
+  const oldAction = button('以管理员身份运行');
+  hostId.value = 'host';
+  await flush();
+  oldAction.click();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(store.hostTabs('')).toHaveLength(1);
+  expect(store.hostTabs('host')).toHaveLength(1);
+  expect(native.openLocal).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  ['Win32', 'host'],
+  ['Linux x86_64', ''],
+  ['MacIntel', ''],
+])('opens directly from plus on platform=%s host=%s', async (platform, target) => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+  const store = useTerminalsStore();
+  hostId.value = target!;
+  if (!target) store.open(null);
+  await flush();
+  const count = store.panes.length;
+  button('新建终端会话').click();
+  await flush();
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+  expect(store.panes).toHaveLength(count + 1);
+  expect(store.panes.at(-1)?.elevated).not.toBe(true);
+});
+
+it('marks administrator sessions and preserves elevation after cancellation and retry', async () => {
+  const store = useTerminalsStore();
+  hostId.value = '';
+  native.openLocal.mockRejectedValueOnce({
+    code: 'LOCAL_TERMINAL',
+    message: '已取消管理员终端授权',
+  });
+  store.open(null, undefined, undefined, true);
+  await flush();
+  expect(store.panes.at(-1)?.state).toBe('failed');
+  expect(useNotificationsStore().items).toContainEqual(
+    expect.objectContaining({ text: '已取消管理员终端授权', error: true }),
+  );
+  expect(root.textContent).toContain('会话 1（管理员）');
+  await store.reconnect(store.active);
+  await flush();
+  expect(store.panes.at(-1)?.state).toBe('connected');
+  expect(native.openLocal).toHaveBeenCalledTimes(2);
+  for (const call of native.openLocal.mock.calls) expect(call[2]).toBe(true);
 });
 
 it('isolates old-generation data when a connection request reuses the same pane', async () => {

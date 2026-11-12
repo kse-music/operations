@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/storage", "crates/security", "crates/ssh", "crates/sftp", "crates/monitor", "crates/ops", "crates/tasks", "crates/ai", "crates/plugin-sdk", "crates/plugin-core", "crates/plugin-runtime", "crates/application", "crates/windows-file-drag", "apps/desktop/src-tauri", "tools/ssh-probe"]
+members = ["crates/core", "crates/storage", "crates/security", "crates/ssh", "crates/sftp", "crates/monitor", "crates/ops", "crates/tasks", "crates/ai", "crates/plugin-sdk", "crates/plugin-core", "crates/plugin-runtime", "crates/application", "crates/windows-file-drag", "crates/windows-terminal", "apps/desktop/src-tauri", "tools/ssh-probe"]
 default-members = ["crates/core", "crates/storage", "crates/security", "crates/application", "apps/desktop/src-tauri"]
 resolver = "3"
 

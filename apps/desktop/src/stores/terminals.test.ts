@@ -21,6 +21,20 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe('independent terminal tabs', () => {
+  it('keeps local elevation on split and duplicate while ordinary and SSH sessions remain separate', () => {
+    const store = useTerminalsStore();
+    store.open(null, undefined, undefined, true);
+    const admin = store.tabs[0]!;
+    store.split(store.focused, 'rows');
+    expect(admin.panes.every((pane) => pane.elevated)).toBe(true);
+    store.duplicate(admin.key);
+    expect(store.tabs[1]!.panes[0]!.elevated).toBe(true);
+    store.open(null);
+    expect(store.tabs[2]!.panes[0]!.elevated).toBe(false);
+    store.open(host, undefined, undefined, true);
+    expect(store.tabs[3]!.panes[0]!.elevated).toBeUndefined();
+    expect(store.tabs).toHaveLength(4);
+  });
   it.each([
     ['connected', false],
     ['idle', false],

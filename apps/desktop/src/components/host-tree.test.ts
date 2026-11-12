@@ -300,7 +300,42 @@ it('shows loading, failure and per-host status with the total in the heading', a
     updatedAt: '',
   });
   await nextTick();
-  expect(root.querySelector('.disconnected-dot')?.getAttribute('aria-label')).toBe('未连接');
+  const icon = root.querySelector<SVGElement>('.tree-host > svg.host-icon')!;
+  expect(icon).not.toBeNull();
+  expect(icon.querySelector('rect')).not.toBeNull();
+  const gradient = icon.querySelector('linearGradient')!;
+  expect(gradient).not.toBeNull();
+  expect(icon.querySelector('.host-icon-screen')?.getAttribute('fill')).toBe(
+    `url(#${gradient.id})`,
+  );
+  expect(root.querySelector('.disconnected-dot')).toBeNull();
+  expect(icon.getAttribute('role')).toBe('img');
+  expect(icon.getAttribute('aria-label')).toBe('未连接');
+  expect(icon.getAttribute('aria-hidden')).not.toBe('true');
+  expect(icon.classList.contains('connected')).toBe(false);
+  const connection = {
+    id: 'session',
+    hostId: 'offline',
+    transportId: 'transport',
+    routeHostIds: [],
+    hostname: 'offline.example',
+    port: 22,
+    username: 'ops',
+    kind: 'terminal' as const,
+    state: 'connecting',
+  };
+  useBackgroundStore().connections = [connection];
+  await nextTick();
+  expect(icon.getAttribute('aria-label')).toBe('连接中');
+  expect(icon.classList.contains('connected')).toBe(false);
+  useBackgroundStore().connections = [{ ...connection, state: 'connected' }];
+  await nextTick();
+  expect(icon.getAttribute('aria-label')).toBe('已连接');
+  expect(icon.classList.contains('connected')).toBe(true);
+  useBackgroundStore().connections = [];
+  await nextTick();
+  expect(icon.getAttribute('aria-label')).toBe('未连接');
+  expect(icon.classList.contains('connected')).toBe(false);
   expect(root.querySelector('.host-count')?.textContent?.trim()).toBe('1');
   expect(root.querySelector('.host-sidebar-footer')).toBeNull();
 });

@@ -388,7 +388,9 @@ async function connect(): Promise<void> {
     const size = { cols: terminal.cols, rows: terminal.rows };
     const opening = props.tab.host
       ? open(props.tab.host.id, size, receive)
-      : terminalApi.openLocal(size, receive);
+      : props.tab.elevated
+        ? terminalApi.openLocal(size, receive, true)
+        : terminalApi.openLocal(size, receive);
     const value = await opening;
     if (disposed || attempt !== generation) {
       await terminalApi.close(value.id);
@@ -401,7 +403,7 @@ async function connect(): Promise<void> {
       sessionId: value.id,
       ...('transportId' in value
         ? { transportId: value.transportId, routeHostIds: value.routeHostIds }
-        : { shell: value.shell }),
+        : { shell: value.shell, elevated: value.elevated }),
     });
   } catch (cause) {
     update({ state: 'failed' });

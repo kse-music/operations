@@ -993,6 +993,13 @@ onBeforeUnmount(() => {
                 ? AppWindow
                 : FilePenLine
           "
+          :class="
+            menu.entry.kind === 'directory'
+              ? 'file-menu-folder'
+              : menu.side === 'local'
+                ? 'file-menu-open'
+                : 'file-menu-edit'
+          "
           aria-hidden="true"
         />
         {{
@@ -1010,7 +1017,7 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
-        <AppWindow aria-hidden="true" />
+        <AppWindow class="file-menu-open" aria-hidden="true" />
         {{ tr(' 使用系统应用编辑…') }}</button
       ><button
         role="menuitem"
@@ -1021,7 +1028,11 @@ onBeforeUnmount(() => {
           )
         "
       >
-        <component :is="menu.side === 'local' ? Upload : Download" aria-hidden="true" />
+        <component
+          :is="menu.side === 'local' ? Upload : Download"
+          class="file-menu-transfer"
+          aria-hidden="true"
+        />
         {{ menu.side === 'local' ? tr('上传选中') : tr('下载选中') }}</button
       ><button
         role="menuitem"
@@ -1030,20 +1041,20 @@ onBeforeUnmount(() => {
           menu = null;
         "
       >
-        <Copy aria-hidden="true" />
+        <Copy class="file-menu-copy" aria-hidden="true" />
         {{ tr(' 复制绝对路径') }}</button
       ><button role="menuitem" @click="showProperties">
-        <Info aria-hidden="true" />{{ tr('查看属性') }}</button
+        <Info class="file-menu-properties" aria-hidden="true" />{{ tr('查看属性') }}</button
       ><template v-if="menu.side === 'remote'"
         ><button role="menuitem" @click="mutate('rename')">
-          <TextCursorInput aria-hidden="true" />{{ tr('重命名') }}</button
+          <TextCursorInput class="file-menu-rename" aria-hidden="true" />{{ tr('重命名') }}</button
         ><button role="menuitem" @click="mutate('delete')">
-          <Trash2 aria-hidden="true" />{{ tr('删除选中') }}</button
+          <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除选中') }}</button
         ><button
           role="menuitem"
           @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
         >
-          <SquareTerminal aria-hidden="true" />
+          <SquareTerminal class="file-menu-terminal" aria-hidden="true" />
           {{ tr(' 在新终端中打开 ') }}
         </button></template
       >

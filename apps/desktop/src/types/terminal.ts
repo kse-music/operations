@@ -35,6 +35,7 @@ export interface TerminalSession {
 export interface LocalTerminalSession {
   id: string;
   shell: string;
+  elevated: boolean;
 }
 export type TerminalEvent =
   | { type: 'connection'; cipher: string }

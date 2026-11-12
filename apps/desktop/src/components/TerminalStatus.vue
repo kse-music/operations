@@ -9,7 +9,10 @@ const capsLock = ref<boolean | null>(null);
 const numLock = ref<boolean | null>(null);
 const connection = computed(() => {
   if (props.pane.state !== 'connected') return stateLabels[props.pane.state] ?? tr('未连接');
-  if (!props.pane.host) return props.pane.shell || tr('本地终端');
+  if (!props.pane.host) {
+    const shell = props.pane.shell || tr('本地终端');
+    return props.pane.elevated ? tr('{0}（管理员）', shell) : shell;
+  }
   return props.pane.cipher ? `SSH2 · ${props.pane.cipher}` : tr('SSH2 · 加密算法读取中');
 });
 function updateLocks(event: KeyboardEvent): void {

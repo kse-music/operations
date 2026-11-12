@@ -2,7 +2,17 @@
 import { tr } from '../i18n/messages';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { Plus, X } from '@lucide/vue';
+import {
+  Copy,
+  ListX,
+  Plus,
+  RefreshCw,
+  Shield,
+  SquareTerminal,
+  TextCursorInput,
+  Unplug,
+  X,
+} from '@lucide/vue';
 import { useTerminalsStore, type TerminalTab } from '../stores/terminals';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
@@ -36,17 +46,32 @@ const host = computed(
 function newTerminal(): void {
   if (!props.hostId || host.value) store.open(host.value);
 }
+const canChooseLocalMode = computed(() => !props.hostId && navigator.platform.startsWith('Win'));
+function addTerminal(event: MouseEvent): void {
+  if (!props.visible) return;
+  if (canChooseLocalMode.value) void openMenu(null, event);
+  else newTerminal();
+}
+function selectLocalMode(elevated: boolean): void {
+  if (!props.visible || !canChooseLocalMode.value || menu.value?.key !== null) return;
+  closeMenu();
+  store.open(null, undefined, undefined, elevated);
+}
 function sessionTitle(item: TerminalTab): string {
   const host = item.panes[0]?.host;
-  return !item.renamed && (!host || item.title === hostDisplayName(host))
-    ? tr('会话 {0}', item.sessionNumber)
-    : item.title;
+  const title =
+    !item.renamed && (!host || item.title === hostDisplayName(host))
+      ? tr('会话 {0}', item.sessionNumber)
+      : item.title;
+  return item.panes.some((pane) => !pane.host && pane.elevated)
+    ? tr('{0}（管理员）', title)
+    : title;
 }
 const area = ref<HTMLElement>();
 const renaming = ref<string | null>(null),
   title = ref('');
 const tab = computed(() => store.tabs.find((t) => t.key === store.active));
-const menu = ref<{ key: string; x: number; y: number } | null>(null);
+const menu = ref<{ key: string | null; x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuTarget = computed(() => store.tabs.find((item) => item.key === menu.value?.key));
 let menuTrigger: HTMLElement | null = null;
@@ -54,16 +79,17 @@ function closeMenu(): void {
   menu.value = null;
   if (props.visible && menuTrigger?.isConnected) menuTrigger.focus({ preventScroll: true });
 }
-async function openMenu(key: string, event: MouseEvent | KeyboardEvent): Promise<void> {
+async function openMenu(key: string | null, event: MouseEvent | KeyboardEvent): Promise<void> {
   if (!props.visible) return;
   const target = event.currentTarget as HTMLElement;
   menuTrigger = target.querySelector<HTMLElement>('[role=tab]') ?? target;
   const bounds = target.getBoundingClientRect();
-  const keyboard = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  const anchored =
+    key === null || event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
   menu.value = {
     key,
-    x: keyboard ? bounds.left : event.clientX,
-    y: keyboard ? bounds.bottom : event.clientY,
+    x: anchored ? bounds.left : event.clientX,
+    y: anchored ? bounds.bottom : event.clientY,
   };
   await nextTick();
   if (!menu.value || !menuElement.value) return;
@@ -246,7 +272,11 @@ watch(
 watch(
   () => store.tabs.map((item) => item.key),
   (keys) => {
-    if (menu.value && !keys.includes(menu.value.key)) closeMenu();
+    if (
+      menu.value &&
+      (menu.value.key === null ? !tabs.value.length : !keys.includes(menu.value.key))
+    )
+      closeMenu();
   },
 );
 </script>
@@ -321,7 +351,9 @@ watch(
           class="shell-icon-button"
           :aria-label="tr('新建终端会话')"
           :title="tr('新建终端会话')"
-          @click="newTerminal"
+          :aria-haspopup="canChooseLocalMode ? 'menu' : undefined"
+          :aria-expanded="canChooseLocalMode ? menu?.key === null : undefined"
+          @click="addTerminal"
         >
           <Plus :size="15" aria-hidden="true" />
         </button>
@@ -364,7 +396,7 @@ watch(
     <template v-if="menu">
       <button
         class="context-backdrop"
-        :aria-label="tr('关闭会话菜单')"
+        :aria-label="menu.key === null ? tr('关闭新建会话菜单') : tr('关闭会话菜单')"
         @click="closeMenu"
         @contextmenu.prevent="closeMenu"
         @wheel.prevent="closeMenu"
@@ -373,28 +405,50 @@ watch(
         ref="menuElement"
         class="context-menu terminal-session-menu"
         role="menu"
-        :aria-label="tr('终端会话操作')"
+        :aria-label="menu.key === null ? tr('新建终端会话') : tr('终端会话操作')"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         @keydown="menuKey"
       >
-        <button role="menuitem" @click="runMenu('duplicate')">{{ tr('复制') }}</button>
-        <button role="menuitem" @click="runMenu('rename')">{{ tr('重命名') }}</button>
-        <button
-          role="menuitem"
-          :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
-          @click="runMenu('reconnect')"
-        >
-          {{ tr('重新连接') }}
-        </button>
-        <button
-          role="menuitem"
-          :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
-          @click="runMenu('disconnect')"
-        >
-          {{ tr('断开连接') }}
-        </button>
-        <button role="menuitem" @click="runMenu('all')">{{ tr('关闭所有') }}</button>
-        <button role="menuitem" @click="runMenu('close')">{{ tr('关闭') }}</button>
+        <template v-if="menu.key === null">
+          <button role="menuitem" @click="selectLocalMode(false)">
+            <SquareTerminal class="menu-icon-purple" :size="14" aria-hidden="true" />{{
+              tr('新建普通会话')
+            }}
+          </button>
+          <button role="menuitem" @click="selectLocalMode(true)">
+            <Shield class="menu-icon-gold" :size="14" aria-hidden="true" />{{
+              tr('以管理员身份运行')
+            }}
+          </button>
+        </template>
+        <template v-else>
+          <button role="menuitem" @click="runMenu('duplicate')">
+            <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
+          </button>
+          <button role="menuitem" @click="runMenu('rename')">
+            <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名') }}
+          </button>
+          <button
+            role="menuitem"
+            :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
+            @click="runMenu('reconnect')"
+          >
+            <RefreshCw class="menu-icon-green" aria-hidden="true" />{{ tr('重新连接') }}
+          </button>
+          <button
+            role="menuitem"
+            :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
+            @click="runMenu('disconnect')"
+          >
+            <Unplug class="menu-icon-red" aria-hidden="true" />{{ tr('断开连接') }}
+          </button>
+          <button role="menuitem" @click="runMenu('all')">
+            <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
+          </button>
+          <button role="menuitem" @click="runMenu('close')">
+            <X class="menu-icon-muted" aria-hidden="true" />{{ tr('关闭') }}
+          </button>
+        </template>
       </div>
     </template>
   </Teleport>

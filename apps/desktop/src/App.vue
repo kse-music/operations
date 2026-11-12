@@ -9,6 +9,7 @@ import {
   ref,
   watch,
   nextTick,
+  type Component,
 } from 'vue';
 import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
@@ -19,7 +20,19 @@ import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
 import HostTools from './components/HostTools.vue';
-import { FileWarning, Info, ListTodo, Monitor, Puzzle, Server, Unplug, X } from '@lucide/vue';
+import {
+  CopyX,
+  FileWarning,
+  Info,
+  ListTodo,
+  ListX,
+  Monitor,
+  PanelRightClose,
+  Puzzle,
+  Server,
+  Unplug,
+  X,
+} from '@lucide/vue';
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
@@ -190,27 +203,40 @@ const hasTabsToRight = computed(
   () => tabMenuIndex.value >= 0 && tabMenuIndex.value < workspace.tabs.length - 1,
 );
 const hasOtherTabs = computed(() => workspace.tabs.length > 1);
-const tabCloseActions: { scope: WorkspaceCloseScope; label: string }[] = [
+const tabCloseActions: {
+  scope: WorkspaceCloseScope;
+  label: string;
+  icon: Component;
+  iconClass: string;
+}[] = [
   {
     scope: 'current',
+    icon: X,
+    iconClass: 'menu-icon-muted',
     get label() {
       return tr('关闭');
     },
   },
   {
     scope: 'right',
+    icon: PanelRightClose,
+    iconClass: 'menu-icon-gold',
     get label() {
       return tr('关闭右侧');
     },
   },
   {
     scope: 'others',
+    icon: CopyX,
+    iconClass: 'menu-icon-purple',
     get label() {
       return tr('关闭其它');
     },
   },
   {
     scope: 'all',
+    icon: ListX,
+    iconClass: 'menu-icon-red',
     get label() {
       return tr('关闭所有');
     },
@@ -906,7 +932,9 @@ watch(
         "
         @click="closeFromTabMenu(action.scope)"
       >
-        {{ action.label }}
+        <component :is="action.icon" :class="action.iconClass" aria-hidden="true" />{{
+          action.label
+        }}
       </button>
     </div>
   </Teleport>

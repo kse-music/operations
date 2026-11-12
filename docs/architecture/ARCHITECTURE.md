@@ -20,6 +20,7 @@
 | `crates/plugin-sdk` / `packages/plugin-sdk` | 公开协议、WASM async 执行器、TS 客户端和通用 UI  |
 | `plugins/system/{assistant,docker}`         | 独立 Vue/WASM 业务，只依赖公开 SDK 和普通库      |
 | `crates/windows-file-drag`                  | Windows 文件/磁盘互操作，必要 FFI 收敛于专用模块 |
+| `crates/windows-terminal`                   | Windows 本地终端提权与私有进程通信互操作         |
 | `tools` / `tests/fixtures`                  | 构建、隔离 QA、探针及不分发的测试夹具            |
 
 主要依赖方向为 `desktop → application → 具体服务 → core`，SSH 读取 storage/security 中的受管配置与秘密，文件/监控/执行复用独立 SSH 租约。模块不反向依赖 UI。
@@ -87,6 +88,10 @@ NativeStore 使用系统凭据库，服务名 `cn.hiboot.desktop.credentials.v1`
 应用自己的 known-hosts 按规范 hostname+port 保存完整公钥、SHA-256 和信任时间。未知主机认证前等待用户核验，challenge 60 秒；已知密钥变化硬拒绝，证书默认拒绝。系统 known_hosts 哈希/CA/撤销未接入。本地 RSA 私钥签名被禁用。
 
 每终端拥有独立 PTY、取消令牌和任务；文件、Monitor、执行分别持租约。关闭一个 Channel 不误关其他租约，无引用时释放 Transport。同步锁只覆盖短注册表操作，不跨 await。
+
+Windows 管理员本地终端由 `crates/windows-terminal` 封装 `ShellExecuteExW(runas)`、进程令牌查询、命名管道身份校验和 Job Object。宿主只通过主窗口专用 IPC 请求启动当前 EXE 的固定 PTY 代理模式；代理在 Tauri、单实例、存储、凭据和插件初始化前分流，仅运行既有本地终端引擎。系统 UAC 只提升该代理及其 PowerShell，主程序不重启、不提权，不接受自定义程序、命令或 Shell 路径。
+
+每个代理使用独占随机命名管道，拒绝远程客户端，ACL 仅允许当前用户、管理员和 Local System。宿主以 UAC 返回的进程句柄核验管道客户端 PID，代理核验服务端 PID 与宿主 EXE 路径，且使用 identification 级连接禁止宿主模拟管理员令牌。协议有版本与帧长上限，输入、尺寸、序号沿用本地引擎校验；输出继续按 xterm ACK 背压。代理先确认实际提权，再建立 PTY；断线、取消、超时与退出触发清理，Job Object 在代理退出时回收受管后代，主程序等待代理退出后完成会话回收。UAC 提示尚未响应时不能强行关闭系统授权窗口，应用退出须先等待用户允许或取消；等待超时保留工作区并报告失败。该能力不开放给插件。
 
 PTY 每块最多 16 KiB，经 Tauri Channel 送入 xterm，写入回调 ACK 后读取下一块；输入/resize 独立且有界，resize 合并。russh 内部仍有非全有界队列，不承诺恶意服务器下进程硬内存限额。
 

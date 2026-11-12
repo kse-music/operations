@@ -242,4 +242,14 @@ impl Application {
         }
         self.local_terminals.open(size, sink).await
     }
+    pub async fn terminal_local_open_elevated(
+        &self,
+        size: TerminalSize,
+        sink: Sink,
+    ) -> Result<serverdeck_core::terminal::LocalTerminalSession, Error> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        self.local_terminals.open_elevated(size, sink).await
+    }
 }

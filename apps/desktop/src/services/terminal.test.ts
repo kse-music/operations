@@ -53,6 +53,17 @@ describe('terminal IPC contract', () => {
       size: { cols: 120, rows: 40 },
     });
   });
+  it('requests elevation only explicitly and propagates UAC cancellation without retry', async () => {
+    const receive = vi.fn();
+    mocks.invoke.mockRejectedValueOnce({ code: 'LOCAL_TERMINAL', message: '已取消管理员终端授权' });
+    await expect(
+      terminalApi.openLocal({ cols: 80, rows: 24 }, receive, true),
+    ).rejects.toMatchObject({ message: '已取消管理员终端授权' });
+    expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('terminal_local_open_elevated', {
+      size: { cols: 80, rows: 24 },
+      events: expect.objectContaining({ onmessage: receive }),
+    });
+  });
   it('requires desktop IPC and propagates a failed host-key decision', async () => {
     mocks.desktop.mockImplementationOnce(() => {
       throw new Error('desktop unavailable');

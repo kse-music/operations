@@ -75,6 +75,13 @@ async function openPluginModal(name: string): Promise<HTMLDialogElement> {
 async function newSession(): Promise<void> {
   document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
   await flush();
+  const menu = document.querySelector('[role="menu"][aria-label="新建终端会话"]');
+  if (menu) {
+    [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.trim() === '新建普通会话')!
+      .click();
+    await flush();
+  }
 }
 async function closeSession(index: number): Promise<void> {
   root
@@ -218,6 +225,7 @@ it('keeps terminal status on the active host, session and focused split pane onl
   expect(status()).toBeNull();
 });
 beforeEach(async () => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
   vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
     installed: await pluginsApi.list(),
     problems: [],
@@ -1069,6 +1077,30 @@ it('uses the right-clicked folder when creating a host without a group selector'
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
 
+it('selects administrator mode from the session plus menu without replacing ordinary sessions', async () => {
+  const store = useTerminalsStore(),
+    workspace = useWorkspaceStore();
+  document.querySelector<HTMLButtonElement>('[aria-label="本地终端"]')!.click();
+  await flush();
+  const ordinary = store.panes[0]!;
+  expect(document.querySelector('.sidebar [aria-label="本地终端（管理员）"]')).toBeNull();
+  document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
+  await flush();
+  expect(store.hostTabs('')).toHaveLength(1);
+  const menu = document.querySelector('[role="menu"][aria-label="新建终端会话"]')!;
+  [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    .find((item) => item.textContent?.trim() === '以管理员身份运行')!
+    .click();
+  await flush();
+  expect(workspace.current?.hostId).toBe('');
+  expect(workspace.current?.view).toBe('terminals');
+  expect(store.hostTabs('')).toHaveLength(2);
+  expect(store.panes[0]).toBe(ordinary);
+  expect(ordinary.elevated).toBe(false);
+  expect(store.panes[1]?.elevated).toBe(true);
+  expect(store.focused).toBe(store.panes[1]?.key);
+});
+
 it.each([null, '', 'a'])(
   'opens or reuses the local terminal above the host tree in context "%s"',
   async (hostId) => {
@@ -1704,8 +1736,7 @@ it.each(['remote', 'local'])(
     document.querySelector<HTMLButtonElement>('[aria-label="关闭标签 会话 2"]')!.click();
     await flush();
     expect(names()).toEqual(['会话 1', '会话 3']);
-    document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
-    await flush();
+    await newSession();
     expect(names()).toEqual(['会话 1', '会话 3', '会话 4']);
     terminals.reorder(terminals.tabs[2]!.key, terminals.tabs[0]!.key);
     await flush();

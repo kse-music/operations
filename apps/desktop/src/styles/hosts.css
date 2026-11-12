@@ -119,6 +119,14 @@
 .group-toggle > svg {
   flex-shrink: 0;
 }
+.host-group-icon {
+  color: #ffd36f;
+  fill: #f3bd4f;
+}
+:root[data-theme='light'] .host-group-icon {
+  color: #c18b22;
+  fill: #ffd268;
+}
 .group-toggle:hover {
   color: var(--text);
 }
@@ -162,12 +170,36 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.disconnected-dot {
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--muted);
-  border-radius: 50%;
+.host-icon {
+  --host-icon-bezel: #5d747f;
+  --host-icon-outline: #b2c2cc;
+  --host-icon-support: #9aabb6;
+  --host-icon-support-edge: #607582;
   flex-shrink: 0;
+}
+:root[data-theme='light'] .host-icon {
+  --host-icon-bezel: #657d8b;
+  --host-icon-outline: #344e5e;
+  --host-icon-support: #b5c0c7;
+  --host-icon-support-edge: #647986;
+}
+.host-icon-frame {
+  fill: var(--host-icon-bezel);
+  stroke: var(--host-icon-outline);
+  stroke-width: 0.7;
+}
+.host-icon-stand,
+.host-icon-base {
+  fill: var(--host-icon-support);
+  stroke: var(--host-icon-support-edge);
+  stroke-width: 0.6;
+  stroke-linejoin: round;
+}
+.host-icon-status {
+  fill: #687d88;
+}
+.host-icon.connected .host-icon-status {
+  fill: var(--accent);
 }
 .host-name {
   overflow: hidden;

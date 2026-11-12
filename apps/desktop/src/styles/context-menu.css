@@ -8,6 +8,11 @@
   cursor: default;
 }
 .context-menu {
+  --menu-icon-gold: #f6c65d;
+  --menu-icon-folder-fill: #e1a53c;
+  --menu-icon-green: #73d9be;
+  --menu-icon-blue: #82b7f5;
+  --menu-icon-purple: #b9a1f4;
   position: fixed;
   z-index: 41;
   width: max-content;
@@ -21,6 +26,31 @@
   border-radius: 6px;
   box-shadow: 0 6px 20px #0004;
   font-size: var(--font-size-body);
+}
+:root[data-theme='light'] .context-menu {
+  --menu-icon-gold: #9c651d;
+  --menu-icon-folder-fill: #ffd478;
+  --menu-icon-green: #187c5d;
+  --menu-icon-blue: #2563b8;
+  --menu-icon-purple: #7652b5;
+}
+.context-menu .menu-icon-gold {
+  color: var(--menu-icon-gold);
+}
+.context-menu .menu-icon-green {
+  color: var(--menu-icon-green);
+}
+.context-menu .menu-icon-blue {
+  color: var(--menu-icon-blue);
+}
+.context-menu .menu-icon-purple {
+  color: var(--menu-icon-purple);
+}
+.context-menu .menu-icon-red {
+  color: var(--error);
+}
+.context-menu .menu-icon-muted {
+  color: var(--muted);
 }
 .context-menu [role='menuitem'] {
   display: flex;

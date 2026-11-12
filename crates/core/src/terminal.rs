@@ -145,6 +145,7 @@ impl TerminalSize {
 pub struct LocalTerminalSession {
     pub id: String,
     pub shell: String,
+    pub elevated: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -80,7 +80,7 @@ async function settle() {
   await Promise.resolve();
 }
 
-describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
+describe.each(['local', 'ssh', 'administrator'])('%s terminal lifecycle', (kind) => {
   beforeEach(async () => {
     vi.clearAllMocks();
     xterm.parsed = [];
@@ -97,7 +97,7 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
     setActivePinia(pinia);
     store = useTerminalsStore();
     store.open(
-      kind === 'local'
+      kind !== 'ssh'
         ? null
         : {
             ...hostInput(),
@@ -107,15 +107,18 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
             createdAt: '',
             updatedAt: '',
           },
+      undefined,
+      undefined,
+      kind === 'administrator',
     );
-    id = kind === 'local' ? 'local:test' : 'ssh:test';
+    id = kind !== 'ssh' ? 'local:test' : 'ssh:test';
     function connected(callback: (event: TerminalEvent) => void) {
       receive = callback;
       receive({ type: 'state', state: 'connected', code: null, message: null });
     }
     vi.spyOn(terminalApi, 'openLocal').mockImplementation(async (_size, callback) => {
       connected(callback);
-      return { id, shell: 'test shell' };
+      return { id, shell: 'test shell', elevated: kind === 'administrator' };
     });
     vi.spyOn(terminalApi, 'open').mockImplementation(async (_host, _size, callback) => {
       connected(callback);
@@ -172,6 +175,17 @@ describe.each(['local', 'ssh'])('%s terminal lifecycle', (kind) => {
     xterm.buffer.cursorX = size.cols;
     xterm.cursorMove();
     expect(store.panes[0]?.screen?.cursorCol).toBe(size.cols);
+  });
+  it('retains the selected permission mode when reconnecting', async () => {
+    await store.disconnect(store.active);
+    await store.reconnect(store.active);
+    if (kind === 'ssh') {
+      expect(terminalApi.openLocal).not.toHaveBeenCalled();
+    } else {
+      const calls = vi.mocked(terminalApi.openLocal).mock.calls;
+      expect(calls).toHaveLength(2);
+      for (const call of calls) expect(call[2]).toBe(kind === 'administrator' ? true : undefined);
+    }
   });
 
   it('clears negotiated metadata on reconnect and ignores old connection events', async () => {

@@ -109,6 +109,7 @@ fn main() {
             "terminal_upload_read",
             "terminal_upload_release",
             "terminal_local_open",
+            "terminal_local_open_elevated",
             "terminal_open_link",
             "terminal_input",
             "terminal_resize",

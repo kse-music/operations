@@ -89,6 +89,7 @@
     "allow-terminal-upload-read",
     "allow-terminal-upload-release",
     "allow-terminal-local-open",
+    "allow-terminal-local-open-elevated",
     "allow-terminal-open-link",
     "allow-terminal-input",
     "allow-terminal-resize",

@@ -152,7 +152,7 @@ beforeEach(async () => {
   tab = store.tabs[0]!.panes[0]!;
   vi.spyOn(terminalApi, 'openLocal').mockImplementation(async (_size, receive) => {
     receive({ type: 'state', state: 'connected', code: null, message: null });
-    return { id: 'local:test', shell: 'test shell' };
+    return { id: 'local:test', shell: 'test shell', elevated: false };
   });
   vi.spyOn(terminalApi, 'input').mockResolvedValue();
   vi.spyOn(terminalApi, 'close').mockResolvedValue();
@@ -531,7 +531,7 @@ it('drops an asynchronous clipboard read if the pane reconnects before it finish
   expect(readText).toHaveBeenCalledOnce();
   vi.mocked(terminalApi.openLocal).mockImplementationOnce(async (_size, receive) => {
     receive({ type: 'state', state: 'connected', code: null, message: null });
-    return { id: 'local:reconnected', shell: 'test shell' };
+    return { id: 'local:reconnected', shell: 'test shell', elevated: false };
   });
   const store = useTerminalsStore();
   store.update(tab.key, { state: 'idle', connectRequested: false });

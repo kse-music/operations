@@ -19,6 +19,50 @@ fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
 }
 
 #[test]
+fn administrator_terminal_requires_main_window_local_origin_and_valid_size_before_uac() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .manage(
+            Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+                .unwrap(),
+        )
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "untrusted-terminal", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let invalid_size = json!({"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"});
+    let error = get_ipc_response(
+        &main,
+        request("terminal_local_open_elevated", invalid_size, origin),
+    )
+    .expect_err("reject before UAC");
+    assert_eq!(error["code"], "VALIDATION");
+    let valid_size = json!({"size":{"cols":80,"rows":24},"events":"__CHANNEL__:1"});
+    for (window, url) in [(&other, origin), (&main, "https://untrusted.invalid")] {
+        let error = get_ipc_response(
+            window,
+            request("terminal_local_open_elevated", valid_size.clone(), url),
+        )
+        .expect_err("untrusted caller cannot request elevation");
+        assert!(
+            error
+                .as_str()
+                .is_some_and(|text| text.contains("not allowed"))
+        );
+    }
+}
+
+#[test]
 fn local_drives_use_real_system_roots_and_main_window_acl() {
     let directory = tempfile::tempdir().unwrap();
     let application =
@@ -998,23 +1042,19 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
         );
     }
     let local = json!({"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"});
-    let invalid = get_ipc_response(&main, request("terminal_local_open", local.clone(), origin))
-        .expect_err("invalid local PTY size");
-    assert_eq!(invalid["code"], "VALIDATION");
-    assert!(
-        get_ipc_response(
-            &other,
-            request("terminal_local_open", local.clone(), origin)
-        )
-        .is_err()
-    );
-    assert!(
-        get_ipc_response(
-            &main,
-            request("terminal_local_open", local, "https://example.com")
-        )
-        .is_err()
-    );
+    for command in ["terminal_local_open", "terminal_local_open_elevated"] {
+        let invalid = get_ipc_response(&main, request(command, local.clone(), origin))
+            .expect_err("invalid local PTY size");
+        assert_eq!(invalid["code"], "VALIDATION");
+        assert!(get_ipc_response(&other, request(command, local.clone(), origin)).is_err());
+        assert!(
+            get_ipc_response(
+                &main,
+                request(command, local.clone(), "https://example.com")
+            )
+            .is_err()
+        );
+    }
     assert!(get_ipc_response(&main, request("plugin:shell|execute", json!({}), origin)).is_err());
 }
 

@@ -16,6 +16,9 @@ use std::{
 };
 use tokio::sync::{Semaphore, oneshot, watch};
 
+#[cfg(windows)]
+pub(crate) mod elevated;
+
 const LIMIT: usize = 16;
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
 enum Command {
@@ -148,6 +151,24 @@ impl LocalTerminals {
         size: TerminalSize,
         sink: Sink,
     ) -> Result<LocalTerminalSession, Error> {
+        self.open_mode(size, sink, false).await
+    }
+    pub(crate) async fn open_elevated(
+        &self,
+        size: TerminalSize,
+        sink: Sink,
+    ) -> Result<LocalTerminalSession, Error> {
+        if !cfg!(windows) {
+            return Err(Error::Validation("管理员本地终端仅支持 Windows"));
+        }
+        self.open_mode(size, sink, true).await
+    }
+    async fn open_mode(
+        &self,
+        size: TerminalSize,
+        sink: Sink,
+        elevated: bool,
+    ) -> Result<LocalTerminalSession, Error> {
         size.validate()?;
         let permit = self
             .slots
@@ -176,7 +197,18 @@ impl LocalTerminals {
         let sessions = self.sessions.clone();
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let result = run(&id, size, &control, &sink, receiver, ready);
+            #[cfg(windows)]
+            let result = if elevated {
+                tokio::runtime::Handle::current()
+                    .block_on(elevated::run(&id, size, &control, &sink, receiver, ready))
+            } else {
+                run(&id, size, &control, &sink, receiver, ready)
+            };
+            #[cfg(not(windows))]
+            let result = {
+                let _ = elevated;
+                run(&id, size, &control, &sink, receiver, ready)
+            };
             if let Err(error) = result {
                 tracing::warn!(operation = "local_terminal", error = %error, source = ?std::error::Error::source(&error), "local terminal failed");
                 let error = serverdeck_core::IpcError::from(error);
@@ -355,6 +387,11 @@ fn run(
     ready: oneshot::Sender<Result<LocalTerminalSession, Error>>,
 ) -> Result<(), Error> {
     let startup = (|| {
+        #[cfg(windows)]
+        let elevated = serverdeck_windows_terminal::is_elevated()
+            .map_err(|error| failed("无法确认本地终端权限", error))?;
+        #[cfg(not(windows))]
+        let elevated = false;
         let (command, name) = shell()?;
         let pair = native_pty_system()
             .openpty(dimensions(size))
@@ -372,9 +409,9 @@ fn run(
             .spawn_command(command)
             .map_err(|error| failed("无法启动本地 Shell", error))?;
         drop(pair.slave);
-        Ok::<_, Error>((pair.master, reader, writer, child, name))
+        Ok::<_, Error>((pair.master, reader, writer, child, name, elevated))
     })();
-    let (master, reader, mut writer, mut child, name) = match startup {
+    let (master, reader, mut writer, mut child, name, elevated) = match startup {
         Ok(value) => value,
         Err(error) => {
             tracing::warn!(operation = "local_terminal_start", error = %error, source = ?std::error::Error::source(&error), "could not start local shell");
@@ -410,6 +447,7 @@ fn run(
         .send(Ok(LocalTerminalSession {
             id: id.into(),
             shell: name,
+            elevated,
         }))
         .is_err()
     {

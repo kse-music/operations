@@ -259,6 +259,7 @@ pub fn command_handler<R: tauri::Runtime>()
         terminal_upload_commands::terminal_upload_read,
         terminal_upload_commands::terminal_upload_release,
         commands::terminal_local_open,
+        commands::terminal_local_open_elevated,
         browser_commands::terminal_open_link,
         commands::terminal_input,
         commands::terminal_resize,

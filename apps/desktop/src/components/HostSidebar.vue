@@ -2,16 +2,42 @@
 import { tr } from '../i18n/messages';
 
 import { useBackgroundStore } from '../stores/background';
-import { ChevronDown, ChevronRight, Folder, FolderOpen, Search, Server, Plus } from '@lucide/vue';
+import {
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FileInput,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  Pencil,
+  Plug,
+  Plus,
+  Puzzle,
+  Search,
+  Server,
+  TextCursorInput,
+  Trash2,
+} from '@lucide/vue';
 const background = useBackgroundStore();
 import { useOpsStore } from '../stores/ops';
 import { usePluginsStore } from '../stores/plugins';
 const plugins = usePluginsStore();
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  shallowRef,
+  watch,
+  type Component,
+} from 'vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
 import HostTreeControls from './HostTreeControls.vue';
+import HostIcon from './HostIcon.vue';
 import GroupManager from './GroupManager.vue';
 import Modal from './Modal.vue';
 import { hostsApi } from '../services/hosts';
@@ -217,27 +243,58 @@ function setControls(id: string, component: unknown): void {
 }
 const folderEditor = ref<{ parentId: string | null; group?: HostGroup }>();
 const deletingFolder = ref<HostGroup>();
-const menuItems = computed<{ key: MenuAction; label: string; danger?: boolean }[]>(() => {
+const menuItems = computed<
+  { key: MenuAction; label: string; icon: Component; iconClass: string; danger?: boolean }[]
+>(() => {
   const target = context.value?.target;
   if (!target) return [];
   if (target.kind === 'host')
     return [
-      { key: 'connect', label: tr('连接') },
-      { key: 'edit', label: tr('编辑') },
-      { key: 'copy', label: tr('复制') },
+      { key: 'connect', label: tr('连接'), icon: Plug, iconClass: 'menu-icon-green' },
+      { key: 'edit', label: tr('编辑'), icon: Pencil, iconClass: 'menu-icon-gold' },
+      { key: 'copy', label: tr('复制'), icon: Copy, iconClass: 'menu-icon-blue' },
       ...plugins.extensions
         .filter((e) => e.kind === 'host_menu')
-        .map((e) => ({ key: `plugin:${e.pluginId}:${e.id}` as MenuAction, label: e.label })),
-      { key: 'deleteHost', label: tr('删除'), danger: true },
+        .map((e) => ({
+          key: `plugin:${e.pluginId}:${e.id}` as MenuAction,
+          label: e.label,
+          icon: Puzzle,
+          iconClass: 'menu-icon-purple',
+        })),
+      {
+        key: 'deleteHost',
+        label: tr('删除'),
+        icon: Trash2,
+        iconClass: 'menu-icon-red',
+        danger: true,
+      },
     ];
   return [
-    { key: 'newHost', label: tr('新建主机') },
-    { key: 'newFolder', label: tr('新建文件夹') },
+    { key: 'newHost', label: tr('新建主机'), icon: Server, iconClass: 'menu-icon-blue' },
+    { key: 'newFolder', label: tr('新建文件夹'), icon: FolderPlus, iconClass: 'menu-icon-gold' },
     ...(target.id === null
-      ? [{ key: 'importOpenssh' as const, label: tr('导入 SSH 配置…') }]
+      ? [
+          {
+            key: 'importOpenssh' as const,
+            label: tr('导入 SSH 配置…'),
+            icon: FileInput,
+            iconClass: 'menu-icon-blue',
+          },
+        ]
       : [
-          { key: 'rename' as const, label: tr('重命名文件夹') },
-          { key: 'deleteFolder' as const, label: tr('删除文件夹'), danger: true },
+          {
+            key: 'rename' as const,
+            label: tr('重命名文件夹'),
+            icon: TextCursorInput,
+            iconClass: 'menu-icon-gold',
+          },
+          {
+            key: 'deleteFolder' as const,
+            label: tr('删除文件夹'),
+            icon: Trash2,
+            iconClass: 'menu-icon-red',
+            danger: true,
+          },
         ]),
   ];
 });
@@ -432,8 +489,20 @@ onBeforeUnmount(() => {
         >
           <ChevronRight v-if="isCollapsed(group.id)" :size="12" aria-hidden="true" />
           <ChevronDown v-else :size="12" aria-hidden="true" />
-          <Folder v-if="isCollapsed(group.id)" :size="14" aria-hidden="true" />
-          <FolderOpen v-else :size="14" aria-hidden="true" />
+          <Folder
+            v-if="isCollapsed(group.id)"
+            class="host-group-icon"
+            :size="18"
+            :stroke-width="1.2"
+            aria-hidden="true"
+          />
+          <FolderOpen
+            v-else
+            class="host-group-icon"
+            :size="18"
+            :stroke-width="1.2"
+            aria-hidden="true"
+          />
           <span class="group-name">{{ group.name }}</span
           ><span class="group-count">{{ group.count }}</span>
         </button>
@@ -462,11 +531,11 @@ onBeforeUnmount(() => {
               @contextmenu.prevent.stop="openContext({ kind: 'host', id: host.id }, $event)"
               @keydown="contextKeys({ kind: 'host', id: host.id }, $event)"
             >
-              <span
-                :class="['disconnected-dot', { connected: hostState(host.id) === tr('已连接') }]"
-                :aria-label="hostState(host.id)"
-              ></span
-              ><span class="host-label"
+              <HostIcon
+                :connected="hostState(host.id) === tr('已连接')"
+                :label="hostState(host.id)"
+              />
+              <span class="host-label"
                 ><span class="host-name">{{ hostDisplayName(host) }}</span
                 ><span v-if="hostDisplayName(host) !== hostAddress(host)" class="host-address">{{
                   hostAddress(host)
@@ -565,7 +634,9 @@ onBeforeUnmount(() => {
               :disabled="store.busy"
               @click="runContext(item.key)"
             >
-              {{ item.label }}
+              <component :is="item.icon" :class="item.iconClass" aria-hidden="true" />{{
+                item.label
+              }}
             </button>
           </template>
         </div>

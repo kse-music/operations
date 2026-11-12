@@ -31,11 +31,15 @@ export const terminalApi = {
   openLocal(
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,
+    elevated = false,
   ): Promise<LocalTerminalSession> {
     ensureDesktop();
     const events = new Channel<TerminalEvent>();
     events.onmessage = receive;
-    return invoke('terminal_local_open', { size, events });
+    return invoke(elevated ? 'terminal_local_open_elevated' : 'terminal_local_open', {
+      size,
+      events,
+    });
   },
   forwardStart: (id: string, input: ForwardInput): Promise<ForwardInfo> =>
     invoke('forward_start', { id, input }),

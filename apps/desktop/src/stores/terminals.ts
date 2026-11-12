@@ -13,6 +13,7 @@ export interface TerminalPaneModel {
   key: string;
   host: Host | null;
   shell?: string;
+  elevated?: boolean;
   state: string;
   connectRequested: boolean;
   sessionId?: string;
@@ -185,6 +186,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     host: Host | null,
     fileAction?: import('../types/files').FileTerminalAction,
     containerShell?: import('../types/ops').ContainerShell,
+    elevated = false,
   ): void {
     if (panes.value.length >= 32) {
       error.value = tr('最多打开 32 个终端窗格。');
@@ -193,6 +195,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const pane = newPane(host);
     pane.fileAction = fileAction;
     pane.containerShell = containerShell;
+    if (!host) pane.elevated = elevated;
     const key = crypto.randomUUID();
     tabs.value.push({
       key,
@@ -213,6 +216,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       return;
     }
     const added = newPane(pane.host);
+    if (!pane.host) added.elevated = pane.elevated;
     tab.panes.push(added);
     tab.layout = replaceLeaf(tab.layout, key, {
       kind: 'split',
@@ -226,7 +230,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   }
   function duplicate(key: string): void {
     const pane = tabs.value.find((tab) => tab.key === key)?.panes[0];
-    if (pane) open(pane.host);
+    if (pane) open(pane.host, undefined, undefined, pane.elevated);
   }
   function resize(tabId: string, id: string, ratio: number): void {
     const tab = tabs.value.find((t) => t.key === tabId);

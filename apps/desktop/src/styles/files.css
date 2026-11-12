@@ -11,6 +11,28 @@
   font-size: var(--font-size-section);
   margin: 10px 0;
 }
+.file-context-menu .file-menu-folder,
+.file-context-menu .file-menu-rename {
+  color: var(--menu-icon-gold);
+}
+.file-context-menu .file-menu-folder {
+  fill: var(--menu-icon-folder-fill);
+}
+.file-context-menu .file-menu-transfer {
+  color: var(--menu-icon-green);
+}
+.file-context-menu .file-menu-open,
+.file-context-menu .file-menu-copy,
+.file-context-menu .file-menu-properties {
+  color: var(--menu-icon-blue);
+}
+.file-context-menu .file-menu-edit,
+.file-context-menu .file-menu-terminal {
+  color: var(--menu-icon-purple);
+}
+.file-context-menu .file-menu-delete {
+  color: var(--error);
+}
 .file-columns {
   display: grid;
   flex: 1 0 0;

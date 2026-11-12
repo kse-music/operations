@@ -3,6 +3,12 @@ mod bundled_plugins;
 mod files;
 mod hosts;
 mod local_terminal;
+
+/// Dispatch the restricted Windows PTY helper before initializing desktop resources.
+pub fn run_terminal_helper() {
+    #[cfg(windows)]
+    local_terminal::elevated::helper_entry();
+}
 pub mod logging;
 mod monitor;
 mod ops;

@@ -36,6 +36,17 @@ it('shows the actual cipher, cursor, dimensions and emulation, then follows scre
   expect(root.textContent).toContain('光标 1:80');
   expect(root.textContent).toContain('24 行 × 80 列');
 });
+it('marks the current local administrator shell and removes the mark for an ordinary shell', async () => {
+  pane.host = null;
+  pane.shell = 'PowerShell';
+  pane.elevated = true;
+  await nextTick();
+  expect(root.textContent).toContain('PowerShell（管理员）');
+  pane.elevated = false;
+  await nextTick();
+  expect(root.textContent).toContain('PowerShell');
+  expect(root.textContent).not.toContain('管理员');
+});
 
 it('shows connection progress and failure without presenting a stale cipher as active', async () => {
   for (const [state, label] of [
