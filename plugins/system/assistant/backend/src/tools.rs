@@ -86,8 +86,8 @@ pub fn catalog() -> Vec<Definition> {
     let unit = json!({"type":"string","minLength":8,"maxLength":256,"pattern":"^(?!-)[a-zA-Z0-9_.@:\\\\-]*\\.service$"});
     let text = json!({"type":"string","minLength":1,"maxLength":4096});
     let host = json!({"type":"string","minLength":1,"maxLength":128});
-    let endpoint = json!({"type":"object","properties":{"hostId":host,"path":text},"required":["hostId","path"],"additionalProperties":false});
-    let source = json!({"oneOf":[{"type":"object","properties":{"kind":{"const":"local"},"path":text},"required":["kind","path"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"remote"},"hostId":host,"path":text},"required":["kind","hostId","path"],"additionalProperties":false}]});
+    let endpoint = json!({"type":"object","description":"已有远程目录，如 /tmp；不能带文件名。","properties":{"hostId":host,"path":text},"required":["hostId","path"],"additionalProperties":false});
+    let source = json!({"description":"单个文件；优先引用实际 archiveId/artifactId，local 指 ServerDeck 本机。","oneOf":[{"type":"object","properties":{"kind":{"const":"artifact"},"artifactId":host},"required":["kind","artifactId"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"local"},"path":text},"required":["kind","path"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"remote"},"hostId":host,"path":text},"required":["kind","hostId","path"],"additionalProperties":false}]});
     let mut definitions: Vec<Definition> = [
         (Diagnostic, Effect::Read, json!({"tool":{"enum":["uptime","memory","disk"]}})),
         (Capabilities, Effect::Read, json!({})),

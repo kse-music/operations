@@ -20,6 +20,42 @@ use zeroize::Zeroizing;
     rename_all_fields = "camelCase",
     deny_unknown_fields
 )]
+pub enum Source {
+    Local { path: String },
+    Remote { host_id: String, path: String },
+    Artifact { artifact_id: String },
+}
+impl Source {
+    fn resolve(
+        &self,
+        artifacts: &HashMap<String, crate::jobs::Artifact>,
+    ) -> Result<TransferSource, Error> {
+        Ok(match self {
+            Self::Local { path } => TransferSource::Local { path: path.clone() },
+            Self::Remote { host_id, path } => TransferSource::Remote {
+                host_id: host_id.clone(),
+                path: path.clone(),
+            },
+            Self::Artifact { artifact_id } => {
+                let artifact = artifacts.get(artifact_id).ok_or(Error::Validation(
+                    "文件句柄不属于本任务或已失效，请使用本任务实际返回的 archiveId/artifactId",
+                ))?;
+                TransferSource::Remote {
+                    host_id: artifact.host.clone(),
+                    path: artifact.path.clone(),
+                }
+            }
+        })
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 pub enum Query {
     FileRead {
         host_id: String,
@@ -28,10 +64,19 @@ pub enum Query {
         lines: u32,
     },
     TransferPrepare {
-        source: TransferSource,
+        source: Source,
         destination: RemotePath,
         overwrite: bool,
     },
+}
+pub fn preflight_path_error(code: &str) -> bool {
+    [
+        "TRANSFER_DIRECTORY_NOT_FOUND",
+        "TRANSFER_DIRECTORY_REQUIRED",
+        "TRANSFER_SOURCE_NOT_FOUND",
+        "SFTP_NOT_FOUND",
+    ]
+    .contains(&code)
 }
 fn path(value: &str, remote: bool) -> Result<(), Error> {
     if value.is_empty()
@@ -77,31 +122,16 @@ impl Query {
                 host(&destination.host_id)?;
                 path(&destination.path, true)?;
                 match source {
-                    TransferSource::Local { path: p } => path(p, false)?,
-                    TransferSource::Remote { host_id, path: p } => {
+                    Source::Local { path: p } => path(p, false)?,
+                    Source::Remote { host_id, path: p } => {
                         host(host_id)?;
                         path(p, true)?;
                     }
+                    Source::Artifact { artifact_id } => host(artifact_id)?,
                 }
             }
         }
         Ok(())
-    }
-    fn hosts(&self) -> Vec<&str> {
-        match self {
-            Self::FileRead { host_id, .. } => vec![host_id],
-            Self::TransferPrepare {
-                source,
-                destination,
-                ..
-            } => {
-                let mut hosts = vec![destination.host_id.as_str()];
-                if let TransferSource::Remote { host_id, .. } = source {
-                    hosts.push(host_id);
-                }
-                hosts
-            }
-        }
     }
 }
 #[derive(Clone, Deserialize)]
@@ -236,14 +266,8 @@ impl Resources {
         query: Query,
         hosts: &[String],
         redactor: &Redactor,
+        artifacts: &HashMap<String, crate::jobs::Artifact>,
     ) -> Result<(Value, usize), Error> {
-        if query
-            .hosts()
-            .iter()
-            .any(|id| !hosts.iter().any(|host| host == id))
-        {
-            return Err(Error::Validation("文件工具目标不在本次已匹配主机中"));
-        }
         match query {
             Query::FileRead {
                 host_id,
@@ -251,6 +275,9 @@ impl Resources {
                 start_line,
                 lines,
             } => {
+                if !hosts.contains(&host_id) {
+                    return Err(Error::Validation("文件工具目标不在本次已匹配主机中"));
+                }
                 let existing = self
                     .documents
                     .values()
@@ -305,14 +332,35 @@ impl Resources {
                 destination,
                 overwrite,
             } => {
+                let source = source.resolve(artifacts)?;
+                if !hosts.contains(&destination.host_id)
+                    || matches!(&source, TransferSource::Remote { host_id, .. } if !hosts.contains(host_id))
+                {
+                    return Err(Error::Validation("文件工具目标不在本次已匹配主机中"));
+                }
                 let preview: TransferPreview = decode(
                     context
                         .request(platform::Request::TransferPrepare {
-                            source,
-                            destination,
+                            source: source.clone(),
+                            destination: destination.clone(),
                             overwrite,
                         })
-                        .await?,
+                        .await
+                        .map_err(|mut error| {
+                            if preflight_path_error(&error.code) {
+                                let origin = match &source {
+                                    TransferSource::Local { path } => format!("本机:{path}"),
+                                    TransferSource::Remote { host_id, path } => {
+                                        format!("{host_id}:{path}")
+                                    }
+                                };
+                                error.message = format!(
+                                    "{}；源文件：{origin}；目标目录：{}:{}（尚未启动传输）",
+                                    error.message, destination.host_id, destination.path
+                                );
+                            }
+                            error
+                        })?,
                 )?;
                 let mut value = json!(preview);
                 redactor.value(&mut value);
@@ -483,6 +531,35 @@ pub async fn begin_transfer(context: &Context, id: &str) -> Result<TransferState
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn artifact_sources_resolve_owned_paths_and_reject_forged_endpoints() {
+        let mut artifacts = HashMap::new();
+        artifacts.insert(
+            "export".into(),
+            crate::jobs::Artifact {
+                host: "source".into(),
+                path: "/tmp/actual export/image.tar".into(),
+                sha256: None,
+            },
+        );
+        let source = Source::Artifact {
+            artifact_id: "export".into(),
+        };
+        assert!(
+            matches!(source.resolve(&artifacts).unwrap(), TransferSource::Remote { host_id, path }
+            if host_id == "source" && path == "/tmp/actual export/image.tar")
+        );
+        assert!(
+            source.resolve(&HashMap::new()).is_err(),
+            "another task cannot consume this handle"
+        );
+        for source in [
+            json!({"kind":"artifact","artifactId":"export","hostId":"other"}),
+            json!({"kind":"artifact","artifactId":"export","path":"/invented.tar"}),
+        ] {
+            assert!(serde_json::from_value::<Source>(source).is_err());
+        }
+    }
     #[test]
     fn edits_use_one_original_version_and_preserve_newlines_and_untouched_secrets() {
         for eol in ["\n", "\r\n"] {

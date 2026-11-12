@@ -167,7 +167,7 @@ const preview = await call<TransferPreview>({
 const state = await call<TransferState>({ kind: 'transfer_start', id: preview.id });
 ```
 
-精确 DTO 以两端 SDK 类型为准。准备遵循读取审批模式，启动须经宿主按模式授权：前者授权读取源元数据及目标状态，后者固定实际源、目标、大小及覆盖策略。预览五分钟内单次消费，每 owner 最多8项、全局32项。目标是已有规范目录，preview 返回完整目标文件路径。只传单个普通文件，不跟随链接/重解析点，不传目录、不解包、不自动重试。
+精确 DTO 以两端 SDK 类型为准。准备遵循读取审批模式，启动须经宿主按模式授权：前者授权读取源元数据及目标状态，后者固定实际源、目标、大小及覆盖策略。预览五分钟内单次消费，每 owner 最多8项、全局32项。目标是已有规范目录，preview 返回完整目标文件路径。上传/中转预检时，远程源缺失返回 `TRANSFER_SOURCE_NOT_FOUND`，目标目录缺失返回 `TRANSFER_DIRECTORY_NOT_FOUND`，目标是文件返回 `TRANSFER_DIRECTORY_REQUIRED`；均未启动传输或写入目标，原 SFTP 错误保留在 Native 原因链。只传单个普通文件，不跟随链接/重解析点，不传目录、不解包、不自动重试。
 
 本机选择与下载要求 API `^5.5.0`。前端 `pickLocalFiles('files'|'folder')`（`@serverdeck/plugin-sdk/local-files`）经可信桌面选择器返回用户所选路径，需要 `sftp.transfer`；取消返回空数组，选择路径不会启动传输。页面隐藏、关闭、撤权或安装修订变化后丢弃选择结果。
 

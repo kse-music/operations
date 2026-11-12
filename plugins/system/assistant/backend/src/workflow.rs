@@ -742,13 +742,23 @@ async fn query_call(
         tools::Query::Files(query) => {
             let result = memory
                 .resources
-                .query(context, query.clone(), &pending.hosts, &pending.redactor)
+                .query(
+                    context,
+                    query.clone(),
+                    &pending.hosts,
+                    &pending.redactor,
+                    &memory.jobs.artifacts,
+                )
                 .await;
             let (value, count, status, message) = match result {
                 Ok((value, count)) => (value, count, ToolStatus::Succeeded, None),
                 Err(Error::Platform(error))
-                    if matches!(query, files::Query::FileRead { .. })
-                        && error.code == "TEXT_SIZE_MISMATCH" =>
+                    if match query {
+                        files::Query::FileRead { .. } => error.code == "TEXT_SIZE_MISMATCH",
+                        files::Query::TransferPrepare { .. } => {
+                            files::preflight_path_error(&error.code)
+                        }
+                    } =>
                 {
                     let message = pending.redactor.text(&error.message);
                     (
@@ -1755,6 +1765,8 @@ mod tests {
         fail_transfer_close: bool,
         corrupt_hash: bool,
         transfer_polls: usize,
+        prepare_failure: Option<String>,
+        prepare_failures: usize,
         file_content: String,
         file_reads: usize,
     }
@@ -1788,6 +1800,8 @@ mod tests {
                 fail_transfer_close: false,
                 corrupt_hash: false,
                 transfer_polls: 0,
+                prepare_failure: None,
+                prepare_failures: 0,
                 file_content: "old\n".into(),
                 file_reads: 0,
             }
@@ -1928,6 +1942,10 @@ mod tests {
                 }
                 "close_file" => Ok(Value::Null),
                 "transfer_prepare" => {
+                    if let Some(code) = self.prepare_failure.take() {
+                        self.prepare_failures += 1;
+                        return Err(ApiError::new(code, "传输目标目录不存在；请填写已有目录"));
+                    }
                     let source = request["source"]["path"].as_str().unwrap();
                     let path = format!(
                         "{}/{}",
@@ -1983,7 +2001,13 @@ mod tests {
                             .rev()
                             .find_map(|v| v["result"]["artifactId"].as_str())
                             .unwrap_or("");
-                        let decision = match self.model_calls {
+                        let archive = observations
+                            .iter()
+                            .rev()
+                            .find_map(|v| v["result"]["archiveId"].as_str())
+                            .unwrap_or("");
+                        let phase = self.model_calls - self.prepare_failures;
+                        let decision = match phase {
                             1 => {
                                 json!({"kind":"query","requests":[{"kind":"host_query","hostId":"source","query":{"kind":"images"}}]})
                             }
@@ -1994,7 +2018,7 @@ mod tests {
                                 json!({"kind":"plan","summary":"导出已查询的镜像","actions":[{"kind":"image_save","hostId":"source","id":"a".repeat(64),"reference":"stock:v1"}]})
                             }
                             3 => {
-                                json!({"kind":"query","requests":[{"kind":"transfer_prepare","source":{"kind":"remote","hostId":"source","path":latest["result"]["path"]},"destination":{"hostId":"destination","path":"/tmp"},"overwrite":false}]})
+                                json!({"kind":"query","requests":[{"kind":"transfer_prepare","source":{"kind":"artifact","artifactId":archive},"destination":{"hostId":"destination","path":if self.prepare_failure.is_some() {"/tmp/new-image.tar"} else {"/tmp"}},"overwrite":false}]})
                             }
                             4 => {
                                 json!({"kind":"plan","summary":"传输真实归档","actions":[{"kind":"transfer","previewId":latest["result"]["id"]}]})
@@ -2556,6 +2580,110 @@ mod tests {
         assert!(load_script.contains("Archive changed after transfer"));
         assert!(load_script.contains("Loaded image verification failed"));
         assert!(platform.action(&mut runtime, "resume", json!({"id":id}))["error"].is_object());
+    }
+    #[test]
+    fn transfer_path_preflight_can_be_corrected_without_reexport_or_losing_the_source() {
+        let mut platform = composed_platform();
+        platform.prepare_failure = Some("TRANSFER_DIRECTORY_NOT_FOUND".into());
+        let mut runtime = Runtime::new(crate::dispatch);
+        let (id, mut answer) = composed_plan(&mut platform, &mut runtime);
+        for _ in 0..3 {
+            let result = finish_phase(&mut platform, &mut runtime, &id, &answer);
+            assert_eq!(result["success"], true, "{result}");
+            let response = platform.action(&mut runtime, "resume", json!({"id":id}));
+            assert!(response["error"].is_null(), "{response}");
+            answer = response["result"]["value"].clone();
+        }
+        assert_eq!(answer["task"]["status"], "succeeded", "{answer}");
+        assert_eq!(platform.model_calls, 8);
+        let calls = &platform.calls;
+        let saves = calls
+            .iter()
+            .filter(|c| c["kind"] == "stream_open" && c["hostId"] == "source")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            saves.len(),
+            1,
+            "successful changes must never replay on preflight failure"
+        );
+        let nonce = saves[0]["command"]["args"][3].as_str().unwrap();
+        let prepares = calls
+            .iter()
+            .filter(|c| c["kind"] == "transfer_prepare")
+            .collect::<Vec<_>>();
+        assert_eq!(prepares.len(), 2);
+        for prepare in &prepares {
+            assert_eq!(
+                prepare["source"],
+                json!({"kind":"remote","hostId":"source","path":format!("/tmp/serverdeck-image-{nonce}/image-{nonce}.tar")})
+            );
+        }
+        assert_eq!(prepares[0]["destination"]["path"], "/tmp/new-image.tar");
+        assert_eq!(prepares[1]["destination"]["path"], "/tmp");
+        let failed_observation = calls
+            .iter()
+            .filter(|c| c["kind"] == "model_complete")
+            .flat_map(|c| c["messages"].as_array().unwrap())
+            .filter_map(|m| serde_json::from_str::<Value>(m["content"].as_str()?).ok())
+            .any(|m| {
+                m["untrustedToolResults"].as_array().is_some_and(|results| {
+                    results.iter().any(|r| {
+                        r["status"] == "failed"
+                            && r["result"]["code"] == "TRANSFER_DIRECTORY_NOT_FOUND"
+                            && r["result"]["message"].as_str().is_some_and(|message| {
+                                message.contains(&format!(
+                                    "source:/tmp/serverdeck-image-{nonce}/image-{nonce}.tar"
+                                )) && message.contains("destination:/tmp/new-image.tar")
+                            })
+                    })
+                })
+            });
+        assert!(
+            failed_observation,
+            "the model must receive the real preflight failure"
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .filter(|c| c["kind"] == "transfer_start")
+                .count(),
+            1
+        );
+        let first_stop = calls
+            .iter()
+            .position(|c| c["kind"] == "stream_stop")
+            .unwrap();
+        let copy_start = calls
+            .iter()
+            .position(|c| c["kind"] == "transfer_start")
+            .unwrap();
+        assert!(
+            copy_start < first_stop,
+            "preflight failure must keep the source stream alive"
+        );
+    }
+    #[test]
+    fn transfer_preflight_does_not_retry_permission_revision_or_cancellation_errors() {
+        for code in ["PLUGIN_PERMISSION_DENIED", "CONFLICT", "USER_CANCELLED"] {
+            let mut platform = composed_platform();
+            platform.prepare_failure = Some(code.into());
+            let mut runtime = Runtime::new(crate::dispatch);
+            let (id, answer) = composed_plan(&mut platform, &mut runtime);
+            let result = finish_phase(&mut platform, &mut runtime, &id, &answer);
+            assert_eq!(result["success"], true);
+            let response = platform.action(&mut runtime, "resume", json!({"id":id}));
+            assert!(response["error"].is_object(), "{response}");
+            assert!(!platform.transfer_started);
+            assert_eq!(
+                platform
+                    .calls
+                    .iter()
+                    .filter(|c| c["kind"] == "transfer_prepare")
+                    .count(),
+                1
+            );
+            assert!(platform.calls.iter().any(|c| c["kind"] == "stream_stop"));
+        }
     }
     #[test]
     fn composition_stops_on_save_failure_and_defers_ambiguous_image_selection() {

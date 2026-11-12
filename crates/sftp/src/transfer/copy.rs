@@ -124,6 +124,35 @@ async fn local_file(path: &str) -> Result<(PathBuf, std::fs::Metadata), Error> {
     Ok((path, meta))
 }
 
+fn preflight_missing(error: Error, source: bool) -> Error {
+    if matches!(
+        &error,
+        Error::Connection {
+            code: "SFTP_NOT_FOUND",
+            ..
+        }
+    ) {
+        let (code, message) = if source {
+            (
+                "TRANSFER_SOURCE_NOT_FOUND",
+                "传输源文件不存在，请核对源主机和完整文件路径",
+            )
+        } else {
+            (
+                "TRANSFER_DIRECTORY_NOT_FOUND",
+                "传输目标目录不存在；请填写已有目录，不能填写新文件路径",
+            )
+        };
+        Error::Connection {
+            code,
+            message,
+            source: Some(Box::new(error)),
+        }
+    } else {
+        error
+    }
+}
+
 impl Transfers {
     pub async fn prepare_copy(
         &self,
@@ -136,10 +165,23 @@ impl Transfers {
         let trimmed = directory.trim_end_matches('/');
         let directory = if trimmed.is_empty() { "/" } else { trimmed };
         let target = Remote::connect(&self.engine, session).await?;
-        if target.canonical(directory).await? != directory
-            || remote::kind(&target.attrs(directory).await?) != EntryKind::Directory
+        if target
+            .canonical(directory)
+            .await
+            .map_err(|error| preflight_missing(error, false))?
+            != directory
         {
             return Err(Error::Validation("目标须为无链接的规范绝对目录"));
+        }
+        let directory_attrs = target
+            .attrs(directory)
+            .await
+            .map_err(|error| preflight_missing(error, false))?;
+        if remote::kind(&directory_attrs) != EntryKind::Directory {
+            return Err(fail(
+                "TRANSFER_DIRECTORY_REQUIRED",
+                "传输目标必须是已有目录，不能填写文件路径",
+            ));
         }
         let (source, source_before, bytes, name) = match source {
             CopySource::Local { path } => {
@@ -163,8 +205,16 @@ impl Transfers {
             CopySource::Remote { session: src, path } => {
                 remote_absolute(&path)?;
                 let remote = Remote::connect(&self.engine, &src).await?;
-                let attrs = remote.attrs(&path).await?;
-                if remote.canonical(&path).await? != path || remote::kind(&attrs) != EntryKind::File
+                let attrs = remote
+                    .attrs(&path)
+                    .await
+                    .map_err(|error| preflight_missing(error, true))?;
+                if remote
+                    .canonical(&path)
+                    .await
+                    .map_err(|error| preflight_missing(error, true))?
+                    != path
+                    || remote::kind(&attrs) != EntryKind::File
                 {
                     return Err(Error::Validation("远程源须为无链接的普通文件"));
                 }

@@ -448,6 +448,129 @@ async fn read_preview_save_require_native_approval_owner_and_original_version() 
 }
 
 #[tokio::test]
+async fn remote_copy_path_preflight_errors_preserve_native_authority_and_allow_corrected_directory()
+{
+    use serverdeck_plugin_sdk::platform::{ApprovalMode, RemotePath, TransferSource};
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture.install("dev.remote-copy-preflight").await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let source = server(app, Duration::ZERO).await;
+    let target = server(app, Duration::ZERO).await;
+    std::fs::create_dir(source.root.path().join("etc/fixture/job")).unwrap();
+    let bytes = vec![b'x'; 131072];
+    let source_file = source.root.path().join("etc/fixture/job/image.tar");
+    std::fs::write(&source_file, &bytes).unwrap();
+    let mode = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    let binding = mode.result["binding"].as_str().unwrap().to_owned();
+    let scoped = app.plugin_host.start_scoped(id, "page").unwrap();
+    for (file, directory, code) in [
+        (
+            "/etc/fixture/job/image.tar",
+            "/etc/fixture/new-image.tar",
+            "TRANSFER_DIRECTORY_NOT_FOUND",
+        ),
+        (
+            "/etc/fixture/missing.tar",
+            "/etc/fixture",
+            "TRANSFER_SOURCE_NOT_FOUND",
+        ),
+    ] {
+        let response = bound(
+            app,
+            &scoped,
+            Primitive::TransferPrepare {
+                source: TransferSource::Remote {
+                    host_id: source.host.id.clone(),
+                    path: file.into(),
+                },
+                destination: RemotePath {
+                    host_id: target.host.id.clone(),
+                    path: directory.into(),
+                },
+                overwrite: false,
+            },
+            vec![binding.clone()],
+        )
+        .await;
+        assert_eq!(response.error.unwrap().code, code);
+        assert!(app.plugin_host.lock().unwrap().copies.is_empty());
+        assert!(app.files.transfers.list().unwrap().is_empty());
+        assert_eq!(std::fs::read(&source_file).unwrap(), bytes);
+    }
+    let preview = bound(
+        app,
+        &scoped,
+        Primitive::TransferPrepare {
+            source: TransferSource::Remote {
+                host_id: source.host.id.clone(),
+                path: "/etc/fixture/job/image.tar".into(),
+            },
+            destination: RemotePath {
+                host_id: target.host.id.clone(),
+                path: "/etc/fixture".into(),
+            },
+            overwrite: false,
+        },
+        vec![binding],
+    )
+    .await;
+    assert!(preview.error.is_none(), "{preview:?}");
+    assert_eq!(
+        preview.result["destination"]["path"],
+        "/etc/fixture/image.tar"
+    );
+    let key = preview.result["id"].as_str().unwrap();
+    drop(scoped);
+    approved_primitive(app, id, "page", Primitive::TransferStart { id: key.into() }).await;
+    let done = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let state = call(
+                app,
+                id,
+                "page",
+                Primitive::TransferStatus { id: key.into() },
+            )
+            .await;
+            assert!(state.error.is_none(), "{state:?}");
+            if state.result["state"] == "completed" {
+                break state.result;
+            }
+            assert!(
+                matches!(
+                    state.result["state"].as_str(),
+                    Some("queued" | "running" | "verifying")
+                ),
+                "{state:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    use sha2::{Digest, Sha256};
+    assert_eq!(done["sha256"], format!("{:x}", Sha256::digest(&bytes)));
+    assert_eq!(done["transferredBytes"], bytes.len());
+    assert_eq!(
+        std::fs::read(target.root.path().join("etc/fixture/image.tar")).unwrap(),
+        bytes
+    );
+    assert_eq!(std::fs::read(&source_file).unwrap(), bytes);
+    app.plugin_close_scope(id, "page").await.unwrap();
+    assert!(app.plugin_host.lock().unwrap().copies.is_empty());
+    app.shutdown().await;
+}
+
+#[tokio::test]
 async fn transfer_preparation_start_and_out_of_band_cancel_use_native_authority() {
     use serverdeck_plugin_sdk::platform::{RemotePath, TransferSource};
     let fixture = Fixture::new();

@@ -3,7 +3,7 @@
   "id": "cn.hiboot.plugins.assistant",
   "name": "AI 运维助手",
   "icon": "bot",
-  "version": "3.0.2",
+  "version": "3.0.3",
   "author": "ServerDeck",
   "description": "组合主机、命令、文件与镜像工具，按需加载 Skill，按审批模式执行并核对结果。",
   "apiVersion": "^5.6.0",

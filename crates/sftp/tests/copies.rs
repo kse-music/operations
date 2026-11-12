@@ -55,6 +55,102 @@ fn local(path: &std::path::Path) -> CopySource {
 }
 
 #[tokio::test]
+async fn transfer_preflight_identifies_missing_source_and_destination_without_writing() {
+    let source = Server::start(true, Duration::ZERO).await;
+    let target = Server::start_shared(
+        true,
+        Duration::ZERO,
+        Some((source.database.clone(), source.engine.clone())),
+    )
+    .await;
+    let src = source.open().await;
+    let dst = target.open().await;
+    let files = Files::new(source.engine.clone(), 3);
+    let bytes = vec![b'x'; 131072];
+    std::fs::write(source.root.path().join("image.tar"), &bytes).unwrap();
+    std::fs::write(target.root.path().join("existing.tar"), "do not replace").unwrap();
+    for (path, directory, expected) in [
+        (
+            "/image.tar",
+            "/new-image.tar",
+            "TRANSFER_DIRECTORY_NOT_FOUND",
+        ),
+        ("/missing.tar", "/", "TRANSFER_SOURCE_NOT_FOUND"),
+        ("/image.tar", "/existing.tar", "TRANSFER_DIRECTORY_REQUIRED"),
+    ] {
+        let error = files
+            .transfers
+            .prepare_copy(
+                CopySource::Remote {
+                    session: src.id.clone(),
+                    path: path.into(),
+                },
+                &dst.id,
+                directory,
+                false,
+            )
+            .await
+            .err()
+            .expect("preflight must fail");
+        assert!(
+            matches!(&error, Error::Connection { code, .. } if *code == expected),
+            "{error:?}"
+        );
+        if expected.ends_with("NOT_FOUND") {
+            let cause = std::error::Error::source(&error).unwrap();
+            assert!(cause.to_string().contains("不存在"));
+            assert!(
+                cause.source().is_some(),
+                "original SFTP cause must be retained"
+            );
+        }
+        assert!(files.transfers.list().unwrap().is_empty());
+        assert!(!target.root.path().join("image.tar").exists());
+        assert_eq!(
+            std::fs::read_to_string(target.root.path().join("existing.tar")).unwrap(),
+            "do not replace"
+        );
+    }
+    // Correct only the directory, keeping the exact original source file.
+    let plan = files
+        .transfers
+        .prepare_copy(
+            CopySource::Remote {
+                session: src.id.clone(),
+                path: "/image.tar".into(),
+            },
+            &dst.id,
+            "/",
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(plan.destination, "/image.tar");
+    let done = finished(
+        &files
+            .transfers
+            .start_copy(plan.clone(), guard(usize::MAX))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(done.state, "completed", "{done:?}");
+    assert_eq!(done.transferred_bytes, bytes.len() as u64);
+    assert_eq!(
+        std::fs::read(target.root.path().join("image.tar")).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        plan.sha256().unwrap(),
+        Some(format!("{:x}", Sha256::digest(&bytes)))
+    );
+    assert_eq!(
+        std::fs::read(source.root.path().join("image.tar")).unwrap(),
+        bytes
+    );
+    source.engine.shutdown().await;
+}
+
+#[tokio::test]
 async fn local_upload_and_remote_relay_commit_verified_bytes_in_shared_queue() {
     let source = Server::start(true, Duration::ZERO).await;
     let target = Server::start_shared(
