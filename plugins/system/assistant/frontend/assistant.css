@@ -784,7 +784,8 @@
   font-size: var(--font-size-caption);
   line-height: 1.5;
 }
-.ai-chat-turn {
+.ai-chat-turn,
+.ai-chat-messages > :is(.ai-chat-error, .error-text, .banner) {
   max-width: 960px;
   margin-inline: auto;
 }
