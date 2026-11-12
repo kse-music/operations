@@ -3,7 +3,7 @@ import { tr } from './i18n/messages';
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import type { AiAgentReport, AiExecution } from './types';
-defineProps<{ report: AiAgentReport; execution?: AiExecution['agent'] }>();
+defineProps<{ report: AiAgentReport; execution?: AiExecution['agent']; completed?: boolean }>();
 const statuses = {
   get succeeded() {
     return tr('查询成功');
@@ -39,8 +39,11 @@ const statuses = {
       </ul>
     </details>
     <div v-if="report.steps.length" class="ai-agent-plan">
-      <h4>{{ tr('执行计划 · ') }}{{ report.steps.length }}{{ tr(' 项操作') }}</h4>
-      <p class="ai-caption">
+      <h4>
+        {{ completed ? tr('执行记录 · ') : tr('执行计划 · ') }}{{ report.steps.length
+        }}{{ tr(' 项操作') }}
+      </h4>
+      <p v-if="!completed" class="ai-caption">
         {{ tr('以下目标已经固定，确认后才会执行；执行前核对状态，完成后逐项复查。') }}
       </p>
       <ol>

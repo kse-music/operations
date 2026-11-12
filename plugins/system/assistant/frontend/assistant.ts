@@ -96,17 +96,21 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     if (!turn?.requestId) return;
     const current = version;
     polling = true;
+    let continuation = false;
     try {
       const result = await aiApi.poll(turn.requestId);
-      if (!disposed && current === version) {
+      if (!disposed && current === version && outputs.value[proposalId]?.pending) {
         outputs.value[proposalId] = result;
         turn.task = result.task ?? turn.task;
+        continuation = !!result.continuation;
       }
     } catch (cause) {
       const code = (cause as { code?: string })?.code;
       if (
         !disposed &&
         current === version &&
+        outputs.value[proposalId]?.pending &&
+        !cancelling.value.includes(proposalId) &&
         !['BUSY', 'PLUGIN_BUSY', 'PLUGIN_RATE_LIMIT'].includes(code ?? '')
       )
         error.value = tr('传输状态读取失败：{0}', errorMessage(cause));
@@ -114,15 +118,31 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       polling = false;
       schedulePoll();
     }
+    if (continuation) await continueTask(turn, proposalId);
   }
   async function cancelTransfer(proposalId: string) {
-    const transfer = outputs.value[proposalId]?.transfer;
-    if (!transfer || !outputs.value[proposalId]?.pending || cancelling.value.includes(proposalId))
+    const output = outputs.value[proposalId];
+    const transfer = output?.transfer;
+    if (!output?.pending || (!transfer && !output.jobId) || cancelling.value.includes(proposalId))
       return;
+    if (output.jobId && busy.value) return;
     const current = version;
     cancelling.value.push(proposalId);
     try {
-      const state = await aiApi.cancelTransfer(transfer.id);
+      if (output.jobId) {
+        const turn = turns.value.find((turn) =>
+          turn.answer?.proposals.some((p) => p.id === proposalId),
+        );
+        if (!turn?.requestId) return;
+        const cancelled = await aiApi.cancel(turn.requestId);
+        const result = cancelled ?? (await aiApi.poll(turn.requestId));
+        if (!disposed && current === version) {
+          outputs.value[proposalId] = result;
+          turn.task = result.task ?? turn.task;
+        }
+        return;
+      }
+      const state = await aiApi.cancelTransfer(transfer!.id);
       if (!disposed && current === version && outputs.value[proposalId])
         outputs.value[proposalId] = { ...outputs.value[proposalId]!, transfer: state };
     } catch (cause) {
@@ -196,14 +216,23 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     error.value = '';
     // The Host revokes these resources when the page hides. Keep readable history,
     // but never attempt to cancel or execute handles from the previous context.
+    const interrupted = new Set(
+      Object.entries(outputs.value)
+        .filter(([, output]) => output.pending)
+        .map(([id]) => id),
+    );
     for (const output of Object.values(outputs.value))
       if (output.pending) {
         output.pending = false;
         output.success = false;
-        output.output = tr('所属页面已释放，传输结果未确认，请独立核对目标文件');
+        output.output = output.jobId
+          ? tr('所属页面已释放，任务结果未确认，请独立核对实际状态')
+          : tr('所属页面已释放，传输结果未确认，请独立核对目标文件');
       }
     for (const turn of turns.value) {
       turn.requestId = '';
+      if (turn.task && turn.answer?.proposals.some((p) => interrupted.has(p.id)))
+        turn.task = { ...turn.task, status: 'unverified' };
       if (turn.state === 'pending') {
         turn.state = 'cancelled';
         if (turn.task) turn.task = { ...turn.task, status: 'cancelled' };
@@ -357,7 +386,9 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       hostContext.phase.value = '';
       controller = null;
     }
-    if (automatic && !disposed && current === version && visible.value)
+    if (entry.answer?.continuation && !disposed && current === version && visible.value)
+      await continueTask(entry);
+    else if (automatic && !disposed && current === version && visible.value)
       await executeProposal(automatic);
   }
   async function end() {
@@ -384,6 +415,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       if (turn.task) turn.task = { ...turn.task, status: 'cancelled' };
     }
     await revoke(id);
+    if (turn?.operations?.length) await refreshTask(turn, 'unverified');
   }
   function inspect(proposal: AiProposal) {
     if (
@@ -418,6 +450,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
     requestId = turn?.requestId ?? '';
     error.value = '';
     let retained = false;
+    let continuation = false;
     try {
       if (keepRunning.value && aiApi.begin) {
         await aiApi.begin();
@@ -428,6 +461,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       if (!disposed && current === version) {
         outputs.value[proposal.id] = result;
         if (turn) turn.task = result.task ?? turn.task;
+        continuation = !!result.continuation;
       }
     } catch (e) {
       if (current === version) {
@@ -439,7 +473,118 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       busy.value = '';
       requestId = '';
     }
+    if (continuation && turn) await continueTask(turn, proposal.id);
   }
+  async function continueTask(turn: AiTurn, proposalId?: string) {
+    if (
+      disposed ||
+      !visible.value ||
+      busy.value ||
+      !turn.requestId ||
+      turn.task?.status !== 'running'
+    )
+      return;
+    if (proposalId) {
+      const execution = outputs.value[proposalId];
+      if (!execution?.continuation) return;
+      if (!(turn.operations ?? []).some((item) => item.proposalId === proposalId)) {
+        (turn.operations ??= []).push({
+          proposalId,
+          report: { observations: [], steps: turn.answer?.agent?.steps ?? [] },
+          execution,
+        });
+      }
+      execution.continuation = false;
+    }
+    const current = version;
+    const root = turn.requestId;
+    let progressId = '';
+    let stopProgress: (() => Promise<void>) | undefined;
+    let automatic: AiProposal | undefined;
+    let again = false;
+    let retained = false;
+    busy.value = 'send';
+    requestId = root;
+    turn.state = 'pending';
+    turn.streamText = '';
+    error.value = '';
+    try {
+      if (keepRunning.value && aiApi.begin) {
+        await aiApi.begin();
+        retained = true;
+      }
+      if (disposed || current !== version) return;
+      progressId = (await aiApi.progressOpen()).id;
+      if (disposed || current !== version) return;
+      stopProgress = followProgress(
+        (revision, offset) => aiApi.progressRead(progressId, revision, offset),
+        () => visible.value,
+        (text) => {
+          if (!disposed && current === version) turn.streamText = text;
+        },
+        (cause) => {
+          if (!disposed && current === version) {
+            turn.error = errorMessage(cause);
+            void revoke(root);
+          }
+        },
+      );
+      stopCurrentProgress = stopProgress;
+      const answer = await aiApi.resume(root, progressId);
+      if (turn.error) throw new Error(turn.error);
+      if (!disposed && current === version) {
+        turn.answer = {
+          ...answer,
+          warnings: [...new Set([...(turn.answer?.warnings ?? []), ...answer.warnings])],
+        };
+        turn.task = answer.task ?? turn.task;
+        turn.state = 'complete';
+        again = !!answer.continuation;
+        if (turn.approvalMode !== 'request')
+          automatic = answer.proposals.find((p) => p.risk !== 'manual_only');
+      }
+    } catch (cause) {
+      if (!disposed && current === version) {
+        turn.error = errorMessage(cause);
+        turn.state = 'failed';
+        await refreshTask(turn, 'unverified');
+      }
+    } finally {
+      await stopProgress?.();
+      if (stopCurrentProgress === stopProgress) stopCurrentProgress = null;
+      if (progressId) {
+        try {
+          await aiApi.progressClose(progressId);
+        } catch (cause) {
+          if (!disposed && current === version)
+            error.value = tr('关闭回答进度失败：{0}', errorMessage(cause));
+        }
+      }
+      if (retained) await end();
+      busy.value = '';
+      requestId = '';
+    }
+    if (disposed || current !== version || !visible.value) return;
+    if (again) await continueTask(turn);
+    else if (automatic) await executeProposal(automatic);
+  }
+  watch(visible, (active) => {
+    if (!active || busy.value) return;
+    const turn = turns.value.find(
+      (turn) =>
+        turn.task?.status === 'running' &&
+        turn.requestId &&
+        (turn.answer?.continuation ||
+          (turn.answer?.proposals ?? []).some(
+            (proposal) => outputs.value[proposal.id]?.continuation,
+          )),
+    );
+    if (turn)
+      void continueTask(
+        turn,
+        turn.answer?.proposals.find((proposal) => outputs.value[proposal.id]?.continuation)?.id,
+      );
+  });
   onBeforeUnmount(() => {
     if (pollTimer) clearTimeout(pollTimer);
     disposed = true;

@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
   revokeFullAccess: vi.fn(),
   cancel: vi.fn(),
   resolveHosts: vi.fn(),
+  resume: vi.fn(),
   hostList: vi.fn(),
   opsOpen: vi.fn(),
   opsClose: vi.fn(),
@@ -68,7 +69,7 @@ const defaultAiConfig = () => ({
   maxOutputTokens: 1024,
   contextWindowTokens: 131072,
 });
-import type { AiAnswer, AiPrepare, AiPreview } from './types';
+import type { AiAnswer, AiPrepare, AiPreview, AiExecution } from './types';
 let app: App, root: HTMLDivElement, pinia: Pinia;
 const preview: AiPreview = {
   id: 'preview-a',
@@ -1416,4 +1417,280 @@ it('stops rendering an old stream when a new conversation is started', async () 
   expect(root.querySelectorAll('.ai-chat-turn')).toHaveLength(0);
   expect(root.textContent).not.toContain('旧对话片段');
   expect(api.progressClose).toHaveBeenCalledWith('progress-a');
+});
+
+it('keeps the workspace host separate from previous matches for tool task', async () => {
+  api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
+  api.resolveHosts.mockResolvedValue({ hostIds: ['a', 'b'], message: '', modelRevision: 'r1' });
+  openConnected();
+  await mount('a');
+  const input = root.querySelector<HTMLTextAreaElement>('#assistant-question')!;
+  input.value = '把stock镜像导入b';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  root
+    .querySelector<HTMLFormElement>('#assistant-chat-form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(api.resolveHosts).toHaveBeenCalledWith(expect.objectContaining({ entryHostId: 'a' }));
+  expect(api.prepare).toHaveBeenCalledWith(
+    expect.objectContaining({ entryHostId: 'a', sessionIds: ['a', 'b'], sessionId: null }),
+  );
+});
+
+it.each([
+  ['answered', '回答已结束'],
+  ['needs_input', '需要补充信息'],
+] as const)('distinguishes %s from completed operational work', async (status, label) => {
+  api.prepare.mockResolvedValue({ ...preview, task: taskSnapshot('prepared') });
+  api.send.mockResolvedValue({ ...answer, proposals: [], task: taskSnapshot(status) });
+  await mount();
+  await send();
+  expect(root.textContent).toContain(`任务状态：${label}`);
+  expect(root.textContent).not.toContain('任务状态：已完成');
+});
+
+it('allows tool task cancellation before a native transfer exists', async () => {
+  api.send.mockResolvedValue({
+    ...answer,
+    proposals: [answer.proposals[1]],
+    task: taskSnapshot('awaiting_approval'),
+  });
+  api.execute.mockResolvedValue({
+    jobId: 'job',
+    pending: true,
+    success: false,
+    output: '正在导出镜像',
+    task: taskSnapshot('transferring'),
+  });
+  api.poll.mockResolvedValue({
+    jobId: 'job',
+    pending: false,
+    success: false,
+    output: '镜像迁移已取消',
+    task: taskSnapshot('cancelled'),
+  });
+  await mount();
+  await send();
+  button('执行此操作').click();
+  await settle();
+  expect(root.textContent).toContain('工具任务运行中');
+  button('停止任务').click();
+  await settle();
+  expect(api.cancel).toHaveBeenCalledWith('preview-a');
+  expect(api.cancelTransfer).not.toHaveBeenCalled();
+  expect(root.textContent).toContain('镜像迁移已取消');
+});
+
+it.each(['stale_result', 'cancelled_poll'])(
+  'preserves tool task cancellation against %s',
+  async (scenario) => {
+    const state = mountState();
+    state.turns.value = [
+      {
+        id: 'turn',
+        question: '迁移镜像',
+        state: 'complete',
+        answer,
+        error: '',
+        requestId: 'root',
+        hostIds: ['source', 'destination'],
+        task: null,
+      },
+    ];
+    state.outputs.value.change = {
+      jobId: 'job',
+      success: false,
+      pending: true,
+      output: '正在导出镜像',
+    };
+    let finish!: (value: AiExecution) => void;
+    let fail!: (cause: unknown) => void;
+    api.poll.mockImplementationOnce(
+      () =>
+        new Promise<AiExecution>((resolve, reject) => {
+          finish = resolve;
+          fail = reject;
+        }),
+    );
+    api.poll.mockResolvedValue({
+      jobId: 'job',
+      success: false,
+      pending: false,
+      output: '镜像迁移已取消',
+      task: taskSnapshot('cancelled'),
+    });
+    vi.useFakeTimers();
+    try {
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(api.poll).toHaveBeenCalledTimes(1);
+      await state.cancelTransfer('change');
+      if (scenario === 'stale_result')
+        finish({ jobId: 'job', success: false, pending: true, output: '旧的迁移状态' });
+      else fail({ code: 'USER_CANCELLED', message: '动作已取消' });
+      await nextTick();
+      await nextTick();
+      expect(state.outputs.value.change?.pending).toBe(false);
+      expect(state.outputs.value.change?.output).toBe('镜像迁移已取消');
+      expect(state.error.value).toBe('');
+    } finally {
+      vi.useRealTimers();
+    }
+  },
+);
+
+const composedInput = (approvalMode: 'request' | 'assist' | 'full' = 'request'): AiPrepare => ({
+  modelId: 'model-a',
+  sessionId: null,
+  question: '组合多个工具完成任务',
+  approvalMode,
+  selection: {
+    server: true,
+    metrics: false,
+    processes: false,
+    docker: false,
+    log: null,
+    logLines: 100,
+  },
+  maskAddresses: true,
+  redactValues: [],
+});
+const composedAnswer = (id: string): AiAnswer => ({
+  text: `准备 ${id}`,
+  proposals: [{ ...answer.proposals[1]!, id, changeConfirmation: null }],
+  warnings: [],
+  usage: null,
+  task: taskSnapshot('awaiting_approval'),
+  agent: { observations: [], steps: [{ action: `执行 ${id}`, target: 'host:/work/file' }] },
+});
+const verifiedPhase = (): AiExecution => ({
+  success: true,
+  pending: false,
+  continuation: true,
+  output: '本项已执行并完成复查',
+  task: taskSnapshot('running'),
+  agent: {
+    steps: [
+      {
+        action: '执行工具',
+        target: 'host:/work/file',
+        tool: 'file_edit',
+        status: 'verified',
+        message: '已复查',
+      },
+    ],
+  },
+});
+it('resumes after verified execution and requires a fresh approval for the next request-mode plan', async () => {
+  const state = mountState();
+  api.send.mockResolvedValue(composedAnswer('first'));
+  api.execute.mockImplementation(async () => verifiedPhase());
+  api.resume.mockResolvedValue(composedAnswer('second'));
+  await state.send(composedInput());
+  await state.inspect(state.turns.value[0]!.answer!.proposals[0]!);
+  expect(api.execute).toHaveBeenCalledTimes(1);
+  expect(api.resume).toHaveBeenCalledWith('preview-a', 'progress-a');
+  expect(state.turns.value[0]?.answer?.proposals[0]?.id).toBe('second');
+  expect(state.turns.value[0]?.operations).toHaveLength(1);
+  expect(state.turns.value[0]?.operations?.[0]?.execution.agent?.steps[0]?.status).toBe('verified');
+  expect(state.attempted.value).toEqual(['first']);
+  expect(state.turns.value[0]?.task?.status).toBe('awaiting_approval');
+});
+it.each(['assist', 'full'] as const)(
+  'continues different tool phases in %s mode without replaying completed steps',
+  async (mode) => {
+    const state = mountState();
+    api.send.mockResolvedValue(composedAnswer('first'));
+    api.execute.mockImplementation(async () => verifiedPhase());
+    api.resume.mockResolvedValueOnce(composedAnswer('second')).mockResolvedValueOnce({
+      text: '目标已完成',
+      proposals: [],
+      warnings: [],
+      usage: null,
+      task: taskSnapshot('succeeded'),
+    });
+    await state.send(composedInput(mode));
+    expect(api.execute.mock.calls.map((call) => call[0])).toEqual(['first', 'second']);
+    expect(api.resume).toHaveBeenCalledTimes(2);
+    expect(state.turns.value[0]?.operations).toHaveLength(2);
+    expect(state.turns.value[0]?.answer?.text).toBe('目标已完成');
+    expect(state.turns.value[0]?.task?.status).toBe('succeeded');
+  },
+);
+it('waits for a running tool to finish before continuing model reasoning', async () => {
+  const state = mountState();
+  api.send.mockResolvedValue(composedAnswer('first'));
+  api.execute.mockResolvedValue({
+    jobId: 'job',
+    success: false,
+    pending: true,
+    output: '工具运行中',
+    task: taskSnapshot('executing'),
+  });
+  api.poll.mockResolvedValue({ ...verifiedPhase(), jobId: 'job' });
+  api.resume.mockResolvedValue({
+    text: '已核对结果',
+    proposals: [],
+    warnings: [],
+    usage: null,
+    task: taskSnapshot('succeeded'),
+  });
+  await state.send(composedInput());
+  vi.useFakeTimers();
+  try {
+    await state.inspect(state.turns.value[0]!.answer!.proposals[0]!);
+    expect(api.resume).not.toHaveBeenCalled();
+    await nextTick();
+    await vi.advanceTimersByTimeAsync(1001);
+    expect(api.poll).toHaveBeenCalledTimes(1);
+    expect(api.resume).toHaveBeenCalledTimes(1);
+    expect(state.turns.value[0]?.task?.status).toBe('succeeded');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.poll).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+it('keeps verified tool history when a later model turn fails', async () => {
+  const state = mountState();
+  api.send.mockResolvedValue(composedAnswer('first'));
+  api.execute.mockImplementation(async () => verifiedPhase());
+  api.resume.mockRejectedValue({ message: '模型连接中断' });
+  api.task.mockResolvedValue(taskSnapshot('failed'));
+  await state.send(composedInput());
+  await state.inspect(state.turns.value[0]!.answer!.proposals[0]!);
+  expect(state.turns.value[0]?.state).toBe('failed');
+  expect(state.turns.value[0]?.error).toContain('模型连接中断');
+  expect(state.turns.value[0]?.operations?.[0]?.execution.success).toBe(true);
+  expect(api.execute).toHaveBeenCalledTimes(1);
+});
+
+it('uses the cancellation result after the backend has retired the active job handles', async () => {
+  const state = mountState();
+  state.turns.value = [
+    {
+      id: 'turn',
+      question: '执行任务',
+      state: 'complete',
+      answer: composedAnswer('first'),
+      error: '',
+      requestId: 'root',
+      hostIds: ['host'],
+      task: taskSnapshot('executing'),
+    },
+  ];
+  state.outputs.value.first = { jobId: 'job', success: false, pending: true, output: '工具运行中' };
+  api.cancel.mockResolvedValue({
+    success: false,
+    pending: false,
+    output: '任务已停止，请核对实际结果',
+    task: taskSnapshot('unverified'),
+  });
+  api.poll.mockRejectedValue({ code: 'NOT_FOUND', message: '资源已释放' });
+  await state.cancelTransfer('first');
+  expect(api.poll).not.toHaveBeenCalled();
+  expect(state.outputs.value.first?.pending).toBe(false);
+  expect(state.outputs.value.first?.output).toContain('任务已停止');
+  expect(state.turns.value[0]?.task?.status).toBe('unverified');
+  expect(state.error.value).toBe('');
 });

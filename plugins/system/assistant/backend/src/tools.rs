@@ -26,6 +26,11 @@ pub enum ToolId {
     FileEdit,
     TransferPrepare,
     Transfer,
+    HostQuery,
+    SkillRead,
+    Command,
+    ImageSave,
+    ImageLoad,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -41,7 +46,7 @@ pub struct Definition {
     pub id: ToolId,
     pub label: &'static str,
     pub effect: Effect,
-    pub permission: &'static str,
+    pub permission: Option<&'static str>,
     pub input_schema: Value,
 }
 
@@ -65,6 +70,11 @@ impl ToolId {
             Self::FileEdit => "修改文件",
             Self::TransferPrepare => "准备文件传输",
             Self::Transfer => "传输文件",
+            Self::HostQuery => "查询指定主机",
+            Self::SkillRead => "加载 Skill 资源",
+            Self::Command => "执行远程程序",
+            Self::ImageSave => "导出 Docker 镜像归档",
+            Self::ImageLoad => "导入并核对 Docker 镜像",
         }
     }
 }
@@ -78,7 +88,7 @@ pub fn catalog() -> Vec<Definition> {
     let host = json!({"type":"string","minLength":1,"maxLength":128});
     let endpoint = json!({"type":"object","properties":{"hostId":host,"path":text},"required":["hostId","path"],"additionalProperties":false});
     let source = json!({"oneOf":[{"type":"object","properties":{"kind":{"const":"local"},"path":text},"required":["kind","path"],"additionalProperties":false},{"type":"object","properties":{"kind":{"const":"remote"},"hostId":host,"path":text},"required":["kind","hostId","path"],"additionalProperties":false}]});
-    [
+    let mut definitions: Vec<Definition> = [
         (Diagnostic, Effect::Read, json!({"tool":{"enum":["uptime","memory","disk"]}})),
         (Capabilities, Effect::Read, json!({})),
         (Images, Effect::Read, json!({})),
@@ -97,11 +107,28 @@ pub fn catalog() -> Vec<Definition> {
         (FileEdit,Effect::Change,json!({"documentId":host,"edits":{"type":"array","minItems":1,"maxItems":32,"items":{"type":"object","properties":{"startLine":{"type":"integer","minimum":1},"deleteLines":{"type":"integer","minimum":0},"insertLines":{"type":"array","maxItems":200,"items":{"type":"string"}}},"required":["startLine","deleteLines","insertLines"],"additionalProperties":false}}})),
         (TransferPrepare,Effect::Read,json!({"source":source,"destination":endpoint,"overwrite":{"type":"boolean"}})),
         (Transfer,Effect::Change,json!({"previewId":host})),
+        (SkillRead,Effect::Read,json!({"name":host,"path":text})),
+        (Command,Effect::Change,json!({"hostId":host,"program":text,"args":{"type":"array","maxItems":128,"items":{"type":"string"}}})),
+        (ImageSave,Effect::Change,json!({"hostId":host,"id":{"type":"string","pattern":"^(sha256:)?[0-9a-fA-F]{64}$"},"reference":text})),
+        (ImageLoad,Effect::Change,json!({"hostId":host,"artifactId":host,"id":{"type":"string","pattern":"^(sha256:)?[0-9a-fA-F]{64}$"},"reference":text})),
     ].into_iter().map(|(id, effect, mut properties)| {
         properties["kind"] = json!({"const":id});
         let required = properties.as_object().into_iter().flat_map(|p| p.keys()).cloned().collect::<Vec<_>>();
-        Definition { id, label: id.label(), effect, permission: match id {FileRead=>"sftp.read",FileEdit=>"sftp.write",TransferPrepare|Transfer=>"sftp.transfer",_=>"ssh.execute"}, input_schema: json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}) }
-    }).collect()
+        Definition { id, label: id.label(), effect, permission: match id {SkillRead=>None,FileRead=>Some("sftp.read"),FileEdit=>Some("sftp.write"),TransferPrepare|Transfer=>Some("sftp.transfer"),_=>Some("ssh.execute")}, input_schema: json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}) }
+    }).collect();
+    let schemas = definitions
+        .iter()
+        .take(11)
+        .map(|d| d.input_schema.clone())
+        .collect::<Vec<_>>();
+    definitions.push(Definition { id:HostQuery,label:HostQuery.label(),effect:Effect::Read,permission:Some("ssh.execute"),input_schema:json!({"type":"object","properties":{"kind":{"const":"host_query"},"hostId":host,"query":{"oneOf":schemas}},"required":["kind","hostId","query"],"additionalProperties":false}) });
+    definitions
+}
+
+// host_query already contains the schemas for these reads; omit their aliases
+// from the model prompt instead of serializing the same schemas twice.
+pub fn model_catalog() -> Vec<Definition> {
+    catalog().into_iter().skip(11).collect()
 }
 
 pub trait Arguments {
@@ -111,12 +138,32 @@ pub trait Arguments {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum Query {
+    Extension(ExtensionQuery),
     Files(crate::files::Query),
     Operations(Request),
+}
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ExtensionQuery {
+    HostQuery {
+        host_id: String,
+        query: Call<Request>,
+    },
+    SkillRead {
+        name: String,
+        path: String,
+    },
 }
 impl Query {
     pub fn tool(&self) -> Result<ToolId, Error> {
         match self {
+            Self::Extension(ExtensionQuery::HostQuery { .. }) => Ok(ToolId::HostQuery),
+            Self::Extension(ExtensionQuery::SkillRead { .. }) => Ok(ToolId::SkillRead),
             Self::Operations(request) => query_id(request),
             Self::Files(crate::files::Query::FileRead { .. }) => Ok(ToolId::FileRead),
             Self::Files(crate::files::Query::TransferPrepare { .. }) => Ok(ToolId::TransferPrepare),
@@ -127,12 +174,22 @@ impl Arguments for Query {
     const EFFECT: Effect = Effect::Read;
     fn validate(&self) -> Result<(), Error> {
         match self {
+            Self::Extension(ExtensionQuery::HostQuery { host_id, query }) => {
+                reference(host_id)?;
+                validate_query(&query.0).map(|_| ())
+            }
+            Self::Extension(ExtensionQuery::SkillRead { name, path }) => {
+                reference(name)?;
+                reference(path)
+            }
             Self::Operations(request) => validate_query(request).map(|_| ()),
             Self::Files(query) => query.validate(),
         }
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(transparent)]
 pub struct Call<T>(pub T);
 thread_local! {
     static DEFINITIONS: Vec<Definition> = catalog();
@@ -231,6 +288,22 @@ pub enum Action {
     Transfer {
         preview_id: String,
     },
+    Command {
+        host_id: String,
+        program: String,
+        args: Vec<String>,
+    },
+    ImageSave {
+        host_id: String,
+        id: String,
+        reference: String,
+    },
+    ImageLoad {
+        host_id: String,
+        artifact_id: String,
+        id: String,
+        reference: String,
+    },
 }
 
 impl Action {
@@ -244,6 +317,35 @@ impl Action {
                 crate::files::validate_edits(edits)
             }
             Self::Transfer { preview_id } => reference(preview_id),
+            Self::Command {
+                host_id,
+                program,
+                args,
+            } => {
+                reference(host_id)?;
+                let mut command = serverdeck_plugin_sdk::platform::Command::new(program);
+                command.args = args.clone();
+                command.validate().map_err(Into::into)
+            }
+            Self::ImageSave {
+                host_id,
+                id,
+                reference: tag,
+            }
+            | Self::ImageLoad {
+                host_id,
+                id,
+                reference: tag,
+                ..
+            } => {
+                reference(host_id)?;
+                image_id(id)?;
+                crate::jobs::reference(tag)?;
+                if let Self::ImageLoad { artifact_id, .. } = self {
+                    reference(artifact_id)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -320,6 +422,11 @@ mod tests {
             json!({"kind":"file_edit","documentId":"doc","edits":[{"startLine":6,"deleteLines":1,"insertLines":[]}]}),
             json!({"kind":"transfer_prepare","source":{"kind":"local","path":"D:/work/x.tar.gz"},"destination":{"hostId":"test","path":"/work"},"overwrite":false}),
             json!({"kind":"transfer","previewId":"copy"}),
+            json!({"kind":"skill_read","name":"docker-images","path":"SKILL.md"}),
+            json!({"kind":"command","hostId":"a","program":"uname","args":["-a"]}),
+            json!({"kind":"image_save","hostId":"a","id":"a".repeat(64),"reference":"stock:v1"}),
+            json!({"kind":"image_load","hostId":"b","artifactId":"artifact","id":"a".repeat(64),"reference":"stock:v1"}),
+            json!({"kind":"host_query","hostId":"a","query":{"kind":"images"}}),
         ];
         let definitions = catalog();
         assert_eq!(cases.len(), definitions.len());

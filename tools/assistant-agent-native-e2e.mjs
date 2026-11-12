@@ -131,7 +131,7 @@ server.on('request', async (req, res) => {
     const system = body.messages[0].content;
     let content;
     if (raw.includes('ServerDeck connection test.')) content = 'OK';
-    else if (system.includes('只负责从已登记资产'))
+    else if (system.includes('从已登记资产'))
       content = JSON.stringify({ hostIds: [hostId], message: '' });
     else {
       assert(system.includes('运维智能体'));
@@ -148,23 +148,56 @@ server.on('request', async (req, res) => {
         });
         held = false;
       }
-      content = body.messages.some(
-        (m) => m.role === 'user' && m.content.includes('untrustedToolResults'),
-      )
-        ? JSON.stringify({
-            kind: 'plan',
-            summary: '清理无标签 Docker 镜像。仅删除已查询的目标，不强制删除，完成后逐项复查。',
-            actions: [{ kind: 'remove_untagged_images' }],
-          })
-        : JSON.stringify({ kind: 'query', requests: [{ kind: 'images' }] });
+      const results = body.messages
+        .filter((message) => message.role === 'user')
+        .flatMap((message) => {
+          try {
+            return JSON.parse(message.content).untrustedToolResults ?? [];
+          } catch {
+            return [];
+          }
+        });
+      const complete = results.some(
+        (result) => result.status === 'verified' || result.result?.noOp,
+      );
+      content = JSON.stringify(
+        complete
+          ? {
+              kind: 'answer',
+              outcome: 'completed',
+              text: results.some((result) => result.result?.noOp)
+                ? '查询完成，没有符合条件的目标，无需执行变更。'
+                : '计划已执行并完成复查',
+            }
+          : results.length
+            ? {
+                kind: 'plan',
+                hostId,
+                summary: '清理已查询的无标签镜像，完成后逐项复查。',
+                actions: [{ kind: 'remove_untagged_images' }],
+              }
+            : {
+                kind: 'query',
+                requests: [{ kind: 'host_query', hostId, query: { kind: 'images' } }],
+              },
+      );
     }
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(
-      JSON.stringify({
-        choices: [{ message: { content }, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 20, completion_tokens: 30 },
-      }),
-    );
+    const usage = { prompt_tokens: 20, completion_tokens: 30 };
+    if (body.stream) {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content }, finish_reason: null }] })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\n`,
+      );
+      res.end('data: [DONE]\n\n');
+    } else {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage }),
+      );
+    }
   } catch (error) {
     res.writeHead(500);
     res.end(String(error));
@@ -412,7 +445,7 @@ try {
   passed.push(
     'Real model protocol queries images through SSH and freezes two exact targets without mutating',
   );
-  await frame.getByRole('button', { name: '审核执行计划', exact: true }).click();
+  await frame.getByRole('button', { name: '执行计划', exact: true }).click();
   const review = page.getByRole('dialog', { name: '确认 AI 运维计划', exact: true });
   await review.waitFor();
   for (const image of linux.images.filter((r) => r.Tag === '<none>'))
@@ -427,7 +460,7 @@ try {
   await frame.getByText('计划已执行并完成复查', { exact: true }).waitFor();
   assert.equal(
     await frame
-      .getByText('已执行并复查 · 操作完成，已通过 SSH 重新读取目标状态并确认预期结果', {
+      .getByText('已执行并复查 · 已执行并复查目标状态', {
         exact: true,
       })
       .count(),
@@ -441,8 +474,8 @@ try {
   assert.notEqual(remaining[0].Tag, '<none>');
   assert.equal(
     modelCalls,
-    2,
-    'Execution output is checked locally, without automatic model transmission',
+    3,
+    'Verified execution feedback returns to the model before the task finishes',
   );
   passed.push(
     'Native exact-target confirmation gates real Docker removal; both postconditions verified and tagged image retained',
@@ -453,7 +486,7 @@ try {
   await frame.getByRole('button', { name: '新对话', exact: true }).click();
   await ask();
   await frame.getByText('查询完成，没有符合条件的目标，无需执行变更。', { exact: true }).waitFor();
-  assert.equal(await frame.getByRole('button', { name: '审核执行计划', exact: true }).count(), 0);
+  assert.equal(await frame.getByRole('button', { name: '执行计划', exact: true }).count(), 0);
   passed.push(
     'A fresh follow-up sees actual remaining images and correctly produces no destructive plan',
   );

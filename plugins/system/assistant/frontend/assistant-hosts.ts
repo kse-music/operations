@@ -40,6 +40,7 @@ export function useAssistantHosts() {
     try {
       const route = await api.resolveHosts({
         modelId: input.modelId,
+        entryHostId: input.entryHostId ?? null,
         requestId,
         question: input.question,
         previousHostIds,

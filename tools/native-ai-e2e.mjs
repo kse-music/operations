@@ -76,7 +76,7 @@ const model = createServer(async (req, res) => {
         !text.includes('credentialId') && !text.includes('keyPath') && !text.includes('secretRef'),
       );
     } else {
-      assert.deepEqual(payload.context, { associatedAssets: [] });
+      assert.deepEqual(payload.context, { hosts: [] });
       requestedModels.push(body.model);
       requestedHistories.push(body.messages.slice(1, -1));
       calls++;
@@ -87,28 +87,35 @@ const model = createServer(async (req, res) => {
       res.end('{"error":"fixture-unavailable"}');
       return;
     }
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify({
-        choices: [
-          {
-            message: {
-              content: JSON.stringify(
-                hostRouting
-                  ? { hostIds: [routeTargetId], message: '' }
-                  : {
-                      answer:
-                        '## 诊断结论\n\n**这是本机协议测试回答。** 当前未授权读取服务器数据，证据不足。\n\n- 先检查资源变化\n- 再核对进程与选定日志\n\n|项目|状态|\n|---|---|\n|服务器上下文|未授权|\n\n```sh\nuptime\n```\n\n<script>untrusted()</script>\n\n![tracking](https://track.example/pixel)\n\n[危险链接](javascript:untrusted())',
-                      commands: ['uptime'],
-                    },
-              ),
-            },
-            finish_reason: 'stop',
+    const content = JSON.stringify(
+      hostRouting
+        ? { hostIds: [routeTargetId], message: '' }
+        : {
+            kind: 'answer',
+            outcome: 'informational',
+            text: '## 诊断结论\n\n**这是本机协议测试回答。** 当前未授权读取服务器数据，证据不足。\n\n- 先检查资源变化\n- 再核对进程与选定日志\n\n|项目|状态|\n|---|---|\n|服务器上下文|未授权|\n\n```sh\nuptime\n```\n\n<script>untrusted()</script>\n\n![tracking](https://track.example/pixel)\n\n[危险链接](javascript:untrusted())',
           },
-        ],
-        usage: { prompt_tokens: 12, completion_tokens: 18 },
-      }),
     );
+    const responseContent = connectionTest ? 'OK' : content;
+    const usage = { prompt_tokens: 12, completion_tokens: 18 };
+    if (body.stream) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: responseContent }, finish_reason: null }] })}\n\n`,
+      );
+      res.write(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage })}\n\n`,
+      );
+      res.end('data: [DONE]\n\n');
+    } else {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          choices: [{ message: { content: responseContent }, finish_reason: 'stop' }],
+          usage,
+        }),
+      );
+    }
   } catch {
     res.writeHead(500);
     res.end();

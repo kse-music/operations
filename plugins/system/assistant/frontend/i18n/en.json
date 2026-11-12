@@ -154,5 +154,17 @@
   "容器 start": "Start container",
   "容器 stop": "Stop container",
   "容器 restart": "Restart container",
-  "容器 remove": "Remove container"
+  "容器 remove": "Remove container",
+  "回答已结束": "Response finished",
+  "需要补充信息": "More information needed",
+  "工具任务运行中": "Tool task in progress",
+  "停止任务": "Stop task",
+  "工具执行记录": "Tool execution history",
+  "加载 Skill 资源": "Load Skill resource",
+  "查询指定主机": "Query selected host",
+  "执行远程程序": "Run remote program",
+  "导出 Docker 镜像归档": "Save Docker image archive",
+  "导入并核对 Docker 镜像": "Load and verify Docker image",
+  "所属页面已释放，任务结果未确认，请独立核对实际状态": "The owning page was released. Task result is unconfirmed; verify the actual state independently",
+  "执行记录 · ": "Execution record · "
 }

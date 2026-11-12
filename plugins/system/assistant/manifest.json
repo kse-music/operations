@@ -3,10 +3,10 @@
   "id": "cn.hiboot.plugins.assistant",
   "name": "AI 运维助手",
   "icon": "bot",
-  "version": "2.5.1",
+  "version": "3.0.0",
   "author": "ServerDeck",
-  "description": "查询主机、预览文件修改及传输计划，在确认后执行并校验结果。",
-  "apiVersion": "^5.4.0",
+  "description": "组合主机、命令、文件与镜像工具，按需加载 Skill，按审批模式执行并核对结果。",
+  "apiVersion": "^5.6.0",
   "entry": {
     "backend": "backend.wasm",
     "ui": "ui.json"

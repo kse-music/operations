@@ -14,16 +14,24 @@ pub enum Status {
     Transferring,
     Verifying,
     Succeeded,
+    Answered,
+    NeedsInput,
     Failed,
     Cancelled,
     Unverified,
     Expired,
 }
 impl Status {
-    fn terminal(self) -> bool {
+    pub fn terminal(self) -> bool {
         matches!(
             self,
-            Self::Succeeded | Self::Failed | Self::Cancelled | Self::Unverified | Self::Expired
+            Self::Succeeded
+                | Self::Answered
+                | Self::NeedsInput
+                | Self::Failed
+                | Self::Cancelled
+                | Self::Unverified
+                | Self::Expired
         )
     }
 }
@@ -85,7 +93,15 @@ impl Tasks {
             (Status::Prepared, Status::Running)
                 | (
                     Status::Running,
-                    Status::AwaitingApproval | Status::Succeeded
+                    Status::Unverified
+                        | Status::AwaitingApproval
+                        | Status::Succeeded
+                        | Status::Answered
+                        | Status::NeedsInput
+                )
+                | (
+                    Status::Executing | Status::Transferring | Status::Verifying,
+                    Status::Running
                 )
                 | (Status::AwaitingApproval, Status::Executing)
                 | (Status::Executing, Status::Verifying)
@@ -98,7 +114,7 @@ impl Tasks {
                 | (Status::Verifying, Status::Transferring)
                 | (Status::Executing, Status::Succeeded | Status::Unverified)
                 | (Status::Verifying, Status::Unverified)
-        ) || (previous == status && !previous.terminal())
+        ) || (previous == status)
             || (!previous.terminal()
                 && matches!(status, Status::Failed | Status::Cancelled | Status::Expired));
         if !allowed {
@@ -122,6 +138,11 @@ impl Tasks {
                 task.snapshot.updated_at = now;
             }
         }
+    }
+    pub fn renew(&mut self, id: &str, now: u64) -> Result<(), Error> {
+        let task = self.0.get_mut(id).ok_or(Error::NotFound)?;
+        task.snapshot.expires_at = now.saturating_add(TTL_MS);
+        Ok(())
     }
     pub fn detach(&mut self, id: &str) -> Result<(), Error> {
         self.0.get_mut(id).ok_or(Error::NotFound)?.native_job = true;

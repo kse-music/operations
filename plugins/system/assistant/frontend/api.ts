@@ -21,6 +21,7 @@ const api = {
   prepare: (input: AiPrepare) => invoke<AiPreview>('prepare', json(input)),
   resolveHosts: (input: AiResolveHosts) => invoke<AiHostRoute>('resolve_hosts', json(input)),
   send: (id: string, confirmed: boolean) => invoke<AiAnswer>('send', { id, confirmed }),
+  resume: (id: string, progressId: string) => invoke<AiAnswer>('resume', { id, progressId }),
   execute: (proposalId: string, confirmed: boolean, changeConfirmation: string | null) =>
     invoke<AiExecution>('execute', { proposalId, confirmed, changeConfirmation }),
   task: (id: string) => invoke<AiTask>('task', { id }),
@@ -29,7 +30,7 @@ const api = {
   revokeFullAccess: () => call({ kind: 'approval_mode', mode: 'request' }),
   async cancel(id: string) {
     await cancelCurrent();
-    await invoke('cancel', { id });
+    return invoke<AiExecution | null>('cancel', { id });
   },
 };
 export type AssistantApi = typeof api & { begin?: () => Promise<void>; end?: () => Promise<void> };

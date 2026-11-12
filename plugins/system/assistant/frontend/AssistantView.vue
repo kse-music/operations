@@ -143,6 +143,7 @@ function send() {
       approvalMode: approvalMode.value,
       modelId: modelId.value,
       sessionId: null,
+      entryHostId: props.hostId ?? null,
       autoHosts: true,
       question: text,
       selection: {
@@ -293,7 +294,18 @@ const readinessHint = computed(() => {
                     {{ tr(' 重新编辑 ') }}
                   </button>
                 </div>
-                <template v-else-if="turn.answer"
+                <details v-if="turn.operations?.length" class="ai-chat-notes">
+                  <summary>{{ tr('工具执行记录') }} · {{ turn.operations.length }}</summary>
+                  <div v-for="operation in turn.operations" :key="operation.proposalId">
+                    <AssistantAgent
+                      :report="operation.report"
+                      :execution="operation.execution.agent"
+                      completed
+                    />
+                    <pre class="ai-output">{{ operation.execution.output }}</pre>
+                  </div>
+                </details>
+                <template v-if="turn.state === 'complete' && !turn.error && turn.answer"
                   ><AssistantMarkdown :content="turn.answer.text" />
                   <AssistantAgent
                     v-if="turn.answer.agent"
@@ -386,7 +398,9 @@ const readinessHint = computed(() => {
                             aria-hidden="true"
                           /><AlertTriangle v-else :size="14" aria-hidden="true" />{{
                             outputs[proposal.id]!.pending
-                              ? tr('文件传输进行中')
+                              ? outputs[proposal.id]!.jobId
+                                ? tr('工具任务运行中')
+                                : tr('文件传输进行中')
                               : outputs[proposal.id]!.success
                                 ? outputs[proposal.id]!.agent
                                   ? tr('计划已执行并完成复查')
@@ -416,7 +430,7 @@ const readinessHint = computed(() => {
                             {{ tr(' 需人工核对的恢复路径：') }}{{ path }}
                           </p>
                           <button
-                            v-if="outputs[proposal.id]!.pending"
+                            v-if="outputs[proposal.id]!.pending && !outputs[proposal.id]!.jobId"
                             class="button"
                             type="button"
                             :disabled="ai.cancelling.value.includes(proposal.id)"
@@ -425,6 +439,15 @@ const readinessHint = computed(() => {
                             {{ tr(' 取消传输 ') }}
                           </button>
                         </div>
+                        <button
+                          v-if="outputs[proposal.id]!.pending && outputs[proposal.id]!.jobId"
+                          class="button"
+                          type="button"
+                          :disabled="!!busy || ai.cancelling.value.includes(proposal.id)"
+                          @click="ai.cancelTransfer(proposal.id)"
+                        >
+                          {{ tr('停止任务') }}
+                        </button>
                       </div>
                     </article>
                   </details>

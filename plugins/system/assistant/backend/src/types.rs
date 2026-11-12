@@ -14,6 +14,8 @@ pub struct ContextSelection {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PrepareInput {
     #[serde(default)]
+    pub entry_host_id: Option<String>,
+    #[serde(default)]
     pub progress_id: Option<String>,
     #[serde(default)]
     pub approval_mode: serverdeck_plugin_sdk::platform::ApprovalMode,
@@ -45,6 +47,8 @@ pub struct HostAsset {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResolveHostsInput {
+    #[serde(default)]
+    pub entry_host_id: Option<String>,
     pub model_id: String,
     pub request_id: String,
     pub question: String,

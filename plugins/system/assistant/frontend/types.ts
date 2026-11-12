@@ -59,6 +59,7 @@ export interface AiSelection {
   logLines: number;
 }
 export interface AiPrepare {
+  entryHostId?: string | null;
   progressId?: string;
   approvalMode?: 'request' | 'assist' | 'full';
   modelId: string;
@@ -78,6 +79,7 @@ export interface AiHostRoute {
   modelRevision: string;
 }
 export interface AiResolveHosts {
+  entryHostId?: string | null;
   modelId: string;
   requestId: string;
   question: string;
@@ -86,6 +88,7 @@ export interface AiResolveHosts {
   redactValues: string[];
 }
 export interface AiTurn {
+  operations?: { proposalId: string; report: AiAgentReport; execution: AiExecution }[];
   streamText?: string;
   approvalMode?: 'request' | 'assist' | 'full';
   id: string;
@@ -105,6 +108,8 @@ export type AiTaskStatus =
   | 'transferring'
   | 'verifying'
   | 'succeeded'
+  | 'answered'
+  | 'needs_input'
   | 'failed'
   | 'cancelled'
   | 'unverified'
@@ -140,6 +145,12 @@ export const taskStatusLabels: Record<AiTaskStatus, string> = {
   get succeeded() {
     return tr('已完成');
   },
+  get answered() {
+    return tr('回答已结束');
+  },
+  get needs_input() {
+    return tr('需要补充信息');
+  },
   get failed() {
     return tr('失败');
   },
@@ -171,7 +182,12 @@ export type AiToolId =
   | 'file_read'
   | 'file_edit'
   | 'transfer_prepare'
-  | 'transfer';
+  | 'transfer'
+  | 'host_query'
+  | 'skill_read'
+  | 'command'
+  | 'image_save'
+  | 'image_load';
 export interface AiToolResult {
   tool: AiToolId;
   status: 'running' | 'succeeded' | 'verified' | 'failed' | 'unverified' | 'skipped';
@@ -197,6 +213,7 @@ export interface AiProposal {
   changeConfirmation: string | null;
 }
 export interface AiAnswer {
+  continuation?: boolean;
   task?: AiTask;
   text: string;
   proposals: AiProposal[];
@@ -205,6 +222,8 @@ export interface AiAnswer {
   agent?: AiAgentReport;
 }
 export interface AiExecution {
+  jobId?: string;
+  continuation?: boolean;
   pending?: boolean;
   transfer?: TransferState;
   task?: AiTask;

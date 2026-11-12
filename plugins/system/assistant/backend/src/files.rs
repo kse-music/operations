@@ -230,29 +230,6 @@ fn decode<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, Error> {
     serde_json::from_value(value).map_err(|_| Error::Validation("文件平台返回格式无效"))
 }
 impl Resources {
-    pub async fn keep_only(
-        &mut self,
-        context: &Context,
-        document: Option<&str>,
-        transfer: Option<&str>,
-    ) -> Result<(), Error> {
-        let mut release = Resources::default();
-        for (id, doc) in std::mem::take(&mut self.documents) {
-            if document == Some(id.as_str()) {
-                self.documents.insert(id, doc);
-            } else {
-                release.documents.insert(id, doc);
-            }
-        }
-        for (id, preview) in std::mem::take(&mut self.transfers) {
-            if transfer == Some(id.as_str()) {
-                self.transfers.insert(id, preview);
-            } else {
-                release.transfers.insert(id, preview);
-            }
-        }
-        release.close(context).await
-    }
     pub async fn query(
         &mut self,
         context: &Context,
@@ -374,7 +351,7 @@ impl Resources {
             .cloned()
             .ok_or(Error::Validation("请先准备本任务中的文件传输预览"))
     }
-    pub async fn close(&mut self, context: &Context) -> Result<(), Error> {
+    pub async fn close_documents(&mut self, context: &Context) -> Result<(), Error> {
         let mut errors = Vec::new();
         for id in self.documents.keys().cloned().collect::<Vec<_>>() {
             match context
@@ -387,13 +364,28 @@ impl Resources {
                 Ok(_) => {
                     self.documents.remove(&id);
                 }
-                Err(e) if e.code == "NOT_FOUND" => {
+                Err(error) if error.code == "NOT_FOUND" => {
                     self.documents.remove(&id);
                 }
-                Err(e) => {
-                    errors.push(e);
-                }
+                Err(error) => errors.push(error.message),
             }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(Error::Platform(serverdeck_plugin_sdk::ApiError::new(
+                "DOCUMENT_CLEANUP",
+                errors.join("；"),
+            )))
+        }
+    }
+    pub async fn close(&mut self, context: &Context) -> Result<(), Error> {
+        let mut errors = Vec::new();
+        if let Err(error) = self.close_documents(context).await {
+            errors.push(serverdeck_plugin_sdk::ApiError::new(
+                "DOCUMENT_CLEANUP",
+                error.message(),
+            ));
         }
         for id in self.transfers.keys().cloned().collect::<Vec<_>>() {
             match context
