@@ -280,7 +280,7 @@ try {
     await navigateWorkspace(page, '模型');
     assert.deepEqual(
       await page
-        .locator('.settings-dialog-navigation [aria-label]')
+        .locator('.settings-navigation [aria-label]')
         .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label'))),
       ['通用', '终端', '快捷键', '数据与存储', '模型', '关于'],
     );

@@ -85,6 +85,12 @@ const unsaved = computed(
   () => changed.value || (!!draft.value && JSON.stringify(draft.value) !== baseline.value),
 );
 const closePrompt = ref(false);
+watch(
+  () => application.saving || busy.value,
+  (value) => (workspace.settingsBusy = value),
+  { immediate: true, flush: 'sync' },
+);
+watch(unsaved, (value) => (workspace.settingsDirty = value), { immediate: true, flush: 'sync' });
 let closeDecision: Promise<boolean> | null = null;
 let resolveClose: ((discard: boolean) => void) | undefined;
 function confirmClose(): Promise<boolean> {
@@ -104,6 +110,8 @@ function finishClose(discard: boolean): void {
 }
 workspace.settingsCloseGuard = confirmClose;
 onBeforeUnmount(() => {
+  workspace.settingsBusy = false;
+  workspace.settingsDirty = false;
   application.interfaceFontSizePreview = undefined;
   if (workspace.settingsCloseGuard === confirmClose) workspace.settingsCloseGuard = undefined;
   finishClose(false);

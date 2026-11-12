@@ -231,84 +231,62 @@
     gap: 8px;
   }
 }
-.modal:has(> .settings-dialog-body)[open] {
+.settings-sidebar,
+.local-session-sidebar {
   display: flex;
   flex-direction: column;
-  width: min(1080px, calc(100vw - 32px));
-  height: min(780px, calc(100dvh - 32px));
-  max-height: calc(100dvh - 32px);
-  padding: 0;
-  overflow: hidden;
-}
-.modal:has(> .settings-dialog-body) > .modal-heading {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.settings-dialog-body {
-  flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 170px minmax(0, 1fr);
+  flex: 1;
 }
-.settings-dialog-navigation {
+.settings-sidebar > h2,
+.local-session-sidebar > h2 {
+  margin: 0;
+  padding: 16px;
+  font-size: var(--font-size-section);
+  font-weight: 600;
+}
+.settings-navigation {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 12px 8px;
-  border-right: 1px solid var(--border);
-  background: var(--rail);
+  gap: 4px;
+  padding: 0 10px 12px;
   overflow: auto;
 }
-.settings-dialog-navigation .nav-item {
+.settings-navigation .nav-item {
+  display: flex;
   align-items: center;
-  padding: 8px;
+  gap: 10px;
   margin: 0;
-  gap: 8px;
+  padding: 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
-.settings-dialog-navigation svg {
+.settings-navigation svg {
   flex-shrink: 0;
 }
-.settings-dialog-content {
-  container: workspace / inline-size;
+.settings-page {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 20px;
+  padding: 24px;
+  container: workspace / inline-size;
 }
-.settings-dialog-content:has(> .plugin-configuration) {
+.settings-page:has(> .plugin-configuration) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-.settings-dialog-content .settings-panel .form-footer {
+.settings-page .settings-panel .form-footer {
   position: sticky;
-  bottom: -20px;
+  bottom: -24px;
   padding: 12px 0;
-  background: var(--panel);
+  background: var(--bg);
   z-index: 1;
 }
-@media (max-width: 720px) {
-  .settings-dialog-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-  }
-  .settings-dialog-navigation {
-    flex-direction: row;
-    flex-wrap: wrap;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-    padding: 7px;
-  }
-  .settings-dialog-navigation .nav-item {
-    width: auto;
-    padding: 6px 8px;
-  }
-  .settings-dialog-content {
-    padding: 12px;
-  }
-  .settings-dialog-content .settings-panel .form-footer {
-    bottom: -12px;
+@container workspace (max-width: 640px) {
+  .settings-fields,
+  .settings-panel .settings-shortcuts .settings-fields > label {
+    grid-template-columns: 1fr;
   }
 }

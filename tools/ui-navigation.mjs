@@ -23,8 +23,7 @@ export async function terminalAction(page, pane, name) {
 
 export async function showHostTree(page) {
   if (!(await page.locator('.host-tree-section').isVisible())) {
-    const expand = page.getByRole('button', { name: '展开主机列表', exact: true });
-    if (await expand.isVisible()) await expand.click();
+    await page.locator('.activity-rail').getByRole('button', { name: '首页', exact: true }).click();
   }
 }
 
@@ -104,14 +103,14 @@ export async function openPluginDetails(page, name) {
 export async function openPluginSettings(page, name) {
   await navigateWorkspace(page, '插件管理');
   await page.getByRole('button', { name: `配置 ${name}`, exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  const dialog = page.locator('.settings-page');
   await dialog.getByRole('region', { name: `${name} · 配置`, exact: true }).waitFor();
   return dialog;
 }
 
 export async function closePluginSettings(page) {
   const panel = page.locator('.plugin-configuration');
-  if (!(await panel.count())) return;
+  if (!(await panel.isVisible())) return;
   await panel.getByRole('button', { name: '返回插件列表', exact: true }).click();
   await panel.waitFor({ state: 'hidden' });
 }
@@ -170,39 +169,33 @@ export async function navigateWorkspace(page, name) {
     if (name === 'SSH 终端' && !(await remote.count()))
       await page.getByRole('button', { name: '本地终端', exact: true }).click();
     else {
-      if (await page.evaluate(() => innerWidth <= 720)) {
-        const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
-        if (await collapse.isVisible()) await collapse.click();
-      }
       await remote.getByRole('button', { name, exact: true }).click();
     }
   } else {
-    const dialog = page.getByRole('dialog', { name: '设置', exact: true });
-    if (!(await dialog.count()))
+    const dialog = page.locator('.settings-page');
+    if (!(await dialog.isVisible()))
       await page
         .getByRole('navigation', { name: '应用导航', exact: true })
         .getByRole('button', { name: '设置', exact: true })
         .click();
-    await dialog
+    await page
       .getByRole('navigation', { name: '设置分类', exact: true })
       .getByRole('button', { name: name === '插件管理' ? '插件' : name, exact: true })
       .click();
   }
-  if (module !== 'system' && (await page.evaluate(() => innerWidth <= 720))) {
-    const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
-    if (await collapse.isVisible()) await collapse.click();
-  }
 }
 
 export async function closeApplicationSettings(page) {
-  const dialog = page.getByRole('dialog', { name: '设置', exact: true });
-  if (!(await dialog.count())) return;
-  await dialog
-    .locator(':scope > .modal-heading')
-    .getByRole('button', { name: '关闭对话框', exact: true })
-    .click();
-  // Dirty drafts keep their existing confirmation; callers must explicitly resolve it.
-  await dialog.waitFor({ state: 'hidden' });
+  if (!(await page.locator('.settings-page').isVisible())) return;
+  // Explicit draft disposal invokes the same guard used by application exit.
+  // Area switches in the product preserve the draft instead.
+  await page.evaluate(() => {
+    const workspace = document
+      .querySelector('#app')
+      .__vue_app__.config.globalProperties.$pinia._s.get('workspace');
+    void workspace.closeSettings();
+  });
+  await page.locator('.settings-page').waitFor({ state: 'hidden' });
 }
 
 // Model choice belongs to the assistant's persisted plugin settings.
@@ -217,7 +210,7 @@ export async function bindAssistantModel(page, modelId) {
     await save.click();
     await dialog.locator('.plugin-configuration').waitFor({ state: 'hidden' });
   } else {
-    await dialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await closePluginSettings(page);
   }
   await closeApplicationSettings(page);
 }
@@ -243,9 +236,13 @@ export async function openPluginFunction(page, name, hostId) {
 
 export async function selectHostWorkspace(page, id) {
   await closeApplicationSettings(page);
-  if (await page.evaluate(() => innerWidth <= 720)) {
-    const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
-    if (await collapse.isVisible()) await collapse.click();
+  if (id) await showHostTree(page);
+  else {
+    await page
+      .locator('.activity-rail')
+      .getByRole('button', { name: '本地终端', exact: true })
+      .click();
+    return;
   }
   const tab = page.locator(`.workspace-tab[data-host-id=${JSON.stringify(id)}] [role=tab]`);
   if (await tab.count()) {
@@ -259,9 +256,5 @@ export async function selectHostWorkspace(page, id) {
     for (const group of await page.locator('.group-toggle[aria-expanded=false]').all())
       await group.click();
     await page.locator(`.tree-host[data-host-id=${JSON.stringify(id)}]`).dblclick();
-  }
-  if (await page.evaluate(() => innerWidth <= 720)) {
-    const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
-    if (await collapse.isVisible()) await collapse.click();
   }
 }

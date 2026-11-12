@@ -25,6 +25,58 @@
   overflow-y: hidden;
   scrollbar-width: thin;
 }
+#local-terminal-session-list {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.local-session-sidebar .terminal-session-header {
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0 10px 12px;
+  border: 0;
+}
+.local-session-sidebar .terminal-session-header > .shell-icon-button {
+  order: -1;
+  width: 100%;
+  min-height: 36px;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+}
+.local-session-sidebar .terminal-tabs {
+  flex: 1;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.local-session-sidebar .terminal-tab {
+  min-width: 0;
+  align-items: center;
+}
+.local-session-sidebar .terminal-tab [role='tab'] {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.local-session-sidebar .terminal-tab small {
+  flex-basis: 100%;
+  margin-left: 0;
+}
+.local-session-empty {
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+  margin: 8px 0;
+}
 .terminal-tab {
   display: flex;
   flex-shrink: 0;

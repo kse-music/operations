@@ -1,3 +1,4 @@
+import { showHostTree } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'vite';
@@ -133,7 +134,7 @@ try {
       while (await notices.count()) await notices.first().click();
     };
     await dismissNotices();
-    if (width <= 720) await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+    await showHostTree(page);
     assert.equal(await page.locator('.module-navigation, .workspace-group-tab').count(), 0);
     assert.equal(await page.locator('.app-menu, [aria-label="应用菜单"]').count(), 0);
     assert.equal(await page.locator('.workspace-tabs').count(), 1);
@@ -141,45 +142,17 @@ try {
     assert.equal(await page.locator('.sidebar-work-actions [aria-label="本地终端"]').count(), 1);
     assert.equal(await page.locator('.activity-rail [aria-label="插件管理"]').count(), 0);
     assert(await page.locator('.host-tree-section').isVisible());
-    const localPosition = await page.locator('.sidebar-work-actions').boundingBox();
-    const treePosition = await page.locator('.host-tree-section').boundingBox();
-    const settingsPosition = await page.locator('.sidebar-app-actions').boundingBox();
-    assert(treePosition.y + treePosition.height <= localPosition.y + 1);
-    assert(localPosition.y + localPosition.height <= settingsPosition.y + 1);
-    assert.equal(await page.locator('.app-header [aria-controls="host-tree-panel"]').count(), 0);
-    const collapsePosition = await page.locator('.host-list-heading').evaluate((heading) => {
-      const bounds = heading.getBoundingClientRect();
-      const button = heading.querySelector('[aria-label="收起主机栏"]').getBoundingClientRect();
-      return Math.abs(bounds.right - button.right) <= 2;
-    });
-    assert(collapsePosition, `${name}: collapse action must be at the right of the host heading`);
-    await page.screenshot({ path: output + '/' + name + '-sidebar-expanded.png' });
-    const hostSearch = page.getByRole('textbox', { name: '搜索主机', exact: true });
-    await hostSearch.fill('生产');
-    await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
-    const rail = page.locator('.activity-rail-collapsed');
-    await rail.waitFor();
-    assert(
-      await rail
-        .getByRole('button', { name: '展开主机列表', exact: true })
-        .evaluate((button) => document.activeElement === button),
-    );
-    assert.equal(await page.locator('.host-tree-section').isVisible(), false);
-    assert.equal(await page.locator('.sidebar-resizer').count(), 0);
+    const rail = page.locator('.activity-rail');
+    assert.equal(await rail.isVisible(), true);
+    assert.equal(await page.locator('.sidebar-resizer').count(), 1);
     assert.deepEqual(
-      await rail.locator('.activity-group button').evaluateAll((buttons) =>
-        buttons.map((button) => ({
-          label: button.ariaLabel,
-          title: button.title,
-        })),
-      ),
-      ['展开主机列表', '本地终端', '设置'].map((label) => ({
-        label,
-        title: label,
-      })),
+      await rail
+        .locator('button')
+        .evaluateAll((buttons) => buttons.map((button) => button.ariaLabel)),
+      ['首页', '本地终端', '设置'],
     );
     const railGeometry = await page.evaluate(() => {
-      const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+      const sidebar = document.querySelector('.activity-rail').getBoundingClientRect();
       const main = document.querySelector('.main-content').getBoundingClientRect();
       const local = document.querySelector('.sidebar-work-actions button').getBoundingClientRect();
       const settings = document
@@ -192,18 +165,18 @@ try {
           local.bottom <= settings.top &&
           settings.bottom <= sidebar.bottom &&
           sidebar.bottom - settings.bottom <= 16,
-        buttonsFit: [
-          ...document.querySelectorAll('.activity-rail-collapsed .activity-group button'),
-        ].every((button) => {
-          const box = button.getBoundingClientRect();
-          return (
-            box.left >= sidebar.left &&
-            box.right <= sidebar.right &&
-            box.top >= sidebar.top &&
-            box.bottom <= sidebar.bottom &&
-            box.height >= 40
-          );
-        }),
+        buttonsFit: [...document.querySelectorAll('.activity-rail .activity-group button')].every(
+          (button) => {
+            const box = button.getBoundingClientRect();
+            return (
+              box.left >= sidebar.left &&
+              box.right <= sidebar.right &&
+              box.top >= sidebar.top &&
+              box.bottom <= sidebar.bottom &&
+              box.height >= 40
+            );
+          },
+        ),
         horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
       };
     });
@@ -233,7 +206,7 @@ try {
     assert.equal(await page.locator('.workspace-tab').count(), 2);
     assert.equal(await page.locator('.workspace-tab[data-host-id="a"].active').count(), 1);
     await page.screenshot({ path: output + '/' + name + '-plugins.png' });
-    const pluginDialog = page.getByRole('dialog', { name: '设置', exact: true });
+    const pluginDialog = page.locator('.settings-page:visible');
     const pluginSearch = pluginDialog.getByRole('searchbox', { name: '搜索插件', exact: true });
     await pluginSearch.fill('Docker');
     await pluginDialog.getByRole('button', { name: '配置 Docker 管理', exact: true }).click();
@@ -245,12 +218,12 @@ try {
     assert.equal(await pluginSearch.inputValue(), 'Docker');
     await pluginSearch.fill('');
     await closeApplicationSettings(page);
-    await rail.getByRole('button', { name: '展开主机列表', exact: true }).click();
+    await showHostTree(page);
     assert.equal(await hostSearch.inputValue(), '生产');
     assert.equal(await page.locator('.tree-host').count(), 1);
     await hostSearch.fill('');
     assert.equal(await page.locator('.tree-host').count(), 2);
-    await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '收起主机栏', exact: true }).count(), 0);
     await page.screenshot({ path: output + '/' + name + '-workspace.png' });
     await navigateWorkspace(page, 'SFTP 文件');
     await page.locator('.files-view').waitFor();
@@ -266,12 +239,11 @@ try {
       .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().top));
     assert(tabRows.every((y) => Math.abs(y - tabRows[0]) < 1));
     await closeApplicationSettings(page);
-    if (!(await page.locator('.host-tree-section').isVisible()))
-      await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+    if (!(await page.locator('.host-tree-section').isVisible())) await showHostTree(page);
     assert(await page.locator('.host-tree-section').isVisible());
     await navigateWorkspace(page, '通用');
     await dismissNotices();
-    const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    const settings = page.locator('.settings-page:visible');
     assert.equal(await page.locator('.workspace-tab').count(), 2);
     const dirty = settings.getByLabel('侧边栏宽度', { exact: true });
     await dirty.evaluate((input) => {
@@ -285,7 +257,7 @@ try {
     await navigateWorkspace(page, '通用');
     assert.equal(await dirty.inputValue(), '300');
     const geometry = await settings.evaluate((dialog) => {
-      const content = dialog.querySelector('.settings-dialog-content');
+      const content = dialog.querySelector('.settings-page') ?? dialog;
       const bounds = dialog.getBoundingClientRect();
       const save = dialog.querySelector('.form-footer [type="submit"]').getBoundingClientRect();
       return {
@@ -306,14 +278,21 @@ try {
       JSON.stringify({ name, geometry }),
     );
     await page.screenshot({ path: output + '/' + name + '-settings.png' });
-    await settings
-      .locator(':scope > .modal-heading')
-      .getByRole('button', { name: '关闭对话框', exact: true })
-      .click();
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     const unsaved = page.getByRole('dialog', { name: '设置尚未保存', exact: true });
     await unsaved.getByRole('button', { name: '继续编辑', exact: true }).click();
     assert.equal(await dirty.inputValue(), '300');
-    await settings.press('Escape');
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     await unsaved.getByRole('button', { name: '放弃更改并关闭', exact: true }).click();
     await settings.waitFor({ state: 'hidden' });
     await navigateWorkspace(page, '关于');

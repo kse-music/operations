@@ -218,7 +218,7 @@ try {
   ]) {
     const name = `${theme}-${size}`;
     await navigateWorkspace(page, '通用');
-    const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    const settings = page.locator('.settings-page:visible');
     await settings.getByTestId('theme-select').selectOption(theme);
     await settings
       .locator('.interface-font-ticks')
@@ -245,7 +245,7 @@ try {
       assert(
         await settings.evaluate((dialog) => {
           const r = dialog.getBoundingClientRect();
-          const content = dialog.querySelector('.settings-dialog-content');
+          const content = dialog.querySelector('.settings-page') ?? dialog;
           return (
             r.left >= 0 &&
             r.top >= 0 &&
@@ -270,10 +270,12 @@ try {
     await cancel.click();
     await settings.locator('.plugin-manager').waitFor();
     assert.equal(await settings.locator('.plugin-configuration').count(), 0);
-    await settings
-      .locator(':scope > .modal-heading')
-      .getByRole('button', { name: '关闭对话框', exact: true })
-      .click();
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     await settings.waitFor({ state: 'detached' });
 
     await navigateWorkspace(page, '通用');
@@ -299,7 +301,12 @@ try {
     await settings.waitFor({ state: 'detached' });
     await navigateWorkspace(page, '通用');
     assert.equal(await selectTheme.inputValue(), theme);
-    await settings.press('Escape');
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     await settings.waitFor({ state: 'detached' });
     results.push({
       name,

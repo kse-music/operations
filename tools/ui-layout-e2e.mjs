@@ -82,7 +82,7 @@ try {
       },
       { theme },
     );
-    if (width <= 720) await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+    await showHostTree(page);
     await page.locator('.tree-host').first().waitFor();
     assert.equal(await page.locator('.topbar').count(), 0);
     assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
@@ -93,7 +93,7 @@ try {
     assert.equal(await page.getByRole('button', { name: '关于', exact: true }).count(), 0);
     await navigateWorkspace(page, '通用');
     assert.deepEqual(
-      (await page.locator('.settings-dialog-navigation .nav-item').allTextContents()).map((text) =>
+      (await page.locator('.settings-navigation .nav-item').allTextContents()).map((text) =>
         text.trim(),
       ),
       ['通用', '终端', '快捷键', '数据与存储', '模型', '插件', '关于'],
@@ -114,37 +114,9 @@ try {
     await closeApplicationSettings(page);
     assert.equal(await aboutPage.count(), 0);
     await showHostTree(page);
-    const collapseButton = page
-      .locator('.host-list-heading')
-      .getByRole('button', { name: '收起主机栏', exact: true });
-    const collapsePosition = await page.locator('.host-list-heading').evaluate((header) => {
-      const heading = header.getBoundingClientRect();
-      const button = header.querySelector('[aria-label="收起主机栏"]').getBoundingClientRect();
-      return {
-        text: header.textContent.trim(),
-        atRight: button.right <= heading.right && button.right >= heading.right - 2,
-        sameRow: Math.abs(button.top + button.height / 2 - heading.top - heading.height / 2) < 2,
-      };
-    });
-    assert(
-      collapsePosition.text.includes('主机') &&
-        collapsePosition.atRight &&
-        collapsePosition.sameRow,
-      `${name}: sidebar must have a host management title and a collapse action`,
-    );
-    await collapseButton.click();
-    assert.equal(await page.locator('.activity-rail-collapsed').isVisible(), true);
-    assert.equal(await page.locator('.host-tree-section').isVisible(), false);
-    const expandButton = page
-      .locator('.sidebar-quick-actions')
-      .getByRole('button', { name: '展开主机列表', exact: true });
-    assert.equal(await expandButton.evaluate((button) => document.activeElement === button), true);
-    await expandButton.press('Enter');
+    assert.equal(await page.locator('.activity-rail button').count(), 3);
+    assert.equal(await page.locator('.host-list-heading button').count(), 0);
     assert.equal(await page.locator('.sidebar').isVisible(), true);
-    assert.equal(
-      await collapseButton.evaluate((button) => document.activeElement === button),
-      true,
-    );
     const geometry = await page.evaluate(() => {
       const box = (s) => document.querySelector(s).getBoundingClientRect().toJSON();
       const list = document.querySelector('.host-tree-scroll');
@@ -192,8 +164,8 @@ try {
     );
     assert.equal(
       geometry.sidebar.x,
-      geometry.rail.x,
-      `${name}: navigation is outside the combined sidebar`,
+      geometry.rail.right,
+      `${name}: context sidebar must follow the rail`,
     );
     assert(geometry.listScrolls, `${name}: long host list cannot scroll`);
     if (width > 720)
@@ -202,7 +174,7 @@ try {
     assert.equal(await page.getByLabel('主机排序', { exact: true }).count(), 0);
     assert.equal(await page.locator('#host-tree-tools').count(), 0);
     const listHeading = page.locator('.host-list-heading');
-    assert.equal(await listHeading.getByRole('button').count(), 1);
+    assert.equal(await listHeading.getByRole('button').count(), 0);
     assert.equal(
       await listHeading.getByRole('button', { name: '新建主机', exact: true }).count(),
       0,
@@ -388,7 +360,7 @@ try {
     await page.screenshot({ path: `${output}/${name}-host-context-menu.png` });
     await page.keyboard.press('Escape');
     assert.equal(await hostMenu.count(), 0);
-    if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+    await showHostTree(page);
     await page.locator('.workspace-tab.active [role=tab]').click({ button: 'middle' });
     await page.locator('.terminal-tab').waitFor({ state: 'detached' });
     assert.equal(
@@ -399,33 +371,28 @@ try {
     await navigateWorkspace(page, 'SSH 终端');
     await page.locator('.terminal-tab [role=tab]').first().click({ button: 'middle' });
     assert.equal(await page.locator('.terminal-tab').count(), 0, `${name}: terminal not closed`);
-    if (width <= 720) await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+    await showHostTree(page);
     await page.locator('.host-tree-scroll').evaluate((el) => {
       el.scrollTop = 0;
     });
     await page.screenshot({ path: `${output}/${name}.png` });
     await page.locator('.tree-host').first().dblclick();
-    await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
-    assert.equal(await page.locator('.activity-rail-collapsed').isVisible(), true);
-    assert.equal(await page.locator('.host-tree-section').isVisible(), false);
+    assert.equal(await page.locator('.activity-rail').isVisible(), true);
+    assert.equal(await page.locator('.host-tree-section').isVisible(), true);
     await navigateWorkspace(page, '服务器管理');
     await page.getByRole('heading', { name: '服务器管理', exact: true }).waitFor();
     await page.screenshot({ path: `${output}/${name}-workspace.png` });
-    if (!(await page.locator('.host-tree-section').isVisible()))
-      await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+    if (!(await page.locator('.host-tree-section').isVisible())) await showHostTree(page);
     await localTerminal.waitFor();
     const pinned = await localTerminal.boundingBox();
     const heading = await page.locator('.host-list-heading').boundingBox();
     const list = await page.locator('.host-tree-scroll').boundingBox();
-    const sidebarBounds = await page.locator('.sidebar').boundingBox();
+    const sidebarBounds = await page.locator('.activity-rail').boundingBox();
     assert(
       pinned.x >= sidebarBounds.x &&
         pinned.x + pinned.width <= sidebarBounds.x + sidebarBounds.width,
     );
-    assert(
-      list.y + list.height <= pinned.y + 1,
-      `${name}: local terminal must remain below the host list`,
-    );
+    assert(pinned.y >= sidebarBounds.y, `${name}: local terminal stays in the permanent rail`);
     const settingsBounds = await page.locator('.sidebar-app-actions').boundingBox();
     assert(
       pinned.y + pinned.height <= settingsBounds.y + 1,

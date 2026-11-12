@@ -27,7 +27,7 @@ manifest贡献ID对应页面ID；kind支持workspace、navigation、host_menu、
 
 `invoke(action, input, { confirmation: { title, message, confirmLabel? } })` 可提供本次动作的易读确认说明：标题 1–80 字符、正文 1–2048 字符、可选确认按钮 1–24 字符，仅接受这些纯文本字段。宿主冻结说明副本，不把它传入 WASM 或作为已确认依据。原生审批提供实际 `target` 时，正文只显示真实 SSH 目标和插件说明，不提供执行详情或命令脚本入口；原生仍绑定完整命令，没有实际目标时沿用完整原生提示。说明不会跳过审批，也不能改写 owner、目标、命令或续接请求；确认/取消继续由可信宿主处理。
 
-工作区的插件设置由独立弹窗承载，开关弹窗不改变底层业务页面的 visibility。前端通过 `platform.request` 成功写入 `settings_write` 后，宿主递增该插件的运行期 `context.settingsRevision`，只通知同插件页面，不广播配置内容或刷新业务列表；写入失败和取消不递增。读取配置的页面可监听修订并按需重读，正在保存的配置页应保留自身保存状态与反馈。
+工作区的插件设置统一在设置页面第三栏承载；进入设置时业务页面保留挂载并变为非活动，返回首页恢复同一页面与 owner，不重建业务实例。前端通过 `platform.request` 成功写入 `settings_write` 后，宿主递增该插件的运行期 `context.settingsRevision`，只通知同插件页面，不广播配置内容或刷新业务列表；写入失败和取消不递增。读取配置的页面可监听修订并按需重读，正在保存的配置页应保留自身保存状态与反馈。
 
 iframe采用`sandbox="allow-scripts allow-forms"`且无allow-same-origin；Guest不能读取父DOM/Store或直接调用原生IPC。静态资源协议重新检查包/修订/授权/摘要，固定HTML壳及受限CSP禁止外网、远程脚本和动态资源。包内JS/CSS只在子页面运行。父桥验证实际窗口/null来源/协议后建立专属MessageChannel。
 

@@ -101,7 +101,7 @@ async function start() {
   assert.equal(path.resolve(bootstrap.dataDirectory), artifacts, 'refusing to write non-test data');
   safe = true;
   await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
-  assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 0);
+  assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 1);
   assert.equal(await page.locator('.terminal-pane').count(), 0);
   assert.equal(await page.locator('.xterm-container[data-state="connected"]').count(), 0);
   await page.getByRole('button', { name: '本地终端', exact: true }).click();
@@ -112,7 +112,7 @@ async function start() {
     (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
       text.trim(),
     ),
-    ['收起主机栏'],
+    ['起步页', '本地终端'],
   );
 }
 const active = () => page.locator('.terminal-pane:visible');
@@ -202,32 +202,17 @@ try {
   );
   assert.equal(await page.locator('.sidebar-app-actions button').count(), 1);
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
-  await page
-    .locator('.host-list-heading')
-    .getByRole('button', { name: '收起主机栏', exact: true })
-    .click();
-  assert.equal(await page.locator('.activity-rail-collapsed').isVisible(), true);
-  assert.equal(await page.locator('.host-tree-section').isVisible(), false);
-  const expandHosts = page
-    .locator('.sidebar-quick-actions')
-    .getByRole('button', { name: '展开主机列表', exact: true });
-  assert.equal(await expandHosts.evaluate((button) => document.activeElement === button), true);
-  await expandHosts.press('Enter');
+  assert.equal(await page.locator('.activity-rail').isVisible(), true);
   assert.equal(await page.locator('.sidebar').isVisible(), true);
-  assert.equal(
-    await page
-      .getByRole('button', { name: '收起主机栏', exact: true })
-      .evaluate((button) => document.activeElement === button),
-    true,
-  );
-  await page.screenshot({ path: path.join(artifacts, 'sidebar-host-toggle.png') });
-  passed.push(
-    'About shows backend version; host heading collapse and rail expansion support keyboard focus',
-  );
+  assert.equal(await page.locator('.activity-rail button').count(), 3);
+  assert.equal(await page.locator('.local-session-sidebar').isVisible(), true);
+  assert.equal(await page.getByRole('button', { name: '收起主机栏', exact: true }).count(), 0);
+  await page.screenshot({ path: path.join(artifacts, 'fixed-three-columns.png') });
+  passed.push('About shows backend version; fixed rail and context sidebar remain available');
   for (const target of [
     page.locator('.activity-rail'),
     page.locator('.sidebar'),
-    page.locator('.sidebar input'),
+    active().locator('.xterm-helper-textarea'),
     page.locator('.app-header'),
   ])
     await assertNativeMenuSuppressed(target);
@@ -401,7 +386,7 @@ try {
   const tabsBeforeSettings = await page.locator('.workspace-tab').count();
   for (const label of ['通用', '终端', '关于']) {
     await navigateWorkspace(page, label);
-    assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).count(), 1);
+    assert.equal(await page.locator('.settings-page:visible').count(), 1);
     assert.equal(await page.locator('.workspace-tab').count(), tabsBeforeSettings);
     assert.equal(
       await page.locator('.workspace-tab.active').getAttribute('data-view'),
@@ -776,7 +761,7 @@ try {
     await page
       .locator('.host-list-heading button')
       .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
-    ['本地终端'],
+    [],
   );
   assert.equal(await page.getByRole('dialog').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });

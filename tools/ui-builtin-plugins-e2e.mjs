@@ -302,11 +302,7 @@ try {
     };
     const inspectHost = async () => {
       const overflow = await page.evaluate(() =>
-        [
-          ...document.querySelectorAll(
-            '.settings-dialog-content, .plugin-configuration, .plugin-config-body',
-          ),
-        ]
+        [...document.querySelectorAll('.settings-page, .plugin-configuration, .plugin-config-body')]
           .filter((el) => el.getClientRects().length && el.scrollWidth > el.clientWidth + 1)
           .map((el) => el.className),
       );
@@ -432,15 +428,12 @@ try {
     await settingsButton.click();
     const standalone = page.getByRole('dialog', { name: 'Docker 管理 · 插件设置', exact: true });
     await standalone.waitFor();
-    assert.equal(
-      await standalone.locator('.settings-dialog-navigation, .settings-panel').count(),
-      0,
-    );
+    assert.equal(await standalone.locator('.settings-navigation, .settings-panel').count(), 0);
     assert.equal(
       await standalone.getByRole('button', { name: '返回插件列表', exact: true }).count(),
       0,
     );
-    assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).count(), 0);
+    assert.equal(await page.locator('.settings-page:visible').count(), 0);
     await standalone.getByRole('tab', { name: '插件配置', exact: true }).click();
     await standalone.getByRole('heading', { name: '无需单独配置', exact: true }).waitFor();
     await inspectHost();

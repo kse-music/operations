@@ -799,7 +799,7 @@ try {
       await upload.getByRole('button', { name: /^启用 / }).waitFor();
       const uploadTabs = await page.locator('.workspace-tab').count();
       await upload.locator('.plugin-name-button').click();
-      const uploadDialog = page.getByRole('dialog', { name: '设置', exact: true });
+      const uploadDialog = page.locator('.settings-page:visible');
       await uploadDialog
         .locator('.plugin-configuration')
         .getByText('用户上传', { exact: true })

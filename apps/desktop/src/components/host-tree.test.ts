@@ -265,9 +265,8 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
   expect(root.querySelector('[aria-label="已收藏"]')).toBeNull();
-  expect(heading.querySelectorAll('button')).toHaveLength(1);
+  expect(heading.querySelectorAll('button')).toHaveLength(0);
   expect(heading.querySelector('[aria-label="新建主机"]')).toBeNull();
-  expect(heading.querySelector('button')?.getAttribute('aria-label')).toBe('收起主机栏');
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',
   );

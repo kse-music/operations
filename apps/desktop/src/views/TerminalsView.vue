@@ -28,15 +28,47 @@ const emit = defineEmits<{
 const store = useTerminalsStore(),
   application = useApplicationStore();
 const props = withDefaults(
-  defineProps<{ visible?: boolean; hostId?: string; toolbarTarget?: string }>(),
+  defineProps<{
+    visible?: boolean;
+    hostId?: string;
+    toolbarTarget?: string;
+    localSessionTarget?: string;
+  }>(),
   {
     visible: true,
     hostId: '',
     toolbarTarget: '',
+    localSessionTarget: '',
   },
 );
 const hosts = useHostsStore();
 const tabs = computed(() => store.hostTabs(props.hostId));
+const sidebarSessions = computed(() => !props.hostId && !!props.localSessionTarget);
+const sessionTarget = computed(() =>
+  sidebarSessions.value ? props.localSessionTarget : props.toolbarTarget,
+);
+function sessionKeys(event: KeyboardEvent): void {
+  if (!sidebarSessions.value || !props.visible || event.defaultPrevented) return;
+  const target = event.target as HTMLElement;
+  if (
+    !target.matches('[role="tab"]') ||
+    !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+  )
+    return;
+  const buttons = [
+    ...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  ];
+  const index = buttons.indexOf(target as HTMLButtonElement);
+  const next =
+    event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? buttons.length - 1
+        : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+  event.preventDefault();
+  buttons[next]?.click();
+  buttons[next]?.focus();
+}
 const host = computed(
   () =>
     hosts.catalog?.hosts.find((h) => h.id === props.hostId) ??
@@ -290,12 +322,22 @@ watch(
       </button>
     </div>
     <Teleport
-      v-if="tabs.length"
-      :to="props.toolbarTarget || 'body'"
-      :disabled="!props.toolbarTarget"
+      v-if="tabs.length || sidebarSessions"
+      :to="sessionTarget || 'body'"
+      :disabled="!sessionTarget"
     >
       <div class="terminal-session-header">
-        <div class="terminal-tabs" role="tablist" :aria-label="tr('终端标签')">
+        <p v-if="!tabs.length" class="local-session-empty" role="status">
+          {{ tr('没有打开的终端') }}
+        </p>
+        <div
+          v-else
+          class="terminal-tabs"
+          role="tablist"
+          :aria-label="sidebarSessions ? tr('本地终端会话') : tr('终端标签')"
+          :aria-orientation="sidebarSessions ? 'vertical' : 'horizontal'"
+          @keydown="sessionKeys"
+        >
           <div
             v-for="item in tabs"
             :key="item.key"
@@ -314,6 +356,7 @@ watch(
               role="tab"
               :title="item.title"
               :aria-selected="store.active === item.key"
+              :tabindex="sidebarSessions && store.active !== item.key ? -1 : 0"
               @click="store.select(item.key)"
               @dblclick="rename(item.key)"
             >
@@ -355,7 +398,9 @@ watch(
           :aria-expanded="canChooseLocalMode ? menu?.key === null : undefined"
           @click="addTerminal"
         >
-          <Plus :size="15" aria-hidden="true" />
+          <SquareTerminal v-if="sidebarSessions" :size="16" aria-hidden="true" />
+          <Plus v-else :size="15" aria-hidden="true" />
+          <span v-if="sidebarSessions">{{ tr('新建会话') }}</span>
         </button>
       </div>
     </Teleport>

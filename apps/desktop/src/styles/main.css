@@ -16,21 +16,19 @@ pre {
 }
 .app-shell {
   --module-header-height: 44px;
-  --collapsed-sidebar-width: 52px;
-  --host-panel-width: var(--sidebar-width);
+  --navigation-width: 52px;
+  --sidebar-layout-width: var(--sidebar-width);
   height: 100dvh;
   min-height: 560px;
   display: grid;
-  grid-template: var(--module-header-height) minmax(0, 1fr) 28px / var(--host-panel-width) minmax(
-      0,
-      1fr
-    );
-}
-.app-shell.sidebar-collapsed {
-  --host-panel-width: var(--collapsed-sidebar-width);
+  grid-template:
+    var(--module-header-height) minmax(0, 1fr) 28px / var(--navigation-width) var(
+      --sidebar-layout-width
+    )
+    minmax(0, 1fr);
 }
 .sidebar {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 2;
   background: var(--panel);
   border-right: 1px solid var(--border);
@@ -107,7 +105,7 @@ pre {
   background: var(--muted);
 }
 .main-content {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 2;
   min-width: 0;
   min-height: 0;

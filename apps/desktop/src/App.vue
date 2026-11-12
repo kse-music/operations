@@ -14,7 +14,8 @@ import {
 import { useApplicationStore } from './stores/application';
 import { useTheme } from './composables/theme';
 import { interfaceFontSizes } from './types/preferences';
-import SettingsDialog from './components/SettingsDialog.vue';
+import SettingsView from './views/SettingsView.vue';
+import SettingsNavigation from './components/SettingsNavigation.vue';
 import TerminalStatus from './components/TerminalStatus.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
@@ -64,9 +65,6 @@ import GlobalSearch from './components/GlobalSearch.vue';
 import { usePluginsStore } from './stores/plugins';
 import PluginDialogs from './components/PluginDialogs.vue';
 const PluginView = defineAsyncComponent(() => import('./views/PluginView.vue'));
-const PluginSettingsDialog = defineAsyncComponent(
-  () => import('./components/PluginSettingsDialog.vue'),
-);
 const plugins = usePluginsStore();
 const workspace = useWorkspaceStore(),
   notifications = useNotificationsStore(),
@@ -138,9 +136,9 @@ const isHostWorkspace = computed(() => {
   const tab = workspace.current;
   return !!tab && isHostTab(tab);
 });
-const settingsOpen = computed(() => workspace.settingsView !== null);
+const settingsOpen = computed(() => workspace.area === 'settings');
 const statusPane = computed(() => {
-  if (view.value !== 'terminals') return;
+  if (settingsOpen.value || view.value !== 'terminals') return;
   const tab = terminals.tabs.find((tab) => tab.key === terminals.active);
   if (!tab || (tab.panes[0]?.host?.id ?? '') !== currentHostId.value) return;
   return tab.panes.find((pane) => pane.key === terminals.focused) ?? tab.panes[0];
@@ -151,10 +149,15 @@ function navigate(
   hostId = currentHostId.value,
   section?: WorkspaceTab['section'],
 ): void {
+  if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
   if (value === 'terminals' && (host || !hostId)) {
     terminals.activateHost(host?.id ?? '');
-    if (!terminals.active) terminals.open(host ?? null);
+    if (
+      !terminals.active &&
+      (hostId || !workspace.tabs.some((tab) => isHostTab(tab) && !tab.hostId))
+    )
+      terminals.open(host ?? null);
     const pane = terminals.panes.find((p) => p.key === terminals.focused);
     if (pane?.state === 'idle') pane.connectRequested = true;
   }
@@ -350,21 +353,8 @@ function globalShortcut(event: KeyboardEvent) {
   else if (action === 'settings') navigate('settings');
 }
 const sidebarDraft = ref<number | null>(null);
-const sidebarOpen = ref(!window.matchMedia('(max-width: 720px)').matches);
 function clampSidebarWidth(width: number): number {
   return Math.max(200, Math.min(400, Math.round(width)));
-}
-async function toggleSidebar(): Promise<void> {
-  sidebarOpen.value = !sidebarOpen.value;
-  await nextTick();
-  document
-    .querySelector<HTMLButtonElement>(
-      sidebarOpen.value
-        ? '.host-list-heading [aria-controls="host-tree-panel"]'
-        : '.sidebar-quick-actions [aria-controls="host-tree-panel"]',
-    )
-    ?.focus({ preventScroll: true });
-  revealActiveTab();
 }
 function resizeSidebar(event: PointerEvent) {
   event.preventDefault();
@@ -428,6 +418,7 @@ let releaseEditorSaved: UnlistenFn | undefined;
 const exitBusy = ref(false);
 const exitError = ref<string | null>(null);
 async function confirmExit(): Promise<void> {
+  if (workspace.settingsCloseGuard && !(await workspace.settingsCloseGuard())) return;
   exitBusy.value = true;
   exitError.value = null;
   try {
@@ -456,7 +447,7 @@ function revealHost(host: Host): void {
     store.search = '';
   }
   store.selectedId = host.id;
-  sidebarOpen.value = true;
+  workspace.showHome();
   void nextTick(() =>
     document.querySelector('.tree-host.selected')?.scrollIntoView({ block: 'nearest' }),
   );
@@ -510,7 +501,7 @@ onMounted(async () => {
   }
 });
 function protectDraft(event: BeforeUnloadEvent): void {
-  if (files.dirty || plugins.dirty) {
+  if (files.dirty || plugins.dirty || workspace.settingsDirty) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -591,7 +582,8 @@ watch(
   () => terminals.panes.length,
   (count) => {
     if (!count && !workspace.closing.length)
-      for (const tab of [...workspace.tabs]) if (tab.view === 'terminals') workspace.close(tab.key);
+      for (const tab of [...workspace.tabs])
+        if (tab.view === 'terminals' && tab.hostId) workspace.close(tab.key);
   },
 );
 watch(
@@ -628,36 +620,42 @@ watch(
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'sidebar-collapsed': !sidebarOpen }" :style="layoutStyle">
+  <div class="app-shell" :style="layoutStyle">
     <AppHeader
       :search-shortcut="
         application.state?.config.product?.shortcuts.search ?? defaultShortcuts.search!
       "
       @search="searching = true"
     />
-    <aside id="host-sidebar" class="sidebar" :aria-label="tr('主机管理侧栏')">
-      <AppNavigation
-        :local-active="isHostWorkspace && view === 'terminals' && !currentHostId"
-        :settings-open="settingsOpen"
-        :collapsed="!sidebarOpen"
-        @expand="toggleSidebar"
-        @navigate="navigate($event, $event === 'terminals' ? '' : currentHostId)"
+    <AppNavigation
+      :area="workspace.area"
+      :disabled="workspace.navigationBlocked"
+      @home="workspace.showHome()"
+      @local="navigate('terminals', '')"
+      @settings="workspace.showSettings()"
+    />
+    <aside id="host-sidebar" class="sidebar" :aria-label="tr('侧栏菜单')">
+      <HostSidebar
+        v-show="workspace.area === 'home'"
+        id="host-tree-panel"
+        :active="workspace.area === 'home'"
+        @plugin="openPlugin"
+        @create="openHost($event)"
+        @import-openssh="importingOpenSsh = true"
+        @select="setContext($event.id, true)"
+        @saved="revealHost"
+      />
+      <section
+        v-show="workspace.area === 'local'"
+        class="local-session-sidebar"
+        :aria-label="tr('本地终端会话')"
       >
-        <HostSidebar
-          v-show="sidebarOpen"
-          id="host-tree-panel"
-          :active="sidebarOpen"
-          @collapse="toggleSidebar"
-          @plugin="openPlugin"
-          @create="openHost($event)"
-          @import-openssh="importingOpenSsh = true"
-          @select="setContext($event.id, true)"
-          @saved="revealHost"
-        />
-      </AppNavigation>
+        <h2>{{ tr('本地终端') }}</h2>
+        <div id="local-terminal-session-list"></div>
+      </section>
+      <SettingsNavigation v-show="settingsOpen" />
     </aside>
     <div
-      v-if="sidebarOpen"
       class="sidebar-resizer"
       role="separator"
       :aria-label="tr('调整主机侧栏宽度')"
@@ -670,13 +668,23 @@ watch(
       @keydown="sidebarKey"
     />
     <main class="main-content">
-      <div class="workspace-navigation">
+      <SettingsView v-if="workspace.settingsView" v-show="settingsOpen" :active="settingsOpen" />
+      <div v-show="workspace.area === 'home'" class="workspace-navigation">
         <div
           class="tabbar workspace-tabs"
           role="tablist"
           :aria-label="tr('工作区')"
           @keydown="workspaceKeys"
         >
+          <button
+            class="workspace-start-tab"
+            role="tab"
+            :aria-selected="!workspace.active"
+            :tabindex="!workspace.active ? 0 : -1"
+            @click="workspace.showHome(true)"
+          >
+            {{ tr('起步页') }}
+          </button>
           <div
             v-for="tab in workspace.tabs"
             :key="tab.key"
@@ -717,7 +725,7 @@ watch(
         </div>
       </div>
       <div
-        v-show="isHostWorkspace"
+        v-show="!settingsOpen && isHostWorkspace"
         class="workspace-header"
         :inert="workspace.closing.includes(workspace.active)"
       >
@@ -733,15 +741,18 @@ watch(
           tr('本地终端')
         }}</strong>
       </div>
-      <div v-show="view === 'terminals'" id="terminal-session-tools"></div>
-      <p v-if="isHostWorkspace && connectionChanged" class="banner" role="status">
+      <div
+        v-show="!settingsOpen && view === 'terminals' && workspace.area === 'home'"
+        id="terminal-session-tools"
+      ></div>
+      <p v-if="!settingsOpen && isHostWorkspace && connectionChanged" class="banner" role="status">
         {{ tr(' 当前仍操作建立时的连接：') }}{{ currentHost?.username }}@{{
           currentHost?.hostname
         }}:{{ currentHost?.port
         }}{{ tr('。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。 ') }}
       </p>
       <div
-        v-show="view !== 'terminals'"
+        v-show="!settingsOpen && view !== 'terminals'"
         class="content-scroll"
         :class="{ 'plugin-frame-workspace': view === 'extension' }"
         :inert="workspace.closing.includes(workspace.active)"
@@ -799,16 +810,22 @@ watch(
       </div>
       <div
         class="terminal-workspace"
-        :class="{ 'terminal-hidden': view !== 'terminals' }"
-        :inert="view !== 'terminals' || workspace.closing.includes(workspace.active) || undefined"
-        :aria-hidden="view !== 'terminals' || undefined"
+        :class="{ 'terminal-hidden': settingsOpen || view !== 'terminals' }"
+        :inert="
+          settingsOpen ||
+          view !== 'terminals' ||
+          workspace.closing.includes(workspace.active) ||
+          undefined
+        "
+        :aria-hidden="settingsOpen || view !== 'terminals' || undefined"
       >
         <div class="terminal-primary">
           <TerminalsView
             v-if="view === 'terminals' || terminals.tabs.length"
-            :visible="view === 'terminals'"
+            :visible="!settingsOpen && view === 'terminals'"
             :host-id="currentHostId"
             toolbar-target="#terminal-session-tools"
+            local-session-target="#local-terminal-session-list"
             @server="openServer"
           />
         </div>
@@ -833,12 +850,6 @@ watch(
     </footer>
   </div>
   <NotificationToasts />
-  <SettingsDialog v-if="settingsOpen" />
-  <PluginSettingsDialog
-    v-if="workspace.pluginConfiguration && !settingsOpen"
-    :key="workspace.pluginConfiguration.pluginId"
-    :plugin-id="workspace.pluginConfiguration.pluginId"
-  />
   <Modal v-if="pluginTarget" :title="tr('选择使用工具的主机')" @close="pluginTarget = null">
     <p>{{ tr('选择主机后，工具将在该主机工作区打开。') }}</p>
     <div class="action-row">

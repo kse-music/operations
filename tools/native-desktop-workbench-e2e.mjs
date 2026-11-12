@@ -117,7 +117,7 @@ try {
   assert.equal(await page.locator('.workspace-tab').count(), 1);
   assert(await page.locator('.host-tree-section').isVisible());
   await navigateWorkspace(page, '通用');
-  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  const settings = page.locator('.settings-page:visible');
   const theme = settings.getByTestId('theme-select');
   const originalTheme = await theme.inputValue();
   const nextTheme = originalTheme === 'dark' ? 'light' : 'dark';

@@ -25,11 +25,21 @@ export function pluginPageKey(
   return `extension:${tab.pluginId}:${tab.contributionId}:${tab.hostId}`;
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';
+export type WorkspaceArea = 'home' | 'local' | 'settings';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const tabs = ref<WorkspaceTab[]>([]),
     active = ref(''),
     hostId = ref('');
   const settingsView = ref<SettingsView | null>(null);
+  const area = ref<WorkspaceArea>('home');
+  const settingsBusy = ref(false);
+  const settingsDirty = ref(false);
+  const navigationBlocked = computed(
+    () =>
+      area.value === 'settings' &&
+      (settingsBusy.value || pluginSettingsBusy.value || usePluginsStore().busy),
+  );
+  let homeKey = '';
   const pluginSettingsBusy = ref(false);
   const current = computed(() => tabs.value.find((t) => t.key === active.value));
   const pluginPages = ref<WorkspaceTab[]>([]);
@@ -43,27 +53,54 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     else navigate('terminals', id);
   }
   function activate(key: string): void {
+    if (navigationBlocked.value) return;
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
     active.value = key;
+    area.value = isHostTab(tab) && !tab.hostId ? 'local' : 'home';
+    if (area.value === 'home') homeKey = key;
     if (isHostTab(tab)) hostId.value = tab.hostId;
+    if (tab.view === 'terminals') useTerminalsStore().activateHost(tab.hostId);
+  }
+  function showHome(welcome = false): void {
+    if (navigationBlocked.value) return;
+    if (welcome) homeKey = '';
+    const tab = tabs.value.find((tab) => tab.key === homeKey);
+    if (tab) activate(tab.key);
+    else {
+      active.value = '';
+      area.value = 'home';
+    }
+  }
+  function showSettings(): void {
+    if (navigationBlocked.value) return;
+    settingsView.value ??= 'settings';
+    area.value = 'settings';
   }
   function openPluginSettings(pluginId: string, contributionId?: string): void {
     const plugins = usePluginsStore();
     if (
-      pluginConfiguration.value ||
+      settingsBusy.value ||
       pluginSettingsBusy.value ||
       plugins.busy ||
       !plugins.installed.some((p) => p.manifest.id === pluginId)
     )
       return;
+    if (pluginConfiguration.value) {
+      if (pluginConfiguration.value.pluginId !== pluginId)
+        plugins.error = tr('请先返回插件列表，再打开其他插件配置。');
+      settingsView.value = 'plugins';
+      area.value = 'settings';
+      return;
+    }
     const settings = plugins.extensions.find(
       (entry) =>
         entry.pluginId === pluginId &&
         entry.kind === 'settings' &&
         (!contributionId || entry.id === contributionId),
     );
-    if (settingsView.value) settingsView.value = 'plugins';
+    settingsView.value = 'plugins';
+    area.value = 'settings';
     pluginConfiguration.value = { pluginId, contributionId: settings?.id ?? null };
   }
   function closePluginSettings(): void {
@@ -76,6 +113,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     target = '',
     section?: ServerSection,
   ): Promise<void> {
+    if (navigationBlocked.value) return;
     const plugins = usePluginsStore();
     const installed = plugins.installed.find((p) => p.manifest.id === pluginId);
     if (!installed) return;
@@ -112,10 +150,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     target = hostId.value,
     section?: WorkspaceTab['section'],
   ): void {
+    if (navigationBlocked.value) return;
     if (isSettingsView(view)) {
       if (pluginSettingsBusy.value || usePluginsStore().busy) return;
       pluginConfiguration.value = undefined;
       settingsView.value = view;
+      area.value = 'settings';
       return;
     }
     const hostView = hostViews.has(view);
@@ -136,13 +176,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const closing = ref<string[]>([]);
   const settingsCloseGuard = shallowRef<() => Promise<boolean>>();
   async function closeSettings(): Promise<void> {
-    if (!settingsView.value || pluginSettingsBusy.value || usePluginsStore().busy) return;
+    if (!settingsView.value || navigationBlocked.value) return;
     if (settingsCloseGuard.value && !(await settingsCloseGuard.value())) return;
     if (pluginSettingsBusy.value || usePluginsStore().busy) return;
     pluginConfiguration.value = undefined;
     settingsView.value = null;
+    area.value =
+      current.value && isHostTab(current.value) && !current.value.hostId ? 'local' : 'home';
   }
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
+    if (navigationBlocked.value) return;
+    const previousArea = area.value;
     const index = tabs.value.findIndex((t) => t.key === key);
     if (index < 0) return;
     const targets = tabs.value.filter((tab, i) => {
@@ -218,6 +262,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } else if (active.value && !tabs.value.some((tab) => tab.key === active.value)) {
       activate(tabs.value[Math.min(index, tabs.value.length - 1)]!.key);
     }
+    if (previousArea === 'settings') area.value = 'settings';
   }
   return {
     tabs,
@@ -227,6 +272,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     closing,
     settingsCloseGuard,
     settingsView,
+    area,
+    settingsBusy,
+    settingsDirty,
+    navigationBlocked,
+    showHome,
+    showSettings,
     pluginSettingsBusy,
     closeSettings,
     selectHost,

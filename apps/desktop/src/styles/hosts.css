@@ -46,11 +46,6 @@
   color: var(--accent);
   background: var(--accent-bg);
 }
-.host-heading-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 .host-list-title {
   display: inline-flex;
   align-items: center;

@@ -23,6 +23,59 @@ beforeEach(async () => {
 });
 afterEach(() => disposePinia(getActivePinia()!));
 
+it('preserves home, local sessions and the settings category across fixed navigation', () => {
+  const workspace = useWorkspaceStore(),
+    terminals = useTerminalsStore();
+  terminals.open({ id: 'a', name: 'A' } as Host);
+  const remote = terminals.focused;
+  workspace.navigate('terminals', 'a');
+  terminals.open(null);
+  const local = terminals.focused;
+  workspace.navigate('terminals', '');
+  workspace.navigate('settingsTerminal');
+  workspace.settingsDirty = true;
+  workspace.showHome();
+  expect(workspace.area).toBe('home');
+  expect(workspace.current?.hostId).toBe('a');
+  expect(terminals.focused).toBe(remote);
+  workspace.navigate('terminals', '');
+  expect(terminals.focused).toBe(local);
+  workspace.showSettings();
+  expect(workspace.area).toBe('settings');
+  expect(workspace.settingsView).toBe('settingsTerminal');
+  expect(workspace.settingsDirty).toBe(true);
+  expect(terminals.panes).toHaveLength(2);
+});
+
+it('blocks area switches and resource activation while settings are busy', () => {
+  const workspace = useWorkspaceStore();
+  workspace.navigate('files', 'a');
+  workspace.navigate('settings');
+  workspace.settingsBusy = true;
+  workspace.showHome();
+  workspace.navigate('terminals', '');
+  workspace.activate('host:a');
+  expect(workspace.area).toBe('settings');
+  expect(workspace.tabs.map((tab) => tab.key)).toEqual(['host:a']);
+  workspace.settingsBusy = false;
+  workspace.showHome();
+  expect(workspace.area).toBe('home');
+});
+
+it('returns to an existing plugin configuration without replacing its draft', () => {
+  const workspace = useWorkspaceStore();
+  workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+  const configuration = workspace.pluginConfiguration;
+  workspace.showHome();
+  workspace.openPluginSettings('cn.hiboot.plugins.assistant');
+  expect(workspace.area).toBe('settings');
+  expect(workspace.pluginConfiguration).toBe(configuration);
+  workspace.showHome();
+  workspace.openPluginSettings('cn.hiboot.plugins.docker');
+  expect(workspace.pluginConfiguration).toBe(configuration);
+  expect(usePluginsStore().error).toContain('返回插件列表');
+});
+
 it('protects hidden plugin drafts before closing a host and clears them only after an accepted close', async () => {
   const workspace = useWorkspaceStore(),
     plugins = usePluginsStore(),
@@ -332,7 +385,7 @@ it('shows the host controls for a plugin without a settings contribution in the 
   expect(workspace.tabs).toHaveLength(1);
 });
 
-it('opens an authorized settings contribution without navigating or creating a workspace tab', async () => {
+it('opens an authorized settings contribution in the settings page without replacing the active workspace', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
   const active = workspace.current;
@@ -345,7 +398,7 @@ it('opens an authorized settings contribution without navigating or creating a w
   expect(workspace.hostId).toBe('a');
   expect(workspace.tabs).toEqual([active]);
   expect(workspace.pluginPages).toEqual([]);
-  expect(workspace.settingsView).toBeNull();
+  expect(workspace.settingsView).toBe('plugins');
   await workspace.closePluginSettings();
   expect(workspace.pluginConfiguration).toBeUndefined();
   expect(workspace.current).toBe(active);
@@ -384,7 +437,7 @@ it.each(['save', 'mutation'] as const)(
 );
 
 it.each(['save', 'mutation'] as const)(
-  'keeps standalone plugin settings open during a plugin %s',
+  'keeps plugin settings on the page open during a plugin %s',
   async (operation) => {
     const workspace = useWorkspaceStore(),
       plugins = usePluginsStore();
@@ -399,12 +452,12 @@ it.each(['save', 'mutation'] as const)(
     await workspace.closePluginSettings();
     workspace.navigate('models');
     expect(workspace.pluginConfiguration).toBe(configuration);
-    expect(workspace.settingsView).toBeNull();
+    expect(workspace.settingsView).toBe('plugins');
     workspace.pluginSettingsBusy = false;
     plugins.busy = false;
     await workspace.closePluginSettings();
     expect(workspace.pluginConfiguration).toBeUndefined();
-    expect(workspace.settingsView).toBeNull();
+    expect(workspace.settingsView).toBe('plugins');
     expect(workspace.current).toBe(current);
     expect(guard).not.toHaveBeenCalled();
   },

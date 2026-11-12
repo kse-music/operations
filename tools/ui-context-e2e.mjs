@@ -1,3 +1,4 @@
+import { showHostTree } from './ui-navigation.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
@@ -52,7 +53,7 @@ try {
     await localTerminal.click();
     await page.locator('.terminal-pane:visible[data-host-id=""]').waitFor();
     assert.equal(await localTerminal.getAttribute('aria-current'), 'page');
-    if (width <= 720) await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+    await showHostTree(page);
     assert.equal(await hostTabs.getByRole('tab', { name: '本地终端', exact: true }).count(), 1);
     if (name === 'desktop-dark')
       await page.screenshot({
@@ -131,9 +132,7 @@ try {
       assert.equal(await page.locator('.workspace-tab.active').count(), 1);
       assert.equal(await page.locator('.host-tree-section').isVisible(), treeVisibleBeforeSettings);
       assert.equal(
-        await page
-          .locator('.settings-dialog-navigation [aria-current="page"]')
-          .getAttribute('aria-label'),
+        await page.locator('.settings-navigation [aria-current="page"]').getAttribute('aria-label'),
         category,
       );
     }
@@ -263,7 +262,7 @@ try {
     await assertHost('b', 'files');
     assert.equal(await page.getByLabel('远程路径', { exact: true }).inputValue(), '/b');
     await nav('通用');
-    assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).count(), 1);
+    assert.equal(await page.locator('.settings-page:visible').count(), 1);
     assert.equal(await hostTabs.isVisible(), true);
     assert.equal(await page.getByRole('navigation', { name: '当前主机工具' }).count(), 1);
     await closeApplicationSettings(page);
@@ -309,9 +308,7 @@ try {
     await page.screenshot({ path: `${output}/${name}-closed-session.png` });
     await nav('模型');
     assert.equal(
-      await page
-        .locator('.settings-dialog-navigation [aria-current="page"]')
-        .getAttribute('aria-label'),
+      await page.locator('.settings-navigation [aria-current="page"]').getAttribute('aria-label'),
       '模型',
     );
     await page.screenshot({ path: `${output}/${name}-models-settings.png` });
@@ -319,9 +316,7 @@ try {
     await closeApplicationSettings(page);
     await nav('插件管理');
     assert.equal(
-      await page
-        .locator('.settings-dialog-navigation [aria-current="page"]')
-        .getAttribute('aria-label'),
+      await page.locator('.settings-navigation [aria-current="page"]').getAttribute('aria-label'),
       '插件',
     );
     await selectHostWorkspace(page, 'b');

@@ -121,10 +121,7 @@ try {
   await page.getByRole('menu', { name: '主机树操作', exact: true }).waitFor();
   await page.keyboard.press('Escape');
   await navigateWorkspace(page, '通用');
-  await checkMenu(
-    page,
-    page.getByRole('dialog', { name: '设置', exact: true }).locator('h2').first(),
-  );
+  await checkMenu(page, page.locator('.settings-page:visible').locator('h2').first());
   await closeApplicationSettings(page);
   passed.push(
     'Main window blank areas, inputs and teleported settings suppress the browser menu; host tree menu still opens',

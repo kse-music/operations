@@ -9,7 +9,7 @@ import PluginView from '../views/PluginView.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
 
-const props = defineProps<{ pluginId: string; standalone?: boolean }>();
+const props = withDefaults(defineProps<{ pluginId: string; active?: boolean }>(), { active: true });
 const plugins = usePluginsStore();
 const workspace = useWorkspaceStore();
 const opener = document.activeElement;
@@ -73,24 +73,14 @@ async function select(event: Event): Promise<void> {
 
 async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
   if (busy.value) return;
-  if (props.standalone && action === 'close') {
-    workspace.closePluginSettings();
-    return;
-  }
   workspace.navigate(action === 'models' ? 'models' : 'plugins');
   if (action === 'close') {
     await nextTick();
-    if (
-      opener instanceof HTMLElement &&
-      opener.isConnected &&
-      opener.closest('.settings-dialog-body')
-    )
+    if (opener instanceof HTMLElement && opener.isConnected && opener.closest('.settings-page'))
       opener.focus();
     else
       document
-        .querySelector<HTMLButtonElement>(
-          '.settings-dialog-navigation [data-settings-view="plugins"]',
-        )
+        .querySelector<HTMLButtonElement>('.settings-navigation [data-settings-view="plugins"]')
         ?.focus();
   }
 }
@@ -103,7 +93,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
       tr('{0} · 配置', plugin ? plugins.metadata(plugin, plugin.manifest.name) : tr('插件'))
     "
   >
-    <header v-if="!standalone" class="plugin-configuration-heading">
+    <header class="plugin-configuration-heading">
       <button class="button" :aria-label="tr('返回插件列表')" :disabled="busy" @click="finish()">
         <ArrowLeft :size="16" aria-hidden="true" />{{ tr('插件 ') }}
       </button>
@@ -165,6 +155,7 @@ async function finish(action: 'close' | 'models' = 'close'): Promise<void> {
           v-if="contribution"
           :key="contextKey"
           settings-page
+          :active="props.active && activeTab === 'settings'"
           :plugin-id="pluginId"
           :contribution-id="contribution.id"
           host-id=""

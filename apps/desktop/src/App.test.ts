@@ -52,25 +52,25 @@ const flush = async () => {
 };
 async function openNavigation(label: string): Promise<void> {
   const workspace = useWorkspaceStore();
-  if (!workspace.settingsView) {
+  if (workspace.area !== 'settings') {
     document.querySelector<HTMLButtonElement>('.sidebar-app-actions [aria-label="设置"]')!.click();
     await flush();
   }
   document
     .querySelector<HTMLButtonElement>(
-      `.settings-dialog-navigation [aria-label="${label === '插件管理' ? '插件' : label}"]`,
+      `.settings-navigation [aria-label="${label === '插件管理' ? '插件' : label}"]`,
     )!
     .click();
   await flush();
 }
-async function openPluginModal(name: string): Promise<HTMLDialogElement> {
+async function openPluginModal(name: string): Promise<HTMLElement> {
   await openNavigation('插件管理');
   [...document.querySelectorAll<HTMLButtonElement>('.plugin-name-button')]
     .find((button) => button.textContent?.trim() === name)!
     .click();
   await flush();
   expect(document.querySelector(`[aria-label="${name} · 配置"]`)).not.toBeNull();
-  return document.querySelector<HTMLDialogElement>('dialog[aria-label="设置"]')!;
+  return document.querySelector<HTMLDialogElement>('.settings-page')!;
 }
 async function newSession(): Promise<void> {
   document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
@@ -135,9 +135,9 @@ it('switches the shell and built-in plugin labels while preserving sessions and 
     .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   await vi.waitFor(() => expect(application.state!.config.product.language).toBe('en-US'));
   await flush();
-  expect(document.querySelector('dialog[aria-label="Settings"]')).not.toBeNull();
+  expect(document.querySelector('.settings-page[aria-label="Settings page"]')).not.toBeNull();
   expect(
-    [...document.querySelectorAll('.settings-dialog-navigation .nav-item')].map((item) =>
+    [...document.querySelectorAll('.settings-navigation .nav-item')].map((item) =>
       item.textContent?.trim(),
     ),
   ).toEqual(['General', 'Terminal', 'Shortcuts', 'Data and storage', 'Models', 'Plugins', 'About']);
@@ -488,7 +488,7 @@ it.each(['.activity-rail', '.sidebar', '.content-scroll', '.sidebar input'])(
   },
 );
 
-it('opens About inside the settings window and preserves the connected terminal', async () => {
+it('opens About inside the settings page and preserves the connected terminal', async () => {
   loadSidebarConfig();
   useApplicationStore().state!.appVersion = '9.8.7-test.1';
   const workspace = useWorkspaceStore(),
@@ -544,7 +544,7 @@ it('opens plugin management inside settings without adding a tab or changing the
     ),
   ).toEqual(['terminals']);
   expect(workspace.settingsView).toBe('plugins');
-  expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
+  expect(document.querySelectorAll('dialog[open]')).toHaveLength(0);
   await openNavigation('数据与存储');
   expect(document.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')?.value).toBe('zh-CN');
   expect(workspace.current?.view).toBe('terminals');
@@ -565,10 +565,8 @@ it('keeps shared preferences and close protection when managing plugins', async 
   width.value = '300';
   width.dispatchEvent(new Event('input', { bubbles: true }));
   await openNavigation('插件管理');
-  const close = document.querySelector<HTMLButtonElement>(
-    'dialog[aria-label="设置"] [aria-label="关闭对话框"]',
-  )!;
-  close.click();
+  const close = () => void workspace.closeSettings();
+  close();
   await flush();
   const prompt = () =>
     document.querySelector<HTMLDialogElement>('dialog[aria-label="设置尚未保存"]')!;
@@ -579,7 +577,7 @@ it('keeps shared preferences and close protection when managing plugins', async 
   expect(workspace.settingsView).toBe('plugins');
   expect(document.querySelector('.settings-panel')).toBe(panel);
   expect(width.value).toBe('300');
-  close.click();
+  close();
   await flush();
   [...prompt().querySelectorAll('button')]
     .find((button) => button.textContent?.trim() === '放弃更改并关闭')!
@@ -695,7 +693,7 @@ it.each([
   ['快捷键', 'settingsShortcuts', '[aria-label="复制快捷键"]', ''],
   ['数据与存储', 'settingsStorage', '[aria-label="默认下载目录"]', 'D:\\Downloads'],
 ])(
-  'warns before closing the settings window with dirty %s preferences',
+  'warns before discarding the settings draft with dirty %s preferences',
   async (label, view, selector, value) => {
     loadSidebarConfig();
     const save = vi.spyOn(ipc, 'saveConfig');
@@ -711,11 +709,7 @@ it.each([
       );
     }
     await flush();
-    document
-      .querySelector<HTMLButtonElement>(
-        'dialog[aria-label="设置"] > .modal-heading [aria-label="关闭对话框"]',
-      )!
-      .click();
+    void workspace.closeSettings();
     await flush();
     const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="设置尚未保存"]')!;
     expect(dialog).not.toBeNull();
@@ -914,7 +908,7 @@ it('removes the task center from the footer, search and legacy shortcuts without
   expect(JSON.stringify(useTerminalsStore().tabs)).toBe(original);
 });
 
-it('opens model management from global search in the shared settings window without creating a tab', async () => {
+it('opens model management from global search in the shared settings page without creating a tab', async () => {
   loadSidebarConfig();
   const workspace = useWorkspaceStore();
   workspace.navigate('files', 'a');
@@ -932,7 +926,7 @@ it('opens model management from global search in the shared settings window with
   expect(workspace.tabs).toHaveLength(1);
   expect(
     document
-      .querySelector('.settings-dialog-navigation [aria-current="page"]')
+      .querySelector('.settings-navigation [aria-current="page"]')
       ?.getAttribute('aria-label'),
   ).toBe('模型');
 });
@@ -1011,86 +1005,134 @@ it('confirms active transfer cancellation before closing a host and preserves th
   expect(files.tasks.filter((task) => task.hostId === 'a')).toEqual([]);
 });
 
-it('collapses the persistent host tree from its heading and transfers focus while retaining search', async () => {
-  const toggle = document.querySelector<HTMLButtonElement>(
-    '.host-list-heading [aria-controls="host-tree-panel"]',
-  )!;
+it('keeps all three columns and preserves the host tree and search across navigation', async () => {
+  const workspace = useWorkspaceStore();
   const tree = document.querySelector('.host-tree-section');
+  const sidebar = document.querySelector('.sidebar');
+  const rail = document.querySelector('.activity-rail');
   useHostsStore().search = 'Host a';
   await nextTick();
-  toggle.click();
+  expect(
+    document.querySelector('[aria-label="收起主机栏"], [aria-label="展开主机列表"]'),
+  ).toBeNull();
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
-  expect(document.querySelector<HTMLElement>('.sidebar')!.style.display).not.toBe('none');
-  expect(document.querySelector<HTMLElement>('.host-tree-section')!.style.display).toBe('none');
-  expect(document.querySelector('.activity-rail-collapsed')).not.toBeNull();
-  const expand = document.querySelector<HTMLButtonElement>(
-    '.sidebar-quick-actions [aria-label="展开主机列表"]',
-  )!;
-  expect(document.querySelector('.app-header [aria-controls]')).toBeNull();
-  expect(document.activeElement).toBe(expand);
-  expect(expand.getAttribute('aria-expanded')).toBe('false');
-  expand.click();
+  expect(workspace.area).toBe('local');
+  expect(document.querySelector('.sidebar')).toBe(sidebar);
+  expect(document.querySelector('.activity-rail')).toBe(rail);
+  expect(document.querySelector('.local-session-sidebar .terminal-tabs')).not.toBeNull();
+  await openNavigation('关于');
+  expect(workspace.area).toBe('settings');
+  expect(document.querySelector('dialog[aria-label="设置"]')).toBeNull();
+  expect(document.querySelector<HTMLElement>('.settings-sidebar')!.style.display).not.toBe('none');
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.click();
   await flush();
-  expect(document.querySelector<HTMLElement>('.sidebar')!.style.display).not.toBe('none');
-  expect(toggle.ariaLabel).toBe('收起主机栏');
-  expect(document.activeElement).toBe(toggle);
-  expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  expect(useHostsStore().search).toBe('Host a');
-  await openNavigation('插件管理');
-  await useWorkspaceStore().closeSettings();
-  await flush();
+  expect(workspace.area).toBe('home');
   expect(document.querySelector('.host-tree-section')).toBe(tree);
   expect(document.querySelector<HTMLElement>('.host-tree-section')!.style.display).not.toBe('none');
-  expect(document.querySelector('.workspace-group-tab')).toBeNull();
-  expect(useTerminalsStore().panes).toEqual([]);
+  expect(useHostsStore().search).toBe('Host a');
+  expect(document.querySelector('.sidebar')).toBe(sidebar);
 });
 
-it('keeps collapsed rail actions reachable without replacing the host tree or closing sessions', async () => {
+it('retains remote and local sessions and settings drafts while switching the fixed rail', async () => {
+  loadSidebarConfig();
   const workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
   document
-    .querySelector<HTMLButtonElement>('.tree-host[data-host-id="a"]')!
+    .querySelector('.tree-host')!
     .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
-  const hostPane = terminals.panes[0]!;
-  const tree = document.querySelector('.host-tree-section');
+  const remote = terminals.panes[0]!;
   const close = vi.spyOn(terminalApi, 'close');
-  document
-    .querySelector<HTMLButtonElement>('.host-list-heading [aria-label="收起主机栏"]')!
-    .click();
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
-  const railAction = (label: string) =>
-    document.querySelector<HTMLButtonElement>(`.activity-rail-collapsed [aria-label="${label}"]`)!;
-  expect(document.querySelector('.activity-rail [aria-label="插件管理"]')).toBeNull();
-  expect(document.querySelector('.app-shell.sidebar-collapsed')).not.toBeNull();
-  railAction('设置').click();
+  const local = terminals.panes.find((pane) => !pane.host)!;
+  await openNavigation('通用');
+  const field = document.querySelector<HTMLInputElement>('[aria-label="侧边栏宽度"]')!;
+  field.value = '300';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
   await flush();
-  expect(document.querySelector('dialog[aria-label="设置"]')).not.toBeNull();
-  expect(workspace.current?.view).toBe('terminals');
-  await openNavigation('插件管理');
-  expect(workspace.settingsView).toBe('plugins');
-  expect(workspace.current?.hostId).toBe('a');
-  await workspace.closeSettings();
+  expect(workspace.settingsDirty).toBe(true);
+  const settingsPage = document.querySelector('.settings-page');
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.click();
   await flush();
-  expect(document.querySelector('.activity-rail-collapsed [aria-label="全局搜索"]')).toBeNull();
-  expect(document.querySelectorAll('button[aria-label="全局搜索"]')).toHaveLength(1);
-  document.querySelector<HTMLButtonElement>('.app-header [aria-label="全局搜索"]')!.click();
+  expect(workspace.current?.hostId).toBe(remote.host?.id);
+  expect(terminals.focused).toBe(remote.key);
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
-  document
-    .querySelector<HTMLButtonElement>('dialog[aria-label="全局搜索"] [aria-label="关闭对话框"]')!
-    .click();
+  expect(terminals.focused).toBe(local.key);
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="设置"]')!.click();
   await flush();
-  railAction('本地终端').click();
-  await flush();
-  expect(workspace.current).toMatchObject({ view: 'terminals', hostId: '' });
-  expect(terminals.panes.some((pane) => pane.key === hostPane.key)).toBe(true);
-  expect(document.querySelector('.app-shell.sidebar-collapsed')).not.toBeNull();
-  railAction('展开主机列表').click();
-  await flush();
-  expect(document.querySelector<HTMLElement>('.host-tree-section')!.style.display).not.toBe('none');
-  expect(document.querySelector('.host-tree-section')).toBe(tree);
-  expect(workspace.current?.hostId).toBe('');
+  expect(document.querySelector('.settings-page')).toBe(settingsPage);
+  expect(field.value).toBe('300');
+  expect(document.querySelector('dialog[aria-label="设置尚未保存"]')).toBeNull();
+  expect(terminals.panes).toContain(remote);
+  expect(terminals.panes).toContain(local);
   expect(close).not.toHaveBeenCalled();
+});
+
+it('supports vertical keyboard selection in the local session list', async () => {
+  const terminals = useTerminalsStore();
+  for (let index = 0; index < 3; index++) terminals.open(null);
+  useWorkspaceStore().navigate('terminals', '');
+  await flush();
+  const list = document.querySelector('.local-session-sidebar [role="tablist"]')!;
+  expect(list.getAttribute('aria-orientation')).toBe('vertical');
+  const buttons = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  buttons[0]!.focus();
+  buttons[0]!.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+  );
+  await flush();
+  expect(terminals.active).toBe(terminals.hostTabs('')[1]?.key);
+  expect(document.activeElement).toBe(buttons[1]);
+  buttons[1]!.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true }),
+  );
+  await flush();
+  expect(terminals.active).toBe(terminals.hostTabs('')[2]?.key);
+  expect(document.activeElement).toBe(buttons[2]);
+  buttons[2]!.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true }),
+  );
+  await flush();
+  expect(terminals.active).toBe(terminals.hostTabs('')[0]?.key);
+  expect(document.activeElement).toBe(buttons[0]);
+});
+
+it('protects a hidden settings draft before confirming application exit', async () => {
+  loadSidebarConfig();
+  await openNavigation('通用');
+  const field = document.querySelector<HTMLInputElement>('[aria-label="侧边栏宽度"]')!;
+  field.value = '300';
+  field.dispatchEvent(new Event('input', { bubbles: true }));
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.click();
+  await flush();
+  const exit = vi.spyOn(filesApi, 'exit').mockResolvedValue();
+  useFilesStore().exitReview = true;
+  await flush();
+  const confirm = document.querySelector<HTMLButtonElement>(
+    'dialog[aria-label="确认退出 ServerDeck"] button.danger',
+  )!;
+  confirm.click();
+  await flush();
+  const prompt = () =>
+    document.querySelector<HTMLDialogElement>('dialog[aria-label="设置尚未保存"]')!;
+  expect(prompt()).not.toBeNull();
+  expect(exit).not.toHaveBeenCalled();
+  [...prompt().querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '继续编辑')!
+    .click();
+  await flush();
+  expect(field.value).toBe('300');
+  expect(exit).not.toHaveBeenCalled();
+  confirm.click();
+  await flush();
+  [...prompt().querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '放弃更改并关闭')!
+    .click();
+  await flush();
+  expect(exit).toHaveBeenCalledExactlyOnceWith(true);
 });
 
 it('keeps the root folder count and search without a duplicate heading count or JSON controls', () => {
@@ -1099,9 +1141,7 @@ it('keeps the root folder count and search without a duplicate heading count or 
   expect(heading.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
   expect(heading.querySelector('.host-count')).toBeNull();
   expect(document.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('2');
-  expect([...heading.querySelectorAll('button')].map((button) => button.ariaLabel)).toEqual([
-    '收起主机栏',
-  ]);
+  expect(heading.querySelectorAll('button')).toHaveLength(0);
   expect(document.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
   expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
 });
@@ -1195,7 +1235,7 @@ it('selects administrator mode from the session plus menu without replacing ordi
 });
 
 it.each([null, '', 'a'])(
-  'opens or reuses the local terminal below the host tree and above settings in context "%s"',
+  'opens or reuses the local terminal from the fixed rail in context "%s"',
   async (hostId) => {
     const workspace = useWorkspaceStore();
     if (hostId !== null) workspace.navigate('terminals', hostId);
@@ -1205,14 +1245,15 @@ it.each([null, '', 'a'])(
       '.sidebar-work-actions > [aria-label="本地终端"]',
     )!;
     expect(local.closest('.sidebar-work-actions')).not.toBeNull();
-    expect(local.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(local.closest('.activity-rail')).not.toBeNull();
+    expect(document.querySelector('.activity-rail')?.contains(section)).toBe(false);
     expect(
       local
         .closest('.sidebar-work-actions')
         ?.nextElementSibling?.classList.contains('sidebar-app-actions'),
     ).toBe(true);
     expect(local.querySelector('svg')).not.toBeNull();
-    expect(local.textContent?.trim()).toBe('本地终端');
+    expect(local.getAttribute('aria-label')).toBe('本地终端');
     expect(section.querySelector('.sidebar-local-device')).toBeNull();
     const hosts = useHostsStore();
     hosts.search = 'no matching host';
@@ -1221,6 +1262,10 @@ it.each([null, '', 'a'])(
     local.click();
     await flush();
     expect(workspace.current?.hostId).toBe('');
+    if (hostId === '') {
+      expect(useTerminalsStore().panes).toHaveLength(0);
+      await newSession();
+    }
     expect(useTerminalsStore().panes.at(-1)?.host).toBeNull();
     expect(local.getAttribute('aria-current')).toBe('page');
     local.click();
@@ -1637,29 +1682,25 @@ it.each(['button', 'middle', 'menu'])(
   },
 );
 
-it('shows welcome after the last terminal closes and opens a new local terminal only on request', async () => {
+it('keeps an empty local session list after the last close and opens a replacement only on explicit creation', async () => {
   const terminals = useTerminalsStore(),
     workspace = useWorkspaceStore();
-  terminals.open(null);
-  workspace.navigate('terminals');
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
-  expect(
-    [...document.querySelectorAll('.workspace-tabs [role="tab"]')].map((tab) =>
-      tab.textContent?.trim(),
-    ),
-  ).toEqual(['本地终端']);
   document
     .querySelector<HTMLButtonElement>('.terminal-tab [aria-label="关闭标签 会话 1"]')!
     .click();
   await flush();
   expect(terminals.panes).toHaveLength(0);
-  expect(workspace.tabs).toHaveLength(0);
-  expect(document.querySelector('[aria-label="欢迎页面"]')).not.toBeNull();
-  document.querySelector<HTMLButtonElement>('[aria-label="欢迎页面"] .primary')!.click();
+  expect(workspace.area).toBe('local');
+  expect(document.querySelector('.local-session-empty')?.textContent).toContain('没有打开的终端');
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
+  expect(terminals.panes).toHaveLength(0);
+  await newSession();
   expect(terminals.panes).toHaveLength(1);
   expect(terminals.panes[0]!.host).toBeNull();
-  expect(workspace.current).toMatchObject({ view: 'terminals', hostId: '' });
+  expect(terminals.hostTabs('')[0]?.sessionNumber).toBe(1);
 });
 
 it('middle-click closes only the target terminal session and retains a tab if close fails', async () => {
@@ -1851,6 +1892,7 @@ it.each(['remote', 'local'])(
       )!
       .dispatchEvent(new MouseEvent(host ? 'dblclick' : 'click', { bubbles: true }));
     await flush();
+    if (!host) await newSession();
     expect(names()).toEqual(['会话 1']);
   },
 );
@@ -2043,9 +2085,7 @@ it('restores each host tool, file connection and terminal session through primar
   await flush();
   expect(workspace.hostId).toBe('b');
   expect((document.querySelector('.sidebar') as HTMLElement).style.display).not.toBe('none');
-  expect((document.querySelector('.host-tree-section') as HTMLElement).style.display).not.toBe(
-    'none',
-  );
+  expect((document.querySelector('.host-tree-section') as HTMLElement).style.display).toBe('none');
   expect(document.querySelector('.workspace-header .host-tools')).not.toBeNull();
   await workspace.closeSettings();
   await flush();
@@ -2057,7 +2097,7 @@ it('restores each host tool, file connection and terminal session through primar
     [...document.querySelectorAll('.workspace-tabs [role="tab"]')].map((t) =>
       t.textContent?.trim(),
     ),
-  ).toEqual(['Host a', 'Host b']);
+  ).toEqual(['起步页', 'Host a', 'Host b']);
   workspace.close(workspace.active, 'all');
   await flush();
   document.querySelector<HTMLButtonElement>('[aria-label="欢迎页面"] .primary')!.click();
@@ -2359,21 +2399,18 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   settingsButton.click();
   await flush();
   expect(workspace.current).toMatchObject({ view: 'extension', hostId: 'a' });
-  expect(workspace.settingsView).toBeNull();
-  expect(document.querySelector('.settings-dialog-navigation')).toBeNull();
-  expect(document.querySelector('.settings-panel')).toBeNull();
-  expect(frameA.getAttribute('data-active')).toBe('true');
+  expect(workspace.settingsView).toBe('plugins');
+  expect(workspace.area).toBe('settings');
+  expect(document.querySelector('.settings-navigation')).not.toBeNull();
+  expect(frameA.getAttribute('data-active')).toBe('false');
   const configuration = document.querySelector('[aria-label="主机草稿工具 · 配置"]')!;
   expect(configuration.querySelector('.plugin-settings-workspace')).not.toBeNull();
-  expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
-  const closeSettings = document.querySelector<HTMLButtonElement>(
-    'dialog[aria-label="主机草稿工具 · 插件设置"] [aria-label="关闭对话框"]',
-  )!;
-  closeSettings.focus();
-  closeSettings.click();
+  expect(document.querySelectorAll('dialog[open]')).toHaveLength(0);
+  configuration.querySelector<HTMLButtonElement>('[aria-label="返回插件列表"]')!.click();
   await flush();
   expect(document.querySelector('[aria-label="主机草稿工具 · 配置"]')).toBeNull();
-  expect(document.activeElement).toBe(settingsButton);
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.click();
+  await flush();
   expect(document.querySelector('.plugin-workspace[data-host-id="a"] textarea')).toBe(editorA);
   expect(editorA.closest('[data-plugin-frame]')).toBe(frameA);
   expect(frameA.getAttribute('data-active')).toBe('true');
@@ -2388,51 +2425,53 @@ it('keeps single-host plugin drafts in their host workspace through host, core-t
   expect(editorB.value).toBe('draft for b');
 });
 
-it('protects standalone plugin settings while saving and routes cancel and model actions', async () => {
+it('protects plugin settings on the page while saving and routes cancel and model actions', async () => {
   const workspace = useWorkspaceStore();
   workspace.navigate('terminals', 'a');
   const current = workspace.current;
   const open = async () => {
     workspace.openPluginSettings('cn.hiboot.plugins.assistant');
     await flush();
-    return document.querySelector<HTMLDialogElement>(
-      'dialog[aria-label="AI 运维助手 · 插件设置"]',
-    )!;
+    return document.querySelector<HTMLElement>('.plugin-configuration')!;
   };
-  const dialog = await open();
-  expect(dialog).not.toBeNull();
-  expect(dialog.querySelector('[data-plugin-frame]')).not.toBeNull();
-  expect(dialog.querySelector('[aria-label="返回插件列表"]')).toBeNull();
-  expect(workspace.settingsView).toBeNull();
-  dialog.querySelector<HTMLButtonElement>('[data-save]')!.click();
+  const panel = await open();
+  expect(panel).not.toBeNull();
+  expect(panel.querySelector('[data-plugin-frame]')).not.toBeNull();
+  expect(panel.querySelector('[aria-label="返回插件列表"]')).not.toBeNull();
+  expect(workspace.settingsView).toBe('plugins');
+  expect(document.querySelector('dialog[aria-label="设置"]')).toBeNull();
+  panel.querySelector<HTMLButtonElement>('[data-save]')!.click();
   await flush();
-  expect(dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.disabled).toBe(true);
-  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
-  await flush();
-  expect(dialog.isConnected).toBe(true);
+  expect(
+    [...document.querySelectorAll<HTMLButtonElement>('.activity-rail button')].every(
+      (button) => button.disabled,
+    ),
+  ).toBe(true);
+  workspace.showHome();
+  expect(workspace.area).toBe('settings');
   expect(workspace.pluginConfiguration).toBeDefined();
-  dialog.querySelector<HTMLButtonElement>('[data-save-failed]')!.click();
+  panel.querySelector<HTMLButtonElement>('[data-save-failed]')!.click();
   await flush();
-  expect(dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.disabled).toBe(
-    false,
-  );
-  dialog.querySelector<HTMLButtonElement>('[data-cancel]')!.click();
+  expect(
+    document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.disabled,
+  ).toBe(false);
+  panel.querySelector<HTMLButtonElement>('[data-cancel]')!.click();
   await flush();
-  expect(dialog.isConnected).toBe(false);
+  expect(panel.isConnected).toBe(false);
   expect(workspace.pluginConfiguration).toBeUndefined();
-  expect(workspace.settingsView).toBeNull();
+  expect(workspace.settingsView).toBe('plugins');
   const reopened = await open();
   reopened.querySelector<HTMLButtonElement>('[data-models]')!.click();
   await flush();
   expect(reopened.isConnected).toBe(false);
   expect(workspace.pluginConfiguration).toBeUndefined();
   expect(workspace.settingsView).toBe('models');
-  expect(document.querySelector('dialog[aria-label="设置"] .models-view')).not.toBeNull();
+  expect(document.querySelector('.settings-page .models-view')).not.toBeNull();
   expect(workspace.current).toBe(current);
   expect(workspace.tabs).toEqual([current]);
 });
 
-it('opens disabled, ungranted and UI-less plugins in the shared settings window without creating tabs', async () => {
+it('opens disabled, ungranted and UI-less plugins in the shared settings page without creating tabs', async () => {
   const workspace = useWorkspaceStore(),
     plugins = usePluginsStore();
   plugins.installed = systemPluginFixtures();
@@ -2468,13 +2507,13 @@ it('opens disabled, ungranted and UI-less plugins in the shared settings window 
       pluginId: plugin.manifest.id,
       contributionId: null,
     });
-    expect(document.querySelector('.activity-rail [aria-current="page"]')?.textContent).toContain(
-      '设置',
-    );
+    expect(
+      document.querySelector('.activity-rail [aria-current="page"]')?.getAttribute('aria-label'),
+    ).toBe('设置');
     expect(document.querySelector('[aria-label="选择使用工具的主机"]')).toBeNull();
     expect(modal.querySelector('[aria-label="插件设置"]')).not.toBeNull();
     expect(workspace.tabs.every((tab) => !tab.pluginId)).toBe(true);
-    modal.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+    modal.querySelector<HTMLButtonElement>('[aria-label="返回插件列表"]')!.click();
     await flush();
     expect(workspace.pluginConfiguration).toBeUndefined();
   }

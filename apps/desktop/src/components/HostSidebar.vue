@@ -10,7 +10,6 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  PanelLeftClose,
   Pencil,
   Plug,
   Puzzle,
@@ -56,7 +55,6 @@ const hostState = (id: string) =>
       ? operations.hostState(id)
       : files.hostState(id);
 const emit = defineEmits<{
-  collapse: [];
   create: [groupId: string | null];
   importOpenssh: [];
   select: [host: Host];
@@ -441,19 +439,6 @@ onBeforeUnmount(() => {
   >
     <div class="host-list-heading">
       <span class="host-list-title">{{ tr(' 主机') }}</span>
-      <div class="host-heading-actions">
-        <button
-          type="button"
-          class="shell-icon-button"
-          :aria-label="tr('收起主机栏')"
-          :title="tr('收起主机栏')"
-          :aria-expanded="active"
-          aria-controls="host-tree-panel"
-          @click="emit('collapse')"
-        >
-          <PanelLeftClose :size="17" aria-hidden="true" />
-        </button>
-      </div>
     </div>
     <div class="host-sidebar-controls">
       <label class="host-search-field">

@@ -1,65 +1,48 @@
 <script setup lang="ts">
+import { House, Settings2, SquareTerminal } from '@lucide/vue';
 import { tr } from '../i18n/messages';
-
-import { PanelLeftOpen, Settings2, SquareTerminal } from '@lucide/vue';
-import type { WorkspaceView } from '../types/product';
-defineProps<{
-  localActive: boolean;
-  settingsOpen: boolean;
-  collapsed: boolean;
-}>();
-defineEmits<{ navigate: [view: WorkspaceView]; expand: [] }>();
+import type { WorkspaceArea } from '../stores/workspace';
+defineProps<{ area: WorkspaceArea; disabled?: boolean }>();
+defineEmits<{ home: []; local: []; settings: [] }>();
 </script>
 <template>
-  <div class="activity-rail" :class="{ 'activity-rail-collapsed': collapsed }">
-    <nav
-      v-if="collapsed"
-      class="activity-group sidebar-quick-actions"
-      :aria-label="tr('收起后的导航')"
-    >
+  <nav class="activity-rail" :aria-label="tr('应用导航')">
+    <div class="activity-group sidebar-work-actions">
       <button
         class="nav-item"
-        :aria-label="tr('展开主机列表')"
-        :title="tr('展开主机列表')"
-        :aria-expanded="false"
-        aria-controls="host-tree-panel"
-        @click="$emit('expand')"
+        :aria-label="tr('首页')"
+        :title="tr('首页')"
+        :class="{ active: area === 'home' }"
+        :aria-current="area === 'home' ? 'page' : undefined"
+        :disabled="disabled"
+        @click="$emit('home')"
       >
-        <PanelLeftOpen :size="20" aria-hidden="true" />
+        <House :size="20" aria-hidden="true" />
       </button>
-    </nav>
-    <slot />
-    <nav class="activity-group sidebar-work-actions" :aria-label="tr('本地工作区')">
       <button
         class="nav-item"
         :aria-label="tr('本地终端')"
-        :title="collapsed ? tr('本地终端') : undefined"
-        :class="{ active: localActive }"
-        :aria-current="localActive ? 'page' : undefined"
-        @click="$emit('navigate', 'terminals')"
+        :title="tr('本地终端')"
+        :class="{ active: area === 'local' }"
+        :aria-current="area === 'local' ? 'page' : undefined"
+        :disabled="disabled"
+        @click="$emit('local')"
       >
-        <SquareTerminal :size="collapsed ? 20 : 16" aria-hidden="true" /><span
-          v-if="!collapsed"
-          class="nav-label"
-          >{{ tr('本地终端') }}</span
-        >
+        <SquareTerminal :size="20" aria-hidden="true" />
       </button>
-    </nav>
-    <nav class="activity-group sidebar-app-actions" :aria-label="tr('应用导航')">
+    </div>
+    <div class="activity-group sidebar-app-actions">
       <button
         class="nav-item"
         :aria-label="tr('设置')"
-        :title="collapsed ? tr('设置') : undefined"
-        :class="{ active: settingsOpen }"
-        :aria-current="settingsOpen ? 'page' : undefined"
-        @click="$emit('navigate', 'settings')"
+        :title="tr('设置')"
+        :class="{ active: area === 'settings' }"
+        :aria-current="area === 'settings' ? 'page' : undefined"
+        :disabled="disabled"
+        @click="$emit('settings')"
       >
-        <Settings2 :size="collapsed ? 20 : 16" aria-hidden="true" /><span
-          v-if="!collapsed"
-          class="nav-label"
-          >{{ tr('设置') }}</span
-        >
+        <Settings2 :size="20" aria-hidden="true" />
       </button>
-    </nav>
-  </div>
+    </div>
+  </nav>
 </template>

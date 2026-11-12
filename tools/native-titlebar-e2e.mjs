@@ -1,3 +1,4 @@
+import { showHostTree } from './ui-navigation.mjs';
 // Real Windows/WebView2 and Rust window APIs, with a separate QA profile and executable.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
@@ -118,7 +119,7 @@ async function windowState(command, expected) {
 }
 async function appearance(theme, font = '标准') {
   await navigateWorkspace(page, '通用');
-  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  const settings = page.locator('.settings-page:visible');
   await settings.getByTestId('theme-select').selectOption(theme);
   await settings
     .locator('.interface-font-ticks')
@@ -145,42 +146,27 @@ async function confirmClose() {
   await browser.close();
   browser = undefined;
 }
-async function sidebarLayout(collapsed) {
-  const layout = await page.locator('.sidebar').evaluate((sidebar) => {
-    const rect = (selector) => sidebar.querySelector(selector).getBoundingClientRect();
-    const local = rect('.sidebar-work-actions button');
-    const settings = rect('.sidebar-app-actions button');
-    const bounds = sidebar.getBoundingClientRect();
-    const rail = sidebar.querySelector('.activity-rail-collapsed');
-    const tree = rect('.host-tree-section');
-    const expand = rail?.querySelector('.sidebar-quick-actions button').getBoundingClientRect();
-    const heading = rect('.host-list-heading');
-    const collapse = rect('.host-list-heading [aria-controls="host-tree-panel"]');
+async function sidebarLayout() {
+  const layout = await page.evaluate(() => {
+    const rail = document.querySelector('.activity-rail').getBoundingClientRect();
+    const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
+    const main = document.querySelector('.main-content').getBoundingClientRect();
+    const settings = document.querySelector('.sidebar-app-actions button').getBoundingClientRect();
     return {
-      collapsed: !!rail,
-      width: bounds.width,
-      footerPinned:
-        local.bottom <= settings.top &&
-        settings.bottom <= bounds.bottom &&
-        bounds.bottom - settings.bottom <= 18,
-      iconsOnly: !sidebar.querySelector('.nav-label'),
-      treeAboveFooter: tree.bottom <= local.top,
-      expandAtTop: !!expand && expand.top <= bounds.top + 16,
-      collapseAtRight: Math.abs(heading.right - collapse.right) <= 2,
-      headerHasNoSidebarToggle: !document.querySelector(
-        '.app-header [aria-controls="host-tree-panel"]',
-      ),
+      railWidth: rail.width,
+      columnsFit: rail.right <= sidebar.left + 1 && sidebar.right <= main.left + 1,
+      footerPinned: settings.bottom <= rail.bottom && rail.bottom - settings.bottom <= 18,
+      noCollapse: !document.querySelector('[aria-label="收起主机栏"], [aria-label="展开主机列表"]'),
+      noOverflow: document.documentElement.scrollWidth <= innerWidth,
     };
   });
-  assert.equal(layout.collapsed, collapsed);
-  assert(layout.footerPinned && layout.headerHasNoSidebarToggle, JSON.stringify(layout));
-  if (collapsed) {
-    assert.equal(layout.width, 52);
-    assert(layout.expandAtTop && layout.iconsOnly, JSON.stringify(layout));
-  } else {
-    assert(layout.treeAboveFooter && layout.collapseAtRight, JSON.stringify(layout));
-  }
+  assert.equal(layout.railWidth, 52);
+  assert(
+    layout.columnsFit && layout.footerPinned && layout.noCollapse && layout.noOverflow,
+    JSON.stringify(layout),
+  );
 }
+
 try {
   await launch();
   assert.equal(await invoke('plugin:window|is_decorated', { label: 'main' }), false);
@@ -190,20 +176,11 @@ try {
   await windowState('is_maximized', false);
   await page.getByRole('button', { name: '全局搜索', exact: true }).click();
   await page.getByRole('dialog', { name: '全局搜索', exact: true }).press('Escape');
-  await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
-  await sidebarLayout(true);
-  assert(
-    await page
-      .getByRole('button', { name: '展开主机列表', exact: true })
-      .evaluate((button) => document.activeElement === button),
-  );
-  await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
-  await sidebarLayout(false);
-  assert(
-    await page
-      .getByRole('button', { name: '收起主机栏', exact: true })
-      .evaluate((button) => document.activeElement === button),
-  );
+  await sidebarLayout();
+  await page.locator('.activity-rail').getByRole('button', { name: '设置', exact: true }).click();
+  await sidebarLayout();
+  await closeApplicationSettings(page);
+  await sidebarLayout();
   passed.push('native decorations removed; search and sidebar retain independent clicks');
 
   await page.getByRole('button', { name: '最大化窗口', exact: true }).click();
@@ -264,10 +241,10 @@ try {
       colors[theme] = layout.background;
       await sidebarLayout(false);
       await page.screenshot({ path: path.join(artifacts, `${theme}-${font}.png`) });
-      await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+      await sidebarLayout();
       await sidebarLayout(true);
       await page.screenshot({ path: path.join(artifacts, `${theme}-${font}-collapsed.png`) });
-      await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+      await showHostTree(page);
     }
   }
   assert.notEqual(colors.dark, colors.light);
@@ -302,17 +279,13 @@ try {
     );
   const before = await sessions();
   assert(before.length > 0 && before.every(Boolean));
-  await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
+  await sidebarLayout();
   await page.getByRole('button', { name: '本地终端', exact: true }).click();
-  assert.deepEqual(
-    await sessions(),
-    before,
-    'collapsed local action must reuse the current session',
-  );
-  await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
-  assert.deepEqual(await sessions(), before, 'sidebar expansion must retain the live session');
+  assert.deepEqual(await sessions(), before, 'local action must reuse the current session');
+  await showHostTree(page);
+  assert.deepEqual(await sessions(), before, 'home navigation must retain the live session');
   passed.push(
-    'host heading collapse, top rail expansion and pinned footer work in both themes and font sizes without replacing sessions',
+    'fixed rail, context sidebar and pinned settings work in both themes and font sizes without replacing sessions',
   );
   await page.getByRole('button', { name: '关闭窗口', exact: true }).click();
   const review = page.getByRole('dialog', { name: '确认退出 ServerDeck', exact: true });

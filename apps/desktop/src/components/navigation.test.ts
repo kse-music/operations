@@ -14,61 +14,39 @@ afterEach(() => {
   root?.remove();
   vi.restoreAllMocks();
 });
-it.each([
-  ['terminals', false],
-  ['plugins', false],
-  [null, false],
-  ['terminals', true],
-  ['plugins', true],
-  [null, true],
-] as const)(
-  'keeps application entries available with %s active and collapsed=%s',
-  (active, collapsed) => {
-    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Linux x86_64');
-    const navigate = vi.fn();
-    const expand = vi.fn();
-    mountNavigation({
-      localActive: active === 'terminals',
-      settingsOpen: false,
-      collapsed,
-      onNavigate: navigate,
-      onExpand: expand,
-    });
+it.each(['home', 'local', 'settings'] as const)(
+  'keeps the three fixed navigation entries in area %s',
+  (area) => {
+    const home = vi.fn(),
+      local = vi.fn(),
+      settings = vi.fn();
+    mountNavigation({ area, onHome: home, onLocal: local, onSettings: settings });
     const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')];
-    expect(buttons.map((node) => node.ariaLabel)).toEqual(
-      collapsed ? ['展开主机列表', '本地终端', '设置'] : ['本地终端', '设置'],
+    expect(buttons.map((button) => button.ariaLabel)).toEqual(['首页', '本地终端', '设置']);
+    for (const button of buttons) {
+      expect(button.title).toBe(button.ariaLabel);
+      button.click();
+    }
+    expect(home).toHaveBeenCalledOnce();
+    expect(local).toHaveBeenCalledOnce();
+    expect(settings).toHaveBeenCalledOnce();
+    expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label')).toBe(
+      { home: '首页', local: '本地终端', settings: '设置' }[area],
     );
-    for (const node of buttons) node.click();
-    expect(navigate.mock.calls.map(([view]) => view)).toEqual(['terminals', 'settings']);
-    expect(expand).toHaveBeenCalledTimes(collapsed ? 1 : 0);
-    expect(root.querySelectorAll('.nav-label')).toHaveLength(collapsed ? 0 : 2);
+    expect(root.querySelectorAll('.sidebar-work-actions button')).toHaveLength(2);
     expect(root.querySelectorAll('.sidebar-app-actions button')).toHaveLength(1);
-    if (collapsed) for (const node of buttons) expect(node.title).toBe(node.ariaLabel);
-    expect(root.querySelector('[aria-current="page"]')?.getAttribute('aria-label') ?? null).toBe(
-      active === 'terminals' ? '本地终端' : null,
-    );
-  },
-);
-it.each([false, true])(
-  'keeps only the ordinary local navigation entry on Windows with collapsed=%s',
-  (collapsed) => {
-    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
-    const navigate = vi.fn();
-    mountNavigation({
-      localActive: true,
-      settingsOpen: false,
-      collapsed,
-      onNavigate: navigate,
-    });
-    const ordinary = root.querySelector<HTMLButtonElement>('[aria-label="本地终端"]')!;
-    ordinary.click();
-    expect(navigate).toHaveBeenCalledExactlyOnceWith('terminals');
-    expect(root.querySelectorAll('.sidebar-work-actions button')).toHaveLength(1);
-    expect(root.textContent).not.toContain('以管理员身份运行');
     expect(root.querySelector('[aria-label="本地终端（管理员）"]')).toBeNull();
   },
 );
-it('routes all seven settings entries to the dialog while keeping host and plugin functions in the workspace', () => {
+it('disables navigation while settings are saving', () => {
+  const home = vi.fn();
+  mountNavigation({ area: 'settings', disabled: true, onHome: home });
+  const buttons = [...root.querySelectorAll<HTMLButtonElement>('button')];
+  expect(buttons.every((button) => button.disabled)).toBe(true);
+  buttons[0]!.click();
+  expect(home).not.toHaveBeenCalled();
+});
+it('routes all seven settings entries to the settings page while keeping host and plugin functions in the workspace', () => {
   expect(settingsNavigation.map((item) => item.label)).toEqual([
     '通用',
     '终端',

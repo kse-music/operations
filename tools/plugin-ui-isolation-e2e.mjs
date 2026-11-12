@@ -167,7 +167,7 @@ try {
     await scope().locator('.ai-view').waitFor();
     await scope().getByLabel('问题', { exact: true }).fill('retained draft');
     await page.getByRole('button', { name: '插件设置', exact: true }).click();
-    const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    const settings = page.locator('.settings-page:visible');
     await settings
       .frameLocator('iframe')
       .getByRole('button', { name: '取消', exact: true })

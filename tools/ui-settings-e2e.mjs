@@ -69,16 +69,16 @@ try {
     const settings = page.locator('.settings-panel');
     const categories = ['通用', '终端', '快捷键', '数据与存储'];
     const select = async (index) => navigateWorkspace(page, categories[index]);
-    const activeMenu = () => page.locator('.settings-dialog-navigation [aria-current="page"]');
+    const activeMenu = () => page.locator('.settings-navigation [aria-current="page"]');
     const layouts = [];
     const dismissNotices = async () => {
       for (const close of await page.getByRole('button', { name: '关闭通知', exact: true }).all())
         await close.click();
     };
     assert.equal(await settings.getByRole('tablist').count(), 0);
-    assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).count(), 1);
+    assert.equal(await page.locator('.settings-page:visible').count(), 1);
     assert.deepEqual(
-      (await page.locator('.settings-dialog-navigation .nav-item').allTextContents()).map((text) =>
+      (await page.locator('.settings-navigation .nav-item').allTextContents()).map((text) =>
         text.trim(),
       ),
       [...categories, '模型', '插件', '关于'],
@@ -257,10 +257,7 @@ try {
     assert.match(await about.textContent(), /schema v5/);
     assert.equal(await about.getByRole('button', { name: '重新检查', exact: true }).count(), 1);
     assert.equal(await about.evaluate((el) => el.scrollWidth > el.clientWidth), false);
-    assert.equal(
-      await page.locator('.settings-dialog-navigation [aria-label="本地环境"]').count(),
-      0,
-    );
+    assert.equal(await page.locator('.settings-navigation [aria-label="本地环境"]').count(), 0);
     await navigateWorkspace(page, '关于');
     assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 0);
     await page.screenshot({ path: `${output}/${name}-about.png` });
@@ -322,11 +319,13 @@ try {
       );
     }
     await navigateWorkspace(page, '关于');
-    const settingsDialog = page.getByRole('dialog', { name: '设置', exact: true });
-    await settingsDialog
-      .locator(':scope > .modal-heading')
-      .getByRole('button', { name: '关闭对话框', exact: true })
-      .click();
+    const settingsDialog = page.locator('.settings-page:visible');
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     const closeDialog = page.getByRole('dialog', { name: '设置尚未保存', exact: true });
     await closeDialog.waitFor();
     const closeGeometry = await closeDialog.evaluate((el) => {
@@ -343,17 +342,21 @@ try {
     await closeDialog.press('Escape');
     await closeDialog.waitFor({ state: 'detached' });
     assert.equal(await settingsDialog.count(), 1);
-    await settingsDialog
-      .locator(':scope > .modal-heading')
-      .getByRole('button', { name: '关闭对话框', exact: true })
-      .click();
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     await closeDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await closeDialog.waitFor({ state: 'detached' });
     const closeAgain = async () => {
-      await settingsDialog
-        .locator(':scope > .modal-heading')
-        .getByRole('button', { name: '关闭对话框', exact: true })
-        .click();
+      await page.evaluate(() => {
+        void document
+          .querySelector('#app')
+          .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+          .closeSettings();
+      });
       await closeDialog.waitFor();
     };
     await closeAgain();
@@ -366,10 +369,12 @@ try {
     await settingsDialog.waitFor({ state: 'detached' });
     await select(1);
     assert.equal(await settings.getByLabel('终端行高', { exact: true }).inputValue(), '100');
-    await settingsDialog
-      .locator(':scope > .modal-heading')
-      .getByRole('button', { name: '关闭对话框', exact: true })
-      .click();
+    await page.evaluate(() => {
+      void document
+        .querySelector('#app')
+        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
+        .closeSettings();
+    });
     await settings.waitFor({ state: 'detached' });
     assert.equal(await closeDialog.count(), 0);
     assert.deepEqual(errors, []);

@@ -89,7 +89,10 @@ try {
       ];
     }, theme);
     if (!(await page.locator('.host-tree-section').isVisible()))
-      await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
+      await page
+        .locator('.activity-rail')
+        .getByRole('button', { name: '首页', exact: true })
+        .click();
     assert.deepEqual(
       (await page.locator('.sidebar-app-actions button').allTextContents()).map((text) =>
         text.trim(),
@@ -145,7 +148,7 @@ try {
     await page
       .locator('.plugin-installed-row[data-plugin-id="dev.uploaded-0"] .plugin-name-button')
       .click();
-    const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    const settings = page.locator('.settings-page:visible');
     await settings.waitFor();
     assert.equal(await settings.locator('.plugin-configuration').count(), 1);
     assert.equal(

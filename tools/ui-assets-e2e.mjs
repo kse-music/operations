@@ -172,11 +172,9 @@ async function openAsset(page, label, regionName = label) {
   await navigateWorkspace(page, label);
   const view = page.getByRole('region', { name: regionName, exact: true });
   await view.waitFor();
-  await page.locator('.settings-dialog-content').evaluate((el) => (el.scrollTop = 0));
+  await page.locator('.settings-page').evaluate((el) => (el.scrollTop = 0));
   assert.equal(
-    await page
-      .locator('.settings-dialog-navigation [aria-current="page"]')
-      .getAttribute('aria-label'),
+    await page.locator('.settings-navigation [aria-current="page"]').getAttribute('aria-label'),
     label,
   );
   return view;
@@ -248,9 +246,7 @@ try {
 
     const models = await openAsset(page, '模型');
     assert.equal(
-      await page
-        .locator('.settings-dialog-navigation [aria-current="page"]')
-        .getAttribute('aria-label'),
+      await page.locator('.settings-navigation [aria-current="page"]').getAttribute('aria-label'),
       '模型',
     );
     await models.getByRole('heading', { name: '内网诊断模型', exact: true }).waitFor();
