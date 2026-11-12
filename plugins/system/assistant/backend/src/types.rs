@@ -53,6 +53,8 @@ pub struct ResolveHostsInput {
     pub request_id: String,
     pub question: String,
     pub previous_host_ids: Vec<String>,
+    #[serde(default)]
+    pub history: Vec<ChatMessage>,
     pub mask_addresses: bool,
     pub redact_values: Vec<zeroize::Zeroizing<String>>,
 }

@@ -124,7 +124,7 @@ fn question_index(messages: &[Message]) -> Option<usize> {
     messages.iter().rposition(|message| {
         matches!(message.role, Role::User)
             && serde_json::from_str::<Value>(&message.content)
-                .is_ok_and(|value| value["question"].is_string() && value["context"].is_object())
+                .is_ok_and(|value| value["question"].is_string())
     })
 }
 
@@ -216,6 +216,35 @@ mod tests {
             role,
             content: content.into(),
         }
+    }
+    #[test]
+    fn routing_budget_drops_complete_old_turns_and_keeps_current_host_references() {
+        let model =
+            json!({"config":{"model":"fixture","contextWindowTokens":2048,"maxOutputTokens":256}});
+        let payload = json!({"question":"对，用户为dh的主机","assets":[{"id":"source"},{"id":"target"}],"entryHostId":"source","previousHostIds":["source","target"],"explicitHostIds":[]});
+        let messages = vec![
+            message(Role::System, "policy"),
+            message(Role::User, &"old history ".repeat(500)),
+            message(Role::Assistant, "old answer"),
+            message(Role::User, "把stock镜像导入目标主机"),
+            message(Role::Assistant, "请确认目标用户"),
+            message(Role::User, &payload.to_string()),
+        ];
+        let fitted = fit(messages, &model, 44 * 1024).unwrap();
+        assert_eq!(fitted.messages.len(), 4);
+        assert_eq!(fitted.messages[1].content, "把stock镜像导入目标主机");
+        let current: Value = serde_json::from_str(&fitted.messages[3].content).unwrap();
+        for field in [
+            "question",
+            "assets",
+            "entryHostId",
+            "previousHostIds",
+            "explicitHostIds",
+        ] {
+            assert_eq!(current[field], payload[field]);
+        }
+        assert_eq!(current["context"]["omittedHistoryTurns"], 1);
+        assert!(!fitted.warnings.is_empty());
     }
 
     #[test]

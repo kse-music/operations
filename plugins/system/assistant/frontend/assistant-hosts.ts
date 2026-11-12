@@ -44,6 +44,7 @@ export function useAssistantHosts() {
         requestId,
         question: input.question,
         previousHostIds,
+        history: input.history ?? [],
         maskAddresses: input.maskAddresses,
         redactValues: input.redactValues,
       });

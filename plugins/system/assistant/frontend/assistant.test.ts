@@ -1437,6 +1437,49 @@ it('keeps the workspace host separate from previous matches for tool task', asyn
   );
 });
 
+it('sends clarification history and the workspace source to both host matching and preparation', async () => {
+  api.hostList.mockResolvedValue(catalog([fixtureHost('a'), fixtureHost('b')]));
+  api.resolveHosts.mockResolvedValue({ hostIds: ['a', 'b'], message: '', modelRevision: 'r1' });
+  const clarification = '当前主机已有 stock:1.0.0，请确认目标是否为 SSH 用户 dh 的主机。';
+  api.send.mockResolvedValueOnce({
+    text: clarification,
+    proposals: [],
+    warnings: [],
+    usage: null,
+    task: taskSnapshot('needs_input'),
+  });
+  openConnected();
+  await mount('a');
+  const submit = async (text: string) => {
+    const input = root.querySelector<HTMLTextAreaElement>('#assistant-question')!;
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    root
+      .querySelector<HTMLFormElement>('#assistant-chat-form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+  };
+  const question = '把stock镜像导入到192.168.1.159机器上';
+  await submit(question);
+  await submit('对，用户为dh的主机');
+  const history = [
+    { role: 'user', content: question },
+    { role: 'assistant', content: clarification },
+  ];
+  expect(api.resolveHosts).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      entryHostId: 'a',
+      previousHostIds: ['a', 'b'],
+      question: '对，用户为dh的主机',
+      maskAddresses: true,
+      history,
+    }),
+  );
+  expect(api.prepare).toHaveBeenLastCalledWith(
+    expect.objectContaining({ entryHostId: 'a', sessionIds: ['a', 'b'], history }),
+  );
+});
+
 it.each([
   ['answered', '回答已结束'],
   ['needs_input', '需要补充信息'],
@@ -1663,6 +1706,7 @@ it('keeps verified tool history when a later model turn fails', async () => {
   expect(state.turns.value[0]?.error).toContain('模型连接中断');
   expect(state.turns.value[0]?.operations?.[0]?.execution.success).toBe(true);
   expect(api.execute).toHaveBeenCalledTimes(1);
+  expect(api.cancel).toHaveBeenCalledWith('preview-a');
 });
 
 it('uses the cancellation result after the backend has retired the active job handles', async () => {

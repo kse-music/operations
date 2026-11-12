@@ -20,6 +20,8 @@ use std::sync::{
 use serverdeck_application::{Application, logging};
 use tauri::{Emitter, Manager};
 
+const PREVENT_NATIVE_CONTEXT_MENU: &str = include_str!("prevent-native-context-menu.js");
+
 pub fn run() {
     let exiting = Arc::new(AtomicBool::new(false));
     let drained = Arc::new(AtomicBool::new(false));
@@ -57,6 +59,7 @@ pub fn run() {
                 let window_config = app.config().app.windows.iter().find(|w| w.label == "main")
                     .ok_or("main window configuration missing")?;
                 tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                    .initialization_script_for_all_frames(PREVENT_NATIVE_CONTEXT_MENU)
                     .on_navigation({
                         let handle = app.handle().clone();
                         move |_| !handle.state::<editor_commands::EditorWindows>().is_open()

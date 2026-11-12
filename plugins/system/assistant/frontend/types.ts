@@ -84,6 +84,7 @@ export interface AiResolveHosts {
   requestId: string;
   question: string;
   previousHostIds: string[];
+  history?: AiPrepare['history'];
   maskAddresses: boolean;
   redactValues: string[];
 }

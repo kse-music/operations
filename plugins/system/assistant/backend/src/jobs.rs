@@ -152,7 +152,7 @@ exit "$sd_result"
                 if tag_id(rows, tag).as_deref() != Some(normalized.as_str()) {
                     return Err(Error::Validation("镜像标签和完整 ID 不在本次查询证据中"));
                 }
-                let (script, _, path) = image_archive::command(
+                let (command, _, path) = image_archive::command(
                     &image_archive::Archive::Export {
                         id: id.clone(),
                         reference: tag.clone(),
@@ -162,7 +162,7 @@ exit "$sd_result"
                     &nonce,
                 )?;
                 (
-                    Command::script(script),
+                    command,
                     Kind::Save { path },
                     format!("{host}: {tag} · {normalized}"),
                 )
@@ -188,13 +188,17 @@ exit "$sd_result"
                     .ok_or(Error::Validation("归档未校验"))?;
                 let rows = image_snapshot(evidence.get(host).map(Vec::as_slice).unwrap_or(&[]))?;
                 let before = tag_id(rows, tag).unwrap_or_default();
-                let (script, _, _) = image_archive::command(
+                let (archive_command, _, _) = image_archive::command(
                     &image_archive::Archive::Import {
                         file_name: "unused.tar".into(),
                         confirmed: true,
                     },
                     &nonce,
                 )?;
+                let script = archive_command
+                    .args
+                    .get(1)
+                    .ok_or(Error::Validation("归档脚本不兼容"))?;
                 let start = script
                     .find("while ! test -e")
                     .ok_or(Error::Validation("归档脚本不兼容"))?;

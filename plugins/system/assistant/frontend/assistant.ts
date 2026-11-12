@@ -288,7 +288,7 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       if (input.autoHosts) {
         requestId = crypto.randomUUID();
         const { route, sessionIds } = await hostContext.resolve(
-          input,
+          { ...input, history: history(turns.value, input) },
           previousHostIds,
           requestId,
           controller.signal,
@@ -547,6 +547,8 @@ export function useAssistant(keepRunning: Readonly<Ref<boolean>> = ref(false)) {
       if (!disposed && current === version) {
         turn.error = errorMessage(cause);
         turn.state = 'failed';
+        await stopProgress?.();
+        await revoke(root);
         await refreshTask(turn, 'unverified');
       }
     } finally {

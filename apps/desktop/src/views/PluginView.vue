@@ -72,7 +72,7 @@ const operations = computed(() => ops.connections[props.hostId]),
   connection = computed(() => files.connections[props.hostId]);
 const trust = computed(() => operations.value?.trust ?? connection.value?.trust);
 const disposed = ref(false);
-const contextReady = ref(false);
+const runtimeReady = ref(false);
 const needsConnection = computed(
   () =>
     grant.value?.permissions.some((permission) =>
@@ -87,6 +87,11 @@ const needsConnection = computed(
         'assistant.use',
       ].includes(permission),
     ) ?? false,
+);
+const contextReady = computed(
+  () =>
+    runtimeReady.value &&
+    (!props.hostId || !needsConnection.value || operations.value?.state === 'connected'),
 );
 const frameReload = ref(0);
 const frameOpened = ref(false);
@@ -105,7 +110,7 @@ const connectionChanged = computed(
 let generation = 0;
 async function bind() {
   if (!props.active || !available.value || disposed.value) return;
-  contextReady.value = false;
+  runtimeReady.value = false;
   const ticket = ++generation;
   await plugins.bind(props.pluginId, props.tabKey);
   if (
@@ -114,8 +119,7 @@ async function bind() {
     ticket === generation &&
     plugins.owns(props.pluginId, props.tabKey)
   ) {
-    contextReady.value =
-      !props.hostId || !needsConnection.value || operations.value?.state === 'connected';
+    runtimeReady.value = true;
     if (contextReady.value && page.value) frameOpened.value = true;
   }
   return ticket;
@@ -159,6 +163,7 @@ async function connect() {
         ))
       )
         return;
+      runtimeReady.value = false;
       await plugins.release(props.pluginId, props.tabKey);
       await ops.close(host.value.id);
       if (connection.value?.id) await filesApi.close(connection.value.id, false);
@@ -194,6 +199,14 @@ async function acceptTrust(accept: boolean) {
     await files.trust(accept);
   }
 }
+async function reconnect() {
+  try {
+    await connect();
+    await bind();
+  } catch (cause) {
+    error.value = errorMessage(cause);
+  }
+}
 async function restart() {
   try {
     await pluginsApi.activate(props.pluginId);
@@ -204,18 +217,9 @@ async function restart() {
     error.value = errorMessage(cause);
   }
 }
-watch(
-  () => [
-    operations.value?.state === 'connected' ? operations.value.session?.id : '',
-    connection.value?.state === 'connected' ? connection.value.id : '',
-  ],
-  () => {
-    if (schema.value && props.active && available.value)
-      void bind().catch((cause) => {
-        if (!disposed.value) error.value = errorMessage(cause);
-      });
-  },
-);
+watch(contextReady, (ready) => {
+  if (ready && page.value) frameOpened.value = true;
+});
 watch(
   () => [props.active, available.value, generationKey.value],
   async (value, previous) => {
@@ -223,7 +227,7 @@ watch(
       return;
     }
     generation++;
-    contextReady.value = false;
+    runtimeReady.value = false;
     if (previous && value[2] !== previous[2]) {
       schema.value = null;
       frameOpened.value = false;
@@ -315,7 +319,7 @@ useErrorNotifications(error);
             ? tr('主机连接失败')
             : tr('正在连接当前主机…')
       }}</span>
-      <button class="button" :disabled="busy" @click="connect">
+      <button class="button" :disabled="busy" @click="reconnect">
         {{ connectionChanged ? tr('重新连接') : tr('重试连接') }}
       </button>
     </div>

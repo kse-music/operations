@@ -408,6 +408,23 @@ fn task_read_preapproval_manifest_matches_exact_generated_queries() {
         assert!(template.matches_argument_template(&concrete));
         commands.push(template);
     }
+    let (mut export, _, _) = crate::image_archive::command(
+        &crate::image_archive::Archive::Export {
+            id: "a".repeat(64),
+            reference: "stock:1.0.0".into(),
+            file_name: "image.tar".into(),
+            confirmed: true,
+        },
+        "01234567-89ab-cdef-0123-456789abcdef",
+    )
+    .unwrap();
+    export.args[3..].clone_from_slice(&[
+        "{{sd:identifier:36:}}".into(),
+        "{{sd:hex:64}}".into(),
+        "{{sd:hex:64}}".into(),
+        "{{sd:identifier:240:.tar}}".into(),
+    ]);
+    commands.push(export);
     let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
     assert_eq!(
         serde_json::to_value(commands).unwrap(),

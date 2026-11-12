@@ -286,14 +286,12 @@ pub fn preview(text: &str, default_user: &str, timeout: u16) -> Result<ImportPre
                 }
             }
         }
-        for (key, field) in [("serveraliveinterval", &mut host.ssh.keepalive_interval_secs)] {
-            if let Some(value) = options.get(key) {
-                match value.parse::<u16>() {
-                    Ok(value) => *field = value,
-                    Err(_) => {
-                        blocked = true;
-                        warnings.push(format!("{key} 无效"));
-                    }
+        if let Some(value) = options.get("serveraliveinterval") {
+            match value.parse::<u16>() {
+                Ok(value) => host.ssh.keepalive_interval_secs = value,
+                Err(_) => {
+                    blocked = true;
+                    warnings.push("serveraliveinterval 无效".into());
                 }
             }
         }
@@ -357,6 +355,20 @@ mod tests {
         assert_eq!(app.jump_alias.as_deref(), Some("bastion"));
         assert_eq!(app.host.ssh.keepalive_interval_secs, 25);
         assert_eq!(app.host.ssh.keepalive_count_max, 4);
+    }
+    #[test]
+    fn invalid_keepalive_interval_blocks_import_and_preserves_the_preview() {
+        for value in ["invalid", "65536", "-1"] {
+            let config = format!(
+                "Host app\n HostName example.com\n Port 2222\n ServerAliveInterval {value}"
+            );
+            let parsed = preview(&config, "ops", 15).expect("preview");
+            let app = &parsed.candidates[0];
+            assert!(app.blocked, "{value}");
+            assert!(app.warnings.iter().any(|w| w == "serveraliveinterval 无效"));
+            assert_eq!(app.host.hostname, "example.com");
+            assert_eq!(app.host.port, 2222);
+        }
     }
     #[test]
     fn applies_first_value_wildcards_negation_quotes_and_multiple_aliases() {

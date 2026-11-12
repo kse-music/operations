@@ -112,7 +112,7 @@ async function start() {
     (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
       text.trim(),
     ),
-    ['本地终端'],
+    ['收起主机栏'],
   );
 }
 const active = () => page.locator('.terminal-pane:visible');
@@ -164,7 +164,8 @@ async function quit() {
 try {
   await start();
   assert.equal(await page.locator('.activity-rail [aria-label="主机管理"] .nav-badge').count(), 0);
-  assert.equal((await page.locator('.host-count').textContent()).trim(), '0');
+  assert.equal(await page.locator('.host-count').count(), 0);
+  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '0');
   assert.equal(await page.locator('.topbar').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
@@ -202,14 +203,14 @@ try {
   assert.equal(await page.locator('.sidebar-app-actions button').count(), 1);
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
   await page
-    .locator('.app-header')
+    .locator('.host-list-heading')
     .getByRole('button', { name: '收起主机栏', exact: true })
     .click();
   assert.equal(await page.locator('.activity-rail-collapsed').isVisible(), true);
   assert.equal(await page.locator('.host-tree-section').isVisible(), false);
   const expandHosts = page
-    .locator('.app-header')
-    .getByRole('button', { name: '展开主机栏', exact: true });
+    .locator('.sidebar-quick-actions')
+    .getByRole('button', { name: '展开主机列表', exact: true });
   assert.equal(await expandHosts.evaluate((button) => document.activeElement === button), true);
   await expandHosts.press('Enter');
   assert.equal(await page.locator('.sidebar').isVisible(), true);
@@ -219,9 +220,9 @@ try {
       .evaluate((button) => document.activeElement === button),
     true,
   );
-  await page.screenshot({ path: path.join(artifacts, 'header-host-toggle.png') });
+  await page.screenshot({ path: path.join(artifacts, 'sidebar-host-toggle.png') });
   passed.push(
-    'major modules appear above contextual sidebar; About shows backend version; sidebar collapse and expansion support keyboard focus',
+    'About shows backend version; host heading collapse and rail expansion support keyboard focus',
   );
   for (const target of [
     page.locator('.activity-rail'),
@@ -650,7 +651,7 @@ try {
     await page.locator('.sidebar').getByRole('button', { name: '主机管理', exact: true }).count(),
     0,
   );
-  assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机0');
+  assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机');
   assert.equal(await page.locator('.workspace-group-tab').count(), 0);
   assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
   assert.equal(await page.locator('.hosts-view').count(), 0);
@@ -682,7 +683,7 @@ try {
   const created = (await rpc('host_list')).hosts.find((item) => item.name === 'UI Created');
   assert.equal(created.groupId, groups[1].id);
   assert.equal(created.hostname, '192.0.2.20');
-  assert.equal((await page.locator('.host-count').textContent()).trim(), '2');
+  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '2');
   const currentTabs = await page.locator('.workspace-tab').count();
   for (const item of await page.locator('.tree-host').all()) {
     await assertNativeMenuSuppressed(item);
@@ -752,7 +753,7 @@ try {
   await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
   await deletion.waitFor({ state: 'hidden' });
   assert(!(await rpc('host_list')).hosts.some((item) => item.id === host.id));
-  assert.equal((await page.locator('.host-count').textContent()).trim(), '1');
+  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '1');
   passed.push(
     'host rows contain no inline action icons; untested context edits are blocked and confirmed deletion preserves sessions',
   );
@@ -770,7 +771,7 @@ try {
   await importHosts.waitFor({ state: 'hidden' });
   await page.locator('.tree-host').filter({ hasText: 'tree-imported' }).waitFor();
   assert.equal((await rpc('host_list')).hosts.length, 2);
-  assert.equal((await page.locator('.host-count').textContent()).trim(), '2');
+  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '2');
   assert.deepEqual(
     await page
       .locator('.host-list-heading button')
@@ -787,7 +788,7 @@ try {
   }
   await page.getByText('尚未添加主机', { exact: true }).waitFor();
   assert.equal((await rpc('host_list')).hosts.length, 0);
-  assert.equal((await page.locator('.host-count').textContent()).trim(), '0');
+  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '0');
   passed.push(
     'host tree OpenSSH preview/import and host count work without JSON controls; isolated records cleaned via real IPC',
   );

@@ -16,6 +16,158 @@ struct Handler {
 }
 
 #[tokio::test]
+async fn assist_streams_require_the_exact_export_template_and_owner_grant() {
+    use serverdeck_plugin_sdk::platform::ApprovalMode;
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let manifest: Manifest = serde_json::from_str(include_str!(
+        "../../../../../plugins/system/assistant/manifest.json"
+    ))
+    .unwrap();
+    let template = manifest
+        .preapproved_commands
+        .into_iter()
+        .find(|c| {
+            c.args
+                .get(2)
+                .is_some_and(|a| a == "serverdeck-image-export")
+        })
+        .unwrap();
+    assert!(template.validate_argument_template().unwrap());
+    let mut command = template.clone();
+    command.args[3..].clone_from_slice(&[
+        "01234567-89ab-cdef-0123-456789abcdef".into(),
+        "a".repeat(64),
+        "b".repeat(64),
+        "image.tar".into(),
+    ]);
+    let plugin = fixture
+        .install_with_commands(
+            "dev.stream-template",
+            &[Permission::OperationsReadArgumentsPreapproved],
+            vec![template],
+        )
+        .await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let ssh = ssh(app).await;
+    let operation = Primitive::StreamOpen {
+        host_id: ssh.host.id.clone(),
+        command: command.clone(),
+    };
+    let ordinary = call(app, id, "page", operation.clone()).await;
+    assert_eq!(ordinary.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    app.plugin_approve(
+        ordinary.result["confirmationRequired"]["id"]
+            .as_str()
+            .unwrap(),
+        false,
+    )
+    .unwrap();
+    let policy = call(
+        app,
+        id,
+        "page",
+        Primitive::ApprovalMode {
+            mode: ApprovalMode::Assist,
+        },
+    )
+    .await;
+    let binding = policy.result["binding"].as_str().unwrap().to_owned();
+    let opened = app
+        .plugin_capability_scoped(
+            id,
+            "page",
+            request(Capability::Platform {
+                request: operation.clone(),
+                bindings: vec![binding.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(opened.error.is_none(), "{opened:?}");
+    let stream = opened.result["id"].as_str().unwrap().to_owned();
+    for _ in 0..25 {
+        if !ssh.calls.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    let stopped = call(app, id, "page", Primitive::StreamStop { stream_id: stream }).await;
+    assert!(stopped.error.is_none(), "{stopped:?}");
+    let mut changed_script = command.clone();
+    changed_script.args[1].push_str("\nreboot");
+    let mut changed_path = command.clone();
+    changed_path.args[6] = "/etc/outside.tar".into();
+    let mut changed_hash = command.clone();
+    changed_hash.args[5] = "hash;reboot".into();
+    for changed in [
+        changed_script,
+        changed_path,
+        changed_hash,
+        Command::script("docker image load --input /tmp/archive.tar"),
+    ] {
+        let denied = app
+            .plugin_capability_scoped(
+                id,
+                "page",
+                request(Capability::Platform {
+                    request: Primitive::StreamOpen {
+                        host_id: ssh.host.id.clone(),
+                        command: changed,
+                    },
+                    bindings: vec![binding.clone()],
+                }),
+            )
+            .await
+            .unwrap();
+        assert_eq!(denied.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+        app.plugin_approve(
+            denied.result["confirmationRequired"]["id"]
+                .as_str()
+                .unwrap(),
+            false,
+        )
+        .unwrap();
+    }
+    assert_eq!(ssh.calls.lock().unwrap().len(), 1);
+    for owner in ["page", "other-page"] {
+        let scoped = app.plugin_host.start_scoped(id, owner).unwrap();
+        let grant = app.plugins.grant(id).unwrap().unwrap();
+        let op = Capability::Platform {
+            request: operation.clone(),
+            bindings: vec![binding.clone()],
+        };
+        assert_eq!(
+            app.plugin_mode_preapproves(&scoped, &plugin, &grant, &op)
+                .unwrap(),
+            owner == "page"
+        );
+        let mut revoked = grant.clone();
+        revoked
+            .permissions
+            .retain(|p| *p != Permission::OperationsReadArgumentsPreapproved);
+        assert!(
+            !app.plugin_mode_preapproves(&scoped, &plugin, &revoked, &op)
+                .unwrap()
+        );
+        let terminal = Capability::Platform {
+            request: Primitive::Terminal {
+                host_id: ssh.host.id.clone(),
+                command: command.clone(),
+            },
+            bindings: vec![binding.clone()],
+        };
+        assert!(
+            !app.plugin_mode_preapproves(&scoped, &plugin, &grant, &terminal)
+                .unwrap()
+        );
+    }
+    app.shutdown().await;
+}
+
+#[tokio::test]
 async fn assist_parameterized_reads_skip_prompts_but_script_and_argument_changes_do_not() {
     use serverdeck_plugin_sdk::platform::ApprovalMode;
     let fixture = Fixture::new();
@@ -899,7 +1051,7 @@ async fn assistant_packaged_sends_repeated_questions_over_native_stream_and_ssh(
                     }
                 }
             }
-            let delta = json!({"choices":[{"index":0,"delta":{"content":json!({"kind":"answer","text":"fixture answer"}).to_string()},"finish_reason":null}]});
+            let delta = json!({"choices":[{"index":0,"delta":{"content":json!({"kind":"answer","outcome":"completed","text":"fixture answer"}).to_string()},"finish_reason":null}]});
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: {delta}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
             );

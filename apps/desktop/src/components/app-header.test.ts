@@ -1,29 +1,32 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, type App } from 'vue';
+import { createPinia, disposePinia, type Pinia } from 'pinia';
 import AppHeader from './AppHeader.vue';
 let app: App, root: HTMLDivElement;
+let pinia: Pinia;
 afterEach(() => {
   app?.unmount();
+  if (pinia) disposePinia(pinia);
   root?.remove();
 });
-it('keeps global search and sidebar visibility without a duplicate application menu', () => {
-  const sidebar = vi.fn(),
-    search = vi.fn();
+it('keeps the brand and global search without sidebar controls or a duplicate application menu', () => {
+  const search = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
+  pinia = createPinia();
   app = createApp(AppHeader, {
-    sidebarOpen: true,
     searchShortcut: 'Ctrl+J',
-    onSidebar: sidebar,
     onSearch: search,
-  });
+  }).use(pinia);
   app.mount(root);
   expect(root.querySelector('.module-navigation')).toBeNull();
   expect(root.querySelector('details, [aria-label="应用菜单"]')).toBeNull();
-  expect(root.querySelectorAll('button')).toHaveLength(2);
-  root.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!.click();
+  expect(root.querySelectorAll('button')).toHaveLength(1);
+  expect(
+    root.querySelector('[aria-controls="host-sidebar"], [aria-controls="host-tree-panel"]'),
+  ).toBeNull();
+  expect(root.querySelector('.app-brand')?.textContent).toBe('ServerDeck');
   root.querySelector<HTMLButtonElement>('[aria-label="全局搜索"]')!.click();
-  expect(sidebar).toHaveBeenCalledOnce();
   expect(search).toHaveBeenCalledOnce();
   expect(root.querySelector('kbd')?.textContent).toBe('Ctrl+J');
 });

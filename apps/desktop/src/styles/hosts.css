@@ -46,6 +46,11 @@
   color: var(--accent);
   background: var(--accent-bg);
 }
+.host-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .host-list-title {
   display: inline-flex;
   align-items: center;
@@ -54,17 +59,6 @@
   font-size: var(--font-size-body);
   font-weight: 600;
   white-space: nowrap;
-}
-.host-count {
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 4px;
-  background: var(--accent-bg);
-  color: var(--accent);
-  font-size: var(--font-size-caption);
-  font-weight: 600;
-  line-height: 1.5;
-  text-align: center;
 }
 .host-tree-scroll {
   flex: 1;

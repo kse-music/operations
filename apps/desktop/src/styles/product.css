@@ -26,6 +26,41 @@ kbd {
   background: var(--panel);
   z-index: 30;
 }
+.app-header.native-titlebar {
+  padding-block: 0;
+  padding-right: 0;
+  app-region: drag;
+}
+.native-titlebar button {
+  app-region: no-drag;
+}
+.window-controls {
+  display: flex;
+  align-self: stretch;
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+.window-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+}
+.window-control:hover {
+  background: var(--hover);
+}
+.window-control-close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+.window-control:focus-visible {
+  outline-offset: -3px;
+}
 .app-brand {
   display: flex;
   align-items: center;
@@ -66,16 +101,13 @@ kbd {
   margin-left: auto;
   white-space: nowrap;
 }
-.sidebar-app-actions {
+.activity-rail .sidebar-work-actions {
   margin-top: auto;
+  padding-bottom: 0;
 }
-.sidebar-work-actions {
+.activity-rail .sidebar-app-actions {
   border-top: 0;
-  border-bottom: 1px solid var(--border);
-}
-.activity-rail-collapsed .sidebar-work-actions {
-  border-bottom: 0;
-  padding-top: 0;
+  padding-top: 2px;
 }
 .workspace-local-label {
   font-size: var(--font-size-body);
@@ -141,6 +173,9 @@ kbd {
 }
 .activity-rail-collapsed .sidebar-quick-actions {
   border-top: 0;
+}
+.activity-rail-collapsed .sidebar-app-actions {
+  padding-top: 6px;
 }
 .activity-rail.activity-rail-collapsed .nav-item {
   width: 40px;

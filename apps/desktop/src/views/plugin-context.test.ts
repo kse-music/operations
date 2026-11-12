@@ -6,6 +6,8 @@ import PluginView from './PluginView.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useHostsStore } from '../stores/hosts';
 import { useOpsStore } from '../stores/ops';
+import { useFilesStore } from '../stores/files';
+import { createPluginUiBridge } from '../services/plugin-ui-bridge';
 import { pluginsApi } from '../services/plugins';
 import { hostInput } from '../types/hosts';
 import { systemPluginFixtures } from '../services/system-plugins.fixture';
@@ -188,6 +190,107 @@ it('keeps the cached frame inactive until its released runtime has been reactiva
   expect(frame?.getAttribute('data-active')).toBe('true');
   expect((frame as HTMLElement).style.display).toBe('');
 });
+
+it('keeps connection requests active when the entry SFTP lease finishes connecting', async () => {
+  const ops = useOpsStore(),
+    files = useFilesStore(),
+    plugins = usePluginsStore();
+  const target = { ...host, id: 'b', hostname: 'b.example' };
+  useHostsStore().catalog!.hosts.push(target);
+  ops.connections.a = {
+    host,
+    state: 'connected',
+    error: null,
+    trust: null,
+    session: { id: 'ops-a', hostId: 'a', transportId: 'transport-a', routeHostIds: ['a'] },
+  };
+  files.connections.a = {
+    host,
+    id: 'sftp-a',
+    state: 'connecting',
+    error: null,
+    trust: null,
+    path: '.',
+    listing: null,
+    loading: false,
+  };
+  vi.spyOn(files, 'open').mockResolvedValue();
+  const open = vi.spyOn(ops, 'open').mockImplementation(async (selected) => {
+    if (selected.id === target.id)
+      ops.connections.b = {
+        host: target,
+        state: 'connected',
+        error: null,
+        trust: null,
+        session: { id: 'ops-b', hostId: 'b', transportId: 'transport-b', routeHostIds: ['b'] },
+      };
+  });
+  mount();
+  await settle();
+  const frame = root.querySelector('[data-frame]')!;
+  expect(frame.getAttribute('data-active')).toBe('true');
+  const ui = createPluginUiBridge({
+    id,
+    revision: plugins.installed[0]!.revision,
+    page: resourceUi.pages[0] as PluginUi['pages'][number],
+    hostId: 'a',
+    contextKey: 'extension:resources:server:a',
+    isActive: () => frame.getAttribute('data-active') === 'true',
+  });
+  let activated!: (value: never) => void;
+  vi.mocked(pluginsApi.activate)
+    .mockClear()
+    .mockImplementationOnce(() => new Promise((resolve) => (activated = resolve)));
+  try {
+    files.connections.a.state = 'connected';
+    await settle();
+    await expect(ui.call('connections.ensure', { hostId: 'b' })).resolves.toEqual({
+      hostId: 'b',
+      state: 'connected',
+    });
+    expect(open).toHaveBeenLastCalledWith(target, false);
+    await expect(ui.call('connections.ensure', { hostId: 'a' })).resolves.toEqual({
+      hostId: 'a',
+      state: 'connected',
+    });
+    files.connections.a.id = 'sftp-replacement';
+    await settle();
+    expect(frame.getAttribute('data-active')).toBe('true');
+    expect(pluginsApi.activate).not.toHaveBeenCalled();
+  } finally {
+    activated?.({ state: 'active' } as never);
+    await settle();
+  }
+});
+
+it('suspends disconnected entry hosts and restores their frame without rebinding the runtime', async () => {
+  const ops = useOpsStore();
+  vi.spyOn(ops, 'open').mockResolvedValue();
+  vi.spyOn(useFilesStore(), 'open').mockResolvedValue();
+  ops.connections.a = {
+    host,
+    state: 'connected',
+    error: null,
+    trust: null,
+    session: { id: 'ops-a', hostId: 'a', transportId: 'transport-a', routeHostIds: ['a'] },
+  };
+  mount();
+  await settle();
+  const frame = root.querySelector('[data-frame]')!;
+  vi.mocked(pluginsApi.activate).mockClear();
+  ops.connections.a.state = 'failed';
+  await settle();
+  expect(frame.getAttribute('data-active')).toBe('false');
+  expect((frame as HTMLElement).style.display).toBe('none');
+  ops.connections.a.session!.id = 'ops-reconnected';
+  ops.connections.a.state = 'connected';
+  await settle();
+  expect(root.querySelector('[data-frame]')).toBe(frame);
+  expect(frame.getAttribute('data-active')).toBe('true');
+  expect((frame as HTMLElement).style.display).toBe('');
+  expect(pluginsApi.activate).not.toHaveBeenCalled();
+});
+
 it('keeps the built-in assistant frame and native generation while its host workspace stays open', async () => {
   const plugins = usePluginsStore();
   Object.assign(plugins, toolPluginState());

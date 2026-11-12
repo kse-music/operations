@@ -201,7 +201,7 @@ try {
     assert.equal(await row('E2E-Host').locator('.tree-host').getAttribute('title'), null);
     results.push('native host update via real IPC, reflected in the sidebar');
     await showHostTree(page);
-    const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
+    const expand = page.getByRole('button', { name: '展开主机列表', exact: true });
     if (await expand.isVisible()) await expand.click();
     const original = (await invoke('host_list')).hosts.find((item) => item.name === 'E2E-Host');
     await invoke('host_copy', { id: original.id });

@@ -131,7 +131,7 @@ progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取�
 `approval_mode {mode:"request"|"assist"|"full"}` 返回当前插件/owner/VM绑定的opaque `binding`；WASM放入 `Context::with_bindings`，不得交给模型。request/assist需ui.contribute；full另需声明并独立授予 `operations.full.preapproved` permission和operation。模式仅当前运行期有效，不是额外的SSH/文件权限。
 
 - request不使用任务读取免确认，普通固定命令/交互预授权仍遵守其独立合同；助手不声明普通SSH预授权，因而请求批准模式逐次确认外部读取和命令。
-- assist在manifest与grant均有 `operations.read.preapproved` permission及operation时，自动处理 `read_file`、`transfer_prepare` 与完整固定读取。参数化读取还需下面的独立参数权限；未匹配命令和写入仍需批准。
+- assist在manifest与grant均有 `operations.read.preapproved` permission及operation时，自动处理 `read_file`、`transfer_prepare` 与完整固定读取。固定命令和参数模板同时适用于 `execute` 与 `stream_open`，两条通道使用相同的程序、完整脚本、参数、超时和绑定校验；不包括 `terminal`。参数化读取还需下面的独立参数权限；未匹配命令和写入仍需批准。
 - full的首次请求必须在可见页面经可信宿主确认，插件不能自行生成Full策略。批准后同一owner/VM持续复用binding，不设计时过期，免除已授予范围内执行、文件读写、传输及TCP请求的逐次确认。切换到request/assist会撤销Full binding及未完成的Full首次批准，新建对话须调用request撤销；关闭owner、撤权、插件停止/升级同样失效，隐藏后返回保留。request可作为降权清理请求在取消后和Guest忙碌时发起，不能借此启用full；启用会话标识拒绝已撤销的迟到批准。模型/主机等修订绑定仍为10分钟，计划有效期不变；基础授权、目录、真实连接/修订和文件原文检查保持。首次指纹确认不受影响。
 
 `operations.read.arguments.preapproved` permission 和同名 operation 用于参数化读取，依赖 `operations.read.preapproved` 与基础SSH授权。仅assist模式使用以下模板匹配；普通 `ssh.execute.preapproved` 仍只精确匹配。`preapprovedCommands` 在声明参数权限时最多32条，其他情况最多16条，全部编码合计≤48 KiB。

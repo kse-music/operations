@@ -51,6 +51,12 @@
           "enabledWhen": null
         },
         {
+          "id": "resume",
+          "label": "resume",
+          "discardDirty": false,
+          "enabledWhen": null
+        },
+        {
           "id": "execute",
           "label": "execute",
           "discardDirty": false,

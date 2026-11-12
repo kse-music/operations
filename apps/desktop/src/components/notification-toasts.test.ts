@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import NotificationToasts from './NotificationToasts.vue';
@@ -23,6 +23,46 @@ afterEach(() => {
   disposePinia(pinia);
   root.remove();
   document.querySelectorAll('dialog, form').forEach((element) => element.remove());
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
+
+it('automatically dismisses a non-error toast after three seconds while keeping errors visible', async () => {
+  vi.useFakeTimers();
+  const notifications = useNotificationsStore();
+  notifications.push('设置已保存。日志级别在下次启动时生效。');
+  notifications.push('保存设置失败', true);
+  await flush();
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('设置已保存');
+
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(document.querySelector('[role="status"]')).not.toBeNull();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(document.querySelector('[role="status"]')).toBeNull();
+
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('保存设置失败');
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!.click();
+  await flush();
+  expect(document.querySelector('.toast')).toBeNull();
+});
+
+it('allows early dismissal without shortening the lifetime of a repeated non-error toast', async () => {
+  vi.useFakeTimers();
+  const notifications = useNotificationsStore();
+  notifications.push('设置已保存');
+  await flush();
+  await vi.advanceTimersByTimeAsync(1000);
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!.click();
+  await flush();
+  expect(document.querySelector('.toast')).toBeNull();
+
+  notifications.push('设置已保存');
+  await flush();
+  await vi.advanceTimersByTimeAsync(2999);
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('设置已保存');
+  await vi.advanceTimersByTimeAsync(1);
+  expect(document.querySelector('.toast')).toBeNull();
 });
 
 it('keeps a single dismissible alert inside the active dialog, then returns it to the page', async () => {

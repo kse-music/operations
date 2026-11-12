@@ -33,7 +33,7 @@ try {
     const welcome = page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true });
     await welcome.waitFor();
     assert.equal(await workspaceTitle.count(), 0);
-    const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
+    const expand = page.getByRole('button', { name: '展开主机列表', exact: true });
     if (width <= 720) await expand.click();
     const tree = page.getByRole('region', { name: '主机树', exact: true });
     assert.equal(await tree.locator('.host-sidebar-footer').count(), 0);

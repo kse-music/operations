@@ -81,6 +81,25 @@ pub fn record<R: Runtime>(window: &tauri::Window<R>, event: &tauri::WindowEvent)
         return;
     };
     let size = size.to_logical::<f64>(scale);
+    // Undecorated Windows frames can report a client area below the native track minimum.
+    if !maximized
+        && let Some(config) = window
+            .app_handle()
+            .config()
+            .app
+            .windows
+            .iter()
+            .find(|config| config.label == "main")
+    {
+        let width = size.width.max(config.min_width.unwrap_or_default());
+        let height = size.height.max(config.min_height.unwrap_or_default());
+        if width > size.width || height > size.height {
+            if let Err(error) = window.set_size(tauri::LogicalSize::new(width, height)) {
+                tracing::warn!(operation = "window_minimum_size", error = %error, "could not enforce minimum window size");
+            }
+            return;
+        }
+    }
     let previous = *state.0.borrow();
     let normal = previous.unwrap_or(WindowGeometry {
         width: 1280.0,

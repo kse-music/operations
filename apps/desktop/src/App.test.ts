@@ -301,6 +301,83 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('opens the existing host and import dialogs from the welcome cards without starting a connection', async () => {
+  const welcome = document.querySelector('[aria-label="欢迎页面"]')!;
+  expect(welcome.classList.contains('workspace-empty')).toBe(false);
+  expect(welcome.querySelectorAll('.welcome-card')).toHaveLength(3);
+  expect(welcome.querySelector('[aria-label="快速上手"]')).not.toBeNull();
+  expect(welcome.querySelector('[aria-label="键盘操作"]')).not.toBeNull();
+  const open = vi.spyOn(useTerminalsStore(), 'open');
+  const importHosts = vi.spyOn(hostsApi, 'import');
+  const button = (label: string) =>
+    [...welcome.querySelectorAll<HTMLButtonElement>('button')].find(
+      (item) => item.textContent?.trim() === label,
+    )!;
+
+  button('新建主机').click();
+  await flush();
+  const create = document.querySelector<HTMLDialogElement>('dialog[aria-label="新建主机"]')!;
+  expect(create.open).toBe(true);
+  create.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="新建主机"]')).toBeNull();
+
+  button('导入配置').click();
+  await flush();
+  const dialog = document.querySelector<HTMLDialogElement>(
+    'dialog[aria-label="导入 OpenSSH Config"]',
+  )!;
+  expect(dialog.open).toBe(true);
+  expect(dialog.querySelector('[aria-label="OpenSSH Config 内容"]')).not.toBeNull();
+  expect(importHosts).not.toHaveBeenCalled();
+  dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="导入 OpenSSH Config"]')).toBeNull();
+  expect(open).not.toHaveBeenCalled();
+  expect(useWorkspaceStore().tabs).toEqual([]);
+});
+
+it('opens one fresh local terminal from the welcome page even when a remote host is selected', async () => {
+  useHostsStore().selectedId = 'a';
+  const terminals = useTerminalsStore();
+  const open = vi.spyOn(terminals, 'open');
+  const button = document.querySelector<HTMLButtonElement>('.welcome-card .primary')!;
+  expect(button.textContent).toContain('打开本地终端');
+  button.click();
+  await flush();
+  expect(open).toHaveBeenCalledExactlyOnceWith(null);
+  expect(terminals.panes).toHaveLength(1);
+  expect(terminals.panes[0]?.host).toBeNull();
+  expect(terminals.panes[0]?.connectRequested).toBe(true);
+  expect(useWorkspaceStore().current).toMatchObject({ view: 'terminals', hostId: '' });
+  expect(document.querySelector('[aria-label="欢迎页面"]')).toBeNull();
+});
+
+it('updates welcome shortcuts and translations from saved preferences', async () => {
+  loadSidebarConfig();
+  const config = useApplicationStore().state!.config;
+  config.product.shortcuts = { search: 'Ctrl+Shift+K', settings: '' };
+  await flush();
+  const shortcuts = () =>
+    [...document.querySelectorAll('.welcome-shortcuts kbd')].map((item) => item.textContent);
+  expect(shortcuts()).toEqual(['Ctrl+Shift+K', 'Enter']);
+  expect(document.querySelector('.welcome-eyebrow')).toBeNull();
+  expect(
+    [...document.querySelectorAll('.welcome-shortcuts dt')].map((item) => item.textContent),
+  ).toEqual(['搜索主机与命令', '连接选中的主机']);
+  config.product.language = 'en-US';
+  await flush();
+  expect(document.querySelector('.welcome-heading h1')?.textContent).toBe('Welcome to ServerDeck');
+  expect(
+    [...document.querySelectorAll('.welcome-card h2')].map((item) => item.textContent),
+  ).toEqual(['Local terminal', 'New host', 'Import SSH configuration']);
+  expect(shortcuts()).toEqual(['Ctrl+Shift+K', 'Enter']);
+  config.product.language = 'zh-CN';
+  await flush();
+  expect(document.querySelector('.welcome-heading h1')?.textContent).toBe('欢迎使用 ServerDeck');
+  expect(useTerminalsStore().panes).toEqual([]);
+});
+
 it.each(['', 'a'])(
   'starts with no terminal tabs and opens one fresh Shell for the selected host (%s)',
   async (savedHostId) => {
@@ -934,9 +1011,9 @@ it('confirms active transfer cancellation before closing a host and preserves th
   expect(files.tasks.filter((task) => task.hostId === 'a')).toEqual([]);
 });
 
-it('collapses the persistent host tree from the header and retains its search on global pages', async () => {
+it('collapses the persistent host tree from its heading and transfers focus while retaining search', async () => {
   const toggle = document.querySelector<HTMLButtonElement>(
-    '.app-header [aria-controls="host-sidebar"]',
+    '.host-list-heading [aria-controls="host-tree-panel"]',
   )!;
   const tree = document.querySelector('.host-tree-section');
   useHostsStore().search = 'Host a';
@@ -946,12 +1023,18 @@ it('collapses the persistent host tree from the header and retains its search on
   expect(document.querySelector<HTMLElement>('.sidebar')!.style.display).not.toBe('none');
   expect(document.querySelector<HTMLElement>('.host-tree-section')!.style.display).toBe('none');
   expect(document.querySelector('.activity-rail-collapsed')).not.toBeNull();
-  expect(toggle.ariaLabel).toBe('展开主机栏');
-  expect(document.activeElement).toBe(toggle);
-  toggle.click();
+  const expand = document.querySelector<HTMLButtonElement>(
+    '.sidebar-quick-actions [aria-label="展开主机列表"]',
+  )!;
+  expect(document.querySelector('.app-header [aria-controls]')).toBeNull();
+  expect(document.activeElement).toBe(expand);
+  expect(expand.getAttribute('aria-expanded')).toBe('false');
+  expand.click();
   await flush();
   expect(document.querySelector<HTMLElement>('.sidebar')!.style.display).not.toBe('none');
   expect(toggle.ariaLabel).toBe('收起主机栏');
+  expect(document.activeElement).toBe(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(useHostsStore().search).toBe('Host a');
   await openNavigation('插件管理');
   await useWorkspaceStore().closeSettings();
@@ -972,7 +1055,9 @@ it('keeps collapsed rail actions reachable without replacing the host tree or cl
   const hostPane = terminals.panes[0]!;
   const tree = document.querySelector('.host-tree-section');
   const close = vi.spyOn(terminalApi, 'close');
-  document.querySelector<HTMLButtonElement>('.app-header [aria-label="收起主机栏"]')!.click();
+  document
+    .querySelector<HTMLButtonElement>('.host-list-heading [aria-label="收起主机栏"]')!
+    .click();
   await flush();
   const railAction = (label: string) =>
     document.querySelector<HTMLButtonElement>(`.activity-rail-collapsed [aria-label="${label}"]`)!;
@@ -1008,12 +1093,14 @@ it('keeps collapsed rail actions reachable without replacing the host tree or cl
   expect(close).not.toHaveBeenCalled();
 });
 
-it('keeps the host count and search without JSON import or export controls', () => {
+it('keeps the root folder count and search without a duplicate heading count or JSON controls', () => {
   const heading = document.querySelector('.host-list-heading')!;
   expect(heading.textContent).toContain('主机');
-  expect(heading.querySelector('.host-count')?.textContent?.trim()).toBe('2');
+  expect(heading.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
+  expect(heading.querySelector('.host-count')).toBeNull();
+  expect(document.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('2');
   expect([...heading.querySelectorAll('button')].map((button) => button.ariaLabel)).toEqual([
-    '新建主机',
+    '收起主机栏',
   ]);
   expect(document.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
   expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
@@ -1108,7 +1195,7 @@ it('selects administrator mode from the session plus menu without replacing ordi
 });
 
 it.each([null, '', 'a'])(
-  'opens or reuses the local terminal above the host tree in context "%s"',
+  'opens or reuses the local terminal below the host tree and above settings in context "%s"',
   async (hostId) => {
     const workspace = useWorkspaceStore();
     if (hostId !== null) workspace.navigate('terminals', hostId);
@@ -1118,7 +1205,12 @@ it.each([null, '', 'a'])(
       '.sidebar-work-actions > [aria-label="本地终端"]',
     )!;
     expect(local.closest('.sidebar-work-actions')).not.toBeNull();
-    expect(local.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(local.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(
+      local
+        .closest('.sidebar-work-actions')
+        ?.nextElementSibling?.classList.contains('sidebar-app-actions'),
+    ).toBe(true);
     expect(local.querySelector('svg')).not.toBeNull();
     expect(local.textContent?.trim()).toBe('本地终端');
     expect(section.querySelector('.sidebar-local-device')).toBeNull();

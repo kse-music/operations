@@ -23,7 +23,7 @@ export async function terminalAction(page, pane, name) {
 
 export async function showHostTree(page) {
   if (!(await page.locator('.host-tree-section').isVisible())) {
-    const expand = page.getByRole('button', { name: '展开主机栏', exact: true });
+    const expand = page.getByRole('button', { name: '展开主机列表', exact: true });
     if (await expand.isVisible()) await expand.click();
   }
 }

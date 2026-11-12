@@ -169,6 +169,7 @@ pub fn create_window<R: Runtime>(
         &label,
         tauri::WebviewUrl::App("index.html?remote-editor".into()),
     )
+    .initialization_script_for_all_frames(crate::PREVENT_NATIVE_CONTEXT_MENU)
     .title(title)
     .inner_size(1000.0, 740.0)
     .min_inner_size(560.0, 380.0)

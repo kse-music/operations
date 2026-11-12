@@ -19,6 +19,7 @@ import TerminalStatus from './components/TerminalStatus.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
+import WelcomeView from './views/WelcomeView.vue';
 import HostTools from './components/HostTools.vue';
 import {
   CopyX,
@@ -357,7 +358,11 @@ async function toggleSidebar(): Promise<void> {
   sidebarOpen.value = !sidebarOpen.value;
   await nextTick();
   document
-    .querySelector<HTMLButtonElement>('.app-header [aria-controls="host-sidebar"]')
+    .querySelector<HTMLButtonElement>(
+      sidebarOpen.value
+        ? '.host-list-heading [aria-controls="host-tree-panel"]'
+        : '.sidebar-quick-actions [aria-controls="host-tree-panel"]',
+    )
     ?.focus({ preventScroll: true });
   revealActiveTab();
 }
@@ -625,11 +630,9 @@ watch(
 <template>
   <div class="app-shell" :class="{ 'sidebar-collapsed': !sidebarOpen }" :style="layoutStyle">
     <AppHeader
-      :sidebar-open="sidebarOpen"
       :search-shortcut="
         application.state?.config.product?.shortcuts.search ?? defaultShortcuts.search!
       "
-      @sidebar="toggleSidebar"
       @search="searching = true"
     />
     <aside id="host-sidebar" class="sidebar" :aria-label="tr('主机管理侧栏')">
@@ -644,6 +647,7 @@ watch(
           v-show="sidebarOpen"
           id="host-tree-panel"
           :active="sidebarOpen"
+          @collapse="toggleSidebar"
           @plugin="openPlugin"
           @create="openHost($event)"
           @import-openssh="importingOpenSsh = true"
@@ -743,16 +747,15 @@ watch(
         :inert="workspace.closing.includes(workspace.active)"
         :aria-busy="workspace.closing.includes(workspace.active)"
       >
-        <section v-if="view === null" class="workspace-empty" :aria-label="tr('欢迎页面')">
-          <h1>{{ tr('欢迎使用 ServerDeck') }}</h1>
-          <p>{{ tr('打开本地终端，或从左侧主机列表连接服务器。') }}</p>
-          <div class="action-row">
-            <button class="button primary" @click="navigate('terminals', '')">
-              {{ tr('打开本地终端') }}
-            </button>
-            <button class="button" @click="openHost()">{{ tr('新建主机') }}</button>
-          </div>
-        </section>
+        <WelcomeView
+          v-if="view === null"
+          :search-shortcut="
+            application.state?.config.product?.shortcuts.search ?? defaultShortcuts.search!
+          "
+          @local-terminal="navigate('terminals', '')"
+          @create-host="openHost()"
+          @import-openssh="importingOpenSsh = true"
+        />
         <PluginView
           v-for="page in cachedPluginPages"
           v-show="workspace.activePluginKey === page.key"

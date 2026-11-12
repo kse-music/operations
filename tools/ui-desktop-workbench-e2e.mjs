@@ -51,6 +51,7 @@ try {
         const { systemPluginFixtures } = await import('/src/services/system-plugins.fixture.ts');
         Object.assign(pluginsApi, {
           list: async () => systemPluginFixtures(),
+          inventory: async () => ({ installed: systemPluginFixtures(), problems: [] }),
           permissions: async () => null,
           statuses: async () => [],
         });
@@ -128,11 +129,11 @@ try {
     );
     assert(terminalGap <= 4, name + ': terminal content must follow its session bar');
     const dismissNotices = async () => {
-      for (const button of await page.getByRole('button', { name: '关闭通知', exact: true }).all())
-        await button.click();
+      const notices = page.getByRole('button', { name: '关闭通知', exact: true });
+      while (await notices.count()) await notices.first().click();
     };
     await dismissNotices();
-    if (width <= 720) await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+    if (width <= 720) await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
     assert.equal(await page.locator('.module-navigation, .workspace-group-tab').count(), 0);
     assert.equal(await page.locator('.app-menu, [aria-label="应用菜单"]').count(), 0);
     assert.equal(await page.locator('.workspace-tabs').count(), 1);
@@ -142,12 +143,27 @@ try {
     assert(await page.locator('.host-tree-section').isVisible());
     const localPosition = await page.locator('.sidebar-work-actions').boundingBox();
     const treePosition = await page.locator('.host-tree-section').boundingBox();
-    assert(localPosition.y + localPosition.height <= treePosition.y + 1);
+    const settingsPosition = await page.locator('.sidebar-app-actions').boundingBox();
+    assert(treePosition.y + treePosition.height <= localPosition.y + 1);
+    assert(localPosition.y + localPosition.height <= settingsPosition.y + 1);
+    assert.equal(await page.locator('.app-header [aria-controls="host-tree-panel"]').count(), 0);
+    const collapsePosition = await page.locator('.host-list-heading').evaluate((heading) => {
+      const bounds = heading.getBoundingClientRect();
+      const button = heading.querySelector('[aria-label="收起主机栏"]').getBoundingClientRect();
+      return Math.abs(bounds.right - button.right) <= 2;
+    });
+    assert(collapsePosition, `${name}: collapse action must be at the right of the host heading`);
+    await page.screenshot({ path: output + '/' + name + '-sidebar-expanded.png' });
     const hostSearch = page.getByRole('textbox', { name: '搜索主机', exact: true });
     await hostSearch.fill('生产');
     await page.getByRole('button', { name: '收起主机栏', exact: true }).click();
     const rail = page.locator('.activity-rail-collapsed');
     await rail.waitFor();
+    assert(
+      await rail
+        .getByRole('button', { name: '展开主机列表', exact: true })
+        .evaluate((button) => document.activeElement === button),
+    );
     assert.equal(await page.locator('.host-tree-section').isVisible(), false);
     assert.equal(await page.locator('.sidebar-resizer').count(), 0);
     assert.deepEqual(
@@ -165,9 +181,17 @@ try {
     const railGeometry = await page.evaluate(() => {
       const sidebar = document.querySelector('.sidebar').getBoundingClientRect();
       const main = document.querySelector('.main-content').getBoundingClientRect();
+      const local = document.querySelector('.sidebar-work-actions button').getBoundingClientRect();
+      const settings = document
+        .querySelector('.sidebar-app-actions button')
+        .getBoundingClientRect();
       return {
         width: sidebar.width,
         mainClear: main.left >= sidebar.right - 1,
+        footerAtBottom:
+          local.bottom <= settings.top &&
+          settings.bottom <= sidebar.bottom &&
+          sidebar.bottom - settings.bottom <= 16,
         buttonsFit: [
           ...document.querySelectorAll('.activity-rail-collapsed .activity-group button'),
         ].every((button) => {
@@ -185,9 +209,13 @@ try {
     });
     assert.equal(railGeometry.width, 52, name + ': collapsed rail width');
     assert(
-      railGeometry.mainClear && railGeometry.buttonsFit && !railGeometry.horizontalOverflow,
+      railGeometry.mainClear &&
+        railGeometry.footerAtBottom &&
+        railGeometry.buttonsFit &&
+        !railGeometry.horizontalOverflow,
       JSON.stringify({ name, railGeometry }),
     );
+    await page.screenshot({ path: output + '/' + name + '-sidebar-collapsed.png' });
     assert.equal(await page.getByRole('button', { name: '全局搜索', exact: true }).count(), 1);
     await page
       .locator('.app-header')
@@ -239,7 +267,7 @@ try {
     assert(tabRows.every((y) => Math.abs(y - tabRows[0]) < 1));
     await closeApplicationSettings(page);
     if (!(await page.locator('.host-tree-section').isVisible()))
-      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+      await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
     assert(await page.locator('.host-tree-section').isVisible());
     await navigateWorkspace(page, '通用');
     await dismissNotices();

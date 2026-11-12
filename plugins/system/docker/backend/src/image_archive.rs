@@ -1,7 +1,7 @@
 use serverdeck_plugin_sdk::{
     ApiError,
     backend::Context,
-    platform::{Command, Request},
+    platform::Request,
     serde_json::{self, Value, json},
 };
 #[path = "../../../image_archive.rs"]
@@ -18,7 +18,7 @@ pub async fn open(context: &Context, host: &str, input: Value) -> Result<Value, 
     let nonce = info["nonce"]
         .as_str()
         .ok_or_else(|| invalid("平台任务标识无效"))?;
-    let (script, directory, path) = command(&archive, nonce)?;
+    let (command, directory, path) = command(&archive, nonce)?;
     let target = context
         .request(Request::Host {
             host_id: host.into(),
@@ -31,7 +31,7 @@ pub async fn open(context: &Context, host: &str, input: Value) -> Result<Value, 
         .with_bindings(vec![binding.into()])
         .request(Request::StreamOpen {
             host_id: host.into(),
-            command: Command::script(script),
+            command,
         })
         .await?;
     Ok(json!({"streamId":stream["id"],"directory":directory,"path":path,"nonce":nonce}))

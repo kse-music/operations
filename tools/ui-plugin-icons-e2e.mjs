@@ -89,7 +89,7 @@ try {
       ];
     }, theme);
     if (!(await page.locator('.host-tree-section').isVisible()))
-      await page.getByRole('button', { name: '展开主机栏', exact: true }).click();
+      await page.getByRole('button', { name: '展开主机列表', exact: true }).click();
     assert.deepEqual(
       (await page.locator('.sidebar-app-actions button').allTextContents()).map((text) =>
         text.trim(),

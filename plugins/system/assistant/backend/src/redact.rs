@@ -1,7 +1,7 @@
 use crate::Error;
 use regex::{Regex, RegexBuilder};
 use serde_json::Value;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashSet, rc::Rc};
 
 struct Rules {
     rules: Vec<Regex>,
@@ -16,6 +16,7 @@ pub struct Redactor {
     rules: Rc<Rules>,
     mask_addresses: bool,
     values: Vec<zeroize::Zeroizing<String>>,
+    host_addresses: RefCell<HashSet<String>>,
 }
 
 pub fn initialize() -> Result<(), Error> {
@@ -78,7 +79,18 @@ impl Redactor {
             rules: rules()?,
             mask_addresses,
             values,
+            host_addresses: RefCell::new(HashSet::new()),
         })
+    }
+    pub fn register_host_address(&self, address: &str) {
+        self.host_addresses
+            .borrow_mut()
+            .insert(address.trim_matches(['[', ']']).to_ascii_lowercase());
+    }
+    fn is_host_address(&self, address: &str) -> bool {
+        self.host_addresses
+            .borrow()
+            .contains(&address.to_ascii_lowercase())
     }
     pub fn text(&self, text: &str) -> String {
         let mut result = text.to_owned();
@@ -92,7 +104,14 @@ impl Redactor {
             result = self
                 .rules
                 .addresses
-                .replace_all(&result, "[ADDRESS]")
+                .replace_all(&result, |capture: &regex::Captures<'_>| {
+                    let address = capture.get(0).map_or("", |m| m.as_str());
+                    if self.is_host_address(address) {
+                        address.to_owned()
+                    } else {
+                        "[ADDRESS]".into()
+                    }
+                })
                 .into_owned();
         }
         result
@@ -140,6 +159,7 @@ impl Redactor {
                 self.rules
                     .addresses
                     .find_iter(text)
+                    .filter(|m| !self.is_host_address(m.as_str()))
                     .map(|m| (m.start(), m.end())),
             );
         }
@@ -295,5 +315,32 @@ mod tests {
         let text = "custom-secret 192.168.1.2";
         assert_eq!(first.text(text), "[REDACTED] [ADDRESS]");
         assert_eq!(second.text(text), text);
+    }
+    #[test]
+    fn registered_host_addresses_remain_distinct_without_exposing_other_addresses_or_secrets() {
+        let redactor = Redactor::new(true, vec!["192.168.1.3".to_owned().into()]).unwrap();
+        for address in ["192.168.1.2", "192.168.1.3", "[2001:db8::1]"] {
+            redactor.register_host_address(address);
+        }
+        let text = "192.168.1.2 192.168.1.3 2001:DB8::1\n10.20.30.40 user@example.com\npassword=synthetic-secret";
+        for output in [
+            redactor.text(text),
+            redactor.lines(text),
+            redactor.stream_text(text, true),
+        ] {
+            assert!(output.contains("192.168.1.2"));
+            assert!(output.contains("2001:DB8::1"));
+            for hidden in [
+                "192.168.1.3",
+                "10.20.30.40",
+                "user@example.com",
+                "synthetic-secret",
+            ] {
+                assert!(!output.contains(hidden), "{hidden}");
+            }
+            assert_eq!(output.lines().count(), text.lines().count());
+        }
+        let other = Redactor::new(true, vec![]).unwrap();
+        assert_eq!(other.text("192.168.1.2"), "[ADDRESS]");
     }
 }

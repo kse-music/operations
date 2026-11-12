@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
 
-import { Server, Settings2, SquareTerminal } from '@lucide/vue';
+import { PanelLeftOpen, Settings2, SquareTerminal } from '@lucide/vue';
 import type { WorkspaceView } from '../types/product';
 defineProps<{
   localActive: boolean;
@@ -25,9 +25,10 @@ defineEmits<{ navigate: [view: WorkspaceView]; expand: [] }>();
         aria-controls="host-tree-panel"
         @click="$emit('expand')"
       >
-        <Server :size="20" aria-hidden="true" />
+        <PanelLeftOpen :size="20" aria-hidden="true" />
       </button>
     </nav>
+    <slot />
     <nav class="activity-group sidebar-work-actions" :aria-label="tr('本地工作区')">
       <button
         class="nav-item"
@@ -44,7 +45,6 @@ defineEmits<{ navigate: [view: WorkspaceView]; expand: [] }>();
         >
       </button>
     </nav>
-    <slot />
     <nav class="activity-group sidebar-app-actions" :aria-label="tr('应用导航')">
       <button
         class="nav-item"

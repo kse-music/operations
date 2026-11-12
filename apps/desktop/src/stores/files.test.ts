@@ -203,7 +203,7 @@ describe('file opening and external editing', () => {
       await store.closeExternal();
       expect(notifications.items).toHaveLength(1);
       if (action === 'dismiss') notifications.dismiss(notifications.items[0]!.id);
-      else await vi.advanceTimersByTimeAsync(6000);
+      else await vi.advanceTimersByTimeAsync(3000);
       expect(notifications.items).toEqual([]);
       expect(await store.prepareHostClose(host.id)).toBe(true);
       expect(await store.clearHostTransfers(host.id)).toBe(true);

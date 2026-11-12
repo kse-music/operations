@@ -136,7 +136,7 @@ it('shows an address only once when it already serves as the host name', async (
   }
 });
 
-it('shows the saved host total beside the host heading regardless of filtering and updates after changes', async () => {
+it('shows host counts in the root folder without duplicating them in the heading and updates after changes', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const store = useHostsStore();
@@ -158,11 +158,17 @@ it('shows the saved host total beside the host heading regardless of filtering a
   document.body.append(root);
   app = createApp(HostSidebar).use(pinia);
   app.mount(root);
-  const count = () => root.querySelector('.host-list-heading .host-count')?.textContent?.trim();
+  const count = () =>
+    root.querySelector('[data-group-id=""] > .group-toggle .group-count')?.textContent?.trim();
+  expect(root.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
+  expect(root.querySelector('.host-count')).toBeNull();
   expect(count()).toBe('2');
   store.search = 'no-match';
   await nextTick();
   expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
+  expect(count()).toBe('0');
+  store.search = '';
+  await nextTick();
   expect(count()).toBe('2');
   store.catalog.hosts.push({ ...host, id: 'third' });
   await nextTick();
@@ -175,6 +181,7 @@ it('shows the saved host total beside the host heading regardless of filtering a
   expect(count()).toBe('0');
   store.catalog = null;
   await nextTick();
+  expect(root.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
   expect(root.querySelector('.host-count')).toBeNull();
 });
 
@@ -258,7 +265,9 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
   expect(root.querySelector('[aria-label="已收藏"]')).toBeNull();
-  expect(heading.querySelector('button')?.getAttribute('aria-label')).toBe('新建主机');
+  expect(heading.querySelectorAll('button')).toHaveLength(1);
+  expect(heading.querySelector('[aria-label="新建主机"]')).toBeNull();
+  expect(heading.querySelector('button')?.getAttribute('aria-label')).toBe('收起主机栏');
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',
   );
@@ -273,7 +282,7 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(group.getAttribute('aria-expanded')).toBe('false');
 });
 
-it('shows loading, failure and per-host status with the total in the heading', async () => {
+it('shows loading, failure and per-host status with the total in the root folder', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const hosts = useHostsStore();
@@ -289,7 +298,7 @@ it('shows loading, failure and per-host status with the total in the heading', a
   hosts.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
   await nextTick();
   expect(root.textContent).toContain('尚未添加主机');
-  expect(root.querySelector('.host-count')?.textContent?.trim()).toBe('0');
+  expect(root.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('0');
   useBackgroundStore().connections = [];
   hosts.catalog.hosts.push({
     ...hostInput(),
@@ -336,7 +345,7 @@ it('shows loading, failure and per-host status with the total in the heading', a
   await nextTick();
   expect(icon.getAttribute('aria-label')).toBe('未连接');
   expect(icon.classList.contains('connected')).toBe(false);
-  expect(root.querySelector('.host-count')?.textContent?.trim()).toBe('1');
+  expect(root.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('1');
   expect(root.querySelector('.host-sidebar-footer')).toBeNull();
 });
 

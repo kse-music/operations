@@ -11,6 +11,7 @@ use serverdeck_plugin_sdk::{
     ApiError,
     platform::{Command, quote},
 };
+use sha2::{Digest, Sha256};
 
 #[derive(Deserialize)]
 #[serde(
@@ -47,7 +48,7 @@ fn file_name(name: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
-pub fn command(archive: &Archive, nonce: &str) -> Result<(String, String, String), ApiError> {
+pub fn command(archive: &Archive, nonce: &str) -> Result<(Command, String, String), ApiError> {
     if nonce.len() != 36 || !nonce.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         return Err(invalid("镜像任务标识无效"));
     }
@@ -68,7 +69,8 @@ pub fn command(archive: &Archive, nonce: &str) -> Result<(String, String, String
     file_name(name)?;
     let directory = format!("/tmp/serverdeck-image-{nonce}");
     let path = format!("{directory}/{name}");
-    let operation = match archive {
+    let mut export_args = None;
+    let operation: String = match archive {
         Archive::Import {..} => r#"
 while ! test -e "$sd_path" && ! test -L "$sd_path"; do run_child sleep 1 || exit; done
 if test -L "$sd_path" || ! test -f "$sd_path"; then echo 'Archive must be a regular file' >&2; exit 1; fi
@@ -81,21 +83,59 @@ run_child docker --host unix://$sd_socket image load --input "$sd_path" || exit
                 || reference.chars().any(|c| c.is_control() || c.is_whitespace()) {
                 return Err(invalid("镜像引用无效"));
             }
-            let id = format!("sha256:{}", id.strip_prefix("sha256:").unwrap_or(id));
-            format!(r#"
-sd_reference={reference}
-sd_actual=$(d image inspect --format '{{{{.Id}}}}' -- "$sd_reference") || exit
-test "$sd_actual" = {id} || {{ echo 'Image reference changed; refresh the image list' >&2; exit 1; }}
-run_child docker --host unix://$sd_socket image save --output "$sd_path" "$sd_reference" || exit
-sd_actual=$(d image inspect --format '{{{{.Id}}}}' -- "$sd_reference") || exit
-test "$sd_actual" = {id} || {{ echo 'Image reference changed during export' >&2; exit 1; }}
-"#, reference=quote(reference)?, id=quote(&id)?)
+            export_args = Some((id.strip_prefix("sha256:").unwrap_or(id).to_owned(),format!("{:x}",Sha256::digest(reference.as_bytes()))));
+            r#"
+sd_id="sha256:$2"; sd_reference_hash=$3
+sd_references=$(d image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' -- "$sd_id") || exit
+set -f
+sd_reference=
+for sd_candidate in "$sd_id" "${sd_id#sha256:}" $sd_references; do
+    sd_hash=$(printf '%s' "$sd_candidate" | sha256sum) || exit
+    sd_hash=${sd_hash%% *}
+    if test "$sd_hash" = "$sd_reference_hash"; then sd_reference=$sd_candidate; break; fi
+done
+test -n "$sd_reference" || { echo 'Image reference changed; refresh the image list' >&2; exit 1; }
+sd_actual=$(d image inspect --format '{{.Id}}' -- "$sd_reference") || exit
+test "$sd_actual" = "$sd_id" || { echo 'Image reference changed; refresh the image list' >&2; exit 1; }
+run_child docker --host unix://$sd_socket image save --output "$sd_path" -- "$sd_reference" || exit
+sd_actual=$(d image inspect --format '{{.Id}}' -- "$sd_reference") || exit
+test "$sd_actual" = "$sd_id" || { echo 'Image reference changed during export' >&2; exit 1; }
+"#.into()
         }
+    };
+    let (directory_arg, path_arg, setup, prepared, ready): (
+        String,
+        String,
+        String,
+        String,
+        String,
+    ) = if export_args.is_some() {
+        (
+            "\"/tmp/serverdeck-image-$1\"".into(),
+            "\"$sd_dir/$4\"".into(),
+            r#"test "$#" = 4 && test "${#1}" = 36 && test "${#2}" = 64 && test "${#3}" = 64 || exit 65
+case "$1" in *[!0-9a-fA-F-]*) exit 65;; esac
+case "$2$3" in *[!0-9a-fA-F]*) exit 65;; esac
+case "$4" in ''|.|..|*/*|*\\*) exit 65;; esac
+case "$4" in *.[tT][aA][rR]) ;; *) exit 65;; esac
+"#.to_owned(),
+            "printf 'SD_ARCHIVE_PREPARED:%s\\n' \"$1\"".into(),
+            "printf '\\nSD_ARCHIVE_READY:%s\\n' \"$1\"".into(),
+        )
+    } else {
+        (
+            quote(&directory)?,
+            quote(&path)?,
+            String::new(),
+            format!("printf 'SD_ARCHIVE_PREPARED:{nonce}\\n'"),
+            format!("printf '\\nSD_ARCHIVE_READY:{nonce}\\n'"),
+        )
     };
     // The stream owns this private directory until the native transfer finishes.
     // Unexpected files are retained; cleanup never recursively removes a directory.
     let script = format!(
         r#"{PRELUDE}
+{setup}
 umask 077
 sd_dir={directory}; sd_path={path}; sd_child=
 test -d /tmp && ! test -L /tmp || {{ echo 'Temporary directory is unavailable or linked' >&2; exit 1; }}
@@ -114,16 +154,26 @@ cleanup() {{
 trap cleanup 0
 trap 'exit 1' HUP INT TERM
 run_child() {{ "$@" & sd_child=$!; wait "$sd_child"; sd_result=$?; sd_child=; return "$sd_result"; }}
-printf 'SD_ARCHIVE_PREPARED:{nonce}\n'
+{prepared}
 {operation}
-printf '\nSD_ARCHIVE_READY:{nonce}\n'
+{ready}
 while :; do run_child sleep 1 || exit; done
 "#,
-        directory = quote(&directory)?,
-        path = quote(&path)?
+        directory = directory_arg,
+        path = path_arg
     );
-    Command::script(&script).validate()?;
-    Ok((script, directory, path))
+    let mut command = Command::script(script);
+    if let Some((id, reference_hash)) = export_args {
+        command.args.extend([
+            "serverdeck-image-export".into(),
+            nonce.into(),
+            id,
+            reference_hash,
+            name.clone(),
+        ]);
+    }
+    command.validate()?;
+    Ok((command, directory, path))
 }
 
 #[cfg(test)]
@@ -131,6 +181,71 @@ mod tests {
     use super::*;
     use serverdeck_plugin_sdk::serde_json::{self, json};
     const NONCE: &str = "01234567-89ab-cdef-0123-456789abcdef";
+    fn script(command: &Command) -> String {
+        let arguments = command
+            .args
+            .iter()
+            .skip(3)
+            .map(|arg| quote(arg).unwrap())
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "{PRELUDE}\nset -- {arguments};\n{}",
+            command.args[1].strip_prefix(PRELUDE).unwrap()
+        )
+    }
+    #[test]
+    fn assistant_export_matches_only_the_fixed_script_and_bounded_arguments() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("assistant/manifest.json")).unwrap();
+        let templates: Vec<Command> =
+            serde_json::from_value(manifest["preapprovedCommands"].clone()).unwrap();
+        for reference in [
+            "stock:1.0.0",
+            "registry:5000/team/app:tag",
+            "registry.example/a/b:release",
+        ] {
+            let (command, _, _) = command(
+                &Archive::Export {
+                    id: "a".repeat(64),
+                    reference: reference.into(),
+                    file_name: format!("image-{NONCE}.tar"),
+                    confirmed: true,
+                },
+                NONCE,
+            )
+            .unwrap();
+            assert!(
+                templates
+                    .iter()
+                    .any(|template| template.matches_argument_template(&command)),
+                "EXPORT_COMMAND={}",
+                serde_json::to_string(&command).unwrap()
+            );
+            for (index, value) in [
+                (1, "reboot"),
+                (3, "../outside"),
+                (4, "a;reboot"),
+                (5, "not-a-hash"),
+                (6, "/etc/file.tar"),
+            ] {
+                let mut changed = command.clone();
+                changed.args[index] = value.into();
+                assert!(
+                    !templates
+                        .iter()
+                        .any(|template| template.matches_argument_template(&changed))
+                );
+            }
+            let mut changed = command.clone();
+            changed.args.push("extra".into());
+            assert!(
+                !templates
+                    .iter()
+                    .any(|template| template.matches_argument_template(&changed))
+            );
+        }
+    }
     #[test]
     fn archive_contract_rejects_traversal_unknown_fields_and_missing_confirmation() {
         for name in [
@@ -195,7 +310,7 @@ mod tests {
     }
     #[test]
     fn commands_keep_tags_and_quote_filenames_without_shell_expansion() {
-        let (script, dir, path) = command(
+        let (import, dir, path) = command(
             &Archive::Import {
                 file_name: "镜像 '$(touch injected).tar".into(),
                 confirmed: true,
@@ -203,10 +318,11 @@ mod tests {
             NONCE,
         )
         .unwrap();
+        let script = &import.args[1];
         assert!(script.contains(&quote(&path).unwrap()));
         assert!(path.starts_with(&dir));
         assert!(script.contains("image load --input \"$sd_path\" || exit"));
-        let (script, _, _) = command(
+        let (export, _, _) = command(
             &Archive::Export {
                 id: "a".repeat(64),
                 reference: "registry:5000/app:tag".into(),
@@ -216,8 +332,14 @@ mod tests {
             NONCE,
         )
         .unwrap();
-        assert!(script.contains("image save --output \"$sd_path\" \"$sd_reference\" || exit"));
-        assert!(script.contains("test \"$sd_actual\" = 'sha256:"));
+        let script = &export.args[1];
+        assert!(script.contains("image save --output \"$sd_path\" -- \"$sd_reference\" || exit"));
+        assert!(script.contains("test \"$sd_actual\" = \"$sd_id\""));
+        assert_eq!(export.args[4], "a".repeat(64));
+        assert_eq!(
+            export.args[5],
+            format!("{:x}", Sha256::digest(b"registry:5000/app:tag"))
+        );
         assert!(!script.contains("rm -rf"));
     }
     #[test]
@@ -241,11 +363,13 @@ mod tests {
                     confirmed: true,
                 }
             };
-            let (script, dir, _) = command(&archive, NONCE).unwrap();
+            let (command, dir, _) = command(&archive, NONCE).unwrap();
+            let script = script(&command);
             let body = script
                 .strip_prefix(PRELUDE)
                 .unwrap()
                 .replace(&dir, "'\"$sd_fixture\"'/job")
+                .replace("\"/tmp/serverdeck-image-$1\"", "'\"$sd_fixture\"'/job")
                 .replace("docker --host unix://$sd_socket", "d")
                 .replace(
                     "while :; do run_child sleep 1 || exit; done",
@@ -257,8 +381,8 @@ sd_fixture=$(mktemp -d /tmp/sd-archive-qa-XXXXXXXX) || exit
 mkdir() {{ command mkdir "$@" || return; if test {export} = false; then printf ARCHIVE > "$sd_path"; fi; }}
 d() {{
     case "$1 $2" in
-        'image inspect') if test {fail} = true; then printf 'sha256:wrong\n'; else printf 'sha256:{id}\n'; fi;;
-        'image save') test "$3" = --output && test "$5" = registry:5000/app:tag || return 9; printf ARCHIVE > "$4";;
+        'image inspect') case "$4" in *RepoTags*) printf 'registry:5000/app:tag\n';; *) if test {fail} = true; then printf 'sha256:wrong\n'; else printf 'sha256:{id}\n'; fi;; esac;;
+        'image save') test "$3" = --output && test "$5" = -- && test "$6" = registry:5000/app:tag || return 9; printf ARCHIVE > "$4";;
         'image load') test "$3" = --input && test "$(cat "$4")" = ARCHIVE || return 9; if test {fail} = true; then echo 'invalid archive' >&2; return 17; fi; printf 'Loaded image: fixture:tag\n';;
         *) return 9;;
     esac
@@ -324,11 +448,8 @@ exit "$sd_result"
             &nonce,
         )
         .unwrap();
-        let export = export
-            .replace(
-                &quote(&format!("sha256:{}", "a".repeat(64))).unwrap(),
-                "\"$sd_image\"",
-            )
+        let export = script(&export)
+            .replace(&quote(&"a".repeat(64)).unwrap(), "\"${sd_image#sha256:}\"")
             .replace(
                 "while :; do run_child sleep 1 || exit; done",
                 "cp -- \"$sd_path\" \"$sd_qa/image.tar\" || exit",
@@ -341,7 +462,7 @@ exit "$sd_result"
             &import_nonce,
         )
         .unwrap();
-        let import = import.replace(&format!("printf 'SD_ARCHIVE_PREPARED:{import_nonce}\\n'"), &format!("printf 'SD_ARCHIVE_PREPARED:{import_nonce}\\n'\ncp -- \"$sd_qa/image.tar\" \"$sd_path\" || exit"))
+        let import = script(&import).replace(&format!("printf 'SD_ARCHIVE_PREPARED:{import_nonce}\\n'"), &format!("printf 'SD_ARCHIVE_PREPARED:{import_nonce}\\n'\ncp -- \"$sd_qa/image.tar\" \"$sd_path\" || exit"))
             .replace("while :; do run_child sleep 1 || exit; done", "exit 0");
         let script = format!(
             r#"

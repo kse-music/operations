@@ -62,7 +62,7 @@ impl Application {
         Ok(assist
             && match request {
                 Request::ReadFile { .. } | Request::TransferPrepare { .. } => true,
-                Request::Execute { command, .. } => {
+                Request::Execute { command, .. } | Request::StreamOpen { command, .. } => {
                     plugin.manifest.preapproved_commands.contains(command)
                         || (plugin
                             .manifest

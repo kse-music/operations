@@ -31,10 +31,14 @@ manifest贡献ID对应页面ID；kind支持workspace、navigation、host_menu、
 
 iframe采用`sandbox="allow-scripts allow-forms"`且无allow-same-origin；Guest不能读取父DOM/Store或直接调用原生IPC。静态资源协议重新检查包/修订/授权/摘要，固定HTML壳及受限CSP禁止外网、远程脚本和动态资源。包内JS/CSS只在子页面运行。父桥验证实际窗口/null来源/协议后建立专属MessageChannel。
 
+桌面宿主在所有子框架文档启动时统一取消浏览器默认右键菜单；插件自定义的 `contextmenu` 处理仍可执行，键盘与剪贴板事件不受影响。该行为由窗口初始化提供，不依赖插件包更新，也不放宽 iframe 隔离或 IPC 权限。
+
 握手由 `mountPlugin` 管理：先注册消息监听，再向 parent 发送 `{kind:"serverdeck-sdk-ready",version:1}`；父桥验证实际 iframe 窗口及 null 来源后传递单个 MessagePort，SDK 仅接受 parent 发来的 `serverdeck-sdk-connect`，通过端口回复 `{kind:"connected"}`。父桥随后发送可信 context，SDK 才挂载业务组件。修改加载实现应同时验证真实宿主 PluginFrame 与打包 SDK，不能只用两端各自模拟的消息代替联通验证。仓库回归入口为 `node tools/plugin-handshake-e2e.mjs`，使用本地浏览器和包内 UI，不连接远端。
 
 父桥只开放声明action及通用platform.request、connections.ensure、terminal.open、actions.cancel、workspace.draft、复制/通知/导出、平台模型设置导航及设置关闭。身份、owner、修订由父窗口注入，Guest自述确认/租约/管理命令均不可信。CLI安装/账号授权/模型编辑在平台设置完成。
 
 隐藏页面停止新请求/审批、关闭流和PTY；已开始的保留动作可安全收尾，返回结果仍检查安装代及owner。页关闭拒绝所有pending并释放资源；其他页可继续。草稿用setDraftDirty报告，关闭所属工作区前提示；实际文档保存必须重新检查句柄、摘要与写入结果。
+
+工作区的运行期绑定与连接状态分开维护。SSH/SFTP 租约建立或更新只刷新连接上下文，不重新激活插件，也不因 SFTP 就绪将仍可见的页面临时隐藏。入口 SSH 断开时页面停止新请求，恢复后沿用原 owner；真实请求仍由 Native 校验目标、连接及配置修订。包、授权或页面 owner 变化继续按原生命周期释放或重新绑定。
 
 更多限额和示例见[SDK](PLUGIN_SDK.md)。Web UI没有独立OS进程或fuel配额，不能将iframe隔离视为无限资源保障；macOS/Linux原生行为仍须单独验收。
