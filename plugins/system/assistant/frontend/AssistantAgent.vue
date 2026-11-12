@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from './i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import type { AiAgentReport, AiExecution } from './types';
 defineProps<{ report: AiAgentReport; execution?: AiExecution['agent'] }>();
@@ -61,7 +62,11 @@ const statuses = {
                   step.preview.preview.source.kind === 'local'
                     ? tr('本机')
                     : step.preview.preview.source.hostId
-                }}：{{ step.preview.preview.source.path }}
+                }}：{{
+                  step.preview.preview.source.kind === 'local'
+                    ? displayLocalPath(step.preview.preview.source.path)
+                    : step.preview.preview.source.path
+                }}
               </dd>
             </div>
             <div>

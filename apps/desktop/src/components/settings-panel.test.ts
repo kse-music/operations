@@ -375,7 +375,10 @@ it('formats storage and download directories without changing saved paths or sch
   };
   application.state!.config = {
     ...application.state!.config,
-    product: { ...application.state!.config.product, downloadDirectory: '\\\\?\\UNC\\server\\share\\下载' },
+    product: {
+      ...application.state!.config.product,
+      downloadDirectory: '\\\\?\\UNC\\server\\share\\下载',
+    },
   };
   const preview = vi.spyOn(ipc, 'storagePreview');
   const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);

@@ -47,11 +47,22 @@ const stageLabel = computed(
     ({
       preparing: tr('正在准备…'),
       uploading: tr('正在上传镜像归档…'),
+      verifying: tr('正在校验并提交镜像归档…'),
       loading: tr('正在导入镜像…'),
       saving: tr('正在生成镜像归档…'),
       downloading: tr('正在下载镜像归档…'),
+      finishing: tr('正在清理暂存文件…'),
     })[progress.value?.stage ?? 'preparing'],
 );
+const transferring = computed(() => {
+  const value = progress.value;
+  return (
+    value &&
+    ['uploading', 'downloading'].includes(value.stage) &&
+    value.transfer?.state === 'running' &&
+    value.transfer.transferredBytes < value.transfer.totalBytes
+  );
+});
 async function pick() {
   picking.value = true;
   try {
@@ -185,7 +196,7 @@ useErrorNotifications(() => [error.value]);
               :value="progress.transfer.transferredBytes"
               :max="progress.transfer.totalBytes || 1"
             />
-            <p>
+            <p v-if="transferring">
               {{
                 tr(
                   '{0} / {1} MB · {2} MB/s',
@@ -195,7 +206,23 @@ useErrorNotifications(() => [error.value]);
                 )
               }}
             </p>
+            <p v-else>
+              {{
+                tr(
+                  '{0} / {1} MB',
+                  (progress.transfer.transferredBytes / 1_000_000).toFixed(2),
+                  (progress.transfer.totalBytes / 1_000_000).toFixed(2),
+                )
+              }}
+            </p>
           </template>
+          <progress v-else :aria-label="stageLabel" />
+          <p v-if="progress?.stage === 'verifying'" class="subtle">
+            {{ tr('归档字节已传完，正在回读校验并安全保存；大文件可能需要较长时间。') }}
+          </p>
+          <p v-if="progress?.stage === 'loading'" class="subtle">
+            {{ tr('归档已通过校验，正在加载到 Docker；此阶段没有文件传输速度。') }}
+          </p>
         </div>
         <p v-if="done" class="banner success" role="status">
           {{

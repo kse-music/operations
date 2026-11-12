@@ -16,6 +16,7 @@ const settle = async () => {
 };
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
 function mount(row?: Record<string, unknown>) {
+  api.cancel.mockResolvedValue(undefined);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -166,5 +167,60 @@ it.each(['import', 'export'] as const)(
     expect(document.querySelectorAll('dialog')).toHaveLength(1);
     finish();
     await settle();
+  },
+);
+
+it.each(['import', 'export'] as const)(
+  'stops showing %s transfer speed at full bytes and exposes verification and cleanup',
+  async (kind) => {
+    api.pick.mockResolvedValue(kind === 'import' ? ['C:/image.tar'] : ['C:/exports']);
+    let publish: (value: unknown) => void = () => {};
+    let finish: () => void = () => {};
+    api.run.mockImplementation((_host, _request, _path, _signal, update) => {
+      publish = update;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    const completed = mount(
+      kind === 'export' ? { ID: 'a'.repeat(64), Repository: 'image', Tag: 'latest' } : undefined,
+    );
+    await settle();
+    button('选择…').click();
+    await settle();
+    button(kind === 'export' ? '导出' : '上传并导入').click();
+    await settle();
+    publish({
+      stage: 'verifying',
+      output: '',
+      transfer: {
+        state: 'verifying',
+        totalBytes: 427_621_376,
+        transferredBytes: 427_621_376,
+        bytesPerSecond: 7_010_000,
+      },
+    });
+    await settle();
+    expect(document.body.textContent).toContain('正在校验并提交镜像归档…');
+    expect(document.body.textContent).toContain('427.62 / 427.62 MB');
+    expect(document.body.textContent).not.toContain('MB/s');
+    expect(document.body.textContent).not.toContain(
+      kind === 'import' ? '正在上传镜像归档…' : '正在下载镜像归档…',
+    );
+    expect(completed).not.toHaveBeenCalled();
+    if (kind === 'import') {
+      publish({ stage: 'loading', output: '' });
+      await settle();
+      expect(document.body.textContent).toContain('正在导入镜像…');
+      expect(document.body.textContent).not.toContain('MB/s');
+    }
+    publish({ stage: 'finishing', output: '' });
+    await settle();
+    expect(document.body.textContent).toContain('正在清理暂存文件…');
+    expect(document.body.textContent).not.toContain('MB/s');
+    expect(completed).not.toHaveBeenCalled();
+    finish();
+    await settle();
+    expect(completed).toHaveBeenCalledOnce();
   },
 );

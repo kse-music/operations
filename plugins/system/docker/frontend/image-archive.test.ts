@@ -174,6 +174,36 @@ it('rejects unverified transfers without reporting a successful import', async (
     ),
   ).rejects.toThrow('target changed\n/recovery');
 });
+
+it('displays the ordinary local recovery path when an export download fails', async () => {
+  setup();
+  const original = api.call.getMockImplementation()!;
+  api.call.mockImplementation(async (request) =>
+    request.kind === 'transfer_start'
+      ? {
+          ...completed,
+          state: 'failed',
+          message: '校验失败',
+          recoveryPaths: ['\\\\?\\C:\\exports\\.partial'],
+        }
+      : original(request),
+  );
+  await expect(
+    runImageArchive(
+      'host',
+      {
+        kind: 'export',
+        id: 'a'.repeat(64),
+        reference: 'app:v1',
+        fileName: 'image.tar',
+        confirmed: true,
+      },
+      '\\\\?\\C:\\exports\\image.tar',
+      new AbortController().signal,
+      vi.fn(),
+    ),
+  ).rejects.toThrow('校验失败\nC:\\exports\\.partial');
+});
 it('constructs safe export names and retains registry ports and tags', () => {
   const row = { ID: `sha256:${'a'.repeat(64)}`, Repository: 'registry:5000/team/app', Tag: 'v1' };
   expect(imageReference(row)).toBe('registry:5000/team/app:v1');
@@ -182,3 +212,54 @@ it('constructs safe export names and retains registry ports and tags', () => {
   for (const name of ['', '..', '../x.tar', 'a\\b.tar', 'x\n.tar'])
     expect(validArchiveName(name)).toBe(false);
 });
+
+it.each(['import', 'export'] as const)(
+  'keeps %s verification, Docker loading and cleanup separate from byte transfer',
+  async (kind) => {
+    setup();
+    let polls = 0;
+    const states = [
+      { ...completed, state: 'running', transferredBytes: 512, sha256: null },
+      { ...completed, state: 'running', sha256: null },
+      { ...completed, state: 'verifying', sha256: null },
+      completed,
+    ];
+    api.call.mockImplementation(async (r) => {
+      if (r.kind === 'stream_poll') return ++polls === 1 ? prepared : ready;
+      if (['transfer_prepare', 'transfer_download_prepare'].includes(r.kind)) return { id: 'copy' };
+      if (['transfer_start', 'transfer_status'].includes(r.kind)) return states.shift();
+      return null;
+    });
+    const update = vi.fn();
+    await runImageArchive(
+      'host',
+      kind === 'import'
+        ? { kind, fileName: 'image.tar', confirmed: true }
+        : {
+            kind,
+            id: 'a'.repeat(64),
+            reference: 'image:tag',
+            fileName: 'image.tar',
+            confirmed: true,
+          },
+      'C:/image.tar',
+      new AbortController().signal,
+      update,
+    );
+    const transfers = update.mock.calls.map(([value]) => value).filter((value) => value.transfer);
+    expect(transfers.map((value) => value.stage)).toEqual([
+      kind === 'import' ? 'uploading' : 'downloading',
+      'verifying',
+      'verifying',
+    ]);
+    expect(update.mock.calls.at(-1)?.[0]).toMatchObject({ stage: 'finishing' });
+    expect(update.mock.calls.at(-1)?.[0].transfer).toBeUndefined();
+    if (kind === 'import') {
+      const loading = update.mock.calls
+        .map(([value]) => value)
+        .find((value) => value.stage === 'loading');
+      expect(loading).toBeDefined();
+      expect(loading.transfer).toBeUndefined();
+    }
+  },
+);

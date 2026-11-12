@@ -648,4 +648,16 @@ describe('SFTP transfer notifications', () => {
     await store.poll();
     expect(notifications.items).toHaveLength(0);
   });
+  it('formats local download recovery paths without changing task records', async () => {
+    const path = '\\\\?\\C:\\Downloads\\.partial';
+    const task = transfer({ direction: 'download', state: 'failed', recoveryPaths: [path] });
+    const store = useFilesStore();
+    mocks.tasks.mockResolvedValue([task]);
+    await store.poll();
+    expect(useNotificationsStore().items[0]?.text).toContain(
+      '待检查临时文件：C:\\Downloads\\.partial',
+    );
+    expect(useNotificationsStore().items[0]?.text).not.toContain('\\\\?\\');
+    expect(store.tasks[0]!.recoveryPaths).toEqual([path]);
+  });
 });

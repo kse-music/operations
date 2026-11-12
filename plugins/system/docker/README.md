@@ -2,7 +2,7 @@
 
 独立 UI v4 标准插件包。界面、交互业务与前端测试在 `frontend/`，WASM 能力策略与 Rust 测试在 `backend/`；分别只引用公开 `@serverdeck/plugin-sdk` 和 `serverdeck-plugin-sdk`，普通 Vue/测试依赖按工作区管理。宿主通过相同沙箱、SDK、WASM 和授权机制加载内置与上传包。
 
-镜像页顶部「导入镜像」选择本机 `docker save` 归档，通过登录身份 SFTP 上传、校验后执行 `docker image load`；同名标签可能替换，不更新已有容器。行内「导出」选择本机目录与 `.tar` 文件名，核对完整 ID 后按所选标签执行 `docker image save`，无标签按 ID 导出，校验后下载，不覆盖本机已有文件。文件选择、下载及传输预授权使用 SDK 5.6.0 通用能力，需要 `sftp.read/write/transfer` 及独立的 `sftp.transfer.preapproved`；上传安装需另行授予预授权与 `/tmp` 文件范围。点击导入/导出后直接执行，传输准备、启动及长命令均不再逐次弹窗确认。界面以 MB 显示已传/总量、以 MB/s 显示速度（十进制，两位小数），保留任务输出与取消，成功导入刷新列表。`load/save` 使用可取消长命令流，不受单次 Execute 的 30 秒限制。
+镜像页顶部「导入镜像」选择本机 `docker save` 归档，通过登录身份 SFTP 上传、校验后执行 `docker image load`；同名标签可能替换，不更新已有容器。行内「导出」选择本机目录与 `.tar` 文件名，核对完整 ID 后按所选标签执行 `docker image save`，无标签按 ID 导出，校验后下载，不覆盖本机已有文件。文件选择、下载及传输预授权使用 SDK 5.6.0 通用能力，需要 `sftp.read/write/transfer` 及独立的 `sftp.transfer.preapproved`；上传安装需另行授予预授权与 `/tmp` 文件范围。点击导入/导出后直接执行，传输准备、启动及长命令均不再逐次弹窗确认。界面以 MB 显示已传/总量、以 MB/s 显示速度（十进制，两位小数），保留任务输出与取消，成功导入刷新列表。字节传满后进入「校验并提交」，不再显示 MB/s；原生 completed 仍须带 SHA-256 和完整字节数，导入再进入 Docker 加载，最后等待暂存清理再显示整体成功。校验阶段通过 SFTP 回读远端文件，大文件的等待不计入复制进度，不能把 100% 字节数视为导入/导出完成。`load/save` 使用可取消长命令流，不受单次 Execute 的 30 秒限制。
 
 归档只在当前主机私有 `/tmp/serverdeck-image-<nonce>/` 暂存，不经 JS/WASM 传输字节。关闭先排空传输再结束命令流，脚本仅清理已知文件和空目录；取消不回滚已加载镜像。断线、权限撤销、异常退出可能保留暂存，失败显示路径，核对任务结束后手动清理，不自动递归删除。需要 Linux 远端 Shell、Docker CLI、SFTP、可写且非链接的 `/tmp` 及足够空间，不安装工具或提权。标签与完整 ID 的复核不能提供 Docker daemon 的原子标签锁，外部并发改标签仍有竞态。
 

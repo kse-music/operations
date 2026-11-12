@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { useApplicationStore } from '../stores/application';
 import { RefreshCw } from '@lucide/vue';
@@ -65,11 +66,11 @@ const releaseTime = computed(() =>
         </div>
         <div>
           <dt>{{ tr('数据目录') }}</dt>
-          <dd class="path">{{ application.state.dataDirectory }}</dd>
+          <dd class="path">{{ displayLocalPath(application.state.dataDirectory) }}</dd>
         </div>
         <div>
           <dt>{{ tr('日志目录') }}</dt>
-          <dd class="path">{{ application.state.logDirectory }}</dd>
+          <dd class="path">{{ displayLocalPath(application.state.logDirectory) }}</dd>
         </div>
       </dl>
       <p v-else class="subtle">

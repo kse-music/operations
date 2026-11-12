@@ -1,6 +1,7 @@
 import { invoke } from '@serverdeck/plugin-sdk';
 import { call } from '@serverdeck/plugin-sdk/platform';
 import { ensureConnection } from '@serverdeck/plugin-sdk/connections';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
 import type { TransferPreview, TransferState } from '@serverdeck/plugin-sdk/types/platform';
 import { tr } from './i18n/messages';
@@ -9,7 +10,8 @@ export type ImageArchiveRequest =
   | { kind: 'import'; fileName: string; confirmed: boolean }
   | { kind: 'export'; id: string; reference: string; fileName: string; confirmed: boolean };
 export interface ArchiveProgress {
-  stage: 'preparing' | 'uploading' | 'loading' | 'saving' | 'downloading';
+  stage:
+    'preparing' | 'uploading' | 'verifying' | 'loading' | 'saving' | 'downloading' | 'finishing';
   transfer?: TransferState;
   output: string;
   remotePath?: string;
@@ -110,12 +112,12 @@ export async function runImageArchive(
     report();
   }
   async function transfer(preview: { id: string }) {
+    const direction = request.kind === 'import' ? 'uploading' : 'downloading';
     transferId = preview.id;
     check();
     let state = await call<TransferState>({ kind: 'transfer_start', id: preview.id });
     while (true) {
       check();
-      report(state);
       if (state.state === 'completed') {
         if (!state.sha256 || state.transferredBytes !== state.totalBytes)
           throw new Error(tr('文件传输未完成校验，请核对目标文件。'));
@@ -123,10 +125,21 @@ export async function runImageArchive(
       }
       if (['failed', 'cancelled', 'expired', 'unverified'].includes(state.state))
         throw new Error(
-          [state.message || tr('文件传输未完成，请核对实际状态。'), ...state.recoveryPaths].join(
-            '\n',
-          ),
+          [
+            state.message || tr('文件传输未完成，请核对实际状态。'),
+            ...state.recoveryPaths.map((path) =>
+              request.kind === 'export' ? displayLocalPath(path) : path,
+            ),
+          ].join('\n'),
         );
+      stage =
+        state.state === 'verifying' ||
+        (state.state === 'running' && state.transferredBytes >= state.totalBytes)
+          ? 'verifying'
+          : state.state === 'running'
+            ? direction
+            : 'preparing';
+      report(state);
       await pause();
       check();
       state = await call<TransferState>({ kind: 'transfer_status', id: preview.id });
@@ -185,6 +198,10 @@ export async function runImageArchive(
     failure = cause;
   }
   const cleanup: string[] = [];
+  if (transferId || stream) {
+    stage = 'finishing';
+    report();
+  }
   // Stop and drain the native transfer before releasing its remote staging file.
   if (transferId) {
     try {

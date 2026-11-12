@@ -9,6 +9,30 @@ use serverdeck_plugin_core::{
 };
 use serverdeck_plugin_sdk::{ApiError, Capability, Request, Response};
 use std::time::Duration;
+
+fn display_local_path(path: &str) -> std::borrow::Cow<'_, str> {
+    let Some(value) = path.strip_prefix(r"\\?\") else {
+        return path.into();
+    };
+    let bytes = value.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1..3] == *b":\\" {
+        return value.into();
+    }
+    if value
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(r"UNC\"))
+    {
+        let unc = &value[4..];
+        let mut parts = unc.split('\\');
+        if parts.next().is_some_and(|part| !part.is_empty())
+            && parts.next().is_some_and(|part| !part.is_empty())
+        {
+            return format!(r"\\{unc}").into();
+        }
+    }
+    path.into()
+}
+
 impl Application {
     pub async fn plugin_grant(&self, id: String, input: GrantInput) -> Result<Grant, Error> {
         if self.plugin_detail(id.clone()).await?.source
@@ -232,7 +256,7 @@ impl Application {
                 "检查传输来源与目标，冻结文件大小及属性；尚不传输内容。\n来源：{}\n目标目录：{}\n覆盖：{}",
                 match source {
                     serverdeck_plugin_sdk::platform::TransferSource::Local { path } =>
-                        format!("本机 {path}"),
+                        format!("本机 {}", display_local_path(path)),
                     serverdeck_plugin_sdk::platform::TransferSource::Remote { host_id, path } =>
                         format!("{host_id}:{path}"),
                 },
@@ -252,13 +276,16 @@ impl Application {
                     copy.preview.bytes,
                     match &copy.preview.source {
                         serverdeck_plugin_sdk::platform::TransferSource::Local { path } =>
-                            format!("本机 {path}"),
+                            format!("本机 {}", display_local_path(path)),
                         serverdeck_plugin_sdk::platform::TransferSource::Remote {
                             host_id,
                             path,
                         } => format!("{host_id}:{path}"),
                     },
-                    copy.preview.destination.path(),
+                    match &copy.preview.destination {
+                        serverdeck_plugin_sdk::platform::TransferDestination::Local(local) => display_local_path(&local.local_path),
+                        serverdeck_plugin_sdk::platform::TransferDestination::Remote(remote) => remote.path.as_str().into(),
+                    },
                     if copy.preview.target_exists {
                         "将原子覆盖现有目标文件"
                     } else {
@@ -266,7 +293,7 @@ impl Application {
                     }
                 )
             }
-            serverdeck_plugin_sdk::platform::Request::TransferDownloadPrepare {source, destination} => format!("检查远程普通文件并准备下载到本机，不覆盖已有文件。\n来源：{}:{}\n本机目标：{}", source.host_id, source.path, destination),
+            serverdeck_plugin_sdk::platform::Request::TransferDownloadPrepare {source, destination} => format!("检查远程普通文件并准备下载到本机，不覆盖已有文件。\n来源：{}:{}\n本机目标：{}", source.host_id, source.path, display_local_path(destination)),
             serverdeck_plugin_sdk::platform::Request::Execute { command, .. }
             | serverdeck_plugin_sdk::platform::Request::StreamOpen { command, .. }
             | serverdeck_plugin_sdk::platform::Request::Terminal { command, .. } => command
@@ -425,5 +452,25 @@ impl std::fmt::Display for CleanupErrors {
 impl std::error::Error for CleanupErrors {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.0.first().map(|error| error as &dyn std::error::Error)
+    }
+}
+
+#[cfg(test)]
+mod path_display_tests {
+    use super::display_local_path;
+
+    #[test]
+    fn formats_only_extended_drive_and_unc_paths() {
+        for (path, expected) in [
+            (r"\\?\C:\Users\DH\.sts4", r"C:\Users\DH\.sts4"),
+            (r"\\?\UNC\server\share\资料", r"\\server\share\资料"),
+            (r"\\?\unc\server\share", r"\\server\share"),
+            (r"\\?\Volume{example}\资料", r"\\?\Volume{example}\资料"),
+            (r"\\?\UNC\server", r"\\?\UNC\server"),
+            (r"\\.\pipe\service", r"\\.\pipe\service"),
+            (r"/srv/\\?\C:\file", r"/srv/\\?\C:\file"),
+        ] {
+            assert_eq!(display_local_path(path), expected);
+        }
     }
 }

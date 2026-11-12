@@ -10,6 +10,17 @@ async fn approved_primitive(app: &Application, id: &str, owner: &str, op: Primit
         "PLUGIN_CONFIRMATION_REQUIRED",
         "{response:?}"
     );
+    if matches!(
+        op,
+        Primitive::TransferPrepare { .. }
+            | Primitive::TransferDownloadPrepare { .. }
+            | Primitive::TransferStart { .. }
+    ) {
+        let description = response.result["confirmationRequired"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(!description.contains(r"\\?\"), "{description}");
+    }
     app.plugin_approve(
         response.result["confirmationRequired"]["id"]
             .as_str()
