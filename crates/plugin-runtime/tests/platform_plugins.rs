@@ -89,6 +89,48 @@ fn done(reply: &Reply) -> &Value {
     &reply.result["value"]
 }
 
+#[tokio::test]
+async fn docker_image_archive_uses_bound_long_streams_and_returns_native_transfer_paths() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let nonce = "01234567-89ab-cdef-0123-456789abcdef";
+    for request in [
+        json!({"kind":"import","fileName":"image.tar","confirmed":true}),
+        json!({"kind":"export","id":"a".repeat(64),"reference":"registry:5000/app:v1","fileName":"image.tar","confirmed":true}),
+    ] {
+        let mut reply = runtime
+            .call(
+                &id,
+                json!({"action":"image_archive","input":{"hostId":"host","request":request}}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(operation(&reply)["kind"], "info");
+        reply = resume(&runtime, &id, &reply, json!({"nonce":nonce})).await;
+        assert_eq!(operation(&reply)["kind"], "host");
+        reply = resume(&runtime, &id, &reply, metadata(operation(&reply))).await;
+        assert_eq!(operation(&reply)["kind"], "stream_open");
+        assert_eq!(
+            reply.result["request"]["operation"]["bindings"],
+            json!(["host-binding"])
+        );
+        let script = operation(&reply)["command"]["args"][1].as_str().unwrap();
+        assert!(script.contains(if request["kind"] == "import" {
+            "image load --input"
+        } else {
+            "image save --output"
+        }));
+        assert!(script.contains(&format!("SD_ARCHIVE_READY:{nonce}")));
+        reply = resume(&runtime, &id, &reply, json!({"id":"archive-stream"})).await;
+        assert_eq!(done(&reply)["streamId"], "archive-stream");
+        assert_eq!(
+            done(&reply)["path"],
+            format!("/tmp/serverdeck-image-{nonce}/image.tar")
+        );
+    }
+    runtime.shutdown().await.unwrap();
+}
+
 fn prepare_input(mask: bool, linked: bool) -> Value {
     json!({"modelId":"model","sessionId":if linked {Some("host")} else {None},"sessionIds":[],"question":"说明 password=question-secret\n192.168.1.2\n中文秘密","selection":{"server":linked,"metrics":false,"processes":false,"docker":false,"log":null,"logLines":100},"maskAddresses":mask,"redactValues":["中文秘密"],"history":[{"role":"user","content":format!("{}\nBearer history-secret", "历史上下文 ".repeat(500))},{"role":"assistant","content":"上次回答 password=answer-secret"}],"autoHosts":true,"expectedModelRevision":"revision"})
 }

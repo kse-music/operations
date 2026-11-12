@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed, ref, watch } from 'vue';
 import { useFilesStore } from '../stores/files';
@@ -75,7 +76,9 @@ async function save(): Promise<void> {
     @close="closing = true"
   >
     <p class="file-open-path">{{ tr('远程：') }}{{ store.externalDocument.path }}</p>
-    <p class="file-open-path">{{ tr('本地副本：') }}{{ store.externalDocument.localPath }}</p>
+    <p class="file-open-path">
+      {{ tr('本地副本：') }}{{ displayLocalPath(store.externalDocument.localPath) }}
+    </p>
     <p v-if="!store.externalDocument.ready" role="status">
       {{ taskLabels[task?.state ?? 'queued'] ?? tr('下载中') }} ·
       {{ bytes(task?.transferredBytes ?? 0) }} / {{ bytes(task?.totalBytes ?? 0) }}

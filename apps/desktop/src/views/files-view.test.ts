@@ -6,9 +6,12 @@ import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import { useFilesStore } from '../stores/files';
 import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
+import { useApplicationStore } from '../stores/application';
 import { clipboardApi } from '../services/clipboard';
 import { filesApi } from '../services/files';
 import { hostInput } from '../types/hosts';
+import { defaultProductPreferences } from '../types/product';
+import type { Bootstrap } from '../types/ipc';
 import type { DirectoryListing, FileEntry, FileUserSession } from '../types/files';
 
 const release = vi.hoisted(() => vi.fn());
@@ -913,6 +916,122 @@ it('uses the original path when reopening a displayed long path and accepts a ty
   await vi.waitFor(() => expect(files.local?.path).toBe('\\\\?\\D:\\Downloads'));
   expect(input.value).toBe('D:\\Downloads');
 });
+
+it.each([
+  ['local', '\\\\?\\C:\\Users\\DH\\.sts4', 'C:\\Users\\DH\\.sts4'],
+  ['local', '\\\\?\\UNC\\server\\share\\资料', '\\\\server\\share\\资料'],
+  ['remote', '/srv/api/\\\\?\\C:\\file', '/srv/api/\\\\?\\C:\\file'],
+] as const)('formats only local paths in %s file properties', async (side, path, expected) => {
+  const files = useFilesStore(pinia);
+  const listing = side === 'local' ? files.local! : files.current!.listing!;
+  const selected = { ...entry, path };
+  listing.entries = [selected];
+  const properties = vi.spyOn(filesApi, 'properties').mockResolvedValue(selected);
+  await nextTick();
+  root
+    .querySelector(`[aria-label="${side === 'local' ? '本地' : '远程'}文件"] tbody tr`)!
+    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await nextTick();
+  [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    .find((button) => button.textContent?.trim() === '查看属性')!
+    .click();
+  await vi.waitFor(() => {
+    expect(document.querySelector('.file-properties dd')?.textContent).toBe(expected);
+  });
+  expect(listing.entries[0]!.path).toBe(path);
+  if (side === 'remote') expect(properties).toHaveBeenCalledExactlyOnceWith('sftp-a', path);
+  else expect(properties).not.toHaveBeenCalled();
+});
+
+it.each(['local', 'preference', 'picker', 'edited', 'retry'] as const)(
+  'formats the %s download destination while preserving the actual transfer path',
+  async (source) => {
+    const files = useFilesStore(pinia);
+    const path = '\\\\?\\D:\\' + '目录123\\'.repeat(48) + '归档';
+    const display = path.slice(4);
+    files.local = { path, parent: null, entries: [] };
+    if (source === 'preference') {
+      files.local.path = 'C:\\Users\\DH';
+      useApplicationStore(pinia).state = {
+        config: { product: { ...defaultProductPreferences(), downloadDirectory: path } },
+      } as Bootstrap;
+    }
+    const start = vi.spyOn(filesApi, 'start').mockRejectedValue({ message: '排队失败' });
+    const retry = vi.spyOn(filesApi, 'retry').mockRejectedValue({ message: '排队失败' });
+    if (source === 'retry') {
+      files.tasks = [
+        {
+          id: 'download',
+          hostId: 'a',
+          sessionId: 'sftp-a',
+          direction: 'download',
+          state: 'failed',
+          sources: [entry.path],
+          destination: path,
+          totalBytes: 0,
+          transferredBytes: 0,
+          remainingBytes: 0,
+          bytesPerSecond: 0,
+          filesTotal: 0,
+          filesDone: 0,
+          skipped: 0,
+          message: null,
+          recoveryPaths: [],
+        },
+      ];
+      await nextTick();
+      [...root.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.trim() === '传输记录')!
+        .click();
+      await nextTick();
+      document.querySelector<HTMLButtonElement>('dialog .transfer-row button')!.click();
+    } else {
+      await nextTick();
+      root
+        .querySelector<HTMLInputElement>('[aria-label="远程文件"] input[type="checkbox"]')!
+        .click();
+      await nextTick();
+      root.querySelector<HTMLButtonElement>('[aria-label="下载选中"]')!.click();
+    }
+    await nextTick();
+    const dialog = document.querySelector<HTMLDialogElement>(
+      `dialog[aria-label="${source === 'retry' ? '重试传输' : '确认文件传输'}"]`,
+    )!;
+    const destination = dialog.querySelector<HTMLInputElement>('[aria-label="传输目标目录"]')!;
+    expect(destination.value).toBe(display);
+    if (source === 'picker') {
+      vi.spyOn(filesApi, 'pick').mockResolvedValue(['\\\\?\\UNC\\server\\share\\下载']);
+      [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+        .find((button) => button.textContent?.trim() === '选择下载目录')!
+        .click();
+      await vi.waitFor(() => expect(destination.value).toBe('\\\\server\\share\\下载'));
+    } else if (source === 'edited') {
+      destination.value = 'D:\\另一个目录';
+      destination.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    dialog
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    if (source === 'retry') {
+      expect(retry).toHaveBeenCalledExactlyOnceWith('download', 'sftp-a', 'skip', false);
+      expect(start).not.toHaveBeenCalled();
+    } else {
+      expect(start).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          direction: 'download',
+          sources: [entry.path],
+          destination:
+            source === 'picker'
+              ? '\\\\?\\UNC\\server\\share\\下载'
+              : source === 'edited'
+                ? 'D:\\另一个目录'
+                : path,
+        }),
+      );
+    }
+    expect(files.local.path).toBe(source === 'preference' ? 'C:\\Users\\DH' : path);
+  },
+);
 
 it('sorts each file pane by its clicked header and shows only that pane’s active direction', async () => {
   const files = useFilesStore(pinia);

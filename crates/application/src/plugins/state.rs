@@ -35,7 +35,9 @@ pub(super) struct Copy {
     pub owner: String,
     pub generation: String,
     pub revision: String,
-    pub preview: serverdeck_plugin_sdk::platform::TransferPreview,
+    pub preview: serverdeck_plugin_sdk::platform::TransferPreview<
+        serverdeck_plugin_sdk::platform::TransferDestination,
+    >,
     pub plan: serverdeck_sftp::PreparedCopy,
     pub job: Option<serverdeck_sftp::CopyHandle>,
     pub cancelled: bool,

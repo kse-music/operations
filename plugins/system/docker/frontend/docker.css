@@ -319,6 +319,59 @@
   min-width: 0;
   gap: 10px;
 }
+.docker-archive {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+.modal[open]:has(> .docker-archive) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal:has(> .docker-archive) > .modal-heading,
+.docker-archive > .dialog-actions {
+  flex-shrink: 0;
+}
+.docker-archive > .dialog-actions {
+  margin-top: 0;
+}
+.docker-archive-content {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.docker-archive p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.docker-archive label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.docker-archive-picker {
+  display: flex;
+  gap: 8px;
+}
+.docker-archive-picker input {
+  flex: 1;
+  min-width: 0;
+}
+.docker-archive progress {
+  width: 100%;
+}
+.docker-archive pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .docker-startup p {
   margin: 0;
 }

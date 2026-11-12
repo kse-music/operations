@@ -226,12 +226,39 @@ pub struct RemotePath {
     pub host_id: String,
     pub path: String,
 }
+
+/// Remote destinations retain the existing wire shape; local downloads use localPath.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum TransferDestination {
+    Remote(RemotePath),
+    Local(LocalPath),
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalPath {
+    pub local_path: String,
+}
+impl TransferDestination {
+    pub fn path(&self) -> &str {
+        match self {
+            Self::Remote(remote) => &remote.path,
+            Self::Local(local) => &local.local_path,
+        }
+    }
+    pub fn remote(&self) -> Option<&RemotePath> {
+        match self {
+            Self::Remote(remote) => Some(remote),
+            Self::Local(_) => None,
+        }
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TransferPreview {
+pub struct TransferPreview<D = RemotePath> {
     pub id: String,
     pub source: TransferSource,
-    pub destination: RemotePath,
+    pub destination: D,
     pub bytes: u64,
     pub overwrite: bool,
     pub target_exists: bool,
@@ -327,6 +354,10 @@ pub enum Request {
         destination: RemotePath,
         overwrite: bool,
     },
+    TransferDownloadPrepare {
+        source: RemotePath,
+        destination: String,
+    },
     TransferStart {
         id: String,
     },
@@ -393,6 +424,7 @@ impl Request {
             Self::ReadFile { .. } | Self::CloseFile { .. } => Permission::SftpRead,
             Self::SaveFile { .. } | Self::FileDirty { .. } => Permission::SftpWrite,
             Self::TransferPrepare { .. }
+            | Self::TransferDownloadPrepare { .. }
             | Self::TransferStart { .. }
             | Self::TransferStatus { .. }
             | Self::TransferCancel { .. }
@@ -428,6 +460,7 @@ impl Request {
             Self::ReadFile { .. } | Self::CloseFile { .. } => "sftp.read",
             Self::SaveFile { .. } | Self::FileDirty { .. } => "sftp.write",
             Self::TransferPrepare { .. }
+            | Self::TransferDownloadPrepare { .. }
             | Self::TransferStart { .. }
             | Self::TransferStatus { .. }
             | Self::TransferCancel { .. }
@@ -448,6 +481,7 @@ impl Request {
                 | Self::SaveFile { .. }
                 | Self::ReadFile { .. }
                 | Self::TransferPrepare { .. }
+                | Self::TransferDownloadPrepare { .. }
                 | Self::TransferStart { .. }
                 | Self::TcpConnect { .. }
         )

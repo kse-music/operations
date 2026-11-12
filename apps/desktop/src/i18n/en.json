@@ -345,8 +345,6 @@
   "仅限下方可读目录，读取文本逐次确认": "Only within the readable directories below; confirm each text read",
   "写入远程文件": "Write remote files",
   "仅限下方可写目录，写入逐次确认": "Only within the writable directories below; confirm each write",
-  "文件上传与中转": "File upload and relay",
-  "本机普通文件上传或远程文件中转；准备和启动逐次确认，远程读写仍须独立权限与目录授权": "Upload local regular files or relay remote files. Preparation and start each require confirmation; remote reads and writes also require separate permissions and directory grants.",
   "插件界面": "Plugin interface",
   "显示插件功能和通知": "Display plugin features and notifications",
   "读取插件配置": "Read plugin settings",
@@ -1086,5 +1084,9 @@
   "{0}: 网络驱动器": "{0}: Network drive",
   "{0}: 光驱": "{0}: Optical drive",
   "{0}: 内存磁盘": "{0}: RAM disk",
-  "{0}: 磁盘": "{0}: Disk"
+  "{0}: 磁盘": "{0}: Disk",
+  "文件上传、下载与中转": "File upload, download and relay",
+  "本机普通文件上传、远程文件下载或中转；默认准备和启动逐次确认，远程读写仍须独立权限与目录授权": "Upload local regular files, download or relay remote files. Preparation and start require confirmation by default; remote reads and writes still require separate permissions and directory grants.",
+  "文件传输预授权": "File transfer preapproval",
+  "允许插件指定本机文件路径并直接准备、启动上传、下载或中转，无需逐次确认；仍受文件读写权限与远程目录范围限制": "Allow the plugin to specify local file paths and prepare and start uploads, downloads or relays without individual confirmations. File read/write permissions and remote directory scopes still apply."
 }

@@ -1,6 +1,6 @@
 # 本地插件包 v1
 
-当前 Host/Rust/Vue SDK 为 5.4.0，包格式和 WASM ABI 为 1，UI 为 4；版本约定见[版本规范](PLUGIN_API_VERSIONING.md)。
+当前 Host/Rust/Vue SDK 为 5.6.0，包格式和 WASM ABI 为 1，UI 为 4；版本约定见[版本规范](PLUGIN_API_VERSIONING.md)。
 
 ## UI v4 前端入口
 

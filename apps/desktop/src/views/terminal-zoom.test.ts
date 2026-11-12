@@ -148,6 +148,35 @@ async function savedSize(size: number) {
   });
 }
 
+it('keeps inactive sessions mounted and inert, then restores the original panes on selection', async () => {
+  const store = useTerminalsStore();
+  const first = store.active;
+  const originalPanes = [...root.querySelectorAll('.split-pane')];
+  const originalTerminals = [...xterm.instances];
+  store.open(null);
+  store.update(store.focused, { connectRequested: false, state: 'idle' });
+  await nextTick();
+  for (const pane of originalPanes) {
+    expect(pane.isConnected).toBe(true);
+    expect(pane.hasAttribute('inert')).toBe(true);
+    expect(pane.getAttribute('aria-hidden')).toBe('true');
+    expect(pane.classList.contains('terminal-hidden')).toBe(true);
+  }
+  store.select(first);
+  await nextTick();
+  const restoredPanes = [...root.querySelectorAll('.split-pane')];
+  expect(xterm.instances).toHaveLength(3);
+  for (const [index, pane] of originalPanes.entries()) {
+    expect(restoredPanes[index]).toBe(pane);
+    expect(xterm.instances[index]).toBe(originalTerminals[index]);
+  }
+  for (const pane of originalPanes) {
+    expect(pane.hasAttribute('inert')).toBe(false);
+    expect(pane.hasAttribute('aria-hidden')).toBe(false);
+    expect(pane.classList.contains('terminal-hidden')).toBe(false);
+  }
+});
+
 it('synchronizes a bottom-pinned scrollbar after resize and coalesces consecutive fits', () => {
   const terminal = xterm.instances[0]!;
   Object.assign(terminal.buffer.active, { baseY: 100, viewportY: 100, length: 124 });

@@ -171,6 +171,18 @@
   min-height: 0;
   overflow: hidden;
 }
+/* Keep font measurements valid while xterm's IntersectionObserver pauses hidden
+   renderers. display:none makes selection-triggered DOM redraws measure every
+   glyph again because zero-width measurements cannot enter xterm's cache. */
+.terminal-hidden {
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateX(-200vw);
+}
+.terminal-workspace.terminal-hidden {
+  position: fixed;
+  inset: 0;
+}
 .terminal-primary {
   flex: 1;
   min-width: 0;

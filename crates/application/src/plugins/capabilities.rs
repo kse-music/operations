@@ -258,7 +258,7 @@ impl Application {
                             path,
                         } => format!("{host_id}:{path}"),
                     },
-                    copy.preview.destination.path,
+                    copy.preview.destination.path(),
                     if copy.preview.target_exists {
                         "将原子覆盖现有目标文件"
                     } else {
@@ -266,6 +266,7 @@ impl Application {
                     }
                 )
             }
+            serverdeck_plugin_sdk::platform::Request::TransferDownloadPrepare {source, destination} => format!("检查远程普通文件并准备下载到本机，不覆盖已有文件。\n来源：{}:{}\n本机目标：{}", source.host_id, source.path, destination),
             serverdeck_plugin_sdk::platform::Request::Execute { command, .. }
             | serverdeck_plugin_sdk::platform::Request::StreamOpen { command, .. }
             | serverdeck_plugin_sdk::platform::Request::Terminal { command, .. } => command
@@ -303,8 +304,23 @@ impl Application {
             serverdeck_plugin_sdk::platform::Request::TransferStart { id } => data
                 .copies
                 .get(id)
-                .map(|copy| copy.preview.destination.host_id.clone())
+                .and_then(|copy| {
+                    copy.preview
+                        .destination
+                        .remote()
+                        .map(|remote| remote.host_id.clone())
+                        .or_else(|| match &copy.preview.source {
+                            serverdeck_plugin_sdk::platform::TransferSource::Remote {
+                                host_id,
+                                ..
+                            } => Some(host_id.clone()),
+                            _ => None,
+                        })
+                })
                 .ok_or(Error::NotFound)?,
+            serverdeck_plugin_sdk::platform::Request::TransferDownloadPrepare {
+                source, ..
+            } => source.host_id.clone(),
             serverdeck_plugin_sdk::platform::Request::SaveFile { document_id, .. } => data
                 .documents
                 .get(document_id)

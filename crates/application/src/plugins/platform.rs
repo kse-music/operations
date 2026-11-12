@@ -215,6 +215,7 @@ impl Application {
         if matches!(
             request,
             Request::TransferPrepare { .. }
+                | Request::TransferDownloadPrepare { .. }
                 | Request::TransferStart { .. }
                 | Request::TransferStatus { .. }
                 | Request::TransferCancel { .. }
@@ -569,7 +570,7 @@ impl Application {
                 data.results.insert(result_id.clone(),state::ResultData {owner:call.owner.clone(),plugin:call.id.clone(),generation:call.generation.clone(),bytes:output.bytes,at:std::time::Instant::now()});
                 json!({"__pluginResult":{"id":result_id,"bytes":bytes,"chunks":chunks}})
             }
-            Request::ApprovalMode {..}|Request::ConfirmOperations {..}|Request::TransferPrepare {..}|Request::TransferStart {..}|Request::TransferStatus {..}|Request::TransferCancel {..}|Request::TransferClose {..}=>return Err(Error::Validation("传输请求未进入任务路由")),
+            Request::ApprovalMode {..}|Request::ConfirmOperations {..}|Request::TransferPrepare {..}|Request::TransferDownloadPrepare {..}|Request::TransferStart {..}|Request::TransferStatus {..}|Request::TransferCancel {..}|Request::TransferClose {..}=>return Err(Error::Validation("传输请求未进入任务路由")),
         };
         self.plugin_host.verify(call)?;
         self.plugin_authorize(call, &operation).await?;

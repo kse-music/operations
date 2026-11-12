@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Download, Puzzle, PackagePlus, RefreshCw, Search, Settings2, Trash2 } from '@lucide/vue';
@@ -104,7 +105,8 @@ async function saveDevelopmentKit() {
   savingDevelopmentKit.value = true;
   try {
     const destination = await pluginsApi.saveDevelopmentKit();
-    if (destination) notifications.push(tr('插件开发包已保存到 {0}', destination));
+    if (destination)
+      notifications.push(tr('插件开发包已保存到 {0}', displayLocalPath(destination)));
   } catch (cause) {
     notifications.push(tr('插件开发包保存失败：{0}', errorMessage(cause)), true);
   } finally {

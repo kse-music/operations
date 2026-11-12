@@ -580,3 +580,234 @@ async fn revoking_plugin_authority_drains_owned_copy_without_committing_target()
     assert!(app.plugin_host.lock().unwrap().copies.is_empty());
     app.shutdown().await;
 }
+
+#[tokio::test]
+async fn plugin_download_verifies_bytes_refuses_conflicts_and_binds_owner() {
+    use serverdeck_plugin_sdk::platform::RemotePath;
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture.install("dev.download").await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let server = server(app, Duration::ZERO).await;
+    let bytes = vec![b'd'; 128 * 1024];
+    let remote = server.root.path().join("etc/fixture/image.tar");
+    std::fs::write(&remote, &bytes).unwrap();
+    let destination = fixture
+        .dir
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("downloaded image.tar");
+    let prepare = Primitive::TransferDownloadPrepare {
+        source: RemotePath {
+            host_id: server.host.id.clone(),
+            path: "/etc/fixture/image.tar".into(),
+        },
+        destination: destination.to_str().unwrap().into(),
+    };
+    let preview = approved_primitive(app, id, "page", prepare.clone()).await;
+    assert_eq!(
+        preview["destination"]["localPath"],
+        destination.to_str().unwrap()
+    );
+    assert_eq!(preview["bytes"], bytes.len());
+    assert!(!destination.exists());
+    let key = preview["id"].as_str().unwrap();
+    let denied = call(
+        app,
+        id,
+        "other",
+        Primitive::TransferStart { id: key.into() },
+    )
+    .await;
+    assert_eq!(denied.error.unwrap().code, "PLUGIN_PERMISSION_DENIED");
+    approved_primitive(app, id, "page", Primitive::TransferStart { id: key.into() }).await;
+    let result = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let response = call(
+                app,
+                id,
+                "page",
+                Primitive::TransferStatus { id: key.into() },
+            )
+            .await;
+            assert!(response.error.is_none(), "{response:?}");
+            if !["queued", "scanning", "running", "verifying"]
+                .contains(&response.result["state"].as_str().unwrap())
+            {
+                break response.result;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(result["state"], "completed", "{result}");
+    assert_eq!(result["sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+    assert_eq!(std::fs::read(&remote).unwrap(), bytes);
+    let conflict = call(app, id, "page", prepare.clone()).await;
+    assert_eq!(conflict.error.unwrap().code, "PLUGIN_CONFIRMATION_REQUIRED");
+    app.plugin_approve(
+        conflict.result["confirmationRequired"]["id"]
+            .as_str()
+            .unwrap(),
+        true,
+    )
+    .unwrap();
+    let conflict = call(app, id, "page", prepare).await;
+    assert_eq!(conflict.error.unwrap().code, "FILE_CONFLICT");
+    assert_eq!(std::fs::read(&destination).unwrap(), bytes);
+    app.plugin_close_scope(id, "page").await.unwrap();
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn plugin_download_revocation_cancels_before_local_commit() {
+    use serverdeck_plugin_sdk::platform::RemotePath;
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture.install("dev.download-revoke").await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let server = server(app, Duration::from_millis(40)).await;
+    std::fs::write(
+        server.root.path().join("etc/fixture/image.tar"),
+        vec![b'x'; 1024 * 1024],
+    )
+    .unwrap();
+    let destination = fixture
+        .dir
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("cancelled.tar");
+    let preview = approved_primitive(
+        app,
+        id,
+        "page",
+        Primitive::TransferDownloadPrepare {
+            source: RemotePath {
+                host_id: server.host.id.clone(),
+                path: "/etc/fixture/image.tar".into(),
+            },
+            destination: destination.to_str().unwrap().into(),
+        },
+    )
+    .await;
+    let key = preview["id"].as_str().unwrap();
+    approved_primitive(app, id, "page", Primitive::TransferStart { id: key.into() }).await;
+    let job = app.plugin_host.lock().unwrap().copies[key]
+        .job
+        .clone()
+        .unwrap();
+    app.plugin_revoke(id.clone()).await.unwrap();
+    assert!(!job.info().unwrap().unfinished());
+    assert_ne!(job.info().unwrap().state, "completed");
+    assert!(!destination.exists());
+    assert!(app.plugin_host.lock().unwrap().copies.is_empty());
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn transfer_preapproval_skips_prompts_for_upload_and_download_but_preserves_roots_and_content()
+ {
+    use serverdeck_plugin_sdk::platform::{RemotePath, TransferSource};
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let plugin = fixture
+        .install_with_commands(
+            "dev.direct-transfer",
+            &[Permission::SftpTransferPreapproved],
+            vec![],
+        )
+        .await;
+    fixture.grant(&plugin).await;
+    let id = &plugin.manifest.id;
+    let server = server(app, Duration::ZERO).await;
+    let local_dir = fixture.dir.path().canonicalize().unwrap();
+    let bytes = vec![b'm'; 128 * 1024];
+    let local_source = local_dir.join("image.tar");
+    std::fs::write(&local_source, &bytes).unwrap();
+    for download in [false, true] {
+        let request = if download {
+            Primitive::TransferDownloadPrepare {
+                source: RemotePath {
+                    host_id: server.host.id.clone(),
+                    path: "/etc/fixture/image.tar".into(),
+                },
+                destination: local_dir.join("download.tar").to_str().unwrap().into(),
+            }
+        } else {
+            Primitive::TransferPrepare {
+                source: TransferSource::Local {
+                    path: local_source.to_str().unwrap().into(),
+                },
+                destination: RemotePath {
+                    host_id: server.host.id.clone(),
+                    path: "/etc/fixture".into(),
+                },
+                overwrite: false,
+            }
+        };
+        let preview = call(app, id, "page", request).await;
+        assert!(preview.error.is_none(), "{preview:?}");
+        assert!(preview.result.get("confirmationRequired").is_none());
+        let key = preview.result["id"].as_str().unwrap();
+        let started = call(app, id, "page", Primitive::TransferStart { id: key.into() }).await;
+        assert!(started.error.is_none(), "{started:?}");
+        let job = app.plugin_host.lock().unwrap().copies[key]
+            .job
+            .clone()
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while job.info().unwrap().unfinished() {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(job.info().unwrap().state, "completed");
+        assert!(app.plugin_host.lock().unwrap().approvals.is_empty());
+    }
+    assert_eq!(
+        std::fs::read(local_dir.join("download.tar")).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        std::fs::read(server.root.path().join("etc/fixture/image.tar")).unwrap(),
+        bytes
+    );
+    let denied = call(
+        app,
+        id,
+        "page",
+        Primitive::TransferDownloadPrepare {
+            source: RemotePath {
+                host_id: server.host.id.clone(),
+                path: "/outside/image.tar".into(),
+            },
+            destination: local_dir.join("denied.tar").to_str().unwrap().into(),
+        },
+    )
+    .await;
+    assert_eq!(denied.error.unwrap().code, "PLUGIN_PERMISSION_DENIED");
+    assert!(!local_dir.join("denied.tar").exists());
+    let conflict = call(
+        app,
+        id,
+        "page",
+        Primitive::TransferDownloadPrepare {
+            source: RemotePath {
+                host_id: server.host.id.clone(),
+                path: "/etc/fixture/image.tar".into(),
+            },
+            destination: local_dir.join("download.tar").to_str().unwrap().into(),
+        },
+    )
+    .await;
+    assert_eq!(conflict.error.unwrap().code, "FILE_CONFLICT");
+    app.plugin_close_scope(id, "page").await.unwrap();
+    app.shutdown().await;
+}

@@ -316,7 +316,10 @@ it.each(['', 'a'])(
     await flush();
     expect(useWorkspaceStore().tabs).toEqual([]);
     expect(document.querySelector('[aria-label="欢迎页面"]')).not.toBeNull();
-    expect(document.querySelector<HTMLElement>('.terminal-workspace')?.style.display).toBe('none');
+    const terminalWorkspace = document.querySelector<HTMLElement>('.terminal-workspace')!;
+    expect(terminalWorkspace.classList.contains('terminal-hidden')).toBe(true);
+    expect(terminalWorkspace.hasAttribute('inert')).toBe(true);
+    expect(terminalWorkspace.getAttribute('aria-hidden')).toBe('true');
     expect(open).not.toHaveBeenCalled();
     expect(terminals.tabs).toEqual([]);
     expect(terminals.panes).toEqual([]);
@@ -334,6 +337,9 @@ it.each(['', 'a'])(
     expect(terminals.tabs).toHaveLength(1);
     expect(terminals.panes).toHaveLength(1);
     expect(terminals.panes[0]?.connectRequested).toBe(true);
+    expect(terminalWorkspace.classList.contains('terminal-hidden')).toBe(false);
+    expect(terminalWorkspace.hasAttribute('inert')).toBe(false);
+    expect(terminalWorkspace.hasAttribute('aria-hidden')).toBe(false);
     expect(terminals.tabs[0]).toMatchObject({ sessionNumber: 1 });
     expect(terminals.tabs[0]!.key).not.toMatch(/^saved-/);
     expect(open).toHaveBeenCalledOnce();

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed } from 'vue';
 import { useFilesStore } from '../stores/files';
@@ -12,6 +13,12 @@ const tasks = computed(() =>
   store.tasks.filter((task) => task.hostId === props.hostId && unfinished(task) !== props.history),
 );
 defineEmits<{ retry: [task: TransferInfo] }>();
+function displayedSources(task: TransferInfo): string[] {
+  return task.direction === 'upload' ? task.sources.map(displayLocalPath) : task.sources;
+}
+function displayedDestination(task: TransferInfo): string {
+  return task.direction === 'download' ? displayLocalPath(task.destination) : task.destination;
+}
 async function cancel(id: string): Promise<void> {
   try {
     await filesApi.cancel(id);
@@ -46,8 +53,11 @@ async function cancel(id: string): Promise<void> {
           >{{ task.filesDone }} / {{ task.filesTotal }}{{ tr(' 文件 · 跳过 ')
           }}{{ task.skipped }}</span
         >
-        <p class="transfer-path" :title="[...task.sources, '→ ' + task.destination].join('\n')">
-          {{ task.sources.join('、') }} → {{ task.destination }}
+        <p
+          class="transfer-path"
+          :title="[...displayedSources(task), '→ ' + displayedDestination(task)].join('\n')"
+        >
+          {{ displayedSources(task).join('、') }} → {{ displayedDestination(task) }}
         </p>
         <progress
           :max="Math.max(task.totalBytes, 1)"

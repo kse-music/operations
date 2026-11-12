@@ -41,8 +41,12 @@ const labels: Record<PluginPermission, [string, string]> = {
   'sftp.read': ['读取远程文件', '仅限下方可读目录，读取文本逐次确认'],
   'sftp.write': ['写入远程文件', '仅限下方可写目录，写入逐次确认'],
   'sftp.transfer': [
-    '文件上传与中转',
-    '本机普通文件上传或远程文件中转；准备和启动逐次确认，远程读写仍须独立权限与目录授权',
+    '文件上传、下载与中转',
+    '本机普通文件上传、远程文件下载或中转；默认准备和启动逐次确认，远程读写仍须独立权限与目录授权',
+  ],
+  'sftp.transfer.preapproved': [
+    '文件传输预授权',
+    '允许插件指定本机文件路径并直接准备、启动上传、下载或中转，无需逐次确认；仍受文件读写权限与远程目录范围限制',
   ],
   'ui.contribute': ['插件界面', '显示插件功能和通知'],
   'settings.read': ['读取插件配置', '仅限这个插件自己的配置'],
@@ -61,6 +65,7 @@ const operationMap: Record<PluginPermission, string[]> = {
   'sftp.read': ['sftp.read'],
   'sftp.write': ['sftp.write'],
   'sftp.transfer': ['sftp.transfer'],
+  'sftp.transfer.preapproved': ['sftp.transfer.preapproved'],
   'ui.contribute': ['ui.contribute', 'ui.notify'],
   'settings.read': ['settings.read'],
   'settings.write': ['settings.write'],

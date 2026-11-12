@@ -10,7 +10,10 @@ use serverdeck_plugin_core::{
 };
 use serverdeck_plugin_sdk::{
     Capability,
-    platform::{RemotePath, Request, TransferPreview, TransferSource, TransferState},
+    platform::{
+        LocalPath, RemotePath, Request, TransferDestination, TransferPreview, TransferSource,
+        TransferState,
+    },
 };
 use serverdeck_sftp::CopyGuard as _;
 use std::{
@@ -22,21 +25,24 @@ fn paths(
     plugin: &InstalledPlugin,
     grant: &Grant,
     source: &TransferSource,
-    destination: &RemotePath,
+    destination: &TransferDestination,
 ) -> Result<(), Error> {
     let source_path = match source {
         TransferSource::Local { path } | TransferSource::Remote { path, .. } => path,
     };
-    if source_path.chars().any(char::is_control) || destination.path.chars().any(char::is_control) {
+    if source_path.chars().any(char::is_control) || destination.path().chars().any(char::is_control)
+    {
         return Err(Error::Validation("插件传输路径不能包含控制字符"));
     }
-    if !plugin.manifest.permissions.contains(&Permission::SftpWrite)
-        || !grant.permissions.contains(&Permission::SftpWrite)
-        || !grant.operations.iter().any(|v| v == "sftp.write")
-    {
-        return Err(denied());
+    if let TransferDestination::Remote(destination) = destination {
+        if !plugin.manifest.permissions.contains(&Permission::SftpWrite)
+            || !grant.permissions.contains(&Permission::SftpWrite)
+            || !grant.operations.iter().any(|v| v == "sftp.write")
+        {
+            return Err(denied());
+        }
+        grant.path(&destination.path, true)?;
     }
-    grant.path(&destination.path, true)?;
     if let TransferSource::Remote { path, .. } = source {
         if !plugin.manifest.permissions.contains(&Permission::SftpRead)
             || !grant.permissions.contains(&Permission::SftpRead)
@@ -59,7 +65,7 @@ struct Authorization {
     targets: Vec<state::RevisionTarget>,
     sessions: Vec<(String, String)>,
     source: TransferSource,
-    destination: RemotePath,
+    destination: TransferDestination,
 }
 impl serverdeck_sftp::CopyGuard for Authorization {
     fn check(
@@ -223,18 +229,41 @@ impl Application {
             bindings: bindings.clone(),
         };
         match request {
-            Request::TransferPrepare {
-                source,
-                destination,
-                overwrite,
-            } => {
+            request @ (Request::TransferPrepare { .. }
+            | Request::TransferDownloadPrepare { .. }) => {
+                let (source, destination, overwrite) = match request {
+                    Request::TransferPrepare {
+                        source,
+                        destination,
+                        overwrite,
+                    } => (source, TransferDestination::Remote(destination), overwrite),
+                    Request::TransferDownloadPrepare {
+                        source,
+                        destination,
+                    } => (
+                        TransferSource::Remote {
+                            host_id: source.host_id,
+                            path: source.path,
+                        },
+                        TransferDestination::Local(LocalPath {
+                            local_path: destination,
+                        }),
+                        false,
+                    ),
+                    _ => return Err(Error::Validation("传输准备请求无效")),
+                };
                 if !self.plugin_scope_visible(call)? {
                     return Err(failure("PLUGIN_UI_HIDDEN", "请返回页面准备文件传输"));
                 }
                 paths(plugin, grant, &source, &destination)?;
-                let target_session = self
-                    .plugin_platform_file_session(call, &destination.host_id)
-                    .await?;
+                let target_host = match (&destination, &source) {
+                    (TransferDestination::Remote(remote), _) => &remote.host_id,
+                    (TransferDestination::Local(_), TransferSource::Remote { host_id, .. }) => {
+                        host_id
+                    }
+                    _ => return Err(Error::Validation("下载需要远程源")),
+                };
+                let target_session = self.plugin_platform_file_session(call, target_host).await?;
                 let mut sessions = vec![(
                     target_session.clone(),
                     self.terminals.lease_profile(&target_session)?,
@@ -249,8 +278,15 @@ impl Application {
                         )
                     }
                     TransferSource::Remote { host_id, path } => {
-                        let session = self.plugin_platform_file_session(call, host_id).await?;
-                        sessions.push((session.clone(), self.terminals.lease_profile(&session)?));
+                        let session = if destination.remote().is_none() {
+                            target_session.clone()
+                        } else {
+                            self.plugin_platform_file_session(call, host_id).await?
+                        };
+                        if destination.remote().is_some() {
+                            sessions
+                                .push((session.clone(), self.terminals.lease_profile(&session)?));
+                        }
                         let label = self.plugin_session_target(&session)?;
                         (
                             serverdeck_sftp::CopySource::Remote {
@@ -263,8 +299,15 @@ impl Application {
                 };
                 let profile =
                     serde_json::to_string(&sessions).map_err(|e| Error::Worker(Box::new(e)))?;
-                let target = format!("{source_target} → {target}");
-                if !self.plugin_mode_preapproves(call, plugin, grant, &operation)?
+                let target = if destination.remote().is_some() {
+                    format!("{source_target} → {target}")
+                } else {
+                    format!("{source_target} → 本机")
+                };
+                if (call.collecting
+                    || call.has_batch()?
+                    || !(grant.preapproves(plugin, &operation)
+                        || self.plugin_mode_preapproves(call, plugin, grant, &operation)?))
                     && let Some(approval) = self.plugin_confirmation_bound(
                         call,
                         plugin,
@@ -275,11 +318,23 @@ impl Application {
                 {
                     return Ok(serde_json::json!({"confirmationRequired":approval}));
                 }
-                let plan = self
-                    .files
-                    .transfers
-                    .prepare_copy(core_source, &target_session, &destination.path, overwrite)
-                    .await?;
+                let plan = match &destination {
+                    TransferDestination::Remote(remote) => {
+                        self.files
+                            .transfers
+                            .prepare_copy(core_source, &target_session, &remote.path, overwrite)
+                            .await?
+                    }
+                    TransferDestination::Local(local) => {
+                        let TransferSource::Remote { path, .. } = &source else {
+                            return Err(Error::Validation("下载需要远程源"));
+                        };
+                        self.files
+                            .transfers
+                            .prepare_download_copy(&target_session, path, &local.local_path)
+                            .await?
+                    }
+                };
                 let source = match (&source, &plan.source) {
                     (TransferSource::Local { .. }, serverdeck_sftp::CopySource::Local { path }) => {
                         TransferSource::Local { path: path.clone() }
@@ -296,9 +351,16 @@ impl Application {
                 let preview = TransferPreview {
                     id: uuid::Uuid::new_v4().to_string(),
                     source,
-                    destination: RemotePath {
-                        host_id: destination.host_id,
-                        path: plan.destination.clone(),
+                    destination: match destination {
+                        TransferDestination::Remote(remote) => {
+                            TransferDestination::Remote(RemotePath {
+                                host_id: remote.host_id,
+                                path: plan.destination.clone(),
+                            })
+                        }
+                        TransferDestination::Local(_) => TransferDestination::Local(LocalPath {
+                            local_path: plan.destination.clone(),
+                        }),
                     },
                     bytes: plan.bytes,
                     overwrite,
@@ -388,12 +450,19 @@ impl Application {
                 }
                 let profile = serde_json::to_string(&copy.sessions)
                     .map_err(|e| Error::Worker(Box::new(e)))?;
-                let target = format!(
-                    "{} → {}",
-                    labels.get(1).map(String::as_str).unwrap_or("本机"),
-                    labels.first().ok_or(Error::Conflict)?
-                );
-                if !self.plugin_mode_preapproves(call, plugin, grant, &operation)?
+                let target = if copy.preview.destination.remote().is_none() {
+                    format!("{} → 本机", labels.first().ok_or(Error::Conflict)?)
+                } else {
+                    format!(
+                        "{} → {}",
+                        labels.get(1).map(String::as_str).unwrap_or("本机"),
+                        labels.first().ok_or(Error::Conflict)?
+                    )
+                };
+                if (call.collecting
+                    || call.has_batch()?
+                    || !(grant.preapproves(plugin, &operation)
+                        || self.plugin_mode_preapproves(call, plugin, grant, &operation)?))
                     && let Some(approval) = self.plugin_confirmation_bound(
                         call,
                         plugin,

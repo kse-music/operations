@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { locale } from '@serverdeck/plugin-sdk/i18n';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 import { tr } from '../i18n/messages';
 
 import { clipboardApi } from '../services/clipboard';
@@ -141,7 +142,7 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
     name: string;
     hasDirectory: boolean;
   } | null>(null),
-  properties = ref<FileEntry | null>(null),
+  properties = ref<(FileEntry & { side: 'local' | 'remote' }) | null>(null),
   terminalAction = ref<FileTerminalAction | null>(null);
 const menuElement = ref<HTMLElement>();
 const transfer = ref<{
@@ -155,12 +156,15 @@ const transfer = ref<{
   retry?: string;
 } | null>(null);
 
-function displayLocalPath(path: string): string {
-  // Keep other Windows namespaces intact. Only drive and UNC paths have this display form.
-  if (/^\\\\\?\\[a-z]:\\/i.test(path)) return path.slice(4);
-  if (/^\\\\\?\\UNC\\[^\\]+\\[^\\]+(?:\\|$)/i.test(path)) return '\\\\' + path.slice(8);
-  return path;
-}
+const transferDestination = computed({
+  get: () =>
+    transfer.value?.direction === 'download'
+      ? displayLocalPath(transfer.value.destination)
+      : (transfer.value?.destination ?? ''),
+  set: (value: string) => {
+    if (transfer.value && value !== transferDestination.value) transfer.value.destination = value;
+  },
+});
 
 const localDrives = ref<LocalDrive[]>([]),
   localDrivesLoading = ref(false),
@@ -563,10 +567,11 @@ async function showProperties(): Promise<void> {
   if (!item) return;
   menu.value = null;
   try {
-    properties.value =
+    const entry =
       item.side === 'local'
         ? item.entry
         : await filesApi.properties(store.current!.id!, item.entry.path);
+    properties.value = { ...entry, side: item.side };
   } catch (cause) {
     store.error = errorMessage(cause);
   }
@@ -1130,7 +1135,7 @@ onBeforeUnmount(() => {
       <label
         >{{ tr('目标目录')
         }}<input
-          v-model="transfer.destination"
+          v-model="transferDestination"
           :aria-label="tr('传输目标目录')"
           :readonly="!!transfer.retry"
           required /></label
@@ -1175,7 +1180,9 @@ onBeforeUnmount(() => {
   <Modal v-if="properties" :title="tr('文件属性')" @close="properties = null"
     ><dl class="file-properties">
       <dt>{{ tr('路径') }}</dt>
-      <dd>{{ properties.path }}</dd>
+      <dd>
+        {{ properties.side === 'local' ? displayLocalPath(properties.path) : properties.path }}
+      </dd>
       <dt>{{ tr('类型') }}</dt>
       <dd>{{ properties.kind }}</dd>
       <dt>{{ tr('大小') }}</dt>

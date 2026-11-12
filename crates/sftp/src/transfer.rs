@@ -1081,6 +1081,14 @@ async fn download(
             .await
             .map_err(local::io)?;
     }
+    if let Some(job) = &task.copy {
+        let guard = locked(&job.guard)?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| fail("TRANSFER_CANCELLED", "传输授权已释放"))?;
+        guard.check().await?;
+        job.plan.attempted_commit.store(true, Ordering::Release);
+    }
     task.committing.store(true, Ordering::Release);
     let overwrite = expected.is_some();
     tokio::task::spawn_blocking(move || {
@@ -1095,6 +1103,14 @@ async fn download(
     .map_err(|e| local::io(e.error))?;
     task.clear_temp()?;
     task.finished();
+    if let Some(job) = &task.copy {
+        *locked(&job.plan.checksum)? = Some(hash);
+        let guard = locked(&job.guard)?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| fail("TRANSFER_CANCELLED", "传输授权已释放"))?;
+        guard.check().await?;
+    }
     task.committing.store(false, Ordering::Release);
     Ok(())
 }

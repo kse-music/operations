@@ -362,6 +362,74 @@ async function storageDraft() {
   await input('[aria-label="数据根目录"]', 'D:\\ServerDeck');
 }
 
+it('formats storage and download directories without changing saved paths or scheduling migration', async () => {
+  const application = useApplicationStore();
+  const prefix = '\\\\?\\C:\\ServerDeck';
+  application.state!.storage = {
+    rootDirectory: prefix,
+    databasePath: `${prefix}\\serverdeck.sqlite3`,
+    pluginDirectory: `${prefix}\\plugins`,
+    logDirectory: `${prefix}\\logs`,
+    webviewDirectory: `${prefix}\\webview`,
+    notice: null,
+  };
+  application.state!.config = {
+    ...application.state!.config,
+    product: { ...application.state!.config.product, downloadDirectory: '\\\\?\\UNC\\server\\share\\下载' },
+  };
+  const preview = vi.spyOn(ipc, 'storagePreview');
+  const save = vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  await select(3);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="数据根目录"]')!.value).toBe(
+    'C:\\ServerDeck',
+  );
+  expect([...root.querySelectorAll('.storage-paths dd')].map((item) => item.textContent)).toEqual([
+    'C:\\ServerDeck\\serverdeck.sqlite3',
+    'C:\\ServerDeck\\plugins',
+    'C:\\ServerDeck\\logs',
+    'C:\\ServerDeck\\webview',
+  ]);
+  expect(root.querySelector<HTMLInputElement>('[aria-label="默认下载目录"]')!.value).toBe(
+    '\\\\server\\share\\下载',
+  );
+  expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);
+  await input('[aria-label="每主机并发传输数"]', '4');
+  await submit();
+  await vi.waitFor(() => expect(application.saving).toBe(false));
+  expect(save).toHaveBeenCalledWith(
+    expect.objectContaining({
+      product: expect.objectContaining({ downloadDirectory: '\\\\?\\UNC\\server\\share\\下载' }),
+    }),
+  );
+  expect(application.state!.storage.rootDirectory).toBe(prefix);
+  expect(preview).not.toHaveBeenCalled();
+});
+
+it('formats both migration preview paths while submitting the original target', async () => {
+  await storageDraft();
+  const raw = '\\\\?\\D:\\ServerDeck';
+  vi.spyOn(ipc, 'storagePreview').mockResolvedValue({
+    targetDirectory: raw,
+    bytes: 1,
+    availableBytes: 1024,
+    unfinishedTasks: 0,
+    dirtyDocuments: 0,
+  });
+  const migrate = vi.spyOn(ipc, 'storageMigrate').mockResolvedValue(true);
+  await submit();
+  await vi.waitFor(() =>
+    expect(document.querySelector('dialog[aria-label="迁移数据并重启"]')).not.toBeNull(),
+  );
+  const dialog = document.querySelector('dialog[aria-label="迁移数据并重启"]')!;
+  expect(
+    [...dialog.querySelectorAll('.storage-path')].map((item) => item.textContent?.trim()),
+  ).toEqual(['当前目录：C:\\ServerDeck', '目标目录：D:\\ServerDeck']);
+  [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '确认迁移并重启')!
+    .click();
+  await vi.waitFor(() => expect(migrate).toHaveBeenCalledWith(expect.anything(), raw, false));
+});
+
 it('warns for a changed data root alone without previewing or starting migration', async () => {
   const preview = vi.spyOn(ipc, 'storagePreview');
   const migrate = vi.spyOn(ipc, 'storageMigrate');

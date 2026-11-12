@@ -9,6 +9,7 @@ import { useWorkspaceStore } from '../stores/workspace';
 import { useNotificationsStore } from '../stores/notifications';
 import { usePluginsStore } from '../stores/plugins';
 import { pluginsApi } from './plugins';
+import { filesApi } from './files';
 import { pluginInvokeRequest, pluginPlatformRequest } from './plugin-server';
 import { clipboardApi } from './clipboard';
 import { terminalApi } from './terminal';
@@ -204,7 +205,14 @@ export function createPluginUiBridge(input: {
       method === 'platform.request' ? (args.operation as PlatformRequest | undefined) : undefined;
     const resourceCleanup =
       primitive &&
-      (['close_file', 'stream_stop', 'result_close'].includes(primitive.kind) ||
+      ([
+        'close_file',
+        'stream_stop',
+        'result_close',
+        'transfer_close',
+        'transfer_cancel',
+        'transfer_status',
+      ].includes(primitive.kind) ||
         (primitive.kind === 'approval_mode' && primitive.mode === 'request') ||
         isStreamControl(primitive));
     check(!resourceCleanup);
@@ -236,6 +244,13 @@ export function createPluginUiBridge(input: {
         plugins.cancelPrompt(owner);
         await pluginsApi.cancelScope(input.id, owner);
         return null;
+      case 'localFiles.pick': {
+        if (!has('sftp.transfer') || !['files', 'folder'].includes(String(args.kind)))
+          throw { code: 'PLUGIN_PERMISSION_DENIED', message: tr('插件没有文件传输权限') };
+        const paths = await filesApi.pick(args.kind as 'files' | 'folder');
+        check(true);
+        return paths;
+      }
       case 'connections.ensure':
         if (
           typeof args.hostId !== 'string' ||

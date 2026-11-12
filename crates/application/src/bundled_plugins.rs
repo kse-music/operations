@@ -218,6 +218,7 @@ fn bundled_grant(
             Permission::SftpRead => &["sftp.read"],
             Permission::SftpWrite => &["sftp.write"],
             Permission::SftpTransfer => &["sftp.transfer"],
+            Permission::SftpTransferPreapproved => &["sftp.transfer.preapproved"],
             Permission::OperationsReadPreapproved => &["operations.read.preapproved"],
             Permission::OperationsReadArgumentsPreapproved => {
                 &["operations.read.arguments.preapproved"]
@@ -264,6 +265,40 @@ mod tests {
             .copied()
             .find(|(key, _)| *key == id)
             .unwrap()
+    }
+    #[tokio::test]
+    async fn docker_archive_grant_preapproves_streams_and_file_transfers() {
+        use serverdeck_plugin_sdk::{
+            Capability, Permission,
+            platform::{Command, Request},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        app.provision_bundled_plugins().unwrap();
+        let plugin = app.plugins.detail("cn.hiboot.plugins.docker").unwrap();
+        let grant = app.plugins.grant(&plugin.manifest.id).unwrap().unwrap();
+        assert!(
+            grant
+                .permissions
+                .contains(&Permission::SftpTransferPreapproved)
+        );
+        for request in [
+            Request::StreamOpen {
+                host_id: "host".into(),
+                command: Command::script("archive"),
+            },
+            Request::TransferStart { id: "copy".into() },
+        ] {
+            assert!(grant.preapproves(
+                &plugin,
+                &Capability::Platform {
+                    request,
+                    bindings: vec![]
+                }
+            ));
+        }
+        app.shutdown().await;
     }
     #[tokio::test]
     async fn old_or_corrupt_plugin_records_do_not_block_startup_and_reinstall_is_explicit() {

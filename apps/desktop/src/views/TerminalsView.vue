@@ -362,9 +362,16 @@ watch(
     <div ref="area" class="split-area">
       <div
         v-for="item in paneViews"
-        v-show="item.tab === store.active"
         :key="item.pane.key"
-        :class="['split-pane', { focused: store.focused === item.pane.key }]"
+        :class="[
+          'split-pane',
+          {
+            focused: store.focused === item.pane.key,
+            'terminal-hidden': item.tab !== store.active,
+          },
+        ]"
+        :inert="item.tab !== store.active || undefined"
+        :aria-hidden="item.tab !== store.active || undefined"
         :style="paneStyle(item.rect)"
         @focusin="store.focused = item.pane.key"
         @pointerdown="store.focused = item.pane.key"

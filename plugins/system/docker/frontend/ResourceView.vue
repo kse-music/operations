@@ -41,6 +41,7 @@ import Modal from '@serverdeck/plugin-sdk/ui/Modal.vue';
 import OpsTable from '@serverdeck/plugin-sdk/ui/OpsTable.vue';
 import OpsDetails from './OpsDetails.vue';
 import StreamDialog from '@serverdeck/plugin-sdk/ui/StreamDialog.vue';
+import ImageArchiveDialog from './ImageArchiveDialog.vue';
 import { Search, RefreshCw, ShieldCheck } from '@lucide/vue';
 
 const props = defineProps<{
@@ -78,6 +79,11 @@ const detailLoading = ref(false),
   detailError = ref<string | null>(null);
 const capabilities = ref<Record<string, unknown> | null>(null);
 const log = ref<{ id: string; title: string }>();
+const archive = ref<{ row?: Record<string, unknown> }>();
+function openArchive(row?: Record<string, unknown>) {
+  if (!busy.value && !archive.value && connected.value && panelVisible.value)
+    archive.value = { row };
+}
 let generation = 0,
   detailGeneration = 0,
   disposed = false;
@@ -120,7 +126,7 @@ async function load() {
   }
 }
 async function inspect(request: OpsRequest, title: string) {
-  if (busy.value || !panelVisible.value) return;
+  if (busy.value || archive.value || !panelVisible.value) return;
   closeDetail();
   const token = ++detailGeneration,
     id = session();
@@ -138,7 +144,7 @@ async function inspect(request: OpsRequest, title: string) {
   }
 }
 async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targetName?: string) {
-  if (busy.value || !panelVisible.value) return;
+  if (busy.value || archive.value || !panelVisible.value) return;
   busy.value = true;
   error.value = null;
   notice.value = null;
@@ -222,6 +228,7 @@ const slotContext = {
   inspect,
   execute,
   query,
+  openExport: openArchive,
   openLog: async (input: LogInput, title: string) => {
     if (busy.value || !panelVisible.value) return;
     const token = generation;
@@ -297,10 +304,11 @@ const slotContext = {
             :aria-label="tr('运维项目搜索')"
             :placeholder="searchPlaceholder ?? tr('搜索名称、镜像、状态或端口…')"
         /></label>
-        <slot name="toolbar" :execute="execute" :busy="busy" />
-        <button class="button" :disabled="busy" @click="load">
+        <slot name="toolbar" :execute="execute" :busy="busy || !!archive" />
+        <button class="button" :disabled="busy || !!archive" @click="load">
           <RefreshCw :size="14" aria-hidden="true" />{{ busy ? tr('正在读取…') : tr('刷新') }}
         </button>
+        <slot name="toolbar-after" :busy="busy || !!archive" :open-import="() => openArchive()" />
         <span v-if="hint" class="subtle">{{ hint }}</span>
       </div>
       <OpsTable
@@ -317,7 +325,7 @@ const slotContext = {
           }}</slot></template
         >
         <template #actions="{ row }"
-          ><slot name="actions" v-bind="slotContext" :row="row" :busy="busy"
+          ><slot name="actions" v-bind="slotContext" :row="row" :busy="busy || !!archive"
         /></template>
       </OpsTable>
       <Modal v-if="detailOpen" :title="detailTitle" wide :busy="busy" @close="closeDetail">
@@ -342,5 +350,14 @@ const slotContext = {
       >
     </footer>
     <StreamDialog v-if="log" :stream-id="log.id" :title="log.title" @close="log = undefined" />
+    <ImageArchiveDialog
+      v-if="archive"
+      :host-id="chosen"
+      :host-label="`${hostDisplayName(connection?.host)} (${connection?.host.hostname ?? ''})`"
+      :row="archive.row"
+      :visible="panelVisible && connected"
+      @close="archive = undefined"
+      @completed="load"
+    />
   </section>
 </template>

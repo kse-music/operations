@@ -17,6 +17,7 @@ pub const OPERATIONS: &[&str] = &[
     "sftp.read",
     "sftp.write",
     "sftp.transfer",
+    "sftp.transfer.preapproved",
     "settings.read",
     "settings.write",
     "ui.notify",
@@ -131,7 +132,7 @@ impl Grant {
         }
         Ok(())
     }
-    /// Fixed commands and interactive sessions have separate, revision-bound grants.
+    /// Commands, interactive sessions and file transfers have separate revision-bound grants.
     pub fn preapproves(&self, plugin: &InstalledPlugin, operation: &Capability) -> bool {
         use serverdeck_plugin_sdk::platform::Request;
         if self.authorize(plugin, operation).is_err() {
@@ -147,6 +148,12 @@ impl Grant {
             Request::StreamOpen { .. } | Request::Terminal { .. } => (
                 Permission::SshInteractivePreapproved,
                 "ssh.interactive.preapproved",
+            ),
+            Request::TransferPrepare { .. }
+            | Request::TransferDownloadPrepare { .. }
+            | Request::TransferStart { .. } => (
+                Permission::SftpTransferPreapproved,
+                "sftp.transfer.preapproved",
             ),
             _ => return false,
         };

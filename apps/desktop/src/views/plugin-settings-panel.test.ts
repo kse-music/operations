@@ -156,6 +156,8 @@ it('shows exact preset commands and grants them only after a separate explicit s
       'ssh.execute',
       'ssh.execute.preapproved',
       'ssh.interactive.preapproved',
+      'sftp.transfer',
+      'sftp.transfer.preapproved',
     ],
     preapprovedCommands: [{ program: 'fixture-tool', args: ['literal; value'], timeoutSecs: 30 }],
   };
@@ -170,6 +172,10 @@ it('shows exact preset commands and grants them only after a separate explicit s
     '[aria-label="ssh.interactive.preapproved"]',
   )!;
   expect(interactive.checked).toBe(false);
+  const transfer = root.querySelector<HTMLInputElement>(
+    '[aria-label="sftp.transfer.preapproved"]',
+  )!;
+  expect(transfer.checked).toBe(false);
   expect(root.textContent).toContain('任意远程日志流和终端命令');
   expect(root.querySelector('.plugin-preset-commands pre')?.textContent).toContain(
     'literal; value',
@@ -190,6 +196,8 @@ it('shows exact preset commands and grants them only after a separate explicit s
   expect(grant.mock.calls[0]![1].operations).not.toContain('ssh.execute.preapproved');
   expect(grant.mock.calls[0]![1].permissions).not.toContain('ssh.interactive.preapproved');
   expect(grant.mock.calls[0]![1].operations).not.toContain('ssh.interactive.preapproved');
+  expect(grant.mock.calls[0]![1].permissions).not.toContain('sftp.transfer.preapproved');
+  expect(grant.mock.calls[0]![1].operations).not.toContain('sftp.transfer.preapproved');
   preset.checked = true;
   preset.dispatchEvent(new Event('change'));
   await nextTick();
@@ -203,6 +211,12 @@ it('shows exact preset commands and grants them only after a separate explicit s
   await submit();
   expect(grant.mock.calls[2]![1].permissions).toContain('ssh.interactive.preapproved');
   expect(grant.mock.calls[2]![1].operations).toContain('ssh.interactive.preapproved');
+  transfer.checked = true;
+  transfer.dispatchEvent(new Event('change'));
+  await nextTick();
+  await submit();
+  expect(grant.mock.calls[3]![1].permissions).toContain('sftp.transfer.preapproved');
+  expect(grant.mock.calls[3]![1].operations).toContain('sftp.transfer.preapproved');
 });
 
 it('opens an independent settings frontend without a host and returns to the plugin list on cancel', async () => {

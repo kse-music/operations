@@ -1,4 +1,5 @@
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
@@ -450,7 +451,9 @@ export const useFilesStore = defineStore('files', () => {
       await filesApi.closeEditor(external.token, true);
       externalDocument.value = null;
       externalError.value = null;
-      notifications.push(tr('已结束外部编辑，本地副本保留于：{0}', external.localPath));
+      notifications.push(
+        tr('已结束外部编辑，本地副本保留于：{0}', displayLocalPath(external.localPath)),
+      );
     } catch (cause) {
       externalError.value = errorMessage(cause);
     } finally {
@@ -595,7 +598,15 @@ export const useFilesStore = defineStore('files', () => {
               '文件传输 {0}（HostId={1}）：{2}',
               task.id,
               task.hostId,
-              [task.message, ...task.recoveryPaths.map((path) => tr('待检查临时文件：{0}', path))]
+              [
+                task.message,
+                ...task.recoveryPaths.map((path) =>
+                  tr(
+                    '待检查临时文件：{0}',
+                    task.direction === 'download' ? displayLocalPath(path) : path,
+                  ),
+                ),
+              ]
                 .filter(Boolean)
                 .join('；'),
             )

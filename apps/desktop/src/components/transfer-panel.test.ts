@@ -85,3 +85,29 @@ it('keeps cancellation and retry bound to their original transfer and host', asy
   root.querySelector<HTMLButtonElement>('button')!.click();
   expect(retry).toHaveBeenCalledWith(expect.objectContaining({ id: 'a-task', hostId: 'a' }));
 });
+
+it.each(['upload', 'download'] as const)(
+  'formats local %s paths in the transfer record and tooltip without changing the retry data',
+  async (direction) => {
+    const local = '\\\\?\\UNC\\server\\share\\资料';
+    const remote = '/srv/\\\\?\\C:\\archive';
+    const transfer = {
+      ...task('copy', 'a', 'failed'),
+      direction,
+      sources: [direction === 'upload' ? local : remote],
+      destination: direction === 'download' ? local : remote,
+    };
+    useFilesStore(pinia).tasks = [transfer];
+    history.value = true;
+    await nextTick();
+    const sources = direction === 'upload' ? '\\\\server\\share\\资料' : remote;
+    const destination = direction === 'download' ? '\\\\server\\share\\资料' : remote;
+    const path = root.querySelector<HTMLElement>('.transfer-path')!;
+    expect(path.textContent?.trim()).toBe(`${sources} → ${destination}`);
+    expect(path.title).toBe(`${sources}\n→ ${destination}`);
+    root.querySelector<HTMLButtonElement>('.transfer-row button')!.click();
+    expect(retry).toHaveBeenCalledExactlyOnceWith(transfer);
+    expect(transfer.sources).toEqual([direction === 'upload' ? local : remote]);
+    expect(transfer.destination).toBe(direction === 'download' ? local : remote);
+  },
+);

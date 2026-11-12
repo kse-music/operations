@@ -6,6 +6,7 @@ use serverdeck_plugin_sdk::{
 };
 mod compose;
 mod docker;
+mod image_archive;
 mod maintenance;
 mod startup;
 std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
@@ -17,6 +18,7 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
             .ok_or_else(|| ApiError::new("HOST", "请选择主机"))?
             .to_owned();
         match action.as_str() {
+            "image_archive" => image_archive::open(&context, &host, input["request"].clone()).await,
             "query" => {
                 let query: docker::Query = serde_json::from_value(input["request"].clone())
                     .map_err(|_| ApiError::new("INPUT", "Docker 请求无效"))?;

@@ -24,6 +24,8 @@ pub enum Permission {
     SftpWrite,
     #[serde(rename = "sftp.transfer")]
     SftpTransfer,
+    #[serde(rename = "sftp.transfer.preapproved")]
+    SftpTransferPreapproved,
     #[serde(rename = "operations.read.preapproved")]
     OperationsReadPreapproved,
     #[serde(rename = "operations.read.arguments.preapproved")]

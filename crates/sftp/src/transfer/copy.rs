@@ -19,11 +19,12 @@ pub struct PreparedCopy {
     pub bytes: u64,
     pub overwrite: bool,
     pub target_exists: bool,
+    local_destination: Option<PathBuf>,
     session: String,
     source_before: Snapshot,
     target_before: Option<FileAttributes>,
-    attempted_commit: Arc<AtomicBool>,
-    checksum: Arc<Mutex<Option<String>>>,
+    pub(super) attempted_commit: Arc<AtomicBool>,
+    pub(super) checksum: Arc<Mutex<Option<String>>>,
 }
 impl PreparedCopy {
     pub(super) fn source_session(&self) -> Option<&str> {
@@ -75,7 +76,7 @@ impl CopyHandle {
 }
 pub(super) struct Job {
     pub plan: PreparedCopy,
-    guard: Mutex<Option<Arc<dyn CopyGuard>>>,
+    pub(super) guard: Mutex<Option<Arc<dyn CopyGuard>>>,
 }
 impl Job {
     pub(super) fn release(&self) {
@@ -211,9 +212,74 @@ impl Transfers {
             bytes,
             overwrite,
             target_exists: expected.is_some(),
+            local_destination: None,
             session: session.into(),
             source_before,
             target_before: expected,
+            attempted_commit: Arc::default(),
+            checksum: Arc::default(),
+        })
+    }
+    pub async fn prepare_download_copy(
+        &self,
+        session: &str,
+        source: &str,
+        destination: &str,
+    ) -> Result<PreparedCopy, Error> {
+        remote_absolute(source)?;
+        valid_path(destination)?;
+        let target = PathBuf::from(destination);
+        if !target.is_absolute()
+            || target.components().any(|p| {
+                matches!(
+                    p,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+        {
+            return Err(Error::Validation("本机下载目标须为规范绝对文件路径"));
+        }
+        local::validate_name(
+            target
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or(Error::Validation("下载文件名无效"))?,
+        )?;
+        let parent = target
+            .parent()
+            .ok_or(Error::Validation("下载目标无父目录"))?;
+        ensure_local_parent(parent).await?;
+        match tokio::fs::symlink_metadata(&target).await {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(local::io(error)),
+            Ok(_) => {
+                return Err(fail(
+                    "FILE_CONFLICT",
+                    "本机下载目标已存在，请选择其他文件名",
+                ));
+            }
+        }
+        let remote = Remote::connect(&self.engine, session).await?;
+        let attrs = remote.attrs(source).await?;
+        if remote.canonical(source).await? != source || remote::kind(&attrs) != EntryKind::File {
+            return Err(Error::Validation("下载源须为无链接的普通文件"));
+        }
+        let bytes = attrs
+            .size
+            .ok_or_else(|| fail("SFTP_ATTRIBUTES", "源文件大小未知"))?;
+        Ok(PreparedCopy {
+            source: CopySource::Remote {
+                session: session.into(),
+                path: source.into(),
+            },
+            destination: local::text(&target)?,
+            bytes,
+            overwrite: false,
+            target_exists: false,
+            local_destination: Some(target),
+            session: session.into(),
+            source_before: Snapshot::Remote(attrs),
+            target_before: None,
             attempted_commit: Arc::default(),
             checksum: Arc::default(),
         })
@@ -228,10 +294,18 @@ impl Transfers {
         };
         let input = TransferInput {
             session_id: plan.session.clone(),
-            direction: Direction::Upload,
+            direction: if plan.local_destination.is_some() {
+                Direction::Download
+            } else {
+                Direction::Upload
+            },
             sources: vec![source],
-            destination: remote_parent(&plan.destination)
-                .ok_or(Error::Validation("目标无父目录"))?,
+            destination: match &plan.local_destination {
+                Some(path) => local::text(path.parent().ok_or(Error::Validation("目标无父目录"))?)?,
+                None => {
+                    remote_parent(&plan.destination).ok_or(Error::Validation("目标无父目录"))?
+                }
+            },
             conflict: if plan.overwrite {
                 ConflictPolicy::Overwrite
             } else {
@@ -351,6 +425,50 @@ pub(super) async fn run(
         .cloned()
         .ok_or_else(|| fail("TRANSFER_CANCELLED", "传输授权已释放"))?;
     guard.check().await?;
+    if let Some(local) = &plan.local_destination {
+        let (path, before) = match (&plan.source, &plan.source_before) {
+            (CopySource::Remote { path, .. }, Snapshot::Remote(before)) => (path, before),
+            _ => return Err(Error::Validation("下载源快照不匹配")),
+        };
+        if target.canonical(path).await? != *path
+            || !remote::same(before, &target.attrs(path).await?)
+        {
+            return Err(Error::Conflict);
+        }
+        {
+            let mut info = locked(&task.info)?;
+            info.total_bytes = plan.bytes;
+            info.files_total = 1;
+            info.state = "running".into();
+        }
+        let host = engine.session_info(&plan.session)?.host_id;
+        let mutation = locked(mutations)?.entry(host).or_default().clone();
+        let operation = download(
+            task,
+            target,
+            &mutation,
+            Item {
+                local: local.clone(),
+                remote: path.clone(),
+                source_link: None,
+                directory: false,
+                size: plan.bytes,
+                attrs: Some(before.clone()),
+            },
+        );
+        tokio::pin!(operation);
+        loop {
+            tokio::select! {
+                result = &mut operation => return result,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {
+                    if let Err(error) = guard.check().await {
+                        if task.committing.load(Ordering::Acquire) { operation.await?; }
+                        return Err(error);
+                    }
+                }
+            }
+        }
+    }
     let parent = remote_parent(&plan.destination).ok_or(Error::Validation("目标无父目录"))?;
     if target.canonical(&parent).await? != parent
         || !same_optional(

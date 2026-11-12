@@ -795,9 +795,10 @@ watch(
         />
       </div>
       <div
-        v-show="view === 'terminals'"
         class="terminal-workspace"
-        :inert="workspace.closing.includes(workspace.active)"
+        :class="{ 'terminal-hidden': view !== 'terminals' }"
+        :inert="view !== 'terminals' || workspace.closing.includes(workspace.active) || undefined"
+        :aria-hidden="view !== 'terminals' || undefined"
       >
         <div class="terminal-primary">
           <TerminalsView

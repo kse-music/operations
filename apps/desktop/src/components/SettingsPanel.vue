@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import ProductSettings from './ProductSettings.vue';
@@ -25,6 +26,12 @@ const application = useApplicationStore();
 const workspace = useWorkspaceStore();
 const migration = useStorageMigration();
 const { target, preview, discardDocuments, busy, restarting, changed } = migration;
+const displayedTarget = computed({
+  get: () => displayLocalPath(target.value),
+  set: (value: string) => {
+    if (value !== displayedTarget.value) target.value = value;
+  },
+});
 const props = withDefaults(defineProps<{ category?: SettingsCategory }>(), { category: 'general' });
 const emit = defineEmits<{ category: [category: SettingsCategory] }>();
 const categoryLabel = computed(
@@ -376,7 +383,7 @@ function restoreDefaults(): void {
               <div class="input-action">
                 <input
                   id="data-root-directory"
-                  v-model="target"
+                  v-model="displayedTarget"
                   :aria-label="tr('数据根目录')"
                   required
                 />
@@ -388,19 +395,19 @@ function restoreDefaults(): void {
             <dl class="full-width storage-paths">
               <div>
                 <dt>{{ tr('数据库') }}</dt>
-                <dd>{{ application.state.storage.databasePath }}</dd>
+                <dd>{{ displayLocalPath(application.state.storage.databasePath) }}</dd>
               </div>
               <div>
                 <dt>{{ tr('插件') }}</dt>
-                <dd>{{ application.state.storage.pluginDirectory }}</dd>
+                <dd>{{ displayLocalPath(application.state.storage.pluginDirectory) }}</dd>
               </div>
               <div>
                 <dt>{{ tr('日志') }}</dt>
-                <dd>{{ application.state.storage.logDirectory }}</dd>
+                <dd>{{ displayLocalPath(application.state.storage.logDirectory) }}</dd>
               </div>
               <div>
                 <dt>{{ tr('WebView 数据与缓存') }}</dt>
-                <dd>{{ application.state.storage.webviewDirectory }}</dd>
+                <dd>{{ displayLocalPath(application.state.storage.webviewDirectory) }}</dd>
               </div>
             </dl>
             <p class="subtle full-width">
@@ -486,9 +493,12 @@ function restoreDefaults(): void {
     </Modal>
     <Modal v-if="preview" :title="tr('迁移数据并重启')" :busy="busy" @close="preview = null">
       <p class="storage-path">
-        {{ tr('当前目录：') }}{{ application.state?.storage?.rootDirectory }}
+        {{ tr('当前目录：')
+        }}{{ displayLocalPath(application.state?.storage?.rootDirectory ?? '') }}
       </p>
-      <p class="storage-path">{{ tr('目标目录：') }}{{ preview.targetDirectory }}</p>
+      <p class="storage-path">
+        {{ tr('目标目录：') }}{{ displayLocalPath(preview.targetDirectory) }}
+      </p>
       <p>
         {{ tr(' 预计迁移 ') }}{{ (preview.bytes / 1024 / 1024).toFixed(2)
         }}{{ tr(' MiB，目标可用 ')

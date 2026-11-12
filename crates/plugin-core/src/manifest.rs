@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serverdeck_core::Error;
 use std::collections::BTreeSet;
 
-pub const API_VERSION: &str = "5.4.0";
+pub const API_VERSION: &str = "5.6.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -164,6 +164,11 @@ impl Manifest {
             && !permissions.contains(&Permission::SshExecute)
         {
             return Err(invalid("交互会话预授权需要 SSH 权限"));
+        }
+        if permissions.contains(&Permission::SftpTransferPreapproved)
+            && !permissions.contains(&Permission::SftpTransfer)
+        {
+            return Err(invalid("文件传输预授权需要文件传输权限"));
         }
         let arguments = permissions.contains(&Permission::OperationsReadArgumentsPreapproved);
         if (arguments && !permissions.contains(&Permission::OperationsReadPreapproved))

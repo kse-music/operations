@@ -153,6 +153,11 @@ const actionLabels = {
             </button>
           </template>
         </template>
+        <template #toolbar-after="{ busy, openImport }">
+          <button v-if="section === 'images'" class="button" :disabled="busy" @click="openImport">
+            {{ tr('导入镜像') }}
+          </button>
+        </template>
         <template #cell="{ row, column }">
           <template v-if="column.key === 'Names'"
             ><strong class="resource-cell-main">{{ row.Names }}</strong
@@ -180,7 +185,7 @@ const actionLabels = {
             }}</span
           ></template
         >
-        <template #actions="{ row, busy, inspect, execute, openLog, openShell }">
+        <template #actions="{ row, busy, inspect, execute, openLog, openShell, openExport }">
           <template v-if="section === 'compose'">
             <button
               class="text-button"
@@ -288,25 +293,29 @@ const actionLabels = {
               Shell
             </button>
           </template>
-          <button
-            v-else
-            class="text-button"
-            :disabled="busy"
-            @click="
-              execute(
-                {
-                  kind: 'image_remove',
-                  id: String(row.ID),
-                  confirmed: true,
-                },
-                [row.Repository, row.Tag]
-                  .filter((value) => value && value !== '<none>')
-                  .join(':') || String(row.ID),
-              )
-            "
-          >
-            {{ tr(' 删除 ') }}
-          </button>
+          <template v-else>
+            <button
+              class="text-button"
+              :disabled="busy"
+              @click="
+                execute(
+                  {
+                    kind: 'image_remove',
+                    id: String(row.ID),
+                    confirmed: true,
+                  },
+                  [row.Repository, row.Tag]
+                    .filter((value) => value && value !== '<none>')
+                    .join(':') || String(row.ID),
+                )
+              "
+            >
+              {{ tr(' 删除 ') }}
+            </button>
+            <button class="text-button" :disabled="busy" @click="openExport(row)">
+              {{ tr('导出') }}
+            </button>
+          </template>
         </template>
         <template #detail-content="{ detail, query }">
           <ComposeDetails

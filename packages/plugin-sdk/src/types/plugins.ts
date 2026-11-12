@@ -8,6 +8,7 @@ export type PluginPermission =
   | 'sftp.read'
   | 'sftp.write'
   | 'sftp.transfer'
+  | 'sftp.transfer.preapproved'
   | 'operations.read.preapproved'
   | 'operations.read.arguments.preapproved'
   | 'operations.full.preapproved'

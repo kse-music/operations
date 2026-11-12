@@ -23,10 +23,10 @@ export interface RemotePath {
   hostId: string;
   path: string;
 }
-export interface TransferPreview {
+export interface TransferPreview<D = RemotePath> {
   id: string;
   source: TransferSource;
-  destination: RemotePath;
+  destination: D;
   bytes: number;
   overwrite: boolean;
   targetExists: boolean;
@@ -78,6 +78,11 @@ export type PlatformRequest =
       source: TransferSource;
       destination: RemotePath;
       overwrite: boolean;
+    }
+  | {
+      kind: 'transfer_download_prepare';
+      source: RemotePath;
+      destination: string;
     }
   | {
       kind: 'transfer_start' | 'transfer_status' | 'transfer_cancel' | 'transfer_close';

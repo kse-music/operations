@@ -67,8 +67,11 @@ node tools/release-manifest.mjs
 
 ```powershell
 npm run test:native
+npm run test:terminal-latency -- --profile
 cargo test -p serverdeck-security native_store_roundtrip_update_and_delete -- --ignored
 ```
+
+本地终端延迟入口构建隔离的 Release EXE 并恢复根目录的正常构建配置，通过真实 WebView2、ConPTY 和带写出时间的 loopback HTTP 日志，比较 1/8/16 个空闲会话及 3/15 个后台输出会话。须检查全部前台日志标记到达、所有后台生产者实际输出并结束，以及隐藏焦点隔离、历史、切页和输入恢复。指标和可选 CPU 剖析保存在 `.local/qa/terminal-latency/`；剖析在延迟采样结束后执行。DOM 就绪及下一帧调度机会不是物理屏幕呈现时间，不替代 SSH、UAC、安装器或其他平台验收。复用历史 EXE 时仅接受该 QA 目录内的 `--exe` 副本。
 
 SSH 测试从进程环境读取 `SERVERDECK_TEST_HOST`、`SERVERDECK_TEST_USER`、`SERVERDECK_TEST_PIN`、`SERVERDECK_TEST_PASSWORD`。PIN 通过带外渠道核对；密码通过隐藏输入仅放入本次进程环境，不进入命令行、文件或日志，使用后清除。先阅读测试入口的前置条件和实际操作，不能把只读检查视为对远端变更的授权。
 

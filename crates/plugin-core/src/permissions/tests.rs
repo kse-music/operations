@@ -200,6 +200,94 @@ fn interactive_preapproval_is_explicit_and_cannot_approve_execute_or_other_opera
         .retain(|p| *p != Permission::SshExecute);
     assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
 }
+
+#[test]
+fn transfer_preapproval_is_independent_and_bound_to_the_installed_revision() {
+    use serverdeck_plugin_sdk::platform::{RemotePath, TransferSource};
+    let mut plugin = plugin();
+    plugin.manifest.permissions.extend([
+        Permission::SftpTransfer,
+        Permission::SftpTransferPreapproved,
+    ]);
+    plugin.manifest.validate(std::env::consts::OS).unwrap();
+    let mut settings = input();
+    settings.permissions = plugin.manifest.permissions.clone();
+    settings
+        .permissions
+        .retain(|p| *p != Permission::SftpTransferPreapproved);
+    settings.operations.push("sftp.transfer".into());
+    let mut grant = Grant::new(&plugin, settings).unwrap();
+    let operations = [
+        cap(Primitive::TransferPrepare {
+            source: TransferSource::Local {
+                path: "C:/image.tar".into(),
+            },
+            destination: RemotePath {
+                host_id: "host".into(),
+                path: "/tmp".into(),
+            },
+            overwrite: false,
+        }),
+        cap(Primitive::TransferDownloadPrepare {
+            source: RemotePath {
+                host_id: "host".into(),
+                path: "/tmp/image.tar".into(),
+            },
+            destination: "C:/image.tar".into(),
+        }),
+        cap(Primitive::TransferStart {
+            id: "native-copy".into(),
+        }),
+    ];
+    for operation in &operations {
+        assert!(!grant.preapproves(&plugin, operation));
+    }
+    grant.permissions.push(Permission::SftpTransferPreapproved);
+    for operation in &operations {
+        assert!(!grant.preapproves(&plugin, operation));
+    }
+    grant.operations.push("sftp.transfer.preapproved".into());
+    for operation in &operations {
+        assert!(grant.preapproves(&plugin, operation));
+        for change in 0..6 {
+            let mut plugin = plugin.clone();
+            let mut grant = grant.clone();
+            match change {
+                0 => plugin.revision = "new-revision".into(),
+                1 => plugin.package_digest = "new-digest".into(),
+                2 => plugin.enabled = false,
+                3 => plugin
+                    .manifest
+                    .permissions
+                    .retain(|p| *p != Permission::SftpTransferPreapproved),
+                4 => grant.permissions.retain(|p| *p != Permission::SftpTransfer),
+                _ => grant.operations.retain(|name| name != "sftp.transfer"),
+            }
+            assert!(!grant.preapproves(&plugin, operation));
+        }
+    }
+    for operation in [
+        cap(Primitive::ReadFile {
+            host_id: "host".into(),
+            path: "/etc/nginx/a.conf".into(),
+        }),
+        cap(Primitive::SaveFile {
+            document_id: "doc".into(),
+            content: "changed".into(),
+        }),
+        cap(Primitive::Execute {
+            host_id: "host".into(),
+            command: Command::script("reboot"),
+        }),
+    ] {
+        assert!(!grant.preapproves(&plugin, &operation));
+    }
+    plugin
+        .manifest
+        .permissions
+        .retain(|p| *p != Permission::SftpTransfer);
+    assert!(plugin.manifest.validate(std::env::consts::OS).is_err());
+}
 #[test]
 fn preset_execution_requires_a_separate_revision_bound_grant_and_exact_command() {
     let mut plugin = plugin();

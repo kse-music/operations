@@ -1,6 +1,6 @@
-# Plugin SDK 5.4.0
+# Plugin SDK 5.6.0
 
-Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.4.0**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.6.0**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
 
 ## 职责边界
 
@@ -21,6 +21,8 @@ SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 St
 | 界面语言与词典                   | `i18n` → `locale` / `createTranslator(english)`      |
 | 连接 / 终端 / 取消 / 草稿        | `connections` / `terminal` / `actions` / `drafts`    |
 | 通用组件                         | `ui/{Modal,OpsTable,TrendChart,StreamDialog}.vue`    |
+
+`paths.displayLocalPath(path)` 仅用于本机路径显示：Windows 扩展盘符和 UNC 路径显示为普通形式，其他路径保持原文。调用文件原语时保留原始路径，不能将显示转换用于权限或路径校验。
 
 `StreamDialog` 使用宽弹窗，固定标题/工具栏并让输出区独立滚动。首次打开和默认跟随时滚到最新输出，用户向上翻阅后停止自动滚动但继续接收；“最新日志”或暂停后的“继续”恢复跟随。窗口尺寸/字号变化时仅在跟随模式重新定位末尾。过滤、复制、导出、1 MiB/5000 行缓存及隐藏/卸载释放自有流的边界不变，显示操作不改变流的执行和释放规则。
 
@@ -86,6 +88,7 @@ Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Cap
 | `read_file`, `close_file`                      | 受目录范围约束的文本编辑句柄      | `sftp.read`                                                           |
 | `save_file`, `file_dirty`                      | 冲突检测、原子保存、退出保护      | `sftp.write`                                                          |
 | `transfer_prepare/start/status/cancel/close`   | 单文件本机上传及双端中转任务      | `sftp.transfer`；准备/启动另需目标 `sftp.write`，远程源需 `sftp.read` |
+| `transfer_download_prepare`                    | 远程普通文件下载到本机的准备      | `sftp.transfer`、源 `sftp.read`；启动仍使用 `transfer_start`          |
 | `settings_read/write`                          | 本插件独立 JSON 配置              | `settings.read/write`                                                 |
 | `notify`                                       | 有界通知                          | `ui.contribute` / `ui.notify`                                         |
 | `tcp_connect`                                  | 从本机探测目标 TCP 端口，3 秒超时 | `network.connect`                                                     |
@@ -98,6 +101,8 @@ Execute 默认经可信宿主**逐次确认真实目标与命令**。可选 Mani
 StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.preapproved`，并独立授予同名权限和 operation 后，当前安装修订可直接启动任意远程流和终端命令；仍需声明、授予 `ssh.execute` 及同名 operation。这是任意交互命令授权，不受 `preapprovedCommands` 限制，也不表示命令只读；上传包默认未选，升级需要重新授权。该权限不能免除 Execute、SaveFile、TcpConnect 的审批。隐藏/关闭、撤权、配额、取消和实际 SSH 配置复验仍适用。
 
 `models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
+
+API `^5.6.0` 可声明、独立授予 `sftp.transfer.preapproved` 权限及同名 operation；须同时声明和授予 `sftp.transfer`。它允许当前安装修订直接准备、启动上传、下载或中转，不再逐次确认 `transfer_prepare`、`transfer_download_prepare`、`transfer_start`。插件可指定本机来源与保存路径，因此上传包默认不选，升级不继承旧修订授权；远程读写权限、目录范围、源/目标快照、owner、配置、撤权和取消检查仍保留。该授权不能免除 SSH 命令、文本读取/保存或其他能力审批，也不能绕过显式固定计划的次数与请求绑定。
 
 ### 模型流与文本进度
 
@@ -163,6 +168,10 @@ const state = await call<TransferState>({ kind: 'transfer_start', id: preview.id
 ```
 
 精确 DTO 以两端 SDK 类型为准。准备遵循读取审批模式，启动须经宿主按模式授权：前者授权读取源元数据及目标状态，后者固定实际源、目标、大小及覆盖策略。预览五分钟内单次消费，每 owner 最多8项、全局32项。目标是已有规范目录，preview 返回完整目标文件路径。只传单个普通文件，不跟随链接/重解析点，不传目录、不解包、不自动重试。
+
+本机选择与下载要求 API `^5.5.0`。前端 `pickLocalFiles('files'|'folder')`（`@serverdeck/plugin-sdk/local-files`）经可信桌面选择器返回用户所选路径，需要 `sftp.transfer`；取消返回空数组，选择路径不会启动传输。页面隐藏、关闭、撤权或安装修订变化后丢弃选择结果。
+
+`transfer_download_prepare {source:{hostId,path},destination}` 的 destination 是本机完整绝对文件路径，父目录必须存在且无链接/重解析点；目标已存在即拒绝，不提供覆盖。准备/启动默认分别由宿主确认真实 SSH 来源与本机目标，独立传输预授权可免除这两次确认；源受 `sftp.read` 目录范围约束，不需要远程写权限。返回 `TransferPreview<{localPath:string}>`，其 `destination.localPath` 为实际本机目标；普通上传/中转的 `TransferPreview` 仍返回原有 `{hostId,path}` 目标形状。两种预览复用相同状态、启动、取消和关闭接口。下载冻结远程源属性，校验远端、本机暂存 SHA-256 后不覆盖提交，提交前后复验权限、配置与目标修订。
 
 启动返回后任务在 Native 既有 SFTP 队列运行，复制使用固定32 KiB缓冲、同目录临时文件和目标读回 SHA-256；字节不通过 JS/WASM/模型。`transfer_status {id}` 返回原生状态、进度、速度、摘要、错误及恢复路径。`transfer_cancel {id}` 仅取消自有任务，可绕开同插件正在占用的 Guest 动作，不占用或释放其 busy 标记。`transfer_close {id}` 取消、等待安全收尾并释放句柄。状态/取消/关闭不依赖已过期的模型绑定，但仍验证当前权限、owner、VM代。启动后继续复验插件/模型/SSH修订、配置、目录授权和连接，关闭所属页面或撤权会取消并排空；运行中不受五分钟预览 TTL 截断，不支持跨重启恢复。提交已发生但复验失败为 `unverified`，不能自动重放或回滚。
 

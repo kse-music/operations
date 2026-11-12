@@ -6,6 +6,7 @@ import { useOpsStore } from '../stores/ops';
 import { useNotificationsStore } from '../stores/notifications';
 import { hostInput } from '../types/hosts';
 import { pluginsApi } from './plugins';
+import { filesApi } from './files';
 import type { PluginPermission, PluginUiPage } from '../types/plugins';
 const api = vi.hoisted(() => ({ invoke: vi.fn(), platform: vi.fn() }));
 vi.mock('./plugin-server', () => ({
@@ -113,6 +114,37 @@ function grant(...permissions: PluginPermission[]) {
 function bridge() {
   return createPluginUiBridge({ id, revision: 'revision', page, hostId: '', stream: vi.fn() });
 }
+
+it('opens the native file picker only with transfer permission and discards late hidden results', async () => {
+  const pick = vi.spyOn(filesApi, 'pick').mockResolvedValue(['C:/images/image.tar']);
+  await expect(bridge().call('localFiles.pick', { kind: 'files' })).rejects.toMatchObject({
+    code: 'PLUGIN_PERMISSION_DENIED',
+  });
+  expect(pick).not.toHaveBeenCalled();
+  grant('ui.contribute', 'sftp.transfer');
+  expect(await bridge().call('localFiles.pick', { kind: 'files' })).toEqual([
+    'C:/images/image.tar',
+  ]);
+  let active = true;
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: 'host',
+    isActive: () => active,
+  });
+  let finish: (value: string[]) => void = () => {};
+  pick.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = ui.call('localFiles.pick', { kind: 'folder' });
+  active = false;
+  finish(['C:/exports']);
+  await expect(pending).rejects.toMatchObject({ code: 'PLUGIN_PERMISSION_DENIED' });
+});
 
 it('passes optional terminal display text while preserving ticket and permission checks', async () => {
   grant('ui.contribute', 'ssh.execute');

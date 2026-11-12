@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, ref } from 'vue';
@@ -12,6 +13,12 @@ const model = defineModel<ProductPreferences>({ required: true });
 defineProps<{ section: 'general' | 'connection' | 'shortcuts' | 'storage'; disabled?: boolean }>();
 const hosts = useHostsStore(),
   error = ref('');
+const downloadDirectory = computed({
+  get: () => displayLocalPath(model.value.downloadDirectory ?? ''),
+  set: (value: string) => {
+    if (value !== downloadDirectory.value) model.value.downloadDirectory = value || null;
+  },
+});
 const newProxyPassword = ref(false);
 function proxyPasswordSaved(id: string): void {
   if (model.value.sshDefaults.proxy) model.value.sshDefaults.proxy.credentialId = id;
@@ -87,10 +94,9 @@ useErrorNotifications(error);
           <div class="input-action">
             <input
               id="default-download-directory"
-              v-model="model.downloadDirectory"
+              v-model="downloadDirectory"
               :placeholder="tr('未设置时使用本地文件栏当前目录')"
               :aria-label="tr('默认下载目录')"
-              @change="model.downloadDirectory ||= null"
             />
             <button type="button" class="button" @click="browse">{{ tr('选择下载目录') }}</button>
           </div>

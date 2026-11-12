@@ -179,6 +179,20 @@ describe('file opening and external editing', () => {
       expect.objectContaining({ text: expect.stringContaining(external.localPath), error: false }),
     ]);
   });
+  it('displays the retained external copy path without its Windows prefix', async () => {
+    const store = connected();
+    const localPath = '\\\\?\\C:\\ServerDeck\\external-edits\\edit-1\\config.ini';
+    store.externalDocument = { ...external, localPath, ready: true };
+    await store.openLocal(localPath);
+    expect(mocks.openLocal).toHaveBeenCalledExactlyOnceWith(localPath);
+    expect(store.externalDocument.localPath).toBe(localPath);
+    await store.closeExternal();
+    expect(useNotificationsStore().items).toEqual([
+      expect.objectContaining({
+        text: '已结束外部编辑，本地副本保留于：C:\\ServerDeck\\external-edits\\edit-1\\config.ini',
+      }),
+    ]);
+  });
   it.each(['timeout', 'dismiss'])(
     'does not replay a finished edit notice after %s and host reopening',
     async (action) => {
