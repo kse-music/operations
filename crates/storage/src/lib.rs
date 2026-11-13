@@ -7,6 +7,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub mod ai;
 mod config_migrations;
 pub mod hosts;
+mod local_terminal;
 mod migrations;
 pub mod plugins;
 pub mod trust;

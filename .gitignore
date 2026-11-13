@@ -24,3 +24,4 @@ __pycache__/
 coverage/
 Thumbs.db
 Desktop.ini
+/local/

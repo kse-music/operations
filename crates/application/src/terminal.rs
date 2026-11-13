@@ -240,6 +240,10 @@ impl Application {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
+        size.validate()?;
+        self.local_terminals
+            .prepare_directory(self.database.clone(), self.operations.clone())
+            .await?;
         self.local_terminals.open(size, sink).await
     }
     pub async fn terminal_local_open_elevated(
@@ -250,6 +254,10 @@ impl Application {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
+        size.validate()?;
+        self.local_terminals
+            .prepare_directory(self.database.clone(), self.operations.clone())
+            .await?;
         self.local_terminals.open_elevated(size, sink).await
     }
 }

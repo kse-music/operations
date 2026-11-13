@@ -29,6 +29,11 @@ const section = ref<ServerSection>(
 );
 const platform = usePlatformContext();
 const summary = useDockerSummary(computed(() => props.hostId ?? platform.hostId));
+const dataRevision = ref(0);
+function refreshSummary() {
+  dataRevision.value++;
+  void summary.refresh();
+}
 const summaryItems = computed(() => [
   { label: tr('Docker 版本'), icon: Container, metric: summary.metrics.version },
   { label: tr('本地镜像'), icon: Layers, metric: summary.metrics.images },
@@ -107,6 +112,7 @@ const actionLabels = {
       ><ResourceView
         :key="section"
         :host-id="hostId"
+        :data-revision="dataRevision"
         :list-request="{
           kind:
             section === 'compose'
@@ -125,7 +131,7 @@ const actionLabels = {
             ? tr('管理已有项目；启动不会重新部署，已删除全部容器的项目不在列表中。')
             : undefined
         "
-        @refresh="summary.refresh"
+        @refresh="refreshSummary"
       >
         <template #toolbar="{ execute, busy }">
           <template v-if="section === 'containers'">

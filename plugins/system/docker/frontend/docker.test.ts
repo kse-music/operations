@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createApp, nextTick, type App } from 'vue';
+import { createApp, nextTick, reactive, type App } from 'vue';
 import { createPinia, setActivePinia, disposePinia, type Pinia } from 'pinia';
 import Docker from './App.vue';
 import { setLocale } from '@serverdeck/plugin-sdk/i18n';
+import { updateVisibility } from '@serverdeck/plugin-sdk/visibility';
+
+const platform = reactive({
+  hostId: 'host',
+  hosts: [{ id: 'host', name: 'QA', hostname: 'qa', username: 'ops', port: 22 }],
+  connections: { host: { hostId: 'host', state: 'connected' } },
+});
 
 const api = vi.hoisted(() => ({
   query: vi.fn(),
@@ -15,11 +22,7 @@ const api = vi.hoisted(() => ({
   terminal: vi.fn(async () => {}),
 }));
 vi.mock('@serverdeck/plugin-sdk/context', () => ({
-  usePlatformContext: () => ({
-    hostId: 'host',
-    hosts: [{ id: 'host', name: 'QA', hostname: 'qa', username: 'ops', port: 22 }],
-    connections: { host: { hostId: 'host', state: 'connected' } },
-  }),
+  usePlatformContext: () => platform,
 }));
 vi.mock('@serverdeck/plugin-sdk', () => ({
   invoke: (action: string, input: { hostId: string; request: unknown }, options?: unknown) => {
@@ -54,6 +57,8 @@ function mountDocker(props: { initialSection?: 'compose'; onShell?: () => void }
   app.mount(root);
 }
 beforeEach(() => {
+  platform.connections.host.state = 'connected';
+  updateVisibility(true);
   vi.stubGlobal(
     'ResizeObserver',
     class {
@@ -65,6 +70,7 @@ beforeEach(() => {
 afterEach(() => {
   setLocale('zh-CN');
   app?.unmount();
+  updateVisibility(true);
   if (pinia) disposePinia(pinia);
   root?.remove();
   if (originalShowModal)
@@ -73,6 +79,232 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+it('reuses loaded tabs and metrics on return, and keeps their values visible while refreshing', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const response = (kind: string) => ({
+    success: true,
+    detail: kind === 'capabilities' ? { dockerVersion: { Server: { Version: '27.5.1' } } } : null,
+    records:
+      kind === 'containers'
+        ? [{ ID: 'cached-container', Names: 'cached', State: 'running' }]
+        : kind === 'images'
+          ? [{ ID: 'cached-image', Repository: 'cached-image' }]
+          : [],
+  });
+  api.query.mockImplementation(async (_host, request) => response(request.kind));
+  mountDocker();
+  await settle();
+  const button = (label: string) =>
+    [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent?.trim() === label,
+    )!;
+  button('镜像').click();
+  await settle();
+  const reads = api.query.mock.calls.length;
+  button('容器').click();
+  await settle();
+  expect(api.query).toHaveBeenCalledTimes(reads);
+  expect(root.querySelector('[data-ops-target="cached-container"]')).not.toBeNull();
+  const values = () =>
+    [...root.querySelectorAll('.docker-summary strong')].map((node) => node.textContent);
+  updateVisibility(false);
+  await settle();
+  expect(values()).toEqual(['27.5.1', '1', '1', '0']);
+  updateVisibility(true);
+  await settle();
+  expect(api.query).toHaveBeenCalledTimes(reads);
+  const row = root.querySelector('[data-ops-target="cached-container"]');
+  const finish: (() => void)[] = [];
+  api.query.mockImplementation(
+    (_host, request) =>
+      new Promise((resolve) => {
+        finish.push(() => resolve(response(request.kind)));
+      }),
+  );
+  button('刷新').click();
+  await settle();
+  expect(root.querySelector('[data-ops-target="cached-container"]')).toBe(row);
+  expect(root.textContent).not.toContain('正在读取列表…');
+  expect(values()).toEqual(['27.5.1', '1', '1', '0']);
+  expect(button('正在读取…').disabled).toBe(true);
+  finish.forEach((resolve) => resolve());
+  await settle();
+  expect(button('刷新').disabled).toBe(false);
+  const refreshed = api.query.mock.calls.length;
+  api.query.mockImplementation(async (_host, request) => response(request.kind));
+  button('镜像').click();
+  await settle();
+  expect(api.query).toHaveBeenCalledTimes(refreshed + 1);
+});
+
+it('invalidates snapshots on reconnect and ignores reads completed after the page was hidden', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const stale: (() => void)[] = [];
+  api.query.mockImplementation(
+    (_host, request) =>
+      new Promise((resolve) => {
+        stale.push(() =>
+          resolve({
+            success: true,
+            records:
+              request.kind === 'containers'
+                ? [{ ID: 'stale', Names: 'stale', State: 'running' }]
+                : [],
+            detail: null,
+          }),
+        );
+      }),
+  );
+  mountDocker();
+  await settle();
+  updateVisibility(false);
+  await settle();
+  stale.forEach((resolve) => resolve());
+  await settle();
+  expect(root.querySelector('[data-ops-target="stale"]')).toBeNull();
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    records:
+      request.kind === 'containers' ? [{ ID: 'fresh', Names: 'fresh', State: 'running' }] : [],
+    detail:
+      request.kind === 'capabilities' ? { dockerVersion: { Server: { Version: '28.0.0' } } } : null,
+  }));
+  updateVisibility(true);
+  await settle();
+  expect(root.querySelector('[data-ops-target="fresh"]')).not.toBeNull();
+  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('28.0.0');
+  updateVisibility(false);
+  await settle();
+  platform.connections.host.state = 'idle';
+  await settle();
+  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
+  const reads = api.query.mock.calls.length;
+  platform.connections.host.state = 'connected';
+  await settle();
+  expect(api.query).toHaveBeenCalledTimes(reads);
+  updateVisibility(true);
+  await settle();
+  expect(api.query).toHaveBeenCalledTimes(reads + 5);
+  expect(root.querySelector('[data-ops-target="fresh"]')).not.toBeNull();
+});
+
+it.each([false, true])(
+  'updates cached lists after a hidden container mutation succeeds (page hidden: %s)',
+  async (hidden) => {
+    vi.clearAllMocks();
+    pinia = createPinia();
+    setActivePinia(pinia);
+    let changed = false;
+    let complete!: () => void;
+    api.query.mockImplementation(async (_host, request) => {
+      if (request.kind === 'container_action')
+        return new Promise((resolve) => {
+          complete = () => {
+            changed = true;
+            resolve({ success: true, records: [] });
+          };
+        });
+      return {
+        success: true,
+        detail: null,
+        records:
+          request.kind === 'containers'
+            ? [{ ID: 'container', Names: 'container', State: changed ? 'exited' : 'running' }]
+            : request.kind === 'images'
+              ? [{ ID: changed ? 'new-image' : 'old-image' }]
+              : [],
+      };
+    });
+    mountDocker();
+    await settle();
+    const click = async (label: string) => {
+      [...root.querySelectorAll<HTMLButtonElement>('button')]
+        .find((node) => node.textContent?.trim() === label)!
+        .click();
+      await settle();
+    };
+    await click('镜像');
+    expect(root.querySelector('[data-ops-target="old-image"]')).not.toBeNull();
+    await click('容器');
+    await click('停止');
+    expect(changed).toBe(false);
+    await click('镜像');
+    if (hidden) {
+      updateVisibility(false);
+      await settle();
+    }
+    const reads = api.query.mock.calls.length;
+    complete();
+    await settle();
+    expect(changed).toBe(true);
+    if (hidden) {
+      expect(api.query).toHaveBeenCalledTimes(reads);
+      updateVisibility(true);
+      await settle();
+    }
+    expect(root.querySelector('[data-ops-target="new-image"]')).not.toBeNull();
+    expect(root.querySelector('[data-ops-target="old-image"]')).toBeNull();
+    expect(root.querySelectorAll('.docker-summary strong')[2]?.textContent).toBe('0');
+  },
+);
+it('discards a list response made stale by another tab mutation and reloads the visible list', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  let changed = false;
+  let delayImages = false;
+  let complete!: () => void;
+  const stale: (() => void)[] = [];
+  api.query.mockImplementation(async (_host, request) => {
+    if (request.kind === 'container_action')
+      return new Promise((resolve) => {
+        complete = () => {
+          changed = true;
+          resolve({ success: true, records: [] });
+        };
+      });
+    const response = {
+      success: true,
+      detail: null,
+      records:
+        request.kind === 'containers'
+          ? [{ ID: 'container', Names: 'container', State: 'running' }]
+          : request.kind === 'images'
+            ? [{ ID: changed ? 'new-image' : 'old-image' }]
+            : [],
+    };
+    if (request.kind === 'images' && delayImages)
+      return new Promise((resolve) => stale.push(() => resolve(response)));
+    return response;
+  });
+  mountDocker();
+  await settle();
+  const click = async (label: string) => {
+    [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find((node) => node.textContent?.trim() === label)!
+      .click();
+    await settle();
+  };
+  await click('镜像');
+  await click('容器');
+  await click('停止');
+  await click('镜像');
+  delayImages = true;
+  await click('刷新');
+  expect(stale).toHaveLength(2);
+  delayImages = false;
+  complete();
+  await settle();
+  stale.forEach((resolve) => resolve());
+  await settle();
+  expect(root.querySelector('[data-ops-target="new-image"]')).not.toBeNull();
+  expect(root.querySelector('[data-ops-target="old-image"]')).toBeNull();
+});
+
 it('keeps all four global metrics above the tabs and independent of tab selection and search', async () => {
   vi.clearAllMocks();
   pinia = createPinia();
@@ -686,7 +918,8 @@ it('manages Compose projects with host confirmations, service details and owned 
   api.query.mockRejectedValue(new Error('docker: unknown command: compose'));
   await click('刷新');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('unknown command');
-  expect(root.querySelectorAll('.docker-summary strong')[3]?.textContent).toBe('—');
+  expect(root.querySelectorAll('.docker-summary strong')[3]?.textContent).toBe('0');
+  expect(root.querySelectorAll('.docker-summary article')[3]?.textContent).toContain('读取失败');
 });
 
 it('closes a late Compose log stream after its tab is deactivated', async () => {

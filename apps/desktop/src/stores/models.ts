@@ -3,10 +3,12 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { aiApi } from '../services/ai';
 import { errorMessage } from '../services/ipc';
-import type { AiModel, AiModelInput } from '../types/ai';
+import type { AiModel, AiModelInput, LocalCodexStatus } from '../types/ai';
 
 export const useModelsStore = defineStore('models', () => {
   const models = ref<AiModel[]>([]),
+    localStatuses = ref<Record<string, LocalCodexStatus>>({}),
+    localLoaded = ref(false),
     selectedId = ref(''),
     loading = ref(false),
     loaded = ref(false),
@@ -75,6 +77,8 @@ export const useModelsStore = defineStore('models', () => {
   }
   return {
     models,
+    localStatuses,
+    localLoaded,
     selectedId,
     selected,
     loading,

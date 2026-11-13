@@ -5,7 +5,12 @@ import PluginsView from './PluginsView.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
-import type { InstalledPlugin, PluginManifest } from '../types/plugins';
+import type {
+  InstalledPlugin,
+  PluginInventory,
+  PluginManifest,
+  PluginRuntimeStatus,
+} from '../types/plugins';
 import { systemPluginFixtures, toolPluginState } from '../services/system-plugins.fixture';
 import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 beforeEach(() => {
@@ -33,12 +38,89 @@ afterEach(() => {
   app?.unmount();
   root?.remove();
   if (pinia) disposePinia(pinia);
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 const settle = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await nextTick();
 };
+it('keeps the refresh button stable during polling and disables it during manual refresh', async () => {
+  const item = systemPluginFixtures()[0]!;
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue([item]);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  const statuses = vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  mountManager();
+  await nextTick();
+  const refresh = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '刷新',
+  )!;
+  expect(refresh.disabled).toBe(true);
+  await settle();
+  expect(refresh.disabled).toBe(false);
+  const card = root.querySelector('.plugin-installed-row');
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const plugins = usePluginsStore(pinia);
+  plugins.start();
+  await settle();
+  const inventoryReads = vi.mocked(pluginsApi.inventory).mock.calls.length;
+  const permissionReads = vi.mocked(pluginsApi.permissions).mock.calls.length;
+  for (const state of ['active', 'crashed'] as const) {
+    let finish!: (value: PluginRuntimeStatus[]) => void;
+    statuses.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(refresh.disabled).toBe(false);
+    expect(root.querySelector('.plugin-installed-row')).toBe(card);
+    expect(root.textContent).not.toContain('正在读取插件…');
+    finish([
+      { id: item.manifest.id, revision: item.revision, state, errorCode: null, diagnostic: null },
+    ]);
+    await settle();
+    expect(plugins.statuses[0]?.state).toBe(state);
+    expect(pluginsApi.inventory).toHaveBeenCalledTimes(inventoryReads);
+    expect(pluginsApi.permissions).toHaveBeenCalledTimes(permissionReads);
+    expect(refresh.disabled).toBe(false);
+  }
+  let finish!: (value: PluginInventory) => void;
+  vi.mocked(pluginsApi.inventory).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  refresh.click();
+  await nextTick();
+  expect(refresh.disabled).toBe(true);
+  finish({ installed: [item], problems: [], availableBundled: [] });
+  await settle();
+  expect(refresh.disabled).toBe(false);
+});
+it('reuses the installed list when returning to settings and still refreshes on request', async () => {
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(systemPluginFixtures());
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  app.unmount();
+  root.remove();
+  mountManager();
+  await nextTick();
+  expect(root.querySelectorAll('.plugin-installed-row')).toHaveLength(2);
+  expect(root.textContent).not.toContain('正在读取插件…');
+  expect(pluginsApi.inventory).toHaveBeenCalledTimes(1);
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '刷新')!
+    .click();
+  await settle();
+  expect(pluginsApi.inventory).toHaveBeenCalledTimes(2);
+});
 it('requires explicit upgrade approval; cancelled upgrade preserves schemas and failure clears stale bindings', async () => {
   const manifest: PluginManifest = {
     schemaVersion: 1,

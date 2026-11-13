@@ -9,7 +9,7 @@ use tokio::{
 };
 
 const HELPER: &str = "--serverdeck-elevated-terminal";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const MAX_FRAME: usize = 128 * 1024;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -19,6 +19,7 @@ enum Frame {
     Start {
         version: u32,
         size: TerminalSize,
+        launch: LaunchDirectory,
     },
     Ready {},
     Input {
@@ -86,6 +87,7 @@ pub(super) async fn run(
     sink: &Sink,
     receiver: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<LocalTerminalSession, Error>>,
+    launch: LaunchDirectory,
 ) -> Result<(), Error> {
     let startup = async {
         let nonce = uuid::Uuid::new_v4();
@@ -109,6 +111,7 @@ pub(super) async fn run(
             &Frame::Start {
                 version: VERSION,
                 size,
+                launch,
             },
         )
         .await?;
@@ -279,14 +282,15 @@ async fn helper(id: uuid::Uuid, parent: u32) -> io::Result<()> {
     // from impersonating this elevated client.
     let mut pipe = ClientOptions::new().open(pipe_name(id))?;
     let _parent = native::authenticate_server(&pipe, parent)?;
-    let size = match tokio::time::timeout(START_TIMEOUT, read_frame(&mut pipe))
+    let (size, launch) = match tokio::time::timeout(START_TIMEOUT, read_frame(&mut pipe))
         .await
         .map_err(io::Error::other)??
     {
         Frame::Start {
             version: VERSION,
             size,
-        } => size.validate().map_err(io::Error::other)?,
+            launch,
+        } => (size.validate().map_err(io::Error::other)?, launch),
         _ => return Err(invalid("Unsupported terminal handshake")),
     };
     let terminals = LocalTerminals::new();
@@ -307,7 +311,10 @@ async fn helper(id: uuid::Uuid, parent: u32) -> io::Result<()> {
         };
         send.try_send(frame).is_ok()
     });
-    let session = terminals.open(size, sink).await.map_err(io::Error::other)?;
+    let session = terminals
+        .open_mode(size, sink, false, Some(launch))
+        .await
+        .map_err(io::Error::other)?;
     write_frame(&mut pipe, &Frame::Ready {}).await?;
     let (mut reader, mut writer) = tokio::io::split(pipe);
     let (send, mut commands) = async_mpsc::channel(64);
@@ -378,6 +385,26 @@ mod tests {
     #[tokio::test]
     async fn wire_roundtrip_and_rejects_oversized_truncated_and_unknown_frames() {
         let (mut write, mut read) = tokio::io::duplex(MAX_FRAME + 4);
+        let token = uuid::Uuid::new_v4();
+        let directory = "C:\\中文 space '&;$[]".to_owned();
+        write_frame(
+            &mut write,
+            &Frame::Start {
+                version: VERSION,
+                size: TerminalSize { cols: 90, rows: 25 },
+                launch: LaunchDirectory {
+                    directory: Some(directory.clone()),
+                    token,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        assert!(
+            matches!(read_frame(&mut read).await.unwrap(), Frame::Start {
+            version: VERSION, launch, ..
+        } if launch.token == token && launch.directory.as_ref() == Some(&directory))
+        );
         let data = vec![255; 16384];
         write_frame(&mut write, &Frame::Input { data: data.clone() })
             .await

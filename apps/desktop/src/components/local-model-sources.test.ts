@@ -88,6 +88,22 @@ it('distinguishes missing tools, authorization and actual model readiness', asyn
   expect(states()).toEqual(['未授权', '已就绪']);
   expect(root.querySelectorAll('.local-source-state.ready')).toHaveLength(1);
 });
+it('rechecks an invalidated authorization snapshot after returning from a failed detection', async () => {
+  await mount();
+  click('授权使用');
+  await settle();
+  api.localCodexStatus.mockRejectedValueOnce({ message: 'CLI detection failed' });
+  usePluginsStore().decide(true);
+  await settle();
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('CLI detection failed');
+  app!.unmount();
+  root.remove();
+  api.localCodexStatus.mockResolvedValue({ installed: true, authorized: true, message: '已授权' });
+  await mount();
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(3);
+  expect(root.querySelector('[role="alert"]')).toBeNull();
+  expect(root.textContent).toContain('撤销授权');
+});
 it.each([0, 1])(
   'requires trusted approval before using source %s and revokes only that source',
   async (index) => {

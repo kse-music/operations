@@ -179,7 +179,7 @@ async function uninstall() {
   }
 }
 onMounted(() => {
-  void plugins.refresh();
+  if (!plugins.loaded) void plugins.refresh();
 });
 onBeforeUnmount(() => {
   disposed = true;

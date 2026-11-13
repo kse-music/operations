@@ -16,6 +16,9 @@ use std::{
 };
 use tokio::sync::{Semaphore, oneshot, watch};
 
+mod directory;
+use directory::{DirectoryMemory, DirectoryTracker, LaunchDirectory};
+
 #[cfg(windows)]
 pub(crate) mod elevated;
 
@@ -45,6 +48,7 @@ pub(crate) struct LocalTerminals {
     sessions: Arc<Mutex<HashMap<String, Arc<Control>>>>,
     slots: Arc<Semaphore>,
     stopped: Arc<AtomicBool>,
+    directory: Arc<tokio::sync::Mutex<Option<Arc<DirectoryMemory>>>>,
 }
 fn failed(
     message: &'static str,
@@ -144,14 +148,32 @@ impl LocalTerminals {
             sessions: Default::default(),
             slots: Arc::new(Semaphore::new(LIMIT)),
             stopped: Default::default(),
+            directory: Default::default(),
         }
+    }
+    pub(crate) async fn prepare_directory(
+        &self,
+        database: serverdeck_storage::Database,
+        operations: Arc<Semaphore>,
+    ) -> Result<(), Error> {
+        let mut directory = self.directory.lock().await;
+        if directory.is_none() {
+            *directory = Some(DirectoryMemory::load(database, operations).await?);
+        }
+        Ok(())
+    }
+    pub(crate) async fn flush_directory(&self) -> Result<(), Error> {
+        if let Some(directory) = self.directory.lock().await.as_ref() {
+            directory.shutdown().await?;
+        }
+        Ok(())
     }
     pub(crate) async fn open(
         &self,
         size: TerminalSize,
         sink: Sink,
     ) -> Result<LocalTerminalSession, Error> {
-        self.open_mode(size, sink, false).await
+        self.open_mode(size, sink, false, None).await
     }
     pub(crate) async fn open_elevated(
         &self,
@@ -161,15 +183,45 @@ impl LocalTerminals {
         if !cfg!(windows) {
             return Err(Error::Validation("管理员本地终端仅支持 Windows"));
         }
-        self.open_mode(size, sink, true).await
+        self.open_mode(size, sink, true, None).await
     }
     async fn open_mode(
         &self,
         size: TerminalSize,
         sink: Sink,
         elevated: bool,
+        launch: Option<LaunchDirectory>,
     ) -> Result<LocalTerminalSession, Error> {
         size.validate()?;
+        let memory = self.directory.lock().await.clone();
+        let launch = launch.unwrap_or_else(|| LaunchDirectory {
+            directory: memory.as_ref().and_then(|memory| memory.current()),
+            token: uuid::Uuid::new_v4(),
+        });
+        let sink = if let Some(memory) = memory {
+            let tracker = Mutex::new(DirectoryTracker::new(
+                launch.token,
+                launch.directory.clone(),
+            ));
+            Arc::new(move |event: TerminalEvent| {
+                if let TerminalEvent::Data { data, .. } = &event {
+                    match lock(&tracker) {
+                        Ok(mut tracker) => {
+                            if let Some(directory) = tracker.feed(data) {
+                                memory.report(directory);
+                            }
+                        }
+                        Err(error) => {
+                            tracing::error!(operation = "local_terminal_directory", error = %error);
+                            return false;
+                        }
+                    }
+                }
+                sink(event)
+            }) as Sink
+        } else {
+            sink
+        };
         let permit = self
             .slots
             .clone()
@@ -199,15 +251,16 @@ impl LocalTerminals {
             let _permit = permit;
             #[cfg(windows)]
             let result = if elevated {
-                tokio::runtime::Handle::current()
-                    .block_on(elevated::run(&id, size, &control, &sink, receiver, ready))
+                tokio::runtime::Handle::current().block_on(elevated::run(
+                    &id, size, &control, &sink, receiver, ready, launch,
+                ))
             } else {
-                run(&id, size, &control, &sink, receiver, ready)
+                run(&id, size, &control, &sink, receiver, ready, launch)
             };
             #[cfg(not(windows))]
             let result = {
                 let _ = elevated;
-                run(&id, size, &control, &sink, receiver, ready)
+                run(&id, size, &control, &sink, receiver, ready, launch)
             };
             if let Err(error) = result {
                 tracing::warn!(operation = "local_terminal", error = %error, source = ?std::error::Error::source(&error), "local terminal failed");
@@ -385,6 +438,7 @@ fn run(
     sink: &Sink,
     receiver: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<LocalTerminalSession, Error>>,
+    launch: LaunchDirectory,
 ) -> Result<(), Error> {
     let startup = (|| {
         #[cfg(windows)]
@@ -392,7 +446,8 @@ fn run(
             .map_err(|error| failed("无法确认本地终端权限", error))?;
         #[cfg(not(windows))]
         let elevated = false;
-        let (command, name) = shell()?;
+        let (mut command, name) = shell()?;
+        launch.configure(&mut command);
         let pair = native_pty_system()
             .openpty(dimensions(size))
             .map_err(|error| failed("无法创建本地伪终端", error))?;
@@ -764,7 +819,15 @@ mod tests {
     ) -> String {
         let mut text = String::new();
         loop {
-            match next(events).await {
+            let event = tokio::time::timeout(Duration::from_secs(15), events.recv()).await;
+            let event = match event {
+                Ok(Some(event)) => event,
+                _ => {
+                    engine.close_all(true).await.expect("close timed out shell");
+                    panic!("PTY output timeout waiting for {marker:?}; output: {text:?}");
+                }
+            };
+            match event {
                 TerminalEvent::Data { sequence, data } => {
                     let chunk = String::from_utf8_lossy(&data);
                     if chunk.contains("\x1b[6n") {
@@ -787,6 +850,159 @@ mod tests {
             }
         }
     }
+    #[cfg(windows)]
+    async fn until_directory(
+        engine: &LocalTerminals,
+        id: &str,
+        events: &mut tokio::sync::mpsc::Receiver<TerminalEvent>,
+        expected: &str,
+    ) {
+        let mut text = String::new();
+        let result = tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                if engine
+                    .directory
+                    .lock()
+                    .await
+                    .as_ref()
+                    .unwrap()
+                    .current()
+                    .as_deref()
+                    == Some(expected)
+                {
+                    return true;
+                }
+                match events.recv().await {
+                    Some(TerminalEvent::Data { sequence, data }) => {
+                        let chunk = String::from_utf8_lossy(&data);
+                        if chunk.contains("\x1b[6n") {
+                            engine.input(id, b"\x1b[1;1R".to_vec()).unwrap();
+                        }
+                        text.push_str(&chunk);
+                        engine.ack(id, sequence).unwrap();
+                    }
+                    Some(TerminalEvent::State {
+                        state: "failed",
+                        message,
+                        ..
+                    }) => {
+                        text.push_str(&format!("{message:?}"));
+                        return false;
+                    }
+                    None => return false,
+                    _ => (),
+                }
+            }
+        })
+        .await;
+        if !matches!(result, Ok(true)) {
+            engine.close_all(true).await.unwrap();
+            engine.flush_directory().await.unwrap();
+        }
+        assert!(
+            matches!(result, Ok(true)),
+            "directory report timed out; output: {text:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn real_powershell_directory_is_saved_restored_and_missing_path_falls_back() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("app.sqlite3");
+        let db = serverdeck_storage::Database::open(&path).unwrap();
+        let directory = root.path().join("中文 space '&;$[]");
+        std::fs::create_dir(&directory).unwrap();
+        let expected = directory.to_str().unwrap();
+        let engine = LocalTerminals::new();
+        engine
+            .prepare_directory(db.clone(), Arc::new(Semaphore::new(1)))
+            .await
+            .unwrap();
+        let (sink, mut output) = events();
+        let session = engine
+            .open(
+                TerminalSize {
+                    cols: 120,
+                    rows: 30,
+                },
+                sink,
+            )
+            .await
+            .unwrap();
+        let home = std::env::var("USERPROFILE").unwrap();
+        until_directory(&engine, &session.id, &mut output, &home).await;
+        let command = format!(
+            "Set-Location -LiteralPath '{}'\r",
+            expected.replace('\'', "''")
+        );
+        engine.input(&session.id, command.into_bytes()).unwrap();
+        until_directory(&engine, &session.id, &mut output, expected).await;
+        engine.close_all(true).await.unwrap();
+        engine.flush_directory().await.unwrap();
+        assert_eq!(
+            db.local_terminal_directory().unwrap().as_deref(),
+            Some(expected)
+        );
+
+        // A fresh engine/database simulates an application restart without replaying cd.
+        let reopened = serverdeck_storage::Database::open(&path).unwrap();
+        let engine = LocalTerminals::new();
+        engine
+            .prepare_directory(reopened.clone(), Arc::new(Semaphore::new(1)))
+            .await
+            .unwrap();
+        let (sink, mut output) = events();
+        let session = engine
+            .open(
+                TerminalSize {
+                    cols: 120,
+                    rows: 30,
+                },
+                sink,
+            )
+            .await
+            .unwrap();
+        until(&engine, &session.id, &mut output, "PS ").await;
+        engine
+            .input(
+                &session.id,
+                b"[Console]::WriteLine(('SD_DIRECTORY_' + $PWD.ProviderPath))\r".to_vec(),
+            )
+            .unwrap();
+        until(
+            &engine,
+            &session.id,
+            &mut output,
+            &format!("SD_DIRECTORY_{expected}"),
+        )
+        .await;
+        engine.close_all(true).await.unwrap();
+        engine.flush_directory().await.unwrap();
+
+        std::fs::remove_dir(&directory).unwrap();
+        let engine = LocalTerminals::new();
+        engine
+            .prepare_directory(reopened.clone(), Arc::new(Semaphore::new(1)))
+            .await
+            .unwrap();
+        let (sink, mut output) = events();
+        let session = engine
+            .open(
+                TerminalSize {
+                    cols: 120,
+                    rows: 30,
+                },
+                sink,
+            )
+            .await
+            .unwrap();
+        until_directory(&engine, &session.id, &mut output, &home).await;
+        engine.close_all(true).await.unwrap();
+        engine.flush_directory().await.unwrap();
+        assert_eq!(reopened.local_terminal_directory().unwrap(), Some(home));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn real_shell_input_output_resize_exit_and_independent_cancellation() {
         let engine = LocalTerminals::new();

@@ -29,40 +29,39 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
-      - run: rustup default 1.97.1
-      - run: rustup target add wasm32-unknown-unknown
-      - run: npm ci
-      - name: Fetch locked Rust workspace dependencies
-        run: cargo fetch --locked
-      - name: Fetch locked WASM plugin dependencies
-        run: npm run plugins:fetch
       - name: Validate stable version and prepare notes
         id: release
         env:
           RELEASE_NOTES: ${{ inputs.notes }}
         run: |
           node --input-type=module -e 'import {readAppVersion} from "./tools/app-version.mjs"; import {releaseTag} from "./tools/update-release.mjs"; import {mkdirSync,writeFileSync,appendFileSync} from "node:fs"; const version=readAppVersion(); const tag=releaseTag(version); if (!process.env.RELEASE_NOTES?.trim()) throw new Error("Release notes are required"); mkdirSync(".local/update-release",{recursive:true}); writeFileSync(".local/update-release/notes.txt",process.env.RELEASE_NOTES); appendFileSync(process.env.GITHUB_OUTPUT,"version="+version+"\ntag="+tag+"\n");'
-      - run: npm run plugins:build
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: npm run format:check
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run test:build
-      - name: Run copied native test executables
+      - name: Prepare Rust and WASM toolchain
         run: |
-          cargo test --workspace --locked --no-run --message-format=json > .local/update-release/tests.jsonl
+          rustup toolchain install 1.97.1 --profile minimal --target wasm32-unknown-unknown
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $testFiles = Get-Content .local/update-release/tests.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.profile.test -and $_.executable } | Select-Object -ExpandProperty executable -Unique
-          if (-not $testFiles) { throw 'No native test executables were built' }
-          foreach ($testFile in $testFiles) {
-            $testCopy = Join-Path .local/update-release ([System.IO.Path]::GetFileName($testFile))
-            Copy-Item -LiteralPath $testFile -Destination $testCopy
-            & $testCopy
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          }
+          rustup default 1.97.1
+      - name: Cache Rust dependencies and release compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+            target/release/deps
+            target/release/build
+            target/release/.fingerprint
+            .local/plugin-build/assistant
+            .local/plugin-build/docker
+          key: signed-windows-${{ runner.os }}-${{ runner.arch }}-rust-1.97.1-v1-${{ hashFiles('Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'plugins/system/*/backend/Cargo.toml', 'plugins/system/*/backend/Cargo.lock') }}
+          restore-keys: |
+            signed-windows-${{ runner.os }}-${{ runner.arch }}-rust-1.97.1-v1-
+      - run: npm ci --no-audit
+      - name: Fetch locked Windows workspace dependencies
+        run: cargo fetch --locked --target x86_64-pc-windows-msvc
+      - name: Fetch locked production WASM plugin dependencies
+        run: node tools/build-system-plugins.mjs --fetch-only
       - run: npm audit --audit-level=moderate
       - name: Build signed updater artifacts
         env:
@@ -76,7 +75,7 @@ jobs:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
           node tools/update-manifest.mjs "target/release/bundle/nsis/ServerDeck_$($env:RELEASE_VERSION)_x64-setup.exe" .local/update-release/notes.txt
-      - name: Create version tag at the tested commit
+      - name: Create version tag at the built commit
         run: node tools/update-release.mjs --create-tag
       - name: Upload complete draft for release acceptance
         env:

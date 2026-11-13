@@ -83,7 +83,9 @@ function navigateTabs(event: KeyboardEvent) {
     .querySelector<HTMLButtonElement>(`#model-tab-${activeTab.value}`)
     ?.focus();
 }
-onMounted(() => void store.refresh());
+onMounted(() => {
+  if (!store.loaded) void store.refresh();
+});
 </script>
 <template>
   <section class="asset-view page-view models-view" :aria-label="tr('模型')">

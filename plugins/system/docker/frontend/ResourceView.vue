@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from './i18n/messages';
 
-import { computed, onActivated, onDeactivated, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onActivated, onDeactivated, onBeforeUnmount, ref, watch } from 'vue';
 import { usePluginVisibility } from '@serverdeck/plugin-sdk/visibility';
 const pluginVisible = usePluginVisibility();
 const active = ref(true);
@@ -52,6 +52,7 @@ const props = defineProps<{
   sort?: string;
   hint?: string;
   searchPlaceholder?: string;
+  dataRevision: number;
 }>();
 const emit = defineEmits<{ refresh: [] }>();
 const platform = usePlatformContext();
@@ -69,6 +70,7 @@ const connection = computed(() => {
 });
 const connected = computed(() => connection.value?.state === 'connected');
 const rows = ref<Record<string, unknown>[]>([]),
+  loaded = ref(false),
   filter = ref(''),
   busy = ref(false);
 const error = ref<string | null>(null),
@@ -85,6 +87,7 @@ function openArchive(row?: Record<string, unknown>, remoteTransfer = false) {
     archive.value = { row, remoteTransfer };
 }
 let generation = 0,
+  loadedRevision = -1,
   detailGeneration = 0,
   disposed = false;
 function session() {
@@ -112,23 +115,33 @@ function closeDetail() {
 async function load() {
   if (!connected.value || !panelVisible.value) return;
   const token = ++generation;
+  let revision = props.dataRevision;
   busy.value = true;
   error.value = null;
   notice.value = null;
-  rows.value = [];
   try {
+    // Let the parent's refresh revision reach this cached panel before reading.
+    await nextTick();
+    if (disposed || token !== generation || !connected.value || !panelVisible.value) return;
+    revision = props.dataRevision;
     const value = await query(props.listRequest);
-    if (!disposed && token === generation) rows.value = value.records;
+    if (!disposed && token === generation && revision === props.dataRevision) {
+      rows.value = value.records;
+      loaded.value = true;
+      loadedRevision = revision;
+    }
   } catch (cause) {
     if (!disposed && token === generation) error.value = errorMessage(cause);
   } finally {
-    if (!disposed && token === generation) busy.value = false;
+    if (!disposed && token === generation) {
+      busy.value = false;
+      if (revision !== props.dataRevision && panelVisible.value) void load();
+    }
   }
 }
 function refresh() {
-  const pending = load();
   emit('refresh');
-  return pending;
+  return load();
 }
 async function inspect(request: OpsRequest, title: string) {
   if (busy.value || archive.value || !panelVisible.value) return;
@@ -192,6 +205,10 @@ watch(
     log.value = undefined;
     ++generation;
     rows.value = [];
+    loaded.value = false;
+    busy.value = false;
+    error.value = null;
+    notice.value = null;
     if (!connected.value || !panelVisible.value) return;
     await load();
   },
@@ -203,6 +220,10 @@ watch(
     filter.value = '';
     closeDetail();
     log.value = undefined;
+    ++generation;
+    rows.value = [];
+    loaded.value = false;
+    busy.value = false;
     void load();
   },
 );
@@ -211,9 +232,15 @@ function visibility() {
   closeDetail();
   log.value = undefined;
   busy.value = false;
-  if (panelVisible.value) void load();
+  if (panelVisible.value && (!loaded.value || loadedRevision !== props.dataRevision)) void load();
 }
 watch(panelVisible, visibility);
+watch(
+  () => props.dataRevision,
+  () => {
+    if (panelVisible.value && !busy.value) void load();
+  },
+);
 onBeforeUnmount(() => {
   disposed = true;
   ++generation;
@@ -295,7 +322,8 @@ const slotContext = {
       </div>
       <OpsTable
         :rows="rows"
-        :loading="busy"
+        :loading="busy && !loaded"
+        :aria-busy="busy"
         :columns="columns"
         :filter="filter"
         :row-key="rowKey"

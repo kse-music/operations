@@ -2,11 +2,12 @@
 import { tr } from '../i18n/messages';
 
 import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import { Download, LoaderCircle, ShieldCheck, ShieldOff, SquareTerminal, X } from '@lucide/vue';
 import { aiApi } from '../services/ai';
 import { errorMessage } from '../services/ipc';
 import { usePluginsStore } from '../stores/plugins';
-import type { LocalCodexStatus } from '../types/ai';
+import { useModelsStore } from '../stores/models';
 const prompts = usePluginsStore();
 const owner = 'platform-model-sources';
 const definitions = [
@@ -27,8 +28,8 @@ const definitions = [
     authorize: aiApi.localClaudeCodeAuthorize,
   },
 ];
-const statuses = ref<Record<string, LocalCodexStatus>>({}),
-  loading = ref(false),
+const { localStatuses: statuses, localLoaded } = storeToRefs(useModelsStore());
+const loading = ref(false),
   busy = ref(''),
   error = ref(''),
   message = ref('');
@@ -47,10 +48,12 @@ async function refresh() {
   error.value = '';
   try {
     const values = await Promise.all(definitions.map((source) => source.read()));
-    if (!disposed)
+    if (!disposed) {
       definitions.forEach((source, index) => {
         statuses.value[source.id] = values[index]!;
       });
+      localLoaded.value = true;
+    }
   } catch (cause) {
     if (!disposed) error.value = errorMessage(cause);
   } finally {
@@ -74,6 +77,7 @@ async function authorize(source: (typeof definitions)[number], authorized: boole
       );
       if (!accepted || disposed) return;
     }
+    localLoaded.value = false;
     await source.authorize(authorized);
     await refresh();
   } catch (cause) {
@@ -89,6 +93,7 @@ async function install(source: (typeof definitions)[number]) {
   message.value = '';
   const request = crypto.randomUUID();
   installation = request;
+  localLoaded.value = false;
   try {
     await aiApi.localToolInstall(source.id, request);
     if (!disposed) {
@@ -119,7 +124,9 @@ async function cancel() {
     if (!disposed) error.value = errorMessage(cause);
   }
 }
-onMounted(() => void refresh());
+onMounted(() => {
+  if (!localLoaded.value) void refresh();
+});
 onBeforeUnmount(() => {
   disposed = true;
   prompts.cancelPrompt(owner);

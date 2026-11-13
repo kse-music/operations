@@ -26,6 +26,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     busy = ref(false),
     loaded = ref(false),
     error = ref<string | null>(null);
+  const runtimeError = ref<string | null>(null);
   const locale = computed<PluginLocale>(
     () => application.state?.config.product?.language ?? 'zh-CN',
   );
@@ -77,6 +78,8 @@ export const usePluginsStore = defineStore('plugins', () => {
     return plugin.source === 'system' ? tr(value) : value;
   }
   let timer: ReturnType<typeof setInterval> | undefined;
+  let refreshJob: Promise<void> | undefined;
+  let statusesJob: Promise<void> | undefined;
   const bindings = new Map<string, Promise<void>>();
   const contexts = new Map<string, string>();
   const contextVersions = new Map<string, number>();
@@ -151,8 +154,17 @@ export const usePluginsStore = defineStore('plugins', () => {
     return job;
   }
   async function refresh(quiet = false): Promise<void> {
-    if (loading.value) return;
-    loading.value = true;
+    if (!quiet) loading.value = true;
+    if (refreshJob) return refreshJob;
+    refreshJob = readSnapshot();
+    try {
+      await refreshJob;
+    } finally {
+      refreshJob = undefined;
+      loading.value = false;
+    }
+  }
+  async function readSnapshot(): Promise<void> {
     try {
       const inventory = await pluginsApi.inventory();
       const list = inventory.installed;
@@ -168,25 +180,37 @@ export const usePluginsStore = defineStore('plugins', () => {
       }
       installed.value = list;
       grants.value = next;
+      await refreshStatuses();
+      loaded.value = true;
+      error.value = null;
+    } catch (cause) {
+      // A manual refresh can join a background poll and must receive its error.
+      if (loading.value) error.value = errorMessage(cause);
+    }
+  }
+  async function refreshStatuses(): Promise<void> {
+    if (statusesJob) return statusesJob;
+    statusesJob = Promise.resolve().then(async () => {
       try {
         statuses.value = await pluginsApi.statuses();
+        runtimeError.value = null;
       } catch (cause) {
         if (!(typeof cause === 'object' && cause && 'code' in cause && cause.code === 'BUSY'))
           throw cause;
       }
-      loaded.value = true;
-      error.value = null;
-    } catch (cause) {
-      if (!quiet) error.value = errorMessage(cause);
+    });
+    try {
+      await statusesJob;
     } finally {
-      loading.value = false;
+      statusesJob = undefined;
     }
   }
   function start() {
-    void refresh();
+    if (!loaded.value) void refresh();
     if (!timer)
       timer = setInterval(() => {
-        if (!busy.value) void refresh(true);
+        if (!busy.value && !refreshJob)
+          void refreshStatuses().catch((cause) => (runtimeError.value = errorMessage(cause)));
       }, 2000);
   }
   function stop() {
@@ -242,7 +266,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     delete schemas.value[id];
     contexts.delete(id);
   }
-  useErrorNotifications(error);
+  useErrorNotifications(() => [error.value, runtimeError.value]);
   onScopeDispose(stop);
   return {
     installed,

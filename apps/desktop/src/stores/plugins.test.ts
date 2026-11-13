@@ -3,7 +3,8 @@ import { createPinia, disposePinia, getActivePinia, setActivePinia } from 'pinia
 import { usePluginsStore } from './plugins';
 import { pluginsApi } from '../services/plugins';
 import { filesApi } from '../services/files';
-import type { InstalledPlugin, PluginGrant } from '../types/plugins';
+import { useNotificationsStore } from './notifications';
+import type { InstalledPlugin, PluginGrant, PluginInventory } from '../types/plugins';
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
@@ -17,6 +18,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   disposePinia(getActivePinia()!);
+  vi.useRealTimers();
 });
 function fixture() {
   const plugins = usePluginsStore();
@@ -41,6 +43,98 @@ function fixture() {
   };
   return plugins;
 }
+it('joins manual refreshes to an in-flight background poll and reports failures for manual retry', async () => {
+  const p = usePluginsStore();
+  let reject!: (cause: unknown) => void;
+  const inventory = vi
+    .spyOn(pluginsApi, 'inventory')
+    .mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    )
+    .mockResolvedValue({ installed: [], problems: [], availableBundled: [] });
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const background = p.refresh(true);
+  expect(p.loading).toBe(false);
+  const manual = p.refresh();
+  expect(p.loading).toBe(true);
+  const duplicate = p.refresh(true);
+  expect(p.loading).toBe(true);
+  expect(inventory).toHaveBeenCalledTimes(1);
+  reject({ message: 'Repository unavailable' });
+  await Promise.all([background, manual, duplicate]);
+  expect(p.loading).toBe(false);
+  expect(p.error).toBe('Repository unavailable');
+  expect(p.loaded).toBe(false);
+  const retry = p.refresh();
+  expect(p.loading).toBe(true);
+  await retry;
+  expect(inventory).toHaveBeenCalledTimes(2);
+  expect(p.loading).toBe(false);
+  expect(p.error).toBeNull();
+  expect(p.loaded).toBe(true);
+});
+it('preserves the loaded list and existing error when a background poll fails', async () => {
+  const p = fixture();
+  p.loaded = true;
+  p.error = 'Previous operation failed';
+  const installed = p.installed;
+  let reject!: (cause: unknown) => void;
+  vi.spyOn(pluginsApi, 'inventory').mockImplementationOnce(
+    () =>
+      new Promise<PluginInventory>((_, fail) => {
+        reject = fail;
+      }),
+  );
+  const background = p.refresh(true);
+  expect(p.loading).toBe(false);
+  reject({ message: 'Background read failed' });
+  await background;
+  expect(p.installed).toBe(installed);
+  expect(p.loaded).toBe(true);
+  expect(p.loading).toBe(false);
+  expect(p.error).toBe('Previous operation failed');
+});
+it('deduplicates runtime polls, preserves state on BUSY and reports other failures once', async () => {
+  vi.useFakeTimers();
+  const p = fixture();
+  p.loaded = true;
+  p.error = 'Previous operation failed';
+  const inventory = vi.spyOn(pluginsApi, 'inventory');
+  let finish!: () => void;
+  const statuses = vi.spyOn(pluginsApi, 'statuses').mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve([]);
+      }),
+  );
+  p.start();
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(statuses).toHaveBeenCalledTimes(1);
+  expect(inventory).not.toHaveBeenCalled();
+  expect(p.loading).toBe(false);
+  finish();
+  await vi.advanceTimersByTimeAsync(0);
+  statuses.mockRejectedValueOnce({ code: 'BUSY' });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(p.statuses).toEqual([]);
+  expect(useNotificationsStore().items).toHaveLength(1);
+  statuses.mockRejectedValue({ message: 'Runtime unavailable' });
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(p.error).toBe('Previous operation failed');
+  expect(
+    useNotificationsStore().items.filter((item) => item.text === 'Runtime unavailable'),
+  ).toHaveLength(1);
+  statuses.mockResolvedValue([]);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(p.loading).toBe(false);
+  const reads = statuses.mock.calls.length;
+  p.stop();
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(statuses).toHaveBeenCalledTimes(reads);
+});
 it('withdraws extension registration on disable, revoke or revision change', () => {
   const p = fixture();
   expect(p.extensions).toHaveLength(1);

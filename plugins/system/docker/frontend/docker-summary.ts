@@ -28,15 +28,11 @@ export function useDockerSummary(hostId: Readonly<Ref<string>>) {
   const loading = ref(false);
   let generation = 0;
 
-  async function refresh() {
-    const token = ++generation;
-    for (const metric of Object.values(metrics)) {
-      metric.value = null;
-      metric.error = null;
-      metric.loaded = false;
-    }
-    loading.value = false;
+  async function refresh(onlyMissing = false) {
+    if (!onlyMissing) for (const metric of Object.values(metrics)) metric.loaded = false;
     if (!hostId.value || !connected.value || !visible.value) return;
+    if (onlyMissing && Object.values(metrics).every((metric) => metric.loaded)) return;
+    const token = ++generation;
     const id = hostId.value;
     loading.value = true;
     const queries = [
@@ -66,26 +62,46 @@ export function useDockerSummary(hostId: Readonly<Ref<string>>) {
       },
     ] as const;
     await Promise.all(
-      queries.map(async ({ key, kind, read }) => {
-        try {
-          const response = await invoke<OpsResponse>('query', { hostId: id, request: { kind } });
-          if (!response.success)
-            throw new Error(
-              `${response.code ?? tr('操作失败')}：${response.message ?? tr('请刷新核对状态')}`,
-            );
-          if (token === generation) {
-            metrics[key].value = read(response);
-            metrics[key].loaded = true;
+      queries
+        .filter(({ key }) => !onlyMissing || !metrics[key].loaded)
+        .map(async ({ key, kind, read }) => {
+          metrics[key].error = null;
+          try {
+            const response = await invoke<OpsResponse>('query', { hostId: id, request: { kind } });
+            if (!response.success)
+              throw new Error(
+                `${response.code ?? tr('操作失败')}：${response.message ?? tr('请刷新核对状态')}`,
+              );
+            if (token === generation) {
+              metrics[key].value = read(response);
+              metrics[key].loaded = true;
+            }
+          } catch (cause) {
+            if (token === generation) {
+              metrics[key].error = errorMessage(cause);
+              metrics[key].loaded = false;
+            }
           }
-        } catch (cause) {
-          if (token === generation) metrics[key].error = errorMessage(cause);
-        }
-      }),
+        }),
     );
     if (token === generation) loading.value = false;
   }
 
-  watch([hostId, connected, visible], () => void refresh(), { immediate: true });
+  watch(
+    [hostId, connected, visible],
+    ([id, ready, shown], [previousId, previousReady]) => {
+      ++generation;
+      loading.value = false;
+      if (id !== previousId || ready !== previousReady)
+        for (const metric of Object.values(metrics)) {
+          metric.value = null;
+          metric.error = null;
+          metric.loaded = false;
+        }
+      if (shown) void refresh(true);
+    },
+    { immediate: true },
+  );
   onScopeDispose(() => ++generation);
   useErrorNotifications(() => Object.values(metrics).map((metric) => metric.error));
   return { metrics, loading, refresh };

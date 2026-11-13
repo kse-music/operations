@@ -23,12 +23,14 @@ ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github
 ## 发布流程
 
 1. 只修改根 `Cargo.toml` 的工作区版本，运行既有准备入口并提交配套锁文件，将准备发布的完整代码推送到 `main`。无需手动创建或推送标签。GitHub 的 `release` Environment 允许 `main` 分支部署。
-2. 在 Actions 中手动运行 `.github/workflows/update-release.yml`，分支选择 `main`，只填写面向用户的更新说明。推送代码不会自动触发发布；流程固定检出点击运行时的提交 SHA，安装 npm 依赖后，先通过 `cargo fetch --locked` 与 `npm run plugins:fetch` 联网准备工作区及各独立插件锁定的 Rust 依赖，再读取工作区正式版本并离线编译 WASM 插件。格式、静态类型、测试与 npm 审计通过后生成签名安装包和清单；不能依赖开发机已有 Cargo 缓存，也不通过去掉 `--offline` 或 `--locked` 绕过依赖准备。
+2. 在 Actions 中手动运行 **Signed Windows update draft**（`.github/workflows/update-release.yml`），分支选择 `main`，只填写面向用户的更新说明。推送代码不会自动触发发布；流程固定检出点击运行时的提交 SHA，校验工作区正式版本后，安装工具链与 npm 依赖，通过 `cargo fetch --locked --target x86_64-pc-windows-msvc` 与 `node tools/build-system-plugins.mjs --fetch-only` 联网准备 Windows 工作区及正式内置插件锁定的 Rust 依赖。npm 审计通过后直接构建签名安装包和清单；正式构建包含生产 WASM 插件的离线编译、前端类型检查及打包，不额外构建测试夹具，也不运行完整测试、Clippy、格式和 lint 检查。
 3. 构建与清单生成成功后，流程通过 `tools/update-release.mjs` 为该提交自动创建 `v<版本>` 标签，再上传完整的 **Release 草稿**。已有标签只有指向同一提交时才允许复用，包括已存在的附注标签；指向其他提交时明确失败，须提高工作区版本，不能移动或强制覆盖标签。已公开的 Release 不允许覆盖；同一提交的草稿失败可重跑，替换尚未发布的文件。构建失败不创建标签；标签创建后若草稿上传失败，标签保留用于同一提交重试。
 4. 依据[发布检查表](RELEASE_CHECKLIST.md)验收同一候选安装器，落实 Windows 发布者签名，核对安装包、公钥、签名版本、平台及清单内容。更新签名与 Authenticode 分别管理；现有流程不自动提供 Windows 发布者证书。
 5. 确认文件完整且验收满足后，手动将草稿正式发布并设为 Latest。草稿与预发布版本不作为正式更新渠道。所有附件应在对用户可见前上传完成，不能先公开清单再补包。
 
-已有 `.github/workflows/release.yml` 继续生成未签名候选产物，并显式关闭 updater artifacts；不能将这些候选包直接替换成正式更新包。如果进行 Authenticode 签名，须先完成安装包签名，再生成 updater `.sig` 和清单；修改 `.exe` 后必须重新生成 updater 签名。流程不会自动把草稿发布给用户。
+发布流程复用 npm 下载缓存，并按运行平台、Rust 版本及 Cargo 配置/锁文件缓存 Rust 下载、根 `target/release` 的编译依赖和现有生产插件 `.local/plugin-build/assistant`、`.local/plugin-build/docker` 编译目录。缓存不包含签名密钥、应用数据、测试目录或安装包；首次运行或缓存失效时仍须完整编译，命中缓存时也保留锁定依赖准备与编译校验，不通过去掉 `--offline` 或 `--locked` 绕过依赖准备。
+
+完整格式、Clippy、lint、类型、测试与安全审计继续放在 **Candidate builds (unsigned, no publish)**（`.github/workflows/release.yml`）。准备正式公开前应对同一提交运行并检查该流程；签名草稿流程成功只代表打包完成，不代表这些检查通过。候选流程生成未签名产物，并显式关闭 updater artifacts；不能将这些候选包直接替换成正式更新包。如果进行 Authenticode 签名，须先完成安装包签名，再生成 updater `.sig` 和清单；修改 `.exe` 后必须重新生成 updater 签名。流程不会自动把草稿发布给用户。
 
 ## 发布验收与限制
 

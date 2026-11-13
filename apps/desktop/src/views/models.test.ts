@@ -86,6 +86,33 @@ afterEach(() => {
   root?.remove();
   disposePinia(pinia);
 });
+it('reuses remote and local model snapshots after remount and refreshes the selected source explicitly', async () => {
+  api.models.mockResolvedValue([model('cached', '缓存模型')]);
+  await mount();
+  expect(api.models).toHaveBeenCalledTimes(1);
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(1);
+  expect(api.localClaudeCodeStatus).toHaveBeenCalledTimes(1);
+  app.unmount();
+  root.remove();
+  await mount();
+  expect(root.textContent).toContain('缓存模型');
+  expect(root.textContent).not.toContain('正在读取模型列表…');
+  expect(root.textContent).not.toContain('正在检测本地工具…');
+  expect(api.models).toHaveBeenCalledTimes(1);
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(1);
+  expect(api.localClaudeCodeStatus).toHaveBeenCalledTimes(1);
+  button('刷新').click();
+  await settle();
+  expect(api.models).toHaveBeenCalledTimes(2);
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(1);
+  root.querySelector<HTMLButtonElement>('#model-tab-local')!.click();
+  await settle();
+  button('刷新').click();
+  await settle();
+  expect(api.localCodexStatus).toHaveBeenCalledTimes(2);
+  expect(api.localClaudeCodeStatus).toHaveBeenCalledTimes(2);
+  expect(api.models).toHaveBeenCalledTimes(2);
+});
 it('opens remote models by default and scopes counts, actions and feedback to their tabs', async () => {
   api.models.mockResolvedValue([model('a', '模型 A'), model('b', '模型 B')]);
   await mount();
