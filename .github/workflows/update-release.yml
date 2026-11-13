@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       notes:
-        description: User-facing release notes
-        required: true
+        description: Release notes (optional; leave blank to generate automatically)
+        required: false
         type: string
 permissions:
   contents: read
@@ -32,9 +32,9 @@ jobs:
       - name: Validate stable version and prepare notes
         id: release
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: ${{ inputs.notes }}
-        run: |
-          node --input-type=module -e 'import {readAppVersion} from "./tools/app-version.mjs"; import {releaseTag} from "./tools/update-release.mjs"; import {mkdirSync,writeFileSync,appendFileSync} from "node:fs"; const version=readAppVersion(); const tag=releaseTag(version); if (!process.env.RELEASE_NOTES?.trim()) throw new Error("Release notes are required"); mkdirSync(".local/update-release",{recursive:true}); writeFileSync(".local/update-release/notes.txt",process.env.RELEASE_NOTES); appendFileSync(process.env.GITHUB_OUTPUT,"version="+version+"\ntag="+tag+"\n");'
+        run: node tools/update-release.mjs --prepare
       - name: Prepare Rust and WASM toolchain
         run: |
           rustup toolchain install 1.97.1 --profile minimal --target wasm32-unknown-unknown
@@ -85,6 +85,8 @@ jobs:
           $draft = gh release view $env:RELEASE_TAG --json isDraft --jq .isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             if ($draft -ne 'true') { throw 'Refusing to replace an already published release' }
+            gh release edit $env:RELEASE_TAG --notes-file .local/update-release/notes.txt
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           } else {
             gh release create $env:RELEASE_TAG --verify-tag --draft --title "ServerDeck $env:RELEASE_TAG" --notes-file .local/update-release/notes.txt
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

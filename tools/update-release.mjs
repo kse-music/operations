@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readAppVersion } from './app-version.mjs';
@@ -13,6 +14,28 @@ export function releaseTag(version) {
     'only stable Cargo workspace versions can be released',
   );
   return `v${version}`;
+}
+
+export function prepareReleaseNotes({ version, sha, repo, notes = '' }, run = execFileSync) {
+  const tag = releaseTag(version);
+  if (!notes.trim()) {
+    assert.match(sha, /^[0-9a-f]{40}$/, 'release requires the full workflow commit SHA');
+    assert.match(repo, /^[\w.-]+\/[\w.-]+$/, 'release requires the GitHub owner/repository');
+    const response = run(
+      'gh',
+      ['api', `repos/${repo}/releases/generate-notes`, '--method', 'POST', '--input', '-'],
+      {
+        input: JSON.stringify({ tag_name: tag, target_commitish: sha }),
+        encoding: 'utf8',
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      },
+    );
+    notes = JSON.parse(response).body;
+  }
+  assert(typeof notes === 'string' && notes.trim(), 'release notes are empty or invalid');
+  assert(Buffer.byteLength(notes, 'utf8') <= 64 * 1024, 'release notes exceed 64 KiB');
+  return notes;
 }
 
 export function ensureReleaseTag({ version, sha, cwd = repository }) {
@@ -46,15 +69,29 @@ export function ensureReleaseTag({ version, sha, cwd = repository }) {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  assert.equal(
-    process.argv[2],
-    '--create-tag',
-    'usage: node tools/update-release.mjs --create-tag',
+  const command = process.argv[2];
+  assert(
+    ['--prepare', '--create-tag'].includes(command),
+    'usage: node tools/update-release.mjs <--prepare|--create-tag>',
   );
   assert.equal(process.env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'release requires a manual run');
   assert.equal(process.env.GITHUB_REF, 'refs/heads/main', 'release must run from main');
-  const result = ensureReleaseTag({ version: readAppVersion(), sha: process.env.GITHUB_SHA });
-  console.log(
-    `${result.created ? 'Created' : 'Reused'} ${result.tag} at ${process.env.GITHUB_SHA}`,
-  );
+  const version = readAppVersion();
+  const sha = process.env.GITHUB_SHA;
+  if (command === '--prepare') {
+    assert(process.env.GITHUB_OUTPUT, 'release preparation requires GITHUB_OUTPUT');
+    const notes = prepareReleaseNotes({
+      version,
+      sha,
+      repo: process.env.GITHUB_REPOSITORY,
+      notes: process.env.RELEASE_NOTES,
+    });
+    const directory = path.join(repository, '.local/update-release');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(path.join(directory, 'notes.txt'), notes);
+    appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=${releaseTag(version)}\n`);
+  } else {
+    const result = ensureReleaseTag({ version, sha });
+    console.log(`${result.created ? 'Created' : 'Reused'} ${result.tag} at ${sha}`);
+  }
 }

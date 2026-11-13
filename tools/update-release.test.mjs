@@ -4,7 +4,8 @@ import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ensureReleaseTag, releaseTag } from './update-release.mjs';
+import { ensureReleaseTag, prepareReleaseNotes, releaseTag } from './update-release.mjs';
+import { updateManifest } from './update-manifest.mjs';
 
 const qa = fileURLToPath(new URL('../.local/qa/update-release/', import.meta.url));
 
@@ -53,19 +54,109 @@ test('derives tags from stable workspace versions and rejects prereleases and in
   }
 });
 
-test('tag creation entry rejects automatic events and manual runs outside main before any Git access', () => {
+test('release entries reject automatic events and manual runs outside main before any Git access', () => {
   const script = fileURLToPath(new URL('./update-release.mjs', import.meta.url));
   for (const [event, ref, message] of [
     ['push', 'refs/heads/main', 'manual run'],
     ['workflow_dispatch', 'refs/heads/feature', 'must run from main'],
   ]) {
-    const result = spawnSync(process.execPath, [script, '--create-tag'], {
-      env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
-      encoding: 'utf8',
-      windowsHide: true,
+    for (const command of ['--prepare', '--create-tag']) {
+      const result = spawnSync(process.execPath, [script, command], {
+        env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      assert.equal(result.status, 1);
+      assert(result.stderr.includes(message));
+    }
+  }
+});
+
+const notesInput = { version: '0.9.0', sha: 'a'.repeat(40), repo: 'kse-music/operations' };
+
+test('custom release notes preserve Unicode, newlines and shell text without calling GitHub', () => {
+  const notes = ' 修复终端问题\n保留 `$HOME` 与 $(literal) 原文\n';
+  assert.equal(
+    prepareReleaseNotes({ ...notesInput, notes }, () => assert.fail('must not call GitHub')),
+    notes,
+  );
+});
+
+test('blank notes generate against the exact release commit and feed the same body to the updater', () => {
+  const body = "## What's Changed\n* 修复终端问题 by @contributor in #10\n";
+  for (const blank of [undefined, '', ' \n\t']) {
+    let calls = 0;
+    const notes = prepareReleaseNotes({ ...notesInput, notes: blank }, (command, args, options) => {
+      calls += 1;
+      assert.equal(command, 'gh');
+      assert.deepEqual(args, [
+        'api',
+        'repos/kse-music/operations/releases/generate-notes',
+        '--method',
+        'POST',
+        '--input',
+        '-',
+      ]);
+      assert.deepEqual(JSON.parse(options.input), {
+        tag_name: 'v0.9.0',
+        target_commitish: notesInput.sha,
+      });
+      assert.notEqual(options.shell, true);
+      return JSON.stringify({ name: 'v0.9.0', body });
     });
-    assert.equal(result.status, 1);
-    assert(result.stderr.includes(message));
+    assert.equal(calls, 1);
+    assert.equal(notes, body);
+    assert.equal(
+      updateManifest({
+        version: '0.9.0',
+        signature: Buffer.from('trusted comment: timestamp:1\tversion:0.9.0\n').toString('base64'),
+        notes,
+        publishedAt: '2026-11-14T00:00:00Z',
+      }).notes,
+      body,
+    );
+  }
+});
+
+test('note generation propagates API failures and rejects malformed or empty responses', () => {
+  const failure = new Error('GitHub API unavailable');
+  assert.throws(
+    () =>
+      prepareReleaseNotes(notesInput, () => {
+        throw failure;
+      }),
+    (error) => error === failure,
+  );
+  assert.throws(() => prepareReleaseNotes(notesInput, () => 'not JSON'), SyntaxError);
+  for (const body of [undefined, null, 123, '', ' \n']) {
+    assert.throws(
+      () => prepareReleaseNotes(notesInput, () => JSON.stringify({ body })),
+      /release notes are empty or invalid/,
+    );
+  }
+});
+
+test('custom and generated notes respect the updater UTF-8 byte limit without truncation', () => {
+  const boundary = 'a'.repeat(64 * 1024);
+  assert.equal(prepareReleaseNotes({ ...notesInput, notes: boundary }), boundary);
+  const oversized = '中'.repeat(22 * 1024);
+  for (const input of [{ ...notesInput, notes: oversized }, notesInput]) {
+    assert.throws(
+      () => prepareReleaseNotes(input, () => JSON.stringify({ body: oversized })),
+      /release notes exceed 64 KiB/,
+    );
+  }
+});
+
+test('generation rejects invalid version, repository or commit before calling GitHub', () => {
+  for (const changed of [{ version: '0.9.0-beta.1' }, { sha: 'main' }, { repo: 'operations' }]) {
+    let calls = 0;
+    assert.throws(() =>
+      prepareReleaseNotes({ ...notesInput, ...changed }, () => {
+        calls += 1;
+      }),
+    );
+    assert.equal(calls, 0);
   }
 });
 

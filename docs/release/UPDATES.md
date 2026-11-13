@@ -23,8 +23,8 @@ ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github
 ## 发布流程
 
 1. 只修改根 `Cargo.toml` 的工作区版本，运行既有准备入口并提交配套锁文件，将准备发布的完整代码推送到 `main`。无需手动创建或推送标签。GitHub 的 `release` Environment 允许 `main` 分支部署。
-2. 在 Actions 中手动运行 **Signed Windows update draft**（`.github/workflows/update-release.yml`），分支选择 `main`，只填写面向用户的更新说明。推送代码不会自动触发发布；流程固定检出点击运行时的提交 SHA，校验工作区正式版本后，安装工具链与 npm 依赖，通过 `cargo fetch --locked --target x86_64-pc-windows-msvc` 与 `node tools/build-system-plugins.mjs --fetch-only` 联网准备 Windows 工作区及正式内置插件锁定的 Rust 依赖。npm 审计通过后直接构建签名安装包和清单；正式构建包含生产 WASM 插件的离线编译、前端类型检查及打包，不额外构建测试夹具，也不运行完整测试、Clippy、格式和 lint 检查。
-3. 构建与清单生成成功后，流程通过 `tools/update-release.mjs` 为该提交自动创建 `v<版本>` 标签，再上传完整的 **Release 草稿**。已有标签只有指向同一提交时才允许复用，包括已存在的附注标签；指向其他提交时明确失败，须提高工作区版本，不能移动或强制覆盖标签。已公开的 Release 不允许覆盖；同一提交的草稿失败可重跑，替换尚未发布的文件。构建失败不创建标签；标签创建后若草稿上传失败，标签保留用于同一提交重试。
+2. 在 Actions 中手动运行 **Signed Windows update draft**（`.github/workflows/update-release.yml`），分支选择 `main`。更新说明可留空，由 GitHub 根据本次版本标签和固定提交 SHA 自动生成，上一版本由 GitHub 自动选择；填写时使用原样的自定义说明。自动内容通常包含合并的 PR、贡献者和完整变更链接，不会自动改写成中文产品摘要；主要直接提交代码、较少使用 PR 时，说明可能只有变更链接，发布前须复核。生成失败、内容为空或超过客户端的 64 KiB 限制时停止，不静默替换或截断。推送代码不会自动触发发布；流程固定检出点击运行时的提交 SHA，校验工作区正式版本并准备说明后，安装工具链与 npm 依赖，通过 `cargo fetch --locked --target x86_64-pc-windows-msvc` 与 `node tools/build-system-plugins.mjs --fetch-only` 联网准备 Windows 工作区及正式内置插件锁定的 Rust 依赖。npm 审计通过后直接构建签名安装包和清单；正式构建包含生产 WASM 插件的离线编译、前端类型检查及打包，不额外构建测试夹具，也不运行完整测试、Clippy、格式和 lint 检查。
+3. 构建与清单生成成功后，流程通过 `tools/update-release.mjs` 为该提交自动创建 `v<版本>` 标签，再上传完整的 **Release 草稿**。草稿正文与 `latest.json` 使用同一份说明。已有标签只有指向同一提交时才允许复用，包括已存在的附注标签；指向其他提交时明确失败，须提高工作区版本，不能移动或强制覆盖标签。已公开的 Release 不允许覆盖；同一提交的草稿失败可重跑，同步更新说明并替换尚未发布的文件。构建失败不创建标签；标签创建后若草稿上传失败，标签保留用于同一提交重试。若验收时需要修改说明，应以自定义说明重跑同一提交，使草稿与清单一致。
 4. 依据[发布检查表](RELEASE_CHECKLIST.md)验收同一候选安装器，落实 Windows 发布者签名，核对安装包、公钥、签名版本、平台及清单内容。更新签名与 Authenticode 分别管理；现有流程不自动提供 Windows 发布者证书。
 5. 确认文件完整且验收满足后，手动将草稿正式发布并设为 Latest。草稿与预发布版本不作为正式更新渠道。所有附件应在对用户可见前上传完成，不能先公开清单再补包。
 
