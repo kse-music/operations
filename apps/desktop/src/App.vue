@@ -152,7 +152,8 @@ function navigate(
   if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
   if (value === 'terminals' && (host || !hostId)) {
-    terminals.activateHost(host?.id ?? '');
+    if (host) terminals.activateHost(host.id);
+    else terminals.activateLocal();
     if (
       !terminals.active &&
       (hostId || !workspace.tabs.some((tab) => isHostTab(tab) && !tab.hostId))

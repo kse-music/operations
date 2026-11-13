@@ -77,7 +77,7 @@ vi.mock('@xterm/addon-search', () => ({
   },
 }));
 
-let app: App, pinia: Pinia, root: HTMLElement;
+let app: App | undefined, pinia: Pinia, root: HTMLElement;
 const host: Host = {
   id: 'host',
   name: '目标主机',
@@ -153,6 +153,7 @@ beforeEach(async () => {
     open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: !!elevated })),
   );
   native.savedLocalSessions.mockResolvedValue([]);
+  native.removeSavedLocalSession.mockResolvedValue(undefined);
   native.openSavedLocal.mockImplementation((_id, _pane, size, receive) =>
     open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: false })),
   );
@@ -843,4 +844,97 @@ it('opens a saved local shell only after the saved row is selected', async () =>
     expect.any(Function),
   );
   expect(saved.panes[0]!.sessionId).toBeTruthy();
+});
+it('starts the first saved shell on local entry and keeps it running on repeated entry', async () => {
+  hostId.value = '';
+  native.savedLocalSessions.mockResolvedValue([
+    {
+      id: 'first',
+      title: '第一个',
+      panes: [{ directory: 'C:\\one', elevated: false }],
+      layout: { kind: 'leaf', pane: 0 },
+    },
+    {
+      id: 'second',
+      title: '第二个',
+      panes: [{ directory: 'C:\\two', elevated: true }],
+      layout: { kind: 'leaf', pane: 0 },
+    },
+  ]);
+  const store = useTerminalsStore();
+  await store.loadSaved();
+  await flush();
+  expect(native.openSavedLocal).not.toHaveBeenCalled();
+  store.activateLocal();
+  await flush();
+  expect(native.openSavedLocal).toHaveBeenCalledExactlyOnceWith(
+    'first',
+    0,
+    expect.anything(),
+    expect.any(Function),
+  );
+  expect(native.openLocal).not.toHaveBeenCalled();
+  expect(store.tabs.find((tab) => tab.savedId === 'second')!.panes[0]!.connectRequested).toBe(
+    false,
+  );
+  store.activateLocal();
+  await flush();
+  expect(native.openSavedLocal).toHaveBeenCalledTimes(1);
+  expect(native.close).not.toHaveBeenCalled();
+});
+it.each([false, true])(
+  'removes a saved session through its close button without recreating it (running=%s)',
+  async (running) => {
+    hostId.value = '';
+    native.savedLocalSessions.mockResolvedValue([
+      {
+        id: 'saved-one',
+        title: '项目',
+        panes: [{ directory: 'C:\\project', elevated: false }],
+        layout: { kind: 'leaf', pane: 0 },
+      },
+    ]);
+    const store = useTerminalsStore();
+    await store.loadSaved();
+    const saved = store.tabs.find((tab) => tab.savedId === 'saved-one')!;
+    store.select(saved.key, running);
+    await flush();
+    const sessionId = saved.panes[0]!.sessionId;
+    const menu = await tabMenu(0);
+    expect(
+      [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
+    ).toEqual(['复制', '重命名', '重新连接', '断开连接', '关闭所有', '关闭']);
+    document.querySelector<HTMLElement>('.context-backdrop')!.click();
+    await flush();
+    button('关闭标签 项目', root).click();
+    await flush();
+    expect(native.removeSavedLocalSession).toHaveBeenCalledExactlyOnceWith('saved-one');
+    expect(store.hostTabs('')).toEqual([]);
+    expect(root.querySelector('[aria-label="关闭标签 项目"]')).toBeNull();
+    if (running) expect(native.close).toHaveBeenCalledWith(sessionId);
+    else expect(native.close).not.toHaveBeenCalled();
+    store.activateLocal();
+    await flush();
+    expect(native.openSavedLocal).toHaveBeenCalledTimes(running ? 1 : 0);
+    expect(native.openLocal).not.toHaveBeenCalled();
+  },
+);
+it('keeps saved records when the terminal view unmounts on application exit', async () => {
+  hostId.value = '';
+  native.savedLocalSessions.mockResolvedValue([
+    {
+      id: 'saved-one',
+      title: '项目',
+      panes: [{ directory: 'C:\\project', elevated: false }],
+      layout: { kind: 'leaf', pane: 0 },
+    },
+  ]);
+  const store = useTerminalsStore();
+  await store.loadSaved();
+  store.select(store.tabs.find((tab) => tab.savedId === 'saved-one')!.key);
+  await flush();
+  app!.unmount();
+  app = undefined;
+  await flush();
+  expect(native.removeSavedLocalSession).not.toHaveBeenCalled();
 });

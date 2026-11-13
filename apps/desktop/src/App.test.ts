@@ -355,6 +355,44 @@ it('opens one fresh local terminal from the welcome page even when a remote host
   expect(useWorkspaceStore().current).toMatchObject({ view: 'terminals', hostId: '' });
   expect(document.querySelector('[aria-label="欢迎页面"]')).toBeNull();
 });
+it.each(['rail', 'welcome'] as const)(
+  'starts the first saved local session through the %s entry without opening the rest',
+  async (entry) => {
+    vi.spyOn(terminalApi, 'savedLocalSessions').mockResolvedValue([
+      {
+        id: 'first',
+        title: '第一个',
+        panes: [{ directory: 'C:\\one', elevated: false }],
+        layout: { kind: 'leaf', pane: 0 },
+      },
+      {
+        id: 'second',
+        title: '第二个',
+        panes: [{ directory: 'C:\\two', elevated: true }],
+        layout: { kind: 'leaf', pane: 0 },
+      },
+    ]);
+    const terminals = useTerminalsStore();
+    await terminals.loadSaved();
+    await flush();
+    expect(terminals.panes.every((pane) => !pane.connectRequested)).toBe(true);
+    expect(useWorkspaceStore().area).toBe('home');
+    const open = vi.spyOn(terminals, 'open');
+    document
+      .querySelector<HTMLButtonElement>(
+        entry === 'rail' ? '.activity-rail [aria-label="本地终端"]' : '.welcome-card .button',
+      )!
+      .click();
+    await flush();
+    expect(terminals.active).toBe(terminals.tabs[0]!.key);
+    expect(terminals.tabs[0]!.panes[0]!.connectRequested).toBe(true);
+    expect(terminals.tabs[0]!.panes[0]!.savedSource).toEqual({ id: 'first', pane: 0 });
+    expect(terminals.tabs[1]!.panes[0]!.connectRequested).toBe(false);
+    expect(terminals.tabs).toHaveLength(2);
+    expect(open).not.toHaveBeenCalled();
+    expect(useWorkspaceStore().area).toBe('local');
+  },
+);
 
 it('updates welcome shortcuts and translations from saved preferences', async () => {
   loadSidebarConfig();

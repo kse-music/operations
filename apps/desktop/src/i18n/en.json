@@ -1178,8 +1178,6 @@
   "需独立授予变更预授权；仅在帮我审批模式匹配完整模板时自动执行，其他命令仍需确认。": "Requires an independent change grant. Only exact template matches run automatically in Assist mode; other commands still require confirmation.",
   "远端二进制接收长度或帧边界异常，已关闭此会话以隔离未确认的数据": "The remote binary receive length or frame boundary is invalid. This session was closed to isolate unconfirmed data.",
   "本地会话已保存": "Local session saved",
-  "已取消保存本地会话": "Local session is no longer saved",
-  "取消保存": "Unsave",
   "已保存": "Saved",
   "重试加载已保存会话": "Retry loading saved sessions",
   "正在加载已保存会话…": "Loading saved sessions…",

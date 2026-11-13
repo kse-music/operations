@@ -37,7 +37,6 @@ export interface TerminalTab {
   panes: TerminalPaneModel[];
   layout: LayoutNode;
   savedId?: string;
-  savedSnapshot?: SavedLocalTerminal;
 }
 type ConnectionAction = 'reconnect' | 'disconnect';
 export const useTerminalsStore = defineStore('terminals', () => {
@@ -51,6 +50,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   const sessionNumbers = new Map<string, number>();
   const uploads = new Map<string, { active: () => boolean; stop: () => Promise<void> }>();
   const connections = new Map<string, (action: ConnectionAction) => Promise<void>>();
+  const closingPanes = new Set<string>();
   const changingConnections = ref<string[]>([]);
   const savedLoading = ref(false),
     savedError = ref<string | null>(null),
@@ -59,11 +59,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   function runningPaneCount(): number {
     return panes.value.filter((pane) => pane.connectRequested || pane.state !== 'idle').length;
   }
-  function restoreSavedTab(
-    entry: SavedLocalTerminal,
-    key: string = crypto.randomUUID(),
-    number = nextSessionNumber(''),
-  ): TerminalTab {
+  function restoreSavedTab(entry: SavedLocalTerminal): TerminalTab {
     const restored = entry.panes.map((pane, index) => ({
       ...newPane(null),
       state: 'idle',
@@ -81,12 +77,11 @@ export const useTerminalsStore = defineStore('terminals', () => {
             second: restoreLayout(layout.second),
           };
     return {
-      key,
+      key: crypto.randomUUID(),
       title: entry.title,
       renamed: true,
       savedId: entry.id,
-      savedSnapshot: entry,
-      sessionNumber: number,
+      sessionNumber: nextSessionNumber(''),
       panes: restored,
       layout: restoreLayout(entry.layout),
     };
@@ -117,6 +112,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       !localSaving.value &&
       !changingConnections.value.includes(key) &&
       tab.panes.every((pane) => !pane.host && !pane.pluginTerminal) &&
+      !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
       (tab.panes.every((pane) => pane.state === 'connected' && !!pane.sessionId) ||
         (!!tab.savedId &&
           tab.panes.every((pane) =>
@@ -150,7 +146,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
         layout: connected ? saveLayout(tab.layout) : null,
       });
       tab.savedId = saved.id;
-      tab.savedSnapshot = saved;
       tab.title = saved.title;
       tab.renamed = true;
       if (connected)
@@ -162,23 +157,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
     } catch (cause) {
       error.value = errorMessage(cause);
       return false;
-    } finally {
-      localSaving.value = '';
-    }
-  }
-  async function unsaveLocal(key: string): Promise<void> {
-    const tab = tabs.value.find((tab) => tab.key === key);
-    if (!tab?.savedId || localSaving.value) return;
-    localSaving.value = key;
-    error.value = null;
-    try {
-      await terminalApi.removeSavedLocalSession(tab.savedId);
-      tab.savedId = undefined;
-      tab.savedSnapshot = undefined;
-      for (const pane of tab.panes) pane.savedSource = undefined;
-      useNotificationsStore().push(tr('已取消保存本地会话'));
-    } catch (cause) {
-      error.value = errorMessage(cause);
     } finally {
       localSaving.value = '';
     }
@@ -197,6 +175,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     return (
       !!tab &&
       !changingConnections.value.includes(key) &&
+      !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
       tab.panes.every(
         (pane) =>
           !pane.fileAction &&
@@ -211,6 +190,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     return (
       !!tab &&
       !changingConnections.value.includes(key) &&
+      !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
       !tab.panes.some((pane) => ['opening', 'closing'].includes(pane.state)) &&
       tab.panes.some(
         (pane) =>
@@ -292,6 +272,23 @@ export const useTerminalsStore = defineStore('terminals', () => {
       available[0];
     if (tab?.key !== active.value) select(tab?.key ?? '', false);
   }
+  function activateLocal(): void {
+    const available = hostTabs('');
+    const opened = available.filter((tab) =>
+      tab.panes.some((pane) => pane.state !== 'idle' || pane.connectRequested),
+    );
+    if (opened.length) {
+      const tab =
+        opened.find((tab) => tab.key === active.value) ??
+        opened.find((tab) => tab.key === lastHostTabs.get('')) ??
+        opened[0]!;
+      if (tab.key !== active.value) select(tab.key, false);
+      return;
+    }
+    const saved = available.find((tab) => tab.savedId);
+    if (saved) select(saved.key);
+    else activateHost('');
+  }
   watch([active, focused], () => {
     const pane = panes.value.find((p) => p.key === focused.value);
     if (pane) lastHostTabs.set(pane.host?.id ?? '', active.value);
@@ -346,7 +343,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   function split(key: string, axis: SplitAxis): void {
     const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
     const pane = tab?.panes.find((p) => p.key === key);
-    if (!tab || !pane || localSaving.value === tab.key) return;
+    if (!tab || !pane || localSaving.value === tab.key || closingPanes.has(key)) return;
     if (tab.panes.length >= 8 || runningPaneCount() >= 32) {
       error.value = tr('每个标签最多 8 个窗格，总计最多 32 个。');
       return;
@@ -405,6 +402,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   }
   function select(key: string, connect = true): void {
     const tab = tabs.value.find((tab) => tab.key === key);
+    if (connect && tab?.panes.some((pane) => closingPanes.has(pane.key))) return;
     const pending = connect
       ? (tab?.panes.filter((pane) => pane.state === 'idle' && !pane.connectRequested) ?? [])
       : [];
@@ -426,16 +424,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
   function removeTab(key: string): void {
     const index = tabs.value.findIndex((t) => t.key === key);
     if (index < 0) return;
-    const closing = tabs.value[index]!;
-    if (closing.savedSnapshot) {
-      tabs.value.splice(
-        index,
-        1,
-        restoreSavedTab(closing.savedSnapshot, closing.key, closing.sessionNumber),
-      );
-      if (active.value === key) select(key, false);
-      return;
-    }
     const hostId = tabs.value[index]?.panes[0]?.host?.id ?? '';
     const available = hostTabs(hostId),
       position = available.findIndex((t) => t.key === key);
@@ -445,7 +433,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       lastHostTabs.delete(hostId);
     }
     if (active.value === key)
-      select(hostTabs(hostId)[Math.min(position, available.length - 2)]?.key ?? '');
+      select(hostTabs(hostId)[Math.min(position, available.length - 2)]?.key ?? '', false);
   }
   async function closePane(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
@@ -453,10 +441,12 @@ export const useTerminalsStore = defineStore('terminals', () => {
     if (
       !tab ||
       !pane ||
+      closingPanes.has(key) ||
       changingConnections.value.includes(tab.key) ||
       localSaving.value === tab.key
     )
       return;
+    closingPanes.add(key);
     let previousState = pane.state;
     try {
       const decision = approved || confirmUploadClose([pane]);
@@ -467,10 +457,15 @@ export const useTerminalsStore = defineStore('terminals', () => {
         previousState = pane.state;
         pane.state = 'closing';
         await terminalApi.close(pane.sessionId);
+        pane.state = 'closed';
+        pane.sessionId = undefined;
+        pane.connectRequested = false;
       }
       const layout = removeLeaf(tab.layout, key);
-      if (!layout) removeTab(tab.key);
-      else {
+      if (!layout) {
+        if (tab.savedId) await terminalApi.removeSavedLocalSession(tab.savedId);
+        removeTab(tab.key);
+      } else {
         tab.panes = tab.panes.filter((p) => p.key !== key);
         tab.layout = layout;
         if (focused.value === key) focused.value = tab.panes[0]?.key ?? '';
@@ -478,6 +473,8 @@ export const useTerminalsStore = defineStore('terminals', () => {
     } catch (cause) {
       if (pane.state === 'closing') pane.state = previousState;
       error.value = errorMessage(cause);
+    } finally {
+      closingPanes.delete(key);
     }
   }
   async function close(key: string, approved = false): Promise<void> {
@@ -521,6 +518,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     hostState,
     hostTabs,
     activateHost,
+    activateLocal,
     update,
     open,
     duplicate,
@@ -548,6 +546,5 @@ export const useTerminalsStore = defineStore('terminals', () => {
     localSaving,
     canSaveLocal,
     saveLocal,
-    unsaveLocal,
   };
 });

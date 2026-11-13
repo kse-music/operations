@@ -8,7 +8,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  BookmarkX,
   Shield,
   SquareTerminal,
   TextCursorInput,
@@ -153,7 +152,7 @@ function menuKey(event: KeyboardEvent): void {
   ]?.focus();
 }
 function runMenu(
-  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'close' | 'unsave',
+  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'close',
 ): void {
   const target = store.tabs.find((item) => item.key === menu.value?.key);
   closeMenu();
@@ -171,7 +170,6 @@ function runMenu(
     if (action === 'duplicate') store.duplicate(target.key);
     else void store.reconnect(target.key);
   } else if (action === 'rename') rename(target.key);
-  else if (action === 'unsave') void store.unsaveLocal(target.key);
   else if (action === 'disconnect') void store.disconnect(target.key);
   else if (action === 'all') void store.closeAll(target.key);
   else void store.close(target.key);
@@ -539,14 +537,6 @@ watch(
           </button>
         </template>
         <template v-else>
-          <button
-            v-if="!props.hostId && menuTarget?.savedId"
-            role="menuitem"
-            :disabled="!!store.localSaving"
-            @click="runMenu('unsave')"
-          >
-            <BookmarkX class="menu-icon-gold" aria-hidden="true" />{{ tr('取消保存') }}
-          </button>
           <button role="menuitem" @click="runMenu('duplicate')">
             <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
           </button>
