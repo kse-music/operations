@@ -33,6 +33,10 @@ jobs:
       - run: rustup default 1.97.1
       - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
+      - name: Fetch locked Rust workspace dependencies
+        run: cargo fetch --locked
+      - name: Fetch locked WASM plugin dependencies
+        run: npm run plugins:fetch
       - name: Validate stable version and prepare notes
         id: release
         env:

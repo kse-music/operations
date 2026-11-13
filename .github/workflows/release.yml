@@ -43,6 +43,8 @@ jobs:
       - run: rustup target add ${{ matrix.target }}
       - run: rustup target add wasm32-unknown-unknown
       - run: npm ci
+      - name: Fetch locked Rust workspace dependencies
+        run: cargo fetch --locked
       - name: Prepare application version and workspace lockfile
         run: node tools/app-version.mjs
       - run: npm run plugins:fetch
