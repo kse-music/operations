@@ -5217,6 +5217,7 @@ dependencies = [
 name = "serverdeck-windows-file-drag"
 version = "0.8.0"
 dependencies = [
+ "serde_json",
  "serverdeck-core",
  "tempfile",
  "tokio",

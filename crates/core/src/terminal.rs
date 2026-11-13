@@ -51,7 +51,7 @@ pub fn default_shortcuts() -> BTreeMap<String, String> {
         ("paste", "Ctrl+Shift+V"),
         ("find", "Ctrl+Shift+F"),
         ("splitRows", "Ctrl+Shift+H"),
-        ("splitColumns", "Ctrl+Shift+E"),
+        ("splitColumns", "Ctrl+Shift+L"),
         ("newTab", "Ctrl+Shift+T"),
         ("closePane", "Ctrl+Shift+W"),
         ("nextTab", "Ctrl+Shift+Right"),

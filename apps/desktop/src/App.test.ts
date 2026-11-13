@@ -893,7 +893,7 @@ it('opens the host tree menu without connecting and closes sessions through thei
   await nextTick();
   expect(document.querySelector('[aria-label="主机树操作"]')).not.toBeNull();
   expect(useTerminalsStore().panes).toHaveLength(0);
-  document.querySelector<HTMLButtonElement>('[aria-label="关闭主机树菜单"]')!.click();
+  document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
   host.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
   await flush();
   expect(useTerminalsStore().panes[0]?.host?.id).toBe('a');
@@ -1627,7 +1627,7 @@ it.each(['a', 'b'])(
       await nextTick();
       expect(event.defaultPrevented).toBe(true);
       expect(document.querySelector('[aria-label="主机树操作"]')).not.toBeNull();
-      document.querySelector<HTMLButtonElement>('[aria-label="关闭主机树菜单"]')!.click();
+      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
       await nextTick();
       expect(document.querySelector('[aria-label="主机树操作"]')).toBeNull();
     }
@@ -2007,12 +2007,128 @@ it('routes a ready update through exit review and cancellation preserves running
   expect(exit).not.toHaveBeenCalled();
 });
 
-it('opens settings with its global shortcut without changing the workspace', async () => {
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true }));
-  useWorkspaceStore().navigate('settings');
+async function mountReadyShortcutShell() {
+  app!.unmount();
+  loadSidebarConfig();
+  vi.spyOn(useHostsStore(), 'load').mockResolvedValue();
+  vi.spyOn(useBackgroundStore(), 'start').mockImplementation(() => {});
+  vi.spyOn(useFilesStore(), 'poll').mockResolvedValue();
+  app = createApp(AppShell).use(pinia);
+  app.mount(root);
   await flush();
-  expect(useWorkspaceStore().settingsView).toBe('settings');
-  expect(document.querySelector('.topbar')).toBeNull();
+}
+
+it.each([
+  { key: 'P', code: 'KeyP', shiftKey: true, custom: false },
+  { key: ',', code: 'Comma', shiftKey: false, custom: true },
+  { key: '，', code: 'Comma', shiftKey: false, custom: true },
+])(
+  'opens settings with its configured keydown ($key) without changing the workspace',
+  async ({ key, code, shiftKey, custom }) => {
+    await mountReadyShortcutShell();
+    if (custom) useApplicationStore().state!.config.product.shortcuts.settings = 'Ctrl+,';
+    const workspace = useWorkspaceStore();
+    workspace.navigate('files', 'a');
+    await flush();
+    const tabs = JSON.stringify(workspace.tabs);
+    const active = workspace.active;
+    expect(workspace.area).toBe('home');
+    const event = new KeyboardEvent('keydown', {
+      key,
+      code,
+      ctrlKey: true,
+      shiftKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(event);
+    await flush();
+    expect(event.defaultPrevented).toBe(true);
+    expect(workspace.area).toBe('settings');
+    expect(workspace.settingsView).toBe('settings');
+    expect(document.querySelector('.settings-page')).not.toBeNull();
+    expect(JSON.stringify(workspace.tabs)).toBe(tabs);
+    expect(workspace.active).toBe(active);
+    workspace.navigate('settingsTerminal');
+    document.dispatchEvent(
+      new KeyboardEvent('keyup', { key, code, ctrlKey: true, shiftKey, bubbles: true }),
+    );
+    await flush();
+    expect(workspace.settingsView).toBe('settingsTerminal');
+  },
+);
+
+it.each(['dialog', 'recording'])(
+  'does not open settings with its keydown inside a %s',
+  async (kind) => {
+    await mountReadyShortcutShell();
+    const target = document.createElement(kind === 'dialog' ? 'dialog' : 'input');
+    if (target instanceof HTMLDialogElement) target.open = true;
+    else (target as HTMLInputElement).readOnly = true;
+    document.body.append(target);
+    try {
+      const event = new KeyboardEvent('keydown', {
+        key: 'P',
+        code: 'KeyP',
+        ctrlKey: true,
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      target.dispatchEvent(event);
+      await flush();
+      expect(event.defaultPrevented).toBe(false);
+      expect(useWorkspaceStore().area).toBe('home');
+      expect(useWorkspaceStore().settingsView).toBeNull();
+    } finally {
+      target.remove();
+    }
+  },
+);
+
+it('does not execute navigation from keyup when an input method consumes keydown', async () => {
+  await mountReadyShortcutShell();
+  document.dispatchEvent(
+    new KeyboardEvent('keyup', {
+      key: 'P',
+      code: 'KeyP',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+    }),
+  );
+  await flush();
+  expect(useWorkspaceStore().settingsView).toBeNull();
+  useApplicationStore().state!.config.product.shortcuts.settings = 'Ctrl+,';
+  const up = new KeyboardEvent('keyup', {
+    key: ',',
+    code: 'Comma',
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  document.dispatchEvent(up);
+  window.dispatchEvent(new Event('blur'));
+  document.dispatchEvent(up);
+  await flush();
+  expect(up.defaultPrevented).toBe(false);
+  expect(useWorkspaceStore().settingsView).toBeNull();
+});
+
+it('does not execute a prevented settings keydown', async () => {
+  await mountReadyShortcutShell();
+  const down = new KeyboardEvent('keydown', {
+    key: 'P',
+    code: 'KeyP',
+    shiftKey: true,
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  down.preventDefault();
+  document.dispatchEvent(down);
+  await flush();
+  expect(useWorkspaceStore().settingsView).toBeNull();
 });
 
 it('opens a fresh local terminal from welcome after the remote workspace and its sessions close', async () => {

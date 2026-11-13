@@ -113,7 +113,8 @@
   color: #c18b22;
   fill: #ffd268;
 }
-.group-toggle:hover {
+.group-toggle:hover,
+.group-toggle:focus-visible {
   color: var(--text);
 }
 .tree-host-row {
@@ -140,6 +141,10 @@
 }
 .tree-host.selected {
   box-shadow: inset 2px 0 var(--accent);
+}
+.group-toggle:focus-visible,
+.tree-host:focus-visible {
+  background: var(--accent-bg);
 }
 .host-label {
   display: flex;

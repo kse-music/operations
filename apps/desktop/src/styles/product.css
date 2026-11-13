@@ -58,9 +58,6 @@ kbd {
   background: #c42b1c;
   color: #fff;
 }
-.window-control:focus-visible {
-  outline-offset: -3px;
-}
 .app-brand {
   display: flex;
   align-items: center;

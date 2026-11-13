@@ -242,6 +242,13 @@ function setControls(id: string, component: unknown): void {
 }
 const folderEditor = ref<{ parentId: string | null; group?: HostGroup }>();
 const deletingFolder = ref<HostGroup>();
+function confirmDelete(target: ContextTarget): void {
+  if (target.kind === 'host') controls.get(target.id)?.confirmDelete();
+  else {
+    const group = store.catalog?.groups.find((group) => group.id === target.id);
+    if (group) deletingFolder.value = { ...group };
+  }
+}
 const menuItems = computed<
   { key: MenuAction; label: string; icon: Component; iconClass: string; danger?: boolean }[]
 >(() => {
@@ -301,6 +308,9 @@ function dismissContext(restoreFocus = false): void {
   context.value = undefined;
   if (restoreFocus && contextTrigger?.isConnected) contextTrigger.focus({ preventScroll: true });
 }
+function outsideContext(event: PointerEvent): void {
+  if (context.value && !menuElement.value?.contains(event.target as Node)) dismissContext();
+}
 function treeScrolled(event: Event): void {
   if (context.value && (event.currentTarget as HTMLElement).scrollTop !== contextScrollTop)
     dismissContext();
@@ -334,7 +344,30 @@ async function openContext(
     .querySelector<HTMLButtonElement>('button:not(:disabled)')
     ?.focus({ preventScroll: true });
 }
-function contextKeys(target: ContextTarget, event: KeyboardEvent): void {
+function rowKeys(target: ContextTarget, event: KeyboardEvent): void {
+  if (event.defaultPrevented) return;
+  if (event.key === 'Delete') {
+    if (
+      event.repeat ||
+      event.isComposing ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      !props.active ||
+      store.busy ||
+      !store.catalog ||
+      document.querySelector('dialog[open]') ||
+      dragged.value ||
+      context.value ||
+      (target.kind === 'folder' && target.id === null)
+    )
+      return;
+    event.preventDefault();
+    event.stopPropagation();
+    confirmDelete(target);
+    return;
+  }
   if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
   event.preventDefault();
   event.stopPropagation();
@@ -376,7 +409,7 @@ async function runContext(action: MenuAction): Promise<void> {
     else if (action === 'importOpenssh') emit('importOpenssh');
     else if (action === 'rename' && group)
       folderEditor.value = { parentId: group.parentId ?? null, group: { ...group } };
-    else if (action === 'deleteFolder' && group) deletingFolder.value = { ...group };
+    else if (action === 'deleteFolder' && group) confirmDelete(target);
     return;
   }
   const host = store.catalog?.hosts.find((host) => host.id === target.id);
@@ -391,7 +424,7 @@ async function runContext(action: MenuAction): Promise<void> {
     store.selectedId = host.id;
     emit('select', host);
   } else if (action === 'edit') controls.get(host.id)?.edit();
-  else if (action === 'deleteHost') controls.get(host.id)?.confirmDelete();
+  else if (action === 'deleteHost') confirmDelete(target);
   else if (action === 'copy') {
     const result = await store.run(() => hostsApi.copy(host.id), tr('主机已复制。'));
     if (result.ok) emit('saved', result.value);
@@ -420,10 +453,14 @@ watch(
   },
 );
 onMounted(() => {
+  window.addEventListener('contextmenu', closeContext, true);
+  window.addEventListener('pointerdown', outsideContext, true);
   window.addEventListener('blur', closeContext);
   window.addEventListener('resize', closeContext);
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('contextmenu', closeContext, true);
+  window.removeEventListener('pointerdown', outsideContext, true);
   window.removeEventListener('blur', closeContext);
   window.removeEventListener('resize', closeContext);
 });
@@ -471,7 +508,7 @@ onBeforeUnmount(() => {
           :aria-expanded="!isCollapsed(group.id)"
           :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
           @contextmenu.prevent.stop="openContext({ kind: 'folder', id: group.id }, $event)"
-          @keydown="contextKeys({ kind: 'folder', id: group.id }, $event)"
+          @keydown="rowKeys({ kind: 'folder', id: group.id }, $event)"
           @click="toggle(group.id ?? 'root')"
         >
           <ChevronRight v-if="isCollapsed(group.id)" :size="12" aria-hidden="true" />
@@ -516,7 +553,7 @@ onBeforeUnmount(() => {
               @keydown.enter.prevent="openHost(host)"
               @keydown.space.prevent="openHost(host)"
               @contextmenu.prevent.stop="openContext({ kind: 'host', id: host.id }, $event)"
-              @keydown="contextKeys({ kind: 'host', id: host.id }, $event)"
+              @keydown="rowKeys({ kind: 'host', id: host.id }, $event)"
             >
               <HostIcon
                 :connected="hostState(host.id) === tr('已连接')"
@@ -598,12 +635,6 @@ onBeforeUnmount(() => {
     </Modal>
     <Teleport to="body">
       <template v-if="context">
-        <button
-          class="context-backdrop"
-          :aria-label="tr('关闭主机树菜单')"
-          @click="dismissContext(true)"
-          @contextmenu.prevent="dismissContext(true)"
-        ></button>
         <div
           ref="menuElement"
           class="context-menu host-tree-menu"

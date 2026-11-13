@@ -312,6 +312,34 @@ fn local_drives_use_real_system_roots_and_main_window_acl() {
 }
 
 #[test]
+fn local_recycling_requires_confirmation_and_only_accepts_the_local_main_window() {
+    let app = mock_builder()
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "untrusted-recycle", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let input = json!({"input":{"parent":"C:\\","paths":[],"confirmed":false}});
+    let error =
+        get_ipc_response(&main, request("files_local_recycle", input.clone(), origin)).unwrap_err();
+    assert_eq!(error["code"], "VALIDATION");
+    for (window, url) in [(&other, origin), (&main, "https://untrusted.invalid")] {
+        let error = get_ipc_response(window, request("files_local_recycle", input.clone(), url))
+            .unwrap_err();
+        assert!(error.to_string().contains("not allowed"));
+    }
+}
+
+#[test]
 fn file_opening_commands_reject_untrusted_windows_and_invalid_files_without_launching_apps() {
     let directory = tempfile::tempdir().unwrap();
     let application =

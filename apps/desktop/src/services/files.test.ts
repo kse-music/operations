@@ -1,7 +1,27 @@
 import { describe, it, expect } from 'vitest';
+import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
+import { filesApi } from './files';
 import { osc7Path } from './osc7';
 import { remoteDirectoryLocations, remoteJoin } from '../types/files';
 describe('trusted file navigation contracts', () => {
+  it('binds recycling to the exact confirmed local parent and paths over IPC', async () => {
+    Reflect.set(window, 'isTauri', true);
+    const input = { parent: 'D:/test', paths: ['D:/test/中文 空格.txt'], confirmed: true };
+    let invoked = false;
+    mockIPC((command, args) => {
+      expect(command).toBe('files_local_recycle');
+      expect(args).toEqual({ input });
+      invoked = true;
+    });
+    try {
+      await filesApi.localRecycle(input);
+      expect(invoked).toBe(true);
+    } finally {
+      clearMocks();
+      Reflect.deleteProperty(window, 'isTauri');
+      Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    }
+  });
   it('derives the root-to-current folder chain without changing special file names', () => {
     expect(remoteDirectoryLocations('/home/dh')).toEqual([
       { path: '/', name: '/ <root>', depth: 0 },

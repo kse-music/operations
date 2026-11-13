@@ -23,6 +23,7 @@ windows = { version = "0.62.2", features = [
 windows-core = "0.62.2"
 
 [target.'cfg(windows)'.dev-dependencies]
+serde_json.workspace = true
 windows = { version = "0.62.2", features = ["Win32_UI_WindowsAndMessaging"] }
 
 [lints.rust]

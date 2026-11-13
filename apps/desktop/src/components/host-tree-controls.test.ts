@@ -118,10 +118,27 @@ it('removes inline actions while retaining context menu operations without chang
   expect(useTerminalsStore().panes).toHaveLength(1);
 });
 
-it.each([true, false])(
-  'requires explicit deletion, supports cancellation and preserves failures (%s)',
-  async (success) => {
+it.each([
+  { trigger: 'context menu', success: true },
+  { trigger: 'context menu', success: false },
+  { trigger: 'Delete key', success: true },
+  { trigger: 'Delete key', success: false },
+])(
+  'requires explicit deletion via $trigger, supports cancellation and preserves failures ($success)',
+  async ({ trigger, success }) => {
     const { hosts } = await mount();
+    hosts.selectedId = 'a';
+    const openDelete = async () => {
+      if (trigger === 'context menu') await openAction('删除');
+      else {
+        const row = root.querySelector<HTMLElement>('[data-host-id="b"]')!;
+        row.focus();
+        row.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }),
+        );
+        await nextTick();
+      }
+    };
     const remove = vi.spyOn(hostsApi, 'remove');
     if (success) remove.mockResolvedValue();
     else remove.mockRejectedValue({ message: 'delete failed' });
@@ -129,15 +146,16 @@ it.each([true, false])(
       ...hosts.catalog!,
       hosts: [hosts.catalog!.hosts[0]!],
     });
-    await openAction('删除');
+    await openDelete();
     let dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
     expect(dialog.open).toBe(true);
     expect(dialog.textContent).toContain('b.example');
     expect(remove).not.toHaveBeenCalled();
+    expect(hosts.selectedId).toBe('a');
     button('取消', dialog).click();
     await nextTick();
     expect(document.querySelector('dialog')).toBeNull();
-    await openAction('删除');
+    await openDelete();
     dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
     button('确认删除主机', dialog).click();
     await vi.waitFor(() => expect(hosts.busy).toBe(false));

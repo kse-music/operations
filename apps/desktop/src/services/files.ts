@@ -5,6 +5,7 @@ import type { TerminalEvent, TerminalSession, TerminalSize } from '../types/term
 import type {
   DirectoryListing,
   LocalDrive,
+  LocalRecycle,
   FileEntry,
   RemoteAction,
   TransferInput,
@@ -42,6 +43,7 @@ export const filesApi = {
   },
   list: (id: string, path: string) => call<DirectoryListing>('files_list', { id, path }),
   local: (path: string | null) => call<DirectoryListing>('files_local', { path }),
+  localRecycle: (input: LocalRecycle) => call<void>('files_local_recycle', { input }),
   localDrives: () => call<LocalDrive[]>('files_local_drives'),
   properties: (id: string, path: string) => call<FileEntry>('files_properties', { id, path }),
   action: (id: string, action: RemoteAction) => call<void>('files_action', { id, action }),

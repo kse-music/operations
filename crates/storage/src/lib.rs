@@ -193,11 +193,19 @@ mod tests {
         let path = directory.path().join("nested/serverdeck.sqlite3");
         let database = Database::open(&path).expect("open");
         assert_eq!(database.version().expect("version"), DATABASE_VERSION);
-        let config = AppConfig {
+        let mut config = AppConfig {
             theme: serverdeck_core::Theme::Light,
             interface_font_size: serverdeck_core::InterfaceFontSize::UltraLarge,
             ..Default::default()
         };
+        config
+            .product
+            .shortcuts
+            .insert("settings".into(), "Ctrl+,".into());
+        config
+            .terminal
+            .shortcuts
+            .insert("splitColumns".into(), "Ctrl+Shift+E".into());
         database.save_config(&config).expect("save");
         let reopened = Database::open(&path).expect("reopen");
         assert_eq!(reopened.load_config().expect("load"), config);

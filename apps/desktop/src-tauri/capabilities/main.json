@@ -59,6 +59,7 @@
     "allow-files-switch-user",
     "allow-files-list",
     "allow-files-local",
+    "allow-files-local-recycle",
     "allow-files-local-drives",
     "allow-files-properties",
     "allow-files-action",

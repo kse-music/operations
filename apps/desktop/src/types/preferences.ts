@@ -65,7 +65,7 @@ export const defaultTerminalPreferences = (): TerminalPreferences => ({
     paste: 'Ctrl+Shift+V',
     find: 'Ctrl+Shift+F',
     splitRows: 'Ctrl+Shift+H',
-    splitColumns: 'Ctrl+Shift+E',
+    splitColumns: 'Ctrl+Shift+L',
     newTab: 'Ctrl+Shift+T',
     closePane: 'Ctrl+Shift+W',
     nextTab: 'Ctrl+Shift+Right',
@@ -91,16 +91,16 @@ export const shortcutLabels: Record<string, string> = {
     return tr('垂直分屏（左右）');
   },
   get newTab() {
-    return tr('新建同主机标签');
+    return tr('新建终端会话');
   },
   get closePane() {
     return tr('关闭窗格');
   },
   get nextTab() {
-    return tr('下一个标签');
+    return tr('下一个会话');
   },
   get previousTab() {
-    return tr('上一个标签');
+    return tr('上一个会话');
   },
   get zoomIn() {
     return tr('放大字体');

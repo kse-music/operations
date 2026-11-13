@@ -227,7 +227,6 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-  outline-offset: -2px;
 }
 .file-sort-button:hover,
 .file-sort-column[aria-sort] .file-sort-button {

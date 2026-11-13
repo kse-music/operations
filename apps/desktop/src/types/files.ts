@@ -20,6 +20,11 @@ export interface LocalDrive {
   path: string;
   name: string;
 }
+export interface LocalRecycle {
+  parent: string;
+  paths: string[];
+  confirmed: boolean;
+}
 export interface FileLocation {
   path: string;
   name: string;

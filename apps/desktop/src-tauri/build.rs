@@ -76,6 +76,7 @@ fn main() {
             "files_switch_user",
             "files_list",
             "files_local",
+            "files_local_recycle",
             "files_local_drives",
             "files_properties",
             "files_action",

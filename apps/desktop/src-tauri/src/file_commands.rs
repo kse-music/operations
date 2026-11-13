@@ -67,6 +67,21 @@ pub async fn files_local(
     application.files_local(path).await.map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_local_recycle(input: LocalRecycle) -> Result<(), IpcError> {
+    #[cfg(windows)]
+    {
+        tauri::async_runtime::spawn_blocking(move || serverdeck_windows_file_drag::recycle(input))
+            .await
+            .map_err(|error| IpcError::from(Error::Worker(Box::new(error))))?
+            .map_err(Into::into)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = input;
+        Err(Error::Validation("本地移入回收站当前仅支持 Windows").into())
+    }
+}
+#[tauri::command]
 pub async fn files_local_drives() -> Result<Vec<LocalDrive>, IpcError> {
     #[cfg(windows)]
     {

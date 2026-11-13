@@ -174,11 +174,6 @@ async function toggleExpanded(): Promise<void> {
         standalone
         @update="(value) => Object.assign(pane, value)"
         @close="emit('close')"
-        @action="
-          (_key, action) => {
-            if (action === 'close') emit('close');
-          }
-        "
       />
       <div v-if="connecting" class="plugin-terminal-loading" role="status">
         <LoaderCircle :size="22" class="spinning" aria-hidden="true" />{{

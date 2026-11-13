@@ -31,22 +31,64 @@ function mountPane(
   side: 'local' | 'remote',
   directory: DirectoryListing | null = listing,
   loading = false,
+  selected: string[] = [],
 ) {
   const select = vi.fn();
   const open = vi.fn();
+  const remove = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(FilePane, {
     side,
     listing: directory,
     loading,
-    selected: [],
+    selected,
     onSelect: select,
     onOpen: open,
+    onRemove: remove,
   });
   app.mount(root);
-  return { select, open };
+  return { select, open, remove };
 }
+
+it.each(['local', 'remote'] as const)(
+  'requests deletion from the focused %s list and focuses clicked rows',
+  (side) => {
+    const { remove } = mountPane(side, listing, false, ['/srv/app']);
+    const row = root.querySelector<HTMLTableRowElement>('tbody tr')!;
+    row.children[2]!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(document.activeElement).toBe(row.querySelector('.file-name'));
+    const event = new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true });
+    document.activeElement!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(remove).toHaveBeenCalledOnce();
+  },
+);
+
+it.each(['local', 'remote'] as const)(
+  'ignores Delete modifiers, composition and repeat in the %s list',
+  (side) => {
+    const { remove } = mountPane(side, listing, false, ['/srv/app']);
+    const name = root.querySelector('.file-name')!;
+    for (const flag of ['ctrlKey', 'altKey', 'metaKey', 'shiftKey', 'isComposing', 'repeat']) {
+      name.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, [flag]: true }),
+      );
+    }
+    expect(remove).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  { loading: false, selected: [] },
+  { loading: true, selected: ['/srv/app'] },
+])('ignores Delete with loading=$loading and selection=$selected', ({ loading, selected }) => {
+  const { remove } = mountPane('local', listing, loading, selected);
+  root
+    .querySelector('.file-table')!
+    .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+  expect(remove).not.toHaveBeenCalled();
+});
 
 it.each(['local', 'remote'] as const)(
   'keeps the %s table header above a loading indicator without showing stale entries',

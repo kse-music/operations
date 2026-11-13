@@ -176,6 +176,8 @@ watch(
 const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: number } | null>(null),
   operation = ref<{
     kind: 'mkdir' | 'rename' | 'delete';
+    side: 'local' | 'remote';
+    hostId: string;
     id: string;
     host: string;
     parent: string;
@@ -529,6 +531,12 @@ async function retry(task: TransferInfo): Promise<void> {
     retry: task.id,
   };
 }
+function closeMenu(): void {
+  menu.value = null;
+}
+function outsideMenu(event: PointerEvent): void {
+  if (menu.value && !menuElement.value?.contains(event.target as Node)) closeMenu();
+}
 async function context(
   side: 'local' | 'remote',
   entry: FileEntry,
@@ -546,38 +554,73 @@ async function context(
   menu.value.x = Math.max(8, Math.min(menu.value.x, window.innerWidth - bounds.width - 8));
   menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - bounds.height - 8));
 }
-function mutate(kind: 'mkdir' | 'rename' | 'delete'): void {
+function mutate(kind: 'mkdir' | 'rename' | 'delete', side: 'local' | 'remote' = 'remote'): void {
   const current = store.current;
-  if (!current?.id || current.state !== 'connected') return;
+  const listing = side === 'local' ? store.local : current?.listing;
+  if (
+    busy.value ||
+    operation.value ||
+    document.querySelector('dialog[open]') ||
+    store.active !== chosen.value ||
+    store.closingHosts.includes(chosen.value) ||
+    downloadDrag?.started ||
+    !listing ||
+    (side === 'local'
+      ? store.localLoading
+      : !current?.id || current.state !== 'connected' || current.loading || current.switchingUser)
+  )
+    return;
   const paths =
     kind === 'mkdir'
       ? []
       : kind === 'rename' && menu.value
         ? [menu.value.entry.path]
-        : [...remoteSelection.value];
+        : [...(side === 'local' ? localSelection.value : remoteSelection.value)];
   if (kind !== 'mkdir' && !paths.length) return;
+  if (paths.some((path) => !listing.entries.some((entry) => entry.path === path))) {
+    store.error = tr('部分选中项目已不在当前目录，请刷新后重试。');
+    return;
+  }
   operation.value = {
     kind,
-    id: current.id,
-    host: hostDisplayName(current.host),
-    parent: current.path,
+    side,
+    hostId: chosen.value,
+    id: current?.id ?? '',
+    host: hostDisplayName(current?.host),
+    parent: listing.path,
     paths,
     name: kind === 'rename' ? (menu.value?.entry.name ?? '') : '',
     hasDirectory:
       kind === 'delete' &&
-      !!current.listing?.entries.some(
-        (entry) => entry.kind === 'directory' && paths.includes(entry.path),
-      ),
+      listing.entries.some((entry) => entry.kind === 'directory' && paths.includes(entry.path)),
   };
   menu.value = null;
 }
 async function submitOperation(): Promise<void> {
   const op = operation.value;
   if (!op || busy.value) return;
+  if (
+    store.active !== op.hostId ||
+    chosen.value !== op.hostId ||
+    store.closingHosts.includes(op.hostId) ||
+    (op.side === 'local'
+      ? store.localLoading || store.local?.path !== op.parent
+      : store.current?.id !== op.id ||
+        store.current.state !== 'connected' ||
+        store.current.loading ||
+        store.current.switchingUser ||
+        store.current.path !== op.parent)
+  ) {
+    operation.value = null;
+    store.error = tr('文件操作目标已变化，请重新选择。');
+    return;
+  }
   busy.value = true;
   store.error = null;
   try {
-    if (op.kind === 'mkdir')
+    if (op.side === 'local')
+      await filesApi.localRecycle({ parent: op.parent, paths: op.paths, confirmed: true });
+    else if (op.kind === 'mkdir')
       await filesApi.action(op.id, { kind: 'mkdir', path: remoteJoin(op.parent, op.name) });
     else if (op.kind === 'rename')
       await filesApi.action(op.id, {
@@ -593,8 +636,14 @@ async function submitOperation(): Promise<void> {
         confirmed: true,
       });
     operation.value = null;
-    remoteSelection.value = [];
-    await store.refresh();
+    if (store.active === op.hostId) {
+      if (op.side === 'local') localSelection.value = [];
+      else remoteSelection.value = [];
+    }
+    if (op.side === 'local') await store.localLoad(op.parent, undefined, op.hostId);
+    else if (store.active === op.hostId) await store.refresh();
+    else if (store.connections[op.hostId]?.id === op.id)
+      await store.navigate(op.parent, store.connections[op.hostId]);
   } catch (cause) {
     store.error = errorMessage(cause);
   } finally {
@@ -633,6 +682,8 @@ async function openEntry(side: 'local' | 'remote', entry: FileEntry): Promise<vo
 let unlisten: UnlistenFn | undefined,
   disposed = false;
 onMounted(async () => {
+  window.addEventListener('contextmenu', closeMenu, true);
+  window.addEventListener('pointerdown', outsideMenu, true);
   void loadLocalDrives();
   if (props.hostId && store.current?.host.id !== props.hostId) await connect();
   if (!disposed && !store.local && !store.localLoading) await store.localLoad();
@@ -658,6 +709,8 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  window.removeEventListener('contextmenu', closeMenu, true);
+  window.removeEventListener('pointerdown', outsideMenu, true);
   if (userForm.value) userForm.value.password = '';
   disposed = true;
   endDownloadDrag();
@@ -802,6 +855,7 @@ onBeforeUnmount(() => {
           @select="localSelection = $event"
           @open="openEntry('local', $event)"
           @menu="(entry, event) => context('local', entry, event)"
+          @remove="mutate('delete', 'local')"
         />
       </section>
       <section
@@ -934,6 +988,7 @@ onBeforeUnmount(() => {
           @open="openEntry('remote', $event)"
           @menu="(entry, event) => context('remote', entry, event)"
           @drag="beginDownloadDrag"
+          @remove="mutate('delete')"
         />
       </section>
     </div>
@@ -1032,17 +1087,13 @@ onBeforeUnmount(() => {
   >
     <TransferPanel :host-id="chosen" history @retry="retry" />
   </Modal>
-  <template v-if="menu"
-    ><button
-      class="context-backdrop"
-      :aria-label="tr('关闭文件菜单')"
-      @click="menu = null"
-    ></button>
+  <template v-if="menu">
     <div
       ref="menuElement"
       class="context-menu file-context-menu"
       role="menu"
       :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
+      @contextmenu.prevent
     >
       <button
         role="menuitem"
@@ -1111,6 +1162,8 @@ onBeforeUnmount(() => {
         {{ tr(' 复制绝对路径') }}</button
       ><button role="menuitem" @click="showProperties">
         <Info class="file-menu-properties" aria-hidden="true" />{{ tr('查看属性') }}</button
+      ><button v-if="menu.side === 'local'" role="menuitem" @click="mutate('delete', 'local')">
+        <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除') }}</button
       ><template v-if="menu.side === 'remote'"
         ><button role="menuitem" @click="mutate('rename')">
           <TextCursorInput class="file-menu-rename" aria-hidden="true" />{{ tr('重命名') }}</button
@@ -1128,7 +1181,7 @@ onBeforeUnmount(() => {
   >
   <Modal
     v-if="operation?.kind === 'delete'"
-    :title="tr('确认删除远程项目')"
+    :title="operation.side === 'local' ? tr('确认移入回收站') : tr('确认删除远程项目')"
     :busy="busy"
     @close="operation = null"
   >
@@ -1137,14 +1190,25 @@ onBeforeUnmount(() => {
         <CircleX :size="32" aria-hidden="true" />
         <p class="file-delete-question">
           {{
-            operation.paths.length === 1
-              ? tr('确定要永久删除「{0}」吗？', operation.paths[0]?.split('/').at(-1))
-              : tr('确定要永久删除这 {0} 个远程项目吗？', operation.paths.length)
+            operation.side === 'local'
+              ? operation.paths.length === 1
+                ? tr(
+                    '确定要将「{0}」移入回收站吗？',
+                    displayLocalPath(operation.paths[0] ?? '')
+                      .split(/[\\/]/)
+                      .at(-1),
+                  )
+                : tr('确定要将这 {0} 个本地项目移入回收站吗？', operation.paths.length)
+              : operation.paths.length === 1
+                ? tr('确定要永久删除「{0}」吗？', operation.paths[0]?.split('/').at(-1))
+                : tr('确定要永久删除这 {0} 个远程项目吗？', operation.paths.length)
           }}
         </p>
       </div>
       <pre v-if="operation.paths.length > 1" class="file-path-preview">{{
-        operation.paths.join('\n')
+        (operation.side === 'local' ? operation.paths.map(displayLocalPath) : operation.paths).join(
+          '\n',
+        )
       }}</pre>
       <footer class="dialog-actions">
         <button class="button" type="button" autofocus :disabled="busy" @click="operation = null">

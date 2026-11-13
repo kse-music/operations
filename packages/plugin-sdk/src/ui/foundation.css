@@ -29,10 +29,7 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
-button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
+button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,

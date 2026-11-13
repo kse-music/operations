@@ -577,6 +577,8 @@ fn old_optional_groups_get_defaults_while_required_fields_and_explicit_values_st
     assert_eq!(config.terminal.paste_confirm_chars, 4096);
     assert_eq!(config.product.language, "zh-CN");
     assert_eq!(config.product.shortcuts["search"], "Ctrl+K");
+    assert_eq!(config.product.shortcuts["settings"], "Ctrl+,");
+    assert_eq!(config.terminal.shortcuts["splitColumns"], "Ctrl+Shift+E");
     assert_eq!(config.transfer_concurrency, 3);
     assert_eq!(config.sidebar_width, 312);
     value["terminal"] = json!({"cursorBlink":false,"quickCopyPaste":false});

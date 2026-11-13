@@ -29,6 +29,7 @@ const emit = defineEmits<{
   open: [entry: FileEntry];
   menu: [entry: FileEntry, event: MouseEvent];
   drag: [entry: FileEntry, event: PointerEvent];
+  remove: [];
 }>();
 const localColumns = [
   ['name', '名称'],
@@ -107,6 +108,32 @@ function toggle(path: string): void {
 function clicked(entry: FileEntry, event: MouseEvent): void {
   if (event.ctrlKey || event.metaKey) toggle(entry.path);
   else emit('select', [entry.path]);
+  (event.currentTarget as HTMLElement)
+    .closest('tr')
+    ?.querySelector<HTMLButtonElement>('.file-name')
+    ?.focus({ preventScroll: true });
+}
+function keys(event: KeyboardEvent): void {
+  if (
+    event.key !== 'Delete' ||
+    event.defaultPrevented ||
+    event.repeat ||
+    event.isComposing ||
+    event.ctrlKey ||
+    event.altKey ||
+    event.metaKey ||
+    event.shiftKey ||
+    props.loading ||
+    !props.selected.length ||
+    document.querySelector('dialog[open]') ||
+    (event.target as HTMLElement).closest(
+      'input:not([type="checkbox"]), textarea, select, [contenteditable]:not([contenteditable="false"])',
+    )
+  )
+    return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit('remove');
 }
 function context(entry: FileEntry, event: MouseEvent): void {
   if (!props.selected.includes(entry.path)) emit('select', [entry.path]);
@@ -218,7 +245,7 @@ function entryIcon(entry: FileEntry) {
       }}{{ tr(' 已选') }}</span
     >
   </div>
-  <div class="file-table" :aria-busy="loading">
+  <div class="file-table" :aria-busy="loading" @keydown="keys">
     <table :aria-label="side === 'local' ? tr('本地文件') : tr('远程文件')">
       <thead>
         <tr>

@@ -130,4 +130,23 @@ describe('product integration boundaries', () => {
       globalKey(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, isComposing: true })),
     ).toBeNull();
   });
+  it.each([
+    [',', false, 'Ctrl+,'],
+    ['，', false, 'Ctrl+,'],
+    ['<', true, 'Ctrl+Shift+,'],
+  ])('recognizes the comma key when its character is %s', (key, shiftKey, binding) => {
+    expect(
+      globalKey(new KeyboardEvent('keydown', { key, code: 'Comma', ctrlKey: true, shiftKey })),
+    ).toBe(binding);
+  });
+  it.each([{ ctrlKey: false }, { altKey: true }, { isComposing: true }, { repeat: true }])(
+    'ignores the comma shortcut with %j',
+    (flags) => {
+      expect(
+        globalKey(
+          new KeyboardEvent('keydown', { key: '，', code: 'Comma', ctrlKey: true, ...flags }),
+        ),
+      ).toBeNull();
+    },
+  );
 });

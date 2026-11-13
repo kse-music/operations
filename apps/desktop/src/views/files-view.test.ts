@@ -305,7 +305,7 @@ it.each([
       transfer,
       '复制绝对路径',
       '查看属性',
-      ...(side === 'remote' ? ['重命名', '删除选中', '在新终端中打开'] : []),
+      ...(side === 'remote' ? ['重命名', '删除选中', '在新终端中打开'] : ['删除']),
     ]);
     for (const button of buttons) {
       expect(button.firstElementChild?.tagName).toBe('svg');
@@ -318,6 +318,114 @@ it.each([
     expect(root.querySelector('.file-context-menu')).toBeNull();
   },
 );
+
+it.each(['local', 'remote'] as const)(
+  'closes the %s file menu on a right-click anywhere else, even when propagation is stopped',
+  async (side) => {
+    const files = useFilesStore(pinia);
+    files.local!.entries = [
+      { ...entry, name: 'local.txt', path: 'D:/test/local.txt', kind: 'file' },
+    ];
+    await nextTick();
+    const row = root.querySelector(
+      `[aria-label="${side === 'local' ? '本地' : '远程'}文件"] tbody tr`,
+    )!;
+    for (const outside of [
+      root.querySelector('h1')!,
+      root.querySelector('.path-bar input')!,
+      document.body,
+    ]) {
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await nextTick();
+      expect(root.querySelector('.file-context-menu')).not.toBeNull();
+      outside.addEventListener(
+        'contextmenu',
+        (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        },
+        { once: true },
+      );
+      outside.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+      await nextTick();
+      expect(root.querySelector('.file-context-menu')).toBeNull();
+    }
+  },
+);
+
+it.each([
+  ['local', 'local'],
+  ['local', 'remote'],
+  ['remote', 'local'],
+  ['remote', 'remote'],
+] as const)('replaces a %s file menu with the new %s target and its position', async (from, to) => {
+  const files = useFilesStore(pinia);
+  files.local!.entries = ['first', 'second'].map((name) => ({
+    ...entry,
+    name,
+    path: `D:/test/${name}`,
+    kind: 'file' as const,
+  }));
+  files.current!.listing!.entries = ['first', 'second'].map((name) => ({
+    ...entry,
+    name,
+    path: `/srv/api/${name}`,
+    kind: 'file' as const,
+  }));
+  const write = vi.spyOn(clipboardApi, 'writeText').mockResolvedValue();
+  await nextTick();
+  const row = (side: 'local' | 'remote', name: string) =>
+    root.querySelector(
+      `[aria-label="${side === 'local' ? '本地' : '远程'}文件"] .file-name[title="${name}"]`,
+    )!;
+  row(from, 'first').dispatchEvent(
+    new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 20, clientY: 30 }),
+  );
+  await nextTick();
+  row(to, 'second').dispatchEvent(
+    new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 90 }),
+  );
+  await nextTick();
+  expect(root.querySelectorAll('.file-context-menu')).toHaveLength(1);
+  const menu = root.querySelector<HTMLElement>('.file-context-menu')!;
+  expect(menu.style.left).toBe('80px');
+  expect(menu.style.top).toBe('90px');
+  const copy = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '复制绝对路径',
+  )!;
+  copy.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  await nextTick();
+  expect(menu.isConnected).toBe(true);
+  copy.click();
+  await vi.waitFor(() =>
+    expect(write).toHaveBeenCalledExactlyOnceWith(
+      to === 'local' ? 'D:/test/second' : '/srv/api/second',
+    ),
+  );
+});
+
+it('closes a file menu on outside pointer presses and removes its global listeners on unmount', async () => {
+  app?.unmount();
+  const add = vi.spyOn(window, 'addEventListener');
+  const remove = vi.spyOn(window, 'removeEventListener');
+  await mountView();
+  root
+    .querySelector('[aria-label="远程文件"] tbody tr')!
+    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await nextTick();
+  root.querySelector('h1')!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  await nextTick();
+  expect(root.querySelector('.file-context-menu')).toBeNull();
+  app?.unmount();
+  app = undefined;
+  for (const type of ['contextmenu', 'pointerdown']) {
+    const listener = add.mock.calls.find(
+      ([event, , capture]) => event === type && capture === true,
+    )?.[1];
+    expect(listener).toBeDefined();
+    expect(remove).toHaveBeenCalledWith(type, listener, true);
+  }
+});
 
 const driveOptions = () => [
   ...document.querySelectorAll<HTMLElement>('[aria-label="本地磁盘"] [role="option"]'),
@@ -929,46 +1037,196 @@ it.each(['local', 'remote'] as const)(
 );
 
 it.each([
-  { names: ['config'], recursive: true },
-  { names: ['guide.txt', 'config'], recursive: true },
-  { names: ['guide.txt'], recursive: false },
-])('confirms deletion of $names with recursive=$recursive', async ({ names, recursive }) => {
+  ...['button', 'Delete'].flatMap((trigger) => [
+    { trigger, names: ['config'], recursive: true },
+    { trigger, names: ['guide.txt', 'config'], recursive: true },
+    { trigger, names: ['guide.txt'], recursive: false },
+  ]),
+])(
+  'confirms deletion of $names via $trigger with recursive=$recursive',
+  async ({ trigger, names, recursive }) => {
+    const files = useFilesStore(pinia);
+    files.current!.listing!.entries.push({
+      ...entry,
+      name: 'guide.txt',
+      path: '/srv/api/guide.txt',
+      kind: 'file',
+    });
+    const action = vi.spyOn(filesApi, 'action').mockResolvedValue(undefined);
+    vi.spyOn(files, 'refresh').mockResolvedValue(undefined);
+    await nextTick();
+    for (const name of names) {
+      root.querySelector<HTMLInputElement>(`[aria-label="选择 ${name}"]`)!.click();
+      await nextTick();
+    }
+    const remove = root.querySelector<HTMLButtonElement>('[aria-label="删除选中"]')!;
+    const openDialog = async () => {
+      if (trigger === 'button') remove.click();
+      else {
+        const name = root.querySelector<HTMLElement>('[aria-label="远程文件"] .file-name')!;
+        name.focus();
+        name.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }),
+        );
+      }
+      await nextTick();
+      return document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除远程项目"]')!;
+    };
+
+    const dialog = await openDialog();
+    expect(dialog.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(dialog.querySelectorAll('.file-delete-message p')).toHaveLength(1);
+    dialog.querySelector<HTMLButtonElement>('button[autofocus]')!.click();
+    await nextTick();
+    expect(dialog.isConnected).toBe(false);
+    expect(action).not.toHaveBeenCalled();
+
+    (await openDialog()).querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+      kind: 'remove',
+      paths: names.map((name) => `/srv/api/${name}`),
+      recursive,
+      confirmed: true,
+    });
+  },
+);
+
+it.each([
+  { trigger: 'Delete', success: true },
+  { trigger: 'Delete', success: false },
+  { trigger: 'menu', success: true },
+  { trigger: 'menu', success: false },
+])(
+  'recycles the local selection via $trigger after confirmation and retains failures ($success)',
+  async ({ trigger, success }) => {
+    const files = useFilesStore(pinia);
+    const local = {
+      ...entry,
+      name: 'report.txt',
+      path: 'D:/test/report.txt',
+      kind: 'file' as const,
+    };
+    files.local!.entries = [
+      local,
+      { ...local, name: 'folder', path: 'D:/test/folder', kind: 'directory' },
+    ];
+    const recycle = vi.spyOn(filesApi, 'localRecycle');
+    if (success) recycle.mockResolvedValue();
+    else recycle.mockRejectedValue({ message: '回收站不可用' });
+    const remote = vi.spyOn(filesApi, 'action').mockResolvedValue();
+    const load = vi.spyOn(files, 'localLoad').mockResolvedValue();
+    await nextTick();
+    root.querySelector<HTMLInputElement>('[aria-label="远程文件"] tbody input')!.click();
+    for (const name of ['report.txt', 'folder']) {
+      root
+        .querySelector<HTMLInputElement>(`[aria-label="本地文件"] [aria-label="选择 ${name}"]`)!
+        .click();
+      await nextTick();
+    }
+    await nextTick();
+    const open = async () => {
+      const name = root.querySelector<HTMLElement>('[aria-label="本地文件"] .file-name')!;
+      if (trigger === 'Delete') {
+        name.focus();
+        name.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }),
+        );
+      } else {
+        name.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+        await nextTick();
+        [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+          .find((button) => button.textContent?.trim() === '删除')!
+          .click();
+      }
+      await nextTick();
+      return document.querySelector<HTMLDialogElement>('[aria-label="确认移入回收站"]')!;
+    };
+    let dialog = await open();
+    expect(dialog.open).toBe(true);
+    expect(dialog.textContent).toContain('2 个本地项目');
+    expect(dialog.textContent).not.toContain('永久删除');
+    expect(recycle).not.toHaveBeenCalled();
+    dialog.querySelector<HTMLButtonElement>('button[autofocus]')!.click();
+    await nextTick();
+    expect(document.querySelector('dialog')).toBeNull();
+    dialog = await open();
+    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await vi.waitFor(() =>
+      expect(recycle).toHaveBeenCalledExactlyOnceWith({
+        parent: 'D:/test',
+        paths: ['D:/test/report.txt', 'D:/test/folder'],
+        confirmed: true,
+      }),
+    );
+    await nextTick();
+    expect(remote).not.toHaveBeenCalled();
+    expect(
+      root.querySelector<HTMLInputElement>('[aria-label="远程文件"] tbody input')!.checked,
+    ).toBe(true);
+    if (success) {
+      expect(document.querySelector('dialog')).toBeNull();
+      expect(load).toHaveBeenCalledExactlyOnceWith('D:/test', undefined, 'a');
+    } else {
+      expect(dialog.open).toBe(true);
+      expect(files.error).toBe('回收站不可用');
+      expect(load).not.toHaveBeenCalled();
+      expect(
+        [...root.querySelectorAll<HTMLInputElement>('[aria-label="本地文件"] tbody input')].every(
+          (input) => input.checked,
+        ),
+      ).toBe(true);
+    }
+  },
+);
+
+it.each(['local', 'remote'] as const)(
+  'rejects changed targets before confirming %s deletion',
+  async (side) => {
+    const files = useFilesStore(pinia);
+    files.local!.entries = [
+      { ...entry, name: 'local.txt', path: 'D:/test/local.txt', kind: 'file' },
+    ];
+    const recycle = vi.spyOn(filesApi, 'localRecycle').mockResolvedValue();
+    const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+    await nextTick();
+    const table = root.querySelector<HTMLElement>(
+      `[aria-label="${side === 'local' ? '本地' : '远程'}文件"]`,
+    )!;
+    table.querySelector<HTMLInputElement>('tbody input')!.click();
+    await nextTick();
+    table
+      .querySelector('.file-name')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
+    await nextTick();
+    const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+    expect(dialog.open).toBe(true);
+    if (side === 'local') files.local!.path = 'D:/different';
+    else files.current!.id = 'sftp-replaced';
+    dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
+    await nextTick();
+    expect(recycle).not.toHaveBeenCalled();
+    expect(action).not.toHaveBeenCalled();
+    expect(files.error).toBe('文件操作目标已变化，请重新选择。');
+  },
+);
+
+it('keeps Delete in directory text inputs as editing and blocks disconnected remote deletion', async () => {
   const files = useFilesStore(pinia);
-  files.current!.listing!.entries.push({
-    ...entry,
-    name: 'guide.txt',
-    path: '/srv/api/guide.txt',
-    kind: 'file',
-  });
-  const action = vi.spyOn(filesApi, 'action').mockResolvedValue(undefined);
-  vi.spyOn(files, 'refresh').mockResolvedValue(undefined);
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+  root.querySelector<HTMLInputElement>('[aria-label="远程文件"] tbody input')!.click();
   await nextTick();
-  for (const name of names) {
-    root.querySelector<HTMLInputElement>(`[aria-label="选择 ${name}"]`)!.click();
-    await nextTick();
+  for (const input of root.querySelectorAll<HTMLInputElement>('.path-bar input')) {
+    const key = new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true });
+    input.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(false);
   }
-  const remove = root.querySelector<HTMLButtonElement>('[aria-label="删除选中"]')!;
-  const openDialog = async () => {
-    remove.click();
-    await nextTick();
-    return document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除远程项目"]')!;
-  };
-
-  const dialog = await openDialog();
-  expect(dialog.querySelector('input[type="checkbox"]')).toBeNull();
-  expect(dialog.querySelectorAll('.file-delete-message p')).toHaveLength(1);
-  dialog.querySelector<HTMLButtonElement>('button[autofocus]')!.click();
+  files.current!.state = 'disconnected';
+  root
+    .querySelector('[aria-label="远程文件"] .file-name')!
+    .dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }));
   await nextTick();
-  expect(dialog.isConnected).toBe(false);
+  expect(document.querySelector('dialog')).toBeNull();
   expect(action).not.toHaveBeenCalled();
-
-  (await openDialog()).querySelector<HTMLButtonElement>('button[type="submit"]')!.click();
-  expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
-    kind: 'remove',
-    paths: names.map((name) => `/srv/api/${name}`),
-    recursive,
-    confirmed: true,
-  });
 });
 
 it('hands a Windows drag to the native exporter once it crosses the window edge', async () => {

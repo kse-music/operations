@@ -348,6 +348,13 @@ function restoreDefaults(): void {
             <p class="subtle full-width">
               {{
                 tr(
+                  '先点击本地或 SSH 终端输入区再使用。分屏、新建及切换会话仅适用于主终端，插件终端弹窗不支持。',
+                )
+              }}
+            </p>
+            <p class="subtle full-width">
+              {{
+                tr(
                   ' 选中后按新组合键。使用 Ctrl+Shift、Meta+Shift 或 Ctrl+Alt，避免拦截远端 Ctrl+C / Z 等常用按键。 ',
                 )
               }}

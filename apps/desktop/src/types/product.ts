@@ -10,7 +10,7 @@ export const defaultProductPreferences = (): ProductPreferences => ({
   language: 'zh-CN',
   downloadDirectory: null,
   sshDefaults: defaultSshOptions(),
-  shortcuts: { search: 'Ctrl+K', settings: 'Ctrl+,' },
+  shortcuts: { search: 'Ctrl+K', settings: 'Ctrl+Shift+P' },
 });
 export const viewLabels = {
   get models() {
@@ -84,7 +84,11 @@ export function globalKey(event: KeyboardEvent): string | null {
   if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.isComposing || event.repeat)
     return null;
   const key =
-    event.key === ',' ? ',' : /^[a-z0-9]$/i.test(event.key) ? event.key.toUpperCase() : '';
+    event.code === 'Comma' || event.key === ','
+      ? ','
+      : /^[a-z0-9]$/i.test(event.key)
+        ? event.key.toUpperCase()
+        : '';
   return key ? `Ctrl+${event.shiftKey ? 'Shift+' : ''}${key}` : null;
 }
 export interface ConnectionStatus {

@@ -254,6 +254,7 @@ pub fn command_handler<R: tauri::Runtime>()
         file_commands::files_switch_user,
         file_commands::files_list,
         file_commands::files_local,
+        file_commands::files_local_recycle,
         file_commands::files_local_drives,
         file_commands::files_open_local,
         file_commands::external_prepare,

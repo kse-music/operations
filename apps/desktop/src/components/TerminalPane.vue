@@ -215,7 +215,8 @@ function update(values: Partial<Omit<TerminalPaneModel, 'key' | 'host'>>): void 
   else store.update(props.tab.key, values);
 }
 function terminalAction(name: string): void {
-  if (props.standalone && ['zoomIn', 'zoomOut', 'zoomReset'].includes(name)) {
+  if (props.standalone && name === 'closePane') emit('close');
+  else if (props.standalone && ['zoomIn', 'zoomOut', 'zoomReset'].includes(name)) {
     const base = application.state?.config.terminalFontSize ?? 16;
     const current = terminal.options.fontSize ?? base;
     displayFontSize.value =
@@ -702,6 +703,7 @@ onMounted(() => {
   });
   terminal.attachCustomKeyEventHandler((event) => {
     if (event.type !== 'keydown') return true;
+    if (!props.active || dialogBlocksTerminal()) return false;
     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
       event.preventDefault();
       const bounds = container.value!.getBoundingClientRect();
@@ -713,6 +715,14 @@ onMounted(() => {
       ([, binding]) => binding === key,
     )?.[0];
     if (action) event.preventDefault();
+    if (
+      props.standalone &&
+      action &&
+      ['splitRows', 'splitColumns', 'newTab', 'nextTab', 'previousTab'].includes(action)
+    ) {
+      message.value = tr('插件终端不支持分屏、新建或切换会话。');
+      return false;
+    }
     if (action === 'copy') {
       void copy();
       return false;

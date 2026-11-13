@@ -3,6 +3,7 @@ import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, type Pinia } from 'pinia';
 import PluginTerminalDialog from './PluginTerminalDialog.vue';
 import { useTerminalsStore } from '../stores/terminals';
+import { useNotificationsStore } from '../stores/notifications';
 import { hostInput } from '../types/hosts';
 import type { TerminalEvent } from '../types/terminal';
 const api = vi.hoisted(() => ({
@@ -15,6 +16,7 @@ const api = vi.hoisted(() => ({
   fit: vi.fn(),
   find: vi.fn<(text: string) => boolean>(() => true),
   receive: vi.fn() as (event: TerminalEvent) => void,
+  key: (() => true) as (event: KeyboardEvent) => boolean,
 }));
 vi.mock('../services/plugins', () => ({ pluginsApi: { platformTerminalOpen: api.open } }));
 vi.mock('../services/terminal', () => ({ terminalApi: { input: api.input, close: api.close } }));
@@ -43,7 +45,9 @@ vi.mock('@xterm/xterm', () => ({
     onCursorMove() {}
     onBinary() {}
     onSelectionChange() {}
-    attachCustomKeyEventHandler() {}
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) {
+      api.key = handler;
+    }
     focus() {
       api.focus();
     }
@@ -257,6 +261,72 @@ it('supports search, Escape, Ctrl+wheel and the clipboard menu inside its own di
   expect(document.querySelector('[role="menu"]')).toBeNull();
   nested.remove();
 });
+it('closes the plugin terminal with the configured close-pane shortcut', async () => {
+  await mount();
+  const event = new KeyboardEvent('keydown', {
+    code: 'KeyW',
+    key: 'W',
+    ctrlKey: true,
+    shiftKey: true,
+    cancelable: true,
+  });
+  expect(api.key(event)).toBe(false);
+  expect(event.defaultPrevented).toBe(true);
+  expect(closed).toHaveBeenCalledOnce();
+  expect(api.input).not.toHaveBeenCalled();
+  expect(useTerminalsStore(pinia).tabs).toEqual([]);
+  app!.unmount();
+  app = undefined;
+  await settle();
+  expect(api.close).toHaveBeenCalledWith('container-pty');
+});
+
+it.each(['KeyL', 'KeyH', 'KeyT', 'ArrowLeft', 'ArrowRight'])(
+  'explains unsupported plugin workspace shortcut %s without sending it to the shell',
+  async (code) => {
+    await mount();
+    const event = new KeyboardEvent('keydown', {
+      code,
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+    });
+    expect(api.key(event)).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(
+      useNotificationsStore(pinia).items.some(
+        (item) => item.text === '插件终端不支持分屏、新建或切换会话。',
+      ),
+    ).toBe(true);
+    expect(useTerminalsStore(pinia).tabs).toEqual([]);
+    expect(closed).not.toHaveBeenCalled();
+    expect(api.input).not.toHaveBeenCalled();
+    expect(api.open).toHaveBeenCalledOnce();
+  },
+);
+
+it('does not close the plugin terminal behind a nested confirmation dialog', async () => {
+  await mount();
+  const nested = document.createElement('dialog');
+  nested.open = true;
+  document.body.append(nested);
+  try {
+    expect(
+      api.key(
+        new KeyboardEvent('keydown', {
+          code: 'KeyW',
+          ctrlKey: true,
+          shiftKey: true,
+        }),
+      ),
+    ).toBe(false);
+    expect(closed).not.toHaveBeenCalled();
+    expect(api.input).not.toHaveBeenCalled();
+  } finally {
+    nested.remove();
+  }
+});
+
 it('shows an ended session without consuming its one-use ticket again', async () => {
   await mount();
   api.receive({ type: 'state', state: 'disconnected', code: null, message: 'SSH 连接中断' });

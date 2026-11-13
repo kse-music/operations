@@ -7,9 +7,9 @@ fn global_shortcuts_cannot_capture_terminal_control_keys_or_collide() {
     assert!(p.validate().is_err());
     p.shortcuts.insert("search".into(), "Ctrl+Shift+J".into());
     p.validate().unwrap();
-    p.shortcuts.insert("search".into(), "Ctrl+,".into());
-    assert!(p.validate().is_err());
     p.shortcuts.insert("search".into(), "Ctrl+Shift+P".into());
+    assert!(p.validate().is_err());
+    p.shortcuts.insert("search".into(), "Ctrl+,".into());
     p.validate().unwrap();
 }
 #[test]
@@ -31,14 +31,14 @@ fn interface_language_accepts_chinese_and_english_but_rejects_unknown_values() {
 #[test]
 fn removed_task_shortcut_is_rejected_without_resetting_other_preferences() {
     let mut value = serde_json::to_value(AppConfig::default()).unwrap();
-    value["product"]["shortcuts"]["search"] = "Ctrl+Shift+P".into();
+    value["product"]["shortcuts"]["search"] = "Ctrl+Shift+O".into();
     value["product"]["shortcuts"]["tasks"] = "Ctrl+Shift+J".into();
     value["product"]["sshDefaults"]["keepaliveIntervalSecs"] = 25.into();
     let config: AppConfig = serde_json::from_value(value).unwrap();
     assert!(config.validate().is_err());
     assert_eq!(config.product.shortcuts.len(), 3);
-    assert_eq!(config.product.shortcuts["search"], "Ctrl+Shift+P");
-    assert_eq!(config.product.shortcuts["settings"], "Ctrl+,");
+    assert_eq!(config.product.shortcuts["search"], "Ctrl+Shift+O");
+    assert_eq!(config.product.shortcuts["settings"], "Ctrl+Shift+P");
     assert_eq!(config.product.ssh_defaults.keepalive_interval_secs, 25);
     assert!(
         serde_json::to_value(config).unwrap()["product"]["shortcuts"]

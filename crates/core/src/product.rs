@@ -16,7 +16,7 @@ impl Default for ProductPreferences {
             language: "zh-CN".into(),
             download_directory: None,
             ssh_defaults: SshOptions::default(),
-            shortcuts: [("search", "Ctrl+K"), ("settings", "Ctrl+,")]
+            shortcuts: [("search", "Ctrl+K"), ("settings", "Ctrl+Shift+P")]
                 .map(|(k, v)| (k.into(), v.into()))
                 .into(),
         }

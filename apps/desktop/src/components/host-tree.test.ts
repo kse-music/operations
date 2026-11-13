@@ -241,7 +241,7 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(document.querySelector('[aria-label="主机树操作"]')?.textContent).not.toContain(
     '新建文件夹',
   );
-  document.querySelector<HTMLButtonElement>('[aria-label="关闭主机树菜单"]')!.click();
+  document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
   const rootFolder = root.querySelector<HTMLButtonElement>('[data-group-id=""] .group-toggle')!;
   rootFolder.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }),
@@ -485,6 +485,24 @@ it.each(['Enter', ' '])('opens the focused host with %s', async (key) => {
   row.focus();
   row.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   expect(select).toHaveBeenCalledOnce();
+});
+it('ignores Delete on host and folder rows during pointer dragging', async () => {
+  await mountDragTree();
+  const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
+  const folder = root.querySelector<HTMLButtonElement>('[data-group-id="b"] .group-toggle')!;
+  hitTarget.mockReturnValue(folder);
+  pointer(row, 'pointerdown', 10, 10);
+  pointer(window, 'pointermove', 50, 90);
+  await nextTick();
+  expect(root.querySelector('.host-dragging')).not.toBeNull();
+  for (const target of [row, folder]) {
+    target.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }),
+    );
+    await nextTick();
+    expect(document.querySelector('dialog')).toBeNull();
+  }
+  pointer(window, 'pointercancel', 50, 90);
 });
 it('drops onto a host row inside another group without selecting either host', async () => {
   const { store, host, update, select } = await mountDragTree();

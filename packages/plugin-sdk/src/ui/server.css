@@ -57,9 +57,6 @@
   color: var(--accent);
   background: var(--accent-bg);
 }
-.server-tabs button:focus-visible {
-  outline-offset: -2px;
-}
 .server-panel {
   min-width: 0;
 }
