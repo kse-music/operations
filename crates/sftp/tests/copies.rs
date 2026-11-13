@@ -166,6 +166,13 @@ async fn local_upload_and_remote_relay_commit_verified_bytes_in_shared_queue() {
     let input = temp.path().join("archive.tar.gz");
     let content = (0..200000).map(|i| (i % 251) as u8).collect::<Vec<_>>();
     std::fs::write(&input, &content).unwrap();
+    let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_645_594_860);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&input)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
     for origin in [
         local(&input),
         CopySource::Remote {
@@ -174,6 +181,12 @@ async fn local_upload_and_remote_relay_commit_verified_bytes_in_shared_queue() {
         },
     ] {
         std::fs::write(source.root.path().join("archive.tar.gz"), &content).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(source.root.path().join("archive.tar.gz"))
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
         let plan = files
             .transfers
             .prepare_copy(origin, &dst.id, "/", true)
@@ -185,6 +198,13 @@ async fn local_upload_and_remote_relay_commit_verified_bytes_in_shared_queue() {
         let done = finished(&job).await;
         assert_eq!(done.state, "completed", "{:?}", done.message);
         assert_eq!(done.transferred_bytes, content.len() as u64);
+        assert_eq!(
+            std::fs::metadata(target.root.path().join("archive.tar.gz"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified
+        );
         assert_eq!(
             std::fs::read(target.root.path().join("archive.tar.gz")).unwrap(),
             content

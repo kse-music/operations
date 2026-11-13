@@ -12,6 +12,37 @@ describe('terminal IPC contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+  it('starts native binary upload with an opaque grant and streams progress without file bytes', async () => {
+    const receive = vi.fn();
+    mocks.invoke.mockResolvedValue({ code: null, committed: 2, recovery: null });
+    await terminalApi.runDrop('session', 'native-token', receive);
+    expect(mocks.invoke).toHaveBeenCalledExactlyOnceWith('terminal_upload_run_drop', {
+      id: 'session',
+      token: 'native-token',
+      confirmed: true,
+      events: expect.objectContaining({ onmessage: receive }),
+    });
+    await terminalApi.cancelDrop('session', 'native-token');
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_upload_cancel_drop', {
+      id: 'session',
+      token: 'native-token',
+    });
+  });
+  it('uses raw binary ZMODEM payloads and binds writes to the terminal file grant', async () => {
+    const bytes = new Uint8Array([0, 24, 255]);
+    mocks.invoke.mockResolvedValueOnce(bytes.buffer);
+    expect([...(await terminalApi.zmodemRead('session', 'grant', 2, 65536))]).toEqual([...bytes]);
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_zmodem_read', {
+      id: 'session',
+      token: 'grant',
+      index: 2,
+      offset: 65536,
+    });
+    await terminalApi.zmodemWrite('session', 'grant', bytes);
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_zmodem_write', bytes, {
+      headers: { 'x-serverdeck-session': 'session', 'x-serverdeck-token': 'grant' },
+    });
+  });
   it('opens links through restricted desktop IPC and propagates browser failures', async () => {
     const url = 'http://localhost:8080/login?state=abc&next=%2Fhome#result';
     mocks.invoke.mockResolvedValueOnce(undefined);

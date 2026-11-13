@@ -4,6 +4,7 @@ import {
   imageReference,
   runImageArchive,
   validArchiveName,
+  inspectImageTarget,
 } from './image-archive';
 const api = vi.hoisted(() => ({ call: vi.fn(), invoke: vi.fn(), ensure: vi.fn() }));
 vi.mock('@serverdeck/plugin-sdk', () => ({ invoke: api.invoke }));
@@ -15,7 +16,15 @@ const prepared = {
   events: [{ type: 'data', stream: 'stdout', dataBase64: btoa(`SD_ARCHIVE_PREPARED:${nonce}\n`) }],
 };
 const ready = {
-  events: [{ type: 'data', stream: 'stdout', dataBase64: btoa(`SD_ARCHIVE_READY:${nonce}\n`) }],
+  events: [
+    {
+      type: 'data',
+      stream: 'stdout',
+      dataBase64: btoa(
+        `SD_ARCHIVE_CONTENT:${nonce}:${'c'.repeat(64)}\nSD_ARCHIVE_READY:${nonce}\n`,
+      ),
+    },
+  ],
 };
 const completed = {
   id: 'copy',
@@ -263,3 +272,231 @@ it.each(['import', 'export'] as const)(
     }
   },
 );
+
+const remoteRequest = {
+  kind: 'transfer',
+  id: `sha256:${'a'.repeat(64)}`,
+  reference: 'app:v1',
+  fileName: 'image.tar',
+  confirmed: true,
+  targetHostId: 'target',
+  expectedTargetId: null,
+  replaceConfirmed: false,
+} as const;
+function remoteSetup() {
+  setup();
+  api.invoke.mockImplementation(async (_action, { hostId }) => ({
+    streamId: hostId,
+    nonce,
+    directory: `${directory}-${hostId}`,
+    path: `${directory}-${hostId}/image.tar`,
+  }));
+  const polls: Record<string, number> = {};
+  api.call.mockImplementation(async (r) => {
+    if (r.kind === 'stream_poll')
+      return (polls[r.streamId] = (polls[r.streamId] ?? 0) + 1) === 1 ? prepared : ready;
+    if (r.kind === 'transfer_prepare') return { id: 'copy' };
+    if (r.kind === 'transfer_start') return completed;
+    return null;
+  });
+}
+it('relays directly through the native remote transfer and verifies target load before cleaning both hosts', async () => {
+  remoteSetup();
+  const update = vi.fn();
+  await runImageArchive('source', remoteRequest, '', new AbortController().signal, update);
+  expect(api.invoke.mock.calls.map(([, input]) => input)).toEqual([
+    {
+      hostId: 'source',
+      request: {
+        kind: 'export',
+        id: remoteRequest.id,
+        reference: 'app:v1',
+        fileName: 'image.tar',
+        confirmed: true,
+      },
+    },
+    {
+      hostId: 'target',
+      request: {
+        kind: 'receive',
+        id: remoteRequest.id,
+        reference: 'app:v1',
+        contentSha256: 'c'.repeat(64),
+        fileName: 'image.tar',
+        expectedTargetId: null,
+        replaceConfirmed: false,
+        confirmed: true,
+      },
+    },
+  ]);
+  expect(api.call).toHaveBeenCalledWith({
+    kind: 'transfer_prepare',
+    source: { kind: 'remote', hostId: 'source', path: `${directory}-source/image.tar` },
+    destination: { hostId: 'target', path: `${directory}-target` },
+    overwrite: false,
+  });
+  expect(api.call.mock.calls.slice(-3).map(([r]) => r)).toEqual([
+    { kind: 'transfer_close', id: 'copy' },
+    { kind: 'stream_stop', streamId: 'target' },
+    { kind: 'stream_stop', streamId: 'source' },
+  ]);
+  expect(update.mock.calls.map(([p]) => p.stage)).toContain('loading');
+  expect(update.mock.calls.at(-1)?.[0].stage).toBe('finishing');
+});
+it('does not start target load or a file transfer if source export fails', async () => {
+  remoteSetup();
+  api.call.mockImplementation(async (r) =>
+    r.kind === 'stream_poll'
+      ? { events: [{ type: 'state', state: 'failed', message: 'source tag changed' }] }
+      : null,
+  );
+  await expect(
+    runImageArchive('source', remoteRequest, '', new AbortController().signal, vi.fn()),
+  ).rejects.toThrow('source tag changed');
+  expect(api.invoke).toHaveBeenCalledOnce();
+  expect(api.call.mock.calls.some(([r]) => r.kind === 'transfer_prepare')).toBe(false);
+  expect(api.call).toHaveBeenLastCalledWith({ kind: 'stream_stop', streamId: 'source' });
+});
+it('drains a cancelled relay before stopping both staging owners', async () => {
+  remoteSetup();
+  const controller = new AbortController();
+  const original = api.call.getMockImplementation()!;
+  api.call.mockImplementation(async (r) => {
+    if (r.kind === 'transfer_start') {
+      controller.abort();
+      return { ...completed, state: 'running' };
+    }
+    return original(r);
+  });
+  await expect(
+    runImageArchive('source', remoteRequest, '', controller.signal, vi.fn()),
+  ).rejects.toThrow('取消');
+  expect(api.call.mock.calls.slice(-3).map(([r]) => r.kind)).toEqual([
+    'transfer_close',
+    'stream_stop',
+    'stream_stop',
+  ]);
+});
+it('reports target load failure and both recovery locations even when target cleanup fails', async () => {
+  remoteSetup();
+  const original = api.call.getMockImplementation()!;
+  let polls = 0;
+  api.call.mockImplementation(async (r) => {
+    if (r.kind === 'stream_poll' && r.streamId === 'target' && ++polls === 2)
+      return { events: [{ type: 'state', state: 'failed', message: 'Target image tag changed' }] };
+    if (r.kind === 'stream_stop' && r.streamId === 'target')
+      throw new Error('target cleanup disconnected');
+    return original(r);
+  });
+  await expect(
+    runImageArchive('source', remoteRequest, '', new AbortController().signal, vi.fn()),
+  ).rejects.toThrow(
+    `Target image tag changed\ntarget cleanup disconnected\n远程暂存位置：source: ${directory}-source`,
+  );
+  expect(api.call).toHaveBeenLastCalledWith({ kind: 'stream_stop', streamId: 'source' });
+});
+it('does not load a relay whose native verification failed', async () => {
+  remoteSetup();
+  const original = api.call.getMockImplementation()!;
+  api.call.mockImplementation(async (r) =>
+    r.kind === 'transfer_start'
+      ? { ...completed, state: 'unverified', message: 'digest mismatch' }
+      : original(r),
+  );
+  await expect(
+    runImageArchive('source', remoteRequest, '', new AbortController().signal, vi.fn()),
+  ).rejects.toThrow('digest mismatch');
+  expect(
+    api.call.mock.calls.filter(([r]) => r.kind === 'stream_poll' && r.streamId === 'target'),
+  ).toHaveLength(1);
+});
+it.each([null, `sha256:${'b'.repeat(64)}`])(
+  'reads the actual target tag snapshot (%s) through an authenticated connection',
+  async (id) => {
+    api.ensure.mockResolvedValue(undefined);
+    api.invoke.mockResolvedValue({
+      success: true,
+      records: id ? [{ Repository: 'app', Tag: 'v1', ID: id }] : [],
+    });
+    await expect(
+      inspectImageTarget('target', 'app:v1', new AbortController().signal),
+    ).resolves.toBe(id);
+    expect(api.ensure).toHaveBeenCalledWith('target', true);
+    expect(api.invoke).toHaveBeenCalledWith('query', {
+      hostId: 'target',
+      request: { kind: 'images' },
+    });
+  },
+);
+it('rejects a failed target query and ignores a cancelled late query response', async () => {
+  api.ensure.mockResolvedValue(undefined);
+  api.invoke.mockResolvedValue({ success: false, message: 'Docker unavailable' });
+  await expect(
+    inspectImageTarget('target', 'app:v1', new AbortController().signal),
+  ).rejects.toThrow('Docker unavailable');
+  const controller = new AbortController();
+  api.invoke.mockImplementation(async () => {
+    controller.abort();
+    return { success: true, records: [] };
+  });
+  await expect(inspectImageTarget('target', 'app:v1', controller.signal)).rejects.toMatchObject({
+    code: 'USER_CANCELLED',
+  });
+});
+
+it('keeps final stderr and unterminated stdout when a failed event shares the last poll batch', async () => {
+  remoteSetup();
+  const original = api.call.getMockImplementation()!;
+  let polls = 0;
+  api.call.mockImplementation(async (r) => {
+    if (r.kind === 'stream_poll' && r.streamId === 'target' && ++polls === 2)
+      return {
+        events: [
+          { type: 'data', stream: 'stdout', dataBase64: btoa('Loaded image: app:v1\n') },
+          {
+            type: 'data',
+            stream: 'stderr',
+            dataBase64: btoa('Loaded image content does not match the source'),
+          },
+          { type: 'data', stream: 'stdout', dataBase64: btoa('final diagnostic without newline') },
+          {
+            type: 'state',
+            state: 'failed',
+            code: 'LOG_COMMAND',
+            message: '日志读取失败，可能是权限、文件/容器不存在或日志驱动不支持',
+          },
+        ],
+      };
+    return original(r);
+  });
+  const update = vi.fn();
+  await expect(
+    runImageArchive('source', remoteRequest, '', new AbortController().signal, update),
+  ).rejects.toThrow('远程镜像命令执行失败');
+  expect(update.mock.calls.at(-1)?.[0].output).toContain(
+    'Loaded image content does not match the source',
+  );
+  expect(update.mock.calls.at(-1)?.[0].output).toContain('final diagnostic without newline');
+});
+
+it('requires the source content digest before opening any target receive stream', async () => {
+  remoteSetup();
+  const original = api.call.getMockImplementation()!;
+  let polls = 0;
+  api.call.mockImplementation(async (r) =>
+    r.kind === 'stream_poll'
+      ? ++polls === 1
+        ? prepared
+        : {
+            events: [
+              { type: 'data', stream: 'stdout', dataBase64: btoa(`SD_ARCHIVE_READY:${nonce}\n`) },
+            ],
+          }
+      : original(r),
+  );
+  await expect(
+    runImageArchive('source', remoteRequest, '', new AbortController().signal, vi.fn()),
+  ).rejects.toThrow('未取得来源镜像内容摘要');
+  expect(api.invoke).toHaveBeenCalledOnce();
+  expect(api.call.mock.calls.some(([r]) => r.kind === 'transfer_start')).toBe(false);
+});

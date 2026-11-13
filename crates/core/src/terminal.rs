@@ -192,6 +192,8 @@ pub enum TerminalEvent {
 pub struct TerminalUploadFile {
     pub name: String,
     pub size: u64,
+    /// Source modification time in Unix seconds, independent of local timezone.
+    pub modified: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -220,9 +222,38 @@ pub struct TerminalDropSelection {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalDropPrepared {
     pub size: u64,
-    pub sha256: String,
     pub command: String,
     pub nonce: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalDropPhase {
+    Preparing,
+    Starting,
+    Uploading,
+    Verifying,
+    Committing,
+    Cancelling,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalDropProgress {
+    pub phase: TerminalDropPhase,
+    pub sent: u64,
+    pub size: u64,
+    pub bytes_per_second: u64,
+    pub elapsed_seconds: u64,
+    pub uid: Option<String>,
+    pub username: Option<String>,
+    pub directory: Option<String>,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalDropResult {
+    pub code: Option<String>,
+    pub committed: usize,
+    pub recovery: Option<String>,
 }
 
 #[cfg(test)]

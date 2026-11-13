@@ -51,6 +51,217 @@ async fn assert_completed(files: &Files, id: &str) {
 }
 
 #[tokio::test]
+async fn uploads_preserve_source_modified_time_for_new_empty_nested_and_replaced_files() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    let local = tempfile::tempdir().unwrap();
+    let modified = std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_645_594_860);
+    for name in ["new.bin", "empty.bin", "folder/nested.bin", "replaced.bin"] {
+        let source = local.path().join(name);
+        std::fs::create_dir_all(source.parent().unwrap()).unwrap();
+        std::fs::write(
+            &source,
+            if name == "empty.bin" {
+                &b""[..]
+            } else {
+                &b"source"[..]
+            },
+        )
+        .unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+    }
+    std::fs::write(server.root.path().join("replaced.bin"), b"old").unwrap();
+    for source in ["new.bin", "empty.bin", "folder", "replaced.bin"] {
+        let task = files
+            .transfers
+            .start(input(
+                &session.id,
+                Direction::Upload,
+                vec![path(&local.path().join(source))],
+                "/".into(),
+                ConflictPolicy::Overwrite,
+            ))
+            .unwrap();
+        assert_completed(&files, &task.id).await;
+    }
+    for name in ["new.bin", "empty.bin", "folder/nested.bin", "replaced.bin"] {
+        assert_eq!(
+            std::fs::metadata(server.root.path().join(name))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            modified,
+            "{name}"
+        );
+    }
+    server.engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn ignored_modified_time_fails_without_replacing_target_or_leaking_staging_file() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    let local = tempfile::tempdir().unwrap();
+    let source = local.path().join("file.bin");
+    std::fs::write(&source, b"new").unwrap();
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&source)
+        .unwrap()
+        .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_645_594_860))
+        .unwrap();
+    let target = server.root.path().join("file.bin");
+    std::fs::write(&target, b"old").unwrap();
+    let before = std::fs::metadata(&target).unwrap().modified().unwrap();
+    server
+        .faults
+        .ignore_times
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let task = files
+        .transfers
+        .start(input(
+            &session.id,
+            Direction::Upload,
+            vec![path(&source)],
+            "/".into(),
+            ConflictPolicy::Overwrite,
+        ))
+        .unwrap();
+    let result = finished(&files, &task.id).await;
+    assert_eq!(result.state, "failed");
+    assert!(result.message.as_deref().unwrap().contains("修改时间"));
+    assert_eq!(std::fs::read(&target).unwrap(), b"old");
+    assert_eq!(
+        std::fs::metadata(&target).unwrap().modified().unwrap(),
+        before
+    );
+    assert_eq!(std::fs::read_dir(server.root.path()).unwrap().count(), 1);
+    server.engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn data_time_and_speed_freeze_before_close_and_verification_for_each_file() {
+    use std::sync::atomic::Ordering;
+    for direction in [Direction::Upload, Direction::Download] {
+        let server = Server::start(true, Duration::from_millis(40)).await;
+        // Keep file close and readback visibly separate from the data stage.
+        server.faults.close_delay_ms.store(1500, Ordering::SeqCst);
+        let session = server.open().await;
+        let files = Files::new(server.engine.clone(), 1);
+        let local = tempfile::tempdir().expect("local files");
+        let payload = vec![
+            42;
+            if direction == Direction::Upload {
+                1024 * 1024
+            } else {
+                128 * 1024 + 17
+            }
+        ];
+        let sources: Vec<_> = ["first.bin", "second.bin"]
+            .into_iter()
+            .map(|name| {
+                if direction == Direction::Upload {
+                    let source = local.path().join(name);
+                    std::fs::write(&source, &payload).expect("upload source");
+                    path(&source)
+                } else {
+                    std::fs::write(server.root.path().join(name), &payload)
+                        .expect("download source");
+                    format!("/{name}")
+                }
+            })
+            .collect();
+        let task = files
+            .transfers
+            .start(input(
+                &session.id,
+                direction,
+                sources,
+                if direction == Direction::Upload {
+                    "/".into()
+                } else {
+                    path(local.path())
+                },
+                ConflictPolicy::Fail,
+            ))
+            .expect("start transfer");
+        let snapshot = || files.transfers.list().expect("tasks").pop().expect("task");
+        let mut final_metrics = (0, 0);
+        for index in 0..2 {
+            let target_directory = if direction == Direction::Upload {
+                server.root.path()
+            } else {
+                local.path()
+            };
+            tokio::time::timeout(Duration::from_secs(15), async {
+                loop {
+                    let info = snapshot();
+                    assert!(info.unfinished(), "missed data phase: {info:?}");
+                    if info.transferred_bytes == payload.len() as u64 * (index as u64 + 1) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("data deadline");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let verifying = snapshot();
+            assert_eq!(verifying.state, "verifying", "{direction:?}: {verifying:?}");
+            assert_eq!(verifying.files_done, index);
+            assert_eq!(
+                ["first.bin", "second.bin"]
+                    .iter()
+                    .filter(|name| target_directory.join(name).exists())
+                    .count(),
+                index,
+                "full byte progress must not commit an unverified file"
+            );
+            assert!(verifying.bytes_per_second > 0);
+            if direction == Direction::Upload {
+                assert!(
+                    verifying.elapsed_seconds > index as u64,
+                    "data time must accumulate across files: {verifying:?}"
+                );
+            }
+            final_metrics = (verifying.elapsed_seconds, verifying.bytes_per_second);
+            tokio::time::sleep(Duration::from_millis(1100)).await;
+            let later = snapshot();
+            assert_eq!(later.state, "verifying", "{later:?}");
+            assert_eq!(later.files_done, index);
+            assert_eq!(
+                (later.elapsed_seconds, later.bytes_per_second),
+                final_metrics,
+                "verification must not change transfer metrics: {direction:?}"
+            );
+        }
+        let done = finished(&files, &task.id).await;
+        assert_eq!(done.state, "completed", "{done:?}");
+        assert_eq!(done.files_done, 2);
+        assert_eq!(done.remaining_bytes, 0);
+        assert_eq!((done.elapsed_seconds, done.bytes_per_second), final_metrics);
+        for name in ["first.bin", "second.bin"] {
+            let target = if direction == Direction::Upload {
+                server.root.path().join(name)
+            } else {
+                local.path().join(name)
+            };
+            assert_eq!(std::fs::read(target).expect("committed file"), payload);
+        }
+        assert_eq!(server.faults.open_handles.load(Ordering::SeqCst), 0);
+        files.shutdown().await;
+        server.engine.shutdown().await;
+    }
+}
+
+#[tokio::test]
 async fn elapsed_time_excludes_queueing_and_freezes_after_completion() {
     let server = Server::start(true, Duration::from_millis(50)).await;
     let session = server.open().await;

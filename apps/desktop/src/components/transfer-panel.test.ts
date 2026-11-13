@@ -169,6 +169,42 @@ it.each([
     const times = root.querySelector('.transfer-details');
     expect(elapsed()).toBe('25:01:01');
     expect(remainingTime()).toBe(text);
-    expect(times?.querySelector('[title]')?.getAttribute('title')).toContain('不含校验和提交耗时');
+    expect(times?.querySelector('[data-time="remaining"]')?.parentElement?.title).toContain(
+      '不含校验和提交耗时',
+    );
+  },
+);
+
+it.each(['upload', 'download'] as const)(
+  'keeps %s at verifying with frozen transfer metrics until the backend commits',
+  async (direction) => {
+    const files = useFilesStore(pinia);
+    const snapshot = {
+      ...task('copy', 'a', 'verifying'),
+      direction,
+      transferredBytes: 100,
+      remainingBytes: 0,
+      elapsedSeconds: 13,
+      bytesPerSecond: 40,
+    };
+    files.tasks = [snapshot];
+    await nextTick();
+    const metrics = root.querySelector('.transfer-details')?.textContent;
+    expect(root.querySelector('.transfer-summary strong')?.textContent).toContain('校验中');
+    expect(root.querySelector('.transfer-summary')?.textContent).toContain('0 / 1');
+    expect(elapsed()).toBe('0:00:13');
+    expect(remainingTime()).toBe('校验中');
+    expect(root.querySelector('[data-time="elapsed"]')?.parentElement?.title).toContain(
+      '不含扫描、校验和提交耗时',
+    );
+    files.tasks = [{ ...snapshot }];
+    await nextTick();
+    expect(root.querySelector('.transfer-details')?.textContent).toBe(metrics);
+    files.tasks = [{ ...snapshot, state: 'completed', filesDone: 1 }];
+    history.value = true;
+    await nextTick();
+    expect(root.querySelector('.transfer-summary strong')?.textContent).toContain('已完成');
+    expect(elapsed()).toBe('0:00:13');
+    expect(remainingTime()).toBe('0:00:00');
   },
 );

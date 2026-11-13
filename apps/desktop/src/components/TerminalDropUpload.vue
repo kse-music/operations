@@ -17,8 +17,6 @@ const props = defineProps<{
   enabled: boolean;
   canReceive: () => boolean;
   area?: HTMLElement;
-  send: (id: string, data: Uint8Array) => Promise<void>;
-  interrupt: (id: string) => Promise<void>;
 }>();
 const emit = defineEmits<{
   error: [error: unknown];
@@ -50,6 +48,7 @@ let transfer: TerminalDropUpload | undefined;
 let running: Promise<void> | undefined;
 let unlisten: UnlistenFn | undefined;
 let disposed = false;
+let unmounted = false;
 const id = props.sessionId;
 const phaseNames: Record<DropProgress['phase'], string> = {
   get preparing() {
@@ -62,16 +61,13 @@ const phaseNames: Record<DropProgress['phase'], string> = {
     return tr('正在上传…');
   },
   get verifying() {
-    return tr('正在校验并解包…');
+    return tr('正在校验文件…');
   },
   get committing() {
     return tr('正在提交文件…');
   },
   get cancelling() {
     return tr('正在停止上传并恢复终端…');
-  },
-  get blocked() {
-    return tr('接收状态未确定，请关闭此会话后重新打开。');
   },
 };
 function eligible(): boolean {
@@ -142,15 +138,18 @@ function start(): void {
   confirmed.value = true;
   failure.value = '';
   const current = new TerminalDropUpload({
-    prepare: () => terminalApi.prepareDrop(id, selection.token),
-    read: (offset) => terminalApi.uploadRead(id, selection.token, 0, offset),
-    release: () => terminalApi.uploadRelease(id, selection.token),
-    send: (data) => props.send(id, data),
-    interrupt: () => props.interrupt(id),
-    write: (data) => {
-      // Protocol parsing returns ordinary output to TerminalPane synchronously.
-      output.push(data);
+    run: async (receive) => {
+      try {
+        return await terminalApi.runDrop(id, selection.token, receive);
+      } catch (error) {
+        // A terminal-close event may arrive before the native upload rejection.
+        // Keep its actual cause in the retained dialog after disconnect.
+        if (disposed && !unmounted && selected.value) failure.value = errorMessage(error);
+        throw error;
+      }
     },
+    cancel: () => terminalApi.cancelDrop(id, selection.token),
+    release: () => terminalApi.uploadRelease(id, selection.token),
     progress: (value) => {
       if (!disposed) progress.value = value;
     },
@@ -167,22 +166,6 @@ function start(): void {
     }
   });
 }
-// A PTY packet can contain both control frames and ordinary Shell output.
-let output: Uint8Array[] = [];
-function consume(data: Uint8Array): Uint8Array | undefined {
-  if (disposed && confirmed.value) return new Uint8Array();
-  if (!transfer || (!transfer.busy && !transfer.pendingOutput)) return undefined;
-  output = [];
-  transfer.consume(data);
-  const bytes = new Uint8Array(output.reduce((n, part) => n + part.length, 0));
-  let offset = 0;
-  for (const part of output) {
-    bytes.set(part, offset);
-    offset += part.length;
-  }
-  output = [];
-  return bytes;
-}
 function cancel(): void {
   if (selected.value && !confirmed.value) void dismiss();
   else transfer?.cancel();
@@ -196,23 +179,14 @@ function dispose(): void {
   const interrupted = confirmed.value && !!progress.value;
   disposed = true;
   transfer?.dispose();
-  if (interrupted) failure.value = tr('终端会话已结束，上传已停止。请核对远端已提交的文件。');
+  if (interrupted && !failure.value)
+    failure.value = tr('终端会话已结束，上传已停止。请核对远端已提交的文件。');
   else if (!confirmed.value) void dismiss();
   progress.value = null;
   claiming.value = false;
   over.value = false;
 }
-async function closeSession(): Promise<void> {
-  try {
-    await terminalApi.close(id);
-    selected.value = null;
-    progress.value = null;
-    failure.value = '';
-  } catch (error) {
-    failure.value = errorMessage(error);
-  }
-}
-defineExpose({ busy, consume, cancel, dispose, stop });
+defineExpose({ busy, cancel, dispose, stop });
 watch(
   dialogOpen,
   async (open, wasOpen) => {
@@ -244,6 +218,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  unmounted = true;
   dispose();
   unlisten?.();
 });
@@ -288,7 +263,7 @@ onBeforeUnmount(() => {
         :aria-label="tr('拖放上传进度')"
       ></progress>
       <progress
-        v-else-if="!['blocked', 'cancelling'].includes(progress.phase)"
+        v-else-if="progress.phase !== 'cancelling'"
         :aria-label="tr('拖放上传进度')"
       ></progress>
       <div v-if="progress.size" class="terminal-drop-statistics">
@@ -319,9 +294,6 @@ onBeforeUnmount(() => {
         <button class="button" @click="dismiss">{{ tr('取消') }}</button>
         <button class="button primary" @click="start">{{ tr('确认上传') }}</button>
       </template>
-      <button v-else-if="progress?.phase === 'blocked'" class="button" @click="closeSession">
-        {{ tr(' 关闭此终端会话 ') }}
-      </button>
       <button
         v-else-if="progress && progress.phase !== 'cancelling'"
         class="button"

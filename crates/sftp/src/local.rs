@@ -137,6 +137,16 @@ pub(crate) async fn hash(path: &Path) -> Result<String, Error> {
     }
     Ok(format!("{:x}", digest.finalize()))
 }
+pub(crate) fn modified_seconds(metadata: &std::fs::Metadata) -> Result<u32, Error> {
+    let seconds = metadata
+        .modified()
+        .map_err(io)?
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .map_err(|_| fail("SFTP_ATTRIBUTES", "源文件修改时间早于 1970 年，无法保留"))?
+        .as_secs();
+    u32::try_from(seconds).map_err(|_| fail("SFTP_ATTRIBUTES", "源文件修改时间超出 SFTP 协议范围"))
+}
+
 pub(crate) fn same(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
     a.len() == b.len()
         && a.modified().ok() == b.modified().ok()

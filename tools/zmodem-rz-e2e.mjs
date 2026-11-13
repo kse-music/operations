@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -66,7 +66,13 @@ async function check(
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       return {
         token: name,
-        files: cancel ? [] : files.map((file) => ({ name: file.name, size: file.data.length })),
+        files: cancel
+          ? []
+          : files.map((file) => ({
+              name: file.name,
+              size: file.data.length,
+              modified: 1645594860,
+            })),
       };
     },
     read: async (token, index, offset) => {
@@ -123,8 +129,13 @@ async function check(
         );
         assert(noticed.includes('跳过 1'));
       } else {
-        for (const file of files)
+        for (const file of files) {
           assert.deepEqual(await readFile(path.join(destination, file.name)), file.data);
+          assert.equal(
+            Math.floor((await stat(path.join(destination, file.name))).mtimeMs / 1000),
+            1645594860,
+          );
+        }
       }
     }
     results.push({

@@ -11,10 +11,18 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
     time::SystemTime,
 };
+mod binary;
 mod drop;
+mod zmodem;
 
-const CHUNK: usize = 8192;
+const CHUNK: usize = 64 * 1024;
 const MAX_FILES: usize = 100;
+
+fn modified_seconds(time: SystemTime) -> Result<u64, Error> {
+    time.duration_since(SystemTime::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| Error::Validation("上传源修改时间早于 1970 年，无法保留"))
+}
 
 struct SelectedFile {
     file: File,
@@ -26,8 +34,11 @@ struct Selection {
     token: String,
     files: Vec<Arc<Mutex<SelectedFile>>>,
     released: tokio::sync::watch::Sender<()>,
+    zmodem_writer: Arc<tokio::sync::Semaphore>,
     drop_paths: Option<Vec<PathBuf>>,
     temporary: Option<tempfile::NamedTempFile>,
+    running_drop: bool,
+    cancel_drop: tokio_util::sync::CancellationToken,
 }
 #[derive(Clone)]
 pub(crate) struct TerminalUploads(
@@ -69,8 +80,11 @@ impl TerminalUploads {
                 token: token.clone(),
                 files: vec![],
                 released: tokio::sync::watch::channel(()).0,
+                zmodem_writer: Arc::new(tokio::sync::Semaphore::new(1)),
                 drop_paths: None,
                 temporary: None,
+                running_drop: false,
+                cancel_drop: tokio_util::sync::CancellationToken::new(),
             },
         );
         Ok(token)
@@ -111,6 +125,7 @@ impl TerminalUploads {
             details.push(TerminalUploadFile {
                 name,
                 size: metadata.len(),
+                modified: modified_seconds(metadata.modified().map_err(io_error)?)?,
             });
             files.push(Arc::new(Mutex::new(SelectedFile {
                 file,
@@ -158,12 +173,19 @@ impl TerminalUploads {
     pub(crate) fn release(&self, id: &str, token: &str) -> Result<(), Error> {
         let mut selections = locked(&self.0)?;
         if selections.get(id).is_some_and(|s| s.token == token) {
+            if let Some(selection) = selections.get(id) {
+                selection.cancel_drop.cancel();
+            }
             selections.remove(id);
         }
         Ok(())
     }
     pub(crate) fn clear(&self) -> Result<(), Error> {
-        locked(&self.0)?.clear();
+        let mut selections = locked(&self.0)?;
+        for selection in selections.values() {
+            selection.cancel_drop.cancel();
+        }
+        selections.clear();
         locked(&self.2)?.clear();
         Ok(())
     }
@@ -257,8 +279,16 @@ mod tests {
     fn reads_binary_in_bounded_chunks_and_scopes_grants() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("中文 文件.bin");
-        let data: Vec<u8> = (0..20000).map(|i| (i % 256) as u8).collect();
+        let data: Vec<u8> = (0..CHUNK * 2 + 17).map(|i| (i % 256) as u8).collect();
         std::fs::write(&path, &data).expect("fixture");
+        File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(
+                SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(1_645_594_860_999),
+            )
+            .unwrap();
         let uploads = TerminalUploads::default();
         let token = uploads.begin("session").expect("begin");
         assert!(matches!(uploads.begin("session"), Err(Error::Busy)));
@@ -267,25 +297,30 @@ mod tests {
             .expect("select");
         assert_eq!(selection.files[0].name, "中文 文件.bin");
         assert_eq!(selection.files[0].size, data.len() as u64);
+        assert_eq!(selection.files[0].modified, 1_645_594_860);
         let mut actual = vec![];
         while actual.len() < data.len() {
             let part = uploads
                 .read("session", &token, 0, actual.len() as u64)
                 .expect("read");
-            assert!(part.len() <= CHUNK);
+            assert_eq!(part.len(), CHUNK.min(data.len() - actual.len()));
             actual.extend(part);
         }
         assert_eq!(actual, data);
         assert!(
             uploads
-                .read("session", &token, 0, 20000)
+                .read("session", &token, 0, data.len() as u64)
                 .expect("EOF")
                 .is_empty()
         );
         assert!(uploads.read("other", &token, 0, 0).is_err());
         assert!(uploads.read("session", "forged", 0, 0).is_err());
         assert!(uploads.read("session", &token, 1, 0).is_err());
-        assert!(uploads.read("session", &token, 0, 20001).is_err());
+        assert!(
+            uploads
+                .read("session", &token, 0, data.len() as u64 + 1)
+                .is_err()
+        );
         uploads.release("session", &token).expect("release");
         assert!(uploads.read("session", &token, 0, 0).is_err());
     }

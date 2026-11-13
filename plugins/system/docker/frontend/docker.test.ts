@@ -367,7 +367,7 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
   });
   expect(document.querySelector('[aria-label="确认运维目标"]')).toBeNull();
   await click('镜像');
-  expect(actionLabels('image')).toEqual(['删除', '导出']);
+  expect(actionLabels('image')).toEqual(['删除', '导出', '远程传输']);
   await click('删除');
   expect(
     api.presentations.mock.calls.some(

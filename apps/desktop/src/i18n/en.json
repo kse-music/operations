@@ -568,7 +568,7 @@
   "正在准备文件与目录…": "Preparing files and directories…",
   "等待当前 Shell 接收…": "Waiting for the current shell to receive…",
   "正在上传…": "Uploading…",
-  "正在校验并解包…": "Verifying and unpacking…",
+  "正在校验文件…": "Verifying files…",
   "正在提交文件…": "Committing files…",
   "正在停止上传并恢复终端…": "Stopping upload and restoring terminal…",
   "接收状态未确定，请关闭此会话后重新打开。": "Receiver status is unknown. Close this session and open it again.",
@@ -642,6 +642,7 @@
   "速度": "Speed",
   "剩余大小": "Remaining size",
   "已用时间": "Elapsed",
+  "仅统计数据传输阶段，不含扫描、校验和提交耗时。": "Counts data transfer only, excluding scanning, verification and commit.",
   "预计剩余时间": "Estimated remaining",
   "后台传输": "Continue in background",
   "拖放到的 Windows 文件夹": "Windows folder selected by drag and drop",
@@ -718,7 +719,8 @@
   "服务器缺少上传所需的 GNU 基础命令或参数，未安装额外软件。": "The server lacks GNU commands or options required for upload. No additional software was installed.",
   "当前 Shell 用户不能在当前目录创建上传临时目录，请检查权限和磁盘空间。": "The current shell user cannot create an upload temporary directory here. Check permissions and disk space.",
   "目标存在同名文件、文件夹或链接，上传已停止，未覆盖已有内容。": "A file, folder or link with the same name already exists. Upload stopped without overwriting anything.",
-  "远端归档校验失败，未提交本次文件。": "Remote archive verification failed. No files from this upload were committed.",
+  "远端文件校验失败，未提交本次文件。": "Remote file verification failed. No files from this upload were committed.",
+  "远端无法保留文件修改时间，未提交本次文件。": "Failed to preserve the file modification time remotely. No files from this upload were committed.",
   "远端解包失败，请检查磁盘空间及目录权限。": "Remote unpacking failed. Check disk space and directory permissions.",
   "远端接收失败或超时，上传已停止。": "Remote receiving failed or timed out. Upload stopped.",
   "远端解码失败，上传已停止。": "Remote decoding failed. Upload stopped.",
@@ -744,6 +746,7 @@
   "等待上传接收端响应超时。": "Timed out waiting for the upload receiver.",
   "无法确认远端接收进程已结束，请关闭此会话后重新打开。": "Cannot confirm that the remote receiver has ended. Close this session and open it again.",
   "本地上传归档信息无效。": "Invalid local upload archive metadata.",
+  "本地上传文件读取失败，请重新选择文件。": "Failed to read the local upload file. Select the files again.",
   "上传已取消。": "Upload cancelled.",
   "本地归档读取长度无效，上传已停止。": "Invalid local archive read length. Upload stopped.",
   "上传完成：": "Upload complete: ",
@@ -1130,5 +1133,6 @@
   "文件传输预授权": "File transfer preapproval",
   "允许插件指定本机文件路径并直接准备、启动上传、下载或中转，无需逐次确认；仍受文件读写权限与远程目录范围限制": "Allow the plugin to specify local file paths and prepare and start uploads, downloads or relays without individual confirmations. File read/write permissions and remote directory scopes still apply.",
   "帮我审批的受限命令模板": "Guarded templates for assisted approval",
-  "需独立授予变更预授权；仅在帮我审批模式匹配完整模板时自动执行，其他命令仍需确认。": "Requires an independent change grant. Only exact template matches run automatically in Assist mode; other commands still require confirmation."
+  "需独立授予变更预授权；仅在帮我审批模式匹配完整模板时自动执行，其他命令仍需确认。": "Requires an independent change grant. Only exact template matches run automatically in Assist mode; other commands still require confirmation.",
+  "远端二进制接收长度或帧边界异常，已关闭此会话以隔离未确认的数据": "The remote binary receive length or frame boundary is invalid. This session was closed to isolate unconfirmed data."
 }

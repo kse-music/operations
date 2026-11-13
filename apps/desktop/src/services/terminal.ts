@@ -7,7 +7,8 @@ import type {
   TerminalSize,
   TerminalUploadSelection,
   TerminalDropSelection,
-  TerminalDropPrepared,
+  TerminalDropProgress,
+  TerminalDropResult,
 } from '../types/terminal';
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
@@ -18,8 +19,17 @@ export const terminalApi = {
   },
   claimDrop: (id: string, grant: string): Promise<TerminalDropSelection> =>
     invoke('terminal_upload_claim_drop', { id, grant }),
-  prepareDrop: (id: string, token: string): Promise<TerminalDropPrepared> =>
-    invoke('terminal_upload_prepare_drop', { id, token, confirmed: true }),
+  runDrop: (
+    id: string,
+    token: string,
+    receive: (progress: TerminalDropProgress) => void,
+  ): Promise<TerminalDropResult> => {
+    const events = new Channel<TerminalDropProgress>();
+    events.onmessage = receive;
+    return invoke('terminal_upload_run_drop', { id, token, confirmed: true, events });
+  },
+  cancelDrop: (id: string, token: string): Promise<void> =>
+    invoke('terminal_upload_cancel_drop', { id, token }),
   uploadPick: (id: string): Promise<TerminalUploadSelection> => {
     ensureDesktop();
     return invoke('terminal_upload_pick', { id });
@@ -28,6 +38,17 @@ export const terminalApi = {
     invoke('terminal_upload_read', { id, token, index, offset }),
   uploadRelease: (id: string, token: string): Promise<void> =>
     invoke('terminal_upload_release', { id, token }),
+  zmodemRead: async (
+    id: string,
+    token: string,
+    index: number,
+    offset: number,
+  ): Promise<Uint8Array> =>
+    new Uint8Array(await invoke<ArrayBuffer>('terminal_zmodem_read', { id, token, index, offset })),
+  zmodemWrite: (id: string, token: string, data: Uint8Array): Promise<void> =>
+    invoke('terminal_zmodem_write', data, {
+      headers: { 'x-serverdeck-session': id, 'x-serverdeck-token': token },
+    }),
   openLocal(
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,

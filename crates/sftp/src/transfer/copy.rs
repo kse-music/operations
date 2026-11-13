@@ -524,6 +524,7 @@ pub(super) async fn run(
     let mut digest = Sha256::new();
     let mut checked = Instant::now();
     let mut failure = None;
+    let data = task.start_data()?;
     loop {
         if failure.is_none() {
             failure = task.check_cancel().err();
@@ -580,6 +581,7 @@ pub(super) async fn run(
         }
     }
     if failure.is_none() {
+        data.verifying()?;
         failure = match &mut source {
             Reader::Local(file) => match file.read(&mut [0; 1]).await {
                 Ok(0) => None,
@@ -588,6 +590,8 @@ pub(super) async fn run(
             },
             Reader::Remote(remote, input) => remote.verify_eof(input, plan.bytes).await.err(),
         };
+    } else {
+        drop(data);
     }
     let input_close = if let Reader::Remote(remote, input) = &source {
         remote
@@ -612,7 +616,6 @@ pub(super) async fn run(
     input_close?;
     output_close?;
     source.verify(plan).await?;
-    task.state("verifying");
     let checksum = format!("{:x}", digest.finalize());
     let target_hash = target.hash_cancellable(&temp, Some(&task.cancel)).await;
     task.check_cancel()?;
@@ -622,6 +625,13 @@ pub(super) async fn run(
     if let Some(attrs) = &plan.target_before {
         target.preserve(&temp, attrs).await?;
     }
+    let modified = match &plan.source_before {
+        Snapshot::Local(metadata) => local::modified_seconds(metadata)?,
+        Snapshot::Remote(attrs) => attrs
+            .mtime
+            .ok_or_else(|| fail("SFTP_ATTRIBUTES", "源文件缺少修改时间，未提交目标"))?,
+    };
+    target.preserve_modified(&temp, modified).await?;
     let host = engine.session_info(&plan.session)?.host_id;
     let mutation = locked(mutations)?.entry(host).or_default().clone();
     let _mutation = mutation.lock().await;

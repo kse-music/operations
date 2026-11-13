@@ -1,10 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { Buffer } from 'node:buffer';
 import Zmodem from 'zmodem.js';
 import { ZmodemUpload, type UploadProgress } from './zmodem';
 import type { TerminalUploadSelection } from '../types/terminal';
 
 interface Offer {
-  get_details(): { name: string; size: number };
+  get_details(): { name: string; size: number; mtime: Date };
   on(event: 'input', callback: (data: number[]) => void): void;
   accept(): Promise<void>;
   skip(): void;
@@ -29,9 +30,9 @@ function harness(
   const peer = new Protocol.Session.Receive();
   const selection: TerminalUploadSelection = {
     token: 'selection',
-    files: files.map((file) => ({ name: file.name, size: file.data.length })),
+    files: files.map((file) => ({ name: file.name, size: file.data.length, modified: 1645594860 })),
   };
-  const received: { name: string; data: number[] }[] = [];
+  const received: { name: string; modified: number; data: number[] }[] = [];
   const output: number[] = [];
   const failed = vi.fn(),
     notice = vi.fn(),
@@ -41,8 +42,10 @@ function harness(
     Array.from(files[index]!.data.slice(offset, offset + 8192)),
   );
   let progress: UploadProgress | null = null;
+  const snapshots: UploadProgress[] = [];
   const send = vi.fn(async (data: Uint8Array) => {
-    peer.consume(Array.from(data));
+    for (let offset = 0; offset < data.length; offset += 16384)
+      peer.consume(Array.from(data.subarray(offset, offset + 16384)));
   });
   const upload = new ZmodemUpload({
     write: (data) => output.push(...data),
@@ -54,12 +57,18 @@ function harness(
     notice,
     progress: (value) => {
       progress = value;
+      if (value) snapshots.push(value);
     },
   });
   instances.push(upload);
   peer.set_sender((data) => queueMicrotask(() => upload.consume(Uint8Array.from(data))));
   peer.on('offer', (offer) => {
-    const item = { name: offer.get_details().name, data: [] as number[] };
+    const details = offer.get_details();
+    const item = {
+      name: details.name,
+      modified: details.mtime.getTime() / 1000,
+      data: [] as number[],
+    };
     received.push(item);
     offer.on('input', (data) => item.data.push(...data));
     void offer.accept();
@@ -77,6 +86,7 @@ function harness(
     send,
     selection,
     files,
+    snapshots,
     progress: () => progress,
   };
 }
@@ -94,9 +104,134 @@ it('uploads binary, Unicode filenames and empty files through the real protocol 
     h.files.map((file) => [file.name, file.data]),
   );
   expect(h.release).toHaveBeenCalledExactlyOnceWith('selection');
+  expect(h.received.map((file) => file.modified)).toEqual([1645594860, 1645594860]);
   expect(h.failed).not.toHaveBeenCalled();
   expect(h.progress()).toBeNull();
   expect(h.upload.busy).toBe(false);
+});
+
+it('transfers 64 KiB reads losslessly with bounded coalesced writes and throttled progress', async () => {
+  vi.spyOn(performance, 'now').mockReturnValue(1000);
+  const h = harness([
+    { name: 'bulk.bin', data: Uint8Array.from({ length: 1024 * 1024 }, (_, i) => i % 256) },
+  ]);
+  h.read.mockImplementation(async (_token, index, offset) => [
+    ...h.files[index]!.data.slice(offset, offset + 65536),
+  ]);
+  h.peer.start();
+  await vi.waitFor(() => expect(h.release).toHaveBeenCalledOnce());
+  expect(h.read).toHaveBeenCalledTimes(16);
+  expect(Buffer.from(h.received[0]!.data).equals(Buffer.from(h.files[0]!.data))).toBe(true);
+  expect(h.send.mock.calls.length).toBeLessThan(24);
+  expect(h.send.mock.calls.every(([data]) => data.length <= 256 * 1024)).toBe(true);
+  expect(h.snapshots.filter((progress) => progress.phase === 'uploading').length).toBeLessThan(16);
+  expect(h.failed).not.toHaveBeenCalled();
+});
+
+it('prefetches at most one block and waits for the active batch and cancel frame before releasing', async () => {
+  const h = harness([{ name: 'cancel.bin', data: new Uint8Array(4 * 65536).fill(7) }]);
+  h.read.mockImplementation(async (_token, index, offset) => [
+    ...h.files[index]!.data.slice(offset, offset + 65536),
+  ]);
+  let accept!: () => void;
+  h.send.mockImplementation(async (data) => {
+    for (let offset = 0; offset < data.length; offset += 16384)
+      h.peer.consume([...data.subarray(offset, offset + 16384)]);
+    if (data.length > 65536)
+      await new Promise<void>((resolve) => {
+        accept = resolve;
+      });
+  });
+  h.peer.start();
+  await vi.waitFor(() => expect(h.read).toHaveBeenCalledTimes(2));
+  h.upload.cancel();
+  await Promise.resolve();
+  expect(h.upload.busy).toBe(true);
+  expect(h.release).not.toHaveBeenCalled();
+  expect(h.read).toHaveBeenCalledTimes(2);
+  accept();
+  await vi.waitFor(() => expect(h.release).toHaveBeenCalledOnce());
+  expect(h.send.mock.calls.at(-1)![0].slice(0, 5)).toEqual(Uint8Array.of(24, 24, 24, 24, 24));
+  expect(h.upload.busy).toBe(false);
+});
+
+it('reports a failed prefetch and aborts without sending a following file block', async () => {
+  const h = harness([{ name: 'changed.bin', data: new Uint8Array(2 * 65536).fill(7) }]);
+  h.read
+    .mockResolvedValueOnce([...h.files[0]!.data.slice(0, 65536)])
+    .mockRejectedValueOnce(new Error('prefetched file changed'));
+  h.peer.start();
+  await vi.waitFor(() => expect(h.release).toHaveBeenCalledOnce());
+  expect(h.failed).toHaveBeenCalledWith(
+    expect.objectContaining({ message: 'prefetched file changed' }),
+  );
+  expect(h.received[0]!.data).toHaveLength(65536);
+  expect(h.notice).not.toHaveBeenCalled();
+});
+
+it('reports current file timing and speed without counting time spent choosing files', async () => {
+  let now = 1000;
+  vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const h = harness();
+  h.pick.mockImplementation(async () => {
+    now += 10000;
+    return h.selection;
+  });
+  h.read.mockImplementation(async (_token, index, offset) => {
+    now += 1000;
+    return [...h.files[index]!.data.slice(offset, offset + 8192)];
+  });
+  let release!: () => void;
+  h.release.mockReturnValue(
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }),
+  );
+  h.peer.start();
+  await vi.waitFor(() => expect(h.release).toHaveBeenCalledOnce());
+  expect(h.snapshots).toContainEqual(
+    expect.objectContaining({
+      phase: 'uploading',
+      sent: 8192,
+      elapsedSeconds: 2,
+      bytesPerSecond: 4096,
+    }),
+  );
+  expect(h.progress()).toEqual({
+    phase: 'finishing',
+    files: ['中文 空格.bin'],
+    name: '中文 空格.bin',
+    sent: 20000,
+    size: 20000,
+    elapsedSeconds: 3,
+    bytesPerSecond: 20000 / 3,
+  });
+  release();
+  await vi.waitFor(() => expect(h.progress()).toBeNull());
+  expect(h.failed).not.toHaveBeenCalled();
+});
+
+it('refreshes stalled transfer timing and stops updates when the session is disposed', async () => {
+  vi.useFakeTimers();
+  const h = harness();
+  h.read.mockReturnValue(new Promise(() => {}));
+  h.peer.start();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.read).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(h.progress()).toMatchObject({
+    phase: 'uploading',
+    sent: 0,
+    elapsedSeconds: 2,
+    bytesPerSecond: 0,
+  });
+  h.upload.dispose();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.progress()).toBeNull();
+  expect(h.release).toHaveBeenCalledOnce();
+  const count = h.snapshots.length;
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(h.snapshots).toHaveLength(count);
 });
 
 it('recognizes every split point without displaying the handshake or losing surrounding terminal text', async () => {

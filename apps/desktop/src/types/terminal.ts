@@ -9,17 +9,26 @@ export interface TerminalScreen extends TerminalSize {
 }
 export interface TerminalUploadSelection {
   token: string;
-  files: { name: string; size: number }[];
+  files: { name: string; size: number; modified: number }[];
 }
 export interface TerminalDropSelection {
   token: string;
   names: string[];
 }
-export interface TerminalDropPrepared {
+export interface TerminalDropProgress {
+  phase: 'preparing' | 'starting' | 'uploading' | 'verifying' | 'committing' | 'cancelling';
+  sent: number;
   size: number;
-  sha256: string;
-  command: string;
-  nonce: string;
+  bytesPerSecond: number;
+  elapsedSeconds: number;
+  uid: string | null;
+  username: string | null;
+  directory: string | null;
+}
+export interface TerminalDropResult {
+  code: string | null;
+  committed: number;
+  recovery: string | null;
 }
 export type TerminalFileDrag =
   | { type: 'leave' }

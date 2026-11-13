@@ -185,7 +185,9 @@ const actionLabels = {
             }}</span
           ></template
         >
-        <template #actions="{ row, busy, inspect, execute, openLog, openShell, openExport }">
+        <template
+          #actions="{ row, busy, inspect, execute, openLog, openShell, openExport, openTransfer }"
+        >
           <template v-if="section === 'compose'">
             <button
               class="text-button"
@@ -314,6 +316,9 @@ const actionLabels = {
             </button>
             <button class="text-button" :disabled="busy" @click="openExport(row)">
               {{ tr('导出') }}
+            </button>
+            <button class="text-button" :disabled="busy" @click="openTransfer(row)">
+              {{ tr('远程传输') }}
             </button>
           </template>
         </template>

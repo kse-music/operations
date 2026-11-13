@@ -5,7 +5,7 @@ import TerminalPane from './TerminalPane.vue';
 import { terminalApi } from '../services/terminal';
 import { useTerminalsStore } from '../stores/terminals';
 import { hostInput } from '../types/hosts';
-import type { TerminalEvent, TerminalFileDrag } from '../types/terminal';
+import type { TerminalEvent, TerminalFileDrag, TerminalDropResult } from '../types/terminal';
 
 const native = vi.hoisted(() => ({
   listeners: [] as ((event: { payload: TerminalFileDrag }) => void)[],
@@ -76,30 +76,17 @@ vi.mock('@xterm/addon-fit', () => ({
 }));
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {} }));
 
-const nonce = 'a'.repeat(32);
 const active = ref(true);
 let app: App, pinia: Pinia, root: HTMLDivElement;
 let store: ReturnType<typeof useTerminalsStore>;
 const receivers = new Map<string, (event: TerminalEvent) => void>();
 const showModal = HTMLDialogElement.prototype.showModal;
-let sequence = 0;
-function receive(...frames: string[]): void {
-  receivers.get('session-1')!({
-    type: 'data',
-    sequence: ++sequence,
-    data: Array.from(
-      new TextEncoder().encode(
-        frames.map((frame) => '\x1eSDU:' + nonce + ':' + frame + '\x1f').join(''),
-      ),
-    ),
-  });
-}
+let complete!: (result: TerminalDropResult) => void;
 beforeEach(async () => {
   vi.clearAllMocks();
   native.listeners = [];
   xterm.instances = [];
   receivers.clear();
-  sequence = 0;
   active.value = true;
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
@@ -133,22 +120,28 @@ beforeEach(async () => {
     callback({ type: 'state', state: 'connected', code: null, message: null });
     return { id, transportId: 'transport', hostId: 'host', routeHostIds: ['host'] };
   });
-  vi.spyOn(terminalApi, 'input').mockImplementation(async (id, data) => {
-    if (id !== 'session-1') return;
-    if (new TextDecoder().decode(data) === 'start\r')
-      receive('READY:0:' + btoa('root') + ':' + btoa('/root/current\n'));
-    else if (data.length === 1 && data[0] === 3) receive('ERROR:CANCELLED:0', 'RETURN');
-  });
+  vi.spyOn(terminalApi, 'input').mockResolvedValue();
   vi.spyOn(terminalApi, 'ack').mockResolvedValue();
   vi.spyOn(terminalApi, 'close').mockResolvedValue();
   vi.spyOn(terminalApi, 'claimDrop').mockResolvedValue({ token: 'grant', names: ['file.bin'] });
-  vi.spyOn(terminalApi, 'prepareDrop').mockResolvedValue({
-    nonce,
-    sha256: 'a'.repeat(64),
-    command: 'start\r',
-    size: 10,
+  vi.spyOn(terminalApi, 'runDrop').mockImplementation((_id, _token, progress) => {
+    progress({
+      phase: 'uploading',
+      size: 10,
+      sent: 0,
+      bytesPerSecond: 0,
+      elapsedSeconds: 0,
+      uid: '0',
+      username: 'root',
+      directory: '/root/current',
+    });
+    return new Promise((resolve) => {
+      complete = resolve;
+    });
   });
-  vi.spyOn(terminalApi, 'uploadRead').mockResolvedValue(Array(10).fill(7));
+  vi.spyOn(terminalApi, 'cancelDrop').mockImplementation(async () => {
+    complete({ code: 'CANCELLED', committed: 0, recovery: null });
+  });
   vi.spyOn(terminalApi, 'uploadRelease').mockResolvedValue();
   root = document.createElement('div');
   document.body.append(root);
@@ -200,12 +193,12 @@ async function upload(): Promise<void> {
   ) as HTMLButtonElement;
   confirm.focus();
   confirm.click();
-  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
+  await vi.waitFor(() => expect(terminalApi.runDrop).toHaveBeenCalledOnce());
   expect(document.activeElement).not.toBe(xterm.instances[1]!.textarea);
   xterm.focus.mockClear();
 }
 function finish(): void {
-  receive('ACK:0', 'VERIFYING', 'COMMITTING', 'DONE:1', 'RETURN');
+  complete({ code: null, committed: 1, recovery: null });
 }
 async function closed(): Promise<void> {
   await vi.waitFor(() =>

@@ -11,6 +11,7 @@ mod product_commands;
 pub mod storage_commands;
 mod terminal_upload_commands;
 mod window_state;
+mod zmodem_commands;
 
 use std::sync::{
     Arc,
@@ -258,9 +259,12 @@ pub fn command_handler<R: tauri::Runtime>()
         commands::terminal_open,
         terminal_upload_commands::terminal_upload_pick,
         terminal_upload_commands::terminal_upload_claim_drop,
-        terminal_upload_commands::terminal_upload_prepare_drop,
+        terminal_upload_commands::terminal_upload_run_drop,
+        terminal_upload_commands::terminal_upload_cancel_drop,
         terminal_upload_commands::terminal_upload_read,
         terminal_upload_commands::terminal_upload_release,
+        zmodem_commands::terminal_zmodem_read,
+        zmodem_commands::terminal_zmodem_write,
         commands::terminal_local_open,
         commands::terminal_local_open_elevated,
         browser_commands::terminal_open_link,

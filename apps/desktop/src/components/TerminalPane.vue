@@ -30,6 +30,7 @@ import { ZmodemUpload, type UploadProgress } from '../services/zmodem';
 import { useApplicationStore } from '../stores/application';
 import Modal from './Modal.vue';
 import TerminalDropUpload from './TerminalDropUpload.vue';
+import TerminalZmodemUpload from './TerminalZmodemUpload.vue';
 import '@xterm/xterm/css/xterm.css';
 
 const props = defineProps<{ tab: TerminalPaneModel; active: boolean; standalone?: boolean }>();
@@ -195,7 +196,7 @@ function activateDropTarget(id: string): void {
   store.focused = props.tab.key;
   focusTerminal();
 }
-async function restoreDropFocus(id: string): Promise<void> {
+async function restoreUploadFocus(id: string): Promise<void> {
   const attempt = generation;
   await nextTick();
   if (
@@ -324,17 +325,26 @@ async function connect(): Promise<void> {
     const receiver = props.tab.host
       ? new ZmodemUpload({
           write: (data) => terminal.write(data),
-          send: async (data) => {
-            await ready();
+          send: async (data, token) => {
+            const id = await ready();
+            if (token) {
+              await inputQueue.flush();
+              await terminalApi.zmodemWrite(id, token, data);
+              return;
+            }
             if (!inputQueue.enqueue(data)) throw new Error(tr('ZMODEM 输入队列已满，上传已停止。'));
             await inputQueue.flush();
           },
           pick: async () => terminalApi.uploadPick(await ready()),
           read: async (token, index, offset) =>
-            terminalApi.uploadRead(await ready(), token, index, offset),
+            terminalApi.zmodemRead(await ready(), token, index, offset),
           release: async (token) => terminalApi.uploadRelease((await opening).id, token),
           progress: (value) => {
-            if (!disposed && attempt === generation) uploadProgress.value = value;
+            if (!disposed && attempt === generation) {
+              const hadFiles = !!uploadProgress.value?.files.length;
+              uploadProgress.value = value;
+              if (!value && hadFiles) void restoreUploadFocus(props.tab.sessionId ?? '');
+            }
           },
           failed: (cause) => {
             if (!disposed && attempt === generation) message.value = errorMessage(cause);
@@ -350,10 +360,9 @@ async function connect(): Promise<void> {
       if (disposed || attempt !== generation) return;
       if (event.type === 'data') {
         const data = new Uint8Array(event.data);
-        const ordinary = dropUpload.value?.consume(data) ?? data;
-        if (dropUpload.value?.busy) terminal.write(ordinary);
-        else if (receiver) receiver.consume(ordinary);
-        else terminal.write(ordinary);
+        if (dropUpload.value?.busy) terminal.write(data);
+        else if (receiver) receiver.consume(data);
+        else terminal.write(data);
         terminal.write(new Uint8Array(), () => {
           void opening
             .then((value) => {
@@ -597,17 +606,6 @@ function nativePaste(event: ClipboardEvent): void {
     requestPaste(text);
   }
 }
-async function sendDrop(id: string, data: Uint8Array): Promise<void> {
-  if (disposed || session?.id !== id || props.tab.state !== 'connected')
-    throw new Error(tr('终端会话已改变，上传已停止。'));
-  if (!inputQueue.enqueue(data)) throw new Error(tr('终端输入队列已满，上传已停止。'));
-  await inputQueue.flush();
-}
-async function interruptDrop(id: string): Promise<void> {
-  if (disposed || session?.id !== id) throw new Error(tr('终端会话已结束。'));
-  inputQueue.reset(id);
-  await sendDrop(id, Uint8Array.of(3));
-}
 function terminalInputOptions() {
   const connected = props.tab.state === 'connected';
   return {
@@ -762,6 +760,12 @@ watch(
   },
   { deep: true },
 );
+watch(
+  () => dropUpload.value?.busy,
+  (busy) => {
+    if (busy) inputQueue.reset(session?.id);
+  },
+);
 watch(trust, (value) => {
   if (value) menu.value = null;
 });
@@ -869,28 +873,16 @@ defineExpose({
       :enabled="dropEnabled"
       :can-receive="canReceiveDrop"
       :area="container"
-      :send="sendDrop"
-      :interrupt="interruptDrop"
       @error="message = errorMessage($event)"
       @activate="activateDropTarget"
-      @closed="restoreDropFocus"
+      @closed="restoreUploadFocus"
     />
-    <div v-if="uploadProgress" class="terminal-upload" role="status" aria-live="polite">
-      <span v-if="uploadProgress.phase === 'choosing'">{{
-        tr('ZMODEM：请选择要上传的本地文件…')
-      }}</span>
-      <template v-else-if="uploadProgress.phase === 'uploading'">
-        <span>{{ uploadProgress.name }}</span>
-        <progress
-          :value="uploadProgress.sent"
-          :max="uploadProgress.size || 1"
-          :aria-label="tr('ZMODEM 上传进度')"
-        ></progress>
-        <span>{{ uploadProgress.sent }} / {{ uploadProgress.size }}{{ tr(' 字节') }}</span>
-      </template>
-      <span v-else>{{ tr('ZMODEM：等待远端确认完成…') }}</span>
-      <button class="button" @click="upload?.cancel()">{{ tr('取消上传') }}</button>
-    </div>
+    <TerminalZmodemUpload
+      v-if="uploadProgress"
+      :target="name"
+      :progress="uploadProgress"
+      @cancel="upload?.cancel()"
+    />
     <Modal
       v-if="trust && active && (standalone || store.focused === tab.key)"
       :title="tr('确认 SSH 主机指纹')"

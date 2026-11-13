@@ -91,7 +91,7 @@ function displayedDestination(task: TransferInfo): string {
             <dt>{{ tr('总大小') }}</dt>
             <dd>{{ bytes(task.totalBytes) }}</dd>
           </div>
-          <div>
+          <div :title="tr('仅统计数据传输阶段，不含扫描、校验和提交耗时。')">
             <dt>{{ tr('速度') }}</dt>
             <dd>{{ bytes(task.bytesPerSecond) }}/s</dd>
           </div>
@@ -99,7 +99,7 @@ function displayedDestination(task: TransferInfo): string {
             <dt>{{ tr('剩余大小') }}</dt>
             <dd>{{ bytes(task.remainingBytes) }}</dd>
           </div>
-          <div>
+          <div :title="tr('仅统计数据传输阶段，不含扫描、校验和提交耗时。')">
             <dt>{{ tr('已用时间') }}</dt>
             <dd data-time="elapsed">{{ transferDuration(task.elapsedSeconds) }}</dd>
           </div>

@@ -8,6 +8,7 @@ import pathlib
 import pwd
 import pty
 import selectors
+import shlex
 import shutil
 import subprocess
 import sys
@@ -18,11 +19,13 @@ import time
 
 def main():
     scenario = sys.argv[1]
+    shell_path = sys.argv[2] if len(sys.argv) > 2 else "/bin/bash"
     root = pathlib.Path(tempfile.mkdtemp(prefix="serverdeck-drop-"))
     destination = root / "destination"
     destination.mkdir()
     os.chmod(root, 0o755)
     account = pwd.getpwnam("nobody") if scenario != "sudo-root" else pwd.getpwuid(0)
+    switched = scenario in ("su-user", "sudo-user")
     if scenario == "unnamed":
         account = pwd.struct_passwd(("", "", 2147483646, account.pw_gid, "", "/", "/bin/bash"))
         try:
@@ -46,12 +49,21 @@ def main():
     def setup():
         os.setsid()
         fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        if scenario == "private":
+            os.umask(0o077)
         os.setgroups([])
-        os.setgid(account.pw_gid)
-        os.setuid(account.pw_uid)
+        initial = pwd.getpwuid(0) if switched else account
+        os.setgid(initial.pw_gid)
+        os.setuid(initial.pw_uid)
 
     environment = dict(os.environ, HISTFILE="/dev/null", PS1="SD_TEST_PROMPT> ", PS2="> ")
-    shell = ["sudo", "-i"] if scenario == "sudo-root" else ["/bin/bash", "--noprofile", "--norc", "-i"]
+    shell = [shell_path, "--noprofile", "--norc", "-i"]
+    if scenario == "sudo-root":
+        shell = ["sudo", "-i", *shell]
+    if scenario == "su-user":
+        shell = ["su", "-s", shell_path, "nobody", "-c", "exec " + shlex.quote(shell_path) + " --noprofile --norc -i"]
+    elif scenario == "sudo-user":
+        shell = ["sudo", "-u", "nobody", *shell]
     child = subprocess.Popen(
         shell, cwd=destination,
         stdin=slave, stdout=slave, stderr=slave, preexec_fn=setup, env=environment,
@@ -59,9 +71,9 @@ def main():
     selector = selectors.DefaultSelector()
     selector.register(master, selectors.EVENT_READ)
     selector.register(sys.stdin.fileno(), selectors.EVENT_READ)
-    deadline = time.monotonic() + 90
+    deadline = time.monotonic() + 180
     try:
-        if scenario == "sudo-root":
+        if scenario == "sudo-root" or switched:
             command = ("cd " + str(destination) + "; printf '\\036SD_PEER_READY\\037'\n").encode()
             os.write(master, command)
         while time.monotonic() < deadline:
@@ -93,7 +105,7 @@ def main():
                 entries = {}
                 for item in destination.rglob("*"):
                     relative = str(item.relative_to(destination))
-                    info = {"uid": item.lstat().st_uid, "mode": item.lstat().st_mode & 0o777}
+                    info = {"uid": item.lstat().st_uid, "mode": item.lstat().st_mode & 0o777, "modified": int(item.lstat().st_mtime)}
                     if item.is_symlink():
                         info["link"] = os.readlink(item)
                     elif item.is_file():

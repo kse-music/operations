@@ -1,9 +1,9 @@
 use super::*;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serverdeck_core::{
     files::TREE_LIMIT,
     terminal::{TerminalDropGrant, TerminalDropPrepared, TerminalDropSelection},
 };
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     io::{self, Write},
@@ -11,7 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-const BLOCK: usize = 65536;
 const GRANT_TTL: Duration = Duration::from_secs(120);
 #[derive(Default)]
 pub(super) struct Grants(HashMap<String, (Instant, Vec<PathBuf>)>);
@@ -85,7 +84,7 @@ fn safe_path(path: &Path) -> Result<std::fs::Metadata, Error> {
     std::fs::symlink_metadata(path).map_err(io_error)
 }
 fn check(released: &tokio::sync::watch::Receiver<()>) -> Result<(), Error> {
-    if released.has_changed().is_err() {
+    if !matches!(released.has_changed(), Ok(false)) {
         Err(Error::NotFound)
     } else {
         Ok(())
@@ -97,7 +96,7 @@ struct CancellableReader<'a> {
 }
 impl Read for CancellableReader<'_> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if self.released.has_changed().is_err() {
+        if !matches!(self.released.has_changed(), Ok(false)) {
             return Err(io::Error::other("upload cancelled"));
         }
         self.file.read(buffer)
@@ -122,7 +121,7 @@ fn append(
     let mut header = tar::Header::new_gnu();
     header.set_uid(0);
     header.set_gid(0);
-    header.set_mtime(0);
+    header.set_mtime(modified_seconds(before.modified().map_err(io_error)?)?);
     if before.is_dir() {
         header.set_entry_type(tar::EntryType::Directory);
         header.set_size(0);
@@ -181,10 +180,10 @@ fn append(
     }
     check(released)
 }
-fn archive(
+pub(super) fn archive(
     paths: Vec<PathBuf>,
     released: &tokio::sync::watch::Receiver<()>,
-) -> Result<(tempfile::NamedTempFile, u64, String), Error> {
+) -> Result<(tempfile::NamedTempFile, u64), Error> {
     let mut temporary = tempfile::NamedTempFile::new().map_err(io_error)?;
     {
         let mut builder = tar::Builder::new(temporary.as_file_mut());
@@ -208,28 +207,89 @@ fn archive(
         builder.finish().map_err(io_error)?;
     }
     temporary.flush().map_err(io_error)?;
-    temporary.seek(SeekFrom::Start(0)).map_err(io_error)?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0; BLOCK];
-    loop {
-        check(released)?;
-        let n = temporary.read(&mut buffer).map_err(io_error)?;
-        if n == 0 {
-            break;
-        }
-        digest.update(&buffer[..n]);
-    }
+    check(released)?;
     let size = temporary.as_file().metadata().map_err(io_error)?.len();
     if size > 9_007_199_254_740_991 {
         return Err(Error::Validation("上传归档超过安全计数范围"));
     }
-    Ok((temporary, size, format!("{:x}", digest.finalize())))
+    Ok((temporary, size))
 }
-fn command(nonce: &str, size: u64, digest: &str) -> String {
+pub(super) struct Source {
+    pub(super) selected: SelectedFile,
+    pub(super) temporary: Option<tempfile::NamedTempFile>,
+    pub(super) filename: Option<String>,
+}
+
+pub(super) fn prepare_source(
+    paths: Vec<PathBuf>,
+    released: &tokio::sync::watch::Receiver<()>,
+) -> Result<Source, Error> {
+    check(released)?;
+    if let [path] = paths.as_slice() {
+        let before = safe_path(path)?;
+        if before.is_file() {
+            let filename = name(path)?;
+            let file = File::open(path).map_err(io_error)?;
+            let opened = file.metadata().map_err(io_error)?;
+            let after = safe_path(path)?;
+            let modified = opened.modified().map_err(io_error)?;
+            if !opened.is_file()
+                || !after.is_file()
+                || before.len() != opened.len()
+                || after.len() != opened.len()
+                || before.modified().map_err(io_error)? != modified
+                || after.modified().map_err(io_error)? != modified
+            {
+                return Err(Error::Validation("上传源已变化，请重新拖放"));
+            }
+            if opened.len() > 9_007_199_254_740_991 {
+                return Err(Error::Validation("上传文件超过安全计数范围"));
+            }
+            check(released)?;
+            return Ok(Source {
+                selected: SelectedFile {
+                    file,
+                    size: opened.len(),
+                    modified,
+                    chunk: super::binary::BLOCK,
+                },
+                temporary: None,
+                filename: Some(filename),
+            });
+        }
+    }
+    let (temporary, size) = archive(paths, released)?;
+    let file = temporary.reopen().map_err(io_error)?;
+    let modified = file
+        .metadata()
+        .map_err(io_error)?
+        .modified()
+        .map_err(io_error)?;
+    Ok(Source {
+        selected: SelectedFile {
+            file,
+            size,
+            modified,
+            chunk: super::binary::BLOCK,
+        },
+        temporary: Some(temporary),
+        filename: None,
+    })
+}
+
+pub(super) fn command(nonce: &str, size: u64, filename: Option<&str>, modified: u64) -> String {
     let script = include_str!("receiver.sh").replace('\'', "'\\''");
-    // All arguments are generated internally, never local paths or file names.
+    let kind = if filename.is_some() {
+        "file"
+    } else {
+        "archive"
+    };
+    let name = filename
+        .map(|name| STANDARD.encode(name))
+        .unwrap_or_else(|| "-".into());
+    // Names are validated basenames and Base64 encoded; no user text is Shell code.
     format!(
-        "/bin/sh -c '{script}' serverdeck-upload {nonce} {size} {digest}; printf '\\036SDU:{nonce}:RETURN\\037'\r"
+        "/bin/sh -c '{script}' serverdeck-upload {nonce} {size} {kind} {name} {modified}; printf '\\036SDU:{nonce}:RETURN\\037'\r"
     )
 }
 
@@ -298,30 +358,24 @@ impl Application {
         };
         tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            let (temporary, size, sha256) = archive(paths, &released)?;
-            let file = temporary.reopen().map_err(io_error)?;
-            let modified = file
-                .metadata()
-                .map_err(io_error)?
-                .modified()
-                .map_err(io_error)?;
+            let source = prepare_source(paths, &released)?;
+            let size = source.selected.size;
             let nonce = uuid::Uuid::new_v4().simple().to_string();
-            let command = command(&nonce, size, &sha256);
+            let command = command(
+                &nonce,
+                size,
+                source.filename.as_deref(),
+                modified_seconds(source.selected.modified)?,
+            );
             let mut selections = locked(&uploads.0)?;
             let selected = selections
                 .get_mut(&id)
                 .filter(|s| s.token == token)
                 .ok_or(Error::NotFound)?;
-            selected.files = vec![Arc::new(Mutex::new(SelectedFile {
-                file,
-                size,
-                modified,
-                chunk: BLOCK,
-            }))];
-            selected.temporary = Some(temporary);
+            selected.files = vec![Arc::new(Mutex::new(source.selected))];
+            selected.temporary = source.temporary;
             Ok(TerminalDropPrepared {
                 size,
-                sha256,
                 command,
                 nonce,
             })
@@ -334,6 +388,48 @@ impl Application {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_single_file_preparation_keeps_original_handle_without_archive_or_reading_payload() {
+        let qa =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local/qa/terminal-direct-tests");
+        std::fs::create_dir_all(&qa).unwrap();
+        let dir = tempfile::tempdir_in(qa).unwrap();
+        let path = dir.path().join("large.iso");
+        let size = 5 * 1024 * 1024 * 1024 + 17;
+        File::create(&path).unwrap().set_len(size).unwrap();
+        let (_released, receiver) = tokio::sync::watch::channel(());
+        let started = Instant::now();
+        let mut source = prepare_source(vec![path.clone()], &receiver).unwrap();
+        eprintln!("5 GiB direct preparation: {:?}", started.elapsed());
+        assert!(source.temporary.is_none());
+        assert_eq!(source.filename.as_deref(), Some("large.iso"));
+        assert_eq!(source.selected.size, size);
+        assert_eq!(source.selected.file.stream_position().unwrap(), 0);
+        // The retained handle must refer to the original source, not a copy.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(size + 1)
+            .unwrap();
+        assert_eq!(source.selected.file.metadata().unwrap().len(), size + 1);
+    }
+    #[test]
+    fn packing_reader_stops_when_cancellation_changes_the_watch_value() {
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&[1; 1024]).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        let (released, receiver) = tokio::sync::watch::channel(());
+        let mut reader = CancellableReader {
+            file: &mut file,
+            released: &receiver,
+        };
+        let mut buffer = [0; 32];
+        assert_eq!(reader.read(&mut buffer).unwrap(), 32);
+        released.send_replace(());
+        assert!(reader.read(&mut buffer).is_err());
+        assert!(prepare_source(vec![], &receiver).is_err());
+    }
     #[test]
     fn grants_are_one_shot_bounded_and_expire() {
         let mut grants = Grants::default();
@@ -353,9 +449,8 @@ mod tests {
         std::fs::create_dir_all(root.join("empty")).unwrap();
         std::fs::write(root.join(".hidden"), [0, 255, 13, 10]).unwrap();
         let (tx, rx) = tokio::sync::watch::channel(());
-        let (mut file, size, hash) = archive(vec![root], &rx).unwrap();
+        let (mut file, size) = archive(vec![root], &rx).unwrap();
         assert!(size > 0);
-        assert_eq!(hash.len(), 64);
         file.seek(SeekFrom::Start(0)).unwrap();
         let mut archive = tar::Archive::new(file);
         let mut entries = HashMap::new();

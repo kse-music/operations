@@ -4,14 +4,32 @@ import { ensureConnection } from '@serverdeck/plugin-sdk/connections';
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 import { errorMessage } from '@serverdeck/plugin-sdk/services/ipc';
 import type { TransferPreview, TransferState } from '@serverdeck/plugin-sdk/types/platform';
+import type { OpsResponse } from './types';
 import { tr } from './i18n/messages';
 
 export type ImageArchiveRequest =
   | { kind: 'import'; fileName: string; confirmed: boolean }
-  | { kind: 'export'; id: string; reference: string; fileName: string; confirmed: boolean };
+  | { kind: 'export'; id: string; reference: string; fileName: string; confirmed: boolean }
+  | {
+      kind: 'transfer';
+      id: string;
+      reference: string;
+      fileName: string;
+      confirmed: boolean;
+      targetHostId: string;
+      expectedTargetId: string | null;
+      replaceConfirmed: boolean;
+    };
 export interface ArchiveProgress {
   stage:
-    'preparing' | 'uploading' | 'verifying' | 'loading' | 'saving' | 'downloading' | 'finishing';
+    | 'preparing'
+    | 'uploading'
+    | 'transferring'
+    | 'verifying'
+    | 'loading'
+    | 'saving'
+    | 'downloading'
+    | 'finishing';
   transfer?: TransferState;
   output: string;
   remotePath?: string;
@@ -25,6 +43,7 @@ interface ArchiveStream {
 interface StreamEvent {
   type: string;
   state?: string;
+  code?: string;
   message?: string;
   stream?: string;
   dataBase64?: string;
@@ -54,6 +73,28 @@ export function validArchiveName(name: string): boolean {
   );
 }
 
+export async function inspectImageTarget(
+  hostId: string,
+  reference: string,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const check = () => {
+    if (signal.aborted) throw cancelled();
+  };
+  check();
+  await ensureConnection(hostId, true);
+  check();
+  const result = await invoke<OpsResponse>('query', { hostId, request: { kind: 'images' } });
+  check();
+  if (!result.success) throw new Error(result.message || tr('无法读取目标镜像列表。'));
+  const matches = result.records.filter((row) => imageReference(row) === reference);
+  if (!matches.length) return null;
+  const ids = new Set(matches.map((row) => String(row.ID)));
+  if (ids.size !== 1 || !/^sha256:[a-fA-F0-9]{64}$/.test(String(matches[0]!.ID)))
+    throw new Error(tr('目标镜像信息无效，请刷新后重试。'));
+  return String(matches[0]!.ID);
+}
+
 export async function runImageArchive(
   hostId: string,
   request: ImageArchiveRequest,
@@ -62,7 +103,9 @@ export async function runImageArchive(
   update: (value: ArchiveProgress) => void,
 ): Promise<void> {
   let stream: ArchiveStream | undefined, transferId: string | undefined;
+  const streams: { stream: ArchiveStream; hostId: string }[] = [];
   let output = '',
+    contentHash: string | undefined,
     partial = '',
     prepared = false,
     ready = false;
@@ -81,10 +124,10 @@ export async function runImageArchive(
       streamId: stream!.streamId,
     });
     check();
+    let ended: StreamEvent | undefined;
     for (const event of value.events) {
       if (event.type === 'state') {
-        if (['closed', 'failed'].includes(event.state ?? ''))
-          throw new Error(event.message || tr('镜像任务提前结束，未确认成功，请核对实际状态。'));
+        if (['closed', 'failed'].includes(event.state ?? '')) ended = event;
         continue;
       }
       const channel = event.stream ?? 'stdout';
@@ -105,14 +148,35 @@ export async function runImageArchive(
         for (const line of lines) {
           if (line === `SD_ARCHIVE_PREPARED:${stream!.nonce}`) prepared = true;
           else if (line === `SD_ARCHIVE_READY:${stream!.nonce}`) ready = true;
-          else output = (output + line + '\n').slice(-65536);
+          else if (line.startsWith(`SD_ARCHIVE_CONTENT:${stream!.nonce}:`)) {
+            const hash = line.slice(`SD_ARCHIVE_CONTENT:${stream!.nonce}:`.length);
+            if (/^[a-f0-9]{64}$/.test(hash)) contentHash = hash;
+          } else output = (output + line + '\n').slice(-65536);
         }
       } else output = (output + text).slice(-65536);
     }
+    if (ended) {
+      for (const decoder of decoders.values()) output = (output + decoder.decode()).slice(-65536);
+      if (partial) {
+        output = (output + partial).slice(-65536);
+        partial = '';
+      }
+    }
     report();
+    if (ended)
+      throw new Error(
+        ended.code === 'LOG_COMMAND'
+          ? tr('远程镜像命令执行失败，请查看任务输出并核对目标镜像。')
+          : ended.message || tr('镜像任务提前结束，未确认成功，请核对实际状态。'),
+      );
   }
   async function transfer(preview: { id: string }) {
-    const direction = request.kind === 'import' ? 'uploading' : 'downloading';
+    const direction =
+      request.kind === 'transfer'
+        ? 'transferring'
+        : request.kind === 'import'
+          ? 'uploading'
+          : 'downloading';
     transferId = preview.id;
     check();
     let state = await call<TransferState>({ kind: 'transfer_start', id: preview.id });
@@ -151,7 +215,25 @@ export async function runImageArchive(
     check();
     await ensureConnection(hostId, true);
     check();
-    stream = await invoke<ArchiveStream>('image_archive', { hostId, request });
+    if (request.kind === 'transfer') {
+      if (request.targetHostId === hostId) throw new Error(tr('请选择与来源不同的目标主机。'));
+      await ensureConnection(request.targetHostId, true);
+      check();
+    }
+    stream = await invoke<ArchiveStream>('image_archive', {
+      hostId,
+      request:
+        request.kind === 'transfer'
+          ? {
+              kind: 'export',
+              id: request.id,
+              reference: request.reference,
+              fileName: request.fileName,
+              confirmed: request.confirmed,
+            }
+          : request,
+    });
+    streams.push({ stream, hostId });
     check();
     report();
     while (!prepared) {
@@ -183,16 +265,63 @@ export async function runImageArchive(
         await poll();
         if (!ready) await pause();
       }
-      stage = 'downloading';
-      report();
-      const preview = await call<TransferPreview<{ localPath: string }>>({
-        kind: 'transfer_download_prepare',
-        source: { hostId, path: stream.path },
-        destination: localPath,
-      });
+      let preview: { id: string };
+      if (request.kind === 'transfer') {
+        const source = stream;
+        if (!contentHash) throw new Error(tr('未取得来源镜像内容摘要，未开始目标导入。'));
+        check();
+        stream = await invoke<ArchiveStream>('image_archive', {
+          hostId: request.targetHostId,
+          request: {
+            kind: 'receive',
+            id: request.id,
+            reference: request.reference,
+            contentSha256: contentHash,
+            fileName: request.fileName,
+            expectedTargetId: request.expectedTargetId,
+            replaceConfirmed: request.replaceConfirmed,
+            confirmed: request.confirmed,
+          },
+        });
+        streams.push({ stream, hostId: request.targetHostId });
+        check();
+        prepared = ready = false;
+        partial = '';
+        decoders.clear();
+        stage = 'preparing';
+        report();
+        while (!prepared) {
+          await poll();
+          if (!prepared) await pause();
+        }
+        stage = 'transferring';
+        report();
+        preview = await call<TransferPreview>({
+          kind: 'transfer_prepare',
+          source: { kind: 'remote', hostId, path: source.path },
+          destination: { hostId: request.targetHostId, path: stream.directory },
+          overwrite: false,
+        });
+      } else {
+        stage = 'downloading';
+        report();
+        preview = await call<TransferPreview<{ localPath: string }>>({
+          kind: 'transfer_download_prepare',
+          source: { hostId, path: stream.path },
+          destination: localPath,
+        });
+      }
       transferId = preview.id;
       check();
       await transfer(preview);
+      if (request.kind === 'transfer') {
+        stage = 'loading';
+        report();
+        while (!ready) {
+          await poll();
+          if (!ready) await pause();
+        }
+      }
     }
   } catch (cause) {
     failure = cause;
@@ -210,7 +339,7 @@ export async function runImageArchive(
       cleanup.push(errorMessage(cause));
     }
   }
-  if (stream) {
+  for (const { stream } of [...streams].reverse()) {
     try {
       await call({ kind: 'stream_stop', streamId: stream.streamId });
     } catch (cause) {
@@ -221,12 +350,15 @@ export async function runImageArchive(
     const message = [failure ? errorMessage(failure) : '', ...cleanup].filter(Boolean).join('\n');
     throw new Error(
       message +
-        (stream
-          ? tr(
+        streams
+          .map(({ stream, hostId }) =>
+            tr(
               '\n远程暂存位置：{0}。断线或异常关闭后可能需要手动清理；请先核对任务状态。',
-              stream.directory,
-            )
-          : ''),
+              request.kind === 'transfer' ? `${hostId}: ${stream.directory}` : stream.directory,
+            ),
+          )
+          .join(''),
+      { cause: failure },
     );
   }
 }

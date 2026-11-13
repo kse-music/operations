@@ -1,7 +1,9 @@
 use serverdeck_application::Application;
 use serverdeck_core::{
     Error, IpcError,
-    terminal::{TerminalDropPrepared, TerminalDropSelection, TerminalUploadSelection},
+    terminal::{
+        TerminalDropProgress, TerminalDropResult, TerminalDropSelection, TerminalUploadSelection,
+    },
 };
 use tauri_plugin_dialog::DialogExt;
 
@@ -51,15 +53,32 @@ pub async fn terminal_upload_claim_drop(
 }
 
 #[tauri::command]
-pub async fn terminal_upload_prepare_drop(
+pub async fn terminal_upload_run_drop(
     application: tauri::State<'_, Application>,
     id: String,
     token: String,
     confirmed: bool,
-) -> Result<TerminalDropPrepared, IpcError> {
+    events: tauri::ipc::Channel<TerminalDropProgress>,
+) -> Result<TerminalDropResult, IpcError> {
     application
-        .terminal_upload_prepare_drop(id, token, confirmed)
+        .terminal_upload_run_drop(
+            id,
+            token,
+            confirmed,
+            std::sync::Arc::new(move |progress| events.send(progress).is_ok()),
+        )
         .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn terminal_upload_cancel_drop(
+    application: tauri::State<'_, Application>,
+    id: String,
+    token: String,
+) -> Result<(), IpcError> {
+    application
+        .terminal_upload_cancel_drop(&id, &token)
         .map_err(Into::into)
 }
 

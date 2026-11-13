@@ -416,6 +416,102 @@ fn database() -> (tempfile::TempDir, Database) {
 }
 
 #[tokio::test]
+async fn native_binary_transfer_is_exclusive_bounded_and_restores_normal_output_after_return() {
+    let server = Server::start().await;
+    let (_dir, db) = database();
+    server.trust(&db);
+    let host = server.host(&db);
+    let engine = Engine::new(db);
+    let mut shell = open(&engine, host, server.password());
+    state(&mut shell, "connected").await;
+    let nonce = "a".repeat(32);
+    let mut transfer = engine.terminal_transfer(&shell.info.id, &nonce).unwrap();
+    assert!(matches!(
+        engine.input(&shell.info.id, b"forbidden normal input".to_vec()),
+        Err(serverdeck_core::Error::Busy)
+    ));
+    assert!(matches!(
+        engine.terminal_transfer(&shell.info.id, &nonce),
+        Err(serverdeck_core::Error::Busy)
+    ));
+    let bytes: Vec<_> = (0..128 * 1024).map(|n| (n % 256) as u8).collect();
+    transfer.send(&bytes).await.unwrap();
+    let mut received = vec![];
+    while received.len() < bytes.len() {
+        received.extend(transfer.recv().await.unwrap());
+    }
+    assert_eq!(
+        received, bytes,
+        "native route must preserve every binary/control byte"
+    );
+    assert!(
+        shell.events.try_recv().is_err(),
+        "binary data must never enter the WebView or its ACK queue"
+    );
+    let marker = format!("\x1eSDU:{nonce}:RETURN\x1f");
+    transfer.send(&marker.as_bytes()[..13]).await.unwrap();
+    transfer
+        .send(&[&marker.as_bytes()[13..], b"user@host$ "].concat())
+        .await
+        .unwrap();
+    let returned = transfer.recv().await.unwrap();
+    assert_eq!(
+        returned,
+        marker.as_bytes(),
+        "fragmented return marker must reach the native parser intact"
+    );
+    drop(transfer);
+    match event(&mut shell).await {
+        TerminalEvent::Data { sequence, data } => {
+            assert_eq!(data, b"\r\x1b[2Kuser@host$ ");
+            engine.acknowledge(&shell.info.id, sequence).unwrap();
+        }
+        other => panic!("expected restored prompt: {other:?}"),
+    }
+    engine
+        .input(&shell.info.id, b"after recovery".to_vec())
+        .unwrap();
+    match event(&mut shell).await {
+        TerminalEvent::Data { sequence, data } => {
+            assert_eq!(data, b"after recovery");
+            engine.acknowledge(&shell.info.id, sequence).unwrap();
+        }
+        other => panic!("normal terminal must remain usable: {other:?}"),
+    }
+    engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn abandoned_binary_transfer_closes_only_its_original_terminal() {
+    let server = Server::start().await;
+    let (_dir, db) = database();
+    server.trust(&db);
+    let host = server.host(&db);
+    let engine = Engine::new(db);
+    let mut first = open(&engine, host.clone(), server.password());
+    state(&mut first, "connected").await;
+    let mut second = open(&engine, host, server.password());
+    state(&mut second, "connected").await;
+    let transfer = engine
+        .terminal_transfer(&first.info.id, &"a".repeat(32))
+        .unwrap();
+    transfer.send(b"partial binary frame").await.unwrap();
+    drop(transfer);
+    state(&mut first, "closed").await;
+    engine
+        .input(&second.info.id, b"other pane unaffected".to_vec())
+        .unwrap();
+    loop {
+        if let TerminalEvent::Data { sequence, data } = event(&mut second).await {
+            assert_eq!(data, b"other pane unaffected");
+            engine.acknowledge(&second.info.id, sequence).unwrap();
+            break;
+        }
+    }
+    engine.shutdown().await;
+}
+
+#[tokio::test]
 async fn terminal_metadata_uses_negotiated_cipher_for_new_and_shared_transports() {
     for cipher in [russh::cipher::AES_256_CTR, russh::cipher::AES_256_GCM] {
         let server = Server::start_with_cipher(cipher).await;
@@ -822,6 +918,52 @@ async fn output_waits_for_ack_and_large_output_is_lossless() {
     assert_eq!(bytes, 2 * 1024 * 1024 + 9);
     engine.shutdown().await;
     assert_eq!(engine.counts().expect("counts"), (0, 0));
+}
+
+#[tokio::test]
+async fn zmodem_batches_preserve_binary_order_and_do_not_relax_ordinary_input_limits() {
+    let server = Server::start().await;
+    let (_dir, db) = database();
+    server.trust(&db);
+    let engine = Engine::new(db.clone());
+    let mut shell = open(&engine, server.host(&db), server.password());
+    state(&mut shell, "connected").await;
+    assert!(engine.input(&shell.info.id, vec![1; 16385]).is_err());
+    assert!(
+        engine
+            .terminal_upload_input(&shell.info.id, &[])
+            .await
+            .is_err()
+    );
+    assert!(
+        engine
+            .terminal_upload_input(&shell.info.id, &vec![1; 256 * 1024 + 1])
+            .await
+            .is_err()
+    );
+    let expected: Vec<u8> = (0..256 * 1024).map(|i| i as u8).collect();
+    let id = shell.info.id.clone();
+    let send = engine.terminal_upload_input(&id, &expected);
+    let receive = async {
+        let mut actual = vec![];
+        while actual.len() < expected.len() {
+            if let TerminalEvent::Data { sequence, data } = event(&mut shell).await {
+                engine.acknowledge(&shell.info.id, sequence).expect("ack");
+                actual.extend(data);
+            }
+        }
+        actual
+    };
+    let (sent, actual) = tokio::join!(send, receive);
+    sent.expect("batch");
+    assert_eq!(actual, expected);
+    engine.shutdown().await;
+    assert!(
+        engine
+            .terminal_upload_input(&shell.info.id, &[1])
+            .await
+            .is_err()
+    );
 }
 #[tokio::test]
 async fn transport_disconnect_closes_all_sessions_and_cancel_during_trust_releases_resources() {

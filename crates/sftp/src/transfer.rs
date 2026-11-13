@@ -7,7 +7,7 @@ use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -24,11 +24,40 @@ struct Task {
     info: Mutex<TransferInfo>,
     cancel: CancellationToken,
     owner_closed: CancellationToken,
-    started: Mutex<Option<Instant>>,
+    clock: Mutex<TransferClock>,
     skipped_bytes: AtomicU64,
     committing: AtomicBool,
     temporary: Mutex<Option<(bool, String)>>,
     done: Notify,
+}
+#[derive(Default)]
+struct TransferClock {
+    elapsed: Duration,
+    started: Option<Instant>,
+}
+impl TransferClock {
+    fn elapsed(&self) -> Duration {
+        self.elapsed + self.started.map_or(Duration::ZERO, |start| start.elapsed())
+    }
+    fn pause(&mut self) {
+        if let Some(start) = self.started.take() {
+            self.elapsed += start.elapsed();
+        }
+    }
+}
+// Dropping a failed or interrupted data phase must also stop its clock.
+struct DataPhase<'a>(&'a Task);
+impl DataPhase<'_> {
+    fn verifying(self) -> Result<(), Error> {
+        self.0.pause_data(true)
+    }
+}
+impl Drop for DataPhase<'_> {
+    fn drop(&mut self) {
+        if let Err(error) = self.0.pause_data(false) {
+            tracing::warn!(operation="transfer_clock", error=%error, "failed to stop data transfer clock");
+        }
+    }
 }
 impl Task {
     fn cancel(&self) -> Result<(), Error> {
@@ -37,6 +66,7 @@ impl Task {
             return Ok(());
         }
         self.cancel.cancel();
+        locked(&self.clock)?.pause();
         if info.state == "queued" {
             info.state = "cancelled".into();
             info.message = Some("排队任务已取消".into());
@@ -57,15 +87,14 @@ impl Task {
                 .is_some_and(|job| job.plan.source_session() == Some(session))
     }
     fn snapshot(&self) -> Result<TransferInfo, Error> {
-        let mut info = locked(&self.info)?.clone();
+        let info = locked(&self.info)?;
+        let elapsed = locked(&self.clock)?.elapsed();
+        let mut info = info.clone();
         info.remaining_bytes = info
             .total_bytes
             .saturating_sub(info.transferred_bytes)
             .saturating_sub(self.skipped_bytes.load(Ordering::Relaxed));
-        if info.unfinished()
-            && let Some(started) = *locked(&self.started)?
-        {
-            let elapsed = started.elapsed();
+        if info.unfinished() {
             info.elapsed_seconds = elapsed.as_secs();
             let seconds = elapsed.as_secs_f64();
             if seconds > 0.0 {
@@ -73,6 +102,21 @@ impl Task {
             }
         }
         Ok(info)
+    }
+    fn start_data(&self) -> Result<DataPhase<'_>, Error> {
+        let mut info = locked(&self.info)?;
+        self.check_cancel()?;
+        locked(&self.clock)?.started = Some(Instant::now());
+        info.state = "running".into();
+        Ok(DataPhase(self))
+    }
+    fn pause_data(&self, verifying: bool) -> Result<(), Error> {
+        let mut info = locked(&self.info)?;
+        locked(&self.clock)?.pause();
+        if verifying && info.state == "running" {
+            info.state = "verifying".into();
+        }
+        Ok(())
     }
     fn state(&self, value: &str) {
         if let Ok(mut info) = self.info.lock() {
@@ -188,7 +232,7 @@ impl Transfers {
             info: Mutex::new(info.clone()),
             cancel: CancellationToken::new(),
             owner_closed,
-            started: Mutex::new(None),
+            clock: Mutex::new(TransferClock::default()),
             skipped_bytes: AtomicU64::new(0),
             committing: AtomicBool::new(false),
             temporary: Mutex::new(None),
@@ -427,9 +471,6 @@ impl Transfers {
         }
     }
     async fn run(&self, task: Arc<Task>) {
-        if let Ok(mut started) = task.started.lock() {
-            *started = Some(Instant::now());
-        }
         let opened = tokio::select! {
             result=Remote::connect(&self.engine,&task.input.session_id)=>result,
             _=task.cancel.cancelled()=>Err(fail("TRANSFER_CANCELLED","任务已取消，未提交目标文件")),
@@ -874,6 +915,7 @@ async fn upload(
     if local::link(&before) || !before.is_file() || before.len() != item.size {
         return Err(Error::Conflict);
     }
+    let modified = local::modified_seconds(&before)?;
     let file = tokio::fs::File::open(&item.local)
         .await
         .map_err(local::io)?;
@@ -882,6 +924,7 @@ async fn upload(
     let handle = remote.stage(&temp).await?;
     task.temp(true, temp.clone())?;
     let copying = async {
+        let data = task.start_data()?;
         let mut digest = Sha256::new();
         let mut offset = 0;
         let mut pending = FuturesOrdered::new();
@@ -924,6 +967,7 @@ async fn upload(
         if let Some(error) = failure {
             return Err(error);
         }
+        data.verifying()?;
         if file.read(&mut [0; 1]).await.map_err(local::io)? != 0
             || !local::same(
                 &before,
@@ -950,7 +994,6 @@ async fn upload(
         }
     };
     task.check_cancel()?;
-    task.state("verifying");
     let target_hash = remote.hash_cancellable(&temp, Some(&task.cancel)).await;
     task.check_cancel()?;
     if checksum != target_hash? {
@@ -959,6 +1002,7 @@ async fn upload(
     if let Some(attrs) = &expected {
         remote.preserve(&temp, attrs).await?;
     }
+    remote.preserve_modified(&temp, modified).await?;
     task.check_cancel()?;
     let _mutation = mutation.lock().await;
     let actual = remote.optional_attrs(&target).await?;
@@ -1077,6 +1121,7 @@ async fn download(
         ) {
             return Err(Error::Conflict);
         }
+        let data = task.start_data()?;
         let mut digest = Sha256::new();
         let mut offset = 0;
         let mut pending = FuturesOrdered::new();
@@ -1109,6 +1154,7 @@ async fn download(
         if let Some(error) = failure {
             return Err(error);
         }
+        data.verifying()?;
         remote.verify_eof(&handle, item.size).await?;
         Ok(format!("{:x}", digest.finalize()))
     }
@@ -1136,7 +1182,6 @@ async fn download(
     file.flush().await.map_err(local::io)?;
     file.get_ref().sync_all().await.map_err(local::io)?;
     drop(file);
-    task.state("verifying");
     let local_hash = tokio::select! {
         result = local::hash(Path::new(&temp_name)) => result?,
         _ = task.cancel.cancelled() => return Err(fail("TRANSFER_CANCELLED", "任务已取消，已完成的文件保留")),

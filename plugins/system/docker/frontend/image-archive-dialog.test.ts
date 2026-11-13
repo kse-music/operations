@@ -1,12 +1,29 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import ImageArchiveDialog from './ImageArchiveDialog.vue';
-const api = vi.hoisted(() => ({ pick: vi.fn(), run: vi.fn(), cancel: vi.fn() }));
+const api = vi.hoisted(() => ({
+  pick: vi.fn(),
+  run: vi.fn(),
+  cancel: vi.fn(),
+  inspect: vi.fn(),
+  notify: vi.fn(),
+}));
+vi.mock('@serverdeck/plugin-sdk/transport', () => ({ request: api.notify }));
 vi.mock('@serverdeck/plugin-sdk/local-files', () => ({ pickLocalFiles: api.pick }));
 vi.mock('@serverdeck/plugin-sdk/actions', () => ({ cancelCurrent: api.cancel }));
+vi.mock('@serverdeck/plugin-sdk/context', () => ({
+  usePlatformContext: () => ({
+    hosts: [
+      { id: 'host', name: 'Source', hostname: 'source', port: 22, username: 'ops' },
+      { id: 'target', name: 'Target', hostname: 'target', port: 22, username: 'ops' },
+      { id: 'other', name: 'Other', hostname: 'other', port: 22, username: 'ops' },
+    ],
+  }),
+}));
 vi.mock('./image-archive', async (original) => ({
   ...(await original<typeof import('./image-archive')>()),
   runImageArchive: api.run,
+  inspectImageTarget: api.inspect,
 }));
 let app: App | undefined;
 let root: HTMLDivElement;
@@ -15,8 +32,9 @@ const settle = async () => {
   await nextTick();
 };
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
-function mount(row?: Record<string, unknown>) {
+function mount(row?: Record<string, unknown>, remoteTransfer = false) {
   api.cancel.mockResolvedValue(undefined);
+  api.notify.mockResolvedValue(undefined);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
     value: function (this: HTMLDialogElement) {
@@ -31,6 +49,7 @@ function mount(row?: Record<string, unknown>) {
     hostLabel: 'QA (192.0.2.1)',
     visible: true,
     row,
+    remoteTransfer,
     onCompleted: completed,
   });
   app.mount(root);
@@ -48,6 +67,121 @@ afterEach(() => {
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.restoreAllMocks();
   vi.resetAllMocks();
+});
+
+const image = { ID: `sha256:${'a'.repeat(64)}`, Repository: 'app', Tag: 'v1' };
+async function selectTarget(value = 'target') {
+  const select = document.querySelector<HTMLSelectElement>('[aria-label="目标主机"]')!;
+  select.value = value;
+  select.dispatchEvent(new Event('change'));
+  await settle();
+}
+it('requires a different target host and starts relay plus import without choosing a local file', async () => {
+  api.inspect.mockResolvedValue(null);
+  api.run.mockResolvedValue(undefined);
+  const completed = mount(image, true);
+  await settle();
+  expect(button('传输并导入').disabled).toBe(true);
+  expect(
+    [...document.querySelectorAll('select option')].map(
+      (option) => (option as HTMLOptionElement).value,
+    ),
+  ).toEqual(['', 'target', 'other']);
+  await selectTarget();
+  button('传输并导入').click();
+  await settle();
+  expect(api.inspect).toHaveBeenCalledWith('target', 'app:v1', expect.any(AbortSignal));
+  expect(api.run).toHaveBeenCalledWith(
+    'host',
+    {
+      kind: 'transfer',
+      id: image.ID,
+      reference: 'app:v1',
+      fileName: 'app-v1-aaaaaaaaaaaa.tar',
+      targetHostId: 'target',
+      expectedTargetId: null,
+      replaceConfirmed: false,
+      confirmed: true,
+    },
+    '',
+    expect.any(AbortSignal),
+    expect.any(Function),
+  );
+  expect(api.pick).not.toHaveBeenCalled();
+  expect(completed).toHaveBeenCalledOnce();
+  expect(document.body.textContent).toContain('镜像已传输并导入目标主机');
+});
+it('requires explicit confirmation for the actual conflicting tag and resets it on target change', async () => {
+  const conflicting = `sha256:${'b'.repeat(64)}`;
+  api.inspect.mockResolvedValue(conflicting);
+  api.run.mockResolvedValue(undefined);
+  mount(image, true);
+  await selectTarget();
+  button('传输并导入').click();
+  await settle();
+  expect(api.run).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain(`目标已有标签 app:v1，当前指向 ${conflicting}`);
+  expect(button('确认替换并传输')).toBeDefined();
+  await selectTarget('other');
+  expect(document.body.textContent).not.toContain('目标已有标签');
+  button('传输并导入').click();
+  await settle();
+  expect(api.inspect).toHaveBeenCalledTimes(2);
+  expect(api.run).not.toHaveBeenCalled();
+  button('确认替换并传输').click();
+  await settle();
+  expect(api.run.mock.calls[0]?.[1]).toMatchObject({
+    targetHostId: 'other',
+    expectedTargetId: conflicting,
+    replaceConfirmed: true,
+  });
+});
+it('keeps an identical target tag without requesting replacement confirmation', async () => {
+  api.inspect.mockResolvedValue(image.ID);
+  api.run.mockResolvedValue(undefined);
+  mount(image, true);
+  await selectTarget();
+  button('传输并导入').click();
+  await settle();
+  expect(api.run.mock.calls[0]?.[1]).toMatchObject({
+    expectedTargetId: image.ID,
+    replaceConfirmed: false,
+  });
+});
+it('does not export when the target cannot be inspected and displays the failure', async () => {
+  api.inspect.mockRejectedValue(new Error('target Docker unavailable'));
+  mount(image, true);
+  await selectTarget();
+  button('传输并导入').click();
+  await settle();
+  expect(api.run).not.toHaveBeenCalled();
+  expect(api.notify).toHaveBeenCalledExactlyOnceWith('ui.notify', {
+    message: 'target Docker unavailable',
+    error: true,
+  });
+  expect(document.body.textContent).not.toContain('target Docker unavailable');
+  expect(document.body.textContent).toContain('镜像任务失败');
+});
+it('cancels an active relay and never reports it as completed', async () => {
+  api.inspect.mockResolvedValue(null);
+  let signal: AbortSignal | undefined;
+  api.run.mockImplementation((_host, _request, _path, inputSignal: AbortSignal) => {
+    signal = inputSignal;
+    return new Promise((_resolve, reject) =>
+      inputSignal.addEventListener('abort', () => reject(new Error('任务已取消'))),
+    );
+  });
+  const completed = mount(image, true);
+  await selectTarget();
+  button('传输并导入').click();
+  await settle();
+  button('取消任务').click();
+  await settle();
+  expect(signal?.aborted).toBe(true);
+  expect(api.cancel).toHaveBeenCalledOnce();
+  expect(completed).not.toHaveBeenCalled();
+  expect(api.notify).toHaveBeenCalledWith('ui.notify', { message: '任务已取消', error: true });
+  expect(document.body.textContent).not.toContain('任务已取消');
 });
 it('requires a local archive selection and submits upload then load for the fixed host', async () => {
   api.pick.mockResolvedValue(['C:/images/image.tar']);

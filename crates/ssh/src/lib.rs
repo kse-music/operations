@@ -9,8 +9,12 @@ mod subsystem;
 pub use subsystem::SubsystemChannel;
 mod proxy;
 mod trust;
+mod zmodem;
+pub use zmodem::ZMODEM_INPUT_LIMIT;
+mod transfer;
 pub use connect::{ConnectionPlan, Hop};
 pub use proxy::ProxyConnection;
+pub use transfer::TerminalTransfer;
 
 use russh::{Channel, ChannelMsg, client};
 use serverdeck_core::{
@@ -112,6 +116,8 @@ struct Control {
     info: TerminalSession,
     cancel: CancellationToken,
     input: mpsc::Sender<Vec<u8>>,
+    transfer: Mutex<Option<Arc<transfer::Route>>>,
+    redraw: AtomicBool,
     size: watch::Sender<TerminalSize>,
     acknowledgment: watch::Sender<u64>,
     awaiting: AtomicU64,
@@ -368,7 +374,8 @@ impl Engine {
             .last()
             .ok_or_else(|| failure("SSH_ROUTE", "连接路径为空"))?
             .revision;
-        let (input, receiver) = mpsc::channel(8); // <=128 KiB input per session.
+        // Ordinary input <=128 KiB; exclusive binary upload input <=512 KiB.
+        let (input, receiver) = mpsc::channel(8);
         let (size, dimensions) = watch::channel(size);
         let (acknowledgment, ack) = watch::channel(0);
         let key = TransportKey {
@@ -423,6 +430,8 @@ impl Engine {
             info: info.clone(),
             cancel: CancellationToken::new(),
             input,
+            transfer: Mutex::new(None),
+            redraw: AtomicBool::new(false),
             size,
             acknowledgment,
             awaiting: AtomicU64::new(0),
@@ -565,7 +574,23 @@ impl Engine {
                 match message {
                     Some(ChannelMsg::Data { data })
                     | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        for chunk in data.chunks(16 * 1024) {
+                        let route = locked(&control.transfer)?.clone();
+                        let normal = if let Some(route) = route {
+                            let (normal, returned) = route.forward(&data).await?;
+                            if returned {
+                                control.redraw.store(true, Ordering::Release);
+                            }
+                            normal
+                        } else {
+                            data.to_vec()
+                        };
+                        let normal =
+                            if !normal.is_empty() && control.redraw.swap(false, Ordering::AcqRel) {
+                                [b"\r\x1b[2K".as_slice(), &normal].concat()
+                            } else {
+                                normal
+                            };
+                        for chunk in normal.chunks(16 * 1024) {
                             sequence += 1;
                             control.awaiting.store(sequence, Ordering::Release);
                             if !sink(TerminalEvent::Data {
@@ -637,13 +662,18 @@ impl Engine {
         if data.is_empty() || data.len() > 16 * 1024 {
             return Err(Error::Validation("终端输入每次须为 1–16384 字节"));
         }
-        self.control(id)?
-            .input
-            .try_send(data)
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => Error::Busy,
-                _ => Error::NotFound,
-            })
+        let control = self.control(id)?;
+        let transfer = locked(&control.transfer)?;
+        if control.cancel.is_cancelled() {
+            return Err(Error::NotFound);
+        }
+        if transfer.is_some() {
+            return Err(Error::Busy);
+        }
+        control.input.try_send(data).map_err(|error| match error {
+            mpsc::error::TrySendError::Full(_) => Error::Busy,
+            _ => Error::NotFound,
+        })
     }
     pub fn resize(&self, id: &str, size: TerminalSize) -> Result<(), Error> {
         self.control(id)?.size.send_replace(size.validate()?);

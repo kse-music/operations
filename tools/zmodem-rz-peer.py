@@ -56,7 +56,12 @@ def main():
                     data = os.read(key.fd, 16384)
                     if not data:
                         return 1
-                    os.write(master, data)
+                    pending = memoryview(data)
+                    while pending:
+                        written = os.write(master, pending)
+                        if written <= 0:
+                            raise OSError("PTY write made no progress")
+                        pending = pending[written:]
         raise TimeoutError("isolated rz receiver timed out")
     finally:
         if child.poll() is None:

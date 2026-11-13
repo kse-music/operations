@@ -13,7 +13,7 @@ declare module 'zmodem.js' {
     has_ended(): boolean;
     aborted(): boolean;
     abort(): void;
-    send_offer(file: { name: string; size: number }): Promise<Transfer | undefined>;
+    send_offer(file: { name: string; size: number; mtime: number }): Promise<Transfer | undefined>;
     close(): Promise<void>;
   }
   const Zmodem: { Session: { parse(data: number[]): Session | undefined } };

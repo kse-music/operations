@@ -974,8 +974,12 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
             json!({"id":"missing","grant":"forged"}),
         ),
         (
-            "terminal_upload_prepare_drop",
-            json!({"id":"missing","token":"forged","confirmed":true}),
+            "terminal_upload_run_drop",
+            json!({"id":"missing","token":"forged","confirmed":true,"events":"__CHANNEL__:1"}),
+        ),
+        (
+            "terminal_upload_cancel_drop",
+            json!({"id":"missing","token":"forged"}),
         ),
         (
             "terminal_upload_read",
@@ -995,7 +999,10 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
                     .is_some_and(|message| message.contains("not allowed"))
             );
         }
-        if command != "terminal_upload_release" {
+        if command == "terminal_upload_cancel_drop" {
+            get_ipc_response(&main, request(command, body, origin))
+                .expect("cancellation is idempotent after a task or session ends");
+        } else if command != "terminal_upload_release" {
             let error = get_ipc_response(&main, request(command, body, origin))
                 .expect_err("invalid terminal must be rejected before opening a picker or file");
             assert_eq!(error["code"], "NOT_FOUND");

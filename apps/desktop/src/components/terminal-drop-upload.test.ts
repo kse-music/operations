@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, h, nextTick, type App } from 'vue';
 import TerminalDropUpload from './TerminalDropUpload.vue';
 import { terminalApi } from '../services/terminal';
-import type { TerminalFileDrag } from '../types/terminal';
+import type { TerminalFileDrag, TerminalDropProgress, TerminalDropResult } from '../types/terminal';
 import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 
 const events = vi.hoisted(() => ({
@@ -22,36 +22,35 @@ vi.mock('@tauri-apps/api/event', () => ({
   }),
 }));
 let root: HTMLDivElement, area: HTMLDivElement, app: App;
-let pane: InstanceType<typeof TerminalDropUpload> | undefined;
+let pane: InstanceType<typeof TerminalDropUpload>;
 let enabled = true,
   canReceive = true;
-const send = vi.fn<(id: string, data: Uint8Array) => Promise<void>>(),
-  interrupt = vi.fn<(id: string) => Promise<void>>();
-const nonce = 'a'.repeat(32);
-const encoder = new TextEncoder();
-function receive(...frames: string[]): Uint8Array | undefined {
-  return pane!.consume(
-    encoder.encode(frames.map((frame) => '\x1eSDU:' + nonce + ':' + frame + '\x1f').join('')),
-  );
-}
+let receive!: (progress: TerminalDropProgress) => void;
+let finish!: (result: TerminalDropResult) => void;
+const value = (extra: Partial<TerminalDropProgress> = {}): TerminalDropProgress => ({
+  phase: 'uploading',
+  sent: 0,
+  size: 10,
+  bytesPerSecond: 0,
+  elapsedSeconds: 0,
+  uid: '0',
+  username: 'root',
+  directory: '/root/current',
+  ...extra,
+});
 function prepareUpload(username = 'root'): void {
-  vi.mocked(terminalApi.prepareDrop).mockResolvedValue({
-    size: 10,
-    sha256: 'a'.repeat(64),
-    nonce,
-    command: 'start\r',
-  });
-  send.mockImplementation(async (id, data) => {
-    expect(id).toBe('session');
-    if (new TextDecoder().decode(data) === 'start\r')
-      receive('READY:0:' + btoa(username) + ':' + btoa('/root/current\n'));
+  vi.mocked(terminalApi.runDrop).mockImplementation((_id, _token, callback) => {
+    receive = callback;
+    callback(value({ username: username || null }));
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
   });
 }
 const showModal = HTMLDialogElement.prototype.showModal;
 beforeEach(async () => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
-  send.mockReset().mockResolvedValue();
-  interrupt.mockReset().mockResolvedValue();
   HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute('open', '');
   };
@@ -62,8 +61,9 @@ beforeEach(async () => {
     names: ['中文目录', 'file.bin'],
   });
   vi.spyOn(terminalApi, 'uploadRelease').mockResolvedValue();
-  vi.spyOn(terminalApi, 'prepareDrop').mockReturnValue(new Promise(() => {}));
-  vi.spyOn(terminalApi, 'uploadRead').mockResolvedValue(Array(10).fill(7));
+  vi.spyOn(terminalApi, 'cancelDrop').mockResolvedValue();
+  vi.spyOn(terminalApi, 'runDrop').mockReturnValue(new Promise(() => {}));
+  vi.spyOn(terminalApi, 'uploadRead').mockResolvedValue([]);
   root = document.createElement('div');
   area = document.createElement('div');
   area.getBoundingClientRect = () =>
@@ -74,15 +74,13 @@ beforeEach(async () => {
     setup: () => () =>
       h(TerminalDropUpload, {
         sessionId: 'session',
-        ref: (value: unknown) => {
-          pane = value as InstanceType<typeof TerminalDropUpload> | undefined;
+        ref: (v: unknown) => {
+          pane = v as typeof pane;
         },
         target: 'host',
         enabled,
         canReceive: () => canReceive,
         area,
-        send,
-        interrupt,
       }),
   });
   app.mount(root);
@@ -99,26 +97,38 @@ afterEach(() => {
 function drop(x = 400, y = 200): void {
   events.callback({ payload: { type: 'drop', x, y, grant: 'native-grant', names: ['unused'] } });
 }
-it('targets the physical drop coordinates and requires confirmation before preparing or sending', async () => {
+function click(text: string): void {
+  [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === text)!.click();
+}
+async function start(): Promise<HTMLDialogElement> {
+  drop();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  const dialog = document.querySelector('dialog')!;
+  click('确认上传');
+  await vi.waitFor(() => expect(terminalApi.runDrop).toHaveBeenCalledOnce());
+  return dialog;
+}
+it('targets physical coordinates and requires confirmation before starting native binary I/O', async () => {
   drop();
   await vi.waitFor(() =>
     expect(document.querySelector('dialog')?.textContent).toContain('中文目录'),
   );
   expect(terminalApi.claimDrop).toHaveBeenCalledExactlyOnceWith('session', 'native-grant');
-  expect(terminalApi.prepareDrop).not.toHaveBeenCalled();
-  expect(send).not.toHaveBeenCalled();
-  const confirm = [...document.querySelectorAll('button')].find(
-    (button) => button.textContent?.trim() === '确认上传',
-  )!;
-  confirm.click();
+  expect(terminalApi.runDrop).not.toHaveBeenCalled();
+  click('确认上传');
   await vi.waitFor(() =>
-    expect(terminalApi.prepareDrop).toHaveBeenCalledExactlyOnceWith('session', 'token'),
+    expect(terminalApi.runDrop).toHaveBeenCalledExactlyOnceWith(
+      'session',
+      'token',
+      expect.any(Function),
+    ),
   );
   expect(document.querySelector('dialog')?.textContent).toContain('正在准备');
   expect(root.querySelector('.terminal-drop-progress')).toBeNull();
-  expect(send).not.toHaveBeenCalled();
+  expect(pane.busy).toBe(true);
+  expect(terminalApi.uploadRead).not.toHaveBeenCalled();
 });
-it('ignores hidden, outside and alternate-screen targets', async () => {
+it('ignores hidden, outside, inert and alternate-screen targets', async () => {
   drop(10, 10);
   area.setAttribute('inert', '');
   drop();
@@ -132,90 +142,84 @@ it('ignores hidden, outside and alternate-screen targets', async () => {
   drop();
   expect(terminalApi.claimDrop).not.toHaveBeenCalled();
 });
-it('releases a declined selection without starting any receiver', async () => {
+it('releases a declined selection without starting a receiver', async () => {
   drop();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '取消')!
-    .click();
+  click('取消');
   await vi.waitFor(() =>
     expect(terminalApi.uploadRelease).toHaveBeenCalledExactlyOnceWith('session', 'token'),
   );
-  expect(terminalApi.prepareDrop).not.toHaveBeenCalled();
-  expect(send).not.toHaveBeenCalled();
+  expect(terminalApi.runDrop).not.toHaveBeenCalled();
+  expect(terminalApi.uploadRead).not.toHaveBeenCalled();
 });
-
-it('clears stale progress and input occupation immediately when the session disconnects', async () => {
-  drop();
-  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认上传')!
-    .click();
-  await vi.waitFor(() =>
-    expect(document.querySelector('dialog')?.textContent).toContain('正在准备'),
-  );
-  pane!.dispose();
+it('clears stale progress and input occupation immediately after a disconnect and cancels native work', async () => {
+  await start();
+  pane.dispose();
   await nextTick();
   expect(document.querySelector('dialog')?.textContent).toContain('终端会话已结束');
-  expect(pane!.busy).toBe(false);
-  expect(pane!.consume(encoder.encode('late upload command echo'))).toEqual(new Uint8Array());
+  expect(pane.busy).toBe(false);
+  expect(terminalApi.cancelDrop).toHaveBeenCalledExactlyOnceWith('session', 'token');
   await vi.waitFor(() =>
     expect(terminalApi.uploadRelease).toHaveBeenCalledExactlyOnceWith('session', 'token'),
   );
 });
-
-it('keeps the same dialog for progress and closes only after commit, Shell return and grant release', async () => {
+it('keeps the native protocol failure when the terminal-close event arrives first', async () => {
+  let reject!: (error: unknown) => void;
+  vi.mocked(terminalApi.runDrop).mockImplementation(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  await start();
+  pane.dispose();
+  await nextTick();
+  expect(document.querySelector('dialog')?.textContent).toContain('终端会话已结束');
+  reject(new Error('远端二进制接收长度或帧边界异常，已关闭此会话以隔离未确认的数据'));
+  await vi.waitFor(() =>
+    expect(document.querySelector('dialog')?.textContent).toContain('二进制接收长度或帧边界异常'),
+  );
+  expect(document.querySelector('dialog')?.textContent).not.toContain('终端会话已结束');
+  expect(pane.busy).toBe(false);
+});
+it('keeps one dialog and waits for native commit, Shell recovery and grant release', async () => {
   prepareUpload();
-  drop();
-  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  const dialog = document.querySelector('dialog')!;
-  [...dialog.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认上传')!
-    .click();
-  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
-  expect(document.querySelector('dialog')).toBe(dialog);
+  const dialog = await start();
   expect(dialog.textContent).toContain('正在上传');
   expect(dialog.querySelector('progress')?.max).toBe(10);
   expect((dialog.querySelector('[aria-label="关闭对话框"]') as HTMLButtonElement).disabled).toBe(
     true,
   );
   dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
-  expect(document.querySelector('dialog')).toBe(dialog);
-  const echoed = pane!.consume(encoder.encode('/bin/sh -c sd_nonce=$1\r\n> source code\r\n'));
-  expect(echoed).toEqual(new Uint8Array());
-  receive('ACK:0', 'VERIFYING', 'COMMITTING', 'DONE:2');
+  receive(value({ phase: 'verifying', sent: 10 }));
   await nextTick();
   expect(document.querySelector('dialog')).toBe(dialog);
   expect(terminalApi.uploadRelease).not.toHaveBeenCalled();
-  const prompt = receive('RETURN');
-  expect(prompt).toEqual(new Uint8Array());
+  receive(value({ phase: 'committing', sent: 10 }));
+  await nextTick();
+  expect(document.querySelector('dialog')).toBe(dialog);
+  let released!: () => void;
+  vi.mocked(terminalApi.uploadRelease).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        released = resolve;
+      }),
+  );
+  finish({ code: null, committed: 2, recovery: null });
+  await vi.waitFor(() => expect(terminalApi.uploadRelease).toHaveBeenCalledOnce());
+  expect(document.querySelector('dialog')).toBe(dialog);
+  expect(pane.busy).toBe(true);
+  released();
   await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
-  expect(terminalApi.uploadRelease).toHaveBeenCalledExactlyOnceWith('session', 'token');
   expect(document.body.textContent).not.toContain('上传完成');
   expect(root.querySelector('.terminal-upload')).toBeNull();
-  expect(new TextDecoder().decode(pane!.consume(encoder.encode('user@host$ ')))).toBe(
-    '\r\x1b[2Kuser@host$ ',
-  );
+  expect(terminalApi.uploadRead).not.toHaveBeenCalled();
 });
-
-it('shows acknowledged progress, remaining size and transfer times across upload phases', async () => {
-  let now = 1000;
-  vi.spyOn(performance, 'now').mockImplementation(() => now);
+it('shows native acknowledged bytes, speed, remaining size and times through upload phases in both languages', async () => {
   prepareUpload();
-  vi.mocked(terminalApi.prepareDrop).mockResolvedValue({
-    size: 131072,
-    sha256: 'a'.repeat(64),
-    nonce,
-    command: 'start\r',
-  });
-  vi.mocked(terminalApi.uploadRead).mockResolvedValue(Array(65536).fill(7));
-  drop();
-  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  const dialog = document.querySelector('dialog')!;
-  [...dialog.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认上传')!
-    .click();
-  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
+  const dialog = await start();
+  receive(value({ size: 131072 }));
+  await nextTick();
   expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toBe('0 B/s');
   expect(dialog.textContent).toContain('0 B / 128.0 KiB');
   expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain(
@@ -225,9 +229,8 @@ it('shows acknowledged progress, remaining size and transfer times across upload
   expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain(
     '预计剩余时间：估算中',
   );
-  now += 2000;
-  receive('ACK:0');
-  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledTimes(2));
+  receive(value({ size: 131072, sent: 65536, bytesPerSecond: 32768, elapsedSeconds: 2 }));
+  await nextTick();
   expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toBe('32.0 KiB/s');
   expect(dialog.textContent).toContain('64.0 KiB / 128.0 KiB');
   expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain('剩余 64.0 KiB');
@@ -236,92 +239,66 @@ it('shows acknowledged progress, remaining size and transfer times across upload
     '预计剩余时间：0:00:02',
   );
   expect(dialog.querySelector('progress')?.value).toBe(65536);
-  expect(dialog.querySelector('.terminal-drop-status')?.textContent).toContain(
-    'root · /root/current',
-  );
   setLocale('en-US');
   await nextTick();
-  expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain(
-    'remaining 64.0 KiB',
-  );
   expect(dialog.querySelector('[data-time="elapsed"]')?.textContent).toContain('Elapsed: 0:00:02');
   expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain(
     'Estimated remaining: 0:00:02',
   );
   setLocale('zh-CN');
-  now += 2000;
-  receive('ACK:1', 'VERIFYING');
+  receive(value({ phase: 'verifying', size: 131072, sent: 131072, elapsedSeconds: 4 }));
   await nextTick();
   expect(dialog.querySelector('[aria-label="平均上传速度"]')).toBeNull();
   expect(dialog.textContent).toContain('128.0 KiB / 128.0 KiB');
   expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain('剩余 0 B');
   expect(dialog.querySelector('[data-time="elapsed"]')?.textContent).toContain('已用时间：0:00:04');
   expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain('预计剩余时间：—');
-  expect(dialog.textContent).toContain('正在校验并解包');
-  receive('COMMITTING', 'DONE:2', 'RETURN');
+  expect(dialog.textContent).toContain('正在校验文件');
+  finish({ code: null, committed: 2, recovery: null });
   await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
-  expect(terminalApi.uploadRelease).toHaveBeenCalledOnce();
 });
-
 it.each([
   ['deploy', 'deploy · /root/current'],
   ['', 'UID 0 · /root/current'],
-])('shows receiver account %j with UID as the fallback', async (username, expected) => {
+])('shows receiver account %j with UID fallback', async (username, expected) => {
   prepareUpload(username);
-  drop();
-  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认上传')!
-    .click();
-  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
+  await start();
   expect(document.querySelector('.terminal-drop-destination')?.textContent?.trim()).toBe(expected);
-  receive('ACK:0', 'VERIFYING', 'COMMITTING', 'DONE:2', 'RETURN');
+  finish({ code: null, committed: 2, recovery: null });
   await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
 });
-
-it('keeps failures inside the dialog and closes them without releasing the grant twice', async () => {
-  vi.mocked(terminalApi.prepareDrop).mockRejectedValue(new Error('本地文件读取失败'));
-  drop();
-  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认上传')!
-    .click();
+it('keeps errors in its dialog and does not release twice when dismissed', async () => {
+  vi.mocked(terminalApi.runDrop).mockRejectedValue(new Error('本地文件读取失败'));
+  await start();
   await vi.waitFor(() =>
     expect(document.querySelector('dialog [role="alert"]')?.textContent).toContain(
       '本地文件读取失败',
     ),
   );
-  expect(send).not.toHaveBeenCalled();
-  expect(pane!.busy).toBe(false);
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '关闭')!
-    .click();
+  expect(pane.busy).toBe(false);
+  expect(terminalApi.uploadRead).not.toHaveBeenCalled();
+  await nextTick();
+  click('关闭');
   await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
-  expect(terminalApi.uploadRelease).toHaveBeenCalledTimes(1);
+  expect(terminalApi.uploadRelease).toHaveBeenCalledOnce();
 });
-
-it('cancels from the progress dialog and closes after the receiver returns', async () => {
+it('cancels once and waits for confirmed native recovery before closing', async () => {
   prepareUpload();
-  interrupt.mockImplementation(async (id) => {
-    expect(id).toBe('session');
-    receive('ERROR:CANCELLED:0', 'RETURN');
-  });
-  drop();
-  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认上传')!
-    .click();
-  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
-  [...document.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '取消上传')!
-    .click();
+  const dialog = await start();
+  click('取消上传');
+  expect(terminalApi.cancelDrop).toHaveBeenCalledExactlyOnceWith('session', 'token');
+  expect(pane.busy).toBe(true);
+  expect(document.querySelector('dialog')).toBe(dialog);
+  receive(value({ phase: 'cancelling' }));
+  await nextTick();
+  expect(dialog.textContent).toContain('正在停止上传并恢复终端');
+  finish({ code: 'CANCELLED', committed: 0, recovery: null });
   await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
-  expect(interrupt).toHaveBeenCalledTimes(1);
-  expect(terminalApi.uploadRelease).toHaveBeenCalledTimes(1);
-  expect(pane!.busy).toBe(false);
+  expect(terminalApi.uploadRelease).toHaveBeenCalledOnce();
+  expect(pane.busy).toBe(false);
 });
-it('releases a claim arriving after the owning pane was removed', async () => {
-  let resolve!: (value: { token: string; names: string[] }) => void;
+it('releases a claim arriving after its owning pane was removed', async () => {
+  let resolve!: (v: { token: string; names: string[] }) => void;
   vi.mocked(terminalApi.claimDrop).mockImplementation(
     () =>
       new Promise((done) => {
@@ -332,5 +309,5 @@ it('releases a claim arriving after the owning pane was removed', async () => {
   app.unmount();
   resolve({ token: 'late', names: ['late.bin'] });
   await vi.waitFor(() => expect(terminalApi.uploadRelease).toHaveBeenCalledWith('session', 'late'));
-  expect(send).not.toHaveBeenCalled();
+  expect(terminalApi.runDrop).not.toHaveBeenCalled();
 });

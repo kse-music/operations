@@ -104,8 +104,10 @@ fn attrs(m: &std::fs::Metadata) -> FileAttributes {
 #[derive(Default)]
 pub struct FileFaults {
     pub wire_delay_ms: std::sync::atomic::AtomicU64,
+    pub close_delay_ms: std::sync::atomic::AtomicU64,
     pub corrupt_reads: std::sync::atomic::AtomicBool,
     pub reject_writes: std::sync::atomic::AtomicBool,
+    pub ignore_times: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
     pub links: Mutex<HashMap<String, String>>,
     pub reported_sizes: Mutex<HashMap<String, u64>>,
@@ -266,6 +268,13 @@ impl russh_sftp::server::Handler for Disk {
         Ok(Handle { id, handle })
     }
     async fn close(&mut self, id: u32, handle: String) -> Result<Status, StatusCode> {
+        let delay = self
+            .faults
+            .close_delay_ms
+            .load(std::sync::atomic::Ordering::SeqCst);
+        if delay > 0 {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
         if self.handles.remove(&handle).is_some() {
             self.faults
                 .open_handles
@@ -343,6 +352,24 @@ impl russh_sftp::server::Handler for Disk {
         value: FileAttributes,
     ) -> Result<Status, StatusCode> {
         let path = self.path(&path)?;
+        if let Some(modified) = value.mtime
+            && !self
+                .faults
+                .ignore_times
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            let file = tokio::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .await
+                .map_err(io)?;
+            file.into_std()
+                .await
+                .set_modified(
+                    std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(u64::from(modified)),
+                )
+                .map_err(io)?;
+        }
         if let Some(mode) = value.permissions {
             let mut permissions = tokio::fs::metadata(&path).await.map_err(io)?.permissions();
             permissions.set_readonly(mode & 0o200 == 0);

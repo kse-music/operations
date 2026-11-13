@@ -49,6 +49,15 @@ fn file_name(name: &str) -> Result<(), ApiError> {
 }
 
 pub fn command(archive: &Archive, nonce: &str) -> Result<(Command, String, String), ApiError> {
+    command_with_checks(archive, nonce, "", "")
+}
+
+pub fn command_with_checks(
+    archive: &Archive,
+    nonce: &str,
+    before_load: &str,
+    after_operation: &str,
+) -> Result<(Command, String, String), ApiError> {
     if nonce.len() != 36 || !nonce.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         return Err(invalid("镜像任务标识无效"));
     }
@@ -70,20 +79,46 @@ pub fn command(archive: &Archive, nonce: &str) -> Result<(Command, String, Strin
     let directory = format!("/tmp/serverdeck-image-{nonce}");
     let path = format!("{directory}/{name}");
     let mut export_args = None;
+    let capture_load = matches!(archive, Archive::Import { .. }) && !after_operation.is_empty();
+    let load = if capture_load {
+        r#"set -C
+run_child docker --host unix://$sd_socket image load --input "$sd_path" > "$sd_dir/.load-output"
+sd_load_status=$?
+set +C
+if test -L "$sd_dir/.load-output" || ! test -f "$sd_dir/.load-output"; then echo 'Load output must be a regular file' >&2; exit 1; fi
+cat -- "$sd_dir/.load-output" || exit
+test "$sd_load_status" = 0 || exit "$sd_load_status""#
+    } else {
+        "run_child docker --host unix://$sd_socket image load --input \"$sd_path\" || exit"
+    };
     let operation: String = match archive {
-        Archive::Import {..} => r#"
+        Archive::Import { .. } => format!(
+            r#"
 while ! test -e "$sd_path" && ! test -L "$sd_path"; do run_child sleep 1 || exit; done
 if test -L "$sd_path" || ! test -f "$sd_path"; then echo 'Archive must be a regular file' >&2; exit 1; fi
-run_child docker --host unix://$sd_socket image load --input "$sd_path" || exit
-"#.into(),
-        Archive::Export {id, reference, ..} => {
+{before_load}
+{load}
+{after_operation}
+"#
+        ),
+        Archive::Export { id, reference, .. } => {
             image_id(id)?;
-            if !name.to_ascii_lowercase().ends_with(".tar") { return Err(invalid("导出文件名必须以 .tar 结尾（不压缩）")); }
-            if reference.is_empty() || reference.len() > 1024 || reference.starts_with('-')
-                || reference.chars().any(|c| c.is_control() || c.is_whitespace()) {
+            if !name.to_ascii_lowercase().ends_with(".tar") {
+                return Err(invalid("导出文件名必须以 .tar 结尾（不压缩）"));
+            }
+            if reference.is_empty()
+                || reference.len() > 1024
+                || reference.starts_with('-')
+                || reference
+                    .chars()
+                    .any(|c| c.is_control() || c.is_whitespace())
+            {
                 return Err(invalid("镜像引用无效"));
             }
-            export_args = Some((id.strip_prefix("sha256:").unwrap_or(id).to_owned(),format!("{:x}",Sha256::digest(reference.as_bytes()))));
+            export_args = Some((
+                id.strip_prefix("sha256:").unwrap_or(id).to_owned(),
+                format!("{:x}", Sha256::digest(reference.as_bytes())),
+            ));
             r#"
 sd_id="sha256:$2"; sd_reference_hash=$3
 sd_references=$(d image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' -- "$sd_id") || exit
@@ -105,6 +140,16 @@ sd_archive_hash=${sd_archive_hash%% *}
 printf 'SD_ARCHIVE_SHA256:%s:%s\n' "$1" "$sd_archive_hash"
 "#.into()
         }
+    };
+    let operation = if matches!(archive, Archive::Export { .. }) {
+        format!("{operation}{after_operation}")
+    } else {
+        operation
+    };
+    let load_cleanup = if capture_load {
+        " \"$sd_dir/.load-output\""
+    } else {
+        ""
     };
     let (directory_arg, path_arg, setup, prepared, ready): (
         String,
@@ -149,7 +194,7 @@ cleanup() {{
         if kill -0 "$sd_child" 2>/dev/null; then kill -TERM "$sd_child" || sd_status=1; fi
         wait "$sd_child" 2>/dev/null
     fi
-    if test -L "$sd_dir" || ! rm -f -- "$sd_path" || ! rmdir -- "$sd_dir"; then
+    if test -L "$sd_dir" || ! rm -f -- "$sd_path"{load_cleanup} || ! rmdir -- "$sd_dir"; then
         printf 'Archive cleanup incomplete: %s\n' "$sd_dir" >&2; sd_status=1
     fi
     exit "$sd_status"
@@ -372,7 +417,7 @@ mod tests {
                 .strip_prefix(PRELUDE)
                 .unwrap()
                 .replace(&dir, "'\"$sd_fixture\"'/job")
-                .replace("\"/tmp/serverdeck-image-$1\"", "'\"$sd_fixture\"'/job")
+                .replace("\"/tmp/serverdeck-image-$1\"", "\"$sd_fixture/job\"")
                 .replace("docker --host unix://$sd_socket", "d")
                 .replace(
                     "while :; do run_child sleep 1 || exit; done",

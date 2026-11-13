@@ -296,22 +296,6 @@
   background: var(--panel);
   padding: 12px;
 }
-.terminal-upload {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 10px;
-  border-top: 1px solid var(--border);
-  font-size: var(--font-size-body);
-  flex-wrap: wrap;
-}
-.terminal-upload > span:first-child {
-  overflow-wrap: anywhere;
-}
-.terminal-upload progress {
-  width: 140px;
-  accent-color: var(--accent);
-}
 @media (max-width: 720px) {
   .terminal-session-header {
     gap: 6px;

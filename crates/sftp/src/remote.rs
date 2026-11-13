@@ -405,6 +405,32 @@ impl Remote {
         closing?;
         Ok(())
     }
+    pub async fn preserve_modified(&self, temp: &str, modified: u32) -> Result<(), Error> {
+        // SFTP v3 sends atime and mtime together. Keep the staged file's atime.
+        let accessed = self
+            .attrs(temp)
+            .await?
+            .atime
+            .ok_or_else(|| fail("SFTP_ATTRIBUTES", "服务器缺少时间信息，无法保留修改时间"))?;
+        self.raw
+            .setstat(
+                temp,
+                FileAttributes {
+                    atime: Some(accessed),
+                    mtime: Some(modified),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(map)?;
+        if self.attrs(temp).await?.mtime != Some(modified) {
+            return Err(fail(
+                "SFTP_ATTRIBUTES",
+                "服务器未保留源修改时间，未提交目标",
+            ));
+        }
+        Ok(())
+    }
     pub async fn preserve(&self, temp: &str, attrs: &FileAttributes) -> Result<(), Error> {
         // A replacement must retain ownership and mode; never silently reset them.
         if attrs.uid.is_none() || attrs.gid.is_none() || attrs.permissions.is_none() {

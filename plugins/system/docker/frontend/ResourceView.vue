@@ -79,10 +79,10 @@ const detailLoading = ref(false),
   detailError = ref<string | null>(null);
 const capabilities = ref<Record<string, unknown> | null>(null);
 const log = ref<{ id: string; title: string }>();
-const archive = ref<{ row?: Record<string, unknown> }>();
-function openArchive(row?: Record<string, unknown>) {
+const archive = ref<{ row?: Record<string, unknown>; remoteTransfer?: boolean }>();
+function openArchive(row?: Record<string, unknown>, remoteTransfer = false) {
   if (!busy.value && !archive.value && connected.value && panelVisible.value)
-    archive.value = { row };
+    archive.value = { row, remoteTransfer };
 }
 let generation = 0,
   detailGeneration = 0,
@@ -229,6 +229,7 @@ const slotContext = {
   execute,
   query,
   openExport: openArchive,
+  openTransfer: (row: Record<string, unknown>) => openArchive(row, true),
   openLog: async (input: LogInput, title: string) => {
     if (busy.value || !panelVisible.value) return;
     const token = generation;
@@ -355,6 +356,7 @@ const slotContext = {
       :host-id="chosen"
       :host-label="`${hostDisplayName(connection?.host)} (${connection?.host.hostname ?? ''})`"
       :row="archive.row"
+      :remote-transfer="archive.remoteTransfer"
       :visible="panelVisible && connected"
       @close="archive = undefined"
       @completed="load"
