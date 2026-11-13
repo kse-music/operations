@@ -7,6 +7,8 @@ import {
   ListX,
   Plus,
   RefreshCw,
+  Save,
+  BookmarkX,
   Shield,
   SquareTerminal,
   TextCursorInput,
@@ -151,7 +153,7 @@ function menuKey(event: KeyboardEvent): void {
   ]?.focus();
 }
 function runMenu(
-  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'close',
+  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'close' | 'unsave',
 ): void {
   const target = store.tabs.find((item) => item.key === menu.value?.key);
   closeMenu();
@@ -169,12 +171,19 @@ function runMenu(
     if (action === 'duplicate') store.duplicate(target.key);
     else void store.reconnect(target.key);
   } else if (action === 'rename') rename(target.key);
+  else if (action === 'unsave') void store.unsaveLocal(target.key);
   else if (action === 'disconnect') void store.disconnect(target.key);
   else if (action === 'all') void store.closeAll(target.key);
   else void store.close(target.key);
 }
 const paneViews = computed(() =>
   store.tabs.flatMap((t) => {
+    if (
+      t.savedId &&
+      t.key !== store.active &&
+      t.panes.every((pane) => pane.state === 'idle' && !pane.connectRequested)
+    )
+      return [];
     const layout = geometry(t.layout);
     return t.panes.map((pane) => ({ pane, tab: t.key, rect: layout.panes[pane.key] }));
   }),
@@ -194,11 +203,51 @@ function paneStyle(
     : { display: 'none' };
 }
 function rename(key: string): void {
+  if (store.localSaving) return;
   renaming.value = key;
   title.value = store.tabs.find((t) => t.key === key)?.title ?? '';
 }
-function submitRename(): void {
-  if (renaming.value && store.rename(renaming.value, title.value)) renaming.value = null;
+const savingName = computed(() => !!renaming.value && store.localSaving === renaming.value);
+const savingLocalName = computed(
+  () =>
+    navigator.platform.startsWith('Win') &&
+    !!renaming.value &&
+    store.tabs.find((tab) => tab.key === renaming.value)?.panes.every((pane) => !pane.host),
+);
+async function submitRename(): Promise<void> {
+  const key = renaming.value;
+  if (!key || savingName.value) return;
+  const saved = savingLocalName.value
+    ? await store.saveLocal(key, title.value)
+    : store.rename(key, title.value);
+  if (saved && renaming.value === key) renaming.value = null;
+}
+function closeRename(): void {
+  if (!savingName.value) renaming.value = null;
+}
+function saveShortcut(event: KeyboardEvent): void {
+  if (
+    !props.visible ||
+    props.hostId ||
+    !event.ctrlKey ||
+    event.metaKey ||
+    event.altKey ||
+    event.shiftKey ||
+    event.key.toLowerCase() !== 's'
+  )
+    return;
+  if (document.querySelector('dialog[open]') && !renaming.value) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  if (
+    !event.repeat &&
+    !renaming.value &&
+    tab.value &&
+    tab.value.panes.every((pane) => !pane.host)
+  ) {
+    closeMenu();
+    rename(tab.value.key);
+  }
 }
 function dragTab(event: DragEvent, key: string): void {
   closeMenu();
@@ -289,10 +338,12 @@ onBeforeUnmount(() => {
   finishDrag?.();
   window.removeEventListener('resize', closeMenu);
   window.removeEventListener('blur', closeMenu);
+  window.removeEventListener('keydown', saveShortcut, true);
 });
 onMounted(() => {
   window.addEventListener('resize', closeMenu);
   window.addEventListener('blur', closeMenu);
+  window.addEventListener('keydown', saveShortcut, true);
 });
 watch(
   () => [props.visible, props.hostId],
@@ -313,9 +364,18 @@ watch(
 </script>
 <template>
   <div class="terminals-view">
+    <div v-if="!props.hostId && store.savedError" class="workspace-empty" role="alert">
+      <p>{{ store.savedError }}</p>
+      <button class="button" :disabled="store.savedLoading" @click="store.loadSaved">
+        {{ tr('重试加载已保存会话') }}
+      </button>
+    </div>
     <div v-if="!tabs.length" class="workspace-empty">
       <h2>{{ tr('没有打开的终端') }}</h2>
-      <p>{{ tr('当前主机尚无终端。可新建会话，或通过工作区标签切换主机。') }}</p>
+      <p v-if="!props.hostId && store.savedLoading" role="status">
+        {{ tr('正在加载已保存会话…') }}
+      </p>
+      <p v-else>{{ tr('当前主机尚无终端。可新建会话，或通过工作区标签切换主机。') }}</p>
       <button class="button" :disabled="!!props.hostId && !host" @click="newTerminal">
         {{ props.hostId ? tr('新建终端') : tr('打开本地终端') }}
       </button>
@@ -375,6 +435,12 @@ watch(
                 <path d="M4 8h8" stroke="white" stroke-width="2" />
               </svg>
               <span class="terminal-session-title">{{ sessionTitle(item) }}</span>
+              <Save
+                v-if="item.savedId"
+                :size="12"
+                :aria-label="tr('已保存')"
+                :title="tr('已保存')"
+              />
               <small>{{
                 item.panes.length > 1
                   ? tr('{0} 个窗格', item.panes.length)
@@ -473,6 +539,14 @@ watch(
           </button>
         </template>
         <template v-else>
+          <button
+            v-if="!props.hostId && menuTarget?.savedId"
+            role="menuitem"
+            :disabled="!!store.localSaving"
+            @click="runMenu('unsave')"
+          >
+            <BookmarkX class="menu-icon-gold" aria-hidden="true" />{{ tr('取消保存') }}
+          </button>
           <button role="menuitem" @click="runMenu('duplicate')">
             <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
           </button>
@@ -506,8 +580,9 @@ watch(
   <Modal
     v-if="renaming"
     :title="tr('重命名标签')"
+    :busy="savingName"
     panel-class="terminal-rename-dialog"
-    @close="renaming = null"
+    @close="closeRename"
     ><form class="terminal-rename-form" @submit.prevent="submitRename">
       <label
         >{{ tr('标签名称')
@@ -516,12 +591,20 @@ watch(
           class="terminal-rename-input"
           maxlength="128"
           required
+          :disabled="savingName"
           autofocus
           :aria-label="tr('标签名称')"
       /></label>
       <footer class="dialog-actions">
-        <button class="button" type="button" @click="renaming = null">{{ tr('取消') }}</button
-        ><button class="button primary" type="submit">{{ tr('保存名称') }}</button>
+        <button class="button" type="button" :disabled="savingName" @click="closeRename">
+          {{ tr('取消') }}</button
+        ><button
+          class="button primary"
+          type="submit"
+          :disabled="savingName || (savingLocalName && !!renaming && !store.canSaveLocal(renaming))"
+        >
+          {{ tr('保存') }}
+        </button>
       </footer>
     </form></Modal
   >

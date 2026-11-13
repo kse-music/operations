@@ -17,7 +17,7 @@ use std::{
 use tokio::sync::{Semaphore, oneshot, watch};
 
 mod directory;
-use directory::{DirectoryMemory, DirectoryTracker, LaunchDirectory};
+use directory::{DirectoryTracker, LaunchDirectory};
 
 #[cfg(windows)]
 pub(crate) mod elevated;
@@ -36,6 +36,8 @@ struct Control {
     parsed: Condvar,
     killer: Mutex<Option<Box<dyn ChildKiller + Send + Sync>>>,
     done: watch::Sender<bool>,
+    directory: Mutex<Option<String>>,
+    elevated: AtomicBool,
 }
 impl Control {
     fn cancel(&self) {
@@ -48,7 +50,6 @@ pub(crate) struct LocalTerminals {
     sessions: Arc<Mutex<HashMap<String, Arc<Control>>>>,
     slots: Arc<Semaphore>,
     stopped: Arc<AtomicBool>,
-    directory: Arc<tokio::sync::Mutex<Option<Arc<DirectoryMemory>>>>,
 }
 fn failed(
     message: &'static str,
@@ -148,25 +149,43 @@ impl LocalTerminals {
             sessions: Default::default(),
             slots: Arc::new(Semaphore::new(LIMIT)),
             stopped: Default::default(),
-            directory: Default::default(),
         }
     }
-    pub(crate) async fn prepare_directory(
+    pub(crate) fn snapshot(
         &self,
-        database: serverdeck_storage::Database,
-        operations: Arc<Semaphore>,
-    ) -> Result<(), Error> {
-        let mut directory = self.directory.lock().await;
-        if directory.is_none() {
-            *directory = Some(DirectoryMemory::load(database, operations).await?);
+        id: &str,
+    ) -> Result<serverdeck_core::terminal::SavedLocalPane, Error> {
+        let control = self.get(id)?;
+        if control.cancelled.load(Ordering::Acquire) {
+            return Err(Error::NotFound);
         }
-        Ok(())
+        let directory = lock(&control.directory)?.clone().ok_or(Error::Validation(
+            "尚未获得本地终端的文件系统目录，请回到 PowerShell 提示符后保存",
+        ))?;
+        Ok(serverdeck_core::terminal::SavedLocalPane {
+            directory,
+            elevated: control.elevated.load(Ordering::Acquire),
+        })
     }
-    pub(crate) async fn flush_directory(&self) -> Result<(), Error> {
-        if let Some(directory) = self.directory.lock().await.as_ref() {
-            directory.shutdown().await?;
+    pub(crate) async fn open_saved(
+        &self,
+        pane: serverdeck_core::terminal::SavedLocalPane,
+        size: TerminalSize,
+        sink: Sink,
+    ) -> Result<LocalTerminalSession, Error> {
+        if pane.elevated && !cfg!(windows) {
+            return Err(Error::Validation("管理员本地终端仅支持 Windows"));
         }
-        Ok(())
+        self.open_mode(
+            size,
+            sink,
+            pane.elevated,
+            Some(LaunchDirectory {
+                directory: Some(pane.directory),
+                token: uuid::Uuid::new_v4(),
+            }),
+        )
+        .await
     }
     pub(crate) async fn open(
         &self,
@@ -193,35 +212,10 @@ impl LocalTerminals {
         launch: Option<LaunchDirectory>,
     ) -> Result<LocalTerminalSession, Error> {
         size.validate()?;
-        let memory = self.directory.lock().await.clone();
         let launch = launch.unwrap_or_else(|| LaunchDirectory {
-            directory: memory.as_ref().and_then(|memory| memory.current()),
+            directory: None,
             token: uuid::Uuid::new_v4(),
         });
-        let sink = if let Some(memory) = memory {
-            let tracker = Mutex::new(DirectoryTracker::new(
-                launch.token,
-                launch.directory.clone(),
-            ));
-            Arc::new(move |event: TerminalEvent| {
-                if let TerminalEvent::Data { data, .. } = &event {
-                    match lock(&tracker) {
-                        Ok(mut tracker) => {
-                            if let Some(directory) = tracker.feed(data) {
-                                memory.report(directory);
-                            }
-                        }
-                        Err(error) => {
-                            tracing::error!(operation = "local_terminal_directory", error = %error);
-                            return false;
-                        }
-                    }
-                }
-                sink(event)
-            }) as Sink
-        } else {
-            sink
-        };
         let permit = self
             .slots
             .clone()
@@ -236,6 +230,26 @@ impl LocalTerminals {
             sequence: Mutex::new((0, 0)),
             parsed: Condvar::new(),
             killer: Mutex::new(None),
+            directory: Mutex::new(None),
+            elevated: AtomicBool::new(elevated),
+        });
+        let tracker = Mutex::new(DirectoryTracker::new(launch.token));
+        let tracked_control = control.clone();
+        let sink: Sink = Arc::new(move |event| {
+            if let TerminalEvent::Data { data, .. } = &event {
+                let result = (|| {
+                    if let Some(directory) = lock(&tracker)?.feed(data) {
+                        *lock(&tracked_control.directory)? =
+                            (!directory.is_empty()).then_some(directory);
+                    }
+                    Ok::<_, Error>(())
+                })();
+                if let Err(error) = result {
+                    tracing::error!(operation="local_terminal_directory", error=%error);
+                    return false;
+                }
+            }
+            sink(event)
         });
         let id = format!("local:{}", uuid::Uuid::new_v4());
         {
@@ -446,6 +460,7 @@ fn run(
             .map_err(|error| failed("无法确认本地终端权限", error))?;
         #[cfg(not(windows))]
         let elevated = false;
+        control.elevated.store(elevated, Ordering::Release);
         let (mut command, name) = shell()?;
         launch.configure(&mut command);
         let pair = native_pty_system()
@@ -861,12 +876,9 @@ mod tests {
         let result = tokio::time::timeout(Duration::from_secs(15), async {
             loop {
                 if engine
-                    .directory
-                    .lock()
-                    .await
-                    .as_ref()
-                    .unwrap()
-                    .current()
+                    .snapshot(id)
+                    .ok()
+                    .map(|pane| pane.directory)
                     .as_deref()
                     == Some(expected)
                 {
@@ -897,7 +909,6 @@ mod tests {
         .await;
         if !matches!(result, Ok(true)) {
             engine.close_all(true).await.unwrap();
-            engine.flush_directory().await.unwrap();
         }
         assert!(
             matches!(result, Ok(true)),
@@ -907,100 +918,196 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn real_powershell_directory_is_saved_restored_and_missing_path_falls_back() {
+    async fn real_powershell_manual_sessions_are_independent_and_new_shells_start_at_home() {
+        use serverdeck_core::terminal::{LocalTerminalLayout, SaveLocalTerminalInput};
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("app.sqlite3");
-        let db = serverdeck_storage::Database::open(&path).unwrap();
-        let directory = root.path().join("中文 space '&;$[]");
-        std::fs::create_dir(&directory).unwrap();
-        let expected = directory.to_str().unwrap();
-        let engine = LocalTerminals::new();
-        engine
-            .prepare_directory(db.clone(), Arc::new(Semaphore::new(1)))
-            .await
+        let data = root.path().join("data");
+        let logs = root.path().join("logs");
+        let first_dir = root.path().join("中文 space '&;$[]");
+        let second_dir = root.path().join("second");
+        let changed_dir = root.path().join("changed");
+        for dir in [&first_dir, &second_dir, &changed_dir] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        let app = crate::Application::initialize(data.clone(), logs.clone()).unwrap();
+        // Previously automatic history is retained, but must never control new sessions.
+        app.database
+            .save_local_terminal_directory(first_dir.to_str().unwrap())
             .unwrap();
-        let (sink, mut output) = events();
-        let session = engine
-            .open(
-                TerminalSize {
-                    cols: 120,
-                    rows: 30,
-                },
-                sink,
-            )
-            .await
-            .unwrap();
+        assert!(
+            app.terminal_local_saved_sessions()
+                .await
+                .unwrap()
+                .is_empty()
+        );
         let home = std::env::var("USERPROFILE").unwrap();
-        until_directory(&engine, &session.id, &mut output, &home).await;
+        let size = TerminalSize {
+            cols: 160,
+            rows: 30,
+        };
+        let (sink, mut first_events) = events();
+        let first = app.terminal_local_open(size, sink).await.unwrap();
+        until_directory(&app.local_terminals, &first.id, &mut first_events, &home).await;
         let command = format!(
             "Set-Location -LiteralPath '{}'\r",
-            expected.replace('\'', "''")
+            first_dir.to_str().unwrap().replace('\'', "''")
         );
-        engine.input(&session.id, command.into_bytes()).unwrap();
-        until_directory(&engine, &session.id, &mut output, expected).await;
-        engine.close_all(true).await.unwrap();
-        engine.flush_directory().await.unwrap();
+        app.terminal_input(&first.id, command.into_bytes()).unwrap();
+        until_directory(
+            &app.local_terminals,
+            &first.id,
+            &mut first_events,
+            first_dir.to_str().unwrap(),
+        )
+        .await;
+        assert!(
+            app.terminal_local_saved_sessions()
+                .await
+                .unwrap()
+                .is_empty(),
+            "changing directory must never save a session"
+        );
+        let mut saved_first = app
+            .terminal_local_save(SaveLocalTerminalInput {
+                id: None,
+                title: "第一会话".into(),
+                session_ids: vec![first.id.clone()],
+                layout: Some(LocalTerminalLayout::Leaf { pane: 0 }),
+            })
+            .await
+            .unwrap();
+        let (sink, mut second_events) = events();
+        let second = app.terminal_local_open(size, sink).await.unwrap();
+        until_directory(&app.local_terminals, &second.id, &mut second_events, &home).await;
+        let command = format!(
+            "Set-Location -LiteralPath '{}'\r",
+            second_dir.to_str().unwrap().replace('\'', "''")
+        );
+        app.terminal_input(&second.id, command.into_bytes())
+            .unwrap();
+        until_directory(
+            &app.local_terminals,
+            &second.id,
+            &mut second_events,
+            second_dir.to_str().unwrap(),
+        )
+        .await;
         assert_eq!(
-            db.local_terminal_directory().unwrap().as_deref(),
-            Some(expected)
+            app.local_terminals.snapshot(&first.id).unwrap().directory,
+            first_dir.to_str().unwrap()
         );
-
-        // A fresh engine/database simulates an application restart without replaying cd.
-        let reopened = serverdeck_storage::Database::open(&path).unwrap();
-        let engine = LocalTerminals::new();
-        engine
-            .prepare_directory(reopened.clone(), Arc::new(Semaphore::new(1)))
+        let saved_second = app
+            .terminal_local_save(SaveLocalTerminalInput {
+                id: None,
+                title: "第二会话".into(),
+                session_ids: vec![second.id.clone()],
+                layout: Some(LocalTerminalLayout::Leaf { pane: 0 }),
+            })
             .await
             .unwrap();
-        let (sink, mut output) = events();
-        let session = engine
-            .open(
-                TerminalSize {
-                    cols: 120,
-                    rows: 30,
-                },
-                sink,
-            )
+        let command = format!(
+            "Set-Location -LiteralPath '{}'\r",
+            changed_dir.to_str().unwrap().replace('\'', "''")
+        );
+        app.terminal_input(&first.id, command.into_bytes()).unwrap();
+        until_directory(
+            &app.local_terminals,
+            &first.id,
+            &mut first_events,
+            changed_dir.to_str().unwrap(),
+        )
+        .await;
+        assert_eq!(
+            app.terminal_local_saved_sessions().await.unwrap(),
+            [saved_first.clone(), saved_second.clone()],
+            "saved snapshots only change on explicit save"
+        );
+        saved_first = app
+            .terminal_local_save(SaveLocalTerminalInput {
+                id: Some(saved_first.id.clone()),
+                title: "第一会话已更新".into(),
+                session_ids: vec![first.id.clone()],
+                layout: Some(LocalTerminalLayout::Leaf { pane: 0 }),
+            })
             .await
             .unwrap();
-        until(&engine, &session.id, &mut output, "PS ").await;
-        engine
-            .input(
+        app.shutdown().await;
+        let app = crate::Application::initialize(data, logs).unwrap();
+        assert_eq!(
+            app.terminal_local_saved_sessions().await.unwrap(),
+            [saved_first.clone(), saved_second.clone()]
+        );
+        assert!(
+            lock(&app.local_terminals.sessions).unwrap().is_empty(),
+            "restoring the list must not start any shells"
+        );
+        let prior_panes = saved_first.panes.clone();
+        saved_first = app
+            .terminal_local_save(SaveLocalTerminalInput {
+                id: Some(saved_first.id.clone()),
+                title: "未启动时改名".into(),
+                session_ids: vec![],
+                layout: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            saved_first.panes, prior_panes,
+            "renaming an idle saved entry must preserve its directories"
+        );
+        assert!(lock(&app.local_terminals.sessions).unwrap().is_empty());
+        for (saved, expected) in [
+            (&saved_first, changed_dir.to_str().unwrap()),
+            (&saved_second, second_dir.to_str().unwrap()),
+        ] {
+            let (sink, mut output) = events();
+            let session = app
+                .terminal_local_open_saved(saved.id.clone(), 0, size, sink)
+                .await
+                .unwrap();
+            until(&app.local_terminals, &session.id, &mut output, "PS ").await;
+            app.terminal_input(
                 &session.id,
                 b"[Console]::WriteLine(('SD_DIRECTORY_' + $PWD.ProviderPath))\r".to_vec(),
             )
             .unwrap();
-        until(
-            &engine,
-            &session.id,
-            &mut output,
-            &format!("SD_DIRECTORY_{expected}"),
-        )
-        .await;
-        engine.close_all(true).await.unwrap();
-        engine.flush_directory().await.unwrap();
-
-        std::fs::remove_dir(&directory).unwrap();
-        let engine = LocalTerminals::new();
-        engine
-            .prepare_directory(reopened.clone(), Arc::new(Semaphore::new(1)))
-            .await
-            .unwrap();
-        let (sink, mut output) = events();
-        let session = engine
-            .open(
-                TerminalSize {
-                    cols: 120,
-                    rows: 30,
-                },
-                sink,
+            until(
+                &app.local_terminals,
+                &session.id,
+                &mut output,
+                &format!("SD_DIRECTORY_{expected}"),
             )
+            .await;
+            app.terminal_close(&session.id).await.unwrap();
+        }
+        let (sink, mut output) = events();
+        let ordinary = app.terminal_local_open(size, sink).await.unwrap();
+        until_directory(&app.local_terminals, &ordinary.id, &mut output, &home).await;
+        app.terminal_close(&ordinary.id).await.unwrap();
+        std::fs::remove_dir(&second_dir).unwrap();
+        let (sink, mut output) = events();
+        let missing = app
+            .terminal_local_open_saved(saved_second.id.clone(), 0, size, sink)
             .await
             .unwrap();
-        until_directory(&engine, &session.id, &mut output, &home).await;
-        engine.close_all(true).await.unwrap();
-        engine.flush_directory().await.unwrap();
-        assert_eq!(reopened.local_terminal_directory().unwrap(), Some(home));
+        until_directory(&app.local_terminals, &missing.id, &mut output, &home).await;
+        assert_eq!(
+            app.terminal_local_saved_sessions().await.unwrap()[1],
+            saved_second,
+            "fallback must not silently overwrite the saved directory"
+        );
+        app.terminal_local_remove_saved(saved_first.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            app.terminal_local_saved_sessions().await.unwrap(),
+            [saved_second]
+        );
+        assert!(
+            app.local_terminals.get(&missing.id).is_ok(),
+            "unsaving must leave the running shell intact"
+        );
+        app.shutdown().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

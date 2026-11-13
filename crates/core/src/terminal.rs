@@ -148,6 +148,110 @@ pub struct LocalTerminalSession {
     pub elevated: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum LocalTerminalLayout {
+    Leaf {
+        pane: usize,
+    },
+    Split {
+        axis: LocalSplitAxis,
+        ratio: u8,
+        first: Box<Self>,
+        second: Box<Self>,
+    },
+}
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalSplitAxis {
+    Rows,
+    Columns,
+}
+
+impl LocalTerminalLayout {
+    pub fn validate(&self, panes: usize) -> Result<(), Error> {
+        fn walk(node: &LocalTerminalLayout, seen: &mut [bool], depth: usize) -> bool {
+            if depth > 8 {
+                return false;
+            }
+            match node {
+                LocalTerminalLayout::Leaf { pane } => {
+                    if *pane >= seen.len() || seen[*pane] {
+                        return false;
+                    }
+                    seen[*pane] = true;
+                    true
+                }
+                LocalTerminalLayout::Split {
+                    ratio,
+                    first,
+                    second,
+                    ..
+                } => {
+                    (10..=90).contains(ratio)
+                        && walk(first, seen, depth + 1)
+                        && walk(second, seen, depth + 1)
+                }
+            }
+        }
+        if !(1..=8).contains(&panes) {
+            return Err(Error::Validation("保存的本地会话窗格数量无效"));
+        }
+        let mut seen = vec![false; panes];
+        if !walk(self, &mut seen, 1) || seen.contains(&false) {
+            return Err(Error::Validation("保存的本地会话分屏布局无效"));
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedLocalPane {
+    pub directory: String,
+    pub elevated: bool,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedLocalTerminal {
+    pub id: String,
+    pub title: String,
+    pub panes: Vec<SavedLocalPane>,
+    pub layout: LocalTerminalLayout,
+}
+pub fn validate_local_terminal_title(title: &str) -> Result<(), Error> {
+    if title.trim().is_empty() || title.chars().count() > 128 || title.chars().any(char::is_control)
+    {
+        return Err(Error::Validation("会话名称须为 1–128 个字符且不含控制字符"));
+    }
+    Ok(())
+}
+impl SavedLocalTerminal {
+    pub fn validate(&self) -> Result<(), Error> {
+        if uuid::Uuid::parse_str(&self.id).is_err() {
+            return Err(Error::Validation("保存的本地会话标识无效"));
+        }
+        validate_local_terminal_title(&self.title)?;
+        self.layout.validate(self.panes.len())?;
+        for pane in &self.panes {
+            if pane.directory.len() > 32768
+                || !std::path::Path::new(&pane.directory).is_absolute()
+                || pane.directory.chars().any(char::is_control)
+            {
+                return Err(Error::Validation("保存的本地终端工作目录无效"));
+            }
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SaveLocalTerminalInput {
+    pub id: Option<String>,
+    pub title: String,
+    pub session_ids: Vec<String>,
+    pub layout: Option<LocalTerminalLayout>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSession {

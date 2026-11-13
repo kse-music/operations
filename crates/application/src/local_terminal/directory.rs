@@ -1,5 +1,4 @@
 use super::*;
-use serverdeck_storage::Database;
 use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -36,9 +35,9 @@ impl LaunchDirectory {
     Remove-Item Env:\SERVERDECK_START_DIRECTORY
 }}
 function global:prompt {{
-    if ($PWD.Provider.Name -eq 'FileSystem') {{
-        [Console]::Write(([string][char]27 + ']777;serverdeck-cwd;{};' + $PWD.ProviderPath + [char]7))
-    }}
+    $serverDeckDirectory = ''
+    if ($PWD.Provider.Name -eq 'FileSystem') {{ $serverDeckDirectory = $PWD.ProviderPath }}
+    [Console]::Write(([string][char]27 + ']777;serverdeck-cwd;{};' + $serverDeckDirectory + [char]7))
     'PS ' + $executionContext.SessionState.Path.CurrentLocation + ('>' * ($nestedPromptLevel + 1)) + ' '
 }}"#,
                 self.token
@@ -74,12 +73,12 @@ pub(super) struct DirectoryTracker {
     previous: Option<String>,
 }
 impl DirectoryTracker {
-    pub(super) fn new(token: uuid::Uuid, previous: Option<String>) -> Self {
+    pub(super) fn new(token: uuid::Uuid) -> Self {
         Self {
             prefix: format!("777;serverdeck-cwd;{token};"),
             state: ParseState::Text,
             bytes: Vec::new(),
-            previous,
+            previous: None,
         }
     }
     pub(super) fn feed(&mut self, data: &[u8]) -> Option<String> {
@@ -96,7 +95,7 @@ impl DirectoryTracker {
                 (ParseState::Osc, 7) | (ParseState::OscEscape, b'\\') => {
                     if let Ok(value) = std::str::from_utf8(&self.bytes)
                         && let Some(path) = value.strip_prefix(&self.prefix)
-                        && valid_path(path)
+                        && (path.is_empty() || valid_path(path))
                         && self.previous.as_deref() != Some(path)
                     {
                         self.previous = Some(path.to_owned());
@@ -128,98 +127,6 @@ impl DirectoryTracker {
     }
 }
 
-pub(super) struct DirectoryMemory {
-    directory: watch::Sender<Option<String>>,
-    stop: watch::Sender<bool>,
-    worker: tokio::sync::Mutex<Option<tokio::task::JoinHandle<Result<(), Error>>>>,
-}
-
-impl DirectoryMemory {
-    pub(super) async fn load(
-        database: Database,
-        operations: Arc<Semaphore>,
-    ) -> Result<Arc<Self>, Error> {
-        let permit = operations
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| Error::ShuttingDown)?;
-        let db = database.clone();
-        let initial = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            db.local_terminal_directory()
-        })
-        .await
-        .map_err(|error| Error::Worker(Box::new(error)))??;
-        let (directory, mut changes) = watch::channel(initial.clone());
-        let (stop, mut stopping) = watch::channel(false);
-        let worker = tokio::spawn(async move {
-            let mut saved = initial;
-            loop {
-                let closed = tokio::select! {
-                    result = changes.changed() => result.is_err(),
-                    result = stopping.changed() => result.is_err(),
-                };
-                let finishing = closed || *stopping.borrow();
-                let latest = changes.borrow_and_update().clone();
-                let result = if latest != saved {
-                    let permit = operations
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .map_err(|_| Error::ShuttingDown)?;
-                    let db = database.clone();
-                    let value = latest.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let _permit = permit;
-                        if let Some(path) = value {
-                            db.save_local_terminal_directory(&path)?;
-                        }
-                        Ok::<_, Error>(())
-                    })
-                    .await
-                    .map_err(|error| Error::Worker(Box::new(error)))?
-                } else {
-                    Ok(())
-                };
-                match result {
-                    Ok(()) => saved = latest,
-                    Err(error) => {
-                        // Retain the unsaved value for the next report or the final flush.
-                        tracing::error!(operation = "local_terminal_directory_save", error = %error, "could not save local terminal directory");
-                        if finishing {
-                            return Err(error);
-                        }
-                    }
-                }
-                if finishing && !changes.has_changed().unwrap_or(false) {
-                    return Ok(());
-                }
-            }
-        });
-        Ok(Arc::new(Self {
-            directory,
-            stop,
-            worker: tokio::sync::Mutex::new(Some(worker)),
-        }))
-    }
-    pub(super) fn current(&self) -> Option<String> {
-        self.directory.borrow().clone()
-    }
-    pub(super) fn report(&self, directory: String) {
-        self.directory.send_replace(Some(directory));
-    }
-    pub(super) async fn shutdown(&self) -> Result<(), Error> {
-        self.stop.send_replace(true);
-        if let Some(worker) = self.worker.lock().await.take() {
-            worker
-                .await
-                .map_err(|error| Error::Worker(Box::new(error)))??;
-        }
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,17 +147,17 @@ mod tests {
             .to_owned();
         let bytes = marker(token, &path);
         for split in 0..=bytes.len() {
-            let mut tracker = DirectoryTracker::new(token, None);
+            let mut tracker = DirectoryTracker::new(token);
             let first = tracker.feed(&bytes[..split]);
             let second = tracker.feed(&bytes[split..]);
             assert_eq!(first.or(second), Some(path.clone()), "split at {split}");
             assert_eq!(
                 tracker.feed(&bytes),
                 None,
-                "unchanged prompt must not replace another session's directory"
+                "unchanged prompt needs no extra directory notification"
             );
         }
-        let mut tracker = DirectoryTracker::new(token, None);
+        let mut tracker = DirectoryTracker::new(token);
         let mut observed = None;
         for byte in bytes {
             observed = tracker.feed(&[byte]).or(observed);
@@ -259,11 +166,10 @@ mod tests {
         let second = root.path().to_str().unwrap();
         let st = format!("\x1b]777;serverdeck-cwd;{token};{second}\x1b\\");
         assert_eq!(tracker.feed(st.as_bytes()), Some(second.to_owned()));
-        let mut restored = DirectoryTracker::new(token, Some(path.clone()));
         assert_eq!(
-            restored.feed(&marker(token, &path)),
-            None,
-            "opening a restored session must not overwrite a newer directory from another session"
+            tracker.feed(&marker(token, "")),
+            Some(String::new()),
+            "non-filesystem prompts must invalidate the previous directory"
         );
     }
 
@@ -272,7 +178,7 @@ mod tests {
         let token = uuid::Uuid::new_v4();
         let root = tempfile::tempdir().unwrap();
         let path = root.path().to_str().unwrap();
-        let mut tracker = DirectoryTracker::new(token, None);
+        let mut tracker = DirectoryTracker::new(token);
         for bytes in [
             marker(uuid::Uuid::new_v4(), path),
             marker(token, "relative/path"),
@@ -313,53 +219,5 @@ mod tests {
         let home = command.get_cwd().map(ToOwned::to_owned);
         launch.configure(&mut command);
         assert_eq!(command.get_cwd(), home.as_ref());
-    }
-
-    #[tokio::test]
-    async fn coalesces_pending_updates_and_flushes_latest_directory_before_shutdown() {
-        let root = tempfile::tempdir().unwrap();
-        let db = Database::open(root.path().join("app.sqlite3")).unwrap();
-        let operations = Arc::new(Semaphore::new(1));
-        let memory = DirectoryMemory::load(db.clone(), operations.clone())
-            .await
-            .unwrap();
-        let busy = operations.acquire().await.unwrap();
-        for index in 0..100 {
-            memory.report(
-                root.path()
-                    .join(index.to_string())
-                    .to_str()
-                    .unwrap()
-                    .to_owned(),
-            );
-        }
-        let latest = memory.current();
-        assert_eq!(db.local_terminal_directory().unwrap(), None);
-        drop(busy);
-        memory.shutdown().await.unwrap();
-        assert_eq!(db.local_terminal_directory().unwrap(), latest);
-        let reopened = DirectoryMemory::load(db, operations).await.unwrap();
-        assert_eq!(reopened.current(), latest);
-        reopened.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn final_write_failure_is_reported_without_resetting_saved_data() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("app.sqlite3");
-        let db = Database::open(&path).unwrap();
-        let previous = root.path().to_str().unwrap();
-        db.save_local_terminal_directory(previous).unwrap();
-        let memory = DirectoryMemory::load(db.clone(), Arc::new(Semaphore::new(1)))
-            .await
-            .unwrap();
-        let connection = rusqlite::Connection::open(path).unwrap();
-        connection.execute_batch("CREATE TRIGGER reject_directory_write BEFORE UPDATE ON application_settings WHEN NEW.key='local_terminal_directory' BEGIN SELECT RAISE(ABORT, 'injected directory write failure'); END;").unwrap();
-        memory.report(root.path().join("new").to_str().unwrap().to_owned());
-        assert!(memory.shutdown().await.is_err());
-        assert_eq!(
-            db.local_terminal_directory().unwrap().as_deref(),
-            Some(previous)
-        );
     }
 }

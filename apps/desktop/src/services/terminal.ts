@@ -9,10 +9,31 @@ import type {
   TerminalDropSelection,
   TerminalDropProgress,
   TerminalDropResult,
+  SavedLocalTerminal,
+  SaveLocalTerminalInput,
 } from '../types/terminal';
 import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
+  savedLocalSessions: (): Promise<SavedLocalTerminal[]> => {
+    ensureDesktop();
+    return invoke('terminal_local_saved_sessions');
+  },
+  saveLocalSession: (input: SaveLocalTerminalInput): Promise<SavedLocalTerminal> =>
+    invoke('terminal_local_save', { input }),
+  removeSavedLocalSession: (id: string): Promise<void> =>
+    invoke('terminal_local_remove_saved', { id }),
+  openSavedLocal(
+    id: string,
+    pane: number,
+    size: TerminalSize,
+    receive: (event: TerminalEvent) => void,
+  ): Promise<LocalTerminalSession> {
+    ensureDesktop();
+    const events = new Channel<TerminalEvent>();
+    events.onmessage = receive;
+    return invoke('terminal_local_open_saved', { id, pane, size, events });
+  },
   openLink: (url: string): Promise<void> => {
     ensureDesktop();
     return invoke('terminal_open_link', { url });

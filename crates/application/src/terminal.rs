@@ -166,6 +166,108 @@ pub(crate) fn plan_for_target(
 }
 
 impl Application {
+    pub async fn terminal_local_saved_sessions(
+        &self,
+    ) -> Result<Vec<serverdeck_core::terminal::SavedLocalTerminal>, Error> {
+        self.blocking(|db| db.local_terminal_sessions()).await
+    }
+    pub async fn terminal_local_save(
+        &self,
+        input: serverdeck_core::terminal::SaveLocalTerminalInput,
+    ) -> Result<serverdeck_core::terminal::SavedLocalTerminal, Error> {
+        use serverdeck_core::terminal::{SavedLocalTerminal, validate_local_terminal_title};
+        if !cfg!(windows) {
+            return Err(Error::Validation(
+                "保存本地会话目前仅支持 Windows PowerShell",
+            ));
+        }
+        validate_local_terminal_title(&input.title)?;
+        if input.session_ids.is_empty() {
+            let id = input
+                .id
+                .ok_or(Error::Validation("请先打开本地终端再保存会话"))?;
+            if input.layout.is_some() {
+                return Err(Error::Validation("未运行的会话只能更新已保存名称"));
+            }
+            return self
+                .blocking(move |db| {
+                    let mut saved = db
+                        .local_terminal_sessions()?
+                        .into_iter()
+                        .find(|entry| entry.id == id)
+                        .ok_or(Error::NotFound)?;
+                    saved.title = input.title;
+                    db.save_local_terminal_session(saved.clone())?;
+                    Ok(saved)
+                })
+                .await;
+        }
+        let layout = input
+            .layout
+            .ok_or(Error::Validation("缺少本地会话分屏布局"))?;
+        layout.validate(input.session_ids.len())?;
+        let mut seen = std::collections::HashSet::new();
+        let panes = input
+            .session_ids
+            .iter()
+            .map(|id| {
+                if !seen.insert(id) {
+                    return Err(Error::Validation("本地会话窗格重复"));
+                }
+                self.local_terminals.snapshot(id)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let updating = input.id.is_some();
+        let saved = SavedLocalTerminal {
+            id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            title: input.title,
+            panes,
+            layout,
+        };
+        saved.validate()?;
+        self.blocking(move |db| {
+            if updating
+                && !db
+                    .local_terminal_sessions()?
+                    .iter()
+                    .any(|entry| entry.id == saved.id)
+            {
+                return Err(Error::NotFound);
+            }
+            db.save_local_terminal_session(saved.clone())?;
+            Ok(saved)
+        })
+        .await
+    }
+    pub async fn terminal_local_remove_saved(&self, id: String) -> Result<(), Error> {
+        if uuid::Uuid::parse_str(&id).is_err() {
+            return Err(Error::Validation("保存的本地会话标识无效"));
+        }
+        self.blocking(move |db| db.remove_local_terminal_session(&id))
+            .await
+    }
+    pub async fn terminal_local_open_saved(
+        &self,
+        id: String,
+        pane: usize,
+        size: TerminalSize,
+        sink: Sink,
+    ) -> Result<serverdeck_core::terminal::LocalTerminalSession, Error> {
+        size.validate()?;
+        let saved = self
+            .blocking(move |db| {
+                db.local_terminal_sessions()?
+                    .into_iter()
+                    .find(|entry| entry.id == id)
+                    .and_then(|entry| entry.panes.get(pane).cloned())
+                    .ok_or(Error::NotFound)
+            })
+            .await?;
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        self.local_terminals.open_saved(saved, size, sink).await
+    }
     pub async fn terminal_reset(&self) -> Result<(), Error> {
         self.terminal_uploads.clear()?;
         self.local_terminals.close_all(false).await?;
@@ -241,9 +343,6 @@ impl Application {
             return Err(Error::ShuttingDown);
         }
         size.validate()?;
-        self.local_terminals
-            .prepare_directory(self.database.clone(), self.operations.clone())
-            .await?;
         self.local_terminals.open(size, sink).await
     }
     pub async fn terminal_local_open_elevated(
@@ -255,9 +354,6 @@ impl Application {
             return Err(Error::ShuttingDown);
         }
         size.validate()?;
-        self.local_terminals
-            .prepare_directory(self.database.clone(), self.operations.clone())
-            .await?;
         self.local_terminals.open_elevated(size, sink).await
     }
 }

@@ -397,9 +397,16 @@ async function connect(): Promise<void> {
     const size = { cols: terminal.cols, rows: terminal.rows };
     const opening = props.tab.host
       ? open(props.tab.host.id, size, receive)
-      : props.tab.elevated
-        ? terminalApi.openLocal(size, receive, true)
-        : terminalApi.openLocal(size, receive);
+      : props.tab.savedSource
+        ? terminalApi.openSavedLocal(
+            props.tab.savedSource.id,
+            props.tab.savedSource.pane,
+            size,
+            receive,
+          )
+        : props.tab.elevated
+          ? terminalApi.openLocal(size, receive, true)
+          : terminalApi.openLocal(size, receive);
     const value = await opening;
     if (disposed || attempt !== generation) {
       await terminalApi.close(value.id);

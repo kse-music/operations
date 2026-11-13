@@ -4,6 +4,9 @@ vi.mock('../services/terminal', () => ({
   terminalApi: {
     close: vi.fn(),
     closeHost: vi.fn(),
+    savedLocalSessions: vi.fn(),
+    saveLocalSession: vi.fn(),
+    removeSavedLocalSession: vi.fn(),
   },
 }));
 import { terminalApi } from '../services/terminal';
@@ -448,5 +451,115 @@ describe('independent terminal tabs', () => {
     expect(store.tabs).toEqual([]);
     expect(terminalApi).not.toHaveProperty('workspaceSave');
     expect(terminalApi).not.toHaveProperty('workspaceLoad');
+  });
+});
+
+describe('manually saved local sessions', () => {
+  const snapshot = (id: string, title: string) => ({
+    id,
+    title,
+    panes: [{ directory: `C:\\${title}`, elevated: false }],
+    layout: { kind: 'leaf' as const, pane: 0 },
+  });
+  beforeEach(() => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  it('restores multiple idle records and only starts the selected record; new and duplicated sessions have no saved source', async () => {
+    vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([
+      snapshot('one', 'one'),
+      snapshot('two', 'two'),
+    ]);
+    const store = useTerminalsStore();
+    await store.loadSaved();
+    expect(store.tabs).toHaveLength(2);
+    expect(store.active).toBe('');
+    expect(store.panes.every((pane) => pane.state === 'idle' && !pane.connectRequested)).toBe(true);
+    store.activateHost('');
+    expect(store.panes.every((pane) => !pane.connectRequested)).toBe(true);
+    const second = store.tabs[1]!;
+    store.select(second.key);
+    expect(second.panes[0]!.savedSource).toEqual({ id: 'two', pane: 0 });
+    expect(second.panes[0]!.connectRequested).toBe(true);
+    expect(store.tabs[0]!.panes[0]!.connectRequested).toBe(false);
+    store.open(null);
+    expect(store.tabs.at(-1)!.panes[0]!.savedSource).toBeUndefined();
+    store.duplicate(second.key);
+    expect(store.tabs.at(-1)!.panes[0]!.savedSource).toBeUndefined();
+    expect(terminalApi.saveLocalSession).not.toHaveBeenCalled();
+  });
+  it('saves one named snapshot with every pane and only overwrites it on explicit save', async () => {
+    const store = useTerminalsStore();
+    store.open(null);
+    store.split(store.focused, 'columns');
+    const tab = store.tabs[0]!;
+    tab.panes.forEach((pane, index) =>
+      store.update(pane.key, { state: 'connected', sessionId: `local:${index}` }),
+    );
+    const record = {
+      ...snapshot('one', '项目'),
+      panes: [snapshot('a', 'a').panes[0]!, snapshot('b', 'b').panes[0]!],
+      layout: {
+        kind: 'split' as const,
+        axis: 'columns' as const,
+        ratio: 50,
+        first: { kind: 'leaf' as const, pane: 0 },
+        second: { kind: 'leaf' as const, pane: 1 },
+      },
+    };
+    vi.mocked(terminalApi.saveLocalSession).mockResolvedValue(record);
+    expect(await store.saveLocal(tab.key, '项目')).toBe(true);
+    expect(terminalApi.saveLocalSession).toHaveBeenCalledExactlyOnceWith({
+      id: null,
+      title: '项目',
+      sessionIds: ['local:0', 'local:1'],
+      layout: record.layout,
+    });
+    expect(tab.savedId).toBe('one');
+    expect(tab.title).toBe('项目');
+    store.update(tab.panes[0]!.key, { cwd: 'C:\\changed' });
+    store.resize(tab.key, tab.layout.kind === 'split' ? tab.layout.id : '', 60);
+    await nextTick();
+    expect(terminalApi.saveLocalSession).toHaveBeenCalledTimes(1);
+    await store.saveLocal(tab.key, '更新');
+    expect(vi.mocked(terminalApi.saveLocalSession).mock.calls[1]![0].id).toBe('one');
+  });
+  it('renames an idle saved record without launching shells and keeps it available after closing', async () => {
+    const record = snapshot('one', '旧名称');
+    vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([record]);
+    const store = useTerminalsStore();
+    await store.loadSaved();
+    const tab = store.tabs[0]!;
+    vi.mocked(terminalApi.saveLocalSession).mockResolvedValue({ ...record, title: '新名称' });
+    expect(await store.saveLocal(tab.key, '新名称')).toBe(true);
+    expect(terminalApi.saveLocalSession).toHaveBeenCalledExactlyOnceWith({
+      id: 'one',
+      title: '新名称',
+      sessionIds: [],
+      layout: null,
+    });
+    expect(tab.panes[0]!.connectRequested).toBe(false);
+    await store.close(tab.key);
+    expect(store.tabs[0]!.title).toBe('新名称');
+    expect(store.tabs[0]!.panes[0]!.state).toBe('idle');
+    expect(terminalApi.removeSavedLocalSession).not.toHaveBeenCalled();
+    vi.mocked(terminalApi.removeSavedLocalSession).mockResolvedValue(undefined);
+    await store.unsaveLocal(tab.key);
+    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledWith('one');
+    expect(store.tabs[0]!.savedId).toBeUndefined();
+  });
+  it('preserves the name and saved status when persistence fails', async () => {
+    const store = useTerminalsStore();
+    store.open(null);
+    const tab = store.tabs[0]!;
+    store.update(tab.panes[0]!.key, { state: 'connected', sessionId: 'local:one' });
+    const title = tab.title;
+    vi.mocked(terminalApi.saveLocalSession).mockRejectedValue({ message: '写入失败' });
+    expect(await store.saveLocal(tab.key, '不能保存')).toBe(false);
+    expect(tab.title).toBe(title);
+    expect(tab.savedId).toBeUndefined();
+    expect(store.error).toBe('写入失败');
   });
 });

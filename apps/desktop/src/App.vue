@@ -159,7 +159,7 @@ function navigate(
     )
       terminals.open(host ?? null);
     const pane = terminals.panes.find((p) => p.key === terminals.focused);
-    if (pane?.state === 'idle') pane.connectRequested = true;
+    if (pane?.state === 'idle' && !pane.savedSource) pane.connectRequested = true;
   }
   if (value === 'files') files.active = hostId;
   if (value === 'server') operations.active = hostId;
@@ -336,6 +336,16 @@ function workspaceKeys(event: KeyboardEvent) {
 const defaultShortcuts = defaultProductPreferences().shortcuts;
 function globalShortcut(event: KeyboardEvent) {
   if (
+    workspace.area === 'local' &&
+    view.value === 'terminals' &&
+    event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === 's'
+  )
+    return;
+  if (
     event.defaultPrevented ||
     document.querySelector('dialog[open]') ||
     (event.target instanceof HTMLInputElement && event.target.readOnly)
@@ -494,6 +504,7 @@ onMounted(async () => {
   document.addEventListener('scroll', dismissTabMenu, true);
   await application.initialize();
   if (application.ready) {
+    await terminals.loadSaved();
     void updates.initialize();
     await store.load();
     background.start();

@@ -46,6 +46,27 @@ export interface LocalTerminalSession {
   shell: string;
   elevated: boolean;
 }
+export type SavedLocalLayout =
+  | { kind: 'leaf'; pane: number }
+  | {
+      kind: 'split';
+      axis: 'rows' | 'columns';
+      ratio: number;
+      first: SavedLocalLayout;
+      second: SavedLocalLayout;
+    };
+export interface SavedLocalTerminal {
+  id: string;
+  title: string;
+  panes: { directory: string; elevated: boolean }[];
+  layout: SavedLocalLayout;
+}
+export interface SaveLocalTerminalInput {
+  id: string | null;
+  title: string;
+  sessionIds: string[];
+  layout: SavedLocalLayout | null;
+}
 export type TerminalEvent =
   | { type: 'connection'; cipher: string }
   | { type: 'state'; state: string; code: string | null; message: string | null }

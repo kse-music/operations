@@ -196,9 +196,6 @@ impl Application {
         if let Err(error) = self.local_terminals.close_all(true).await {
             tracing::error!(operation = "local_terminal_shutdown", error = %error);
         }
-        if let Err(error) = self.local_terminals.flush_directory().await {
-            tracing::error!(operation = "local_terminal_directory_shutdown", error = %error);
-        }
         self.tasks.shutdown().await;
         self.operations_host.shutdown().await;
         self.monitors.shutdown().await;

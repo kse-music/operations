@@ -218,6 +218,27 @@ fn administrator_terminal_requires_main_window_local_origin_and_valid_size_befor
                 .is_some_and(|text| text.contains("not allowed"))
         );
     }
+    for (command, input) in [
+        ("terminal_local_saved_sessions", json!({})),
+        (
+            "terminal_local_save",
+            json!({"input":{"id":null,"title":"name","sessionIds":[],"layout":null}}),
+        ),
+        ("terminal_local_remove_saved", json!({"id":"invalid"})),
+        (
+            "terminal_local_open_saved",
+            json!({"id":"missing","pane":0,"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"}),
+        ),
+    ] {
+        let response = get_ipc_response(&main, request(command, input.clone(), origin));
+        if command == "terminal_local_saved_sessions" {
+            assert_eq!(response.unwrap().deserialize::<Value>().unwrap(), json!([]));
+        } else {
+            assert_eq!(response.unwrap_err()["code"], "VALIDATION");
+        }
+        assert!(get_ipc_response(&other, request(command, input.clone(), origin)).is_err());
+        assert!(get_ipc_response(&main, request(command, input, "https://example.com")).is_err());
+    }
 }
 
 #[test]

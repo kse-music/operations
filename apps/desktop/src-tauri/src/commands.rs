@@ -28,6 +28,54 @@ pub async fn forward_stop(
 use serverdeck_core::terminal::{TerminalEvent, TerminalSession, TerminalSize};
 
 #[tauri::command]
+pub async fn terminal_local_saved_sessions(
+    application: tauri::State<'_, Application>,
+) -> Result<Vec<serverdeck_core::terminal::SavedLocalTerminal>, IpcError> {
+    application
+        .terminal_local_saved_sessions()
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn terminal_local_save(
+    application: tauri::State<'_, Application>,
+    input: serverdeck_core::terminal::SaveLocalTerminalInput,
+) -> Result<serverdeck_core::terminal::SavedLocalTerminal, IpcError> {
+    application
+        .terminal_local_save(input)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn terminal_local_remove_saved(
+    application: tauri::State<'_, Application>,
+    id: String,
+) -> Result<(), IpcError> {
+    application
+        .terminal_local_remove_saved(id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn terminal_local_open_saved(
+    application: tauri::State<'_, Application>,
+    id: String,
+    pane: usize,
+    size: TerminalSize,
+    events: tauri::ipc::Channel<TerminalEvent>,
+) -> Result<serverdeck_core::terminal::LocalTerminalSession, IpcError> {
+    application
+        .terminal_local_open_saved(
+            id,
+            pane,
+            size,
+            std::sync::Arc::new(move |event| events.send(event).is_ok()),
+        )
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn terminal_local_open(
     application: tauri::State<'_, Application>,
     size: TerminalSize,

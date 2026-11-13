@@ -12,6 +12,38 @@ describe('terminal IPC contract', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
+  it('lists and saves named local snapshots separately from ordinary new shell launches', async () => {
+    mocks.invoke.mockResolvedValue([]);
+    await terminalApi.savedLocalSessions();
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_saved_sessions');
+    const input = {
+      id: null,
+      title: '项目',
+      sessionIds: ['local:a'],
+      layout: { kind: 'leaf' as const, pane: 0 },
+    };
+    await terminalApi.saveLocalSession(input);
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_save', { input });
+    await terminalApi.saveLocalSession({
+      id: 'saved',
+      title: '只改名',
+      sessionIds: [],
+      layout: null,
+    });
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_save', {
+      input: { id: 'saved', title: '只改名', sessionIds: [], layout: null },
+    });
+    const receive = vi.fn();
+    await terminalApi.openSavedLocal('saved', 0, { cols: 80, rows: 24 }, receive);
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_open_saved', {
+      id: 'saved',
+      pane: 0,
+      size: { cols: 80, rows: 24 },
+      events: expect.objectContaining({ onmessage: receive }),
+    });
+    await terminalApi.removeSavedLocalSession('saved');
+    expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_remove_saved', { id: 'saved' });
+  });
   it('starts native binary upload with an opaque grant and streams progress without file bytes', async () => {
     const receive = vi.fn();
     mocks.invoke.mockResolvedValue({ code: null, committed: 2, recovery: null });

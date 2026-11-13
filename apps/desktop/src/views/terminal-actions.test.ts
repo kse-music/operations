@@ -16,6 +16,10 @@ import type { ITerminalOptions } from '@xterm/xterm';
 const native = vi.hoisted(() => ({
   open: vi.fn(),
   openLocal: vi.fn(),
+  openSavedLocal: vi.fn(),
+  saveLocalSession: vi.fn(),
+  removeSavedLocalSession: vi.fn(),
+  savedLocalSessions: vi.fn(),
   close: vi.fn(),
   input: vi.fn(),
   ack: vi.fn(),
@@ -147,6 +151,18 @@ beforeEach(async () => {
   native.open.mockImplementation(open);
   native.openLocal.mockImplementation((size, receive, elevated) =>
     open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: !!elevated })),
+  );
+  native.savedLocalSessions.mockResolvedValue([]);
+  native.openSavedLocal.mockImplementation((_id, _pane, size, receive) =>
+    open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: false })),
+  );
+  native.saveLocalSession.mockImplementation((input) =>
+    Promise.resolve({
+      id: input.id ?? 'saved-local',
+      title: input.title,
+      panes: input.sessionIds.map(() => ({ directory: 'C:\\project', elevated: false })),
+      layout: input.layout,
+    }),
   );
   pinia = createPinia();
   setActivePinia(pinia);
@@ -731,4 +747,100 @@ it('provides keyboard session menus and leaves local shells without bottom actio
   await flush();
   expect([...pane().children]).toEqual([pane().querySelector('.xterm-container')]);
   expect(pane().querySelector('button')).toBeNull();
+});
+
+it('uses Ctrl+S and the rename Save button to explicitly save a local session', async () => {
+  const store = useTerminalsStore();
+  hostId.value = '';
+  store.open(null);
+  await flush();
+  const target = store.tabs.at(-1)!;
+  const menu = await tabMenu(0);
+  expect(
+    [...menu.querySelectorAll('[role=menuitem]')].map((item) => item.textContent?.trim()),
+  ).not.toContain('保存');
+  document.querySelector<HTMLElement>('.context-backdrop')!.click();
+  await flush();
+  const event = new KeyboardEvent('keydown', {
+    key: 's',
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  pane().querySelector('.xterm-container')!.dispatchEvent(event);
+  await flush();
+  expect(event.defaultPrevented).toBe(true);
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="重命名标签"]')!;
+  expect(dialog).toBeTruthy();
+  expect(native.saveLocalSession).not.toHaveBeenCalled();
+  const input = dialog.querySelector('input')!;
+  input.value = '项目 A';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  button('保存', dialog).click();
+  await flush();
+  expect(native.saveLocalSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: null,
+      title: '项目 A',
+      sessionIds: [target.panes[0]!.sessionId],
+    }),
+  );
+  expect(target.savedId).toBe('saved-local');
+  expect(target.title).toBe('项目 A');
+  expect(document.querySelector('dialog')).toBeNull();
+});
+
+it('keeps Ctrl+S in SSH and does not save when the local rename dialog is cancelled', async () => {
+  const ssh = new KeyboardEvent('keydown', {
+    key: 's',
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  window.dispatchEvent(ssh);
+  await flush();
+  expect(ssh.defaultPrevented).toBe(false);
+  expect(document.querySelector('dialog')).toBeNull();
+  hostId.value = '';
+  useTerminalsStore().open(null);
+  await flush();
+  window.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }),
+  );
+  await flush();
+  button('取消', document.querySelector('dialog')!).click();
+  await flush();
+  expect(native.saveLocalSession).not.toHaveBeenCalled();
+  expect(useTerminalsStore().tabs.at(-1)!.savedId).toBeUndefined();
+});
+
+it('opens a saved local shell only after the saved row is selected', async () => {
+  hostId.value = '';
+  native.savedLocalSessions.mockResolvedValue([
+    {
+      id: 'saved-one',
+      title: '保存的目录',
+      panes: [{ directory: 'C:\\one', elevated: false }],
+      layout: { kind: 'leaf', pane: 0 },
+    },
+  ]);
+  const store = useTerminalsStore();
+  await store.loadSaved();
+  await flush();
+  const saved = store.tabs.find((tab) => tab.savedId === 'saved-one')!;
+  expect(native.openSavedLocal).not.toHaveBeenCalled();
+  store.activateHost('');
+  await flush();
+  expect(native.openSavedLocal).not.toHaveBeenCalled();
+  [...root.querySelectorAll<HTMLButtonElement>('[role=tab]')]
+    .find((item) => item.textContent?.includes('保存的目录'))!
+    .click();
+  await flush();
+  expect(native.openSavedLocal).toHaveBeenCalledWith(
+    'saved-one',
+    0,
+    expect.anything(),
+    expect.any(Function),
+  );
+  expect(saved.panes[0]!.sessionId).toBeTruthy();
 });
