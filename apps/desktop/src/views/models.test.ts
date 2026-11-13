@@ -17,11 +17,13 @@ vi.mock('../services/ai', () => ({ aiApi: api }));
 import ModelsView from './ModelsView.vue';
 import { useModelsStore } from '../stores/models';
 import { defaultAiConfig, type AiModel, type AiModelInput } from '../types/ai';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 let app: App, root: HTMLDivElement, pinia: Pinia;
 const model = (id: string, name: string): AiModel => ({
   id,
   name,
   revision: 'r1',
+  createdAt: '2026-11-13T02:30:45.000Z',
   config: { ...defaultAiConfig(), model: `remote-${id}` },
   hasKey: true,
 });
@@ -79,6 +81,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  setLocale('zh-CN');
   app?.unmount();
   root?.remove();
   disposePinia(pinia);
@@ -188,6 +191,104 @@ it('shows API model IDs, aliases, separate token limits and key status without d
   expect(rows[1]!.querySelector('.model-endpoint')?.textContent).toBe('http://backup.example/v1');
   expect(rows[1]!.querySelector('.model-key-status')?.textContent).toContain('未设置 Key');
   expect(rows[1]!.querySelector('.model-badges')?.textContent).toContain('HTTP 明文');
+});
+it('shows registration times in the local timezone, marks historical times unknown and updates the locale', async () => {
+  const current = model('new', '新模型');
+  const historical = { ...model('old', '历史模型'), createdAt: null };
+  api.models.mockResolvedValue([current, historical]);
+  await mount();
+  const options: Intl.DateTimeFormatOptions = {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  };
+  for (const [language, label, unknown] of [
+    ['zh-CN', '注册时间', '未知'],
+    ['en-US', 'Registered at', 'Unknown'],
+  ] as const) {
+    setLocale(language);
+    await settle();
+    const rows = root.querySelectorAll('.model-list > li');
+    const time = rows[0]!.querySelector('time')!;
+    expect(root.querySelector('.model-list-heading')?.textContent).toContain(label);
+    expect(time.dateTime).toBe(current.createdAt);
+    expect(time.textContent).toBe(
+      new Intl.DateTimeFormat(language, options)
+        .format(new Date(current.createdAt!))
+        .replaceAll('/', '-'),
+    );
+    expect(time.textContent).not.toContain('/');
+    expect(time.textContent).toMatch(/\d{2}-\d{2}/);
+    expect(rows[0]!.querySelector('.model-registration-time .model-field-label')?.textContent).toBe(
+      label,
+    );
+    expect(rows[1]!.querySelector('.model-registration-time')?.textContent).toContain(unknown);
+    expect(rows[1]!.querySelector('time')).toBeNull();
+  }
+});
+it('lists newest registrations first, keeps unknown times last and preserves sorting during search and refresh', async () => {
+  const historicalA = { ...model('legacy-a', '历史 A'), createdAt: null };
+  const historicalB = { ...model('legacy-b', '历史 B'), createdAt: null };
+  const older = { ...model('older', '模型 A'), createdAt: '2026-10-31T23:59:59.999Z' };
+  const newer = { ...model('newer', '模型 B'), createdAt: '2026-11-13T02:30:45.000Z' };
+  const sameTime = { ...model('same-time', '模型 C'), createdAt: newer.createdAt };
+  const original = [historicalA, older, newer, sameTime, historicalB];
+  api.models.mockResolvedValue(original);
+  await mount();
+  const names = () => [...root.querySelectorAll('.model-name')].map((el) => el.textContent);
+  expect(names()).toEqual(['模型 B', '模型 C', '模型 A', '历史 A', '历史 B']);
+  expect(useModelsStore().models.map((entry) => entry.id)).toEqual(
+    original.map((entry) => entry.id),
+  );
+  const search = root.querySelector<HTMLInputElement>('[aria-label="搜索模型"]')!;
+  search.value = '模型';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  expect(names()).toEqual(['模型 B', '模型 C', '模型 A']);
+  api.models.mockResolvedValue([older, historicalA, newer, sameTime, historicalB]);
+  button('刷新').click();
+  await settle();
+  expect(names()).toEqual(['模型 B', '模型 C', '模型 A']);
+  search.value = '';
+  search.dispatchEvent(new Event('input', { bubbles: true }));
+  await settle();
+  expect(names()).toEqual(['模型 B', '模型 C', '模型 A', '历史 A', '历史 B']);
+});
+it('puts newly registered models first and keeps edited models ordered by their original registration time', async () => {
+  const older = { ...model('older', '已有模型'), createdAt: '2026-11-01T00:00:00.000Z' };
+  const newer = { ...model('newer', '最新模型'), createdAt: '2026-11-13T00:00:00.000Z' };
+  api.models.mockResolvedValue([older]);
+  await mount();
+  const store = useModelsStore();
+  const names = () => [...root.querySelectorAll('.model-name')].map((el) => el.textContent);
+  api.modelSave.mockResolvedValue({ value: newer, warnings: [] });
+  expect(
+    await store.save({
+      id: null,
+      expectedRevision: null,
+      name: newer.name,
+      config: newer.config,
+      apiKey: null,
+      clearKey: false,
+      testId: 'passed-test',
+    }),
+  ).toBe(true);
+  await settle();
+  expect(names()).toEqual(['最新模型', '已有模型']);
+  root.querySelector<HTMLButtonElement>('[aria-label="编辑模型 已有模型"]')!.click();
+  await settle();
+  await fill('模型名称', '改名后的模型');
+  api.modelSave.mockResolvedValue({
+    value: { ...older, name: '改名后的模型', revision: 'r2' },
+    warnings: [],
+  });
+  await submit();
+  expect(names()).toEqual(['最新模型', '改名后的模型']);
+  expect(document.querySelector('dialog')).toBeNull();
 });
 it('filters locally by model ID, name and endpoint, preserves the query across tabs and refreshes, and clears no-match results', async () => {
   const primary = model('a', '生产诊断');

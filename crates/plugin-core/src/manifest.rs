@@ -15,6 +15,8 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub built_at: Option<u64>,
     pub author: String,
     pub description: String,
     pub api_version: String,
@@ -116,6 +118,12 @@ pub fn validate_path(path: &str) -> Result<(), Error> {
 impl Manifest {
     pub fn validate(&self, platform: &str) -> Result<(), Error> {
         validate_id(&self.id)?;
+        if self
+            .built_at
+            .is_some_and(|value| value > 253_402_300_799_999)
+        {
+            return Err(invalid("插件构建时间超出 Unix 毫秒时间戳支持范围"));
+        }
         if let Some(icon) = &self.icon
             && (icon.is_empty()
                 || icon.len() > 64

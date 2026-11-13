@@ -97,6 +97,7 @@ async function fixtures(page, appearance) {
         id: 'model-a',
         name: '内网诊断模型',
         revision: '1',
+        createdAt: '2026-11-13T02:30:45.000Z',
         hasKey: true,
         config: {
           provider: 'openai_compatible',
@@ -111,6 +112,7 @@ async function fixtures(page, appearance) {
         id: 'model-b',
         name: '部署验证模型',
         revision: '1',
+        createdAt: null,
         hasKey: false,
         config: {
           provider: 'openai_compatible',
@@ -263,6 +265,35 @@ try {
     assert.equal(await remotePanel.locator('.model-page-note').count(), 0);
     assert.equal(await modelToolbar.getByRole('button', { name: '刷新', exact: true }).count(), 1);
     assert.equal(await models.locator('.model-list-heading').isVisible(), expectedColumns === 2);
+    const registered = models.locator('.model-registration-time').first();
+    assert(await registered.isVisible());
+    assert.equal(
+      await registered.locator('time').getAttribute('datetime'),
+      '2026-11-13T02:30:45.000Z',
+    );
+    assert.equal(
+      await registered.locator('time').textContent(),
+      await page.evaluate(() =>
+        new Intl.DateTimeFormat('zh-CN', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hourCycle: 'h23',
+        })
+          .format(new Date('2026-11-13T02:30:45.000Z'))
+          .replaceAll('/', '-'),
+      ),
+    );
+    assert(
+      await models
+        .locator('.model-registration-time')
+        .last()
+        .getByText('未知', { exact: true })
+        .isVisible(),
+    );
     const modelSearch = models.getByRole('searchbox', { name: '搜索模型', exact: true });
     await modelSearch.fill(' DIAGNOSTICS-V1 ');
     assert.equal(await models.locator('.model-list > li').count(), 1);

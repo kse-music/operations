@@ -130,6 +130,12 @@ async fn model_crud_keeps_secrets_independent_and_cancels_only_its_own_platform_
         .unwrap()
         .value;
     assert_ne!(a.id, b.id);
+    assert!(
+        a.created_at
+            .as_deref()
+            .is_some_and(|time| time.ends_with('Z'))
+    );
+    assert_eq!(app.ai_models().await.unwrap()[0].created_at, a.created_at);
     assert_eq!(app.ai_models().await.unwrap().len(), 2);
     assert_eq!(store.values.lock().unwrap().len(), 2);
     let call_a = app.models_runtime.begin(&a.id).unwrap();
@@ -148,6 +154,7 @@ async fn model_crud_keeps_secrets_independent_and_cancels_only_its_own_platform_
     let renamed = app.ai_model_save(update).await.unwrap().value;
     assert_eq!(renamed.id, a.id);
     assert_ne!(renamed.revision, a.revision);
+    assert_eq!(renamed.created_at, a.created_at);
     assert!(renamed.has_key);
     assert!(call_a.cancel.is_cancelled());
     assert!(!call_b.cancel.is_cancelled());

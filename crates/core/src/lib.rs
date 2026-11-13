@@ -10,6 +10,7 @@ pub mod hosts;
 pub mod identity;
 pub mod openssh;
 pub mod terminal;
+pub mod updates;
 
 pub const CONFIG_VERSION: u32 = 2;
 pub const DATABASE_VERSION: u32 = 11;

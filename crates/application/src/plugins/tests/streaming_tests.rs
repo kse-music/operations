@@ -196,6 +196,7 @@ async fn native_model_stream_yields_before_http_completion_and_cancellation_drai
     });
     app.secrets.write("model-stream-key", b"test-key").unwrap();
     let record = serverdeck_storage::ai::ModelRecord {
+        created_at: None,
         id: "stream-model".into(),
         name: "stream fixture".into(),
         config: serverdeck_core::ai::Config {
@@ -309,6 +310,7 @@ async fn model_stream_completes_with_unchanged_model_and_host_bindings() {
     app.database
         .ai_model_save(
             serverdeck_storage::ai::ModelRecord {
+                created_at: None,
                 id: "bound-stream-model".into(),
                 name: "fixture".into(),
                 config: serverdeck_core::ai::Config {

@@ -77,6 +77,7 @@ it('distinguishes missing tools, authorization and actual model readiness', asyn
       id: 'local-claude-code',
       name: '本地 Claude Code',
       revision: 'r1',
+      createdAt: null,
       config: { ...defaultAiConfig(), provider: 'local_claude_code' },
       hasKey: false,
     },

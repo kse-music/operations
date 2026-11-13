@@ -12,6 +12,7 @@ import {
   type Component,
 } from 'vue';
 import { useApplicationStore } from './stores/application';
+import { useUpdatesStore } from './stores/updates';
 import { useTheme } from './composables/theme';
 import { interfaceFontSizes } from './types/preferences';
 import SettingsView from './views/SettingsView.vue';
@@ -408,6 +409,7 @@ const FilesView = defineAsyncComponent(() => import('./views/FilesView.vue'));
 import { useTerminalsStore } from './stores/terminals';
 
 const application = useApplicationStore();
+const updates = useUpdatesStore();
 const store = useHostsStore();
 const terminals = useTerminalsStore();
 const files = useFilesStore();
@@ -416,12 +418,27 @@ let releaseEditor: UnlistenFn | undefined;
 let releaseEditorSaved: UnlistenFn | undefined;
 const exitBusy = ref(false);
 const exitError = ref<string | null>(null);
+watch(
+  () => updates.installRequested,
+  (requested) => {
+    if (requested) {
+      exitError.value = null;
+      files.exitReview = true;
+    }
+  },
+);
+function cancelExit(): void {
+  files.exitReview = false;
+  updates.installRequested = false;
+  exitError.value = null;
+}
 async function confirmExit(): Promise<void> {
   if (workspace.settingsCloseGuard && !(await workspace.settingsCloseGuard())) return;
   exitBusy.value = true;
   exitError.value = null;
   try {
-    await filesApi.exit(true);
+    if (updates.installRequested) await updates.install();
+    else await filesApi.exit(true);
   } catch (cause) {
     exitError.value = errorMessage(cause);
     exitBusy.value = false;
@@ -477,6 +494,7 @@ onMounted(async () => {
   document.addEventListener('scroll', dismissTabMenu, true);
   await application.initialize();
   if (application.ready) {
+    void updates.initialize();
     await store.load();
     background.start();
     plugins.start();
@@ -629,9 +647,10 @@ watch(
     <AppNavigation
       :area="workspace.area"
       :disabled="workspace.navigationBlocked"
+      :update-available="updates.available"
       @home="workspace.showHome()"
       @local="navigate('terminals', '')"
-      @settings="workspace.showSettings()"
+      @settings="updates.available ? workspace.navigate('about') : workspace.showSettings()"
     />
     <aside id="host-sidebar" class="sidebar" :aria-label="tr('侧栏菜单')">
       <HostSidebar
@@ -876,10 +895,10 @@ watch(
   <FileOpenDialogs />
   <Modal
     v-if="files.exitReview"
-    :title="tr('确认退出 ServerDeck')"
+    :title="updates.installRequested ? tr('确认安装更新并重启') : tr('确认退出 ServerDeck')"
     :busy="exitBusy"
     focus-heading
-    @close="files.exitReview = false"
+    @close="cancelExit"
   >
     <div class="exit-review-body">
       <ul class="exit-review-effects" :aria-label="tr('退出影响')">

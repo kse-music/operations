@@ -10,6 +10,7 @@ pub mod hosts;
 mod migrations;
 pub mod plugins;
 pub mod trust;
+pub mod updates;
 use serverdeck_core::{AppConfig, Error, product::WindowGeometry};
 
 #[derive(Clone)]

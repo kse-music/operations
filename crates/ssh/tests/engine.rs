@@ -90,6 +90,7 @@ struct Fixture {
     forwards: HashMap<(String, u32), tokio_util::sync::CancellationToken>,
     password: String,
     public: PublicKey,
+    signature_algorithm: Option<Algorithm>,
     channels: HashMap<ChannelId, Channel<Msg>>,
     attempts: Arc<AtomicUsize>,
     sizes: Arc<Mutex<Vec<(u32, u32)>>>,
@@ -167,6 +168,9 @@ impl server::Handler for Fixture {
         key: server::VerifiedPublicKey<'_>,
     ) -> Result<Auth, Self::Error> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
+        if let Some(algorithm) = &self.signature_algorithm {
+            assert_eq!(key.algorithm, algorithm, "negotiated signature algorithm");
+        }
         Ok(if user == "fixture" && *key.public_key == self.public {
             Auth::Accept
         } else {
@@ -286,8 +290,17 @@ impl Server {
         cipher: Option<russh::cipher::Name>,
         limits: russh::Limits,
     ) -> Self {
-        let host_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("host key");
         let user_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("user key");
+        Self::start_with_auth_options(auth_delay, cipher, limits, user_key, None).await
+    }
+    async fn start_with_auth_options(
+        auth_delay: Duration,
+        cipher: Option<russh::cipher::Name>,
+        limits: russh::Limits,
+        user_key: PrivateKey,
+        signature_algorithm: Option<Algorithm>,
+    ) -> Self {
+        let host_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("host key");
         let key = host_key.public_key().to_openssh().expect("public");
         let pin = host_key
             .public_key()
@@ -308,6 +321,9 @@ impl Server {
         if let Some(cipher) = cipher {
             config.preferred.cipher = vec![cipher].into();
         }
+        if let Some(algorithm) = &signature_algorithm {
+            config.preferred.key = vec![Algorithm::Ed25519, algorithm.clone()].into();
+        }
         let config = Arc::new(config);
         let (pw, public, attempts2, sizes2) = (
             password.clone(),
@@ -319,7 +335,7 @@ impl Server {
             let mut tasks = tokio::task::JoinSet::new();
             loop {
                 tokio::select! {
-                    accepted=listener.accept()=>{let (stream,_)=accepted.expect("accept");let fixture=Fixture{auth_delay,workers:vec![],forwards:HashMap::new(),password:pw.clone(),public:public.clone(),channels:HashMap::new(),attempts:attempts2.clone(),sizes:sizes2.clone()};let config=config.clone();tasks.spawn(async move {if let Ok(session)=server::run_stream(config,stream,fixture).await{let _=session.await;}});},
+                    accepted=listener.accept()=>{let (stream,_)=accepted.expect("accept");let fixture=Fixture{auth_delay,workers:vec![],forwards:HashMap::new(),password:pw.clone(),public:public.clone(),signature_algorithm:signature_algorithm.clone(),channels:HashMap::new(),attempts:attempts2.clone(),sizes:sizes2.clone()};let config=config.clone();tasks.spawn(async move {if let Ok(session)=server::run_stream(config,stream,fixture).await{let _=session.await;}});},
                     _=tasks.join_next(),if !tasks.is_empty()=>(),
                 }
             }
@@ -807,7 +823,126 @@ async fn encrypted_and_plain_private_keys_authenticate_and_bad_passphrase_fails(
 }
 
 #[tokio::test]
-async fn local_rsa_private_key_is_blocked_before_authentication() {
+async fn rsa_sha2_plain_and_encrypted_keys_authenticate_from_files_and_imported_credentials() {
+    let key = tokio::task::spawn_blocking(|| {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None })
+            .expect("temporary RSA key")
+    })
+    .await
+    .expect("key generation");
+    for hash in [HashAlg::Sha256, HashAlg::Sha512] {
+        let server = Server::start_with_auth_options(
+            Duration::ZERO,
+            None,
+            Default::default(),
+            key.clone(),
+            Some(Algorithm::Rsa { hash: Some(hash) }),
+        )
+        .await;
+        let (dir, db) = database();
+        server.trust(&db);
+        let host = server.host(&db);
+        let engine = Engine::new(db);
+        for encrypted in [false, true] {
+            let passphrase = uuid::Uuid::new_v4().to_string();
+            let private_key = if encrypted {
+                key.encrypt(&mut rand::rng(), &passphrase).expect("encrypt")
+            } else {
+                key.clone()
+            };
+            let path = dir.path().join("rsa_identity");
+            private_key
+                .write_openssh_file(&path, russh::keys::ssh_key::LineEnding::LF)
+                .expect("key file");
+            let auth = Authentication::PrivateKey {
+                path: path.to_string_lossy().into(),
+                passphrase: encrypted.then(|| Zeroizing::new(passphrase.clone())),
+            };
+            let mut shell = open(&engine, host.clone(), auth);
+            state(&mut shell, "connected").await;
+            engine.close(&shell.info.id).await.expect("close");
+
+            let contents = private_key
+                .to_openssh(russh::keys::ssh_key::LineEnding::LF)
+                .expect("key data");
+            let imported = serverdeck_ssh::import_private_key(
+                &contents,
+                encrypted.then_some(passphrase.as_str()),
+            )
+            .expect("import RSA key");
+            // The imported key must authenticate after its original file has been removed.
+            std::fs::remove_file(&path).expect("remove original key file");
+            let mut shell = open(&engine, host.clone(), Authentication::ImportedKey(imported));
+            state(&mut shell, "connected").await;
+            engine.close(&shell.info.id).await.expect("close imported");
+
+            if encrypted {
+                let attempts = server.attempts.load(Ordering::SeqCst);
+                assert!(matches!(
+                    serverdeck_ssh::import_private_key(&contents, Some("wrong")),
+                    Err(serverdeck_core::Error::Connection {
+                        code: "SSH_KEY_UNLOCK",
+                        ..
+                    })
+                ));
+                private_key
+                    .write_openssh_file(&path, russh::keys::ssh_key::LineEnding::LF)
+                    .expect("encrypted key file");
+                let mut bad = open(
+                    &engine,
+                    host.clone(),
+                    Authentication::PrivateKey {
+                        path: path.to_string_lossy().into(),
+                        passphrase: Some(Zeroizing::new("wrong".into())),
+                    },
+                );
+                assert_eq!(state(&mut bad, "failed").await, Some("SSH_KEY_UNLOCK"));
+                assert_eq!(server.attempts.load(Ordering::SeqCst), attempts);
+            }
+        }
+        assert_eq!(server.attempts.load(Ordering::SeqCst), 4);
+        engine.shutdown().await;
+        assert_eq!(engine.counts().expect("counts"), (0, 0));
+    }
+}
+
+#[tokio::test]
+async fn rsa_private_key_rejects_sha1_only_server_before_signing() {
+    let key = tokio::task::spawn_blocking(|| {
+        PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None })
+            .expect("temporary RSA key")
+    })
+    .await
+    .expect("key generation");
+    let server = Server::start_with_auth_options(
+        Duration::ZERO,
+        None,
+        Default::default(),
+        key.clone(),
+        Some(Algorithm::Rsa { hash: None }),
+    )
+    .await;
+    let (_dir, db) = database();
+    server.trust(&db);
+    let host = server.host(&db);
+    let imported = serverdeck_ssh::import_private_key(
+        &key.to_openssh(russh::keys::ssh_key::LineEnding::LF)
+            .expect("key data"),
+        None,
+    )
+    .expect("import RSA key");
+    let engine = Engine::new(db);
+    let mut shell = open(&engine, host, Authentication::ImportedKey(imported));
+    assert_eq!(
+        state(&mut shell, "failed").await,
+        Some("SSH_RSA_SHA2_REQUIRED")
+    );
+    assert_eq!(server.attempts.load(Ordering::SeqCst), 0);
+    engine.shutdown().await;
+}
+
+#[tokio::test]
+async fn unauthorized_rsa_private_key_is_rejected_by_server() {
     let server = Server::start().await;
     let (dir, db) = database();
     server.trust(&db);
@@ -831,8 +966,8 @@ async fn local_rsa_private_key_is_blocked_before_authentication() {
             passphrase: None,
         },
     );
-    assert_eq!(state(&mut shell, "failed").await, Some("SSH_RSA_BLOCKED"));
-    assert_eq!(server.attempts.load(Ordering::SeqCst), 0);
+    assert_eq!(state(&mut shell, "failed").await, Some("SSH_AUTH_REJECTED"));
+    assert_eq!(server.attempts.load(Ordering::SeqCst), 1);
     engine.shutdown().await;
 }
 #[tokio::test]

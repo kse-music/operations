@@ -304,6 +304,7 @@ beforeEach(() => {
       id: 'model-a',
       name: '模型 A',
       revision: 'r1',
+      createdAt: null,
       config: {
         provider: 'openai_compatible',
         baseUrl: 'https://model.example/v1',
@@ -643,6 +644,7 @@ it('loads the persisted plugin binding and revokes old previews on rebind, edit 
     id: 'model-b',
     name: '模型 B',
     revision: 'r1',
+    createdAt: null,
     config: { ...defaultAiConfig(), model: 'other' },
     hasKey: true,
   };

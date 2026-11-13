@@ -387,7 +387,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn new_host_requires_successful_ssh_authentication_for_the_same_configuration() {
+    async fn new_host_requires_successful_ssh_authentication_and_reuses_encrypted_rsa_credentials()
+    {
         use russh::{
             keys::{Algorithm, PrivateKey, PublicKey, ssh_key::LineEnding},
             server,
@@ -437,7 +438,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let auth_calls = Arc::new(AtomicUsize::new(0));
         let server_calls = auth_calls.clone();
-        let client_key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
+        let client_key = tokio::task::spawn_blocking(|| {
+            PrivateKey::random(&mut rand::rng(), Algorithm::Rsa { hash: None }).unwrap()
+        })
+        .await
+        .unwrap();
         let authorized_key = client_key.public_key().clone();
         let sshd = tokio::spawn(async move {
             let config = Arc::new(server::Config {
@@ -632,10 +637,13 @@ mod tests {
             auth_type: AuthType::PrivateKey,
             ..input
         };
+        let encrypted_key = client_key
+            .encrypt(&mut rand::rng(), "fixture-rsa-passphrase")
+            .unwrap();
         let key = || {
             Some(HostAuthenticationInput::PrivateKey {
-                key_data: client_key.to_openssh(LineEnding::LF).unwrap(),
-                passphrase: None,
+                key_data: encrypted_key.to_openssh(LineEnding::LF).unwrap(),
+                passphrase: Some(Zeroizing::new("fixture-rsa-passphrase".into())),
             })
         };
         let HostTestResult::Connected { test_id, .. } = app

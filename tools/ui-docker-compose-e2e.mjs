@@ -366,34 +366,18 @@ try {
     }
     await measure();
     await page.screenshot({ path: `${output}/projects-${width}-${theme}.png` });
-    await frame.getByRole('button', { name: 'Docker信息', exact: true }).click();
-    const capabilities = frame.getByRole('dialog', { name: 'Docker信息' });
-    await capabilities.getByText('27.5.1', { exact: true }).waitFor();
-    assert.deepEqual(await capabilities.locator('dt').allTextContents(), [
-      'Docker 已安装',
-      'Docker 状态',
+    const summary = frame.getByRole('region', { name: 'Docker 全局统计' });
+    await summary.getByText('27.5.1', { exact: true }).waitFor();
+    assert.deepEqual(await summary.locator('article > div > span').allTextContents(), [
       'Docker 版本',
-      '客户端版本',
-      '运行平台',
-      '操作系统',
+      '本地镜像',
+      '运行容器',
+      'Compose 配置',
     ]);
-    assert.deepEqual(
-      (await capabilities.locator('dd').allTextContents()).map((value) => value.trim()),
-      ['是', '运行中', '27.5.1', '28.5.1', 'linux / amd64', 'Ubuntu 24.04.3 LTS'],
-    );
-    assert.equal(await capabilities.locator('details, pre').count(), 0);
-    assert.equal((await capabilities.textContent()).includes('UNNEEDED_DETAILS'), false);
-    await measure();
-    const bounds = await capabilities.boundingBox();
-    assert(
-      bounds &&
-        bounds.x >= 0 &&
-        bounds.y >= 0 &&
-        bounds.x + bounds.width <= width + 1 &&
-        bounds.y + bounds.height <= height + 1,
-    );
-    await page.screenshot({ path: `${output}/capabilities-${width}-${theme}.png` });
-    await frame.getByRole('button', { name: '关闭对话框' }).click();
+    assert.equal(await frame.getByRole('button', { name: 'Docker信息', exact: true }).count(), 0);
+    assert.equal(await frame.locator('.ops-capabilities').count(), 0);
+    assert.equal((await summary.textContent()).includes('UNNEEDED_DETAILS'), false);
+    await page.screenshot({ path: `${output}/summary-${width}-${theme}.png` });
     await frame.getByRole('button', { name: '服务', exact: true }).click();
     await frame
       .getByRole('dialog')

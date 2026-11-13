@@ -13,6 +13,7 @@ export interface AiModel {
   id: string;
   name: string;
   revision: string;
+  createdAt: string | null;
   config: AiConfig;
   hasKey: boolean;
 }

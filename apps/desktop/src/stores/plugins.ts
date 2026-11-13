@@ -7,6 +7,7 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { useApplicationStore } from './application';
 import type {
   InstalledPlugin,
+  PluginManifest,
   PluginGrant,
   PluginRuntimeStatus,
   PluginLocale,
@@ -17,6 +18,7 @@ import type {
 export const usePluginsStore = defineStore('plugins', () => {
   const application = useApplicationStore();
   const installed = ref<InstalledPlugin[]>([]),
+    availableBundled = ref<PluginManifest[]>([]),
     problems = ref<import('../types/plugins').PluginProblem[]>([]),
     grants = ref<Record<string, PluginGrant | null>>({}),
     statuses = ref<PluginRuntimeStatus[]>([]);
@@ -155,6 +157,7 @@ export const usePluginsStore = defineStore('plugins', () => {
       const inventory = await pluginsApi.inventory();
       const list = inventory.installed;
       problems.value = inventory.problems;
+      availableBundled.value = inventory.availableBundled;
       const next: Record<string, PluginGrant | null> = {};
       for (let start = 0; start < list.length; start += 8) {
         await Promise.all(
@@ -243,6 +246,7 @@ export const usePluginsStore = defineStore('plugins', () => {
   onScopeDispose(stop);
   return {
     installed,
+    availableBundled,
     locale,
     metadata,
     problems,

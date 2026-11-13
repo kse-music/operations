@@ -43,6 +43,7 @@ async function walk(folder, prefix = '') {
 }
 await walk(root);
 manifest.files = digests;
+manifest.builtAt = Date.now();
 const bytes = JSON.stringify({ formatVersion: 1, manifest, files });
 if (Buffer.byteLength(bytes) > 16 * 1024 * 1024) throw new Error('Package exceeds 16 MiB');
 await writeFile(output, bytes, { flag: 'wx' });

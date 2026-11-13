@@ -72,11 +72,11 @@ impl Application {
     pub async fn plugin_reinstall_bundled(
         &self,
         id: String,
-        expected_record_digest: String,
+        expected_record_digest: Option<String>,
         confirmed: bool,
     ) -> Result<serverdeck_plugin_core::InstalledPlugin, Error> {
         if !confirmed {
-            return Err(Error::Validation("重新安装问题插件需要明确确认"));
+            return Err(Error::Validation("重新安装内置插件需要明确确认"));
         }
         let bytes = PACKAGES
             .iter()
@@ -85,32 +85,36 @@ impl Application {
             .ok_or(Error::Validation(
                 "此插件没有随应用分发的安装包，请重新上传当前版本",
             ))?;
-        self.plugin_stop_resources(&id).await?;
-        self.plugin_runtime.remove(&id).await?;
+        if expected_record_digest.is_some() {
+            self.plugin_stop_resources(&id).await?;
+            self.plugin_runtime.remove(&id).await?;
+        }
         let repository = self.plugins.clone();
         let target = id.clone();
         let plugin = self
-            .blocking(move |_| {
-                repository.reinstall_bundled(bytes, &target, &expected_record_digest, confirmed)
+            .blocking(move |database| {
+                let plugin = match expected_record_digest {
+                    Some(digest) => {
+                        repository.reinstall_bundled(bytes, &target, &digest, confirmed)?
+                    }
+                    None => repository.restore_bundled(bytes, &target, confirmed)?,
+                };
+                let grant = bundled_grant(&plugin)?;
+                repository.set_grant(
+                    &target,
+                    serverdeck_plugin_core::permissions::GrantInput {
+                        expected_revision: grant.revision,
+                        permissions: grant.permissions,
+                        operations: grant.operations,
+                        read_roots: grant.read_roots,
+                        write_roots: grant.write_roots,
+                        confirmed: true,
+                    },
+                )?;
+                database.mark_bundled_plugin_provisioned(&target)?;
+                Ok(plugin)
             })
             .await?;
-        let grant = bundled_grant(&plugin)?;
-        let repository = self.plugins.clone();
-        let target = id.clone();
-        self.blocking(move |_| {
-            repository.set_grant(
-                &target,
-                serverdeck_plugin_core::permissions::GrantInput {
-                    expected_revision: grant.revision,
-                    permissions: grant.permissions,
-                    operations: grant.operations,
-                    read_roots: grant.read_roots,
-                    write_roots: grant.write_roots,
-                    confirmed: true,
-                },
-            )
-        })
-        .await?;
         self.plugin_startup_problems
             .lock()
             .map_err(|_| Error::Busy)?
@@ -123,6 +127,7 @@ impl Application {
 pub struct PluginInventory {
     pub installed: Vec<serverdeck_plugin_core::InstalledPlugin>,
     pub problems: Vec<PluginProblem>,
+    pub available_bundled: Vec<serverdeck_plugin_core::Manifest>,
 }
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -161,6 +166,23 @@ impl Application {
                     inventory.problems.push(problem);
                 }
             }
+            let mut available_bundled = Vec::new();
+            for (id, bytes) in PACKAGES {
+                if !inventory
+                    .installed
+                    .iter()
+                    .any(|plugin| plugin.manifest.id == id)
+                    && !invalid.contains(id)
+                {
+                    #[derive(serde::Deserialize)]
+                    struct Metadata {
+                        manifest: serverdeck_plugin_core::Manifest,
+                    }
+                    let package: Metadata = serde_json::from_slice(bytes)
+                        .map_err(|error| Error::Worker(Box::new(error)))?;
+                    available_bundled.push(package.manifest);
+                }
+            }
             let problems = inventory
                 .problems
                 .into_iter()
@@ -192,6 +214,7 @@ impl Application {
             Ok(PluginInventory {
                 installed: inventory.installed,
                 problems,
+                available_bundled,
             })
         })
         .await
@@ -301,6 +324,172 @@ mod tests {
         app.shutdown().await;
     }
     #[tokio::test]
+    async fn uninstalled_bundled_plugin_is_restored_only_on_request_with_retained_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let logs = dir.path().join("logs");
+        let app = Application::initialize(data.clone(), logs.clone()).unwrap();
+        app.provision_bundled_plugins().unwrap();
+        let id = "cn.hiboot.plugins.docker";
+        let original = app.plugins.detail(id).unwrap();
+        let other = app.plugins.detail("cn.hiboot.plugins.assistant").unwrap();
+        app.plugins
+            .settings_write(id, &json!({"retained":"docker-configuration"}))
+            .unwrap();
+        app.plugin_uninstall(UninstallInput {
+            id: id.into(),
+            clear_data: false,
+            confirmed: true,
+        })
+        .await
+        .unwrap();
+        app.provision_bundled_plugins().unwrap();
+        let inventory = app.plugin_inventory().await.unwrap();
+        assert_eq!(
+            inventory
+                .available_bundled
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![id]
+        );
+        assert!(matches!(app.plugins.detail(id), Err(Error::NotFound)));
+        assert!(
+            app.plugin_reinstall_bundled(id.into(), None, false)
+                .await
+                .is_err()
+        );
+        assert!(
+            app.plugin_reinstall_bundled("dev.not-bundled".into(), None, true)
+                .await
+                .is_err()
+        );
+        assert!(matches!(app.plugins.detail(id), Err(Error::NotFound)));
+        let restored = app
+            .plugin_reinstall_bundled(id.into(), None, true)
+            .await
+            .unwrap();
+        assert_eq!(
+            restored.source,
+            serverdeck_plugin_core::repository::PluginSource::System
+        );
+        assert!(!restored.enabled);
+        assert_ne!(restored.revision, original.revision);
+        assert_eq!(
+            app.plugins.settings_read(id).unwrap()["retained"],
+            "docker-configuration"
+        );
+        assert_eq!(
+            app.plugins.grant(id).unwrap().unwrap(),
+            bundled_grant(&restored).unwrap()
+        );
+        assert!(
+            app.plugin_inventory()
+                .await
+                .unwrap()
+                .available_bundled
+                .is_empty()
+        );
+        assert_eq!(
+            app.plugins.detail(&other.manifest.id).unwrap().revision,
+            other.revision
+        );
+        assert!(app.plugin_statuses().unwrap().is_empty());
+        app.shutdown().await;
+
+        let restarted = Application::initialize(data, logs).unwrap();
+        restarted.provision_bundled_plugins().unwrap();
+        let plugin = restarted.plugins.detail(id).unwrap();
+        assert_eq!(plugin.revision, restored.revision);
+        assert!(!plugin.enabled);
+        assert_eq!(
+            restarted.plugins.settings_read(id).unwrap()["retained"],
+            "docker-configuration"
+        );
+        restarted.plugin_set_enabled(id.into(), true).await.unwrap();
+        assert!(
+            restarted
+                .plugin_runtime
+                .health(id)
+                .await
+                .unwrap()
+                .error
+                .is_none()
+        );
+        restarted.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn missing_plugin_restore_never_replaces_installed_uploads_or_damaged_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        app.provision_bundled_plugins().unwrap();
+        let id = "cn.hiboot.plugins.docker";
+        let original = app.plugins.detail(id).unwrap();
+        assert!(
+            app.plugin_reinstall_bundled(id.into(), None, true)
+                .await
+                .is_err()
+        );
+        assert_eq!(app.plugins.detail(id).unwrap().revision, original.revision);
+        assert!(app.plugins.detail(id).unwrap().enabled);
+        app.plugin_uninstall(UninstallInput {
+            id: id.into(),
+            clear_data: false,
+            confirmed: true,
+        })
+        .await
+        .unwrap();
+        let path = dir.path().join("upload.sdplugin");
+        std::fs::write(&path, bundled(id).1).unwrap();
+        let upload = app
+            .plugin_install(serverdeck_plugin_core::InstallInput {
+                path,
+                development_confirmed: true,
+                expected_version: None,
+                expected_digest: None,
+            })
+            .await
+            .unwrap();
+        assert!(
+            app.plugin_inventory()
+                .await
+                .unwrap()
+                .available_bundled
+                .is_empty()
+        );
+        assert!(
+            app.plugin_reinstall_bundled(id.into(), None, true)
+                .await
+                .is_err()
+        );
+        assert_eq!(app.plugins.detail(id).unwrap().revision, upload.revision);
+        assert_eq!(
+            app.plugins.detail(id).unwrap().source,
+            serverdeck_plugin_core::repository::PluginSource::User
+        );
+        assert!(app.plugins.grant(id).unwrap().is_none());
+        let record = dir
+            .path()
+            .join("data/plugins/packages")
+            .join(id)
+            .join("record.json");
+        std::fs::write(&record, b"{ damaged }").unwrap();
+        let inventory = app.plugin_inventory().await.unwrap();
+        assert!(inventory.available_bundled.is_empty());
+        assert_eq!(inventory.problems.len(), 1);
+        assert!(inventory.problems[0].replacement.is_some());
+        assert!(
+            app.plugin_reinstall_bundled(id.into(), None, true)
+                .await
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&record).unwrap(), b"{ damaged }");
+        app.shutdown().await;
+    }
+
+    #[tokio::test]
     async fn old_or_corrupt_plugin_records_do_not_block_startup_and_reinstall_is_explicit() {
         let dir = tempfile::tempdir().unwrap();
         let app =
@@ -334,13 +523,13 @@ mod tests {
         assert_eq!(app.bootstrap().await.unwrap().config, config);
         let token = issue.problem.record_digest.clone().unwrap();
         assert!(
-            app.plugin_reinstall_bundled(id.into(), token.clone(), false)
+            app.plugin_reinstall_bundled(id.into(), Some(token.clone()), false)
                 .await
                 .is_err()
         );
         assert_eq!(std::fs::read(&record).unwrap(), original);
         let installed = app
-            .plugin_reinstall_bundled(id.into(), token, true)
+            .plugin_reinstall_bundled(id.into(), Some(token), true)
             .await
             .unwrap();
         assert!(!installed.enabled);

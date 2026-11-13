@@ -39,6 +39,8 @@ serde_json.workspace = true
 serverdeck-application.workspace = true
 tracing.workspace = true
 tempfile.workspace = true
+tauri-plugin-updater = { version = "2.14.1", default-features = false, features = ["rustls-tls", "system-proxy"] }
+serde.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 serverdeck-windows-file-drag = { path = "../../../crates/windows-file-drag" }

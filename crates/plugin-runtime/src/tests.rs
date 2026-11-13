@@ -51,6 +51,7 @@ impl Fixture {
                 id: "dev.runtime".into(),
                 name: "Runtime fixture".into(),
                 version: "1.0.0".into(),
+                built_at: None,
                 author: "Local".into(),
                 description: "Actual WASM".into(),
                 api_version: "^5.0.0".into(),

@@ -141,6 +141,7 @@ impl Fixture {
             name: "Independent fixture".into(),
             icon: None,
             version: "1.0.0".into(),
+            built_at: None,
             author: "Tests".into(),
             description: "Test-only platform boundary".into(),
             api_version: "^5.0.0".into(),

@@ -59,6 +59,8 @@ pub struct ModelRecord {
     pub config: Config,
     pub secret_ref: Option<String>,
     pub revision: String,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub created_at: Option<String>,
 }
 impl ModelRecord {
     pub fn public(&self) -> Model {
@@ -66,6 +68,7 @@ impl ModelRecord {
             id: self.id.clone(),
             name: self.name.clone(),
             revision: self.revision.clone(),
+            created_at: self.created_at.clone(),
             config: self.config.clone(),
             has_key: self.secret_ref.is_some(),
         }
@@ -77,7 +80,46 @@ struct Registry {
     version: u32,
     models: Vec<ModelRecord>,
 }
-const REGISTRY_VERSION: u32 = 2;
+const REGISTRY_VERSION: u32 = 3;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ModelRecordV2 {
+    id: String,
+    name: String,
+    config: Config,
+    secret_ref: Option<String>,
+    revision: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistryV2 {
+    version: u32,
+    models: Vec<ModelRecordV2>,
+}
+impl RegistryV2 {
+    fn upgrade(self) -> Result<Registry, Error> {
+        if self.version != 2 {
+            return Err(Error::Validation("模型配置升级路径不完整，未修改原数据"));
+        }
+        Ok(Registry {
+            version: 3,
+            models: self
+                .models
+                .into_iter()
+                .map(|model| ModelRecord {
+                    id: model.id,
+                    name: model.name,
+                    config: model.config,
+                    secret_ref: model.secret_ref,
+                    revision: model.revision,
+                    // Historical registries did not record registration times.
+                    created_at: None,
+                })
+                .collect(),
+        })
+    }
+}
 
 fn upgrade_model_config(value: &mut serde_json::Value) -> Result<(), Error> {
     let fields = value
@@ -105,7 +147,22 @@ fn read(database: &Database, connection: &Connection) -> Result<Registry, Error>
         let mut value = super::config_migrations::json(&value)?;
         match value["version"].as_u64() {
             Some(version) if version == u64::from(REGISTRY_VERSION) => {
-                return serde_json::from_value(value).map_err(storage_error);
+                let registry: Registry = serde_json::from_value(value).map_err(storage_error)?;
+                for model in &registry.models {
+                    if let Some(time) = &model.created_at {
+                        let valid: bool = connection
+                            .query_row(
+                                "SELECT strftime('%Y-%m-%dT%H:%M:%fZ',?1) IS ?1",
+                                [time],
+                                |row| row.get(0),
+                            )
+                            .map_err(storage_error)?;
+                        if !valid {
+                            return Err(Error::Validation("模型注册时间格式无效"));
+                        }
+                    }
+                }
+                return Ok(registry);
             }
             Some(1) => {
                 let models = value
@@ -119,8 +176,13 @@ fn read(database: &Database, connection: &Connection) -> Result<Registry, Error>
                     upgrade_model_config(config)?;
                 }
                 value["version"] = serde_json::json!(2);
-                serde_json::from_value::<Registry>(value).map_err(storage_error)?
+                serde_json::from_value::<RegistryV2>(value)
+                    .map_err(storage_error)?
+                    .upgrade()?
             }
+            Some(2) => serde_json::from_value::<RegistryV2>(value)
+                .map_err(storage_error)?
+                .upgrade()?,
             _ => return Err(Error::Validation("模型列表版本不受当前应用支持")),
         }
     } else {
@@ -151,9 +213,9 @@ fn read(database: &Database, connection: &Connection) -> Result<Registry, Error>
             .ok_or(Error::Validation("模型配置缺失"))?;
         upgrade_model_config(config)?;
         let legacy: Legacy = serde_json::from_value(value).map_err(storage_error)?;
-        Registry {
+        RegistryV2 {
             version: 2,
-            models: vec![ModelRecord {
+            models: vec![ModelRecordV2 {
                 id: uuid::Uuid::new_v4().to_string(),
                 name: "默认模型".into(),
                 config: legacy.config,
@@ -161,6 +223,7 @@ fn read(database: &Database, connection: &Connection) -> Result<Registry, Error>
                 revision: legacy.revision,
             }],
         }
+        .upgrade()?
     };
     if upgraded.version != REGISTRY_VERSION {
         return Err(Error::Validation("模型配置升级路径不完整，未修改原数据"));
@@ -195,7 +258,7 @@ impl Database {
     }
     pub fn ai_model_save(
         &self,
-        record: ModelRecord,
+        mut record: ModelRecord,
         previous: Option<&str>,
     ) -> Result<ModelRecord, Error> {
         record.config.validate()?;
@@ -217,6 +280,7 @@ impl Database {
                 if Some(old.revision.as_str()) != previous {
                     return Err(Error::Conflict);
                 }
+                record.created_at = old.created_at.clone();
                 if old.secret_ref != record.secret_ref
                     && let Some(reference) = &old.secret_ref
                 {
@@ -233,6 +297,12 @@ impl Database {
                 if registry.models.len() >= 100 {
                     return Err(Error::Validation("最多注册 100 个模型"));
                 }
+                record.created_at = Some(
+                    tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now')", [], |row| {
+                        row.get(0)
+                    })
+                    .map_err(storage_error)?,
+                );
                 registry.models.push(record.clone());
             }
         }

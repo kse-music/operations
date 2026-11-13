@@ -431,6 +431,38 @@ impl Repository {
             PluginSource::System,
         )
     }
+    /// Explicitly restore a missing bundled package without replacing any existing record.
+    pub fn restore_bundled(
+        &self,
+        bytes: &[u8],
+        id: &str,
+        confirmed: bool,
+    ) -> Result<InstalledPlugin, Error> {
+        if !confirmed {
+            return Err(invalid("恢复内置插件需要明确确认"));
+        }
+        match self.detail(id) {
+            Err(Error::NotFound) => (),
+            Ok(_) => return Err(Error::Conflict),
+            Err(error) => return Err(error),
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(self.root.join("cache")).map_err(io)?;
+        temporary.write_all(bytes).map_err(io)?;
+        let preview = self.preview_info(temporary.path())?;
+        if preview.manifest.id != id {
+            return Err(invalid("随应用分发的插件身份不匹配"));
+        }
+        self.install_with_source(
+            InstallInput {
+                path: temporary.path().to_owned(),
+                development_confirmed: true,
+                expected_version: None,
+                expected_digest: Some(preview.package_digest),
+            },
+            false,
+            PluginSource::System,
+        )
+    }
     pub fn detail(&self, id: &str) -> Result<InstalledPlugin, Error> {
         Ok(self.record(id)?.current)
     }

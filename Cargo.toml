@@ -39,6 +39,10 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 
+[patch.crates-io]
+# Published russh 0.65.x pins the vulnerable RSA prerelease; this upstream revision uses rsa 0.10.
+russh = { git = "https://github.com/warp-tech/russh.git", rev = "b541663a88381aab9f6af1af7bbadb02e155058a" }
+
 [profile.release]
 strip = true
 lto = "thin"

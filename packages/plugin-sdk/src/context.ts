@@ -18,6 +18,7 @@ export interface ModelMetadata {
   id: string;
   name: string;
   revision: string;
+  createdAt: string | null;
   hasKey: boolean;
   config: { provider: string; model: string; maxOutputTokens: number; contextWindowTokens: number };
 }

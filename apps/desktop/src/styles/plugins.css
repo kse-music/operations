@@ -111,6 +111,7 @@
 }
 .plugin-card-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
@@ -119,6 +120,15 @@
   background: var(--hover);
   color: var(--muted);
   font-size: var(--font-size-caption);
+}
+.plugin-build-time {
+  margin-right: auto;
+}
+.plugin-build-time time {
+  white-space: nowrap;
+}
+.plugin-card-footer > .plugin-row-actions {
+  margin-left: auto;
 }
 .plugin-identifier {
   min-width: 0;
@@ -353,6 +363,13 @@
 .plugin-preview-heading h2 {
   margin: 0 0 6px;
   font-size: var(--font-size-title);
+}
+.plugin-bundled-option {
+  flex-wrap: wrap;
+}
+.plugin-bundled-option > .plugin-row-main {
+  flex: 1 1 180px;
+  overflow-wrap: anywhere;
 }
 .plugin-preview-heading p {
   margin: 0 0 6px;

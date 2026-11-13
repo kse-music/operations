@@ -110,7 +110,11 @@ try {
             },
           ]),
         );
-        pluginsApi.inventory = async () => ({ installed: items, problems: [] });
+        pluginsApi.inventory = async () => ({
+          installed: items,
+          problems: [],
+          availableBundled: [],
+        });
         pluginsApi.permissions = async (id) => grants[id];
         pluginsApi.statuses = async () => [];
         pluginsApi.ui = async (id) => packages.find((p) => p.manifest.id === id).ui;

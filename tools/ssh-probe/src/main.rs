@@ -40,10 +40,6 @@ async fn main() -> Result<()> {
                         Some(passphrase.as_str())
                     },
                 )?;
-                ensure!(
-                    !key.algorithm().is_rsa(),
-                    "RSA private-key signing is disabled for external probes: RUSTSEC-2023-0071 has no patched version. Use Ed25519 or an OS agent pending review."
-                );
                 authenticate_key(&mut connection, &args[2], key).await?;
             }
             "agent" => authenticate_agent(&mut connection, &args[2]).await?,

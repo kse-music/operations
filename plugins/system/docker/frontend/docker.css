@@ -49,15 +49,12 @@
 }
 .docker-summary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   margin-bottom: 0;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel);
-}
-.docker-summary:has(> article:only-child) {
-  grid-template-columns: minmax(0, 280px);
 }
 .docker-summary article {
   display: flex;
@@ -98,15 +95,11 @@
   font-size: var(--font-size-title);
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
-.docker-workbench .ops-capabilities {
-  padding: 0;
-  border: 0;
-  color: var(--muted);
+.docker-stat-error {
+  color: var(--error);
   font-size: var(--font-size-caption);
-}
-.docker-workbench .ops-capabilities > span:first-child {
-  margin-right: auto;
 }
 .docker-workbench .ops-toolbar .ops-search {
   flex: 0 1 320px;
@@ -258,7 +251,14 @@
 }
 @container (max-width:640px) {
   .docker-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0;
+  }
+  .docker-summary article:nth-child(3) {
+    border-left: 0;
+  }
+  .docker-summary article:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
   }
   .docker-summary article {
     padding: 12px;

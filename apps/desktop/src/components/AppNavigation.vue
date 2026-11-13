@@ -2,7 +2,7 @@
 import { House, Settings, SquareTerminal } from '@lucide/vue';
 import { tr } from '../i18n/messages';
 import type { WorkspaceArea } from '../stores/workspace';
-defineProps<{ area: WorkspaceArea; disabled?: boolean }>();
+defineProps<{ area: WorkspaceArea; disabled?: boolean; updateAvailable?: boolean }>();
 defineEmits<{ home: []; local: []; settings: [] }>();
 </script>
 <template>
@@ -42,6 +42,12 @@ defineEmits<{ home: []; local: []; settings: [] }>();
         @click="$emit('settings')"
       >
         <Settings :size="20" aria-hidden="true" />
+        <span
+          v-if="updateAvailable"
+          class="update-badge"
+          role="status"
+          :aria-label="tr('有可用更新')"
+        ></span>
       </button>
     </div>
   </nav>

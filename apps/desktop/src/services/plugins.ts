@@ -21,7 +21,7 @@ export const pluginsApi = {
   },
   reinstallBundled(
     id: string,
-    expectedRecordDigest: string,
+    expectedRecordDigest: string | null,
     confirmed: boolean,
   ): Promise<InstalledPlugin> {
     ensureDesktop();

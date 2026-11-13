@@ -8,6 +8,12 @@ fn main() {
     }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "app_update_status",
+            "app_update_check",
+            "app_update_auto_check",
+            "app_update_download",
+            "app_update_cancel",
+            "app_update_install",
             "app_storage_preview",
             "app_storage_migrate",
             "app_storage_ready",

@@ -14,7 +14,7 @@ pub async fn plugin_inventory(
 pub async fn plugin_reinstall_bundled(
     application: State<'_, Application>,
     id: String,
-    expected_record_digest: String,
+    expected_record_digest: Option<String>,
     confirmed: bool,
 ) -> Result<InstalledPlugin, IpcError> {
     application

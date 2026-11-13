@@ -27,15 +27,29 @@ const tabs = [
 ] as const;
 const activeTab = ref<(typeof tabs)[number]['id']>('remote');
 const search = ref('');
+const registrationTimeFormat = computed(
+  () =>
+    new Intl.DateTimeFormat(locale.value, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }),
+);
 const filteredModels = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
-  return store.models.filter(
-    (model) =>
-      !query ||
-      [model.config.model, model.name, model.config.baseUrl].some((value) =>
-        value.toLocaleLowerCase().includes(query),
-      ),
-  );
+  return store.models
+    .filter(
+      (model) =>
+        !query ||
+        [model.config.model, model.name, model.config.baseUrl].some((value) =>
+          value.toLocaleLowerCase().includes(query),
+        ),
+    )
+    .sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
 });
 const localSources = ref<InstanceType<typeof LocalModelSources>>();
 const dialog = ref(false),
@@ -191,6 +205,7 @@ onMounted(() => void store.refresh());
           ><span>{{ tr('上下文窗口') }}</span
           ><span>{{ tr('最大输出 Token') }}</span
           ><span>{{ tr('Key 状态') }}</span
+          ><span>{{ tr('注册时间') }}</span
           ><span>{{ tr('操作') }}</span>
         </div>
         <ul class="model-list">
@@ -226,6 +241,13 @@ onMounted(() => void store.refresh());
                 <KeyRound v-else :size="12" aria-hidden="true" />
                 {{ model.hasKey ? tr('已配置') : tr('未设置 Key') }}
               </span>
+            </div>
+            <div class="model-registration-time">
+              <span class="model-field-label">{{ tr('注册时间') }}</span>
+              <time v-if="model.createdAt" :datetime="model.createdAt">{{
+                registrationTimeFormat.format(new Date(model.createdAt)).replaceAll('/', '-')
+              }}</time>
+              <span v-else>{{ tr('未知') }}</span>
             </div>
             <div class="model-row-actions">
               <button

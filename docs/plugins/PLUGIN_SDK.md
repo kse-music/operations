@@ -102,6 +102,8 @@ StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.prea
 
 `models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
 
+公开模型元数据中的 `createdAt` 为首次注册时记录的 UTC 时间字符串；历史模型和本地 CLI 来源为 null。`Models`、`Model` 返回的模型及 UI Context 的 `ModelMetadata` 均包含此字段，编辑模型不改变该值。
+
 API `^5.6.0` 可声明、独立授予 `sftp.transfer.preapproved` 权限及同名 operation；须同时声明和授予 `sftp.transfer`。它允许当前安装修订直接准备、启动上传、下载或中转，不再逐次确认 `transfer_prepare`、`transfer_download_prepare`、`transfer_start`。插件可指定本机来源与保存路径，因此上传包默认不选，升级不继承旧修订授权；远程读写权限、目录范围、源/目标快照、owner、配置、撤权和取消检查仍保留。该授权不能免除 SSH 命令、文本读取/保存或其他能力审批，也不能绕过显式固定计划的次数与请求绑定。
 
 ### 模型流与文本进度

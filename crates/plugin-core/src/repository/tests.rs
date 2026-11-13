@@ -17,6 +17,7 @@ fn package(version: &str) -> Package {
             name: "Metadata fixture".into(),
             icon: None,
             version: version.into(),
+            built_at: None,
             author: "Local developer".into(),
             description: "No executable entry".into(),
             api_version: "^5.0".into(),
@@ -283,6 +284,96 @@ fn independent_ui_assets_require_current_grants_declared_entries_and_matching_di
             .is_err()
     );
 }
+#[test]
+fn optional_build_time_preserves_legacy_records_and_survives_upgrade_restart_and_enable() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("plugins");
+    let repo = Repository::open(root.clone()).unwrap();
+    let legacy = package("1.0.0");
+    assert!(
+        serde_json::to_value(&legacy).unwrap()["manifest"]
+            .get("builtAt")
+            .is_none()
+    );
+    repo.install(input(&save(dir.path(), &legacy), None))
+        .unwrap();
+    let record_path = root.join("packages/dev.example/record.json");
+    let original = fs::read(&record_path).unwrap();
+    let reopened = Repository::open(root.clone()).unwrap();
+    assert_eq!(
+        reopened.detail("dev.example").unwrap().manifest.built_at,
+        None
+    );
+    assert_eq!(fs::read(&record_path).unwrap(), original);
+
+    let timestamp = 1_794_529_845_000;
+    let mut next = package("1.1.0");
+    next.manifest.built_at = Some(timestamp);
+    let path = save(dir.path(), &next);
+    let preview = reopened.preview_info(&path).unwrap();
+    assert_eq!(preview.manifest.built_at, Some(timestamp));
+    next.manifest.built_at = Some(timestamp + 1);
+    assert_ne!(
+        preview.package_digest,
+        Package::validate_bytes(&serde_json::to_vec(&next).unwrap(), std::env::consts::OS)
+            .unwrap()
+            .digest
+    );
+    let installed = reopened.install(input(&path, Some("1.0.0"))).unwrap();
+    let restarted = Repository::open(root).unwrap();
+    let enabled = restarted.set_enabled("dev.example", true).unwrap();
+    assert_eq!(enabled.manifest.built_at, Some(timestamp));
+    assert_eq!(enabled.package_digest, installed.package_digest);
+    assert_eq!(enabled.revision, installed.revision);
+    assert!(restarted.grant("dev.example").unwrap().is_none());
+    assert_eq!(
+        restarted.inventory().unwrap().installed[0]
+            .manifest
+            .built_at,
+        Some(timestamp)
+    );
+    assert_eq!(
+        restarted
+            .record("dev.example")
+            .unwrap()
+            .backup
+            .unwrap()
+            .manifest
+            .built_at,
+        None
+    );
+}
+
+#[test]
+fn build_time_rejects_invalid_types_and_out_of_range_values() {
+    let original = serde_json::to_value(package("1.0.0")).unwrap();
+    for invalid in [
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!(253_402_300_800_000_u64),
+        serde_json::json!("2026-11-13T00:30:45Z"),
+        serde_json::json!(true),
+    ] {
+        let mut p = original.clone();
+        p["manifest"]["builtAt"] = invalid;
+        assert!(
+            Package::validate_bytes(&serde_json::to_vec(&p).unwrap(), std::env::consts::OS)
+                .is_err()
+        );
+    }
+    for valid in [
+        serde_json::Value::Null,
+        serde_json::json!(0),
+        serde_json::json!(253_402_300_799_999_u64),
+    ] {
+        let mut p = original.clone();
+        p["manifest"]["builtAt"] = valid;
+        assert!(
+            Package::validate_bytes(&serde_json::to_vec(&p).unwrap(), std::env::consts::OS).is_ok()
+        );
+    }
+}
+
 #[test]
 fn optional_plugin_icon_survives_preview_install_and_restart() {
     let dir = tempfile::tempdir().unwrap();

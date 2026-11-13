@@ -10,6 +10,7 @@ mod plugin_ui_protocol;
 mod product_commands;
 pub mod storage_commands;
 mod terminal_upload_commands;
+pub mod update_commands;
 mod window_state;
 mod zmodem_commands;
 
@@ -35,9 +36,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let initialized = (|| -> Result<(), Box<dyn std::error::Error>> {
                 app.manage(file_commands::ExitApproval(AtomicBool::new(false)));
+                app.manage(update_commands::Updates::default());
                 let data = app.path().app_data_dir()?;
                 let logs = app.path().app_log_dir()?;
                 let profile = serverdeck_application::storage_location::Profile::open(
@@ -141,8 +144,29 @@ pub fn run() {
                 let state = app.state::<Application>().inner().clone();
                 tauri::async_runtime::spawn(async move {
                     window_state::flush(&handle, &state).await;
+                    handle.state::<update_commands::Updates>().shutdown().await;
                     state.shutdown().await;
                     drained.store(true, Ordering::Release);
+                    if handle.state::<update_commands::Updates>().installing() {
+                        let install_handle = handle.clone();
+                        let installed = tauri::async_runtime::spawn_blocking(move || {
+                            let (update, bytes) = install_handle.state::<update_commands::Updates>().take_installation()?;
+                            update.install(bytes).map_err(|error| serverdeck_core::Error::Connection {
+                                code: "UPDATE_INSTALL",
+                                message: "更新安装器启动失败，应用将重新打开，请重试",
+                                source: Some(Box::new(error)),
+                            })
+                        }).await;
+                        if !matches!(installed, Ok(Ok(()))) {
+                            use tauri_plugin_dialog::DialogExt;
+                            tracing::error!(operation = "update_install", "update installer could not be launched after draining");
+                            handle.dialog().message("更新安装器启动失败，应用将重新打开，请重试。 / Could not launch the update installer. The app will restart; please try again.")
+                                .title("ServerDeck").kind(tauri_plugin_dialog::MessageDialogKind::Error).blocking_show();
+                        }
+                        handle.state::<logging::Logger>().flush();
+                        handle.request_restart();
+                        return;
+                    }
                     if handle
                         .state::<storage_commands::StorageState>()
                         .restart
@@ -162,6 +186,12 @@ pub fn run() {
 pub fn command_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        update_commands::app_update_status,
+        update_commands::app_update_check,
+        update_commands::app_update_auto_check,
+        update_commands::app_update_download,
+        update_commands::app_update_cancel,
+        update_commands::app_update_install,
         storage_commands::app_storage_preview,
         storage_commands::app_storage_migrate,
         storage_commands::app_storage_ready,

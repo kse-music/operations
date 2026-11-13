@@ -9,4 +9,5 @@ export interface PluginProblem {
 export interface PluginInventory {
   installed: import('@serverdeck/plugin-sdk/types/plugins').InstalledPlugin[];
   problems: PluginProblem[];
+  availableBundled: import('@serverdeck/plugin-sdk/types/plugins').PluginManifest[];
 }

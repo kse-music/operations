@@ -13,6 +13,7 @@ fn plugin() -> InstalledPlugin {
             id: "dev.policy".into(),
             name: "Policy".into(),
             version: "1.0.0".into(),
+            built_at: None,
             author: "Local".into(),
             description: String::new(),
             api_version: "^5.0.0".into(),

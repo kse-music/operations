@@ -73,6 +73,109 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+it('keeps all four global metrics above the tabs and independent of tab selection and search', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  api.query.mockImplementation(async (_host, request) => ({
+    success: true,
+    code: null,
+    message: null,
+    detail:
+      request.kind === 'capabilities' ? { dockerVersion: { Server: { Version: '27.5.1' } } } : null,
+    records:
+      request.kind === 'images'
+        ? [{ ID: 'one', Repository: 'first' }, { ID: 'one', Repository: 'second' }, { ID: 'two' }]
+        : request.kind === 'containers'
+          ? [
+              { ID: 'running', State: 'running' },
+              { ID: 'paused', State: 'paused' },
+              { ID: 'exited', State: 'exited' },
+            ]
+          : request.kind === 'compose_projects'
+            ? [{ Name: 'shop' }, { Name: 'worker' }]
+            : [],
+  }));
+  mountDocker();
+  await settle();
+  const summary = root.querySelector('.docker-summary')!;
+  const values = () => [...summary.querySelectorAll('strong')].map((node) => node.textContent);
+  expect(values()).toEqual(['27.5.1', '2', '1', '2']);
+  expect(summary.parentElement).toBe(root.querySelector('.docker-workbench'));
+  expect(summary.nextElementSibling).toBe(root.querySelector('.server-tabs'));
+  for (const label of ['镜像', 'Compose 项目', '容器']) {
+    [...root.querySelectorAll<HTMLButtonElement>('.server-tabs button')]
+      .find((button) => button.textContent?.trim() === label)!
+      .click();
+    await settle();
+    const search = root.querySelector<HTMLInputElement>('[aria-label="运维项目搜索"]')!;
+    search.value = 'no matches';
+    search.dispatchEvent(new Event('input'));
+    await settle();
+    expect(root.querySelector('.docker-summary')).toBe(summary);
+    expect(root.querySelectorAll('.docker-summary')).toHaveLength(1);
+    expect(root.querySelector('.operations-view .docker-summary')).toBeNull();
+    expect(values()).toEqual(['27.5.1', '2', '1', '2']);
+  }
+  expect(
+    api.query.mock.calls.filter(([, request]) => request.kind === 'capabilities'),
+  ).toHaveLength(1);
+});
+
+it('isolates a failed global metric, retries on refresh and ignores an older version response', async () => {
+  vi.clearAllMocks();
+  pinia = createPinia();
+  setActivePinia(pinia);
+  let firstVersion = true;
+  let failCompose = true;
+  let finishVersion!: (response: unknown) => void;
+  api.query.mockImplementation(async (_host, request) => {
+    if (request.kind === 'capabilities' && firstVersion) {
+      firstVersion = false;
+      return new Promise((resolve) => {
+        finishVersion = resolve;
+      });
+    }
+    if (request.kind === 'compose_projects' && failCompose)
+      throw new Error('Compose not installed');
+    return {
+      success: true,
+      code: null,
+      message: null,
+      detail:
+        request.kind === 'capabilities'
+          ? { dockerVersion: { Server: { Version: '28.0.0' } } }
+          : null,
+      records: [],
+    };
+  });
+  mountDocker();
+  await settle();
+  const values = () =>
+    [...root.querySelectorAll('.docker-summary strong')].map((node) => node.textContent);
+  expect(values()).toEqual(['—', '0', '0', '—']);
+  expect(root.querySelector('.docker-summary')?.getAttribute('aria-busy')).toBe('true');
+  expect(root.querySelectorAll('.docker-summary article')[3]?.getAttribute('title')).toBe(
+    'Compose not installed',
+  );
+  expect(root.querySelector('.operations-view [role="alert"]')).toBeNull();
+  failCompose = false;
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim() === '刷新')!
+    .click();
+  await settle();
+  expect(values()).toEqual(['28.0.0', '0', '0', '0']);
+  expect(root.querySelector('.docker-stat-error')).toBeNull();
+  expect(root.querySelector('.docker-summary')?.getAttribute('aria-busy')).toBe('false');
+  finishVersion({
+    success: true,
+    records: [],
+    detail: { dockerVersion: { Server: { Version: 'old' } } },
+  });
+  await settle();
+  expect(values()).toEqual(['28.0.0', '0', '0', '0']);
+});
+
 it('updates English labels without reloading data or translating container names', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
@@ -92,7 +195,7 @@ it('updates English labels without reloading data or translating container names
   const row = root.querySelector('[data-ops-target="language-container"]');
   setLocale('en-US');
   await settle();
-  expect(root.textContent).toContain('All containers');
+  expect(root.textContent).toContain('Running containers');
   expect(root.textContent).toContain('Compose projects');
   expect(root.textContent).toContain('用户镜像');
   expect(root.querySelector('[data-ops-target="language-container"]')).toBe(row);
@@ -100,7 +203,7 @@ it('updates English labels without reloading data or translating container names
   expect(api.query).toHaveBeenCalledTimes(count);
   setLocale('zh-CN');
   await settle();
-  expect(root.textContent).toContain('全部容器');
+  expect(root.textContent).toContain('运行容器');
   expect(api.query).toHaveBeenCalledTimes(count);
 });
 it('opens the selected container shell with its name, short ID and actual shell context', async () => {
@@ -418,7 +521,7 @@ it.each([
       },
       dockerOperatingSystem: 'Ubuntu 24.04.3 LTS',
     },
-    expected: ['是', '运行中', '27.5.1', '28.5.1', 'linux / amd64', 'Ubuntu 24.04.3 LTS'],
+    expected: '27.5.1',
   },
   {
     name: 'missing server information',
@@ -427,12 +530,12 @@ it.each([
       dockerState: 'unavailable',
       dockerVersion: { Client: { Version: '28.5.1', Os: 'darwin', Arch: 'arm64' }, Server: null },
     },
-    expected: ['是', '不可用或权限不足', '不可用', '28.5.1', '不可用', '不可用'],
+    expected: '不可用',
   },
   {
     name: 'Docker not installed',
     detail: { dockerInstalled: false, dockerState: 'absent' },
-    expected: ['否', '未安装', '不可用', '不可用', '不可用', '不可用'],
+    expected: '不可用',
   },
   {
     name: 'invalid version fields',
@@ -445,55 +548,47 @@ it.each([
         Client: [],
       },
     },
-    expected: ['是', '未知', '不可用', '不可用', '不可用', '不可用'],
+    expected: '不可用',
   },
-])('shows only core Docker capability fields for $name', async ({ detail, expected }) => {
-  vi.clearAllMocks();
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value: function (this: HTMLDialogElement) {
-      this.open = true;
-    },
-  });
-  pinia = createPinia();
-  setActivePinia(pinia);
-  api.query.mockImplementation(async (_host, request) => ({
-    success: true,
-    records: [],
-    detail: request.kind === 'capabilities' ? detail : null,
-    code: null,
-    message: null,
-  }));
-  mountDocker();
-  await settle();
-  const button = [...root.querySelectorAll<HTMLButtonElement>('button')].find(
-    (b) => b.textContent?.trim() === 'Docker信息',
-  );
-  expect(button).toBeTruthy();
-  button!.click();
-  await settle();
-  const modal = document.querySelector('dialog[aria-label="Docker信息"]');
-  expect(modal).toBeTruthy();
-  expect([...modal!.querySelectorAll('dt')].map((field) => field.textContent)).toEqual([
-    'Docker 已安装',
-    'Docker 状态',
-    'Docker 版本',
-    '客户端版本',
-    '运行平台',
-    '操作系统',
-  ]);
-  expect([...modal!.querySelectorAll('dd')].map((field) => field.textContent?.trim())).toEqual(
-    expected,
-  );
-  expect(modal!.querySelector('pre, details')).toBeNull();
-  for (const hidden of [
-    'CLIENT_BUILD_METADATA',
-    'GO_BUILD_METADATA',
-    'UNNEEDED_DETAILS',
-    'containerd',
-  ])
-    expect(modal!.textContent).not.toContain(hidden);
-});
+])(
+  'shows the daemon version in the global summary without a Docker information dialog for $name',
+  async ({ detail, expected }) => {
+    vi.clearAllMocks();
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = true;
+      },
+    });
+    pinia = createPinia();
+    setActivePinia(pinia);
+    api.query.mockImplementation(async (_host, request) => ({
+      success: true,
+      records: [],
+      detail: request.kind === 'capabilities' ? detail : null,
+      code: null,
+      message: null,
+    }));
+    mountDocker();
+    await settle();
+    const summary = root.querySelector('.docker-summary')!;
+    expect(summary.querySelector('strong')?.textContent).toBe(expected);
+    expect(
+      [...summary.querySelectorAll('article > div > span')].map((field) => field.textContent),
+    ).toEqual(['Docker 版本', '本地镜像', '运行容器', 'Compose 配置']);
+    expect(root.querySelector('.ops-capabilities, dialog')).toBeNull();
+    expect(root.textContent).not.toContain('Docker信息');
+    expect(root.textContent).not.toContain('Docker：');
+    expect(summary.querySelector('pre, details')).toBeNull();
+    for (const hidden of [
+      'CLIENT_BUILD_METADATA',
+      'GO_BUILD_METADATA',
+      'UNNEEDED_DETAILS',
+      'containerd',
+    ])
+      expect(root.textContent).not.toContain(hidden);
+  },
+);
 
 it('manages Compose projects with host confirmations, service details and owned project logs', async () => {
   vi.clearAllMocks();
@@ -584,14 +679,14 @@ it('manages Compose projects with host confirmations, service details and owned 
   await click('重启');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('permission denied');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('可能部分完成');
-  api.query.mockResolvedValueOnce({ success: true, records: [], detail: null });
+  api.query.mockResolvedValue({ success: true, records: [], detail: null });
   await click('刷新');
   expect(root.textContent).toContain('没有匹配项目');
-  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('0');
-  api.query.mockRejectedValueOnce(new Error('docker: unknown command: compose'));
+  expect(root.querySelectorAll('.docker-summary strong')[3]?.textContent).toBe('0');
+  api.query.mockRejectedValue(new Error('docker: unknown command: compose'));
   await click('刷新');
   expect(root.querySelector('[role="alert"]')?.textContent).toContain('unknown command');
-  expect(root.querySelector('.docker-summary strong')?.textContent).toBe('—');
+  expect(root.querySelectorAll('.docker-summary strong')[3]?.textContent).toBe('—');
 });
 
 it('closes a late Compose log stream after its tab is deactivated', async () => {
@@ -688,7 +783,7 @@ it('runs host-wide maintenance from the container toolbar with confirmation, fee
     expect(confirmation.message).toContain('不受列表搜索条件影响');
     expect(
       api.query.mock.calls.filter(([, request]) => request.kind === 'containers'),
-    ).toHaveLength(reads + 1);
+    ).toHaveLength(reads + 2);
     expect(root.querySelector('.banner.success')?.textContent).toContain('成功 2 个');
   }
   api.query.mockRejectedValueOnce({ code: 'USER_CANCELLED', message: '取消' });

@@ -48,27 +48,6 @@ const labels: Record<string, string> = {
   get properties() {
     return tr('服务属性');
   },
-  get dockerState() {
-    return tr('Docker 状态');
-  },
-  get dockerInstalled() {
-    return tr('Docker 已安装');
-  },
-  get dockerVersion() {
-    return tr('Docker 版本');
-  },
-  get dockerClientVersion() {
-    return tr('客户端版本');
-  },
-  get dockerPlatform() {
-    return tr('运行平台');
-  },
-  get dockerOperatingSystem() {
-    return tr('操作系统');
-  },
-  get dockerInfo() {
-    return tr('Docker 信息');
-  },
   get systemd() {
     return tr('systemd 可用');
   },
@@ -103,40 +82,8 @@ const labels: Record<string, string> = {
     return tr('用户组 GID');
   },
 };
-const isDocker = computed(() =>
-  ['dockerInstalled', 'dockerState', 'dockerVersion'].some((key) => key in props.detail),
-);
-const isProcess = computed(
-  () => !isDocker.value && 'pid' in props.detail && 'startTicks' in props.detail,
-);
-function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
+const isProcess = computed(() => 'pid' in props.detail && 'startTicks' in props.detail);
 const entries = computed(() => {
-  if (isDocker.value) {
-    const version = record(props.detail.dockerVersion);
-    const server = record(version.Server);
-    const client = record(version.Client);
-    const states: Record<string, string> = {
-      running: tr('运行中'),
-      unavailable: tr('不可用或权限不足'),
-      absent: tr('未安装'),
-    };
-    return Object.entries({
-      dockerInstalled:
-        typeof props.detail.dockerInstalled === 'boolean' ? props.detail.dockerInstalled : null,
-      dockerState: states[text(props.detail.dockerState) ?? ''] ?? tr('未知'),
-      dockerVersion: text(server.Version),
-      dockerClientVersion: text(client.Version),
-      dockerPlatform: [text(server.Os), text(server.Arch)].filter(Boolean).join(' / ') || null,
-      dockerOperatingSystem: text(props.detail.dockerOperatingSystem),
-    });
-  }
   const entries = Object.entries(props.detail).filter(
     ([key]) =>
       ![

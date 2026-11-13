@@ -10,7 +10,7 @@
 | 安装和日常使用     | [使用说明](guides/USER_GUIDE.md)、[AI 助手](guides/AI_ASSISTANT.md)                                                                          |
 | 理解实现           | [总体架构](architecture/ARCHITECTURE.md)、[助手工具与任务](architecture/ASSISTANT_AGENT.md)、[数据升级契约](architecture/DATA_MIGRATIONS.md) |
 | 开发和安装插件     | [开发指南](plugins/PLUGIN_DEVELOPMENT.md)、[公开 SDK](plugins/PLUGIN_SDK.md)                                                                 |
-| 准备发布           | [发布检查表](release/RELEASE_CHECKLIST.md)、[安全说明](release/SECURITY.md)                                                                  |
+| 准备发布           | [发布检查表](release/RELEASE_CHECKLIST.md)、[更新分发](release/UPDATES.md)、[安全说明](release/SECURITY.md)                                  |
 | 查看第三方许可     | [依赖清单](release/DEPENDENCY_INVENTORY.md)、[第三方声明](release/THIRD_PARTY_NOTICES.txt)                                                   |
 
 ## 插件规范

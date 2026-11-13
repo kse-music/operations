@@ -3,6 +3,8 @@ import { Boxes, Info, Keyboard, PanelsTopLeft, Puzzle, Settings2, Terminal } fro
 import { tr } from '../i18n/messages';
 import { useWorkspaceStore } from '../stores/workspace';
 import { settingsNavigation } from '../types/navigation';
+import { useUpdatesStore } from '../stores/updates';
+const updates = useUpdatesStore();
 const workspace = useWorkspaceStore();
 const icons = {
   general: Settings2,
@@ -30,6 +32,12 @@ const icons = {
         @click="workspace.navigate(item.view)"
       >
         <component :is="icons[item.icon]" :size="16" aria-hidden="true" />{{ item.label }}
+        <span
+          v-if="item.view === 'about' && updates.available"
+          class="update-badge"
+          role="status"
+          :aria-label="tr('有可用更新')"
+        ></span>
       </button>
     </nav>
   </section>

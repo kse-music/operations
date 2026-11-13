@@ -53,6 +53,7 @@ const props = defineProps<{
   hint?: string;
   searchPlaceholder?: string;
 }>();
+const emit = defineEmits<{ refresh: [] }>();
 const platform = usePlatformContext();
 const chosen = computed(() => props.hostId ?? platform.hostId);
 const connection = computed(() => {
@@ -77,7 +78,6 @@ const detail = ref<Record<string, unknown> | null>(null),
   detailOpen = ref(false);
 const detailLoading = ref(false),
   detailError = ref<string | null>(null);
-const capabilities = ref<Record<string, unknown> | null>(null);
 const log = ref<{ id: string; title: string }>();
 const archive = ref<{ row?: Record<string, unknown>; remoteTransfer?: boolean }>();
 function openArchive(row?: Record<string, unknown>, remoteTransfer = false) {
@@ -125,6 +125,11 @@ async function load() {
     if (!disposed && token === generation) busy.value = false;
   }
 }
+function refresh() {
+  const pending = load();
+  emit('refresh');
+  return pending;
+}
 async function inspect(request: OpsRequest, title: string) {
   if (busy.value || archive.value || !panelVisible.value) return;
   closeDetail();
@@ -161,7 +166,7 @@ async function execute(request: OpsRequest | { kind: 'shell'; id: string }, targ
       });
     } else {
       const value = await query(request, mutationConfirmation(request, targetName));
-      await load();
+      await refresh();
       if (!error.value) notice.value = value.message || tr('请求完成，请核对刷新后的目标状态。');
     }
   } catch (cause) {
@@ -187,17 +192,8 @@ watch(
     log.value = undefined;
     ++generation;
     rows.value = [];
-    capabilities.value = null;
     if (!connected.value || !panelVisible.value) return;
-    const id = session();
-    try {
-      const value = await query({ kind: 'capabilities' });
-      if (id !== connection.value?.session?.id || disposed) return;
-      capabilities.value = value.detail;
-      await load();
-    } catch (cause) {
-      if (!disposed) error.value = errorMessage(cause);
-    }
+    await load();
   },
   { immediate: true },
 );
@@ -283,21 +279,6 @@ const slotContext = {
     <p v-if="notice" class="banner success" role="status">{{ notice }}</p>
     <p v-if="error" class="banner error" role="alert">{{ error }}</p>
     <template v-if="connected">
-      <slot name="summary" :rows="rows" :loading="busy" :error="error" />
-      <div v-if="capabilities" class="ops-capabilities">
-        <slot name="capabilities" :value="capabilities" />
-        <button
-          class="text-button"
-          @click="
-            closeDetail();
-            detail = capabilities;
-            detailTitle = tr('Docker信息');
-            detailOpen = true;
-          "
-        >
-          {{ tr(' Docker信息 ') }}
-        </button>
-      </div>
       <div class="ops-toolbar">
         <label class="ops-search"
           ><Search :size="15" aria-hidden="true" /><input
@@ -306,7 +287,7 @@ const slotContext = {
             :placeholder="searchPlaceholder ?? tr('搜索名称、镜像、状态或端口…')"
         /></label>
         <slot name="toolbar" :execute="execute" :busy="busy || !!archive" />
-        <button class="button" :disabled="busy || !!archive" @click="load">
+        <button class="button" :disabled="busy || !!archive" @click="refresh">
           <RefreshCw :size="14" aria-hidden="true" />{{ busy ? tr('正在读取…') : tr('刷新') }}
         </button>
         <slot name="toolbar-after" :busy="busy || !!archive" :open-import="() => openArchive()" />
@@ -359,7 +340,7 @@ const slotContext = {
       :remote-transfer="archive.remoteTransfer"
       :visible="panelVisible && connected"
       @close="archive = undefined"
-      @completed="load"
+      @completed="refresh"
     />
   </section>
 </template>

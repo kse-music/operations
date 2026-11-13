@@ -62,6 +62,12 @@ if (installed) {
   };
 }
 const output = path.join(root, '.local/release-qa');
+let updateSignature = null;
+try {
+  updateSignature = (await readFile(`${installer}.sig`, 'utf8')).trim();
+} catch (error) {
+  if (error.code !== 'ENOENT') throw error;
+}
 await mkdir(output, { recursive: true });
 await writeFile(
   path.join(output, 'release-manifest.json'),
@@ -70,7 +76,12 @@ await writeFile(
       version,
       platform: 'windows-x86_64',
       signing: 'NotSigned (verified separately with Get-AuthenticodeSignature)',
-      updater: false,
+      updater: {
+        enabled: config.bundle.createUpdaterArtifacts === true,
+        signaturePresent: !!updateSignature,
+        requireSignedVersion: config.plugins.updater.requireSignedVersion,
+        endpoints: config.plugins.updater.endpoints,
+      },
       packagedIdentity,
       files: entries,
     },

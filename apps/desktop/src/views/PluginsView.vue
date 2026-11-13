@@ -32,6 +32,15 @@ const path = ref(''),
 const deleting = ref<InstalledPlugin | null>(null),
   clearData = ref(false);
 const recovering = ref<PluginProblem | null>(null);
+const choosingBundled = ref(false);
+async function restoreBundled(id: string) {
+  if (await plugins.mutate(() => pluginsApi.reinstallBundled(id, null, true))) {
+    plugins.clearPlugin(id);
+    resetFilters();
+    choosingBundled.value = false;
+    notifications.push(tr('已恢复内置插件，请检查配置后启用。'));
+  }
+}
 async function reinstall() {
   const problem = recovering.value;
   if (!problem?.replacement || !problem.recordDigest) return;
@@ -51,6 +60,16 @@ const enabled = computed(() => plugins.installed.filter((p) => p.enabled).length
 const search = ref('');
 const source = ref<'all' | 'system' | 'user'>('all');
 const status = ref<'all' | 'enabled' | 'disabled'>('all');
+const buildTimeFormat = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
 const filtered = computed(() => {
   const query = search.value.trim().toLocaleLowerCase();
   return plugins.installed.filter((plugin) => {
@@ -180,6 +199,14 @@ onBeforeUnmount(() => {
         <p class="subtle">{{ tr('点击插件名称或齿轮，打开插件配置与权限。') }}</p>
       </div>
       <div class="plugin-heading-actions">
+        <button
+          v-if="plugins.availableBundled.length"
+          class="button"
+          :disabled="plugins.loading || plugins.busy || inspecting"
+          @click="choosingBundled = true"
+        >
+          <PackagePlus :size="16" aria-hidden="true" />{{ tr('恢复内置插件') }}
+        </button>
         <button
           class="button"
           :disabled="plugins.loading || plugins.busy"
@@ -329,6 +356,14 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <footer class="plugin-card-footer">
+            <span class="plugin-build-time" :title="tr('北京时间')">
+              <time
+                v-if="plugin.manifest.builtAt != null"
+                :datetime="new Date(plugin.manifest.builtAt).toISOString()"
+                >{{ buildTimeFormat.format(plugin.manifest.builtAt).replaceAll('/', '-') }}</time
+              >
+              <span v-else>{{ tr('未提供') }}</span>
+            </span>
             <div class="plugin-row-actions">
               <button
                 class="button plugin-toggle-button"
@@ -363,6 +398,53 @@ onBeforeUnmount(() => {
         </article>
       </div>
     </section>
+    <Modal
+      v-if="choosingBundled"
+      :title="tr('恢复内置插件')"
+      :busy="plugins.busy"
+      @close="choosingBundled = false"
+    >
+      <p>
+        {{
+          tr(
+            '从应用自带的安装包恢复，保留尚未清除的插件配置。恢复后默认禁用，使用当前系统预置权限，请检查配置后启用。',
+          )
+        }}
+      </p>
+      <div class="plugin-list">
+        <article
+          v-for="manifest in plugins.availableBundled"
+          :key="manifest.id"
+          class="plugin-card plugin-preview-heading plugin-bundled-option"
+        >
+          <span class="plugin-row-icon"
+            ><PluginIcon :manifest="manifest" source="system" :size="25"
+          /></span>
+          <div class="plugin-row-main">
+            <h2>{{ tr(manifest.name) }}</h2>
+            <p>{{ tr(manifest.description) }}</p>
+            <small>{{ manifest.id }} · v{{ manifest.version }}</small>
+          </div>
+          <button
+            class="button primary"
+            :disabled="plugins.busy"
+            :aria-label="tr('恢复 {0}', tr(manifest.name))"
+            @click="restoreBundled(manifest.id)"
+          >
+            {{ tr('恢复安装') }}
+          </button>
+        </article>
+      </div>
+      <p v-if="!plugins.availableBundled.length" class="subtle">
+        {{ tr('当前内置插件均已安装。') }}
+      </p>
+      <p v-if="plugins.error" class="error-text" role="alert">{{ plugins.error }}</p>
+      <div class="dialog-actions">
+        <button class="button" :disabled="plugins.busy" @click="choosingBundled = false">
+          {{ tr('取消') }}
+        </button>
+      </div>
+    </Modal>
     <Modal
       v-if="recovering"
       :title="tr('备份并重装内置插件')"

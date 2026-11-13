@@ -102,6 +102,7 @@ export function createPluginUiBridge(input: {
             id: m.id,
             name: m.name,
             revision: m.revision,
+            createdAt: m.createdAt,
             hasKey: m.hasKey,
             config: {
               provider: m.config.provider,

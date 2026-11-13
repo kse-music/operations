@@ -96,7 +96,7 @@
   display: grid;
   grid-template-columns:
     minmax(0, 1.15fr) minmax(0, 1.4fr) minmax(0, 0.7fr) minmax(0, 0.65fr)
-    96px 68px;
+    96px 156px 68px;
   align-items: center;
   gap: 16px;
   padding: 14px 20px;
@@ -181,6 +181,13 @@
 }
 .model-key-status {
   min-width: 0;
+}
+.model-registration-time {
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
 }
 .model-limit strong {
   font-size: var(--font-size-body);
@@ -354,6 +361,14 @@
   .model-key-status {
     grid-column: 1 / -1;
     grid-row: 4;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .model-registration-time {
+    grid-column: 1 / -1;
+    grid-row: 5;
     display: flex;
     align-items: center;
     flex-wrap: wrap;

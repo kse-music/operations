@@ -393,6 +393,19 @@
 .ai-approval-mode.ai-full-access select {
   color: var(--error);
 }
+@supports (appearance: base-select) {
+  .ai-approval-mode option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ai-approval-mode option svg {
+    flex-shrink: 0;
+  }
+  .ai-approval-mode option[value='full'] {
+    color: var(--error);
+  }
+}
 .ai-chat-composer-footer > span {
   color: var(--muted);
   font-size: var(--font-size-caption);

@@ -146,6 +146,7 @@ pub struct Model {
     pub id: String,
     pub name: String,
     pub revision: String,
+    pub created_at: Option<String>,
     pub config: Config,
     pub has_key: bool,
 }

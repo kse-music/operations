@@ -27,6 +27,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
+      - name: Preserve repository LF line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -59,7 +61,7 @@ jobs:
       - run: npm test
       - run: npm audit --audit-level=moderate
       - name: Build unsigned candidate
-        run: node tools/tauri.mjs build --target ${{ matrix.target }} --config ${{ matrix.config }}
+        run: node tools/tauri.mjs build --target ${{ matrix.target }} --config ${{ matrix.config }} --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ServerDeck-system-plugins-${{ matrix.target }}

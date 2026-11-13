@@ -5,6 +5,164 @@ use tauri::{
     test::{INVOKE_KEY, get_ipc_response, mock_builder},
     webview::InvokeRequest,
 };
+use tauri_plugin_updater::UpdaterExt;
+
+#[test]
+fn updater_preferences_and_installation_are_limited_to_the_main_local_window() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(
+            Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+                .unwrap(),
+        )
+        .manage(serverdeck_desktop_lib::update_commands::Updates::default())
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "remote-editor-test", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let state = get_ipc_response(&main, request("app_update_status", json!({}), origin))
+        .unwrap()
+        .deserialize::<Value>()
+        .unwrap();
+    assert_eq!(state["phase"], "idle");
+    assert_eq!(state["preferences"]["autoCheck"], true);
+    assert!(
+        get_ipc_response(
+            &main,
+            request("plugin:updater|install", json!({"rid":0}), origin)
+        )
+        .is_err()
+    );
+    for (window, url) in [(&other, origin), (&main, "https://untrusted.invalid")] {
+        for (command, body) in [
+            ("app_update_status", json!({})),
+            ("app_update_auto_check", json!({"enabled":false})),
+            ("app_update_install", json!({"confirmed":true})),
+            ("plugin:updater|install", json!({"rid":0})),
+        ] {
+            assert!(get_ipc_response(window, request(command, body, url)).is_err());
+        }
+    }
+    let changed = get_ipc_response(
+        &main,
+        request("app_update_auto_check", json!({"enabled":false}), origin),
+    )
+    .unwrap()
+    .deserialize::<Value>()
+    .unwrap();
+    assert_eq!(changed["preferences"]["autoCheck"], false);
+    let unchecked = get_ipc_response(
+        &main,
+        request("app_update_check", json!({"automatic":true}), origin),
+    )
+    .unwrap()
+    .deserialize::<Value>()
+    .unwrap();
+    assert_eq!(unchecked["phase"], "idle");
+    assert!(unchecked["preferences"]["lastAttemptAt"].is_null());
+    // Both paths fail before any exit state, installer, or process action is accessed.
+    for confirmed in [false, true] {
+        let result = get_ipc_response(
+            &main,
+            request("app_update_install", json!({"confirmed":confirmed}), origin),
+        );
+        assert!(result.is_err());
+    }
+}
+
+#[test]
+fn updater_rejects_nonofficial_and_wrong_version_downloads() {
+    use serverdeck_desktop_lib::update_commands::validate_download;
+    let official = "https://github.com/kse-music/operations/releases/download/v1.2.3/ServerDeck_1.2.3_x64-setup.exe";
+    assert!(validate_download(&official.parse().unwrap(), "1.2.3").is_ok());
+    for url in [
+        official.replace("https:", "http:"),
+        official.replace("github.com", "github.com.attacker.invalid"),
+        official.replace("kse-music", "other"),
+        official.replace("/v1.2.3/", "/v1.2.2/"),
+        format!("{official}?token=untrusted"),
+    ] {
+        assert!(validate_download(&url.parse().unwrap(), "1.2.3").is_err());
+    }
+}
+
+#[test]
+fn updater_verifies_real_cli_signatures_and_rejects_tampering_and_version_substitution() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let cli = root.join("node_modules/@tauri-apps/cli/tauri.js");
+    let key = directory.path().join("test.key");
+    let payload = directory.path().join("payload.exe");
+    std::fs::write(&payload, b"MZ signed updater verification fixture").unwrap();
+    for args in [
+        vec![
+            "signer".into(),
+            "generate".into(),
+            "--ci".into(),
+            "-w".into(),
+            key.as_os_str().to_owned(),
+        ],
+        vec![
+            "signer".into(),
+            "sign".into(),
+            "--app-version".into(),
+            "99.0.0".into(),
+            "-f".into(),
+            key.as_os_str().to_owned(),
+            payload.as_os_str().to_owned(),
+        ],
+    ] {
+        let output = std::process::Command::new("node")
+            .arg(&cli)
+            .args(args)
+            .env_remove("TAURI_SIGNING_PRIVATE_KEY")
+            .env_remove("TAURI_SIGNING_PRIVATE_KEY_PASSWORD")
+            .output()
+            .unwrap();
+        // Never print signer output, which may contain generated private key material.
+        assert!(output.status.success(), "test signing command failed");
+    }
+    let public = std::fs::read_to_string(key.with_extension("key.pub")).unwrap();
+    let signature = std::fs::read_to_string(payload.with_extension("exe.sig")).unwrap();
+    let app = mock_builder()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let updater = app
+        .updater_builder()
+        .pubkey(public)
+        .target("windows-x86_64")
+        .build()
+        .unwrap();
+    let manifest = json!({ "version":"99.0.0", "platforms": { "windows-x86_64": { "url":"https://github.com/kse-music/operations/releases/download/v99.0.0/ServerDeck_99.0.0_x64-setup.exe", "signature":signature.trim() } } });
+    let update = updater.restore_update(manifest.clone()).unwrap().unwrap();
+    let bytes = std::fs::read(payload).unwrap();
+    assert!(update.verify(&bytes).is_ok());
+    let mut tampered = bytes.clone();
+    tampered.push(0);
+    assert!(update.verify(&tampered).is_err());
+    let mut substituted = manifest;
+    substituted["version"] = json!("99.0.1");
+    assert!(
+        updater
+            .restore_update(substituted)
+            .unwrap()
+            .unwrap()
+            .verify(&bytes)
+            .is_err()
+    );
+}
 
 fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
     InvokeRequest {

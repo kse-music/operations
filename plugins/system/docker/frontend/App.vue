@@ -5,7 +5,9 @@ import { computed, ref, watch } from 'vue';
 import ResourceView from './ResourceView.vue';
 import ServerTabs from './ServerTabs.vue';
 import OpsDetails from './OpsDetails.vue';
-import { Container, Layers, CircleCheck, Box } from '@lucide/vue';
+import { Container, Layers, CircleCheck, Boxes } from '@lucide/vue';
+import { usePlatformContext } from '@serverdeck/plugin-sdk/context';
+import { useDockerSummary } from './docker-summary';
 import ContainerDetails from './ContainerDetails.vue';
 import ComposeDetails from './ComposeDetails.vue';
 import './docker.css';
@@ -25,6 +27,14 @@ const section = ref<ServerSection>(
     ? props.initialSection
     : sections.value[0]!,
 );
+const platform = usePlatformContext();
+const summary = useDockerSummary(computed(() => props.hostId ?? platform.hostId));
+const summaryItems = computed(() => [
+  { label: tr('Docker 版本'), icon: Container, metric: summary.metrics.version },
+  { label: tr('本地镜像'), icon: Layers, metric: summary.metrics.images },
+  { label: tr('运行容器'), icon: CircleCheck, metric: summary.metrics.containers },
+  { label: tr('Compose 配置'), icon: Boxes, metric: summary.metrics.compose },
+]);
 watch(
   () => props.initialSection,
   (value) => {
@@ -72,6 +82,26 @@ const actionLabels = {
 </script>
 <template>
   <div class="plugin-server-surface docker-workbench">
+    <section
+      class="docker-summary"
+      :aria-label="tr('Docker 全局统计')"
+      :aria-busy="summary.loading.value"
+    >
+      <article
+        v-for="item in summaryItems"
+        :key="item.label"
+        :title="item.metric.error ?? undefined"
+      >
+        <span class="docker-stat-icon" :class="{ active: item.icon === CircleCheck }">
+          <component :is="item.icon" :size="19" aria-hidden="true" />
+        </span>
+        <div>
+          <span>{{ item.label }}</span>
+          <strong>{{ item.metric.value ?? (item.metric.loaded ? tr('不可用') : '—') }}</strong>
+          <small v-if="item.metric.error" class="docker-stat-error">{{ tr('读取失败') }}</small>
+        </div>
+      </article>
+    </section>
     <ServerTabs v-model="section" :sections="sections" />
     <KeepAlive
       ><ResourceView
@@ -95,48 +125,8 @@ const actionLabels = {
             ? tr('管理已有项目；启动不会重新部署，已删除全部容器的项目不在列表中。')
             : undefined
         "
+        @refresh="summary.refresh"
       >
-        <template #summary="{ rows, loading, error }">
-          <div class="docker-summary">
-            <article>
-              <span class="docker-stat-icon"
-                ><component :is="section === 'images' ? Layers : Container" :size="19"
-              /></span>
-              <div>
-                <span>{{
-                  section === 'compose'
-                    ? tr('Compose 项目')
-                    : section === 'images'
-                      ? tr('本地镜像')
-                      : tr('全部容器')
-                }}</span
-                ><strong>{{ loading || error ? '—' : rows.length }}</strong>
-              </div>
-            </article>
-            <article v-if="section === 'containers'">
-              <span class="docker-stat-icon active"><CircleCheck :size="19" /></span>
-              <div>
-                <span>{{ tr('运行中') }}</span
-                ><strong>{{
-                  loading || error
-                    ? '—'
-                    : rows.filter((row) => String(row.State).toLowerCase() === 'running').length
-                }}</strong>
-              </div>
-            </article>
-            <article v-if="section === 'containers'">
-              <span class="docker-stat-icon"><Box :size="19" /></span>
-              <div>
-                <span>{{ tr('其他状态') }}</span
-                ><strong>{{
-                  loading || error
-                    ? '—'
-                    : rows.filter((row) => String(row.State).toLowerCase() !== 'running').length
-                }}</strong>
-              </div>
-            </article>
-          </div>
-        </template>
         <template #toolbar="{ execute, busy }">
           <template v-if="section === 'containers'">
             <button
@@ -174,17 +164,6 @@ const actionLabels = {
             row[column.key] ?? tr('不可用')
           }}</span>
         </template>
-        <template #capabilities="{ value }"
-          ><span
-            >Docker：{{
-              value.dockerState === 'running'
-                ? tr('可用')
-                : value.dockerInstalled
-                  ? tr('已安装，Daemon 不可用或权限不足')
-                  : tr('未安装')
-            }}</span
-          ></template
-        >
         <template
           #actions="{ row, busy, inspect, execute, openLog, openShell, openExport, openTransfer }"
         >

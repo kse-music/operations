@@ -39,6 +39,20 @@ describe('plugin IPC boundary', () => {
     expect(() => pluginsApi.list()).toThrow('未连接 Rust 后端');
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+  it('distinguishes an explicitly confirmed missing-plugin restore from a frozen damaged-record reinstall', async () => {
+    await pluginsApi.reinstallBundled('cn.hiboot.plugins.docker', null, true);
+    expect(invoke).toHaveBeenLastCalledWith('plugin_reinstall_bundled', {
+      id: 'cn.hiboot.plugins.docker',
+      expectedRecordDigest: null,
+      confirmed: true,
+    });
+    await pluginsApi.reinstallBundled('cn.hiboot.plugins.docker', 'record-digest', true);
+    expect(invoke).toHaveBeenLastCalledWith('plugin_reinstall_bundled', {
+      id: 'cn.hiboot.plugins.docker',
+      expectedRecordDigest: 'record-digest',
+      confirmed: true,
+    });
+  });
   it('keeps capability requests separate from grant and one-shot approval commands', async () => {
     const request = {
       apiVersion: 1,

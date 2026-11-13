@@ -5,7 +5,9 @@ import { megabytes } from './format';
 import { computed, onMounted, ref, watch } from 'vue';
 import {
   Bot,
+  Hand,
   ShieldCheck,
+  ShieldAlert,
   Activity,
   ListTree,
   Boxes,
@@ -88,6 +90,7 @@ watch(
 );
 const question = ref('');
 const approvalMode = ref<'request' | 'assist' | 'full'>('request');
+const approvalModeIcons = { request: Hand, assist: ShieldCheck, full: ShieldAlert };
 const approvalModeDescriptions = {
   get request() {
     return tr('访问外部文件、网络或执行命令时请求批准；仅对新任务生效');
@@ -170,14 +173,14 @@ const readinessHint = computed(() => {
   if (loading.value || models.loading) return tr('正在读取模型配置…');
   if (localSelected.value)
     return localSelected.value.status.model
-      ? tr('{0} · Enter 发送 · Shift + Enter 换行', localSelected.value.name)
+      ? localSelected.value.name
       : localSelected.value.status.message;
   if (bindingError.value || models.error) return tr('模型配置读取失败，请在插件设置中重试');
   if (modelId.value && !selected.value) return tr('绑定模型已删除，请在插件设置中重新绑定');
   if (!selected.value) return tr('请先在插件设置中绑定模型');
   if (!selected.value.hasKey) return tr('绑定模型未配置 Key，请在模型管理中补充');
   if (hosts.busy && !hosts.catalog) return tr('正在读取资产列表…');
-  return tr('Enter 发送 · Shift + Enter 换行');
+  return '';
 });
 </script>
 <template>
@@ -483,19 +486,25 @@ const readinessHint = computed(() => {
           />
           <div class="ai-chat-composer-footer">
             <label class="ai-approval-mode" :class="{ 'ai-full-access': approvalMode === 'full' }">
-              <ShieldCheck :size="14" aria-hidden="true" />
+              <component :is="approvalModeIcons[approvalMode]" :size="14" aria-hidden="true" />
               <select
                 v-model="approvalMode"
                 :aria-label="tr('审批模式')"
                 :disabled="!!busy"
                 :title="approvalModeDescriptions[approvalMode]"
               >
-                <option value="request">{{ tr('请求批准') }}</option>
-                <option value="assist">{{ tr('帮我批准') }}</option>
-                <option value="full">{{ tr('完全访问权限') }}</option>
+                <option value="request">
+                  <Hand :size="16" aria-hidden="true" />{{ tr('请求批准') }}
+                </option>
+                <option value="assist">
+                  <ShieldCheck :size="16" aria-hidden="true" />{{ tr('帮我批准') }}
+                </option>
+                <option value="full">
+                  <ShieldAlert :size="16" aria-hidden="true" />{{ tr('完全访问权限') }}
+                </option>
               </select>
             </label>
-            <span>{{ readinessHint }}</span
+            <span v-if="readinessHint">{{ readinessHint }}</span
             ><button v-if="busy" class="button" type="button" @click="ai.cancel">
               <Square :size="12" aria-hidden="true" />{{ tr('停止') }}</button
             ><button v-else class="button primary" type="submit" :disabled="!ready">

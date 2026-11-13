@@ -61,6 +61,12 @@ pub async fn app_storage_migrate<R: Runtime>(
         return Err(Error::Validation("迁移数据并重启需要明确确认").into());
     }
     if app
+        .try_state::<crate::update_commands::Updates>()
+        .is_some_and(|updates| updates.installing())
+    {
+        return Err(Error::Busy.into());
+    }
+    if app
         .try_state::<crate::editor_commands::EditorWindows>()
         .is_some_and(|editors| editors.is_open())
     {

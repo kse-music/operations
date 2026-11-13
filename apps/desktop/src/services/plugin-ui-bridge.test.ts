@@ -352,13 +352,16 @@ it('exports only public model metadata under the models.use grant', async () => 
       id: 'model',
       name: 'Model',
       revision: 'r1',
+      createdAt: '2026-11-13T02:30:45.000Z',
       hasKey: true,
       config: { ...defaultAiConfig(), baseUrl: 'https://private-endpoint' },
     },
   ];
   expect(bridge().snapshot().models).toEqual([]);
   grant('ui.contribute', 'models.use');
-  expect(bridge().snapshot().models).toMatchObject([{ id: 'model', revision: 'r1', hasKey: true }]);
+  expect(bridge().snapshot().models).toMatchObject([
+    { id: 'model', revision: 'r1', hasKey: true, createdAt: '2026-11-13T02:30:45.000Z' },
+  ]);
   expect(JSON.stringify(bridge().snapshot())).not.toContain('private-endpoint');
 });
 it.each(['system', 'user'] as const)(

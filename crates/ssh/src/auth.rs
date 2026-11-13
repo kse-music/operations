@@ -9,20 +9,11 @@ use std::{io::Read, path::PathBuf};
 const KEY_FILE_LIMIT: usize = 1024 * 1024;
 
 fn decode_private_key(contents: &str, passphrase: Option<&str>) -> Result<PrivateKey, Error> {
-    let key = russh::keys::decode_secret_key(contents, passphrase).map_err(|error| {
-        Error::Connection {
-            code: "SSH_KEY_UNLOCK",
-            message: "私钥格式不支持或口令错误",
-            source: Some(Box::new(error)),
-        }
-    })?;
-    if key.algorithm().is_rsa() {
-        return Err(failure(
-            "SSH_RSA_BLOCKED",
-            "受上游安全通告影响，暂不允许本地 RSA 私钥签名；请使用 Ed25519/ECDSA 或系统 Agent",
-        ));
-    }
-    Ok(key)
+    russh::keys::decode_secret_key(contents, passphrase).map_err(|error| Error::Connection {
+        code: "SSH_KEY_UNLOCK",
+        message: "私钥格式不支持或口令错误",
+        source: Some(Box::new(error)),
+    })
 }
 
 /// Normalize a key for the OS credential store. The supplied passphrase is used only to unlock it.
@@ -89,8 +80,25 @@ async fn authenticate_key(
     let key = tokio::task::spawn_blocking(decode)
         .await
         .map_err(|error| Error::Worker(Box::new(error)))??;
+    let hash = if key.algorithm().is_rsa() {
+        Some(
+            handle
+                .best_supported_rsa_hash()
+                .await
+                .map_err(network)?
+                .flatten()
+                .ok_or_else(|| {
+                    failure(
+                        "SSH_RSA_SHA2_REQUIRED",
+                        "服务器未声明支持 RSA SHA-2 签名，请升级服务器 SSH 或改用 Ed25519/ECDSA 私钥",
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
     Ok(handle
-        .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+        .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
         .await
         .map_err(network)?
         .success())

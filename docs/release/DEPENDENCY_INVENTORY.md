@@ -7,9 +7,10 @@
 - 原文主要取自解析包；部分包没有顶层许可文件，须核对其发布源码及许可适用范围，不从声明字段推断已取得完整授权。
 - clipboard-win 5.4.3 的许可取自固定源码提交 `ed27008ae5d1f10cfbb266de039f0fb35fd05a56`；前端剪贴板插件的完整 MIT/Apache 文本来自同版本官方 Rust 插件包。
 - jni/jni-macros 发布包未附许可文件，许可来源为对应源码提交的 MIT 文本；Android verifier 采用同一源码提交的父包许可，发布时仍需复核。
+- russh、russh-cryptovec、russh-util 和 pageant 的 Apache-2.0 许可取自固定上游提交 `b541663a88381aab9f6af1af7bbadb02e155058a` 的仓库根 `LICENSE.txt`；依赖版本以工作区锁文件为准。
 - WASM 编译与 WAT 相关解析包包含开发/测试工具；跨平台依赖不代表相应平台已经验收。
 
-未找到顶层许可证文件的待复核项：alloc-stdlib 0.3.0, block2 0.6.2, cesu8 1.1.0, delegate 0.13.5, dispatch2 0.3.1, dlopen2 0.8.2, dlopen2_derive 0.4.3, gloo-timers 0.4.0, jni-sys-macros 0.4.1, libappindicator-sys 0.9.0, ndk 0.9.0, ndk-context 0.1.1, ndk-sys 0.6.0+11769913, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-cloud-kit 0.3.2, objc2-core-data 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-core-image 0.3.2, objc2-core-location 0.3.2, objc2-core-text 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-io-surface 0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, pageant 0.2.5, plist 1.10.3, r-efi 5.3.0, r-efi 6.0.0, rsqlite-vfs 0.1.1, russh 0.65.0, russh-cryptovec 0.62.0, russh-util 0.52.0, selectors 0.38.0, tauri-plugin 2.7.2, valuable 0.1.1, webview2-com 0.39.1, webview2-com-macros 0.8.1, webview2-com-sys 0.39.1, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0。
+未找到顶层许可证文件的待复核项：objc2-osa-kit 0.3.2, alloc-stdlib 0.3.0, block2 0.6.2, cesu8 1.1.0, delegate 0.13.5, dispatch2 0.3.1, dlopen2 0.8.2, dlopen2_derive 0.4.3, gloo-timers 0.4.0, jni-sys-macros 0.4.1, libappindicator-sys 0.9.0, ndk 0.9.0, ndk-context 0.1.1, ndk-sys 0.6.0+11769913, objc2 0.6.5, objc2-app-kit 0.3.2, objc2-cloud-kit 0.3.2, objc2-core-data 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-core-image 0.3.2, objc2-core-location 0.3.2, objc2-core-text 0.3.2, objc2-encode 4.1.0, objc2-exception-helper 0.1.1, objc2-foundation 0.3.2, objc2-io-surface 0.3.2, objc2-quartz-core 0.3.2, objc2-ui-kit 0.3.2, objc2-user-notifications 0.3.2, objc2-web-kit 0.3.2, plist 1.10.3, r-efi 5.3.0, r-efi 6.0.0, rsqlite-vfs 0.1.1, selectors 0.38.0, tauri-plugin 2.7.2, valuable 0.1.1, webview2-com 0.39.1, webview2-com-macros 0.8.1, webview2-com-sys 0.39.1, winapi-i686-pc-windows-gnu 0.4.0, winapi-x86_64-pc-windows-gnu 0.4.0。
 
 ## Cargo 依赖
 
@@ -93,6 +94,7 @@
 | const-oid 0.10.2                        | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | cookie 0.18.2                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | core-foundation 0.10.1                  | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| core-foundation 0.9.4                   | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | core-foundation-sys 0.8.7               | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | core-graphics 0.25.0                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | core-graphics-types 0.2.0               | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -103,7 +105,7 @@
 | crossbeam-channel 0.5.17                | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | crossbeam-utils 0.8.23                  | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | crunchy 0.2.4                           | MIT                                                                                                                                 | Cargo |
-| crypto-bigint 0.7.10                    | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| crypto-bigint 0.7.11                    | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | crypto-common 0.1.6                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | crypto-common 0.2.2                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | crypto-primes 0.7.2                     | Apache-2.0 OR MIT                                                                                                                   | Cargo |
@@ -111,7 +113,7 @@
 | cssparser-macros 0.7.1                  | MPL-2.0                                                                                                                             | Cargo |
 | ctor 1.0.13                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | ctr 0.10.1                              | MIT OR Apache-2.0                                                                                                                   | Cargo |
-| ctutils 0.4.7                           | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| ctutils 0.4.8                           | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | curve25519-dalek 5.0.0                  | BSD-3-Clause                                                                                                                        | Cargo |
 | curve25519-dalek-derive 0.1.1           | MIT/Apache-2.0                                                                                                                      | Cargo |
 | darling 0.24.1                          | MIT                                                                                                                                 | Cargo |
@@ -306,6 +308,7 @@
 | memchr 2.8.3                            | Unlicense OR MIT                                                                                                                    | Cargo |
 | memoffset 0.9.1                         | MIT                                                                                                                                 | Cargo |
 | mime 0.3.17                             | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| minisign-verify 0.3.0                   | MIT                                                                                                                                 | Cargo |
 | miniz_oxide 0.8.9                       | MIT OR Zlib OR Apache-2.0                                                                                                           | Cargo |
 | miniz_oxide 0.9.1                       | MIT OR Zlib OR Apache-2.0                                                                                                           | Cargo |
 | mio 1.2.4                               | MIT                                                                                                                                 | Cargo |
@@ -345,6 +348,7 @@
 | objc2-exception-helper 0.1.1            | Zlib OR Apache-2.0 OR MIT                                                                                                           | Cargo |
 | objc2-foundation 0.3.2                  | MIT                                                                                                                                 | Cargo |
 | objc2-io-surface 0.3.2                  | Zlib OR Apache-2.0 OR MIT                                                                                                           | Cargo |
+| objc2-osa-kit 0.3.2                     | Zlib OR Apache-2.0 OR MIT                                                                                                           | Cargo |
 | objc2-quartz-core 0.3.2                 | Zlib OR Apache-2.0 OR MIT                                                                                                           | Cargo |
 | objc2-ui-kit 0.3.2                      | Zlib OR Apache-2.0 OR MIT                                                                                                           | Cargo |
 | objc2-user-notifications 0.3.2          | Zlib OR Apache-2.0 OR MIT                                                                                                           | Cargo |
@@ -355,6 +359,7 @@
 | option-ext 0.2.0                        | MPL-2.0                                                                                                                             | Cargo |
 | ordered-stream 0.2.0                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | os_pipe 1.2.3                           | MIT                                                                                                                                 | Cargo |
+| osakit 0.3.1                            | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | p256 0.14.0                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | p384 0.14.0                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | p521 0.14.0                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
@@ -377,7 +382,7 @@
 | phf_shared 0.13.1                       | MIT                                                                                                                                 | Cargo |
 | pin-project-lite 0.2.17                 | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | piper 0.2.5                             | MIT OR Apache-2.0                                                                                                                   | Cargo |
-| pkcs1 0.8.0-rc.4                        | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| pkcs1 0.8.0                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | pkcs5 0.8.1                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | pkcs8 0.11.0                            | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | pkg-config 0.3.34                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -426,11 +431,11 @@
 | rfd 0.17.2                              | MIT                                                                                                                                 | Cargo |
 | ring 0.17.14                            | Apache-2.0 AND ISC                                                                                                                  | Cargo |
 | rpassword 7.5.4                         | Apache-2.0                                                                                                                          | Cargo |
-| rsa 0.10.0-rc.18                        | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| rsa 0.10.0                              | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | rsqlite-vfs 0.1.1                       | MIT                                                                                                                                 | Cargo |
 | rtoolbox 0.0.6                          | Apache-2.0                                                                                                                          | Cargo |
 | rusqlite 0.38.0                         | MIT                                                                                                                                 | Cargo |
-| russh 0.65.0                            | Apache-2.0                                                                                                                          | Cargo |
+| russh 0.65.1                            | Apache-2.0                                                                                                                          | Cargo |
 | russh-cryptovec 0.62.0                  | Apache-2.0                                                                                                                          | Cargo |
 | russh-sftp 3.0.1                        | Apache-2.0                                                                                                                          | Cargo |
 | russh-util 0.52.0                       | Apache-2.0                                                                                                                          | Cargo |
@@ -503,7 +508,7 @@
 | sqlite-wasm-rs 0.5.5                    | MIT                                                                                                                                 | Cargo |
 | ssh-cipher 0.3.0                        | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | ssh-encoding 0.3.0                      | Apache-2.0 OR MIT                                                                                                                   | Cargo |
-| ssh-key 0.7.0-rc.11                     | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| ssh-key 0.7.0-rc.12                     | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | stable_deref_trait 1.2.1                | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | static_vcruntime 3.0.0                  | MIT OR Apache-2.0 OR Zlib                                                                                                           | Cargo |
 | string-interner 0.19.0                  | MIT/Apache-2.0                                                                                                                      | Cargo |
@@ -518,6 +523,8 @@
 | syn 3.0.9                               | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | sync_wrapper 1.0.2                      | Apache-2.0                                                                                                                          | Cargo |
 | synstructure 0.14.0                     | MIT                                                                                                                                 | Cargo |
+| system-configuration 0.7.0              | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| system-configuration-sys 0.6.0          | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | system-deps 6.2.2                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | tao 0.37.2                              | Apache-2.0                                                                                                                          | Cargo |
 | tao-macros 0.1.4                        | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -533,6 +540,7 @@
 | tauri-plugin-fs 2.7.1                   | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | tauri-plugin-opener 2.7.2               | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | tauri-plugin-single-instance 2.5.5      | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| tauri-plugin-updater 2.14.1             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | tauri-runtime 2.12.2                    | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | tauri-runtime-wry 2.12.3                | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | tauri-utils 2.10.2                      | Apache-2.0 OR MIT                                                                                                                   | Cargo |
@@ -645,6 +653,7 @@
 | windows-link 0.2.1                      | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | windows-native-keyring-store 1.1.0      | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | windows-numerics 0.3.1                  | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| windows-registry 0.6.1                  | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | windows-result 0.4.1                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | windows-strings 0.5.1                   | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | windows-sys 0.45.0                      | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -682,6 +691,7 @@
 | x11-dl 2.21.0                           | MIT                                                                                                                                 | Cargo |
 | x11rb 0.13.2                            | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | x11rb-protocol 0.13.2                   | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| xattr 1.7.0                             | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | yoke 0.8.4                              | Unicode-3.0                                                                                                                         | Cargo |
 | yoke-derive 0.8.4                       | Unicode-3.0                                                                                                                         | Cargo |
 | zbus 5.19.0                             | MIT                                                                                                                                 | Cargo |

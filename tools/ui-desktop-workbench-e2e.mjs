@@ -52,7 +52,11 @@ try {
         const { systemPluginFixtures } = await import('/src/services/system-plugins.fixture.ts');
         Object.assign(pluginsApi, {
           list: async () => systemPluginFixtures(),
-          inventory: async () => ({ installed: systemPluginFixtures(), problems: [] }),
+          inventory: async () => ({
+            installed: systemPluginFixtures(),
+            problems: [],
+            availableBundled: [],
+          }),
           permissions: async () => null,
           statuses: async () => [],
         });

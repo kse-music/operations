@@ -109,7 +109,7 @@ try {
           closed += 1;
         };
         terminalApi.input = terminalApi.resize = terminalApi.ack = async () => {};
-        pluginsApi.inventory = async () => ({ installed: [], problems: [] });
+        pluginsApi.inventory = async () => ({ installed: [], problems: [], availableBundled: [] });
         pluginsApi.list = pluginsApi.statuses = async () => [];
         filesApi.tasks = filesApi.connections = async () => [];
         window.threeColumnQA = { pinia, counts: () => ({ opened, closed }) };

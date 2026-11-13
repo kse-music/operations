@@ -21,6 +21,8 @@ export interface PluginManifest {
   name: string;
   icon?: string | null;
   version: string;
+  /** Package build time in Unix milliseconds, when supplied by the packager. */
+  builtAt?: number | null;
   author: string;
   description: string;
   apiVersion: string;

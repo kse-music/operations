@@ -1212,6 +1212,7 @@ async fn assistant_packaged_sends_repeated_questions_over_native_stream_and_ssh(
     app.database
         .ai_model_save(
             serverdeck_storage::ai::ModelRecord {
+                created_at: None,
                 id: "assistant-stream-model".into(),
                 name: "fixture".into(),
                 config: serverdeck_core::ai::Config {

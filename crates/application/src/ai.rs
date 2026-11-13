@@ -155,6 +155,7 @@ impl Application {
                     secrets.write(reference, key.as_bytes())?;
                 }
                 let record = ModelRecord {
+                    created_at: None,
                     id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                     name: input.name.trim().into(),
                     config: input.config,
@@ -223,6 +224,7 @@ impl Application {
             }
             return Ok((
                 ModelRecord {
+                    created_at: None,
                     id: model_id,
                     name: name.into(),
                     config: snapshot.config,

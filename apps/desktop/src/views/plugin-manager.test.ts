@@ -7,10 +7,12 @@ import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
 import type { InstalledPlugin, PluginManifest } from '../types/plugins';
 import { systemPluginFixtures, toolPluginState } from '../services/system-plugins.fixture';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 beforeEach(() => {
   vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
     installed: await pluginsApi.list(),
     problems: [],
+    availableBundled: [],
   }));
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
     configurable: true,
@@ -27,6 +29,7 @@ function mountManager(onSettings = vi.fn()) {
   app.mount(root);
 }
 afterEach(() => {
+  setLocale('zh-CN');
   app?.unmount();
   root?.remove();
   if (pinia) disposePinia(pinia);
@@ -116,6 +119,44 @@ it('requires explicit upgrade approval; cancelled upgrade preserves schemas and 
   expect(useNotificationsStore(pinia).items).toEqual(
     expect.arrayContaining([expect.objectContaining({ text: 'Commit failed', error: true })]),
   );
+});
+
+it('shows package build times in Beijing time and preserves missing historical metadata', async () => {
+  const items = systemPluginFixtures();
+  items[0]!.manifest = { ...items[0]!.manifest, builtAt: Date.UTC(2026, 10, 13, 0, 30, 45) };
+  const legacyManifest = { ...items[1]!.manifest };
+  delete legacyManifest.builtAt;
+  items[1]!.manifest = legacyManifest;
+  vi.spyOn(pluginsApi, 'list').mockResolvedValue(items);
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  const cards = root.querySelectorAll('.plugin-installed-row');
+  const time = cards[0]!.querySelector('time')!;
+  expect(time.dateTime).toBe('2026-11-13T00:30:45.000Z');
+  expect(time.textContent).toBe('2026-11-13 08:30:45');
+  expect(cards[0]!.querySelector('.plugin-build-time')?.textContent?.trim()).toBe(
+    '2026-11-13 08:30:45',
+  );
+  expect(cards[0]!.querySelector('.plugin-build-time')?.getAttribute('title')).toBe('北京时间');
+  expect(cards[1]!.querySelector('.plugin-build-time')?.textContent).toContain('未提供');
+  expect(cards[1]!.querySelector('time')).toBeNull();
+
+  setLocale('en-US');
+  await nextTick();
+  expect(time.textContent).toBe('2026-11-13 08:30:45');
+  expect(cards[0]!.querySelector('.plugin-build-time')?.textContent?.trim()).toBe(
+    '2026-11-13 08:30:45',
+  );
+  expect(cards[0]!.querySelector('.plugin-build-time')?.getAttribute('title')).toBe('Beijing time');
+  expect(cards[1]!.querySelector('.plugin-build-time')?.textContent).toContain('Not provided');
+  await usePluginsStore(pinia).refresh();
+  expect(time.dateTime).toBe('2026-11-13T00:30:45.000Z');
+  usePluginsStore(pinia).installed[0]!.manifest.builtAt = 0;
+  await nextTick();
+  expect(time.dateTime).toBe('1970-01-01T00:00:00.000Z');
 });
 
 it('opens settings by name or gear for every installed plugin', async () => {
@@ -477,6 +518,94 @@ it('requires uninstall confirmation and preserves plugin data by default', async
   expect(document.querySelector('dialog')).toBeNull();
 });
 
+it('offers a missing bundled plugin for explicit restore and keeps it disabled after installation', async () => {
+  const [docker, assistant] = systemPluginFixtures();
+  let restored = false;
+  vi.mocked(pluginsApi.inventory).mockImplementation(async () => ({
+    installed: restored ? [docker!, assistant!] : [assistant!],
+    availableBundled: restored ? [] : [docker!.manifest],
+    problems: [],
+  }));
+  vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const enable = vi.spyOn(pluginsApi, 'setEnabled');
+  let finish!: () => void;
+  const restore = vi.spyOn(pluginsApi, 'reinstallBundled').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = () => {
+          restored = true;
+          resolve(docker!);
+        };
+      }),
+  );
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  const button = (text: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent?.trim() === text,
+    )!;
+  const source = root.querySelector<HTMLSelectElement>('[aria-label="插件来源"]')!;
+  source.value = 'user';
+  source.dispatchEvent(new Event('change'));
+  await nextTick();
+  button('恢复内置插件').click();
+  await nextTick();
+  expect(document.querySelector('dialog')?.textContent).toContain('Docker 管理');
+  expect(document.querySelector('dialog')?.textContent).toContain('恢复后默认禁用');
+  expect(restore).not.toHaveBeenCalled();
+  button('取消').click();
+  await nextTick();
+  expect(restore).not.toHaveBeenCalled();
+  button('恢复内置插件').click();
+  await nextTick();
+  button('恢复安装').click();
+  await nextTick();
+  expect(restore).toHaveBeenCalledExactlyOnceWith(docker!.manifest.id, null, true);
+  expect(button('恢复安装').disabled).toBe(true);
+  expect(button('取消').disabled).toBe(true);
+  finish();
+  await settle();
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(root.querySelector(`[data-plugin-id="${docker!.manifest.id}"]`)?.textContent).toContain(
+    '已禁用',
+  );
+  expect(root.textContent).not.toContain('恢复内置插件');
+  expect(source.value).toBe('all');
+  expect(enable).not.toHaveBeenCalled();
+});
+
+it('keeps a failed bundled restore open for retry with its error visible', async () => {
+  const docker = systemPluginFixtures()[0]!;
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({
+    installed: [],
+    problems: [],
+    availableBundled: [docker.manifest],
+  });
+  vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
+  const restore = vi
+    .spyOn(pluginsApi, 'reinstallBundled')
+    .mockRejectedValue({ message: 'Plugin storage unavailable' });
+  pinia = createPinia();
+  mountManager();
+  await settle();
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((node) => node.textContent?.trim() === '恢复内置插件')!
+    .click();
+  await nextTick();
+  document.querySelector<HTMLButtonElement>('dialog [aria-label="恢复 Docker 管理"]')!.click();
+  await settle();
+  expect(restore).toHaveBeenCalledExactlyOnceWith(docker.manifest.id, null, true);
+  expect(document.querySelector('dialog [role="alert"]')?.textContent).toContain(
+    'Plugin storage unavailable',
+  );
+  expect(
+    document.querySelector<HTMLButtonElement>('dialog [aria-label="恢复 Docker 管理"]')?.disabled,
+  ).toBe(false);
+  expect(root.querySelector('.plugin-installed-row')).toBeNull();
+});
+
 it('shows invalid plugin records beside healthy plugins and requires explicit reinstall confirmation', async () => {
   const healthy = systemPluginFixtures()[0]!;
   const problem = {
@@ -486,7 +615,11 @@ it('shows invalid plugin records beside healthy plugins and requires explicit re
     recordDigest: 'frozen-digest',
     replacement: { name: 'AI 运维助手', version: '2.0.0' },
   };
-  vi.mocked(pluginsApi.inventory).mockResolvedValue({ installed: [healthy], problems: [problem] });
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({
+    installed: [healthy],
+    problems: [problem],
+    availableBundled: [],
+  });
   vi.spyOn(pluginsApi, 'permissions').mockResolvedValue(null);
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   const reinstall = vi
@@ -510,7 +643,11 @@ it('shows invalid plugin records beside healthy plugins and requires explicit re
   await click('取消');
   expect(reinstall).not.toHaveBeenCalled();
   await click('备份并重装');
-  vi.mocked(pluginsApi.inventory).mockResolvedValue({ installed: [healthy], problems: [] });
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({
+    installed: [healthy],
+    problems: [],
+    availableBundled: [],
+  });
   await click('确认备份并重装');
   expect(reinstall).toHaveBeenCalledExactlyOnceWith(problem.id, 'frozen-digest', true);
   expect(document.querySelector('dialog')).toBeNull();
@@ -524,7 +661,11 @@ it('keeps a failed reinstall visible for retry and offers no bundled replacement
     recordDigest: 'digest',
     replacement: null,
   };
-  vi.mocked(pluginsApi.inventory).mockResolvedValue({ installed: [], problems: [problem] });
+  vi.mocked(pluginsApi.inventory).mockResolvedValue({
+    installed: [],
+    problems: [problem],
+    availableBundled: [],
+  });
   vi.spyOn(pluginsApi, 'statuses').mockResolvedValue([]);
   pinia = createPinia();
   mountManager();
