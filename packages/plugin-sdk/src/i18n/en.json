@@ -1,4 +1,6 @@
 {
+  "清屏": "Clear screen",
+  "仅清除本窗口已接收的内容，后续日志继续显示，不影响远端日志。": "Clear received output in this window. New logs continue to appear; remote logs are preserved.",
   "文件实际长度与报告大小不一致，不能作为可编辑文件读取；/proc、/sys 等动态信息请使用系统采样查询": "The file's actual length differs from its reported size, so it cannot be opened as an editable document. Use system sampling for dynamic data such as /proc or /sys.",
   "插件连接未就绪或请求过多": "Plugin connection is not ready or there are too many requests",
   "插件请求超过限制": "Plugin request exceeds the limit",

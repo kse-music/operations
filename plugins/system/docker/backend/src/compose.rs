@@ -204,7 +204,7 @@ pub async fn logs(
     context
         .request(Request::StreamOpen {
             host_id: host.into(),
-            command: command(project, &rows, &suffix)?,
+            command: crate::log_stream::command(command(project, &rows, &suffix)?)?,
         })
         .await
 }

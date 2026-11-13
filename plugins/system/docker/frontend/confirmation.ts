@@ -14,12 +14,6 @@ export function mutationConfirmation(
           '仅重启当前主机状态为 exited 的容器，使其服务重新启动；不处理 created、paused 等其他状态。',
         ),
       ],
-      clear_logs: [
-        tr('清空容器日志'),
-        tr(
-          '将清空当前主机全部容器的 json-file 当前日志，清空后无法恢复；其他日志驱动和历史轮转文件保留。需要当前 SSH 账号有日志文件写权限，不自动提权。',
-        ),
-      ],
     } as const;
     const [label, impact] = actions[request.action];
     return {

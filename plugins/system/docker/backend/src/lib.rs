@@ -7,6 +7,7 @@ use serverdeck_plugin_sdk::{
 mod compose;
 mod docker;
 mod image_archive;
+mod log_stream;
 mod maintenance;
 mod startup;
 std::thread_local! {static RUNTIME:std::cell::RefCell<Runtime>=std::cell::RefCell::new(Runtime::new(dispatch));}
@@ -54,7 +55,7 @@ fn dispatch(context: Context, action: String, input: Value) -> Action {
                 context
                     .request(Request::StreamOpen {
                         host_id: host,
-                        command: Command::script(command),
+                        command: log_stream::command(Command::script(command))?,
                     })
                     .await
             }

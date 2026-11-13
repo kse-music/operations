@@ -307,14 +307,16 @@ afterEach(() => {
 it('opens the existing host and import dialogs from the welcome cards without starting a connection', async () => {
   const welcome = document.querySelector('[aria-label="欢迎页面"]')!;
   expect(welcome.classList.contains('workspace-empty')).toBe(false);
-  expect(welcome.querySelectorAll('.welcome-card')).toHaveLength(3);
+  expect(welcome.querySelector('.welcome-terminal')).not.toBeNull();
+  expect(welcome.querySelectorAll('.welcome-entry')).toHaveLength(2);
+  expect(welcome.querySelectorAll('.welcome-tool-card')).toHaveLength(3);
   expect(welcome.querySelector('[aria-label="快速上手"]')).not.toBeNull();
   expect(welcome.querySelector('[aria-label="键盘操作"]')).not.toBeNull();
   const open = vi.spyOn(useTerminalsStore(), 'open');
   const importHosts = vi.spyOn(hostsApi, 'import');
   const button = (label: string) =>
     [...welcome.querySelectorAll<HTMLButtonElement>('button')].find(
-      (item) => item.textContent?.trim() === label,
+      (item) => item.getAttribute('aria-label') === label,
     )!;
 
   button('新建主机').click();
@@ -325,7 +327,7 @@ it('opens the existing host and import dialogs from the welcome cards without st
   await flush();
   expect(document.querySelector('dialog[aria-label="新建主机"]')).toBeNull();
 
-  button('导入配置').click();
+  button('导入 SSH 配置').click();
   await flush();
   const dialog = document.querySelector<HTMLDialogElement>(
     'dialog[aria-label="导入 OpenSSH Config"]',
@@ -340,12 +342,82 @@ it('opens the existing host and import dialogs from the welcome cards without st
   expect(useWorkspaceStore().tabs).toEqual([]);
 });
 
+it('keeps the zero-host guide wired to the existing dialogs without creating a Shell', async () => {
+  useHostsStore().catalog!.hosts = [];
+  await flush();
+  const welcome = document.querySelector('.welcome-host-empty')!;
+  expect(welcome).not.toBeNull();
+  expect(document.querySelector('.welcome-target')).toBeNull();
+  const open = vi.spyOn(useTerminalsStore(), 'open');
+  welcome.querySelector<HTMLButtonElement>('.button.primary')!.click();
+  await flush();
+  const create = document.querySelector<HTMLDialogElement>('dialog[aria-label="新建主机"]')!;
+  expect(create.open).toBe(true);
+  create.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await flush();
+  welcome.querySelector<HTMLButtonElement>('.button:not(.primary)')!.click();
+  await flush();
+  expect(
+    document.querySelector<HTMLDialogElement>('dialog[aria-label="导入 OpenSSH Config"]')!.open,
+  ).toBe(true);
+  expect(open).not.toHaveBeenCalled();
+  expect(useWorkspaceStore().tabs).toEqual([]);
+});
+
+it.each(['cn.hiboot.plugins.docker', 'cn.hiboot.plugins.assistant'])(
+  'opens the selected host in the %s homepage tool without creating a terminal',
+  async (pluginId) => {
+    const open = vi.spyOn(useTerminalsStore(), 'open');
+    const picker = document.querySelector<HTMLSelectElement>('.welcome-target select')!;
+    picker.value = 'b';
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+    await flush();
+    expect(useWorkspaceStore().tabs).toEqual([]);
+    expect(useTerminalsStore().panes).toEqual([]);
+    document.querySelector<HTMLButtonElement>(`[data-home-tool="${pluginId}"] .button`)!.click();
+    await flush();
+    expect(useWorkspaceStore().current).toMatchObject({ view: 'extension', hostId: 'b', pluginId });
+    expect(open).not.toHaveBeenCalled();
+  },
+);
+
+it('opens the homepage file tool for its selected host without creating a terminal', async () => {
+  const files = useFilesStore();
+  const openFiles = vi.spyOn(files, 'open').mockResolvedValue();
+  vi.spyOn(files, 'openLocal').mockResolvedValue();
+  vi.spyOn(filesApi, 'localDrives').mockResolvedValue([]);
+  const open = vi.spyOn(useTerminalsStore(), 'open');
+  useHostsStore().selectedId = 'b';
+  await flush();
+  document.querySelector<HTMLButtonElement>('[data-home-tool="files"] .button')!.click();
+  await flush();
+  expect(useWorkspaceStore().current).toMatchObject({ view: 'files', hostId: 'b' });
+  expect(openFiles).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
+  expect(open).not.toHaveBeenCalled();
+});
+
+it('opens assistant model binding through the existing plugin settings page', async () => {
+  const open = vi.spyOn(useTerminalsStore(), 'open');
+  document
+    .querySelector<HTMLButtonElement>(
+      '[data-home-tool="cn.hiboot.plugins.assistant"] .text-button',
+    )!
+    .click();
+  await flush();
+  expect(useWorkspaceStore().area).toBe('settings');
+  expect(useWorkspaceStore().pluginConfiguration).toMatchObject({
+    pluginId: 'cn.hiboot.plugins.assistant',
+    contributionId: 'settings',
+  });
+  expect(open).not.toHaveBeenCalled();
+});
+
 it('opens one fresh local terminal from the welcome page even when a remote host is selected', async () => {
   useHostsStore().selectedId = 'a';
   const terminals = useTerminalsStore();
   const open = vi.spyOn(terminals, 'open');
   const button = document.querySelector<HTMLButtonElement>('.welcome-card .button')!;
-  expect(button.textContent?.trim()).toBe('本地终端');
+  expect(button.textContent?.trim()).toBe('打开本地终端');
   button.click();
   await flush();
   expect(open).toHaveBeenCalledExactlyOnceWith(null);
@@ -402,20 +474,22 @@ it('updates welcome shortcuts and translations from saved preferences', async ()
   const shortcuts = () =>
     [...document.querySelectorAll('.welcome-shortcuts kbd')].map((item) => item.textContent);
   expect(shortcuts()).toEqual(['Ctrl+Shift+K', 'Enter']);
-  expect(document.querySelector('.welcome-eyebrow')).toBeNull();
+  expect(document.querySelector('.welcome-eyebrow')?.textContent).toBe('YOUR TOOLKIT');
   expect(
     [...document.querySelectorAll('.welcome-shortcuts dt')].map((item) => item.textContent),
   ).toEqual(['搜索主机与命令', '连接选中的主机']);
   config.product.language = 'en-US';
   await flush();
-  expect(document.querySelector('.welcome-heading h1')?.textContent).toBe('Welcome to ServerDeck');
+  expect(document.querySelector('.welcome-heading h1')?.textContent).toBe('Your server toolkit.');
   expect(
     [...document.querySelectorAll('.welcome-card h2')].map((item) => item.textContent),
-  ).toEqual(['Local terminal', 'New host', 'Import SSH configuration']);
+  ).toEqual(['Start working locally.']);
+  expect(document.querySelector('.welcome-entry[aria-label="New host"]')).not.toBeNull();
+  expect(document.querySelector('.welcome-tools[aria-label="Host tools"]')).not.toBeNull();
   expect(shortcuts()).toEqual(['Ctrl+Shift+K', 'Enter']);
   config.product.language = 'zh-CN';
   await flush();
-  expect(document.querySelector('.welcome-heading h1')?.textContent).toBe('欢迎使用 ServerDeck');
+  expect(document.querySelector('.welcome-heading h1')?.textContent).toBe('你的服务器工具箱。');
   expect(useTerminalsStore().panes).toEqual([]);
 });
 

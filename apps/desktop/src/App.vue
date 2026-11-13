@@ -795,6 +795,10 @@ watch(
           @local-terminal="navigate('terminals', '')"
           @create-host="openHost()"
           @import-openssh="importingOpenSsh = true"
+          @files="navigate('files', $event)"
+          @plugin="openPlugin"
+          @plugin-settings="workspace.openPluginSettings"
+          @manage-plugins="navigate('plugins')"
         />
         <PluginView
           v-for="page in cachedPluginPages"

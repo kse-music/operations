@@ -31,6 +31,12 @@ export class LogBuffer {
   value(): string {
     return this.chunks.map((c) => c.text).join('');
   }
+  clear(): void {
+    this.chunks = [];
+    this.total = 0;
+    this.lines = 0;
+    this.dropped = 0;
+  }
   get byteLength(): number {
     return this.total;
   }

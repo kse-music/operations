@@ -372,10 +372,8 @@ mod tests {
         ] {
             assert!(!commands.contains(&serverdeck_plugin_sdk::platform::Command::script(command)));
         }
-        for action in [
-            crate::maintenance::Action::RestartExited,
-            crate::maintenance::Action::ClearLogs,
-        ] {
+        {
+            let action = crate::maintenance::Action::RestartExited;
             assert!(
                 Query::ContainerMaintenance {
                     action: action.clone(),
@@ -392,6 +390,15 @@ mod tests {
             .unwrap();
             assert!(!commands.contains(&serverdeck_plugin_sdk::platform::Command::script(command)));
         }
+    }
+    #[test]
+    fn removed_log_cleanup_requests_are_rejected() {
+        assert!(
+            serde_json::from_value::<Query>(json!({
+                "kind":"container_maintenance", "action":"clear_logs", "confirmed":true
+            }))
+            .is_err()
+        );
     }
     #[test]
     fn targets_and_confirmation_are_enforced() {

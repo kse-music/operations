@@ -24,7 +24,7 @@ SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 St
 
 `paths.displayLocalPath(path)` 仅用于本机路径显示：Windows 扩展盘符和 UNC 路径显示为普通形式，其他路径保持原文。调用文件原语时保留原始路径，不能将显示转换用于权限或路径校验。
 
-`StreamDialog` 使用宽弹窗，固定标题/工具栏并让输出区独立滚动。首次打开和默认跟随时滚到最新输出，用户向上翻阅后停止自动滚动但继续接收；“最新日志”或暂停后的“继续”恢复跟随。窗口尺寸/字号变化时仅在跟随模式重新定位末尾。过滤、复制、导出、1 MiB/5000 行缓存及隐藏/卸载释放自有流的边界不变，显示操作不改变流的执行和释放规则。
+`StreamDialog` 使用宽弹窗，固定标题/工具栏并让输出区独立滚动。「清屏」重置本地 LogBuffer 和显示预算、恢复跟随，后续收到的内容继续追加；保留过滤条件、UTF-8 解码器及暂停/错误状态，不发起平台调用、不重建流。复制和导出只读取清屏后剩余的可见缓存。首次打开和默认跟随时滚到最新输出，用户向上翻阅后停止自动滚动但继续接收；“最新日志”或暂停后的“继续”恢复跟随。窗口尺寸/字号变化时仅在跟随模式重新定位末尾。过滤、复制、导出、1 MiB/5000 行缓存及隐藏/卸载释放自有流的边界不变，显示操作不改变流的执行和释放规则。
 
 下载的开发包包含上述两端 SDK、工具、锁文件、文档和完整样例，无需 ServerDeck 源码或 Tauri 工具链。
 
@@ -97,6 +97,8 @@ Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Cap
 `Command { program, args, timeoutSecs }` 将程序和参数逐项 POSIX 引用；无需人工拼接。只有明确需要 shell 时使用 `Command::script`，插件仍必须验证/引用插入脚本的值。程序 ≤4096 字节、参数 ≤128 个且每个 ≤8192 字节、合计 ≤16384 字节，无 NUL；Execute 超时 1–30 秒。Stream/PTY 持续到显式关闭或页面生命周期结束。
 
 Execute 默认经可信宿主**逐次确认真实目标与命令**。可选 Manifest `preapprovedCommands` 声明 1–16 条完整 Command（合计 JSON ≤48 KiB），同时声明并独立授予 `ssh.execute.preapproved` 权限及同名 operation 后，只有 program、args、timeoutSecs 完全匹配的 Execute 使用预授权；仍需 `ssh.execute`。预授权匹配不支持参数模板或通配符，脚本内容按原样精确匹配；上传包权限页展示完整命令，默认未选此能力，升级按原包摘要/修订重新授权。该机制不保证命令只读，不接受 Guest 的 `readOnly`/`confirmed` 免审，也无服务名白名单。
+
+StreamStop 会等待对应远端命令退出确认：TERM 后最多等待 2 秒，未确认则 KILL 后再等 1 秒；仍未确认返回 `LOG_STOP_UNCONFIRMED`，不能把通道关闭当作远端进程已结束。窗口/owner 关闭及主动断开 SSH 复用相同排空逻辑；断开过程中新的流请求返回 BUSY。网络硬中断或强制结束应用时无法保证远端即时退出，须恢复连接后独立核对。
 
 StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.preapproved`，并独立授予同名权限和 operation 后，当前安装修订可直接启动任意远程流和终端命令；仍需声明、授予 `ssh.execute` 及同名 operation。这是任意交互命令授权，不受 `preapprovedCommands` 限制，也不表示命令只读；上传包默认未选，升级需要重新授权。该权限不能免除 Execute、SaveFile、TcpConnect 的审批。隐藏/关闭、撤权、配额、取消和实际 SSH 配置复验仍适用。
 

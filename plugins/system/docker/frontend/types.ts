@@ -34,7 +34,7 @@ export type OpsRequest =
   | { kind: 'container_startup'; id: string; revealEnv: boolean; inspectOnly: boolean }
   | {
       kind: 'container_maintenance';
-      action: 'restart_exited' | 'clear_logs';
+      action: 'restart_exited';
       confirmed: boolean;
     }
   | {

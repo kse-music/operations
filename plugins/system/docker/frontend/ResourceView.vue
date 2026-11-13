@@ -359,7 +359,12 @@ const slotContext = {
         }}</span
       >
     </footer>
-    <StreamDialog v-if="log" :stream-id="log.id" :title="log.title" @close="log = undefined" />
+    <StreamDialog
+      v-if="log"
+      :stream-id="log.id"
+      :title="tr('{0} · 单次最多 10 分钟', log.title)"
+      @close="log = undefined"
+    />
     <ImageArchiveDialog
       v-if="archive"
       :host-id="chosen"

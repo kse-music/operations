@@ -66,6 +66,14 @@ function followLatest() {
   following.value = true;
   scrollToBottom();
 }
+function clearOutput() {
+  buffer.clear();
+  revision.value++;
+  clearScrollIntent();
+  following.value = true;
+  lastLayout = undefined;
+  if (output.value) output.value.scrollTop = 0;
+}
 function onScroll() {
   const element = output.value;
   if (!element) return;
@@ -214,6 +222,12 @@ onBeforeUnmount(() => {
           @click="pause"
         >
           {{ paused ? tr('继续') : tr('暂停') }}</button
+        ><button
+          class="button"
+          :title="tr('仅清除本窗口已接收的内容，后续日志继续显示，不影响远端日志。')"
+          @click="clearOutput"
+        >
+          {{ tr('清屏') }}</button
         ><button class="button" @click="copy">{{ tr('复制') }}</button
         ><button class="button" @click="download">{{ tr('导出') }}</button>
         <button class="button" :disabled="following && !paused" @click="followLatest">

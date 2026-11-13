@@ -622,7 +622,9 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
   await settle();
   expect(document.body.textContent).not.toContain('late-fixture');
   await click('日志');
-  expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe('owned-container');
+  expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe(
+    'owned-container · 单次最多 10 分钟',
+  );
   expect(api.logOpen).toHaveBeenCalledWith('host', {
     hostId: 'host',
     source: { kind: 'container', id: 'container' },
@@ -989,10 +991,8 @@ it('runs host-wide maintenance from the container toolbar with confirmation, fee
   await settle();
   expect(root.querySelector('[data-ops-target="b"]')).toBeNull();
   expect(button('重启全部容器')).toBeUndefined();
-  for (const [label, action, impact] of [
-    ['清空容器日志', 'clear_logs', '无法恢复'],
-    ['重启已退出容器', 'restart_exited', 'exited'],
-  ]) {
+  expect(button('清空容器日志')).toBeUndefined();
+  for (const [label, action, impact] of [['重启已退出容器', 'restart_exited', 'exited']]) {
     const reads = api.query.mock.calls.filter(
       ([, request]) => request.kind === 'containers',
     ).length;
@@ -1033,7 +1033,7 @@ it('runs host-wide maintenance from the container toolbar with confirmation, fee
     { code: 'TIMEOUT', message: '执行超时' },
   ]) {
     api.query.mockResolvedValueOnce({ success: false, ...cause });
-    button('清空容器日志').click();
+    button('重启已退出容器').click();
     await settle();
     expect(root.querySelector('[role="alert"]')?.textContent).toContain(cause.message);
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('可能部分完成');
@@ -1049,7 +1049,7 @@ it('runs host-wide maintenance from the container toolbar with confirmation, fee
   button('重启已退出容器').click();
   await settle();
   expect(button('重启已退出容器').disabled).toBe(true);
-  expect(button('清空容器日志').disabled).toBe(true);
+  expect(button('正在读取…').disabled).toBe(true);
   const calls = api.query.mock.calls.length;
   button('重启已退出容器').click();
   expect(api.query.mock.calls).toHaveLength(calls);

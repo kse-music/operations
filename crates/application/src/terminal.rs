@@ -329,10 +329,10 @@ impl Application {
         if id.starts_with("local:") {
             return self.local_terminals.close(id).await;
         }
-        self.terminals.close(id).await
+        self.operations_host.close(id).await
     }
     pub async fn terminal_close_host(&self, host_id: &str) -> Result<(), Error> {
-        self.terminals.close_host(host_id).await
+        self.operations_host.close_host(host_id).await
     }
     pub async fn terminal_local_open(
         &self,

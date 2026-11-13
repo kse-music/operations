@@ -10,7 +10,6 @@ use crate::docker::PRELUDE;
 #[serde(rename_all = "snake_case")]
 pub enum Action {
     RestartExited,
-    ClearLogs,
 }
 
 // All selection happens on the confirmed SSH host. Never interpolate UI paths or IDs.
@@ -40,46 +39,9 @@ if test -n "$sd_ids"; then
     if test "$sd_status" -ne 0 && test "$sd_failed" -eq 0; then exit "$sd_status"; fi
 fi
 "#;
-const CLEAR_LOGS: &str = r#"
-if test -n "$sd_ids"; then
-    command -v truncate >/dev/null 2>&1 || { echo 'Log cleanup requires truncate' >&2; exit 1; }
-    sd_root=$(d info --format '{{.DockerRootDir}}') || exit
-    sd_root=${sd_root%/}
-    case "$sd_root" in /*) ;; *) echo 'Docker data directory is unavailable' >&2; exit 1;; esac
-    for sd_id in $sd_ids; do
-        sd_driver=$(d container inspect --format '{{.HostConfig.LogConfig.Type}}' -- "$sd_id") || { sd_failed=$((sd_failed + 1)); continue; }
-        if test "$sd_driver" != json-file; then
-            sd_skipped=$((sd_skipped + 1))
-            continue
-        fi
-        sd_log=$(d container inspect --format '{{.LogPath}}' -- "$sd_id") || { sd_failed=$((sd_failed + 1)); continue; }
-        if test "$sd_log" != "$sd_root/containers/$sd_id/$sd_id-json.log" ||
-            test -L "$sd_root" || test -L "$sd_root/containers" ||
-            test -L "$sd_root/containers/$sd_id" || test -L "$sd_log" || ! test -f "$sd_log"; then
-            echo "Refusing unexpected or unavailable log path for container $sd_id" >&2
-            sd_failed=$((sd_failed + 1))
-        elif truncate --no-create --size 0 -- "$sd_log"; then
-            sd_ok=$((sd_ok + 1))
-        else
-            sd_failed=$((sd_failed + 1))
-        fi
-    done
-fi
-"#;
-
-pub fn command(action: &Action) -> String {
-    let filter = if matches!(action, Action::RestartExited) {
-        " --filter status=exited"
-    } else {
-        ""
-    };
-    let operation = if matches!(action, Action::ClearLogs) {
-        CLEAR_LOGS
-    } else {
-        RESTART
-    };
+pub fn command(_action: &Action) -> String {
     format!(
-        "{PRELUDE}sd_ids=$(d container ls --all --quiet --no-trunc{filter}) || exit;{SELECT}{operation}{SUMMARY}"
+        "{PRELUDE}sd_ids=$(d container ls --all --quiet --no-trunc --filter status=exited) || exit;{SELECT}{RESTART}{SUMMARY}"
     )
 }
 
@@ -92,7 +54,7 @@ struct Summary {
     skipped: u32,
 }
 
-pub fn response(action: &Action, text: &str) -> Result<Value, ApiError> {
+pub fn response(_action: &Action, text: &str) -> Result<Value, ApiError> {
     let invalid = || ApiError::new("DOCKER_FORMAT", "容器批量操作结果无效，请刷新核对实际状态");
     let summary: Summary = serde_json::from_str(text).map_err(|_| invalid())?;
     if summary
@@ -100,33 +62,16 @@ pub fn response(action: &Action, text: &str) -> Result<Value, ApiError> {
         .checked_add(summary.failed)
         .and_then(|total| total.checked_add(summary.skipped))
         != Some(summary.matched)
-        || (!matches!(action, Action::ClearLogs) && summary.skipped != 0)
+        || summary.skipped != 0
     {
         return Err(invalid());
     }
     let message = if summary.matched == 0 {
-        if matches!(action, Action::RestartExited) {
-            "没有已退出的容器，无需重启。".into()
-        } else {
-            "没有容器，无需执行。".into()
-        }
+        "没有已退出的容器，无需重启。".into()
     } else {
         format!(
-            "{}：匹配 {} 个，成功 {} 个，失败 {} 个，跳过 {} 个。{}",
-            if matches!(action, Action::ClearLogs) {
-                "清空容器日志"
-            } else {
-                "重启容器"
-            },
-            summary.matched,
-            summary.succeeded,
-            summary.failed,
-            summary.skipped,
-            if matches!(action, Action::ClearLogs) {
-                "仅清理 json-file 当前日志；其他日志驱动跳过，历史轮转文件保留。"
-            } else {
-                "请核对刷新后的容器状态。"
-            }
+            "重启容器：匹配 {} 个，成功 {} 个，失败 {} 个，跳过 {} 个。请核对刷新后的容器状态。",
+            summary.matched, summary.succeeded, summary.failed, summary.skipped,
         )
     };
     Ok(
@@ -151,8 +96,8 @@ mod tests {
                 .contains("没有已退出")
         );
         let partial = response(
-            &Action::ClearLogs,
-            r#"{"matched":3,"succeeded":1,"failed":1,"skipped":1}"#,
+            &Action::RestartExited,
+            r#"{"matched":3,"succeeded":2,"failed":1,"skipped":0}"#,
         )
         .unwrap();
         assert_eq!(partial["success"], false);
@@ -164,7 +109,7 @@ mod tests {
             r#"{"matched":1,"succeeded":0,"failed":0,"skipped":0}"#,
             r#"{"matched":4294967295,"succeeded":4294967295,"failed":1,"skipped":0}"#,
         ] {
-            assert!(response(&Action::ClearLogs, text).is_err());
+            assert!(response(&Action::RestartExited, text).is_err());
         }
         assert!(
             response(
@@ -177,8 +122,8 @@ mod tests {
 
     // Runs the real command body against a shell fixture, never a Docker daemon.
     #[test]
-    #[ignore = "requires local WSL sh, truncate and symlink support; no real Docker access"]
-    fn shell_selection_cleanup_and_failures() {
+    #[ignore = "requires local WSL sh; no real Docker access"]
+    fn shell_selection_and_restart_failures() {
         use std::io::Write;
         use std::process::{Command, Stdio};
 
@@ -269,69 +214,5 @@ d() {{
                 );
             }
         }
-        let [a, b, c] = ids;
-        let cleanup = format!(
-            r#"
-sd_data="$sd_qa/data root"
-mkdir -p "$sd_data/containers/{a}" "$sd_data/containers/{b}" "$sd_data/containers/{c}"
-printf keep > "$sd_qa/outside"
-printf clear > "$sd_data/containers/{a}/{a}-json.log"
-printf rotated > "$sd_data/containers/{a}/{a}-json.log.1"
-ln -s "$sd_qa/outside" "$sd_data/containers/{b}/{b}-json.log"
-d() {{
-    case "$1 $2" in
-        'container ls') printf '%s\n' '{a}' '{b}' '{c}';;
-        'info --format') printf '%s\n' "$sd_data";;
-        'container inspect')
-            case "$6" in
-                '{c}') printf '%s\n' local;;
-                *) case "$4" in
-                    *LogConfig*) printf '%s\n' json-file;;
-                    *LogPath*) printf '%s\n' "$sd_data/containers/$6/$6-json.log";;
-                    *) return 9;;
-                esac;;
-            esac;;
-        *) return 9;;
-    esac
-}}
-"#
-        );
-        let checks = format!(
-            r#"
-test ! -s "$sd_data/containers/{a}/{a}-json.log" &&
-test "$(cat "$sd_qa/outside")" = keep &&
-test "$(cat "$sd_data/containers/{a}/{a}-json.log.1")" = rotated || exit 8
-"#
-        );
-        let out = run(Action::ClearLogs, &cleanup, &checks);
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(
-            summary,
-            json!({"matched":3,"succeeded":1,"failed":1,"skipped":1})
-        );
-        assert!(String::from_utf8_lossy(&out.stderr).contains("Refusing unexpected"));
-        // A valid-looking path outside the selected daemon root must never be truncated.
-        let unexpected = cleanup.replace("$sd_data/containers/$6/$6-json.log", "$sd_qa/outside");
-        let out = run(
-            Action::ClearLogs,
-            &unexpected,
-            "test \"$(cat \"$sd_qa/outside\")\" = keep || exit 8",
-        );
-        assert!(out.status.success());
-        let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(summary["failed"], 2);
-        assert_eq!(summary["succeeded"], 0);
-        let permission =
-            format!("{cleanup}\ntruncate() {{ echo 'Permission denied' >&2; return 1; }}");
-        let out = run(Action::ClearLogs, &permission, "");
-        assert!(out.status.success());
-        let summary: Value = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(summary["failed"], 2);
-        assert!(String::from_utf8_lossy(&out.stderr).contains("Permission denied"));
     }
 }

@@ -1,4 +1,5 @@
 {
+  "{0} · 单次最多 10 分钟": "{0} · Up to 10 minutes per session",
   "容器": "Containers",
   "镜像": "Image",
   "状态": "Status",
@@ -23,7 +24,6 @@
   "Docker 全局统计": "Docker overview",
   "读取失败": "Failed to load",
   "运行中": "Running",
-  "清空容器日志": "Clear container logs",
   "重启已退出容器": "Restart exited containers",
   "不可用": "Unavailable",
   "未安装": "Not installed",
@@ -41,7 +41,6 @@
   "退出码": "Exit code",
   " 显示当前已创建的容器，包含已停止的服务；不包含一次性运行容器和尚未创建的服务。 ": " Shows existing containers, including stopped services. Excludes one-off containers and services that have not been created. ",
   "仅重启当前主机状态为 exited 的容器，使其服务重新启动；不处理 created、paused 等其他状态。": "Restart only containers in the exited state on the current host. Containers in other states, such as created or paused, are not affected.",
-  "将清空当前主机全部容器的 json-file 当前日志，清空后无法恢复；其他日志驱动和历史轮转文件保留。需要当前 SSH 账号有日志文件写权限，不自动提权。": "Clear the current json-file logs for all containers on this host. This cannot be undone. Other log drivers and rotated history are kept. The current SSH account needs write permission to the log files; privileges are not elevated automatically.",
   "范围：当前主机全部容器，不受列表搜索条件影响。\n\n{0}": "Scope: all containers on the current host, regardless of list filters.\n\n{0}",
   "将启动项目中已创建的服务容器，不拉取镜像或重新部署。": "Start existing service containers in this project without pulling images or redeploying.",
   "项目中的服务将暂时不可用，可以稍后重新启动。不删除容器或数据卷。": "Project services will be temporarily unavailable and can be started later. Containers and volumes are not deleted.",

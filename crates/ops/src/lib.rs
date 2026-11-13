@@ -37,6 +37,7 @@ pub struct Operations {
     mutations: Arc<tokio::sync::Mutex<()>>,
     stop: CancellationToken,
     logs: Arc<Mutex<HashMap<String, Arc<LogControl>>>>,
+    log_lifecycle: Arc<tokio::sync::RwLock<()>>,
     feedback: Arc<Mutex<VecDeque<Feedback>>>,
 }
 impl Operations {
@@ -47,6 +48,7 @@ impl Operations {
             mutations: Arc::default(),
             stop: CancellationToken::new(),
             logs: Arc::default(),
+            log_lifecycle: Arc::default(),
             feedback: Arc::default(),
         }
     }
@@ -238,11 +240,18 @@ impl Operations {
         result
     }
     pub async fn close(&self, id: &str) -> Result<(), Error> {
+        let _closing = self.log_lifecycle.write().await;
         self.close_logs(id).await?;
         self.engine.close(id).await
     }
+    pub async fn close_host(&self, host: &str) -> Result<(), Error> {
+        let _closing = self.log_lifecycle.write().await;
+        self.close_host_logs(host).await?;
+        self.engine.close_host(host).await
+    }
     pub async fn shutdown(&self) {
         self.stop.cancel();
+        let _closing = self.log_lifecycle.write().await;
         let ids = self
             .logs
             .lock()

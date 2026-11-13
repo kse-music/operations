@@ -84,10 +84,26 @@ impl server::Handler for Handler {
     async fn signal(
         &mut self,
         id: ChannelId,
-        _: russh::Sig,
+        signal: russh::Sig,
         s: &mut Session,
     ) -> Result<(), Self::Error> {
-        self.calls.fetch_add(100, Ordering::SeqCst);
+        self.calls.fetch_add(
+            if matches!(signal, russh::Sig::KILL) {
+                1000
+            } else {
+                100
+            },
+            Ordering::SeqCst,
+        );
+        match self.mode.load(Ordering::SeqCst) {
+            4 => {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                self.calls.fetch_add(10, Ordering::SeqCst);
+            }
+            5 if matches!(signal, russh::Sig::TERM) => return Ok(()),
+            6 => return Ok(()),
+            _ => (),
+        }
         s.exit_status_request(id, 0)?;
         s.close(id)
     }
@@ -433,4 +449,186 @@ async fn hard_network_cut_and_shutdown_release_waiting_log_workers() {
     f.engine.shutdown().await;
     assert_eq!(ops.log_count().expect("logs"), 0);
     assert_eq!(f.engine.counts().expect("released"), (0, 0));
+}
+
+#[tokio::test]
+async fn log_stop_waits_for_exit_escalates_and_reports_missing_confirmation() {
+    for mode in [4, 5, 6] {
+        let f = Fixture::start().await;
+        let session = f.open();
+        ready(&f, &session).await;
+        f.mode.store(mode, Ordering::SeqCst);
+        let ops = Operations::new(f.engine.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let log = ops
+            .command_stream(
+                &session.id,
+                "tail -n 10 /fixture.log".into(),
+                Arc::new(move |event| tx.try_send(event).is_ok()),
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(event) = rx.recv().await {
+                if matches!(event, LogEvent::Data { .. }) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("remote command is running, blocked on ACK");
+        let started = std::time::Instant::now();
+        let result = ops.log_close(&log.id).await;
+        if mode == 6 {
+            assert_eq!(
+                serverdeck_core::IpcError::from(result.unwrap_err()).code,
+                "LOG_STOP_UNCONFIRMED"
+            );
+        } else {
+            result.expect("confirmed exit");
+        }
+        if mode == 4 {
+            assert!(
+                started.elapsed() >= Duration::from_millis(180),
+                "must wait for remote exit, not merely queue TERM"
+            );
+            assert_eq!(f.calls.load(Ordering::SeqCst), 111);
+        } else {
+            assert_eq!(
+                f.calls.load(Ordering::SeqCst),
+                1101,
+                "KILL follows ignored TERM"
+            );
+        }
+        ops.shutdown().await;
+        f.engine.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn failed_consumer_and_host_disconnect_stop_logs_before_transport_close() {
+    for failed_consumer in [false, true] {
+        let f = Fixture::start().await;
+        let session = f.open();
+        ready(&f, &session).await;
+        f.mode.store(4, Ordering::SeqCst);
+        let ops = Operations::new(f.engine.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let log = ops
+            .command_stream(
+                &session.id,
+                "tail -n 10 /fixture.log".into(),
+                Arc::new(move |event| {
+                    let accepted = !failed_consumer || !matches!(event, LogEvent::Data { .. });
+                    tx.try_send(event).is_ok() && accepted
+                }),
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(event) = rx.recv().await {
+                if matches!(event, LogEvent::Data { .. }) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("stream started");
+        if failed_consumer {
+            ops.log_close(&log.id).await.unwrap();
+        } else {
+            ops.close_host_logs(&f.host.id).await.unwrap();
+            assert!(
+                f.engine.ops_ready(&session.id).unwrap(),
+                "transport stays open through log cleanup"
+            );
+            f.engine.close_host(&f.host.id).await.unwrap();
+        }
+        assert_eq!(f.calls.load(Ordering::SeqCst), 111);
+        assert_eq!(ops.log_count().unwrap(), 0);
+        ops.shutdown().await;
+        f.engine.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn concurrent_and_cancelled_close_callers_still_drain_the_remote_process() {
+    for cancel_first in [false, true] {
+        let f = Fixture::start().await;
+        let session = f.open();
+        ready(&f, &session).await;
+        f.mode.store(4, Ordering::SeqCst);
+        let ops = Operations::new(f.engine.clone());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+        let log = ops
+            .command_stream(
+                &session.id,
+                "tail -n 10 /fixture.log".into(),
+                Arc::new(move |event| tx.try_send(event).is_ok()),
+            )
+            .unwrap();
+        while !matches!(rx.recv().await, Some(LogEvent::Data { .. })) {}
+        let closing = ops.clone();
+        let task = tokio::spawn(async move { closing.log_close(&log.id).await });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while f.calls.load(Ordering::SeqCst) < 100 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        if cancel_first {
+            task.abort();
+        }
+        ops.close_host_logs(&f.host.id).await.unwrap();
+        assert_eq!(
+            f.calls.load(Ordering::SeqCst),
+            111,
+            "a concurrent close must await the existing remote exit"
+        );
+        assert_eq!(ops.log_count().unwrap(), 0);
+        if !cancel_first {
+            task.await.unwrap().unwrap();
+        }
+        ops.shutdown().await;
+        f.engine.shutdown().await;
+    }
+}
+
+#[tokio::test]
+async fn disconnect_rejects_new_streams_until_existing_commands_have_exited() {
+    let f = Fixture::start().await;
+    let session = f.open();
+    ready(&f, &session).await;
+    f.mode.store(4, Ordering::SeqCst);
+    let ops = Operations::new(f.engine.clone());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    ops.command_stream(
+        &session.id,
+        "tail -n 10 /fixture.log".into(),
+        Arc::new(move |event| tx.try_send(event).is_ok()),
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !matches!(rx.recv().await, Some(LogEvent::Data { .. })) {}
+    })
+    .await
+    .unwrap();
+    let closing = ops.clone();
+    let host = f.host.id.clone();
+    let task = tokio::spawn(async move { closing.close_host(&host).await });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while f.calls.load(Ordering::SeqCst) < 100 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        ops.command_stream(&session.id, "new-command".into(), Arc::new(|_| true)),
+        Err(serverdeck_core::Error::Busy)
+    ));
+    task.await.unwrap().unwrap();
+    assert_eq!(f.calls.load(Ordering::SeqCst), 111);
+    assert_eq!(f.engine.counts().unwrap(), (0, 0));
+    assert_eq!(ops.log_count().unwrap(), 0);
+    ops.shutdown().await;
 }

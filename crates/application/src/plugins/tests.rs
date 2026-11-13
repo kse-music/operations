@@ -16,6 +16,8 @@ use std::{
     time::{Duration, Instant},
 };
 use zeroize::Zeroizing;
+#[cfg(windows)]
+mod docker_logs_live;
 mod file_tests;
 mod ssh_tests;
 mod streaming_tests;

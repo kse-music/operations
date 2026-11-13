@@ -69,6 +69,118 @@ it('caps UTF-8 bytes and lines while retaining recent complete Unicode character
   expect(new TextEncoder().encode(buffer.value()).length).toBe(buffer.byteLength);
   expect(buffer.dropped).toBeGreaterThan(0);
 });
+it('clears retained log data and resets its budget before receiving new output', () => {
+  const buffer = new LogBuffer(16 * 1024, 100);
+  buffer.append('old 中文😀\n'.repeat(20000));
+  expect(buffer.dropped).toBeGreaterThan(0);
+  buffer.clear();
+  expect(buffer.value()).toBe('');
+  expect(buffer.byteLength).toBe(0);
+  expect(buffer.dropped).toBe(0);
+  const fresh = 'new 中文😀\n'.repeat(100);
+  buffer.append(fresh);
+  expect(buffer.value()).toBe(fresh);
+});
+
+it('clears all local history, keeps the filter and copies/exports only subsequently received logs', async () => {
+  let line = 'old visible\nold hidden\n';
+  api.call.mockImplementation(async (input) =>
+    input.kind === 'stream_poll' ? { events: [{ type: 'data', dataBase64: btoa(line) }] } : null,
+  );
+  await mount();
+  const button = (label: string) =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+      (node) => node.textContent?.trim() === label,
+    )!;
+  const filter = document.querySelector<HTMLInputElement>('[aria-label="过滤输出"]')!;
+  filter.value = 'visible';
+  filter.dispatchEvent(new Event('input'));
+  await settle();
+  const output = document.querySelector<HTMLPreElement>('pre')!;
+  Object.defineProperties(output, {
+    scrollHeight: { get: () => 1000 },
+    clientHeight: { get: () => 200 },
+  });
+  output.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }));
+  output.scrollTop = 100;
+  output.dispatchEvent(new Event('scroll'));
+  await settle();
+  expect(document.body.textContent).toContain('查看历史 · 新日志继续接收');
+  const calls = api.call.mock.calls.length;
+  button('清屏').click();
+  await settle();
+  expect(api.call).toHaveBeenCalledTimes(calls);
+  expect(filter.value).toBe('visible');
+  expect(document.querySelector('pre')?.textContent).not.toContain('old');
+  filter.value = '';
+  filter.dispatchEvent(new Event('input'));
+  await settle();
+  expect(document.querySelector('pre')?.textContent).toContain('等待输出');
+  line = 'new log\n';
+  await vi.advanceTimersByTimeAsync(200);
+  await settle();
+  expect(document.querySelector('pre')?.textContent).toBe(line);
+  expect(document.body.textContent).toContain('实时跟踪 · 自动滚动到最新');
+  button('复制').click();
+  await settle();
+  expect(api.copy).toHaveBeenLastCalledWith(line);
+  const exportedParts: BlobPart[][] = [];
+  const BrowserBlob = Blob;
+  vi.stubGlobal(
+    'Blob',
+    class extends BrowserBlob {
+      constructor(parts: BlobPart[] = [], options?: BlobPropertyBag) {
+        super(parts, options);
+        exportedParts.push(parts);
+      }
+    },
+  );
+  vi.stubGlobal('URL', {
+    createObjectURL: vi.fn(() => 'blob:cleared'),
+    revokeObjectURL: vi.fn(),
+  });
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  button('导出').click();
+  expect(exportedParts).toEqual([[line]]);
+  expect(api.call.mock.calls.every(([input]) => input.kind === 'stream_poll')).toBe(true);
+});
+
+it.each(['paused', 'failed'])(
+  'clears displayed logs while preserving the %s state',
+  async (state) => {
+    api.call.mockImplementation(async (input) =>
+      input.kind === 'stream_poll'
+        ? {
+            events: [
+              { type: 'data', dataBase64: btoa('old log\n') },
+              ...(state === 'failed' ? [{ type: 'state', state, message: 'remote failed' }] : []),
+            ],
+          }
+        : null,
+    );
+    await mount();
+    const button = (label: string) =>
+      [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+        (node) => node.textContent?.trim() === label,
+      )!;
+    if (state === 'paused') {
+      button('暂停').click();
+      await settle();
+    }
+    const calls = api.call.mock.calls.length;
+    button('清屏').click();
+    await settle();
+    expect(api.call).toHaveBeenCalledTimes(calls);
+    expect(document.querySelector('pre')?.textContent).not.toContain('old log');
+    if (state === 'paused') {
+      expect(button('继续')).toBeDefined();
+      expect(document.body.textContent).toContain('已暂停');
+    } else {
+      expect(document.querySelector('[role="alert"]')?.textContent).toBe('remote failed');
+      expect(document.body.textContent).toContain('读取失败');
+    }
+  },
+);
 it('renders split UTF-8 streams as plain text and never reopens the command', async () => {
   let count = 0;
   api.call.mockImplementation(async (input) =>

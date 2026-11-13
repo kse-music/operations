@@ -136,16 +136,17 @@ const actionLabels = {
         <template #toolbar="{ execute, busy }">
           <template v-if="section === 'containers'">
             <button
-              v-for="[action, label] in [
-                ['clear_logs', tr('清空容器日志')],
-                ['restart_exited', tr('重启已退出容器')],
-              ] as const"
-              :key="action"
               class="button"
               :disabled="busy"
-              @click="execute({ kind: 'container_maintenance', action, confirmed: true })"
+              @click="
+                execute({
+                  kind: 'container_maintenance',
+                  action: 'restart_exited',
+                  confirmed: true,
+                })
+              "
             >
-              {{ label }}
+              {{ tr('重启已退出容器') }}
             </button>
           </template>
         </template>

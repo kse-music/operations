@@ -22,7 +22,7 @@ fn command_line(command: &Command) -> Result<String, Error> {
         .shell()
         .map_err(|_| Error::Validation("远程程序、参数或超时无效"))?;
     Ok(format!(
-        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; {value}"
+        "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; exec {value}"
     ))
 }
 impl Application {

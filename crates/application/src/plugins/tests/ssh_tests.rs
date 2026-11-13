@@ -1571,7 +1571,7 @@ async fn wasm_exec_uses_real_ssh_frozen_endpoint_literal_arguments_and_rejects_c
     assert_eq!(
         ssh.calls.lock().unwrap().as_slice(),
         [format!(
-            "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; {}",
+            "export LC_ALL=C; export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; exec {}",
             command.shell().unwrap()
         )]
     );
