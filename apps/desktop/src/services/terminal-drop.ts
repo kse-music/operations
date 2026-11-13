@@ -7,7 +7,9 @@ export interface DropProgress {
   sent: number;
   size: number;
   bytesPerSecond: number;
+  elapsedSeconds: number;
   uid?: string;
+  username?: string;
   directory?: string;
 }
 interface Options {
@@ -89,6 +91,7 @@ export class TerminalDropUpload {
   private count = 0;
   private inFlightBytes = 0;
   private uploadStartedAt?: number;
+  private progressTimer?: ReturnType<typeof setInterval>;
   private unsafeTerminal = false;
   private released = false;
   private expected?: {
@@ -99,7 +102,13 @@ export class TerminalDropUpload {
   };
   private endWaiter?: () => void;
   private endReject?: (error: Error) => void;
-  private value: DropProgress = { phase: 'preparing', sent: 0, size: 0, bytesPerSecond: 0 };
+  private value: DropProgress = {
+    phase: 'preparing',
+    sent: 0,
+    size: 0,
+    bytesPerSecond: 0,
+    elapsedSeconds: 0,
+  };
   constructor(private options: Options) {}
   get busy(): boolean {
     return this.running;
@@ -121,6 +130,7 @@ export class TerminalDropUpload {
     this.value.phase = phase;
     const seconds =
       this.uploadStartedAt === undefined ? 0 : (performance.now() - this.uploadStartedAt) / 1000;
+    this.value.elapsedSeconds = Math.floor(seconds);
     this.value.bytesPerSecond =
       phase === 'uploading' && seconds > 0 ? Math.floor(this.value.sent / seconds) : 0;
     this.options.progress({ ...this.value });
@@ -211,15 +221,24 @@ export class TerminalDropUpload {
       return;
     }
     if (parts[0] === 'READY') {
-      if (this.expected?.key !== 'READY' || !/^\d+$/.test(parts[1] ?? '')) {
+      if (this.expected?.key !== 'READY' || parts.length !== 4 || !/^\d+$/.test(parts[1] ?? '')) {
+        this.rejectExpected(new Error(tr('上传接收端身份响应无效。')));
+        return;
+      }
+      let username: string;
+      try {
+        username = unbase64(parts[2]!);
+        if (/\p{Cc}/u.test(username)) throw new Error(tr('上传接收端身份响应无效。'));
+      } catch {
         this.rejectExpected(new Error(tr('上传接收端身份响应无效。')));
         return;
       }
       try {
-        const directory = unbase64(parts.slice(2).join(':'));
+        const directory = unbase64(parts[3]!);
         if (!directory.startsWith('/') || !directory.endsWith('\n'))
           throw new Error(tr('上传接收端目录响应无效。'));
         this.value.uid = parts[1];
+        this.value.username = username || undefined;
         this.value.directory = directory.slice(0, -1);
       } catch {
         this.rejectExpected(new Error(tr('上传接收端目录响应无效。')));
@@ -307,7 +326,9 @@ export class TerminalDropUpload {
       this.progress('starting');
       this.started = true;
       await this.exchange('READY', encoder.encode(prepared.command));
+      if (this.cancelled || this.disposed) throw new Error(tr('上传已停止。'));
       this.uploadStartedAt = performance.now();
+      this.progressTimer = setInterval(() => this.progress(this.value.phase), 1000);
       for (let offset = 0, seq = 0; offset < prepared.size; seq++) {
         if (this.cancelled || this.disposed) throw new Error(tr('上传已取消。'));
         const bytes = await this.options.read(offset);
@@ -352,6 +373,7 @@ export class TerminalDropUpload {
       else if (this.endError && this.endCode !== 'CANCELLED') this.options.failed(this.endError);
       else this.options.notice?.(tr('已取消上传。'));
     } finally {
+      clearInterval(this.progressTimer);
       await this.release();
       if (this.value.phase !== 'blocked' || this.disposed) {
         this.running = false;
@@ -382,6 +404,7 @@ export class TerminalDropUpload {
   }
   dispose(): void {
     this.disposed = true;
+    clearInterval(this.progressTimer);
     this.cancel();
     this.rejectExpected(new Error(tr('终端会话已结束。')));
     this.endWaiter?.();

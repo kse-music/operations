@@ -70,6 +70,9 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   busy = ref(false),
   over = ref(false),
   overLocal = ref(false),
+  transferProgress = ref(false),
+  cancellingTransfers = ref(false),
+  transferCancelError = ref<string | null>(null),
   transferHistory = ref(false),
   localArea = ref<HTMLElement>(),
   remoteArea = ref<HTMLElement>();
@@ -130,7 +133,45 @@ async function submitUser(): Promise<void> {
   }
 }
 const hasTransferHistory = computed(() =>
-  store.tasks.some((task) => task.hostId === chosen.value && !unfinished(task)),
+  store.tasks.some((task) => !task.dragExport && task.hostId === chosen.value && !unfinished(task)),
+);
+const activeTransfers = computed(() =>
+  store.tasks.filter((task) => task.hostId === chosen.value && unfinished(task)),
+);
+const transferCancellationPending = computed(
+  () =>
+    cancellingTransfers.value ||
+    (activeTransfers.value.length > 0 &&
+      activeTransfers.value.every((task) => task.state === 'cancelling')),
+);
+async function cancelTransfers(): Promise<void> {
+  if (transferCancellationPending.value) return;
+  const ids = activeTransfers.value.map((task) => task.id);
+  if (!ids.length) return;
+  cancellingTransfers.value = true;
+  transferCancelError.value = null;
+  try {
+    const results = await Promise.allSettled(ids.map((id) => filesApi.cancel(id)));
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') transferCancelError.value = errorMessage(failure.reason);
+    await store.poll();
+  } catch (cause) {
+    transferCancelError.value = errorMessage(cause);
+  } finally {
+    cancellingTransfers.value = false;
+  }
+}
+watch(
+  () => activeTransfers.value.map((task) => task.id),
+  (ids, previous = []) => {
+    if (!ids.length) transferProgress.value = false;
+    else if (ids.some((id) => !previous.includes(id))) {
+      transferHistory.value = false;
+      transferCancelError.value = null;
+      transferProgress.value = true;
+    }
+  },
+  { immediate: true },
 );
 const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: number } | null>(null),
   operation = ref<{
@@ -224,10 +265,8 @@ async function selectRemoteFolder(path: string): Promise<void> {
 watch(
   () => store.localPendingPath ?? store.local?.path,
   (value) => {
-    if (value) {
-      localPath.value = displayLocalPath(value);
-      localSelection.value = [];
-    }
+    localPath.value = displayLocalPath(value ?? '');
+    localSelection.value = [];
   },
   { immediate: true },
 );
@@ -242,6 +281,7 @@ watch(
 watch(
   () => store.active,
   () => {
+    localSelection.value = [];
     remoteSelection.value = [];
     transferHistory.value = false;
     closeUserForm();
@@ -461,7 +501,6 @@ async function startTransfer(): Promise<void> {
       });
     transfer.value = null;
     await store.poll();
-    notifications.push(tr('任务已交给 Rust 后台队列，离开此页面后继续。'));
   } catch (cause) {
     store.error = errorMessage(cause);
   } finally {
@@ -596,7 +635,7 @@ let unlisten: UnlistenFn | undefined,
 onMounted(async () => {
   void loadLocalDrives();
   if (props.hostId && store.current?.host.id !== props.hostId) await connect();
-  if (!store.local) await store.localLoad();
+  if (!disposed && !store.local && !store.localLoading) await store.localLoad();
   try {
     const listener = await getCurrentWebview().onDragDropEvent((event) => {
       const payload = event.payload;
@@ -637,6 +676,9 @@ onBeforeUnmount(() => {
         <h1>{{ tr('文件管理') }}</h1>
       </div>
       <div class="toolbar">
+        <button v-if="activeTransfers.length" class="button" @click="transferProgress = true">
+          {{ tr('传输任务（{0}）', activeTransfers.length) }}
+        </button>
         <button v-if="hasTransferHistory" class="button" @click="transferHistory = true">
           {{ tr(' 传输记录 ') }}
         </button>
@@ -895,8 +937,27 @@ onBeforeUnmount(() => {
         />
       </section>
     </div>
-    <TransferPanel :host-id="chosen" />
   </section>
+  <Modal
+    v-if="transferProgress && activeTransfers.length && !transfer"
+    :title="tr('传输任务（{0}）', activeTransfers.length)"
+    panel-class="file-transfer-dialog"
+    :busy="transferCancellationPending"
+    :close-label="tr('取消此主机的全部传输')"
+    focus-heading
+    @close="cancelTransfers"
+  >
+    <TransferPanel :host-id="chosen" hide-heading />
+    <p v-if="transferCancelError" class="error-text" role="alert">{{ transferCancelError }}</p>
+    <footer class="dialog-actions">
+      <span v-if="transferCancellationPending" class="subtle" role="status">{{
+        tr('正在取消并清理…')
+      }}</span>
+      <button class="button" type="button" @click="transferProgress = false">
+        {{ tr('后台传输') }}
+      </button>
+    </footer>
+  </Modal>
   <Modal v-if="userForm" :title="tr('切换 SFTP 用户')" :busy="switchingUser" @close="closeUserForm">
     <form class="editor-form" @submit.prevent="submitUser">
       <p class="subtle">

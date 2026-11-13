@@ -52,12 +52,14 @@ tar --version >/dev/null 2>&1 || sd_fail DEPENDENCY
 timeout --foreground 1 true || sd_fail DEPENDENCY
 sd_tty=$(stty -g) || sd_fail TTY
 sd_uid=$(id -u) || sd_fail IDENTITY
+sd_user=$(id -un 2>/dev/null) || sd_user=
+sd_user=$(printf '%s' "$sd_user" | base64 -w 0) || sd_fail IDENTITY
 sd_path=$(pwd -P | base64 -w 0) || sd_fail DIRECTORY
 sd_stage=$(mktemp -d ./.serverdeck-upload.XXXXXXXXXX) || sd_fail PERMISSION
 mkdir "$sd_stage/payload" || sd_fail PERMISSION
 stty -echo -icanon -iexten -ixon -ixoff -icrnl -inlcr -igncr isig min 1 time 0 || sd_fail TTY
 sd_ready=1
-sd_frame "READY:$sd_uid:$sd_path"
+sd_frame "READY:$sd_uid:$sd_user:$sd_path"
 sd_seq=0
 while [ "$sd_left" -gt 0 ]; do
   sd_n=65536

@@ -34,6 +34,13 @@ export interface FileConnection {
 
 type HistoryDirection = 'back' | 'forward';
 type DirectoryHistory = Record<HistoryDirection, string[]>;
+interface LocalFileBrowser {
+  listing: DirectoryListing | null;
+  loading: boolean;
+  pendingPath: string | null;
+  generation: number;
+  history: DirectoryHistory;
+}
 const directoryHistoryLimit = 100;
 
 function recordDirectory(
@@ -57,9 +64,7 @@ export const useFilesStore = defineStore('files', () => {
   const notifications = useNotificationsStore();
   const connections = ref<Record<string, FileConnection>>({}),
     active = ref(''),
-    local = ref<DirectoryListing | null>(null),
-    localLoading = ref(false),
-    localPendingPath = ref<string | null>(null),
+    localBrowsers = ref<Record<string, LocalFileBrowser>>({}),
     error = ref<string | null>(null),
     tasks = ref<TransferInfo[]>([]),
     document = ref<EditorDocument | null>(null),
@@ -75,33 +80,54 @@ export const useFilesStore = defineStore('files', () => {
     exitReview = ref(false),
     closingHosts = ref<string[]>([]);
   const current = computed(() => connections.value[active.value]);
+  const localBrowser = computed(() => localBrowsers.value[active.value]);
+  const local = computed({
+    get: () => localBrowser.value?.listing ?? null,
+    set: (value: DirectoryListing | null) => {
+      ensureLocalBrowser(active.value).listing = value;
+    },
+  });
+  const localLoading = computed(() => localBrowser.value?.loading ?? false);
+  const localPendingPath = computed(() => localBrowser.value?.pendingPath ?? null);
   const pending = computed(() => tasks.value.filter(unfinished).length);
-  let localGeneration = 0;
   let editorGeneration = 0;
   let transferGeneration = 0;
   const opening = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
-  const localHistory: DirectoryHistory = { back: [], forward: [] };
   const remoteHistories = new WeakMap<FileConnection, DirectoryHistory>();
+  function ensureLocalBrowser(hostId: string): LocalFileBrowser {
+    localBrowsers.value[hostId] ??= {
+      listing: null,
+      loading: false,
+      pendingPath: null,
+      generation: 0,
+      history: { back: [], forward: [] },
+    };
+    return localBrowsers.value[hostId];
+  }
   async function localLoad(
     path: string | null = null,
     direction?: HistoryDirection,
+    hostId = active.value,
   ): Promise<void> {
-    const generation = ++localGeneration;
-    localPendingPath.value = path;
-    localLoading.value = true;
+    const browser = ensureLocalBrowser(hostId);
+    const generation = ++browser.generation;
+    const isCurrentRequest = () =>
+      localBrowsers.value[hostId] === browser && generation === browser.generation;
+    browser.pendingPath = path;
+    browser.loading = true;
     try {
       const value = await filesApi.local(path);
-      if (generation === localGeneration) {
-        recordDirectory(localHistory, local.value?.path, value.path, direction);
-        local.value = value;
+      if (isCurrentRequest()) {
+        recordDirectory(browser.history, browser.listing?.path, value.path, direction);
+        browser.listing = value;
       }
     } catch (cause) {
-      if (generation === localGeneration) error.value = errorMessage(cause);
+      if (isCurrentRequest()) error.value = errorMessage(cause);
     } finally {
-      if (generation === localGeneration) {
-        localLoading.value = false;
-        localPendingPath.value = null;
+      if (isCurrentRequest()) {
+        browser.loading = false;
+        browser.pendingPath = null;
       }
     }
   }
@@ -154,7 +180,7 @@ export const useFilesStore = defineStore('files', () => {
   }
   function stepHistory(side: 'local' | 'remote', direction: HistoryDirection): boolean {
     if (side === 'local') {
-      const path = localHistory[direction].at(-1);
+      const path = localBrowser.value?.history[direction].at(-1);
       if (!path || localLoading.value) return false;
       void localLoad(path, direction);
       return true;
@@ -230,7 +256,10 @@ export const useFilesStore = defineStore('files', () => {
     } finally {
       opening.delete(host.id);
     }
-    if (!local.value) await localLoad();
+    if (connections.value[host.id] === connection && !closingHosts.value.includes(host.id)) {
+      const browser = ensureLocalBrowser(host.id);
+      if (!browser.listing && !browser.loading) await localLoad(null, undefined, host.id);
+    }
   }
   const switching = new Map<string, Promise<boolean>>();
   async function switchUser(user: SftpUser | null): Promise<boolean> {
@@ -295,9 +324,13 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
   async function refresh(): Promise<void> {
-    if (current.value?.id && current.value.state === 'connected' && !current.value.loading)
-      await navigate(current.value.path);
-    if (local.value && !localLoading.value) await localLoad(local.value.path);
+    const connection = current.value;
+    const hostId = active.value;
+    if (connection?.id && connection.state === 'connected' && !connection.loading)
+      await navigate(connection.path, connection);
+    const browser = localBrowsers.value[hostId];
+    if (browser?.listing && !browser.loading)
+      await localLoad(browser.listing.path, undefined, hostId);
   }
   async function edit(path: string, size: number | null = null): Promise<void> {
     if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value)) return;
@@ -525,6 +558,7 @@ export const useFilesStore = defineStore('files', () => {
       transferGeneration++;
       tasks.value = tasks.value.filter((task) => task.hostId !== hostId);
       delete connections.value[hostId];
+      delete localBrowsers.value[hostId];
       return true;
     } catch (cause) {
       error.value = errorMessage(cause);
@@ -618,6 +652,7 @@ export const useFilesStore = defineStore('files', () => {
     connections,
     active,
     current,
+    localBrowsers,
     local,
     localLoading,
     localPendingPath,

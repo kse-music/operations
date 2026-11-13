@@ -158,15 +158,26 @@
   pointer-events: none;
 }
 .terminal-drop-progress {
+  display: grid;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.terminal-drop-status,
+.terminal-drop-times {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 24px;
 }
 .terminal-drop-progress progress {
-  flex: 1;
-  min-width: 120px;
-  max-width: 100%;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 7px;
+  accent-color: var(--accent);
+}
+.terminal-drop-statistics {
+  overflow-wrap: anywhere;
 }
 .terminal-drop-destination {
   overflow-wrap: anywhere;

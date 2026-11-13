@@ -1,5 +1,6 @@
 use crate::remote::{self, Remote};
 use crate::*;
+use futures_util::{StreamExt, stream::FuturesOrdered};
 use russh_sftp::protocol::{FileAttributes, OpenFlags};
 use sha2::{Digest, Sha256};
 use std::{
@@ -64,7 +65,9 @@ impl Task {
         if info.unfinished()
             && let Some(started) = *locked(&self.started)?
         {
-            let seconds = started.elapsed().as_secs_f64();
+            let elapsed = started.elapsed();
+            info.elapsed_seconds = elapsed.as_secs();
+            let seconds = elapsed.as_secs_f64();
             if seconds > 0.0 {
                 info.bytes_per_second = (info.transferred_bytes as f64 / seconds) as u64;
             }
@@ -170,6 +173,8 @@ impl Transfers {
             transferred_bytes: 0,
             remaining_bytes: 0,
             bytes_per_second: 0,
+            elapsed_seconds: 0,
+            drag_export,
             files_total: 0,
             files_done: 0,
             skipped: 0,
@@ -444,7 +449,8 @@ impl Transfers {
                 tokio::pin!(operation);
                 tokio::select! {
                     result = &mut operation => result,
-                    _ = task.cancel.cancelled() => { if task.copy.is_some() || task.committing.load(Ordering::Acquire) { operation.await } else { Err(fail("TRANSFER_CANCELLED", "任务已取消，已完成的文件保留")) } },
+                    // Let the operation drain in-flight requests and close handles before cleanup.
+                    _ = task.cancel.cancelled() => operation.await,
                     _ = remote.owner_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "文件连接已关闭，传输失败")),
                     _ = remote.transport_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "网络中断，传输失败；可重新连接后从头重试")),
                 }
@@ -478,12 +484,13 @@ impl Transfers {
                 recovery = Some(path);
             }
         }
-        let final_speed = task
+        let (final_speed, elapsed_seconds) = task
             .snapshot()
-            .map(|i| i.bytes_per_second)
+            .map(|i| (i.bytes_per_second, i.elapsed_seconds))
             .unwrap_or_default();
         if let Ok(mut info) = task.info.lock() {
             info.bytes_per_second = final_speed;
+            info.elapsed_seconds = elapsed_seconds;
             match result {
                 Ok(()) => {
                     info.state = "completed".into();
@@ -861,45 +868,92 @@ async fn upload(
     if remote.canonical(&parent).await? != parent {
         return Err(fail("SFTP_PATH_CHANGED", "上传目标父目录包含链接或已改变"));
     }
-    let temp = remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?;
-    let handle = remote.stage(&temp).await?;
-    task.temp(true, temp.clone())?;
     let before = tokio::fs::symlink_metadata(&item.local)
         .await
         .map_err(local::io)?;
     if local::link(&before) || !before.is_file() || before.len() != item.size {
         return Err(Error::Conflict);
     }
-    let mut file = tokio::fs::File::open(&item.local)
+    let file = tokio::fs::File::open(&item.local)
         .await
         .map_err(local::io)?;
-    let mut digest = Sha256::new();
-    let mut offset = 0;
-    let mut buffer = vec![0; 32768];
-    loop {
-        task.check_cancel()?;
-        let n = file.read(&mut buffer).await.map_err(local::io)?;
-        if n == 0 {
-            break;
+    let mut file = tokio::io::BufReader::with_capacity(remote::IO_CHUNK * remote::IO_WINDOW, file);
+    let temp = remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?;
+    let handle = remote.stage(&temp).await?;
+    task.temp(true, temp.clone())?;
+    let copying = async {
+        let mut digest = Sha256::new();
+        let mut offset = 0;
+        let mut pending = FuturesOrdered::new();
+        let mut failure = None;
+        loop {
+            if failure.is_none() {
+                failure = task.check_cancel().err();
+            }
+            while failure.is_none() && pending.len() < remote::IO_WINDOW && offset < item.size {
+                let length = (item.size - offset).min(remote::IO_CHUNK as u64) as usize;
+                let mut bytes = vec![0; length];
+                if let Err(error) = file.read_exact(&mut bytes).await {
+                    failure = Some(local::io(error));
+                    break;
+                }
+                // Read and hash in file order; writes may be acknowledged out of order.
+                digest.update(&bytes);
+                let output = &handle;
+                let block_offset = offset;
+                pending.push_back(async move {
+                    task.check_cancel()?;
+                    remote
+                        .raw
+                        .write(output, block_offset, bytes)
+                        .await
+                        .map_err(remote::map)?;
+                    Ok(length)
+                });
+                offset += length as u64;
+            }
+            let Some(result) = pending.next().await else {
+                break;
+            };
+            match result {
+                Ok(length) => task.bytes(length),
+                Err(error) if failure.is_none() => failure = Some(error),
+                Err(_) => (), // Drain all sent requests before closing/removing the temporary file.
+            }
         }
-        if offset + n as u64 > item.size {
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        if file.read(&mut [0; 1]).await.map_err(local::io)? != 0
+            || !local::same(
+                &before,
+                &file.get_ref().metadata().await.map_err(local::io)?,
+            )
+        {
             return Err(Error::Conflict);
         }
-        remote
-            .raw
-            .write(&handle, offset, buffer[..n].to_vec())
-            .await
-            .map_err(remote::map)?;
-        digest.update(&buffer[..n]);
-        offset += n as u64;
-        task.bytes(n);
+        Ok(format!("{:x}", digest.finalize()))
     }
-    if offset != item.size || !local::same(&before, &file.metadata().await.map_err(local::io)?) {
-        return Err(Error::Conflict);
-    }
-    remote.close_write(handle).await?;
+    .await;
+    let closing = remote.close_write(handle).await;
+    let checksum = match copying {
+        Ok(checksum) => {
+            closing?;
+            checksum
+        }
+        Err(error) => {
+            if let Err(closing) = closing {
+                tracing::warn!(operation="upload_drain_close", error=%closing, "transfer handle close failed after transfer failure");
+            }
+            task.check_cancel()?;
+            return Err(error);
+        }
+    };
+    task.check_cancel()?;
     task.state("verifying");
-    if format!("{:x}", digest.finalize()) != remote.hash(&temp).await? {
+    let target_hash = remote.hash_cancellable(&temp, Some(&task.cancel)).await;
+    task.check_cancel()?;
+    if checksum != target_hash? {
         return Err(fail("TRANSFER_HASH", "上传 SHA-256 校验失败，未替换目标"));
     }
     if let Some(attrs) = &expected {
@@ -1005,7 +1059,10 @@ async fn download(
     let (file, temp_path) = temporary.into_parts();
     let temp_name = local::text(&temp_path)?;
     task.temp(false, temp_name.clone())?;
-    let mut file = tokio::fs::File::from_std(file);
+    let mut file = tokio::io::BufWriter::with_capacity(
+        remote::IO_CHUNK * remote::IO_WINDOW,
+        tokio::fs::File::from_std(file),
+    );
     let before = item.attrs.ok_or(Error::Validation("缺少源文件属性"))?;
     let handle = remote
         .raw
@@ -1013,41 +1070,83 @@ async fn download(
         .await
         .map_err(remote::map)?
         .handle;
-    if !remote::same(
-        &before,
-        &remote.raw.fstat(&handle).await.map_err(remote::map)?.attrs,
-    ) {
-        return Err(Error::Conflict);
-    }
-    let mut digest = Sha256::new();
-    let mut offset = 0;
-    while offset < item.size {
-        task.check_cancel()?;
-        let data = remote
-            .raw
-            .read(&handle, offset, (item.size - offset).min(32768) as u32)
-            .await
-            .map_err(remote::map)?
-            .data;
-        if data.is_empty() || data.len() > 32768 || offset + data.len() as u64 > item.size {
-            return Err(fail(
-                "TRANSFER_SOURCE_CHANGED",
-                "源文件长度改变或响应无效，未提交下载",
-            ));
+    let copying = async {
+        if !remote::same(
+            &before,
+            &remote.raw.fstat(&handle).await.map_err(remote::map)?.attrs,
+        ) {
+            return Err(Error::Conflict);
         }
-        file.write_all(&data).await.map_err(local::io)?;
-        digest.update(&data);
-        offset += data.len() as u64;
-        task.bytes(data.len());
+        let mut digest = Sha256::new();
+        let mut offset = 0;
+        let mut pending = FuturesOrdered::new();
+        let mut failure = None;
+        loop {
+            if failure.is_none() {
+                failure = task.check_cancel().err();
+            }
+            while failure.is_none() && pending.len() < remote::IO_WINDOW && offset < item.size {
+                let length = (item.size - offset).min(remote::IO_CHUNK as u64) as usize;
+                pending.push_back(remote.read_range(&handle, offset, length, Some(&task.cancel)));
+                offset += length as u64;
+            }
+            let Some(result) = pending.next().await else {
+                break;
+            };
+            match result {
+                Ok(bytes) if failure.is_none() => {
+                    if let Err(error) = file.write_all(&bytes).await {
+                        failure = Some(local::io(error));
+                    } else {
+                        digest.update(&bytes);
+                        task.bytes(bytes.len());
+                    }
+                }
+                Err(error) if failure.is_none() => failure = Some(error),
+                _ => (), // Keep replies ordered and drain before closing the shared handle.
+            }
+        }
+        if let Some(error) = failure {
+            return Err(error);
+        }
+        remote.verify_eof(&handle, item.size).await?;
+        Ok(format!("{:x}", digest.finalize()))
     }
-    remote.raw.close(handle).await.map_err(remote::map)?;
+    .await;
+    let closing = remote
+        .raw
+        .close(handle)
+        .await
+        .map_err(remote::map)
+        .map(|_| ());
+    let hash = match copying {
+        Ok(hash) => {
+            closing?;
+            hash
+        }
+        Err(error) => {
+            if let Err(closing) = closing {
+                tracing::warn!(operation="download_drain_close", error=%closing, "transfer handle close failed after transfer failure");
+            }
+            task.check_cancel()?;
+            return Err(error);
+        }
+    };
+    task.check_cancel()?;
     file.flush().await.map_err(local::io)?;
-    file.sync_all().await.map_err(local::io)?;
+    file.get_ref().sync_all().await.map_err(local::io)?;
     drop(file);
     task.state("verifying");
-    let hash = format!("{:x}", digest.finalize());
-    if hash != local::hash(Path::new(&temp_name)).await?
-        || hash != remote.hash(&item.remote).await?
+    let local_hash = tokio::select! {
+        result = local::hash(Path::new(&temp_name)) => result?,
+        _ = task.cancel.cancelled() => return Err(fail("TRANSFER_CANCELLED", "任务已取消，已完成的文件保留")),
+    };
+    let source_hash = remote
+        .hash_cancellable(&item.remote, Some(&task.cancel))
+        .await;
+    task.check_cancel()?;
+    if hash != local_hash
+        || hash != source_hash?
         || !remote::same(&before, &remote.attrs(&item.remote).await?)
     {
         return Err(fail(

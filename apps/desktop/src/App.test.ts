@@ -20,7 +20,7 @@ import { usePluginsStore } from './stores/plugins';
 import { useNotificationsStore } from './stores/notifications';
 import { systemPluginFixtures, toolPluginState } from './services/system-plugins.fixture';
 import { aiApi } from './services/ai';
-import type { TransferInfo } from './types/files';
+import type { DirectoryListing, TransferInfo } from './types/files';
 
 // Exercise the shell, workspace tabs and session tabs without xterm's browser canvas or a remote connection.
 vi.mock('./components/TerminalPane.vue', () => ({ default: { render: () => null } }));
@@ -982,6 +982,8 @@ it('confirms active transfer cancellation before closing a host and preserves th
     transferredBytes: 0,
     remainingBytes: 100,
     bytesPerSecond: 0,
+    elapsedSeconds: 0,
+    dragExport: false,
     filesTotal: 1,
     filesDone: 0,
     skipped: 0,
@@ -1374,12 +1376,108 @@ it('keeps host and plugin function tabs in one row while settings preserve the a
   expect(close).not.toHaveBeenCalled();
 });
 
+it('restores each host local drive, path, listing and mouse history when switching workspace tabs', async () => {
+  const files = useFilesStore();
+  const listing = (path: string): DirectoryListing => ({
+    path,
+    parent: null,
+    entries: [
+      {
+        name: path.startsWith('E:') ? 'release.zip' : 'config.ini',
+        path: `${path}/file`,
+        kind: 'file',
+        size: 1,
+        modified: null,
+        permissions: null,
+        uid: null,
+        gid: null,
+      },
+    ],
+  });
+  vi.spyOn(filesApi, 'local').mockImplementation(async (path) => listing(path ?? 'D:/home'));
+  vi.spyOn(filesApi, 'localDrives').mockResolvedValue([
+    { path: 'D:/', name: 'D: 本地磁盘' },
+    { path: 'E:/', name: 'E: 本地磁盘' },
+  ]);
+  for (const host of useHostsStore().catalog!.hosts) {
+    files.connections[host.id] = {
+      host,
+      id: `sftp-${host.id}`,
+      state: 'connected',
+      error: null,
+      trust: null,
+      path: `/srv/${host.id}`,
+      loading: false,
+      listing: { path: `/srv/${host.id}`, parent: '/srv', entries: [] },
+    };
+  }
+  const workspace = useWorkspaceStore();
+  const localInput = () => document.querySelector<HTMLInputElement>('[aria-label="本地路径"]')!;
+  const drive = () => document.querySelector<HTMLButtonElement>('[aria-label="选择本地磁盘"]')!;
+  const localPane = () => document.querySelector('[aria-label="本地文件"]')!;
+  const selectHost = async (id: string) => {
+    document
+      .querySelector<HTMLButtonElement>(`.workspace-tab[data-host-id="${id}"] [role="tab"]`)!
+      .click();
+    await flush();
+  };
+
+  workspace.navigate('files', 'a');
+  await flush();
+  await vi.waitFor(() => expect(localInput().value).toBe('D:/home'));
+  drive().click();
+  await flush();
+  [...document.querySelectorAll<HTMLElement>('[aria-label="本地磁盘"] [role="option"]')]
+    .find((option) => option.textContent?.trim() === 'E: 本地磁盘')!
+    .click();
+  await flush();
+  expect(localInput().value).toBe('E:/');
+  expect(drive().textContent).toContain('E: 本地磁盘');
+  expect(localPane().textContent).toContain('release.zip');
+  localPane().querySelector<HTMLInputElement>('[aria-label="选择 release.zip"]')!.click();
+
+  workspace.navigate('files', 'b');
+  await flush();
+  await vi.waitFor(() => expect(localInput().value).toBe('D:/home'));
+  expect(drive().textContent).toContain('D: 本地磁盘');
+  expect(localPane().textContent).toContain('config.ini');
+  expect(localPane().textContent).not.toContain('release.zip');
+  const reads = vi.mocked(filesApi.local).mock.calls.length;
+  localInput().dispatchEvent(
+    new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true }),
+  );
+  await flush();
+  expect(filesApi.local).toHaveBeenCalledTimes(reads);
+
+  await selectHost('a');
+  expect(localInput().value).toBe('E:/');
+  expect(drive().textContent).toContain('E: 本地磁盘');
+  expect(localPane().textContent).toContain('release.zip');
+  expect(
+    localPane().querySelector<HTMLInputElement>('[aria-label="选择 release.zip"]')!.checked,
+  ).toBe(false);
+  localInput().dispatchEvent(
+    new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true }),
+  );
+  await flush();
+  expect(localInput().value).toBe('D:/home');
+  localInput().dispatchEvent(
+    new MouseEvent('mouseup', { button: 4, bubbles: true, cancelable: true }),
+  );
+  await flush();
+  expect(localInput().value).toBe('E:/');
+  await selectHost('b');
+  expect(localInput().value).toBe('D:/home');
+  expect(drive().textContent).toContain('D: 本地磁盘');
+});
+
 it('switches full file pages from the toolbar without closing file or terminal sessions', async () => {
   const files = useFilesStore(),
     workspace = useWorkspaceStore(),
     terminals = useTerminalsStore();
-  files.local = { path: 'D:/test', parent: null, entries: [] };
   for (const host of useHostsStore().catalog!.hosts) {
+    files.active = host.id;
+    files.local = { path: 'D:/test', parent: null, entries: [] };
     files.connections[host.id] = {
       host,
       id: `sftp-${host.id}`,
@@ -2080,8 +2178,9 @@ it('restores each host tool, file connection and terminal session through primar
     terminals = useTerminalsStore(),
     files = useFilesStore();
   const hosts = useHostsStore().catalog!.hosts;
-  files.local = { path: 'C:/', parent: null, entries: [] };
-  for (const host of hosts)
+  for (const host of hosts) {
+    files.active = host.id;
+    files.local = { path: 'C:/', parent: null, entries: [] };
     files.connections[host.id] = {
       host,
       id: `files-${host.id}`,
@@ -2092,6 +2191,7 @@ it('restores each host tool, file connection and terminal session through primar
       loading: false,
       listing: { path: `/${host.id}`, parent: '/', entries: [] },
     };
+  }
   document
     .querySelector<HTMLButtonElement>('.tree-host')!
     .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));

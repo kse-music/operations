@@ -6,7 +6,7 @@ const encoder = new TextEncoder();
 function frame(text: string): Uint8Array {
   return encoder.encode('\x1eSDU:' + nonce + ':' + text + '\x1f');
 }
-function fixture(size = 65540, result = 'DONE:2') {
+function fixture(size = 65540, result = 'DONE:2', username = 'root') {
   const bytes = Array.from({ length: size }, (_, i) => i % 256);
   const progress: (DropProgress | null)[] = [];
   const failed = vi.fn(),
@@ -18,7 +18,8 @@ function fixture(size = 65540, result = 'DONE:2') {
   const send = vi.fn(async (data: Uint8Array) => {
     const text = new TextDecoder().decode(data);
     if (text === 'start\r') {
-      const ready = frame('READY:0:' + btoa('/root/current\n'));
+      const encodedUsername = btoa(String.fromCharCode(...encoder.encode(username)));
+      const ready = frame('READY:0:' + encodedUsername + ':' + btoa('/root/current\n'));
       for (const byte of ready) upload.consume(Uint8Array.of(byte));
     } else {
       payload.push(...Array.from(atob(text), (c) => c.charCodeAt(0)));
@@ -89,12 +90,43 @@ it('streams bounded binary blocks and handles byte-fragmented READY and immediat
   expect(h.failed).not.toHaveBeenCalled();
   expect(h.notice).toHaveBeenCalledWith('上传完成：2 个项目。');
   expect(h.progress).toContainEqual(
-    expect.objectContaining({ uid: '0', directory: '/root/current' }),
+    expect.objectContaining({ uid: '0', username: 'root', directory: '/root/current' }),
   );
   expect(new TextDecoder().decode(Uint8Array.from(h.output))).toBe('\r\x1b[2KShell prompt');
   expect(h.release).toHaveBeenCalledTimes(1);
   expect(h.upload.busy).toBe(false);
 });
+
+it.each(['deploy', '运维账户', ''])(
+  'uses the receiver account name %j and retains the numeric UID for fallback',
+  async (username) => {
+    const h = fixture(10, 'DONE:2', username);
+    await h.upload.run();
+    expect(h.progress).toContainEqual(
+      expect.objectContaining({
+        uid: '0',
+        username: username || undefined,
+        directory: '/root/current',
+      }),
+    );
+    expect(h.failed).not.toHaveBeenCalled();
+    expect(h.payload).toEqual(h.bytes);
+  },
+);
+
+it.each(['!', '/w==', btoa('root\n'), btoa('root\0')])(
+  'rejects a malformed receiver account name %j before reading local files',
+  async (username) => {
+    const h = fixture(10);
+    h.send.mockImplementationOnce(async () => {
+      h.upload.consume(frame('READY:0:' + username + ':' + btoa('/root/current\n')));
+    });
+    await h.upload.run();
+    expect(h.failed.mock.calls[0]![0].message).toContain('身份响应无效');
+    expect(h.read).not.toHaveBeenCalled();
+    expect(h.notice).not.toHaveBeenCalled();
+  },
+);
 
 it('measures average acknowledged archive bytes from READY and excludes preparation and startup', async () => {
   let now = 0;
@@ -107,16 +139,20 @@ it('measures average acknowledged archive bytes from READY and excludes preparat
   h.send
     .mockImplementationOnce(async () => {
       now = 30000;
-      h.upload.consume(frame('READY:0:' + btoa('/root/current\n')));
+      h.upload.consume(frame('READY:0:' + btoa('root') + ':' + btoa('/root/current\n')));
     })
     .mockImplementationOnce(async () => {
-      expect(h.progress.at(-1)).toMatchObject({ sent: 0, bytesPerSecond: 0 });
+      expect(h.progress.at(-1)).toMatchObject({ sent: 0, bytesPerSecond: 0, elapsedSeconds: 0 });
       now += 2000;
       h.upload.consume(frame('ACK:0'));
     })
     .mockImplementationOnce(async () => {
       // Sending the second block has not advanced acknowledged progress.
-      expect(h.progress.at(-1)).toMatchObject({ sent: 65536, bytesPerSecond: 32768 });
+      expect(h.progress.at(-1)).toMatchObject({
+        sent: 65536,
+        bytesPerSecond: 32768,
+        elapsedSeconds: 2,
+      });
       now += 2000;
       h.upload.consume(frame('ACK:1'));
     });
@@ -125,10 +161,15 @@ it('measures average acknowledged archive bytes from READY and excludes preparat
   expect(h.progress.at(-1)).toMatchObject({
     phase: 'uploading',
     bytesPerSecond: 16385,
+    elapsedSeconds: 4,
   });
   now += 10000;
   h.upload.consume(frame('VERIFYING'));
-  expect(h.progress.at(-1)).toMatchObject({ phase: 'verifying', bytesPerSecond: 0 });
+  expect(h.progress.at(-1)).toMatchObject({
+    phase: 'verifying',
+    bytesPerSecond: 0,
+    elapsedSeconds: 14,
+  });
   h.upload.consume(frame('COMMITTING'));
   h.upload.consume(frame('DONE:2'));
   h.upload.consume(frame('RETURN'));
@@ -137,12 +178,55 @@ it('measures average acknowledged archive bytes from READY and excludes preparat
   expect(h.notice).toHaveBeenCalledWith('上传完成：2 个项目。');
 });
 
+it.each(['complete', 'cancel', 'dispose'] as const)(
+  'updates elapsed time while awaiting ACK or verification and stops updates on %s',
+  async (action) => {
+    vi.useFakeTimers();
+    const h = fixture(10);
+    h.send
+      .mockImplementationOnce(async () => {
+        h.upload.consume(frame('READY:0:' + btoa('root') + ':' + btoa('/root/current\n')));
+      })
+      .mockResolvedValue();
+    const running = h.upload.run();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(h.progress.at(-1)).toMatchObject({
+      phase: 'uploading',
+      sent: 0,
+      elapsedSeconds: 2,
+      bytesPerSecond: 0,
+    });
+    h.upload.consume(frame('ACK:0'));
+    h.upload.consume(frame('VERIFYING'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(h.progress.at(-1)).toMatchObject({
+      phase: 'verifying',
+      sent: 10,
+      elapsedSeconds: 3,
+      bytesPerSecond: 0,
+    });
+    if (action === 'complete') {
+      h.upload.consume(frame('COMMITTING'));
+      h.upload.consume(frame('DONE:2'));
+      h.upload.consume(frame('RETURN'));
+    } else if (action === 'cancel') h.upload.cancel();
+    else h.upload.dispose();
+    await running;
+    const count = h.progress.length;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(h.progress).toHaveLength(count);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(h.failed).not.toHaveBeenCalled();
+  },
+);
+
 it('keeps speed finite at zero elapsed time and clears it when cancelling', async () => {
   vi.spyOn(performance, 'now').mockReturnValue(0);
   const h = fixture();
   h.send
     .mockImplementationOnce(async () => {
-      h.upload.consume(frame('READY:0:' + btoa('/root/current\n')));
+      h.upload.consume(frame('READY:0:' + btoa('root') + ':' + btoa('/root/current\n')));
     })
     .mockImplementationOnce(async () => {
       h.upload.consume(frame('ACK:0'));
@@ -185,7 +269,7 @@ it('cancels immediately while waiting for verification rather than waiting for t
   const h = fixture(10);
   h.send
     .mockImplementationOnce(async () => {
-      h.upload.consume(frame('READY:0:' + btoa('/root/current\n')));
+      h.upload.consume(frame('READY:0:' + btoa('root') + ':' + btoa('/root/current\n')));
     })
     .mockImplementation(async () => {
       h.upload.consume(frame('ACK:0'));
@@ -297,7 +381,7 @@ it('waits for the parent Shell return fence and refreshes its later prompt in pl
   h.send
     .mockImplementationOnce(async () => {
       h.upload.consume(encoder.encode("/bin/sh -c 'sd_nonce=$1\r\n> script body\r\n"));
-      h.upload.consume(frame('READY:0:' + btoa('/root/current\n')));
+      h.upload.consume(frame('READY:0:' + btoa('root') + ':' + btoa('/root/current\n')));
     })
     .mockImplementation(async () => {
       h.upload.consume(frame('ACK:0'));

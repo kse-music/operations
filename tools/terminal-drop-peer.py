@@ -23,6 +23,14 @@ def main():
     destination.mkdir()
     os.chmod(root, 0o755)
     account = pwd.getpwnam("nobody") if scenario != "sudo-root" else pwd.getpwuid(0)
+    if scenario == "unnamed":
+        account = pwd.struct_passwd(("", "", 2147483646, account.pw_gid, "", "/", "/bin/bash"))
+        try:
+            pwd.getpwuid(account.pw_uid)
+        except KeyError:
+            pass
+        else:
+            raise RuntimeError("UID chosen for unnamed-account test already has a name")
     if scenario != "permission":
         os.chown(destination, account.pw_uid, account.pw_gid)
     os.chmod(destination, 0o700)
@@ -92,7 +100,7 @@ def main():
                         info["sha256"] = hashlib.sha256(item.read_bytes()).hexdigest()
                     entries[relative] = info
                 sys.stderr.write("SD_PEER_RESULT=" + json.dumps({
-                    "status": child.returncode, "uid": account.pw_uid,
+                    "status": child.returncode, "uid": account.pw_uid, "username": account.pw_name,
                     "restored": restored, "entries": entries,
                 }, ensure_ascii=False) + "\n")
                 return 0

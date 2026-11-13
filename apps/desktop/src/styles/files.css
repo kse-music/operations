@@ -320,13 +320,29 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
-.files-view > .transfer-panel {
-  flex: none;
-  max-height: min(220px, 35%);
+.file-transfer-dialog .transfer-panel {
+  border-top: 0;
+  padding-top: 0;
+  max-height: min(480px, 52vh);
   overflow: auto;
 }
-.files-view .transfer-panel h2 {
-  margin: 0;
+.file-transfer-dialog {
+  width: min(620px, calc(100vw - 32px));
+  padding: 18px;
+}
+.file-transfer-dialog .modal-heading {
+  margin-bottom: 8px;
+}
+.file-transfer-dialog .dialog-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  align-items: center;
+}
+.file-transfer-dialog .dialog-actions > .subtle {
+  margin-right: auto;
+}
+.file-transfer-dialog .transfer-row:last-child {
+  border-bottom: 0;
 }
 .transfer-row {
   display: flex;
@@ -340,12 +356,53 @@
   flex: 1;
   min-width: 0;
 }
-.transfer-row strong {
-  margin-right: 12px;
+.transfer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
 }
 .transfer-row p {
   margin: 5px 0;
   overflow-wrap: anywhere;
+}
+.transfer-paths {
+  margin: 10px 0;
+}
+.transfer-paths > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 12px;
+}
+.transfer-paths .transfer-path {
+  margin: 2px 0;
+}
+.transfer-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 24px;
+  margin: 10px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.transfer-details > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.transfer-details dt {
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.transfer-details dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 560px) {
+  .transfer-details {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .transfer-path {
   white-space: nowrap;

@@ -60,6 +60,8 @@ export interface TransferInfo {
   transferredBytes: number;
   remainingBytes: number;
   bytesPerSecond: number;
+  elapsedSeconds: number;
+  dragExport: boolean;
   filesTotal: number;
   filesDone: number;
   skipped: number;
@@ -130,6 +132,21 @@ export function bytes(value: number | null): string {
     index++;
   } while (value >= 1024 && index < 3);
   return `${value.toFixed(1)} ${units[index]}`;
+}
+export function transferDuration(seconds: number): string {
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = String(Math.floor(total / 60) % 60).padStart(2, '0');
+  return `${hours}:${minutes}:${String(total % 60).padStart(2, '0')}`;
+}
+export function transferRemainingTime(task: TransferInfo): string {
+  if (task.state === 'completed') return transferDuration(0);
+  if (task.state === 'verifying' || (task.state === 'running' && task.remainingBytes === 0))
+    return tr('校验中');
+  if (task.state === 'running' && task.bytesPerSecond > 0)
+    return transferDuration(Math.ceil(task.remainingBytes / task.bytesPerSecond));
+  if (['queued', 'scanning', 'running'].includes(task.state)) return tr('估算中');
+  return '—';
 }
 export function permissionText(value: number | null): string {
   if (value === null) return '—';

@@ -1,5 +1,6 @@
 mod external;
 mod support;
+mod throughput;
 use serverdeck_core::{IpcError, files::*};
 use serverdeck_sftp::Files;
 use sha2::{Digest, Sha256};
@@ -47,6 +48,71 @@ async fn assert_completed(files: &Files, id: &str) {
     let info = finished(files, id).await;
     assert_eq!(info.state, "completed", "{:?}", info.message);
     assert_eq!(info.remaining_bytes, 0);
+}
+
+#[tokio::test]
+async fn elapsed_time_excludes_queueing_and_freezes_after_completion() {
+    let server = Server::start(true, Duration::from_millis(50)).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    let source = tempfile::tempdir().expect("source");
+    let large = source.path().join("large.bin");
+    let empty = source.path().join("empty.bin");
+    std::fs::write(&large, vec![42; 1024 * 1024]).expect("large file");
+    std::fs::write(&empty, []).expect("empty file");
+    let start = |source: &Path| {
+        files
+            .transfers
+            .start(input(
+                &session.id,
+                Direction::Upload,
+                vec![path(source)],
+                "/".into(),
+                ConflictPolicy::Fail,
+            ))
+            .expect("enqueue")
+    };
+    let active = start(&large);
+    let queued = start(&empty);
+    assert_eq!(queued.state, "queued");
+    assert_eq!(queued.elapsed_seconds, 0);
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let snapshots = files.transfers.list().expect("tasks");
+    let running = snapshots
+        .iter()
+        .find(|t| t.id == active.id)
+        .expect("active task");
+    assert!(running.elapsed_seconds >= 1, "{running:?}");
+    let waiting = snapshots
+        .iter()
+        .find(|t| t.id == queued.id)
+        .expect("queued task");
+    assert_eq!(waiting.state, "queued");
+    assert_eq!(waiting.elapsed_seconds, 0);
+    let ended = finished(&files, &active.id).await;
+    let second = finished(&files, &queued.id).await;
+    assert_eq!(ended.state, "completed", "{ended:?}");
+    assert!(ended.elapsed_seconds >= 1);
+    assert_eq!(second.state, "completed", "{second:?}");
+    assert!(
+        second.elapsed_seconds < ended.elapsed_seconds,
+        "queue time must not be included"
+    );
+    assert_eq!(
+        serde_json::to_value(&ended).expect("IPC snapshot")["elapsedSeconds"],
+        ended.elapsed_seconds
+    );
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    assert_eq!(
+        finished(&files, &active.id).await.elapsed_seconds,
+        ended.elapsed_seconds
+    );
+    assert_eq!(
+        finished(&files, &queued.id).await.elapsed_seconds,
+        second.elapsed_seconds
+    );
+    files.shutdown().await;
+    server.engine.shutdown().await;
 }
 
 #[tokio::test]
@@ -286,6 +352,81 @@ async fn stages_windows_drag_files_and_selected_file_links() {
         assert!(!destination.path().join(&remote_path[1..]).exists());
     }
     assert!(files.transfers.list().expect("transfer history").is_empty());
+}
+
+#[tokio::test]
+async fn windows_drag_progress_is_marked_without_bypassing_active_transfer_guards() {
+    let server = Server::start(true, Duration::ZERO).await;
+    server
+        .faults
+        .wire_delay_ms
+        .store(20, std::sync::atomic::Ordering::SeqCst);
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    let destination = tempfile::tempdir().expect("staging directory");
+    std::fs::write(
+        server.root.path().join("large.bin"),
+        vec![42; 4 * 1024 * 1024],
+    )
+    .expect("source");
+    let transfers = files.transfers.clone();
+    let session_id = session.id.clone();
+    let directory = destination.path().to_owned();
+    let staging = tokio::spawn(async move {
+        transfers
+            .stage_drag_download(session_id, vec!["/large.bin".into()], &directory)
+            .await
+    });
+    let snapshot = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(info) = files.transfers.list().expect("tasks").into_iter().next() {
+                break info;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("drag task started");
+    assert!(snapshot.drag_export);
+    assert_eq!(
+        serde_json::to_value(&snapshot).expect("IPC snapshot")["dragExport"],
+        true
+    );
+    assert_eq!(files.transfers.unfinished().expect("active count"), 1);
+    assert_eq!(
+        files
+            .transfers
+            .session_unfinished(&session.id)
+            .expect("session count"),
+        1
+    );
+    assert_eq!(
+        IpcError::from(
+            files
+                .close(&session.id, false)
+                .await
+                .expect_err("confirmation required")
+        )
+        .code,
+        "TRANSFERS_ACTIVE"
+    );
+    files
+        .transfers
+        .cancel(&snapshot.id)
+        .expect("cancel drag staging");
+    assert_eq!(
+        staging
+            .await
+            .expect("staging task")
+            .expect_err("cancelled export")
+            .code,
+        "DRAG_DOWNLOAD_FAILED"
+    );
+    assert_eq!(files.transfers.unfinished().expect("drained count"), 0);
+    assert!(files.transfers.list().expect("history").is_empty());
+    assert!(!destination.path().join("large.bin").exists());
+    files.shutdown().await;
+    server.engine.shutdown().await;
 }
 
 #[tokio::test]

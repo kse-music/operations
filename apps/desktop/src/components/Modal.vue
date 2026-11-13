@@ -9,6 +9,7 @@ const props = defineProps<{
   wide?: boolean;
   focusHeading?: boolean;
   panelClass?: string;
+  closeLabel?: string;
 }>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -31,8 +32,8 @@ function close(): void {
           <button
             class="icon-button"
             type="button"
-            :aria-label="tr('关闭对话框')"
-            :title="tr('关闭对话框')"
+            :aria-label="closeLabel ?? tr('关闭对话框')"
+            :title="closeLabel ?? tr('关闭对话框')"
             :disabled="busy"
             @click="close"
           >

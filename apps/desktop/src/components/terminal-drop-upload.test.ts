@@ -3,6 +3,7 @@ import { createApp, h, nextTick, type App } from 'vue';
 import TerminalDropUpload from './TerminalDropUpload.vue';
 import { terminalApi } from '../services/terminal';
 import type { TerminalFileDrag } from '../types/terminal';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 
 const events = vi.hoisted(() => ({
   callback: (_event: { payload: TerminalFileDrag }) => {
@@ -33,7 +34,7 @@ function receive(...frames: string[]): Uint8Array | undefined {
     encoder.encode(frames.map((frame) => '\x1eSDU:' + nonce + ':' + frame + '\x1f').join('')),
   );
 }
-function prepareUpload(): void {
+function prepareUpload(username = 'root'): void {
   vi.mocked(terminalApi.prepareDrop).mockResolvedValue({
     size: 10,
     sha256: 'a'.repeat(64),
@@ -42,7 +43,8 @@ function prepareUpload(): void {
   });
   send.mockImplementation(async (id, data) => {
     expect(id).toBe('session');
-    if (new TextDecoder().decode(data) === 'start\r') receive('READY:0:' + btoa('/root/current\n'));
+    if (new TextDecoder().decode(data) === 'start\r')
+      receive('READY:0:' + btoa(username) + ':' + btoa('/root/current\n'));
   });
 }
 const showModal = HTMLDialogElement.prototype.showModal;
@@ -92,6 +94,7 @@ afterEach(() => {
   area.remove();
   HTMLDialogElement.prototype.showModal = showModal;
   Object.defineProperty(window, 'devicePixelRatio', { configurable: true, value: 1 });
+  setLocale('zh-CN');
 });
 function drop(x = 400, y = 200): void {
   events.callback({ payload: { type: 'drop', x, y, grant: 'native-grant', names: ['unused'] } });
@@ -195,7 +198,7 @@ it('keeps the same dialog for progress and closes only after commit, Shell retur
   );
 });
 
-it('shows formatted acknowledged bytes and average upload speed only during transfer', async () => {
+it('shows acknowledged progress, remaining size and transfer times across upload phases', async () => {
   let now = 1000;
   vi.spyOn(performance, 'now').mockImplementation(() => now);
   prepareUpload();
@@ -213,25 +216,67 @@ it('shows formatted acknowledged bytes and average upload speed only during tran
     .find((button) => button.textContent?.trim() === '确认上传')!
     .click();
   await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
-  expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toContain('平均 0 B/s');
+  expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toBe('0 B/s');
   expect(dialog.textContent).toContain('0 B / 128.0 KiB');
+  expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain(
+    '剩余 128.0 KiB',
+  );
+  expect(dialog.querySelector('[data-time="elapsed"]')?.textContent).toContain('已用时间：0:00:00');
+  expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain(
+    '预计剩余时间：估算中',
+  );
   now += 2000;
   receive('ACK:0');
   await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledTimes(2));
-  expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toContain(
-    '平均 32.0 KiB/s',
-  );
+  expect(dialog.querySelector('[aria-label="平均上传速度"]')?.textContent).toBe('32.0 KiB/s');
   expect(dialog.textContent).toContain('64.0 KiB / 128.0 KiB');
+  expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain('剩余 64.0 KiB');
+  expect(dialog.querySelector('[data-time="elapsed"]')?.textContent).toContain('已用时间：0:00:02');
+  expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain(
+    '预计剩余时间：0:00:02',
+  );
   expect(dialog.querySelector('progress')?.value).toBe(65536);
+  expect(dialog.querySelector('.terminal-drop-status')?.textContent).toContain(
+    'root · /root/current',
+  );
+  setLocale('en-US');
+  await nextTick();
+  expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain(
+    'remaining 64.0 KiB',
+  );
+  expect(dialog.querySelector('[data-time="elapsed"]')?.textContent).toContain('Elapsed: 0:00:02');
+  expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain(
+    'Estimated remaining: 0:00:02',
+  );
+  setLocale('zh-CN');
   now += 2000;
   receive('ACK:1', 'VERIFYING');
   await nextTick();
   expect(dialog.querySelector('[aria-label="平均上传速度"]')).toBeNull();
   expect(dialog.textContent).toContain('128.0 KiB / 128.0 KiB');
+  expect(dialog.querySelector('.terminal-drop-statistics')?.textContent).toContain('剩余 0 B');
+  expect(dialog.querySelector('[data-time="elapsed"]')?.textContent).toContain('已用时间：0:00:04');
+  expect(dialog.querySelector('[data-time="remaining"]')?.textContent).toContain('预计剩余时间：—');
   expect(dialog.textContent).toContain('正在校验并解包');
   receive('COMMITTING', 'DONE:2', 'RETURN');
   await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
   expect(terminalApi.uploadRelease).toHaveBeenCalledOnce();
+});
+
+it.each([
+  ['deploy', 'deploy · /root/current'],
+  ['', 'UID 0 · /root/current'],
+])('shows receiver account %j with UID as the fallback', async (username, expected) => {
+  prepareUpload(username);
+  drop();
+  await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
+  [...document.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '确认上传')!
+    .click();
+  await vi.waitFor(() => expect(terminalApi.uploadRead).toHaveBeenCalledOnce());
+  expect(document.querySelector('.terminal-drop-destination')?.textContent?.trim()).toBe(expected);
+  receive('ACK:0', 'VERIFYING', 'COMMITTING', 'DONE:2', 'RETURN');
+  await vi.waitFor(() => expect(document.querySelector('dialog')).toBeNull());
 });
 
 it('keeps failures inside the dialog and closes them without releasing the grant twice', async () => {

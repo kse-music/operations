@@ -8,7 +8,7 @@ import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
 import { TerminalDropUpload, type DropProgress } from '../services/terminal-drop';
 import type { TerminalDropSelection, TerminalFileDrag } from '../types/terminal';
-import { bytes } from '../types/files';
+import { bytes, transferDuration } from '../types/files';
 import Modal from './Modal.vue';
 
 const props = defineProps<{
@@ -27,6 +27,17 @@ const emit = defineEmits<{
 }>();
 const selected = ref<TerminalDropSelection | null>(null);
 const progress = ref<DropProgress | null>(null);
+const remainingBytes = computed(() =>
+  Math.max(0, (progress.value?.size ?? 0) - (progress.value?.sent ?? 0)),
+);
+const remainingTime = computed(() => {
+  const value = progress.value;
+  if (value?.phase !== 'uploading') return '—';
+  if (remainingBytes.value === 0) return transferDuration(0);
+  return value.bytesPerSecond > 0
+    ? transferDuration(Math.ceil(remainingBytes.value / value.bytesPerSecond))
+    : tr('估算中');
+});
 const over = ref(false);
 const claiming = ref(false);
 const confirmed = ref(false);
@@ -264,10 +275,12 @@ onBeforeUnmount(() => {
       </p>
     </template>
     <div v-if="progress" class="terminal-drop-progress" role="status" aria-live="polite">
-      <span>{{ phaseNames[progress.phase] }}</span>
-      <span v-if="progress.directory" class="terminal-drop-destination">
-        UID {{ progress.uid }} · {{ progress.directory }}
-      </span>
+      <div class="terminal-drop-status">
+        <span>{{ phaseNames[progress.phase] }}</span>
+        <span v-if="progress.directory" class="terminal-drop-destination">
+          {{ progress.username || `UID ${progress.uid}` }} · {{ progress.directory }}
+        </span>
+      </div>
       <progress
         v-if="progress.phase === 'uploading'"
         :value="progress.sent"
@@ -278,10 +291,27 @@ onBeforeUnmount(() => {
         v-else-if="!['blocked', 'cancelling'].includes(progress.phase)"
         :aria-label="tr('拖放上传进度')"
       ></progress>
-      <span v-if="progress.size">{{ bytes(progress.sent) }} / {{ bytes(progress.size) }}</span>
-      <span v-if="progress.phase === 'uploading'" :aria-label="tr('平均上传速度')"
-        >{{ tr(' 平均 ') }}{{ bytes(progress.bytesPerSecond) }}/s
-      </span>
+      <div v-if="progress.size" class="terminal-drop-statistics">
+        {{ bytes(progress.sent) }} / {{ bytes(progress.size) }}
+        <template v-if="progress.phase === 'uploading'">
+          · <span :aria-label="tr('平均上传速度')">{{ bytes(progress.bytesPerSecond) }}/s</span>
+        </template>
+        {{ tr(' · 剩余 ') }}{{ bytes(remainingBytes) }}
+      </div>
+      <div
+        v-if="['uploading', 'verifying', 'committing'].includes(progress.phase)"
+        class="terminal-drop-times"
+      >
+        <span data-time="elapsed">
+          {{ tr('已用时间：{0}', transferDuration(progress.elapsedSeconds)) }}
+        </span>
+        <span
+          data-time="remaining"
+          :title="tr('根据平均速度估算剩余数据传输时间，不含校验和提交耗时。')"
+        >
+          {{ tr('预计剩余时间：{0}', remainingTime) }}
+        </span>
+      </div>
     </div>
     <p v-if="failure" class="banner error" role="alert">{{ failure }}</p>
     <footer class="dialog-actions">

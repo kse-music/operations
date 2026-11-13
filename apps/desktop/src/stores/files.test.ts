@@ -24,7 +24,7 @@ vi.mock('../services/files', () => ({ filesApi: mocks }));
 import { useFilesStore } from './files';
 import { usePluginsStore } from './plugins';
 import type { Host } from '../types/hosts';
-import type { TransferInfo, TextDocument } from '../types/files';
+import type { DirectoryListing, TransferInfo, TextDocument } from '../types/files';
 import { useNotificationsStore } from './notifications';
 const host = {
   id: 'host',
@@ -366,6 +366,160 @@ afterEach(() => {
   disposePinia(getActivePinia()!);
   vi.useRealTimers();
 });
+describe('local file workspace ownership', () => {
+  const listing = (path: string): DirectoryListing => ({ path, parent: null, entries: [] });
+
+  beforeEach(() => {
+    mocks.local.mockImplementation(async (path) => listing(path ?? 'C:/home'));
+  });
+
+  it('keeps local directories and back/forward history on each host', async () => {
+    const store = useFilesStore();
+    store.active = 'a';
+    await store.localLoad('D:/a');
+    await store.localLoad('D:/a/next');
+    store.active = 'b';
+    expect(store.local).toBeNull();
+    expect(store.stepHistory('local', 'back')).toBe(false);
+    await store.localLoad('E:/b');
+    await store.localLoad('E:/b/next');
+    expect(store.stepHistory('local', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.local?.path).toBe('E:/b'));
+
+    store.active = 'a';
+    expect(store.local?.path).toBe('D:/a/next');
+    expect(store.stepHistory('local', 'forward')).toBe(false);
+    expect(store.stepHistory('local', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.local?.path).toBe('D:/a'));
+    expect(store.stepHistory('local', 'back')).toBe(false);
+
+    store.active = 'b';
+    expect(store.stepHistory('local', 'forward')).toBe(true);
+    await vi.waitFor(() => expect(store.local?.path).toBe('E:/b/next'));
+    store.active = 'a';
+    expect(store.stepHistory('local', 'forward')).toBe(true);
+    await vi.waitFor(() => expect(store.local?.path).toBe('D:/a/next'));
+  });
+
+  it('keeps in-flight local reads and loading state on their original hosts', async () => {
+    const store = useFilesStore();
+    let finish!: (value: DirectoryListing) => void;
+    store.active = 'a';
+    mocks.local.mockImplementationOnce(
+      () => new Promise<DirectoryListing>((resolve) => (finish = resolve)),
+    );
+    const pending = store.localLoad('D:/a');
+    store.active = 'b';
+    expect(store.localLoading).toBe(false);
+    expect(store.localPendingPath).toBeNull();
+    await store.localLoad('E:/b');
+    store.active = 'a';
+    expect(store.localLoading).toBe(true);
+    expect(store.localPendingPath).toBe('D:/a');
+    finish(listing('D:/a'));
+    await pending;
+    expect(store.local?.path).toBe('D:/a');
+    expect(store.localLoading).toBe(false);
+    expect(store.localPendingPath).toBeNull();
+    store.active = 'b';
+    expect(store.local?.path).toBe('E:/b');
+    expect(store.stepHistory('local', 'back')).toBe(false);
+  });
+
+  it('rejects stale reads and preserves the directory and history after a failed visit', async () => {
+    const store = useFilesStore();
+    store.active = 'a';
+    await store.localLoad('D:/a');
+    let finish!: (value: DirectoryListing) => void;
+    mocks.local.mockImplementationOnce(
+      () => new Promise<DirectoryListing>((resolve) => (finish = resolve)),
+    );
+    const stale = store.localLoad('D:/stale');
+    await store.localLoad('D:/a/next');
+    finish(listing('D:/stale'));
+    await stale;
+    expect(store.local?.path).toBe('D:/a/next');
+    mocks.local.mockRejectedValueOnce({ message: 'disk unavailable' });
+    expect(store.stepHistory('local', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.localLoading).toBe(false));
+    expect(store.error).toBe('disk unavailable');
+    expect(store.local?.path).toBe('D:/a/next');
+    expect(store.localPendingPath).toBeNull();
+    expect(store.stepHistory('local', 'back')).toBe(true);
+    await vi.waitFor(() => expect(store.local?.path).toBe('D:/a'));
+    expect(store.stepHistory('local', 'back')).toBe(false);
+  });
+
+  it('discards local state only after a successful host close and ignores its late response', async () => {
+    const store = useFilesStore();
+    store.active = 'a';
+    await store.localLoad('D:/a');
+    await store.localLoad('D:/a/next');
+    mocks.clearTransfers.mockRejectedValueOnce({ message: 'still running' });
+    expect(await store.clearHostTransfers('a')).toBe(false);
+    expect(store.local?.path).toBe('D:/a/next');
+    let finish!: (value: DirectoryListing) => void;
+    mocks.local.mockImplementationOnce(
+      () => new Promise<DirectoryListing>((resolve) => (finish = resolve)),
+    );
+    const stale = store.localLoad('D:/stale');
+    expect(await store.clearHostTransfers('a')).toBe(true);
+    expect(store.local).toBeNull();
+    expect(store.localLoading).toBe(false);
+    expect(store.localPendingPath).toBeNull();
+    await store.localLoad('D:/reopened');
+    finish(listing('D:/stale'));
+    await stale;
+    expect(store.local?.path).toBe('D:/reopened');
+    expect(store.stepHistory('local', 'back')).toBe(false);
+  });
+
+  it('initializes a delayed connection on its own host after switching tabs', async () => {
+    const store = useFilesStore();
+    let finish!: (value: { id: string }) => void;
+    mocks.open.mockImplementationOnce(
+      () => new Promise<{ id: string }>((resolve) => (finish = resolve)),
+    );
+    const pending = store.open(host);
+    store.active = 'other';
+    await store.localLoad('E:/other');
+    finish({ id: 'session' });
+    await pending;
+    expect(store.local?.path).toBe('E:/other');
+    store.active = host.id;
+    expect(store.local?.path).toBe('C:/home');
+  });
+
+  it('refreshes the original local pane when the host changes during a remote refresh', async () => {
+    const store = useFilesStore();
+    store.active = 'other';
+    await store.localLoad('E:/other');
+    store.active = host.id;
+    await store.localLoad('D:/host');
+    store.connections[host.id] = {
+      host,
+      id: 'session',
+      state: 'connected',
+      error: null,
+      trust: null,
+      path: '/home',
+      listing: null,
+      loading: false,
+    };
+    let finish!: (value: DirectoryListing) => void;
+    mocks.list.mockImplementationOnce(
+      () => new Promise<DirectoryListing>((resolve) => (finish = resolve)),
+    );
+    mocks.local.mockClear();
+    const pending = store.refresh();
+    store.active = 'other';
+    finish(listing('/home'));
+    await pending;
+    expect(mocks.local).toHaveBeenCalledExactlyOnceWith('D:/host');
+    expect(store.local?.path).toBe('E:/other');
+  });
+});
+
 describe('file workspace ownership', () => {
   it('replaces the file identity only after verification and ignores late events from the old lease', async () => {
     let receive!: (event: unknown) => void;
@@ -572,6 +726,8 @@ const transfer = (values: Partial<TransferInfo> = {}): TransferInfo => ({
   transferredBytes: 12,
   remainingBytes: 0,
   bytesPerSecond: 12,
+  elapsedSeconds: 1,
+  dragExport: false,
   filesTotal: 1,
   filesDone: 1,
   skipped: 0,

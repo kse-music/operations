@@ -173,6 +173,8 @@ pub struct TransferInfo {
     pub transferred_bytes: u64,
     pub remaining_bytes: u64,
     pub bytes_per_second: u64,
+    pub elapsed_seconds: u64,
+    pub drag_export: bool,
     pub files_total: usize,
     pub files_done: usize,
     pub skipped: usize,

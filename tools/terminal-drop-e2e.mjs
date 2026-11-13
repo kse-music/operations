@@ -69,6 +69,7 @@ async function check(scenario) {
     released = 0,
     reads = 0,
     cancelled = false;
+  let identity;
   let terminalReady;
   const prompt = new Promise((resolve) => {
     terminalReady = resolve;
@@ -98,6 +99,8 @@ async function check(scenario) {
       if (scenario === 'sudo-root' && output.includes('\x1eSD_PEER_READY\x1f')) terminalReady();
     },
     progress: (value) => {
+      if (value?.uid)
+        identity = { uid: value.uid, username: value.username, directory: value.directory };
       if (scenario === 'cancel' && value?.sent > 0 && !cancelled) {
         cancelled = true;
         upload.cancel();
@@ -149,8 +152,11 @@ async function check(scenario) {
       !Object.keys(result.entries).some((name) => name.startsWith('.serverdeck-upload.')),
       'temporary directory cleaned',
     );
-    if (['ordinary', 'sudo-root'].includes(scenario)) {
+    if (['ordinary', 'sudo-root', 'unnamed'].includes(scenario)) {
       assert.deepEqual(failures, []);
+      assert(identity, 'receiver must report its effective identity');
+      assert.equal(identity.uid, String(result.uid));
+      assert.equal(identity.username, result.username || undefined);
       assert(notices.some((message) => message.includes('上传完成')));
       assert.equal(
         result.entries['plain.bin'].sha256,
@@ -179,7 +185,7 @@ async function check(scenario) {
         assert.equal(result.entries['plain.bin'].link, 'missing-target');
       if (['permission', 'checksum'].includes(scenario)) assert.deepEqual(result.entries, {});
     }
-    results.push({ scenario, reads, released, failures, notices, ...result });
+    results.push({ scenario, reads, released, failures, notices, identity, ...result });
     process.stdout.write(scenario + ': passed\n');
   } finally {
     clearTimeout(timer);
@@ -192,6 +198,7 @@ try {
   for (const scenario of [
     'ordinary',
     'sudo-root',
+    'unnamed',
     'permission',
     'conflict-file',
     'conflict-directory',

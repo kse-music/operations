@@ -135,7 +135,8 @@ beforeEach(async () => {
   });
   vi.spyOn(terminalApi, 'input').mockImplementation(async (id, data) => {
     if (id !== 'session-1') return;
-    if (new TextDecoder().decode(data) === 'start\r') receive('READY:0:' + btoa('/root/current\n'));
+    if (new TextDecoder().decode(data) === 'start\r')
+      receive('READY:0:' + btoa('root') + ':' + btoa('/root/current\n'));
     else if (data.length === 1 && data[0] === 3) receive('ERROR:CANCELLED:0', 'RETURN');
   });
   vi.spyOn(terminalApi, 'ack').mockResolvedValue();

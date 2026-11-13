@@ -167,8 +167,10 @@ pub(crate) async fn establish(
         };
         let config = client::Config {
             channel_buffer_size: 16,
-            window_size: 64 * 1024,
-            maximum_packet_size: 16 * 1024,
+            // Keep bulk SFTP reads in flight without waiting on a 64 KiB receive window.
+            // PTY delivery still has its own 16 KiB, UI-acknowledged backpressure.
+            window_size: 2 * 1024 * 1024,
+            maximum_packet_size: 32 * 1024,
             keepalive_interval: Some(Duration::from_secs(u64::from(
                 options.keepalive_interval_secs,
             ))),

@@ -37,9 +37,9 @@ use windows::{
             Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON},
             Shell::{
                 CFSTR_FILECONTENTS, CFSTR_FILEDESCRIPTORW, CFSTR_INDRAGLOOP,
-                CFSTR_PREFERREDDROPEFFECT, FD_ATTRIBUTES, FD_PROGRESSUI, FD_UNICODE,
-                FILEDESCRIPTORW, IDataObjectAsyncCapability, IDataObjectAsyncCapability_Impl,
-                SHCreateStdEnumFmtEtc, SHCreateStreamOnFileEx,
+                CFSTR_PREFERREDDROPEFFECT, FD_ATTRIBUTES, FD_UNICODE, FILEDESCRIPTORW,
+                IDataObjectAsyncCapability, IDataObjectAsyncCapability_Impl, SHCreateStdEnumFmtEtc,
+                SHCreateStreamOnFileEx,
             },
         },
     },
@@ -264,7 +264,8 @@ impl DragData {
                         *unit = value;
                     }
                     let descriptor = FILEDESCRIPTORW {
-                        dwFlags: (FD_ATTRIBUTES.0 | FD_PROGRESSUI.0 | FD_UNICODE.0) as u32,
+                        // ServerDeck owns transfer progress; do not request Shell copy UI.
+                        dwFlags: (FD_ATTRIBUTES.0 | FD_UNICODE.0) as u32,
                         dwFileAttributes: FILE_ATTRIBUTE_NORMAL.0,
                         cFileName: filename,
                         ..Default::default()
@@ -493,10 +494,59 @@ mod tests {
         Win32::{
             Foundation::POINTL,
             System::Ole::{IDropTarget, ReleaseStgMedium},
-            UI::Shell::{BHID_SFUIObject, IShellItem, SHCreateItemFromParsingName},
+            UI::{
+                Shell::{BHID_SFUIObject, FD_PROGRESSUI, IShellItem, SHCreateItemFromParsingName},
+                WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId, IsWindowVisible},
+            },
         },
         core::Interface,
     };
+
+    struct VisibleWindowObserver {
+        stop: Arc<AtomicBool>,
+        shown: Arc<AtomicBool>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+    impl VisibleWindowObserver {
+        fn start() -> Self {
+            use windows::Win32::Foundation::{HWND, LPARAM};
+            unsafe extern "system" fn observe(window: HWND, parameter: LPARAM) -> BOOL {
+                let mut process = 0;
+                // EnumWindows keeps each HWND and the callback parameter valid for the call.
+                unsafe { GetWindowThreadProcessId(window, Some(&mut process)) };
+                if process == std::process::id() && unsafe { IsWindowVisible(window) }.as_bool() {
+                    // The observer worker owns the Arc until enumeration has returned.
+                    unsafe { &*(parameter.0 as *const AtomicBool) }.store(true, Ordering::Release);
+                }
+                true.into()
+            }
+            let stop = Arc::new(AtomicBool::new(false));
+            let shown = Arc::new(AtomicBool::new(false));
+            let ending = stop.clone();
+            let visible = shown.clone();
+            let worker = std::thread::spawn(move || {
+                while !ending.load(Ordering::Acquire) {
+                    // The callback only observes windows; it never manipulates other applications.
+                    unsafe { EnumWindows(Some(observe), LPARAM(Arc::as_ptr(&visible) as isize)) }
+                        .expect("enumerate native windows");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            });
+            Self {
+                stop,
+                shown,
+                worker: Some(worker),
+            }
+        }
+    }
+    impl Drop for VisibleWindowObserver {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(worker) = self.worker.take() {
+                worker.join().expect("window observer");
+            }
+        }
+    }
 
     fn format(id: u16, index: i32, medium: u32) -> FORMATETC {
         FORMATETC {
@@ -544,6 +594,7 @@ mod tests {
                 .cast::<FILEDESCRIPTORW>()
                 .read_unaligned();
             let filename = descriptor.cFileName;
+            assert_eq!(descriptor.dwFlags & FD_PROGRESSUI.0 as u32, 0);
             let end = filename.iter().position(|unit| *unit == 0).unwrap();
             assert_eq!(String::from_utf16(&filename[..end]).unwrap(), long_name);
             let _ = GlobalUnlock(memory);
@@ -594,7 +645,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn windows_folder_drop_target_copies_virtual_files() {
+    async fn windows_folder_drop_target_copies_virtual_files_without_system_progress() {
         unsafe { OleInitialize(None) }.expect("OLE");
         let _apartment = OleApartment;
         let target_directory = tempfile::tempdir().expect("isolated drop folder");
@@ -612,13 +663,17 @@ mod tests {
         let formats = Formats::register().expect("formats");
         let state = Arc::new(DropState::default());
         let name = "Shell 验收.txt";
-        let bytes = b"from the virtual file stream";
+        let bytes = vec![42; 8 * 1024 * 1024];
+        let expected = bytes.clone();
+        let observer = VisibleWindowObserver::start();
         let data: IDataObject = DragData::new(
             vec![name.into()],
             formats,
             state.clone(),
             Box::new(move |directory| {
                 std::fs::write(directory.join(name), bytes).expect("staged fixture");
+                // Give the real Shell enough time to show its progress UI if requested.
+                std::thread::sleep(std::time::Duration::from_secs(2));
                 Ok(())
             }),
         )
@@ -629,7 +684,12 @@ mod tests {
         assert_eq!(effect, DROPEFFECT_COPY);
         assert!(!target_directory.path().join(name).exists());
         state.dropped.store(true, Ordering::Release);
+        let drop_started = std::time::Instant::now();
         unsafe { target.Drop(&data, MODIFIERKEYS_FLAGS(0), point, &mut effect) }.expect("drop");
+        assert!(
+            drop_started.elapsed() < std::time::Duration::from_secs(1),
+            "Shell must extract asynchronously so application progress and cancellation remain responsive"
+        );
         if state.extracting.load(Ordering::Acquire) {
             tokio::time::timeout(std::time::Duration::from_secs(10), state.ended.notified())
                 .await
@@ -638,7 +698,11 @@ mod tests {
         assert!(state.error.get().is_none());
         assert_eq!(
             std::fs::read(target_directory.path().join(name)).expect("Shell copied the file"),
-            bytes
+            expected
+        );
+        assert!(
+            !observer.shown.load(Ordering::Acquire),
+            "Shell displayed its own progress window"
         );
     }
 }

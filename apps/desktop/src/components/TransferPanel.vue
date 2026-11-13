@@ -4,28 +4,31 @@ import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed } from 'vue';
 import { useFilesStore } from '../stores/files';
-import { filesApi } from '../services/files';
-import { errorMessage } from '../services/ipc';
-import { bytes, taskLabels, unfinished, type TransferInfo } from '../types/files';
+import {
+  bytes,
+  taskLabels,
+  unfinished,
+  transferDuration,
+  transferRemainingTime,
+  type TransferInfo,
+} from '../types/files';
 const store = useFilesStore();
-const props = defineProps<{ hostId: string; history?: boolean }>();
+const props = defineProps<{ hostId: string; history?: boolean; hideHeading?: boolean }>();
 const tasks = computed(() =>
-  store.tasks.filter((task) => task.hostId === props.hostId && unfinished(task) !== props.history),
+  store.tasks.filter(
+    (task) =>
+      task.hostId === props.hostId &&
+      unfinished(task) !== props.history &&
+      (!task.dragExport || !props.history),
+  ),
 );
 defineEmits<{ retry: [task: TransferInfo] }>();
 function displayedSources(task: TransferInfo): string[] {
   return task.direction === 'upload' ? task.sources.map(displayLocalPath) : task.sources;
 }
 function displayedDestination(task: TransferInfo): string {
+  if (task.dragExport) return tr('拖放到的 Windows 文件夹');
   return task.direction === 'download' ? displayLocalPath(task.destination) : task.destination;
-}
-async function cancel(id: string): Promise<void> {
-  try {
-    await filesApi.cancel(id);
-    await store.poll();
-  } catch (cause) {
-    store.error = errorMessage(cause);
-  }
 }
 </script>
 <template>
@@ -34,11 +37,13 @@ async function cancel(id: string): Promise<void> {
     class="transfer-panel"
     :aria-label="history ? tr('已结束的传输') : tr('传输任务')"
   >
-    <div v-if="!history" class="section-heading">
+    <div v-if="!history && !hideHeading" class="section-heading">
       <h2>{{ tr('传输任务') }}</h2>
       <span>{{ tasks.length }}{{ tr(' 个未完成') }}</span>
     </div>
-    <p v-else class="subtle">{{ tr('关闭此主机后清除记录。重试会从头传输。') }}</p>
+    <p v-else-if="history" class="subtle">
+      {{ tr('关闭此主机后清除记录。重试会从头传输。') }}
+    </p>
     <div
       v-for="task in [...tasks].reverse()"
       :key="task.id"
@@ -46,19 +51,29 @@ async function cancel(id: string): Promise<void> {
       :data-task-id="task.id"
     >
       <div>
-        <strong
-          >{{ task.direction === 'upload' ? tr('↑ 上传') : tr('↓ 下载') }} ·
-          {{ taskLabels[task.state] ?? task.state }}</strong
-        ><span class="subtle"
-          >{{ task.filesDone }} / {{ task.filesTotal }}{{ tr(' 文件 · 跳过 ')
-          }}{{ task.skipped }}</span
-        >
-        <p
-          class="transfer-path"
-          :title="[...displayedSources(task), '→ ' + displayedDestination(task)].join('\n')"
-        >
-          {{ displayedSources(task).join('、') }} → {{ displayedDestination(task) }}
-        </p>
+        <div class="transfer-summary">
+          <strong
+            >{{ task.direction === 'upload' ? tr('↑ 上传') : tr('↓ 下载') }} ·
+            {{ taskLabels[task.state] ?? task.state }}</strong
+          ><span class="subtle"
+            >{{ task.filesDone }} / {{ task.filesTotal }}{{ tr(' 文件 · 跳过 ')
+            }}{{ task.skipped }}</span
+          >
+        </div>
+        <div class="transfer-paths">
+          <div>
+            <span class="subtle">{{ tr('文件') }}</span>
+            <p class="transfer-path" :title="displayedSources(task).join('\n')">
+              {{ displayedSources(task).join('、') }}
+            </p>
+          </div>
+          <div>
+            <span class="subtle">{{ tr('目标') }}</span>
+            <p class="transfer-path" :title="displayedDestination(task)">
+              {{ displayedDestination(task) }}
+            </p>
+          </div>
+        </div>
         <progress
           :max="Math.max(task.totalBytes, 1)"
           :value="
@@ -67,21 +82,35 @@ async function cancel(id: string): Promise<void> {
               : task.totalBytes - task.remainingBytes
           "
         ></progress>
-        <p>
-          {{ bytes(task.transferredBytes) }} / {{ bytes(task.totalBytes) }} ·
-          {{ bytes(task.bytesPerSecond) }}{{ tr('/s · 剩余 ') }}{{ bytes(task.remainingBytes) }}
-        </p>
+        <dl class="transfer-details">
+          <div>
+            <dt>{{ tr('已传输') }}</dt>
+            <dd>{{ bytes(task.transferredBytes) }}</dd>
+          </div>
+          <div>
+            <dt>{{ tr('总大小') }}</dt>
+            <dd>{{ bytes(task.totalBytes) }}</dd>
+          </div>
+          <div>
+            <dt>{{ tr('速度') }}</dt>
+            <dd>{{ bytes(task.bytesPerSecond) }}/s</dd>
+          </div>
+          <div>
+            <dt>{{ tr('剩余大小') }}</dt>
+            <dd>{{ bytes(task.remainingBytes) }}</dd>
+          </div>
+          <div>
+            <dt>{{ tr('已用时间') }}</dt>
+            <dd data-time="elapsed">{{ transferDuration(task.elapsedSeconds) }}</dd>
+          </div>
+          <div :title="tr('根据平均速度估算剩余数据传输时间，不含校验和提交耗时。')">
+            <dt>{{ tr('预计剩余时间') }}</dt>
+            <dd data-time="remaining">{{ transferRemainingTime(task) }}</dd>
+          </div>
+        </dl>
       </div>
       <button
-        v-if="unfinished(task)"
-        class="button"
-        :disabled="task.state === 'cancelling'"
-        :title="tr('取消保留已完成文件，提交中的单文件会等待结果')"
-        @click="cancel(task.id)"
-      >
-        {{ tr(' 取消传输') }}</button
-      ><button
-        v-else-if="['failed', 'cancelled'].includes(task.state)"
+        v-if="['failed', 'cancelled'].includes(task.state)"
         class="button"
         @click="$emit('retry', task)"
       >
