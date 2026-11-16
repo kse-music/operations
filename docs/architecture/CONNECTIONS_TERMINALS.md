@@ -1,6 +1,6 @@
 # 主机连接、凭据与终端
 
-本文说明 SSH 信任、连接复用、终端与上传协议。系统边界见[总体架构](ARCHITECTURE.md)，日常操作见[使用说明](../guides/USER_GUIDE.md)。
+本文说明 SSH 信任、连接复用、终端与上传协议。系统边界见[总体架构](ARCHITECTURE.md)，日常操作见[使用说明](https://ops.hiboot.cn/docs/)。
 
 ## 主机与凭据
 

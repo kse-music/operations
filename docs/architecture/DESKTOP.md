@@ -1,6 +1,6 @@
 # 桌面工作区与设置
 
-本文说明窗口、工作区、设置和界面资源的实现。系统入口见[总体架构](ARCHITECTURE.md)，日常操作见[使用说明](../guides/USER_GUIDE.md)。
+本文说明窗口、工作区、设置和界面资源的实现。系统入口见[总体架构](ARCHITECTURE.md)，日常操作见[使用说明](https://ops.hiboot.cn/docs/)。
 
 ## 工作区、设置和语言
 

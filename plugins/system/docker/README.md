@@ -2,9 +2,9 @@
 
 这是独立 UI v4 / WASM 标准插件。`frontend/` 维护 Vue 页面、交互和前端测试，`backend/` 维护命令、解析、策略和 Rust 测试；只使用公开 SDK 和普通库。内置分发及用户上传使用相同运行、授权与沙箱边界，当前版本和最低 API 以 [manifest](manifest.json) 为准。
 
-- [使用说明](../../../docs/guides/DOCKER.md)：容器、镜像、Compose、日志、Shell、归档和远程传输。
+- [使用说明](https://ops.hiboot.cn/docs/docker.html)：容器、镜像、Compose、日志、Shell、归档和远程传输。
 - [实现与生命周期](../../../docs/architecture/DOCKER.md)：查询授权、配置解析、缓存、日志监督与暂存清理。
-- [公开 SDK](../../../docs/plugins/PLUGIN_SDK.md)与[插件开发](../../../docs/plugins/PLUGIN_DEVELOPMENT.md)：接口、打包和安装。
+- [公开 SDK](../../../docs/plugins/PLUGIN_SDK.md)与[源码与构建契约](../../../docs/plugins/PLUGIN_BUILD_CONTRACT.md)：接口与打包约束；教程见[开发者中心](https://ops.hiboot.cn/developers/)。
 
 ## 构建与检查
 

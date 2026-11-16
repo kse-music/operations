@@ -33,4 +33,4 @@ Docker 提供容器/镜像/Compose、只读启动配置和环境变量、日志/
 
 ## 构建与扩展
 
-`plugins/system/packages/` 为可重建产物。第三方插件从独立开发包构建，通过界面上传，不加入内置注册。目录、构建和安装见[开发指南](PLUGIN_DEVELOPMENT.md)，能力和安全见[公开 SDK](PLUGIN_SDK.md)及[安全边界](PLUGIN_SECURITY.md)。
+`plugins/system/packages/` 为可重建产物。第三方插件从独立开发包构建，通过界面上传，不加入内置注册。源码布局、产物和安装数据边界见[源码与构建契约](PLUGIN_BUILD_CONTRACT.md)，能力和安全见[公开 SDK](PLUGIN_SDK.md)及[安全边界](PLUGIN_SECURITY.md)。

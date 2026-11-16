@@ -51,4 +51,17 @@ describe('downloadable plugin development kit', () => {
       }
     }
   });
+
+  it('ships offline contracts and links to the single maintained tutorial without website sources', () => {
+    const files = archive();
+    const readme = strFromU8(files['README.md']);
+    expect(files['docs/plugins/PLUGIN_BUILD_CONTRACT.md']).toBeDefined();
+    expect(files['docs/plugins/PLUGIN_DEVELOPMENT.md']).toBeUndefined();
+    expect(readme).toContain('https://ops.hiboot.cn/developers/quickstart.html');
+    expect(readme).not.toContain('npm run package');
+    expect(Object.keys(files).some((name) => name.startsWith('website/'))).toBe(false);
+    expect(strFromU8(files['docs/plugins/PLUGIN_BUILD_CONTRACT.md'])).toContain(
+      '[官网开发者中心](https://ops.hiboot.cn/developers/)',
+    );
+  });
 });

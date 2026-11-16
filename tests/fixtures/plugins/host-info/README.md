@@ -8,4 +8,4 @@
 
 在仓库根目录执行 `node tools/build-plugin.mjs tests/fixtures/plugins/host-info .local/host-info.sdplugin`，桌面设置 → 插件管理预览安装并承认未验证开发来源。授予 hosts.read、ssh.execute 与 ui.contribute；ssh.execute 本身不是只读授权，诊断动作执行的固定 uname 查询由本夹具定义并仍需宿主确认。设置页另需 settings.read/write。启用后打开 Host Info，连接并核验 SSH 指纹，再执行诊断。
 
-源码不是签名发行包；不申请文件写入权限，不获取凭据。卸载默认保留本插件设置。详细协议及限制参见[插件开发指南](../../../../docs/plugins/PLUGIN_DEVELOPMENT.md)。
+源码不是签名发行包；不申请文件写入权限，不获取凭据。卸载默认保留本插件设置。详细协议及限制参见[源码与构建契约](../../../../docs/plugins/PLUGIN_BUILD_CONTRACT.md)。

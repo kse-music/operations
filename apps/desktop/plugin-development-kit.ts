@@ -50,7 +50,7 @@ function createArchive(): Uint8Array {
     'tools/build-space.mjs',
     'tools/package-plugin.mjs',
     'docs/plugins/PLUGIN_ARCHITECTURE.md',
-    'docs/plugins/PLUGIN_DEVELOPMENT.md',
+    'docs/plugins/PLUGIN_BUILD_CONTRACT.md',
     'docs/plugins/PLUGIN_SDK.md',
     'docs/plugins/PLUGIN_UI_EXTENSION.md',
     'docs/plugins/PLUGIN_PACKAGE_FORMAT.md',

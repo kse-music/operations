@@ -25,66 +25,11 @@ svg {
 .skip-link:focus {
   top: 15px;
 }
-.site-header-shell {
-  position: sticky;
-  top: 0;
-  z-index: 30;
-  background: #0e1414ed;
-  backdrop-filter: blur(18px);
-  border-bottom: 1px solid #26332d;
-}
-.site-header {
-  height: 82px;
-  border-bottom: 0;
-}
-.site-nav {
-  gap: 25px;
-  font-size: 12px;
-}
-.site-nav a {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.site-nav .nav-download {
-  color: #c3e6d5;
-  border-color: #385046;
-  gap: 16px;
-}
-.site-nav .github-link {
-  padding: 8px;
-  color: #b5c9bd;
-}
-.menu-toggle {
-  background: transparent;
-}
 .brand {
   letter-spacing: -0.7px;
 }
 .brand img {
   flex-shrink: 0;
-}
-.release-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 10px;
-  color: #aac9b6;
-  background: #1b2b22;
-  border: 1px solid #314d3c;
-  border-radius: 30px;
-  font-size: 10px;
-}
-.release-pill .status-dot {
-  margin-right: 0;
-  width: 5px;
-  height: 5px;
-}
-.pill-divider {
-  height: 10px;
-  width: 1px;
-  background: #3d5646;
-  margin-inline: 3px;
 }
 .hero-a {
   padding-block: 67px 74px;
@@ -93,7 +38,6 @@ svg {
   grid-template-columns: 0.95fr 1.15fr;
 }
 .hero-a .hero-eyebrow {
-  margin-top: 24px;
   font-size: 8px;
   color: #8ca995;
 }
@@ -105,14 +49,6 @@ svg {
 .hero-a .hero-description {
   margin-top: 22px;
   font-size: 14px;
-}
-.hero-a .platform-note {
-  margin-top: 17px;
-  font-size: 10px;
-  line-height: 1.9;
-}
-.platform-note > span {
-  color: #87a18e;
 }
 .workspace {
   border-color: #354b40;
@@ -513,121 +449,6 @@ svg {
   line-height: 2;
   margin-top: 16px;
 }
-.download-section {
-  margin-bottom: 85px;
-  padding: 58px 65px;
-  background: #182820;
-  border: 1px solid #324e3e;
-  border-radius: 10px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
-  gap: 100px;
-}
-.download-copy .eyebrow {
-  color: #88b295;
-}
-.download-copy h2 {
-  font-size: 43px;
-  margin-top: 20px;
-  line-height: 1.45;
-}
-.download-copy > p:not(.eyebrow) {
-  color: #93af9b;
-  font-size: 12px;
-  margin-top: 20px;
-  line-height: 1.8;
-}
-.open-source-note {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  color: #8baa93;
-  font-size: 10px;
-  flex-wrap: wrap;
-  margin-top: 23px;
-}
-.open-source-note .lucide {
-  vertical-align: middle;
-}
-.download-card {
-  min-width: 0;
-  background: #101d16;
-  border: 1px solid #304939;
-  padding: 25px;
-  border-radius: 7px;
-}
-.download-platform {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 24px;
-}
-.download-platform > .lucide {
-  color: #a2d3b0;
-}
-.download-platform h3 {
-  font-size: 19px;
-  font-weight: 500;
-}
-.download-platform p {
-  font-size: 10px;
-  color: #91ac97;
-  margin-top: 5px;
-}
-.download-platform > span {
-  margin-left: auto;
-  font:
-    10px Consolas,
-    monospace;
-  color: #8db19a;
-  padding: 5px 8px;
-  background: #223b2b;
-  border-radius: 4px;
-}
-.download-card .button-primary {
-  width: 100%;
-  font-size: 12px;
-  gap: 9px;
-}
-.download-card .button-primary > span {
-  font-size: 9px;
-  margin-left: auto;
-  opacity: 0.65;
-}
-.release-details {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  font-size: 9px;
-  line-height: 1.8;
-  color: #8aa491;
-  margin-top: 13px;
-}
-.release-details .lucide {
-  vertical-align: middle;
-  margin-left: 3px;
-}
-.download-other {
-  display: flex;
-  justify-content: space-between;
-  gap: 15px;
-  padding-block: 18px;
-  margin-top: 14px;
-  border-block: 1px solid #293d2f;
-  color: #a8c1ad;
-  font-size: 10px;
-}
-.download-other a:hover {
-  color: #81e7b4;
-}
-.other-platforms {
-  font-size: 9px;
-  color: #819b87;
-  margin-top: 16px;
-  line-height: 1.9;
-}
 .footer-links > a {
   color: #a0b6a7;
   padding-block: 8px;
@@ -747,9 +568,6 @@ svg {
   .wrap {
     width: calc(100% - 72px);
   }
-  .site-nav {
-    gap: 17px;
-  }
   .hero-a {
     gap: 35px;
   }
@@ -789,28 +607,13 @@ svg {
   .assistant-section {
     gap: 50px;
   }
-  .download-section {
-    gap: 50px;
-    padding-inline: 45px;
-  }
 }
 @media (max-width: 960px) {
   .wrap {
     width: calc(100% - 60px);
   }
-  .site-nav {
-    gap: 14px;
-    font-size: 11px;
-  }
-  .site-nav .nav-download {
-    padding: 10px;
-    gap: 8px;
-  }
   .brand {
     font-size: 21px;
-  }
-  .site-header {
-    height: 76px;
   }
   .hero-a {
     grid-template-columns: 1fr;
@@ -958,66 +761,12 @@ svg {
   .faq-list summary {
     font-size: 12px;
   }
-  .download-section {
-    gap: 35px;
-    padding: 38px 32px;
-  }
-  .download-copy h2 {
-    font-size: 35px;
-  }
-  .download-card {
-    padding: 20px;
-  }
   .footer-links {
     gap: 18px;
     font-size: 11px;
   }
 }
 @media (max-width: 720px) {
-  .site-nav {
-    display: none;
-    position: absolute;
-    top: 65px;
-    left: 0;
-    right: 0;
-    background: #111c16;
-    border: 1px solid #344d3d;
-    padding: 16px;
-    border-radius: 7px;
-    box-shadow: 0 15px 35px #0005;
-  }
-  .site-nav.open {
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-  }
-  .site-nav a {
-    padding: 13px 8px;
-    font-size: 13px;
-    min-height: 44px;
-  }
-  .site-nav .nav-download {
-    justify-content: center;
-    margin-top: 8px;
-    padding: 13px;
-  }
-  .site-nav .github-link {
-    display: none;
-  }
-  .menu-toggle {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 10px;
-    min-height: 44px;
-    min-width: 44px;
-    color: #b9d2c1;
-  }
-  .site-header {
-    position: relative;
-    height: 76px;
-  }
   .section-heading {
     align-items: flex-start;
     flex-direction: column;
@@ -1048,15 +797,6 @@ svg {
     grid-template-columns: 1fr;
     gap: 35px;
   }
-  .download-section {
-    gap: 35px;
-    grid-template-columns: 1fr;
-    padding: 35px;
-  }
-  .download-card {
-    max-width: 480px;
-    width: 100%;
-  }
   .site-footer {
     grid-template-columns: 1fr;
     gap: 25px;
@@ -1084,15 +824,9 @@ svg {
     padding-block: 30px 45px;
     gap: 35px;
   }
-  .release-pill {
-    font-size: 9px;
-    padding: 7px 10px;
-    gap: 7px;
-  }
   .hero-a .hero-eyebrow {
     font-size: 7px;
     letter-spacing: 0.8px;
-    margin-top: 25px;
   }
   .hero-a h1 {
     font-size: 35px;
@@ -1115,10 +849,6 @@ svg {
     padding-inline: 15px;
     gap: 8px;
     min-height: 45px;
-  }
-  .hero-a .platform-note {
-    font-size: 9px;
-    margin-top: 14px;
   }
   .hero-a-visual .app-sidebar,
   .explorer-preview .app-sidebar {
@@ -1422,64 +1152,6 @@ svg {
   }
   .faq-list details p {
     font-size: 12px;
-  }
-  .download-section {
-    padding: 28px 22px;
-    gap: 28px;
-    margin-bottom: 50px;
-  }
-  .download-copy .eyebrow {
-    font-size: 8px;
-  }
-  .download-copy h2 {
-    font-size: 34px;
-    margin-top: 17px;
-  }
-  .download-copy > p:not(.eyebrow) {
-    font-size: 11px;
-    line-height: 1.9;
-    margin-top: 17px;
-  }
-  .open-source-note {
-    font-size: 9px;
-    gap: 7px;
-  }
-  .download-card {
-    padding: 18px;
-  }
-  .download-platform {
-    gap: 10px;
-    margin-bottom: 20px;
-  }
-  .download-platform > .lucide {
-    width: 25px;
-    height: 25px;
-  }
-  .download-platform h3 {
-    font-size: 17px;
-  }
-  .download-platform > span {
-    font-size: 9px;
-  }
-  .download-card .button-primary {
-    padding-inline: 13px;
-    font-size: 11px;
-    gap: 7px;
-  }
-  .download-card .button-primary > span {
-    font-size: 8px;
-  }
-  .release-details {
-    font-size: 8px;
-    gap: 8px;
-  }
-  .download-other {
-    font-size: 9px;
-    gap: 9px;
-    padding-block: 16px;
-  }
-  .other-platforms {
-    font-size: 9px;
   }
   .site-footer {
     padding-block: 30px 23px;

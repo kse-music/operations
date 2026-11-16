@@ -14,7 +14,7 @@ ServerDeck 是面向开发者和运维人员的本地优先服务器工作台，
 - **模型与插件管理**：远程 OpenAI 兼容模型、本地 Codex/Claude Code 来源；本地插件包安装、权限、配置、启停和卸载，以及可下载的独立开发包。
 - **桌面工作区**：主机标签、全局搜索、深浅主题、中英文、字号与快捷键设置、数据目录迁移和安全退出。
 
-功能边界见[产品基线](docs/product/PRD.md)，操作见[使用说明](docs/guides/USER_GUIDE.md)。
+功能边界见[产品基线](docs/product/PRD.md)，操作见[使用说明](https://ops.hiboot.cn/docs/)。
 
 ## 平台与版本
 
@@ -22,14 +22,9 @@ ServerDeck 是面向开发者和运维人员的本地优先服务器工作台，
 
 Windows x64 是首要发布验收平台；macOS/Linux 客户端及其他架构须分别完成原生验收。界面支持简体中文和 English。源码可构建不等于安装包或所有平台已经通过发布验收，发布前按[检查表](docs/release/RELEASE_CHECKLIST.md)逐项确认。
 
-## 快速开始
+## 开始使用
 
-本仓库提供源码；安装器和校验文件由发布流程另行分发。安装前阅读[安装与升级](docs/guides/USER_GUIDE.md#安装与升级)。
-
-1. 新建主机，填写地址、端口、用户名和认证信息，测试连接后保存。
-2. 首次连接通过可信渠道核对 SHA-256 主机指纹；密钥变化时停止连接并排查。
-3. 双击主机打开工作区，在 SSH、SFTP、Docker 和 AI 助手之间切换。
-4. 使用助手前，在“设置 → 模型”准备模型，再在助手插件设置中保存绑定。
+安装与日常操作统一见[官网用户文档](https://ops.hiboot.cn/docs/)，首次使用可阅读[安装与升级](https://ops.hiboot.cn/docs/installation.html)和[连接第一台主机](https://ops.hiboot.cn/docs/quickstart.html)。插件作者从[开发者中心](https://ops.hiboot.cn/developers/)开始。
 
 ## 开发与构建
 
@@ -62,6 +57,6 @@ npm run tauri -- dev
 
 ## 文档与许可
 
-[文档导航](docs/README.md)提供产品、使用、架构、插件和发布入口；开发要求见 [AGENTS.md](AGENTS.md)。
+[文档导航](docs/README.md)提供研发、架构、插件契约、发布验收与官网使用文档入口；开发要求见 [AGENTS.md](AGENTS.md)。
 
 项目采用 [MIT 许可证](LICENSE)。第三方依赖及许可证见[依赖清单](docs/release/DEPENDENCY_INVENTORY.md)和[第三方声明](docs/release/THIRD_PARTY_NOTICES.txt)。

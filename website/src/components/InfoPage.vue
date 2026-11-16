@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, ExternalLink } from '@lucide/vue';
+import { ArrowLeft, ArrowRight, ExternalLink } from '@lucide/vue';
 import { links } from '../content';
 defineProps<{ kind: 'privacy' | 'security' }>();
 </script>
@@ -22,6 +22,9 @@ defineProps<{ kind: 'privacy' | 'security' }>();
         <p>
           官网展示产品信息，并提供官方安装包、文档及源码入口。页面不设置账户、联系表单、广告追踪、分析埋点或
           Cookie，也不读取你的主机、终端或模型数据。工作台演示仅使用随页面打包的示例数据。
+        </p>
+        <p>
+          使用文档与开发者中心在本站阅读；搜索在浏览器内完成，不向第三方搜索服务发送查询。官网和文档会在浏览器本地保存外观偏好，可通过清除此站点数据移除。
         </p>
         <p>
           托管平台会为页面分发、访问控制与服务安全处理正常网络请求信息，例如 IP
@@ -54,8 +57,8 @@ defineProps<{ kind: 'privacy' | 'security' }>();
       <section>
         <h2>下载、更新与外部链接</h2>
         <p>
-          安装包、软件更新和项目资源通过 GitHub
-          提供。点击下载、访问源码或打开文档时，浏览器会请求对应外部服务；桌面应用的更新检查也会访问固定的
+          安装包、软件更新和项目源码通过 GitHub
+          提供。点击下载、访问源码或问题反馈时，浏览器会请求对应外部服务；桌面应用的更新检查也会访问固定的
           GitHub HTTPS 分发源。这些外部服务适用各自的隐私与访问政策。
         </p>
       </section>
@@ -123,9 +126,7 @@ defineProps<{ kind: 'privacy' | 'security' }>();
         <p>
           macOS、Linux、其他架构及安装升级链路须分别验收；本网站的存在不代表所有平台已经完成产品验收。
         </p>
-        <a class="legal-link" :href="links.security" target="_blank" rel="noopener noreferrer"
-          >阅读完整安全说明 <ExternalLink :size="14"
-        /></a>
+        <a class="legal-link" :href="links.security">阅读完整安全说明 <ArrowRight :size="14" /></a>
       </section>
     </template>
   </main>

@@ -1,6 +1,6 @@
 # 软件更新分发
 
-ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github.com/kse-music/operations/releases) 分发 Windows x64 安装版、Linux x86_64 的 deb/AppImage，以及 macOS Intel、Apple Silicon（M 系列）的 DMG 和应用 ZIP。应用内更新仅面向 Windows，Linux、macOS 包供手动下载安装升级。客户端行为见[使用说明](../guides/USER_GUIDE.md#安装与升级)，运行期与信任边界见[架构](../architecture/ARCHITECTURE.md#软件更新)。无需独立更新业务服务器。安装包不提交进 Git，也不使用有保留期限的 Actions Artifact 作为用户下载源。
+ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github.com/kse-music/operations/releases) 分发 Windows x64 安装版、Linux x86_64 的 deb/AppImage，以及 macOS Intel、Apple Silicon（M 系列）的 DMG 和应用 ZIP。应用内更新仅面向 Windows，Linux、macOS 包供手动下载安装升级。客户端行为见[使用说明](https://ops.hiboot.cn/docs/installation.html)，运行期与信任边界见[架构](../architecture/ARCHITECTURE.md#软件更新)。无需独立更新业务服务器。安装包不提交进 Git，也不使用有保留期限的 Actions Artifact 作为用户下载源。
 
 ## 发布文件
 

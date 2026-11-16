@@ -1,6 +1,6 @@
 # 开发、构建与验证
 
-开发约束见根目录 [AGENTS.md](../../AGENTS.md)，模块入口见[总体架构](../architecture/ARCHITECTURE.md)。本页维护源码准备和本地检查；发布流程见[发布检查表](../release/RELEASE_CHECKLIST.md)，第三方插件作者使用[独立开发包](../plugins/PLUGIN_DEVELOPMENT.md)。
+开发约束见根目录 [AGENTS.md](../../AGENTS.md)，模块入口见[总体架构](../architecture/ARCHITECTURE.md)。本页维护源码准备和本地检查；发布流程见[发布检查表](../release/RELEASE_CHECKLIST.md)，第三方插件作者使用[官网开发者中心](https://ops.hiboot.cn/developers/)。
 
 ## 环境与资源
 
@@ -29,6 +29,10 @@ npm run tauri -- dev
 
 内置插件内容改变须提高自身 manifest 版本并重建客户端；同版本重打包不会替换已安装内容。源码删除不自动卸载用户安装。规则见[插件版本约定](../plugins/PLUGIN_API_VERSIONING.md)。
 
+### 内置插件源码接入
+
+在 `plugins/system/<小写目录名>/` 新增符合[源码与构建契约](../plugins/PLUGIN_BUILD_CONTRACT.md)的完整目录，保持 ID 唯一。运行 `npm run plugins:build` 或正常桌面构建，工具会发现、独立编译并生成包和嵌入注册表；无需修改 Cargo workspace、注册数组或宿主页面。新增目录后需重新构建客户端，不是运行时热安装。第三方作者的入门和操作步骤由[官网开发者中心](https://ops.hiboot.cn/developers/)维护。
+
 ## 应用版本与构建
 
 应用唯一版本源为根 [Cargo.toml](../../Cargo.toml) 的 `[workspace.package].version`。桌面 dev/build 检查来源，并通过 `cargo update --workspace` 同步工作区锁记录，不更新锁定的第三方依赖；提交生成的 `Cargo.lock`。SDK、插件、数据库和配置格式独立管理版本。
@@ -50,7 +54,7 @@ node tools/tauri.mjs build --debug --no-bundle
 
 指定 `--target` 时 Cargo 产物位于 `target/<目标三元组>/...`。已有相配的当前 Release EXE 时，`node tools/tauri.mjs bundle --bundles nsis` 可只打安装器。路径不是下载地址；更新签名和 Windows 发布者签名分别处理，见[更新分发](../release/UPDATES.md)。
 
-前端构建生成开发包，包含公开 SDK、锁文件、样例、工具和插件规范。文档或 SDK 调整后同时检查包内副本和相对链接，在仓库外执行独立准备/构建；仅检查源码目录不能证明下载包可用。
+前端构建生成开发包，包含公开 SDK、锁文件、样例、工具和插件契约，README 只提供官网教程及包内规范入口，不复制教程。文档或 SDK 调整后同时检查包内副本和相对链接，在仓库外执行独立准备/构建；仅检查源码目录不能证明下载包可用。用户指南和第三方开发教程在官网独立项目维护，修改产品操作或接口时同步对应教程；公开契约先修改本仓库，再显式按 SDK 版本导入官网，不建立本地构建依赖。
 
 ## 本地检查
 

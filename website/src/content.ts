@@ -1,27 +1,17 @@
-import releaseData from './release.json';
-
 const repository = 'https://github.com/kse-music/operations';
+const docsOrigin = import.meta.env.DEV ? 'http://127.0.0.1:4181' : '';
 export const links = {
   repository,
   releases: `${repository}/releases`,
   latest: `${repository}/releases/latest`,
-  guide: `${repository}/blob/main/docs/guides/USER_GUIDE.md`,
-  docker: `${repository}/blob/main/docs/guides/USER_GUIDE.md#docker-和插件`,
-  assistant: `${repository}/blob/main/docs/guides/AI_ASSISTANT.md`,
-  plugins: `${repository}/blob/main/docs/plugins/PLUGIN_DEVELOPMENT.md`,
-  security: `${repository}/blob/main/docs/release/SECURITY.md`,
+  guide: `${docsOrigin}/docs/`,
+  installation: `${docsOrigin}/docs/installation.html`,
+  docker: `${docsOrigin}/docs/docker.html`,
+  assistant: `${docsOrigin}/docs/assistant.html`,
+  plugins: `${docsOrigin}/developers/`,
+  security: `${docsOrigin}/docs/security.html`,
   issues: `${repository}/issues`,
-  license: `${repository}/blob/main/LICENSE`,
-};
-export const release = {
-  ...releaseData,
-  sizeLabel: `${(releaseData.size / 1024 / 1024).toFixed(1)} MB`,
-  dateLabel: new Date(releaseData.publishedAt).toLocaleDateString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }),
+  license: `${docsOrigin}/docs/license.html`,
 };
 export type Tool = 'terminal' | 'files' | 'docker' | 'assistant';
 export const tools: { id: Tool; name: string; title: string; description: string }[] = [

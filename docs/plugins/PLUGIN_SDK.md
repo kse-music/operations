@@ -211,4 +211,4 @@ Context 只含主题/字号、入口 hostId、可见状态和获授权的公开�
 
 WASM 错误响应的 `code` 最多 80 字节，`message` 最多 1024 字节。Rust SDK 的 `json_error`（包括 `backend::Runtime` 返回的动作错误）在序列化边界保留限额内的原文，超限时保留 UTF-8 完整前缀并追加 `... [truncated]`，标记计入字节上限。远程命令失败仍返回 `REMOTE_COMMAND`，不会因长诊断变成协议故障或使插件崩溃；手写响应仍须遵守限额，宿主严格拒绝不合规消息。
 
-参见[开发指南](PLUGIN_DEVELOPMENT.md)、[安全边界](PLUGIN_SECURITY.md)、[运行时](PLUGIN_RUNTIME.md)。
+参见[源码与构建契约](PLUGIN_BUILD_CONTRACT.md)、[安全边界](PLUGIN_SECURITY.md)、[运行时](PLUGIN_RUNTIME.md)。

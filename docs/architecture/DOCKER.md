@@ -1,6 +1,6 @@
 # Docker 插件实现
 
-Docker 业务位于 `plugins/system/docker/`，只消费[公开 SDK](../plugins/PLUGIN_SDK.md)。操作见[Docker 使用说明](../guides/DOCKER.md)，插件平台边界见[插件架构](../plugins/PLUGIN_ARCHITECTURE.md)。
+Docker 业务位于 `plugins/system/docker/`，只消费[公开 SDK](../plugins/PLUGIN_SDK.md)。操作见[Docker 使用说明](https://ops.hiboot.cn/docs/docker.html)，插件平台边界见[插件架构](../plugins/PLUGIN_ARCHITECTURE.md)。
 
 ## 查询与变更授权
 

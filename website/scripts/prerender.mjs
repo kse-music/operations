@@ -1,11 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
 import { render } from '../.ssr/entry-server.js';
+import { siteOrigin as origin } from './site-config.mjs';
 
 // A real origin is supplied by Sites or the explicitly selected custom domain.
-const origin = process.env.WEBSITE_ORIGIN || 'https://ops.hiboot.cn';
-const parsedOrigin = new URL(origin);
-if (parsedOrigin.protocol !== 'https:' || parsedOrigin.origin !== origin)
-  throw new Error('WEBSITE_ORIGIN 必须为无路径的 HTTPS 站点源。');
 const pages = [
   ['index.html', 'home', '/'],
   ['privacy.html', 'privacy', '/privacy.html'],
@@ -23,18 +20,13 @@ for (const [file, page, path] of pages) {
       `<link rel="canonical" href="${origin}${path}" /><meta property="og:url" content="${origin}${path}" /><meta property="og:image" content="${origin}/assets/social-card.png" /></head>`,
     );
   if (page === 'home') {
-    const release = JSON.parse(
-      await readFile(new URL('../src/release.json', import.meta.url), 'utf8'),
-    );
     const data = {
       '@context': 'https://schema.org',
       '@type': 'SoftwareApplication',
       name: 'ServerDeck',
       applicationCategory: 'DeveloperApplication',
       operatingSystem: 'Windows',
-      softwareVersion: release.version,
       url: origin,
-      downloadUrl: release.downloadUrl,
       license: 'https://github.com/kse-music/operations/blob/main/LICENSE',
       description: '本地服务器工作台，通过 SSH/SFTP 管理终端、文件和 Docker，并提供 AI 运维助手。',
     };

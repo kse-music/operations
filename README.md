@@ -14,7 +14,7 @@ ServerDeck is a local-first server workbench for developers and operations teams
 - **Model and plugin management**: Remote OpenAI-compatible models and local Codex/Claude Code sources; local plugin package installation, permissions, configuration, enabling, disabling, and removal, plus a downloadable standalone development kit.
 - **Desktop workspace**: Host tabs, global search, light and dark themes, Chinese and English interfaces, font size and keyboard shortcut settings, data directory migration, and safe shutdown.
 
-See the [product baseline](docs/product/PRD.md) for feature boundaries and the [user guide](docs/guides/USER_GUIDE.md) for instructions.
+See the [product baseline](docs/product/PRD.md) for feature boundaries and the [user guide](https://ops.hiboot.cn/docs/) for instructions.
 
 ## Platforms and Versioning
 
@@ -22,14 +22,9 @@ The application version has a single source of truth: `[workspace.package].versi
 
 Windows x64 is the primary release validation platform. macOS, Linux, and other architectures require separate native validation. The interface supports Simplified Chinese and English. A successful source build does not establish that installers or all platforms have passed release validation; follow the [release checklist](docs/release/RELEASE_CHECKLIST.md) before publishing.
 
-## Quick Start
+## Getting Started
 
-This repository provides source code. Installers and checksum files are distributed separately through the release process. Read [installation and upgrades](docs/guides/USER_GUIDE.md#安装与升级) before installing.
-
-1. Create a host, enter its address, port, username, and authentication details, test the connection, and save it.
-2. On the first connection, verify the SHA-256 host fingerprint through a trusted channel. If the key changes, stop connecting and investigate.
-3. Double-click a host to open its workspace and switch between SSH, SFTP, Docker, and the AI assistant.
-4. Before using the assistant, configure a model in **Settings → Models**, then save the model binding in the assistant plugin settings.
+See the official [installation guide](https://ops.hiboot.cn/docs/installation.html) and [first connection tutorial](https://ops.hiboot.cn/docs/quickstart.html). Plugin authors can start in the [developer center](https://ops.hiboot.cn/developers/).
 
 ## Development and Build
 
@@ -62,6 +57,6 @@ See the [security notes](docs/release/SECURITY.md) for the full boundaries.
 
 ## Documentation and License
 
-The [documentation index](docs/README.md) links to product, usage, architecture, plugin, and release documentation. Development requirements are in [AGENTS.md](AGENTS.md).
+The [documentation index](docs/README.md) links to product development, architecture, public plugin contracts, release validation, and the official user documentation. Development requirements are in [AGENTS.md](AGENTS.md).
 
 This project is licensed under the [MIT License](LICENSE). See the [dependency inventory](docs/release/DEPENDENCY_INVENTORY.md) and [third-party notices](docs/release/THIRD_PARTY_NOTICES.txt) for third-party dependencies and licenses.

@@ -1,0 +1,224 @@
+---
+title: 'SDK 5.7.1 参考'
+description: 'ServerDeck SDK 5.7.1 的SDK 5.7.1 参考，包含当前公开契约和安全边界。'
+reference: true
+---
+
+<div v-pre>
+
+# Plugin SDK 5.7.1
+
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.7.1**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
+
+## 职责边界
+
+插件提供完整业务：页面、命令/SQL、参数校验、结果解析、健康规则、提示词、工具循环、计划及复查。SDK 只提供平台协议、调用客户端、生命周期和通用界面基础。宿主管理身份、凭据、SSH/SFTP、模型传输、权限、审批和资源配额。
+
+SDK **没有** Docker / MySQL / AI 运维助手业务接口，也没有桌面 Store、任意 Tauri 转发、系统查询枚举或特定插件 ID 的特权分支。容器操作由插件通过通用 SSH 执行 `docker`，模型业务由插件构造消息调用通用模型能力。新增服务插件只新增完整插件目录；无需修改 SDK、宿主路由或原生业务后端。
+
+插件文件原语只使用主机 SSH 登录身份的 SFTP 租约，不继承桌面文件页手动切换的 sudo 用户或密码。文件页处于 sudo 身份或切换中时，`connections.ensureConnection(hostId, true)` 明确要求先切回原登录用户，不报告虚假的连接成功；桌面切用户不扩大插件已授权的目录或身份。
+
+| 内容                             | 位置 / 入口                                          |
+| -------------------------------- | ---------------------------------------------------- |
+| Rust 协议、顺序 async 动作执行器 | `crates/plugin-sdk/src/{lib,platform,backend}.rs`    |
+| Vue/TS SDK                       | `packages/plugin-sdk/src/`，`@serverdeck/plugin-sdk` |
+| 独立页面启动                     | `runtime` → `mountPlugin(App)`                       |
+| 本包声明的 WASM 动作             | `invoke<T>(action, input, options?)`                 |
+| 平台原语                         | `platform` → `call<T>(request)`                      |
+| 安全公开元数据                   | `context` → `usePlatformContext()`                   |
+| 界面语言与词典                   | `i18n` → `locale` / `createTranslator(english)`      |
+| 连接 / 终端 / 取消 / 草稿        | `connections` / `terminal` / `actions` / `drafts`    |
+| 通用组件                         | `ui/{Modal,OpsTable,TrendChart,StreamDialog}.vue`    |
+
+`paths.displayLocalPath(path)` 仅用于本机路径显示：Windows 扩展盘符和 UNC 路径显示为普通形式，其他路径保持原文。调用文件原语时保留原始路径，不能将显示转换用于权限或路径校验。
+
+`StreamDialog` 使用宽弹窗，固定标题/工具栏并让输出区独立滚动。「清屏」重置本地 LogBuffer 和显示预算、恢复跟随，后续收到的内容继续追加；保留过滤条件、UTF-8 解码器及暂停/错误状态，不发起平台调用、不重建流。复制和导出只读取清屏后剩余的可见缓存。首次打开和默认跟随时滚到最新输出，用户向上翻阅后停止自动滚动但继续接收；“最新日志”或暂停后的“继续”恢复跟随。窗口尺寸/字号变化时仅在跟随模式重新定位末尾。过滤、复制、导出、1 MiB/5000 行缓存及隐藏/卸载释放自有流的边界不变，显示操作不改变流的执行和释放规则。
+
+下载的开发包包含上述两端 SDK、工具、锁文件、文档和完整样例，无需 ServerDeck 源码或 Tauri 工具链。
+
+公开 `PlatformContext.language` 为 `'zh-CN' | 'en-US'`，由宿主已保存偏好经绑定的 MessageChannel 推送。`mountPlugin` 自动同步响应式 `locale` 及 HTML `lang`；语言变化不重挂载、不改变可见性或权限，也不触发业务查询。插件维护自己的字典，仅翻译界面拥有的文本，不能遍历翻译主机名称、文件内容或命令输出。通用 SDK 组件已支持两种语言；UI 标题可继续使用现有 `PluginLabel` 双语对象。示例：
+
+```ts
+import { createTranslator } from '@serverdeck/plugin-sdk/i18n';
+const tr = createTranslator({ 刷新: 'Refresh', '主机 {0}': 'Host {0}' });
+// 在模板或 computed 中调用以响应语言变化；参数保持原文。
+// <button>{{ tr('刷新') }}</button>
+// <span>{{ tr('主机 {0}', host.name) }}</span>
+```
+
+`invoke` 可通过 `options.confirmation` 提供 `{title,message,confirmLabel?}` 纯文本业务说明，仅改变本次宿主确认弹窗的呈现。宿主冻结说明，始终保留原生审批的真实目标与完整命令；有真实目标时正文只展示目标及业务说明，不展示执行详情或命令脚本；完整命令仍由原生审批绑定。字段限制、缺失目标行为及边界见 [UI 契约](/developers/reference/ui.html)。该说明不能批准执行、替换目标或重放动作。
+
+## Rust 动作
+
+```rust
+use serverdeck_plugin_sdk::{
+    ApiError, backend::{Action, Context, Runtime}, platform::Command,
+    serde_json::{Value, json},
+};
+fn dispatch(context: Context, action: String, input: Value) -> Action {
+    Box::pin(async move {
+        if action != "inspect" { return Err(ApiError::new("ACTION", "未知动作")); }
+        let host = input["hostId"].as_str()
+            .filter(|host| !host.is_empty())
+            .ok_or_else(|| ApiError::new("HOST", "请选择主机"))?;
+        let result = context.execute(host, Command::new("free").arg("-b"))
+            .await?.checked()?;
+        // 这里由插件解析真实输出并判断健康状态。
+        Ok(json!({"output": result.stdout}))
+    })
+}
+std::thread_local! {
+    static RUNTIME: std::cell::RefCell<Runtime> =
+        std::cell::RefCell::new(Runtime::new(dispatch));
+}
+fn handle(opcode: i32, payload: Value) -> Value {
+    RUNTIME.with_borrow_mut(|runtime| runtime.handle(opcode, payload))
+}
+serverdeck_plugin_sdk::export_plugin!(handle);
+```
+
+每个动作中的平台调用须**顺序 await**。执行器保存原 Future；遇到审批时宿主保存续接状态，批准/拒绝后送回原等待点，不重跑动作开头。不要自己重试已提交的写操作。取消会以 `USER_CANCELLED` 返回，插件可收尾和返回部分结果；关闭/撤权会强制终止该作用域。
+
+`Context::request(platform::Request)` 返回 JSON；`execute(...).checked()` 拒绝非零、未知退出码及截断。`info()` 提供时间、随机 nonce、安装修订和作用域信息。`Host` / `Model` 请求返回不透明 `binding`，可用 `context.with_bindings(vec![binding])` 将后续操作绑定到原 SSH 配置或模型修订；失效须重新准备，不能静默改投其他目标。
+
+## 平台原语及权限
+
+Rust 完整类型在 `platform.rs`，TS 对应 `types/platform.ts`。后端 `Capability` 只有 `Platform { request, bindings }`，身份和页面 owner 由可信宿主绑定。目标使用明确的登记 `hostId`，不使用界面当前选中主机或内部 session ID。
+
+| 请求 kind                                      | 用途                              | 权限 / operation                                                      |
+| ---------------------------------------------- | --------------------------------- | --------------------------------------------------------------------- |
+| `info`                                         | 时间、nonce、当前插件/作用域修订  | `ui.contribute`                                                       |
+| `hosts`, `host`                                | 安全资产目录、指定主机及修订绑定  | `hosts.read`                                                          |
+| `models`, `model`, `model_complete`            | 安全模型目录/绑定、插件自备消息   | `models.use`                                                          |
+| `execute`                                      | 单次 SSH 命令，真实退出状态与输出 | `ssh.execute`                                                         |
+| `stream_open/poll/pause/stop`                  | 任意已批准命令的有界 ACK 字节流   | `ssh.execute`                                                         |
+| `terminal`                                     | 已批准命令的一次性 PTY 票据       | `ssh.execute`                                                         |
+| `read_file`, `close_file`                      | 受目录范围约束的文本编辑句柄      | `sftp.read`                                                           |
+| `save_file`, `file_dirty`                      | 冲突检测、原子保存、退出保护      | `sftp.write`                                                          |
+| `transfer_prepare/start/status/cancel/close`   | 单文件本机上传及双端中转任务      | `sftp.transfer`；准备/启动另需目标 `sftp.write`，远程源需 `sftp.read` |
+| `transfer_download_prepare`                    | 远程普通文件下载到本机的准备      | `sftp.transfer`、源 `sftp.read`；启动仍使用 `transfer_start`          |
+| `settings_read/write`                          | 本插件独立 JSON 配置              | `settings.read/write`                                                 |
+| `notify`                                       | 有界通知                          | `ui.contribute` / `ui.notify`                                         |
+| `tcp_connect`                                  | 从本机探测目标 TCP 端口，3 秒超时 | `network.connect`                                                     |
+| `result_read/close`, `output_open/part/finish` | SDK 内部透明分块传输              | `ui.contribute`                                                       |
+
+`Command { program, args, timeoutSecs }` 将程序和参数逐项 POSIX 引用；无需人工拼接。只有明确需要 shell 时使用 `Command::script`，插件仍必须验证/引用插入脚本的值。程序 ≤4096 字节、参数 ≤128 个且每个 ≤8192 字节、合计 ≤16384 字节，无 NUL；Execute 超时 1–30 秒。Stream/PTY 持续到显式关闭或页面生命周期结束。
+
+Execute 默认经可信宿主**逐次确认真实目标与命令**。可选 Manifest `preapprovedCommands` 声明 1–16 条完整 Command（合计 JSON ≤48 KiB），同时声明并独立授予 `ssh.execute.preapproved` 权限及同名 operation 后，只有 program、args、timeoutSecs 完全匹配的 Execute 使用预授权；仍需 `ssh.execute`。预授权匹配不支持参数模板或通配符，脚本内容按原样精确匹配；上传包权限页展示完整命令，默认未选此能力，升级按原包摘要/修订重新授权。该机制不保证命令只读，不接受 Guest 的 `readOnly`/`confirmed` 免审，也无服务名白名单。
+
+StreamStop 会等待对应远端命令退出确认：TERM 后最多等待 2 秒，未确认则 KILL 后再等 1 秒；仍未确认返回 `LOG_STOP_UNCONFIRMED`，不能把通道关闭当作远端进程已结束。窗口/owner 关闭及主动断开 SSH 复用相同排空逻辑；断开过程中新的流请求返回 BUSY。网络硬中断或强制结束应用时无法保证远端即时退出，须恢复连接后独立核对。
+
+StreamOpen、Terminal 默认逐次确认。清单另声明 `ssh.interactive.preapproved`，并独立授予同名权限和 operation 后，当前安装修订可直接启动任意远程流和终端命令；仍需声明、授予 `ssh.execute` 及同名 operation。这是任意交互命令授权，不受 `preapprovedCommands` 限制，也不表示命令只读；上传包默认未选，升级需要重新授权。该权限不能免除 Execute、SaveFile、TcpConnect 的审批。隐藏/关闭、撤权、配额、取消和实际 SSH 配置复验仍适用。
+
+`models.use` 授权允许外发插件提供的消息，模型 Key/CLI 登录材料始终在宿主；CLI 安装和账号授权由平台模型设置独立管理。插件自行负责业务预览、数据选择和脱敏。
+
+公开模型元数据中的 `createdAt` 为首次注册时记录的 UTC 时间字符串；历史模型和本地 CLI 来源为 null。`Models`、`Model` 返回的模型及 UI Context 的 `ModelMetadata` 均包含此字段，编辑模型不改变该值。
+
+API `^5.6.0` 可声明、独立授予 `sftp.transfer.preapproved` 权限及同名 operation；须同时声明和授予 `sftp.transfer`。它允许当前安装修订直接准备、启动上传、下载或中转，不再逐次确认 `transfer_prepare`、`transfer_download_prepare`、`transfer_start`。插件可指定本机来源与保存路径，因此上传包默认不选，升级不继承旧修订授权；远程读写权限、目录范围、源/目标快照、owner、配置、撤权和取消检查仍保留。该授权不能免除 SSH 命令、文本读取/保存或其他能力审批，也不能绕过显式固定计划的次数与请求绑定。
+
+### 模型流与文本进度
+
+`{kind:"streaming",request:{kind:...}}` 提供下表原语，仍经platform调用。Rust见 `serverdeck_plugin_sdk::streaming`，Vue见 `@serverdeck/plugin-sdk/streaming`（`streaming<T>`、`progress.open/read/close`）。需要这些原语的包最低声明 `^5.4.0`，权限按下表校验。
+
+| 内层kind         | 字段与结果                                                                           | 既有权限/operation |
+| ---------------- | ------------------------------------------------------------------------------------ | ------------------ |
+| model_start      | modelId、expectedRevision、messages；返回{id}                                        | models.use         |
+| model_poll       | id；返回{deltas:[{text,reset}],completion:null或{text,usage,incomplete,binding}}     | models.use         |
+| model_close      | id；取消并等待模型流收尾                                                             | models.use         |
+| progress_open    | 返回{id}，创建空文本进度                                                             | ui.contribute      |
+| progress_publish | id、text、reset；追加或更换文本修订                                                  | ui.contribute      |
+| progress_read    | id、revision、offset（UTF-8字节偏移）；返回{revision,text,offset}，修订不同时从0读取 | ui.contribute      |
+| progress_close   | id；释放文本进度                                                                     | ui.contribute      |
+
+所有句柄绑定插件、owner、VM代，不可跨页面/插件使用；关闭owner、撤权、停止或升级会释放。模型开始前和返回时复验模型修订，支持既有模型取消；model_poll完成结果仅消费一次，仍需model_close释放。远程使用真实SSE，要求正常结束标记和finish_reason；错误/截断不报告成功，不自动退回非流式或重试。Codex/Claude仅传文本事件，保留原MCP/工具隔离及最终成功检查。
+
+模型事件通道32项、每项≤8 KiB，最多8个流；文本≤256 KiB、SSE总响应≤4 MiB、单事件≤256 KiB，poll聚合最多约16 KiB或250ms。进度最多16个资源，每个文本≤256 KiB、publish每片≤16 KiB，read每片≤8 KiB（含最坏JSON转义仍可单消息返回），偏移必须位于UTF-8边界。小的流响应直接返回，较大最终结果沿用透明分块，避免逐片消耗普通请求预算。
+
+progress_read/close、model_close仅操作已有资源，可在Guest忙碌/取消后走控制通道；不能启用模型或发布新内容。UI助手约250ms读取，至多一个在途读；关闭后忽略迟到响应。其他流式请求仍按正常动作/权限检查；流式I/O预算只计model_poll/progress_publish，不能扩展命令执行预算。进度是插件提供的显示文本，不代表可信结果或批准；插件负责增量解析、脱敏和最终校验，工具执行只认宿主授权。
+
+## 前端闭环
+
+### 审批模式与计划确认
+
+`approval_mode {mode:"request"|"assist"|"full"}` 返回当前插件/owner/VM绑定的opaque `binding`；WASM放入 `Context::with_bindings`，不得交给模型。request/assist需ui.contribute；full另需声明并独立授予 `operations.full.preapproved` permission和operation。模式仅当前运行期有效，不是额外的SSH/文件权限。
+
+- request不使用任务读取免确认，普通固定命令/交互预授权仍遵守其独立合同；助手不声明普通SSH预授权，因而请求批准模式逐次确认外部读取和命令。
+- assist在manifest与grant均有 `operations.read.preapproved` permission及operation时，自动处理 `read_file`、`transfer_prepare` 与完整固定读取。固定命令和参数模板同时适用于 `execute` 与 `stream_open`，两条通道使用相同的程序、完整脚本、参数、超时和绑定校验；不包括 `terminal`。参数化读取还需下面的独立参数权限；未匹配命令和写入仍需批准。
+- API `^5.7.0` 的 assist 可在独立 `operations.full.preapproved` permission/operation 已声明并授予、且策略绑定属于当前 owner/VM 时，自动启动不覆盖既有文件的上传/下载/中转，以及完整匹配 manifest `assistCommands` 的 `execute/stream_open`。固定计划只有每项都满足当前自动审批条件才自动批准，次数和完整请求仍冻结；包含保存、覆盖或未知命令时统一请求确认。读取授权不能代替这项变更授权，插件/模型的 risk、readOnly 或显示文案不参与授权判断。
+
+- full的首次请求必须在可见页面经可信宿主确认，插件不能自行生成Full策略。批准后同一owner/VM持续复用binding，不设计时过期，免除已授予范围内执行、文件读写、传输及TCP请求的逐次确认。切换到request/assist会撤销Full binding及未完成的Full首次批准，新建对话须调用request撤销；关闭owner、撤权、插件停止/升级同样失效，隐藏后返回保留。request可作为降权清理请求在取消后和Guest忙碌时发起，不能借此启用full；启用会话标识拒绝已撤销的迟到批准。模型/主机等修订绑定仍为10分钟，计划有效期不变；基础授权、目录、真实连接/修订和文件原文检查保持。首次指纹确认不受影响。
+
+`operations.read.arguments.preapproved` permission 和同名 operation 用于参数化读取，依赖 `operations.read.preapproved` 与基础SSH授权。仅assist模式使用以下模板匹配；普通 `ssh.execute.preapproved` 仍只精确匹配。`preapprovedCommands` 在声明参数权限时最多32条，其他情况最多16条，全部编码合计≤48 KiB。
+
+模板只允许 `sh -c`、固定脚本文本和固定 `$0`，从后续完整argv项选择以下形式；变量通过引用的 `$1`、`$2` 读取，不进行Shell文本插值，程序名/脚本/超时/参数数量及常量均须完全相同。保留命名空间 `{{sd:`，非法或嵌入式模板拒绝。
+
+| 模板                             | 约束                                                                                                        |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `{{sd:uint:2:2147483647}}`       | 十进制u32，包含上下界；界限由清单指定                                                                       |
+| `{{sd:hex:64}}`                  | 精确长度的ASCII十六进制；清单长度1–128                                                                      |
+| `{{sd:identifier:256:.service}}` | 不以减号开头、至多指定字节数、指定后缀，字符仅ASCII字母/数字及 `_.@:-` 与反斜线；长度上限1–256，后缀≤32字节 |
+
+例如固定脚本 `cat "/proc/$1/status"` 的args为 `["-c", "cat \"/proc/$1/status\"", "read-process", "{{sd:uint:2:2147483647}}"]`；具体调用只替换最后一个argv值。参数模板不能证明脚本只读：清单作者负责脚本用途，上传包必须经用户核对并授予独立权限，宿主不接受readOnly/confirmed声明或命令通配符。
+
+`confirm_operations {operations:[{request,count}]}`（ui.contribute）供同一WASM动作内合并确认固定请求集合；request仅限execute/save_file/transfer_start，1–96个唯一条目、最多128次使用，完整消息仍≤60 KiB。重复请求可合并count，不能包含嵌套计划或其他能力。Native先按真实权限/句柄/配置和实际目标预检；request返回宿主一次确认，assist逐项验证自动审批条件后决定是否请求统一确认，full验证当前可信策略后直接授权，均沿原Future续接。授权后后续相同请求及绑定按次数消费，不再弹单项确认，新增/变化/超次数请求拒绝并撤销剩余授权。授权仅保存在当前原生动作中，不跨新invoke、owner、VM或重放；不要用多个独立前端call请求共享它。拒绝、超时或关闭沿原生命周期取消，写入与复查仍保留各自提交边界。
+
+文件保存确认含实际路径、摘要和原文/候选差异；差异超过显示限额明确标注省略，调用方仍须提供完整业务预览。读取免确认不等于秘密不会进入模型，应在模式说明中告知数据用途。不提供独立AI审批模型；完全访问来自用户在可信宿主中的授权，不能替代主机指纹、目录授权或服务端冲突检测。
+
+API `^5.7.0` 增加完整 argv 参数 `{{sd:text:N}}`，N 为1–4096字节：非空、无控制字符，允许路径中的空格及标点。程序、脚本及 argv 数量仍保持字面匹配，Native 按独立参数进行 Shell 引号处理；模板脚本须自行检查参数的业务条件，不能 eval 或重新拼接执行。不把受限文本解释为只读证明，安装修订授权保持显式。
+
+### 文件与传输
+
+`read_file {hostId,path}` 按审批模式和独立读取预授权读取≤32 KiB 的 UTF-8 普通文本，拒绝链接/别名路径。文档 ID 绑定页面、VM、登录身份、原文和插件配置；`save_file {documentId,content}` 经宿主按模式授权、复验配置/目录/原文版本，原子提交并读回复查。不能用新路径或跨页面句柄保存。未标记 dirty 的文档五分钟后可回收，dirty 文档沿用退出保护，过期须重新读取。`info.activeScopes` 返回当前插件仍打开页面的 opaque scope，仅供 Guest 清理遗留状态，不是授权凭证。
+
+```ts
+import { call } from '@serverdeck/plugin-sdk/platform';
+import type { TransferPreview, TransferState } from '@serverdeck/plugin-sdk/types/platform';
+const preview = await call<TransferPreview>({
+  kind: 'transfer_prepare',
+  source: { kind: 'local', path: 'D:\\work\\xx.tar.gz' },
+  destination: { hostId: 'test-host-id', path: '/work' },
+  overwrite: false,
+});
+// 展示 preview 后由用户确认；远程源使用 { kind:'remote',hostId,path }。
+const state = await call<TransferState>({ kind: 'transfer_start', id: preview.id });
+```
+
+精确 DTO 以两端 SDK 类型为准。准备遵循读取审批模式，启动须经宿主按模式授权：前者授权读取源元数据及目标状态，后者固定实际源、目标、大小及覆盖策略。预览五分钟内单次消费，每 owner 最多8项、全局32项。目标是已有规范目录，preview 返回完整目标文件路径。上传/中转预检时，远程源缺失返回 `TRANSFER_SOURCE_NOT_FOUND`，目标目录缺失返回 `TRANSFER_DIRECTORY_NOT_FOUND`，目标是文件返回 `TRANSFER_DIRECTORY_REQUIRED`；均未启动传输或写入目标，原 SFTP 错误保留在 Native 原因链。只传单个普通文件，不跟随链接/重解析点，不传目录、不解包、不自动重试。
+
+本机选择与下载要求 API `^5.5.0`。前端 `pickLocalFiles('files'|'folder')`（`@serverdeck/plugin-sdk/local-files`）经可信桌面选择器返回用户所选路径，需要 `sftp.transfer`；取消返回空数组，选择路径不会启动传输。页面隐藏、关闭、撤权或安装修订变化后丢弃选择结果。
+
+`transfer_download_prepare {source:{hostId,path},destination}` 的 destination 是本机完整绝对文件路径，父目录必须存在且无链接/重解析点；目标已存在即拒绝，不提供覆盖。准备/启动默认分别由宿主确认真实 SSH 来源与本机目标，独立传输预授权可免除这两次确认；源受 `sftp.read` 目录范围约束，不需要远程写权限。返回 `TransferPreview<{localPath:string}>`，其 `destination.localPath` 为实际本机目标；普通上传/中转的 `TransferPreview` 仍返回原有 `{hostId,path}` 目标形状。两种预览复用相同状态、启动、取消和关闭接口。下载冻结远程源属性，校验远端、本机暂存 SHA-256 后不覆盖提交，提交前后复验权限、配置与目标修订。
+
+启动返回后任务在 Native 既有 SFTP 队列运行，上传/中转使用最多32个32 KiB分块的有界并发窗口，目标读回哈希同样按有界窗口读取并按偏移顺序计算；取消先停止调度并排空在途写入，再关闭句柄与清理暂存。复制保留同目录临时文件和目标读回 SHA-256；字节不通过 JS/WASM/模型。`transfer_status {id}` 返回原生状态、进度、速度、摘要、错误及恢复路径。`transfer_cancel {id}` 仅取消自有任务，可绕开同插件正在占用的 Guest 动作，不占用或释放其 busy 标记。`transfer_close {id}` 取消、等待安全收尾并释放句柄。状态/取消/关闭不依赖已过期的模型绑定，但仍验证当前权限、owner、VM代。启动后继续复验插件/模型/SSH修订、配置、目录授权和连接，关闭所属页面或撤权会取消并排空；运行中不受五分钟预览 TTL 截断，不支持跨重启恢复。提交已发生但复验失败为 `unverified`，不能自动重放或回滚。
+
+SFTP v3 缺少服务端 CAS，远端属性可能只有秒级时间；同属性并发改写仍有竞态。保存/覆盖是文件替换，inode、硬链接、ACL/xattr 的限制沿用文件页。目标临时文件无法清理时返回恢复路径。
+
+```ts
+import { invoke } from '@serverdeck/plugin-sdk';
+const result = await invoke('inspect', { hostId });
+```
+
+动作必须在当前 `ui.json` 页面 actions 中声明；结构化 input 为 JSON，最大 60 KiB、深度16、4096节点。不得传函数、循环引用或原型特殊字段。前端可直接使用 `call` 处理通用文件、配置等；业务编排放在自己的 WASM 中。`connections.ensureConnection(hostId, files?)` 委托平台连接及真实指纹审核，不向插件暴露租约。`terminal.openTerminal(ticket, hostId, presentation?)` 仅打开本页已批准票据。
+
+终端可选 `presentation` 只接受 `title`（最多 160 字符）和 `description`（最多 240 字符）的非空、无控制字符纯文本；未知字段拒绝。用于显示容器等业务上下文，不作为主机、命令或权限依据，实际 SSH 地址仍由宿主展示。省略时沿用通用插件终端标题。弹窗复用宿主终端的查找、字体和剪贴板能力，支持最大化/还原及本地清屏；这些操作不创建新 PTY、不重放票据。结束后保留历史和原因，从插件原入口重新打开才创建新会话。
+
+Context 只含主题/字号、入口 hostId、可见状态和获授权的公开元数据。资产目录需 hosts.read；仅 SSH/SFTP 权限只能看到入口主机的安全连接状态。无凭据表、认证配置、代理命令、内部连接/transport ID。models.use 允许模型公开状态；修改模型、Key、授权和安装工具不属于插件桥。
+
+`setDraftDirty(boolean)` 仅报告当前页草稿状态，不传正文。`usePluginVisibility()` 用于停止隐藏页面的交互。每个页面拥有隔离 owner，系统与上传插件采用相同规则。默认隐藏后禁止新动作和审批，并关闭流/PTY；宿主明确保留的已打开工作区可继续已声明的任务动作、命令流、传输/进度轮询，后续操作仍按原权限及精确自动审批规则处理，需要新确认时等待页面可见。PTY 在隐藏时关闭，插件自报 `keepRunning` 不授予后台权。关闭 owner 清理自有资源，最后一个 owner 离开释放共享 VM 根；完整规则见 [UI 生命周期](/developers/reference/ui.html)。
+
+## 资源与错误
+
+- WASM 每次入口 20,000,000 fuel、16 MiB 线性内存、64 KiB 消息、每秒20消息；入口完成后检查2秒壁钟。
+- 每插件一个在途动作，全局4个能力槽；动作含续接最多96次普通平台请求和1024次流式I/O（仅model_poll/progress_publish），合计仍为180秒。两个计数在审批续接时保留，透明结果分块仍占普通预算。流式读取既有资源可走控制通道，不启动新Guest动作。
+- Execute stdout/stderr **各256 KiB**；超限取消并明确 truncated，不报完整成功。
+- 单结果≤1 MiB，chunk32 KiB，TTL60秒；结果池和上传池各最多8个/8 MiB。两端 SDK 自动读/释放结果，大于48 KiB 的 WASM 输出自动分块。`__pluginResult` 为保留的传输字段，业务返回对象不要使用该字段。
+- 文本文件≤32 KiB；配置≤16 KiB；模型消息≤64条且编码总量≤48 KiB，模型调用最多150秒。
+- 原子文件提交已开始后等待安全收尾；中断不等于远端命令未执行，须展示真实错误并独立核对，禁止自动重放。
+
+失败保留 `{code,message}`，不要静默替换为空列表或成功。常见错误有 `PLUGIN_PERMISSION_DENIED`、`PLUGIN_CANCELLED`、`USER_CANCELLED`、`PLUGIN_TARGET_CHANGED`、`PLUGIN_CONFIRMATION_EXPIRED`、输出/配额错误。清理和原请求同时失败时保留两者原因。
+
+WASM 错误响应的 `code` 最多 80 字节，`message` 最多 1024 字节。Rust SDK 的 `json_error`（包括 `backend::Runtime` 返回的动作错误）在序列化边界保留限额内的原文，超限时保留 UTF-8 完整前缀并追加 `... [truncated]`，标记计入字节上限。远程命令失败仍返回 `REMOTE_COMMAND`，不会因长诊断变成协议故障或使插件崩溃；手写响应仍须遵守限额，宿主严格拒绝不合规消息。
+
+参见[源码与构建契约](/developers/reference/development.html)、[安全边界](/developers/reference/security.html)、[运行时](/developers/reference/runtime.html)。
+
+</div>

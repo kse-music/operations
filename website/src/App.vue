@@ -1,97 +1,40 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import {
   ArrowRight,
   ArrowUpRight,
   Check,
   Download,
-  ExternalLink,
   FileText,
   FolderOpen,
-  Menu,
-  Monitor,
   Server,
   ShieldCheck,
   Sparkles,
   Terminal,
   Container,
-  X,
   BookOpen,
 } from '@lucide/vue';
-import { faqs, links, release, tools } from './content';
+import { faqs, links, tools } from './content';
 import type { Tool } from './content';
 import type { Page } from './pages';
 import WorkspacePreview from './components/WorkspacePreview.vue';
 import InfoPage from './components/InfoPage.vue';
-import GitHubIcon from './components/GitHubIcon.vue';
+import SiteHeader from './components/SiteHeader.vue';
 
 const props = defineProps<{ page: Page }>();
 const isHome = computed(() => props.page === 'home');
-const mobileMenuOpen = ref(false);
 const heroTool = ref<Tool>('terminal');
 const selectedTool = ref<Tool>('terminal');
 const symbol = { terminal: Terminal, files: FolderOpen, docker: Container, assistant: Sparkles };
-function closeMenu() {
-  mobileMenuOpen.value = false;
-}
-function handleKey(event: KeyboardEvent) {
-  if (event.key === 'Escape') closeMenu();
-}
-onMounted(() => document.addEventListener('keydown', handleKey));
-onUnmounted(() => document.removeEventListener('keydown', handleKey));
 </script>
 
 <template>
   <div class="site concept-workbench">
     <a class="skip-link" href="#main-content">跳至主要内容</a>
-    <div class="site-header-shell">
-      <header class="site-header wrap">
-        <a class="brand" href="/" aria-label="ServerDeck 首页"
-          ><img src="/assets/serverdeck.svg" width="36" height="36" alt="" /><span
-            >ServerDeck</span
-          ></a
-        >
-        <button
-          class="menu-toggle"
-          type="button"
-          :aria-expanded="mobileMenuOpen"
-          aria-controls="site-nav"
-          :aria-label="mobileMenuOpen ? '关闭菜单' : '打开菜单'"
-          @click="mobileMenuOpen = !mobileMenuOpen"
-        >
-          <X v-if="mobileMenuOpen" :size="20" /><Menu v-else :size="20" />
-        </button>
-        <nav
-          id="site-nav"
-          class="site-nav"
-          :class="{ open: mobileMenuOpen }"
-          aria-label="主要导航"
-          @click="closeMenu"
-        >
-          <a href="/#capabilities">产品能力</a><a href="/#workspace">工作台</a
-          ><a href="/#start">快速上手</a
-          ><a :href="links.guide" target="_blank" rel="noopener noreferrer"
-            >使用文档 <ArrowUpRight :size="12"
-          /></a>
-          <a
-            class="github-link"
-            :href="links.repository"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="GitHub 源码（新窗口）"
-            title="GitHub"
-            ><GitHubIcon :size="19" /></a
-          ><a class="nav-download" href="/#download">下载客户端 <ArrowRight :size="16" /></a>
-        </nav>
-      </header>
-    </div>
+    <SiteHeader />
     <main v-if="isHome" id="main-content">
       <section class="hero-a wrap" aria-labelledby="hero-title">
         <div class="hero-a-copy">
-          <a class="release-pill" :href="release.url" target="_blank" rel="noopener noreferrer"
-            ><span class="status-dot" />v{{ release.version }} 现已发布
-            <span class="pill-divider" />查看更新 <ArrowUpRight :size="12"
-          /></a>
           <p class="eyebrow hero-eyebrow">YOUR SERVERS. YOUR WORKSPACE.</p>
           <h1 id="hero-title">每一台服务器，<br />尽在你的<span>工作台。</span></h1>
           <p class="hero-description">
@@ -99,18 +42,13 @@ onUnmounted(() => document.removeEventListener('keydown', handleKey));
               class="desktop-break"
             />把日常运维，收进一个本地桌面。
           </p>
-          <div class="hero-actions">
-            <a class="button button-primary" :href="release.downloadUrl"
-              ><Download :size="18" />下载 Windows 版</a
+          <div id="download" class="hero-actions">
+            <a class="button button-primary" :href="links.latest"
+              ><Download :size="18" />下载客户端</a
             ><a class="button button-secondary" href="#workspace"
               >探索工作台 <ArrowRight :size="17"
             /></a>
           </div>
-          <p class="platform-note">
-            Windows x64 · v{{ release.version }} · {{ release.sizeLabel }}<br /><span
-              >无需云账号 &nbsp; / &nbsp; 无需远端 Agent</span
-            >
-          </p>
         </div>
         <div class="hero-a-visual">
           <div class="visual-topline">
@@ -198,8 +136,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKey));
           <p>
             结合相关主机的证据分析问题，呈现目标与计划。<br />按审批模式执行之后，再复查真实结果。
           </p>
-          <a class="text-link" :href="links.assistant" target="_blank" rel="noopener noreferrer"
-            >了解 AI 运维助手 <ArrowUpRight :size="16" /></a
+          <a class="text-link" :href="links.assistant">了解 AI 运维助手 <ArrowRight :size="16" /></a
           ><small>需配置可用模型；远程服务可能按其政策计费。</small>
         </div>
         <div class="assistant-process">
@@ -265,9 +202,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKey));
             <p class="eyebrow">04 / YOUR FIRST CONNECTION</p>
             <h2 id="start-title">下一台主机，<span>这样开始。</span></h2>
           </div>
-          <a class="text-link" :href="links.guide" target="_blank" rel="noopener noreferrer"
-            >完整使用指南 <ArrowUpRight :size="16"
-          /></a>
+          <a class="text-link" :href="links.guide">完整使用指南 <ArrowRight :size="16" /></a>
         </div>
         <ol class="start-steps">
           <li>
@@ -302,14 +237,12 @@ onUnmounted(() => document.removeEventListener('keydown', handleKey));
             ]"
             :key="entry.name"
             :href="entry.url"
-            target="_blank"
-            rel="noopener noreferrer"
             ><BookOpen :size="18" />
             <div>
               <strong>{{ entry.name }}</strong
               ><span>{{ entry.sub }}</span>
             </div>
-            <ArrowUpRight :size="16"
+            <ArrowRight :size="16"
           /></a>
         </div>
       </section>
@@ -326,49 +259,6 @@ onUnmounted(() => document.removeEventListener('keydown', handleKey));
             <summary>{{ item.question }}</summary>
             <p>{{ item.answer }}</p>
           </details>
-        </div>
-      </section>
-      <section id="download" class="download-section wrap" aria-labelledby="download-title">
-        <div class="download-copy">
-          <p class="eyebrow">MAKE ROOM FOR FOCUS.</p>
-          <h2 id="download-title">下一次连接，<br />从这里开始。</h2>
-          <p>一个本地工作台，接住完整的工作现场。</p>
-          <div class="open-source-note">
-            <GitHubIcon :size="15" /><a
-              :href="links.license"
-              target="_blank"
-              rel="noopener noreferrer"
-              >MIT 开源许可</a
-            ><span>·</span
-            ><a :href="links.repository" target="_blank" rel="noopener noreferrer"
-              >查看源码 <ArrowUpRight :size="12"
-            /></a>
-          </div>
-        </div>
-        <div class="download-card">
-          <div class="download-platform">
-            <Monitor :size="29" />
-            <div>
-              <h3>Windows</h3>
-              <p>x64 安装版</p>
-            </div>
-            <span>v{{ release.version }}</span>
-          </div>
-          <a class="button button-primary" :href="release.downloadUrl"
-            ><Download :size="18" />下载 Windows 版 <span>{{ release.sizeLabel }}</span></a
-          >
-          <div class="release-details">
-            <span>{{ release.dateLabel }} 发布</span
-            ><a :href="release.url" target="_blank" rel="noopener noreferrer"
-              >更新说明 <ExternalLink :size="11"
-            /></a>
-          </div>
-          <div class="download-other">
-            <a :href="links.releases" target="_blank" rel="noopener noreferrer">全部版本</a
-            ><a :href="release.signatureUrl">安装包签名</a
-            ><a :href="links.guide" target="_blank" rel="noopener noreferrer">安装指南</a>
-          </div>
-          <p class="other-platforms">macOS / Linux 与其他架构尚无正式下载。</p>
         </div>
       </section>
     </main>
@@ -389,7 +279,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKey));
         <p>让每一次连接，都更从容。</p>
       </div>
       <div class="footer-links">
-        <a :href="links.guide" target="_blank" rel="noopener noreferrer">使用文档</a
+        <a :href="links.guide">使用文档</a><a :href="links.plugins">开发者中心</a
         ><a href="/security.html">安全设计</a><a href="/privacy.html">隐私与数据</a
         ><a :href="links.repository" target="_blank" rel="noopener noreferrer"
           >GitHub <ArrowUpRight :size="12"

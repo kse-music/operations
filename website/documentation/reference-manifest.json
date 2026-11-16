@@ -1,0 +1,62 @@
+{
+  "sdkVersion": "5.7.1",
+  "uiVersion": 4,
+  "abiVersion": 1,
+  "packageVersion": 1,
+  "documents": [
+    {
+      "source": "PLUGIN_ARCHITECTURE.md",
+      "file": "developers/reference/architecture.md",
+      "sourceSha256": "c0a2087b2d1b22edf86869beae42aac530904a90d99875d8aff8b7aabb86333b",
+      "contentSha256": "3f939ee7556126d5a269839e46085ff2b41caa04e2aac6844d4ffde94de0e004"
+    },
+    {
+      "source": "PLUGIN_BUILD_CONTRACT.md",
+      "file": "developers/reference/development.md",
+      "sourceSha256": "b5a9f6e8924eea6b4f5891e318007785fde1829d7ea487c1df3b46619f4e9fb6",
+      "contentSha256": "84f421de43e2ef648437e5d65c14274e3e3175fef2bde1eb49e83801d8fbdaef"
+    },
+    {
+      "source": "PLUGIN_SDK.md",
+      "file": "developers/reference/sdk.md",
+      "sourceSha256": "ee0b1a35e239b2fdaa17663e0e5024cd4c379838ccc12c8959d9c1f953021197",
+      "contentSha256": "3a8a0f299bad2463fb23a434070c9694e82a33ed3eb5b957e0af27acfbf3fca1"
+    },
+    {
+      "source": "PLUGIN_UI_EXTENSION.md",
+      "file": "developers/reference/ui.md",
+      "sourceSha256": "6f5d9b4d21b08c8eb3f8a2929b3892324ccb297ba615c8e2b8dd312a4005a734",
+      "contentSha256": "70b1f241db7d545fd11214773e8221049f481e669965eda8db227c04a68e248b"
+    },
+    {
+      "source": "PLUGIN_PACKAGE_FORMAT.md",
+      "file": "developers/reference/package-format.md",
+      "sourceSha256": "0c2bdcff23d1564c68e1d019b370c8124cd2104140492d05f9b3c86966d4dfb6",
+      "contentSha256": "66b917c832543ba1842fd26e302d6213a0d48d6eb8b4736927ab4284dd95a303"
+    },
+    {
+      "source": "PLUGIN_RUNTIME.md",
+      "file": "developers/reference/runtime.md",
+      "sourceSha256": "1b66fea4e3b253657ca73afba84bda5769573cfc8b4df98ddc4ce979330b37e4",
+      "contentSha256": "17d8dc43ad3fd4b2561b559ab1a8217cdf1175552eac5d4306ac4a12647efcd9"
+    },
+    {
+      "source": "PLUGIN_API_VERSIONING.md",
+      "file": "developers/reference/versions.md",
+      "sourceSha256": "b2b79170933debb6bf6556f26f234132515c92b13138bafb9ed3e3940d48daa0",
+      "contentSha256": "be128951ab60b211589c886d60157f02b56021536183a4cf18557548c382e330"
+    },
+    {
+      "source": "PLUGIN_SECURITY.md",
+      "file": "developers/reference/security.md",
+      "sourceSha256": "c1de90e950bd55f0d981b28118f6e4970f2091dc88738208b6133eba058e5f6f",
+      "contentSha256": "ed2600972b20920083703c7e3a8efe807ec4ab8a0b0dba21372fe188dc3e76c0"
+    },
+    {
+      "source": "BUILTIN_PLUGINS.md",
+      "file": "developers/reference/builtins.md",
+      "sourceSha256": "f216ac6d38fc92240b7fe67d490fdc159958822bb2368f96bed946c27bd2e22d",
+      "contentSha256": "0a913db3c743cfa38d4a0931f5edbd915ff1595201aaf7b680906c1583a037aa"
+    }
+  ]
+}

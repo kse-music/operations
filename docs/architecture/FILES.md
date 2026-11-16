@@ -1,6 +1,6 @@
 # 文件、传输与编辑
 
-本文说明桌面文件服务、SFTP 身份、传输和编辑器的实现。系统边界见[总体架构](ARCHITECTURE.md)，操作见[文件使用说明](../guides/USER_GUIDE.md#sftp-文件与编辑)，插件文件契约见[公开 SDK](../plugins/PLUGIN_SDK.md#文件与传输)。
+本文说明桌面文件服务、SFTP 身份、传输和编辑器的实现。系统边界见[总体架构](ARCHITECTURE.md)，操作见[文件使用说明](https://ops.hiboot.cn/docs/files.html)，插件文件契约见[公开 SDK](../plugins/PLUGIN_SDK.md#文件与传输)。
 
 ## SFTP、传输和编辑
 

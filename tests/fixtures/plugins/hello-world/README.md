@@ -15,4 +15,4 @@ cargo run -p serverdeck-plugin-runtime --example compile_wat -- tests/fixtures/p
 node tools/package-plugin.mjs .local/plugin-build/hello .local/plugin-build/hello.sdplugin
 ```
 
-通过主窗口 plugin_preview / plugin_install（developmentConfirmed=true）安装后，plugin_set_enabled 会真实激活；plugin_health/plugin_call 返回 WASM 写入的结果，禁用和卸载释放实例。此夹具没有 UI 贡献，不作为功能页面或独立开发样例。来源为本地开发且未验证，ServerDeck 作者字符串不是数字签名。新插件开发使用[独立开发包](../../../../docs/plugins/PLUGIN_DEVELOPMENT.md)。
+通过主窗口 plugin_preview / plugin_install（developmentConfirmed=true）安装后，plugin_set_enabled 会真实激活；plugin_health/plugin_call 返回 WASM 写入的结果，禁用和卸载释放实例。此夹具没有 UI 贡献，不作为功能页面或独立开发样例。来源为本地开发且未验证，ServerDeck 作者字符串不是数字签名。新插件开发使用[官网开发者中心](https://ops.hiboot.cn/developers/)。
