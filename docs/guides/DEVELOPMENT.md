@@ -6,6 +6,8 @@
 
 需要 Rust stable 1.94+、Node.js 22.13+、npm 和 `wasm32-unknown-unknown`。Windows 需要 MSVC C++ Build Tools、Windows SDK、WebView2；其他平台需对应 Tauri 系统依赖和独立原生验收。CI 使用的具体工具链以 [候选构建](../../.github/workflows/release.yml)和[签名草稿流程](../../.github/workflows/update-release.yml)为准。
 
+仓库文本统一使用 LF 换行，由 `.gitattributes`、`.editorconfig` 和 Prettier 配置共同约束；不需要修改开发者全局的 `core.autocrlf`。格式检查排除 `.ssr/` 等构建产物，避免扫描生成文件。
+
 构建前确认输出盘至少 10 GiB 空闲。遵循 [.cargo/config.toml](../../.cargo/config.toml)：关闭增量编译，dev/test 为行号级调试信息。桌面与原生单测共用根 `target/`，WASM 插件复用 `.local/plugin-build/<插件>/`，不新增另一套桌面 Cargo 缓存。
 
 原生 QA 运行复制后的 EXE，避免锁住构建输出；普通程序若从 `target/` 运行，重建前由用户正常退出。不整删 `.local/`，其中含应用数据、QA 证据、安装包及可能的签名密钥。清理仅限已确认可重建且未使用的子目录，先核实绝对路径、构建锁和重解析点，不跟随链接。

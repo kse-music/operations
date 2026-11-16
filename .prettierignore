@@ -2,6 +2,7 @@ target
 node_modules
 dist
 gen
+**/.ssr/
 Cargo.lock
 package-lock.json
 docs/product/PRD.md
