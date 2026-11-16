@@ -500,7 +500,7 @@ it.each(['ssh', 'local'])(
     expect(JSON.stringify(target.layout)).toBe(layout);
     expect(xterm.writes).toHaveLength(writes);
     const icon = root.querySelector(
-      '.terminal-tab.active [role=tab] > .terminal-disconnected-icon',
+      '.terminal-tab.active [role=tab] .terminal-session-name > .terminal-disconnected-icon',
     );
     expect(icon?.getAttribute('aria-label')).toBe('已断开连接');
     expect(icon?.nextElementSibling?.textContent).toContain('会话');
@@ -564,7 +564,9 @@ it.each(['closed', 'failed', 'disconnected'])(
     native.receivers[0]!({ type: 'state', state, code: null, message: null });
     await flush();
     expect(
-      root.querySelector('.terminal-tab [role=tab] > .terminal-disconnected-icon'),
+      root.querySelector(
+        '.terminal-tab [role=tab] .terminal-session-name > .terminal-disconnected-icon',
+      ),
     ).not.toBeNull();
     button('重新连接', await tabMenu()).click();
     await flush();
@@ -751,11 +753,13 @@ it('provides keyboard session menus and leaves local shells without bottom actio
 });
 
 it('uses Ctrl+S and the rename Save button to explicitly save a local session', async () => {
+  expect(root.querySelector('.terminal-session-saved')).toBeNull();
   const store = useTerminalsStore();
   hostId.value = '';
   store.open(null);
   await flush();
   const target = store.tabs.at(-1)!;
+  expect(root.querySelector('.terminal-session-saved')?.textContent?.trim()).toBe('未保存');
   const menu = await tabMenu(0);
   expect(
     [...menu.querySelectorAll('[role=menuitem]')].map((item) => item.textContent?.trim()),
@@ -787,6 +791,7 @@ it('uses Ctrl+S and the rename Save button to explicitly save a local session', 
     }),
   );
   expect(target.savedId).toBe('saved-local');
+  expect(root.querySelector('.terminal-session-saved')?.textContent?.trim()).toBe('已保存');
   expect(target.title).toBe('项目 A');
   expect(document.querySelector('dialog')).toBeNull();
 });
@@ -906,11 +911,11 @@ it.each([false, true])(
     ).toEqual(['复制', '重命名', '重新连接', '断开连接', '关闭所有', '关闭']);
     document.querySelector<HTMLElement>('.context-backdrop')!.click();
     await flush();
-    button('关闭标签 项目', root).click();
+    button('删除会话 项目', root).click();
     await flush();
     expect(native.removeSavedLocalSession).toHaveBeenCalledExactlyOnceWith('saved-one');
     expect(store.hostTabs('')).toEqual([]);
-    expect(root.querySelector('[aria-label="关闭标签 项目"]')).toBeNull();
+    expect(root.querySelector('[aria-label="删除会话 项目"]')).toBeNull();
     if (running) expect(native.close).toHaveBeenCalledWith(sessionId);
     else expect(native.close).not.toHaveBeenCalled();
     store.activateLocal();

@@ -7,10 +7,10 @@ import {
   ListX,
   Plus,
   RefreshCw,
-  Save,
   Shield,
   SquareTerminal,
   TextCursorInput,
+  Trash2,
   Unplug,
   X,
 } from '@lucide/vue';
@@ -411,45 +411,50 @@ watch(
           >
             <button
               role="tab"
-              :title="item.title"
+              :title="sessionTitle(item)"
               :aria-selected="store.active === item.key"
               :tabindex="sidebarSessions && store.active !== item.key ? -1 : 0"
               @click="store.select(item.key)"
               @dblclick="rename(item.key)"
             >
-              <svg
-                v-if="
-                  item.panes.some((pane) =>
-                    ['closed', 'failed', 'disconnected'].includes(pane.state),
-                  )
-                "
-                class="terminal-disconnected-icon"
-                viewBox="0 0 16 16"
-                role="img"
-                :aria-label="tr('已断开连接')"
-              >
-                <title>{{ tr('已断开连接') }}</title>
-                <circle cx="8" cy="8" r="7" fill="currentColor" />
-                <path d="M4 8h8" stroke="white" stroke-width="2" />
-              </svg>
-              <span class="terminal-session-title">{{ sessionTitle(item) }}</span>
-              <Save
-                v-if="item.savedId"
-                :size="12"
-                :aria-label="tr('已保存')"
-                :title="tr('已保存')"
-              />
+              <span class="terminal-session-name">
+                <svg
+                  v-if="
+                    item.panes.some((pane) =>
+                      ['closed', 'failed', 'disconnected'].includes(pane.state),
+                    )
+                  "
+                  class="terminal-disconnected-icon"
+                  viewBox="0 0 16 16"
+                  role="img"
+                  :aria-label="tr('已断开连接')"
+                >
+                  <title>{{ tr('已断开连接') }}</title>
+                  <circle cx="8" cy="8" r="7" fill="currentColor" />
+                  <path d="M4 8h8" stroke="white" stroke-width="2" />
+                </svg>
+                <span class="terminal-session-title">{{ sessionTitle(item) }}</span>
+              </span>
+              <span v-if="!props.hostId" class="terminal-session-saved">
+                {{ item.savedId ? tr('已保存') : tr('未保存') }}
+              </span>
               <small>{{
                 item.panes.length > 1
                   ? tr('{0} 个窗格', item.panes.length)
                   : stateLabels[item.panes[0]?.state ?? 'idle']
               }}</small></button
             ><button
-              :aria-label="tr('关闭标签 {0}', sessionTitle(item))"
-              :title="tr('关闭标签')"
+              :class="{ 'terminal-session-delete': !props.hostId }"
+              :aria-label="
+                props.hostId
+                  ? tr('关闭标签 {0}', sessionTitle(item))
+                  : tr('删除会话 {0}', sessionTitle(item))
+              "
+              :title="props.hostId ? tr('关闭标签') : tr('删除会话')"
               @click="store.close(item.key)"
             >
-              <X :size="14" aria-hidden="true" />
+              <Trash2 v-if="!props.hostId" :size="16" aria-hidden="true" />
+              <X v-else :size="14" aria-hidden="true" />
             </button>
           </div>
         </div>

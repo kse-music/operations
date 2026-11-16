@@ -33,6 +33,85 @@ function mountDialog(host?: Host) {
   return { saved, close };
 }
 
+it.each(['paste', 'file'] as const)(
+  'keeps the host draft when private-key selection is cancelled with %s authentication already entered',
+  async (source) => {
+    pinia = createPinia();
+    setActivePinia(pinia);
+    const { close, saved } = mountDialog();
+    await nextTick();
+    const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+    const form = dialog.querySelector('form')!;
+    const fields = form.querySelectorAll<HTMLInputElement>('.form-grid > label input');
+    for (const [index, value] of [
+      [0, '草稿主机'],
+      [1, 'server.example'],
+      [2, '2222'],
+      [3, 'ops'],
+    ] as const) {
+      fields[index]!.value = value;
+      fields[index]!.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    const auth = form.querySelector<HTMLSelectElement>('[aria-label="认证方式"]')!;
+    auth.value = 'private_key';
+    auth.dispatchEvent(new Event('change', { bubbles: true }));
+    await nextTick();
+    const fileInput = form.querySelector<HTMLInputElement>('[aria-label="选择私钥文件"]')!;
+    const key = new File(['fixture-only-private-key'], 'fixture-key');
+    if (source === 'paste') {
+      const text = form.querySelector('textarea')!;
+      text.value = 'fixture-only-private-key';
+      text.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      Object.defineProperty(fileInput, 'files', { configurable: true, value: [key] });
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    await nextTick();
+    const passphrase = form.querySelector<HTMLInputElement>('input[type="password"]')!;
+    passphrase.value = 'fixture-only-passphrase';
+    passphrase.dispatchEvent(new Event('input', { bubbles: true }));
+    fileInput.dispatchEvent(new Event('cancel', { bubbles: true }));
+    await nextTick();
+    expect(close).not.toHaveBeenCalled();
+    expect(saved).not.toHaveBeenCalled();
+    expect(dialog.open).toBe(true);
+    expect(
+      Array.from(fields)
+        .slice(0, 4)
+        .map((field) => field.value),
+    ).toEqual(['草稿主机', 'server.example', '2222', 'ops']);
+    expect(auth.value).toBe('private_key');
+    expect(passphrase.value).toBe('fixture-only-passphrase');
+    if (source === 'paste')
+      expect(form.querySelector('textarea')!.value).toBe('fixture-only-private-key');
+    else expect(fileInput.files?.[0]).toBe(key);
+  },
+);
+
+it('handles the dialog own cancel and close button while keeping the busy guard', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const { close } = mountDialog();
+  const store = useHostsStore();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+  const button = dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!;
+  store.busy = true;
+  await nextTick();
+  const busyCancel = new Event('cancel', { cancelable: true });
+  dialog.dispatchEvent(busyCancel);
+  button.click();
+  expect(busyCancel.defaultPrevented).toBe(true);
+  expect(close).not.toHaveBeenCalled();
+  store.busy = false;
+  await nextTick();
+  const cancel = new Event('cancel', { cancelable: true });
+  dialog.dispatchEvent(cancel);
+  expect(cancel.defaultPrevented).toBe(true);
+  expect(close).toHaveBeenCalledOnce();
+  button.click();
+  expect(close).toHaveBeenCalledTimes(2);
+});
+
 it.each([22, 2222])('submits a new host without a name on port %s', async (port) => {
   pinia = createPinia();
   setActivePinia(pinia);

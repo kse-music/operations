@@ -26,6 +26,20 @@ const button = (text: string) =>
   )!;
 const closed = vi.fn();
 
+it('keeps the import dialog and pasted configuration when the native file picker is cancelled', async () => {
+  const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+  const text = dialog.querySelector('textarea')!;
+  const file = dialog.querySelector<HTMLInputElement>('input[type="file"]')!;
+  text.value = 'Host draft\n  HostName draft.example';
+  text.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  file.dispatchEvent(new Event('cancel', { bubbles: true }));
+  await nextTick();
+  expect(closed).not.toHaveBeenCalled();
+  expect(dialog.open).toBe(true);
+  expect(text.value).toBe('Host draft\n  HostName draft.example');
+});
+
 beforeEach(() => {
   for (const [name, state] of [
     ['showPopover', 'open'],

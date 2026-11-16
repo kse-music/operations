@@ -24,7 +24,7 @@ function close(): void {
       ref="dialog"
       :class="['modal', panelClass, { wide }]"
       :aria-label="title"
-      @cancel.prevent="close"
+      @cancel.self.prevent="close"
     >
       <slot name="header"
         ><header class="modal-heading">

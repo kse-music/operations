@@ -64,9 +64,10 @@ kbd {
   gap: 8px;
   white-space: nowrap;
 }
-.app-brand svg {
-  color: var(--accent);
+.app-brand-icon {
+  display: block;
   flex-shrink: 0;
+  pointer-events: none;
 }
 .app-brand strong {
   font-size: var(--font-size-body);

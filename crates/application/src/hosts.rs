@@ -5,10 +5,12 @@ use serverdeck_core::{
     hosts::*,
     openssh::{self, ImportPreview},
 };
-use serverdeck_security::SecretStore;
+use serverdeck_security::{SecretStore, new_secret_reference};
 use serverdeck_storage::Database;
 use uuid::Uuid;
 use zeroize::Zeroizing;
+#[cfg(all(test, windows))]
+mod native_tests;
 mod test_connection;
 pub use test_connection::HostTestResult;
 pub(crate) use test_connection::HostTests;
@@ -90,7 +92,7 @@ fn save_host(
     secret: Option<Zeroizing<String>>,
 ) -> Result<Host, Error> {
     let saved = if let Some(secret) = secret {
-        let reference = Uuid::new_v4().to_string();
+        let reference = new_secret_reference(secret.as_bytes())?;
         db.queue_secret_gc(&reference)?;
         secrets
             .write(&reference, secret.as_bytes())
@@ -210,8 +212,8 @@ impl Application {
                 None => input.secret,
             };
             let previous_reference = old.as_ref().and_then(|r| r.secret_ref.clone());
-            let reference = if secret.is_some() {
-                Some(Uuid::new_v4().to_string())
+            let reference = if let Some(secret) = &secret {
+                Some(new_secret_reference(secret.as_bytes())?)
             } else if input.clear_secret {
                 None
             } else {

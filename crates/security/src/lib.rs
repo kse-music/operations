@@ -2,6 +2,9 @@ use serverdeck_core::Error;
 use serverdeck_core::identity::CREDENTIAL_SERVICE;
 use zeroize::Zeroizing;
 
+mod chunked;
+pub use chunked::new_secret_reference;
+
 // Different implementations are used only for OS storage and fault-injection tests.
 pub trait SecretStore: Send + Sync {
     fn write(&self, reference: &str, secret: &[u8]) -> Result<(), Error>;
@@ -10,13 +13,34 @@ pub trait SecretStore: Send + Sync {
 }
 pub struct NativeStore;
 fn failure(error: keyring::Error) -> Error {
+    let reason = match &error {
+        keyring::Error::TooLong(_, _) => "size_limit",
+        keyring::Error::NoStorageAccess(_) => "access_denied",
+        keyring::Error::PlatformFailure(_) => "platform_failure",
+        keyring::Error::NoDefaultStore => "initialization_failed",
+        _ => "credential_error",
+    };
     tracing::error!(
         operation = "secure_store",
+        reason,
         "native credential store operation failed"
     );
     Error::SecureStore(Box::new(error))
 }
 impl SecretStore for NativeStore {
+    fn write(&self, reference: &str, secret: &[u8]) -> Result<(), Error> {
+        chunked::write(&KeyringStore, reference, secret)
+    }
+    fn read(&self, reference: &str) -> Result<Option<Zeroizing<Vec<u8>>>, Error> {
+        chunked::read(&KeyringStore, reference)
+    }
+    fn delete(&self, reference: &str) -> Result<(), Error> {
+        chunked::delete(&KeyringStore, reference)
+    }
+}
+
+struct KeyringStore;
+impl SecretStore for KeyringStore {
     fn write(&self, reference: &str, secret: &[u8]) -> Result<(), Error> {
         keyring::Entry::new(CREDENTIAL_SERVICE, reference)
             .map_err(failure)?
@@ -51,6 +75,31 @@ fn read_service(service: &str, reference: &str) -> Result<Option<Zeroizing<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Explicit OS credential-store integration test; uses only a random test entry"]
+    fn native_store_large_secret_roundtrip() {
+        let store = NativeStore;
+        for length in [2560, 2561, 4096, 5120, 8192] {
+            let secret = Zeroizing::new(vec![b'x'; length]);
+            let reference = new_secret_reference(&secret).expect("reference");
+            let result = store.write(&reference, &secret);
+            let restored = result.as_ref().ok().map(|()| store.read(&reference));
+            let cleanup = store.delete(&reference);
+            result.expect("save secret at and above the Windows credential size limit");
+            cleanup.expect("cleanup test entry");
+            assert_eq!(
+                restored.unwrap().unwrap().unwrap().as_slice(),
+                secret.as_slice()
+            );
+            assert!(
+                store
+                    .read(&reference)
+                    .expect("read deleted entry")
+                    .is_none()
+            );
+        }
+    }
+
     #[test]
     #[ignore = "Explicit OS credential-store integration test; creates and removes only a random test entry"]
     fn native_store_roundtrip_update_and_delete() {

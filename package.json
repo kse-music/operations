@@ -10,6 +10,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "icons:generate": "node tools/generate-icon.mjs",
     "plugins:fetch": "node tools/build-system-plugins.mjs --fetch-only --with-test-fixtures",
     "plugins:build": "node tools/build-system-plugins.mjs --with-test-fixtures",
     "dev": "npm run dev -w @serverdeck/desktop",

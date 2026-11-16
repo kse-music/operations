@@ -143,8 +143,8 @@ impl Application {
                     let binding = serverdeck_ai::ModelTestBinding::new(&input, &key)?;
                     models.consume_model_test(input.test_id.as_deref(), &binding)?;
                 }
-                let reference = if input.api_key.is_some() {
-                    Some(uuid::Uuid::new_v4().to_string())
+                let reference = if let Some(key) = &input.api_key {
+                    Some(serverdeck_security::new_secret_reference(key.as_bytes())?)
                 } else if input.clear_key {
                     None
                 } else {

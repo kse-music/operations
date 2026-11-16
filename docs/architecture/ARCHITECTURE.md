@@ -57,7 +57,7 @@ Workspace 将全局入口 `area`（首页、本地终端、设置）与运行期
 
 主窗口默认 1280×820，最小 960×600 逻辑像素；恢复时按当前最小尺寸及显示器约束放大已存尺寸。resize/显示缩放事件在保存普通窗口尺寸前复核内容区域最小尺寸，纠正无系统装饰窗口的原生边框偏差，不保存低于限制的尺寸；最小化、全屏和最大化不执行该纠正。`AppNavigation` 固定在第一栏，`HostSidebar`、本地会话列表和 `SettingsNavigation` 共享始终常驻的第二栏；第三栏为内容工作区。第二栏复用 `sidebarWidth` 配置及拖动保存，不变更配置格式。`TerminalsView` 将本地会话头通过 Teleport 放入第二栏，复用原会话行为；SSH 会话头仍在第三栏工具栏，所有 PaneKey 和 xterm 实例保持。
 
-主窗口关闭系统窗口装饰，由 `AppHeader` 合并标题栏与工具栏，沿用主题变量。Windows WebView 使用 `app-region: drag` 识别原生拖动区域，按钮显式使用 `no-drag`；Tauri 的 `data-tauri-drag-region="deep"` 为其他运行时提供非交互区域拖动与双击最大化，按钮由运行时排除。`useWindowControls` 通过当前窗口 API 最小化、切换最大化和请求关闭，并监听 resize 同步最大化/还原图标，卸载时释放监听；调用失败进入统一错误通知，浏览器预览不创建窗口 API。主窗口 capability 只增加所需窗口权限，不向插件或独立编辑器开放；关闭调用 `Window.close()` 触发已有 Rust `CloseRequested` 审核，再由确认退出用例排空资源，不直接销毁窗口或退出进程。
+主窗口关闭系统窗口装饰，由 `AppHeader` 合并标题栏与工具栏，沿用主题变量。品牌标识使用 `apps/desktop/src/assets/serverdeck.svg`，标题栏直接引用同一矢量源；`npm run icons:generate` 通过已有 Tauri CLI 生成桌面 PNG、Windows 多尺寸 ICO 和 macOS ICNS 到 `src-tauri/icons/`，任务栏和打包资源由现有 Tauri 图标配置引用。`build.rs` 显式跟踪 `icons/` 目录，图标变更时开发与发布构建都会重新编译原生图标资源，避免复用旧的 Windows 资源缓存。Windows WebView 使用 `app-region: drag` 识别原生拖动区域，按钮显式使用 `no-drag`；Tauri 的 `data-tauri-drag-region="deep"` 为其他运行时提供非交互区域拖动与双击最大化，按钮由运行时排除。`useWindowControls` 通过当前窗口 API 最小化、切换最大化和请求关闭，并监听 resize 同步最大化/还原图标，卸载时释放监听；调用失败进入统一错误通知，浏览器预览不创建窗口 API。主窗口 capability 只增加所需窗口权限，不向插件或独立编辑器开放；关闭调用 `Window.close()` 触发已有 Rust `CloseRequested` 审核，再由确认退出用例排空资源，不直接销毁窗口或退出进程。
 
 主窗口与独立编辑窗口创建时，通过 Tauri `initialization_script_for_all_frames` 在文档脚本执行前向顶层页面及所有子框架注入统一的 `contextmenu` 捕获监听。监听只调用 `preventDefault`，不阻止事件传播，屏蔽浏览器默认菜单并保留业务菜单；覆盖受限插件 iframe，无需修改或重装插件包。主界面保留前端监听以支持浏览器预览。
 
@@ -73,6 +73,8 @@ Workspace 将全局入口 `area`（首页、本地终端、设置）与运行期
 
 ### 主机目录、测试和导入
 
+共用 `Modal` 只处理 `<dialog>` 自身的 `cancel` 事件，忽略从文件输入等子控件冒泡的同名事件；取消私钥或 OpenSSH 配置文件选择不关闭外层表单。自身取消继续阻止浏览器直接关闭，并沿用 busy 守卫交由业务层处理，关闭按钮使用同一守卫。
+
 SQLite 持久化 HostId、多级文件夹及 SSH 参数。文件夹防环，删除时事务性提升主机和直接子文件夹。主机按名称/地址/用户名搜索，保留现存数据库附加数据但不将其作为当前 DTO。
 
 `HostSidebar` 在主机和文件夹行处理 Delete，与右键菜单共用删除确认入口；目标取事件所在行，不依赖已选主机或活动工作区。仅处理可见主机树上无修饰键、非连发、非输入法组合的 Delete，弹窗、拖动或忙碌期间忽略；不在窗口注册全局删除键，搜索输入和终端不受影响。主机删除继续由 `HostTreeControls` 复用现有 IPC，文件夹删除沿用 `groupRemove`，均经确认后执行。行焦点用主题背景色提示。主机树菜单在窗口捕获阶段监听 `contextmenu` 关闭旧菜单，保留事件继续到达右键目标；外部 `pointerdown` 关闭时不抢回焦点，不设置全屏遮罩。与 SFTP 菜单互相切换时先关闭旧菜单，再由新目标打开菜单。菜单内按键及操作仍按原目标执行，Esc 恢复触发点焦点，滚动、窗口失焦和尺寸变化关闭菜单；组件卸载时移除全部监听。
@@ -86,6 +88,8 @@ OpenSSH Config 解析限 1 MiB、10000 行、500 个明确别名。支持 Host/H
 ### 秘密与一致性
 
 NativeStore 使用系统凭据库，服务名 `cn.hiboot.desktop.credentials.v1`；SQLite 只存 opaque 引用、类型和 revision，秘密 DTO 不实现 Debug/Serialize，Rust 使用 Zeroizing。
+
+Windows 单条系统凭据最多容纳 2560 字节。分配新秘密引用时，超过此长度的内容使用 `chunked:v1:<uuid>:<字节数>` 布局，每块不超过 2560 字节，以 `<引用>:<从零开始的块序号>` 保存到同一系统凭据服务；总长度限制为 1 MiB。引用在写入前确定完整块范围，既有 `secret_gc` 意图可清理写到一半的内容，删除中断后可重试。读取逐块校验长度，缺块或损坏明确失败，不把残缺私钥用于认证。未带分块版本前缀的已有引用继续按原始单条布局读取，不重写原凭据，也不改变数据库或配置版本；未知分块版本拒绝处理。新引用的凭据不支持由尚未识别该布局的旧客户端读取。
 
 新秘密先登记 `secret_gc` 意图，再写新系统 entry；SQLite 事务切换引用，提交后清理旧 entry，失败补偿或保留重试意图。主机认证变更创建独立凭据，不改写其他主机仍在使用的共享认证；显式共享凭据不自动删除。系统库不可用明确失败。
 

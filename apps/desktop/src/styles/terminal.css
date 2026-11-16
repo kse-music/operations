@@ -59,18 +59,37 @@
   align-items: center;
 }
 .local-session-sidebar .terminal-tab [role='tab'] {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 12px;
   flex: 1;
   min-width: 0;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: start;
   white-space: normal;
   text-align: left;
   overflow-wrap: anywhere;
 }
 .local-session-sidebar .terminal-tab small {
-  flex-basis: 100%;
+  grid-column: 1;
+  grid-row: 2;
   margin-left: 0;
+}
+.local-session-sidebar .terminal-session-saved {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  margin-left: 0;
+  line-height: calc(var(--font-size-body) * 1.5);
+}
+.local-session-sidebar .terminal-session-name {
+  grid-column: 1;
+  grid-row: 1;
+  align-items: baseline;
+}
+.local-session-sidebar .terminal-session-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .local-session-empty {
   color: var(--muted);
@@ -100,6 +119,33 @@
 .terminal-tab small {
   opacity: 0.65;
   margin-left: 6px;
+}
+.terminal-session-name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  vertical-align: middle;
+}
+.terminal-session-title {
+  min-width: 0;
+}
+.terminal-session-saved {
+  margin-left: 10px;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}
+.terminal-tab .terminal-session-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  flex-shrink: 0;
+  color: var(--error);
+  border-radius: 4px;
+}
+.terminal-tab .terminal-session-delete:hover {
+  background: var(--error-bg);
 }
 .terminal-disconnected-icon {
   width: 14px;

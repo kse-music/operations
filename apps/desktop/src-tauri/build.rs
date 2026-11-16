@@ -1,4 +1,6 @@
 fn main() {
+    // Windows icon resources are compiled separately from the frontend and Rust source.
+    println!("cargo:rerun-if-changed=icons");
     // The Rust integration test harness also needs Common Controls v6 on Windows.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");

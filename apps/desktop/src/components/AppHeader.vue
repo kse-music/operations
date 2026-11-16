@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
 import { useWindowControls } from '../composables/window-controls';
+import brandIcon from '../assets/serverdeck.svg';
 
-import { Copy, Minus, PanelsTopLeft, Search, Square, X } from '@lucide/vue';
+import { Copy, Minus, Search, Square, X } from '@lucide/vue';
 defineProps<{ searchShortcut: string }>();
 const emit = defineEmits<{
   search: [];
@@ -16,7 +17,15 @@ const { available, maximized, minimize, toggleMaximize, close } = useWindowContr
     data-tauri-drag-region="deep"
   >
     <div class="app-brand">
-      <PanelsTopLeft :size="20" aria-hidden="true" /><strong>ServerDeck</strong>
+      <img
+        :src="brandIcon"
+        class="app-brand-icon"
+        width="24"
+        height="24"
+        alt=""
+        aria-hidden="true"
+        draggable="false"
+      /><strong>ServerDeck</strong>
     </div>
     <button class="app-search-button" :aria-label="tr('全局搜索')" @click="emit('search')">
       <Search :size="15" aria-hidden="true" /><span>{{ tr('搜索主机与命令') }}</span
