@@ -140,7 +140,7 @@ test('directory junctions are rejected without traversing their target', async (
   await assert.rejects(discoverSystemPlugins(root), /must not be a link/);
 });
 
-test('dependency preparation uses every discovered source and excludes generated packages', async (t) => {
+test('dependency preparation fetches complete locked graphs for every discovered source', async (t) => {
   const { default: childProcess } = await import('node:child_process');
   const { syncBuiltinESMExports } = await import('node:module');
   const spawn = t.mock.method(childProcess, 'spawnSync', () => ({ status: 0 }));
@@ -161,10 +161,27 @@ test('dependency preparation uses every discovered source and excludes generated
       'fetch',
       '--manifest-path',
       path.join(repository, expected[index].source, 'backend/Cargo.toml'),
-      '--target',
-      'wasm32-unknown-unknown',
       '--locked',
     ]);
     assert.equal(call.arguments[2].shell, undefined);
   }
+});
+
+test('dependency preparation stops and reports a failed fetch', async (t) => {
+  const { default: childProcess } = await import('node:child_process');
+  const { syncBuiltinESMExports } = await import('node:module');
+  const spawn = t.mock.method(childProcess, 'spawnSync', () => ({ status: 101 }));
+  syncBuiltinESMExports();
+  const previousArgs = process.argv;
+  t.after(() => {
+    process.argv = previousArgs;
+    spawn.mock.restore();
+    syncBuiltinESMExports();
+  });
+  process.argv = [process.execPath, 'build-system-plugins.mjs', '--fetch-only'];
+  await assert.rejects(
+    import('./build-system-plugins.mjs?fetch-failure-test'),
+    /cargo failed \(101\)/,
+  );
+  assert.equal(spawn.mock.callCount(), 1);
 });

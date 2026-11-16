@@ -7,7 +7,7 @@
 ```sh
 rustup target add wasm32-unknown-unknown
 npm ci
-cargo fetch --manifest-path example/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+cargo fetch --manifest-path example/backend/Cargo.toml --locked
 npm run typecheck
 npm test
 npm run package
@@ -42,6 +42,6 @@ npm run package
 
 业务命令/SQL/规则/提示词/DTO都在插件；SDK及宿主只有通用原语。用例至少覆盖参数拒绝、真实失败/截断、取消、健康规则和页面错误状态；涉及写入保留确认、冲突与结果复查。执行 `npm run typecheck`、`npm test`、独立 Rust 单测及 `npm run package`，再在隔离数据目录上传验证。远端 fixture、模型模拟响应与真实服务验证分开记录，不冒称真实账号/所有系统通过。
 
-Rust原生单测复用根 `target/`，编译后复制EXE到QA目录运行；WASM缓存为 `.local/plugin-build/<plugin>`。首次Cargo依赖使用fetch，正式打包用locked/offline，失败不能改锁绕过。更多契约见[SDK](PLUGIN_SDK.md)、[UI](PLUGIN_UI_EXTENSION.md)和[包格式](PLUGIN_PACKAGE_FORMAT.md)。
+Rust原生单测复用根 `target/`，编译后复制EXE到QA目录运行；WASM缓存为 `.local/plugin-build/<plugin>`。首次或锁文件变化后使用 `cargo fetch --locked` 准备完整依赖，不加 `--target`，因为离线解析仍可能读取其他目标的依赖清单；仓库内使用 `npm run plugins:fetch`。正式打包用locked/offline，失败不能改锁绕过。更多契约见[SDK](PLUGIN_SDK.md)、[UI](PLUGIN_UI_EXTENSION.md)和[包格式](PLUGIN_PACKAGE_FORMAT.md)。
 
 上传后安装位置是**应用数据目录**，不是开发源码目录：`plugins/upload/<ID>/versions/<revision>/`，统一记录在 `plugins/packages/<ID>/record.json`；插件配置在 `plugins/data/<ID>/`，授权在 `plugins/authorizations/`。系统包位于同级 `plugins/system/<ID>/versions/<revision>/`。实际应用数据根由平台目录配置决定。

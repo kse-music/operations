@@ -7,7 +7,7 @@
 ```sh
 rustup target add wasm32-unknown-unknown
 npm ci
-cargo fetch --manifest-path example/backend/Cargo.toml --target wasm32-unknown-unknown --locked
+cargo fetch --manifest-path example/backend/Cargo.toml --locked
 npm run typecheck
 npm test
 npm run package

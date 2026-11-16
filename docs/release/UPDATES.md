@@ -30,7 +30,7 @@ Windows 安装包在文件替换后通过 NSIS 安装完成钩子通知系统刷
 4. 依据[发布检查表](RELEASE_CHECKLIST.md)验收同一候选安装器，落实 Windows 发布者签名，核对安装包、公钥、签名版本、平台及清单内容。更新签名与 Authenticode 分别管理；现有流程不自动提供 Windows 发布者证书。
 5. 确认文件完整且验收满足后，手动将草稿正式发布并设为 Latest。草稿与预发布版本不作为正式更新渠道。所有附件应在对用户可见前上传完成，不能先公开清单再补包。
 
-发布流程复用 npm 下载缓存，并按运行平台、Rust 版本及 Cargo 配置/锁文件缓存 Rust 下载、根 `target/release` 的编译依赖和现有生产插件 `.local/plugin-build/assistant`、`.local/plugin-build/docker` 编译目录。缓存不包含签名密钥、应用数据、测试目录或安装包；首次运行或缓存失效时仍须完整编译，命中缓存时也保留锁定依赖准备与编译校验，不通过去掉 `--offline` 或 `--locked` 绕过依赖准备。
+发布流程复用 npm 下载缓存，并按运行平台、Rust 版本及 Cargo 配置/锁文件缓存 Rust 下载、根 `target/release` 的编译依赖和现有生产插件 `.local/plugin-build/assistant`、`.local/plugin-build/docker` 编译目录。生产插件的预取不限制 `--target`，按各自锁文件下载完整依赖，覆盖离线解析可能读取的其他目标依赖清单；实际编译仍限定 `wasm32-unknown-unknown`。缓存不包含签名密钥、应用数据、测试目录或安装包；首次运行或缓存失效时仍须完整编译，命中缓存时也保留锁定依赖准备与编译校验，不通过去掉 `--offline` 或 `--locked` 绕过依赖准备。
 
 完整格式、Clippy、lint、类型、测试与安全审计继续放在 **Candidate builds (unsigned, no publish)**（`.github/workflows/release.yml`）。准备正式公开前应对同一提交运行并检查该流程；签名草稿流程成功只代表打包完成，不代表这些检查通过。候选流程生成未签名产物，并显式关闭 updater artifacts；不能将这些候选包直接替换成正式更新包。如果进行 Authenticode 签名，须先完成安装包签名，再生成 updater `.sig` 和清单；修改 `.exe` 后必须重新生成 updater 签名。流程不会自动把草稿发布给用户。
 

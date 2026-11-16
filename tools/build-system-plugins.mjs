@@ -23,13 +23,12 @@ function run(command, args) {
   if (result.status !== 0) throw new Error(`${command} failed (${result.status})`);
 }
 if (process.argv.includes('--fetch-only')) {
+  // Offline resolution can read manifests for other targets, so fetch the complete locked graph.
   for (const { source } of packages)
     run('cargo', [
       'fetch',
       '--manifest-path',
       path.join(root, source, 'backend/Cargo.toml'),
-      '--target',
-      'wasm32-unknown-unknown',
       '--locked',
     ]);
 } else {
