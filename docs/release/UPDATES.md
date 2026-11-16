@@ -12,6 +12,8 @@ ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github
 
 客户端固定请求 `https://github.com/kse-music/operations/releases/latest/download/latest.json`。下载 URL 指向该版本的 `/releases/download/v<版本>/...`，不使用随新发布变化的最新包地址。首次正式清单尚未发布时，客户端会如实显示检查失败。普通用户无需 GitHub 账号或 Token；软件不携带仓库访问凭据。
 
+Windows 安装包在文件替换后通过 NSIS 安装完成钩子通知系统刷新应用 EXE 及已有快捷方式的图标，普通安装与应用内更新均自动执行。无需用户运行刷新命令；不删除系统缓存文件、不重启 Explorer，也不取消或重建任务栏固定项。该行为须随新的安装包分发，已发布安装包不会自动获得新增钩子。
+
 ## 发布密钥
 
 公钥固定在 `apps/desktop/src-tauri/tauri.conf.json`，对应私钥在本机 Git 忽略目录 `.local/updater-signing/serverdeck.key`，已限制为当前 Windows 账户访问。应单独安全备份；不得随着 QA、构建缓存或临时文件清理，不覆盖或反复生成。公钥可公开，私钥内容不得进入源码、命令参数、聊天、日志或 Release。

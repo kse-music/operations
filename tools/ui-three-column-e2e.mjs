@@ -142,11 +142,31 @@ try {
     await page.screenshot({ path: path.join(output, `${name}-home.png`) });
     await page.locator('.tree-host').first().dblclick();
     await page.locator('.terminal-pane[data-state="connected"] .xterm-screen').waitFor();
+    assert(await page.locator('.workspace-header .host-tools').isVisible());
     const remote = await page.locator('.split-pane:visible').elementHandle();
     await rail.getByRole('button', { name: '本地终端', exact: true }).click();
     await page.locator('.local-session-sidebar .terminal-tab').waitFor();
     await page.locator('.terminal-pane[data-state="connected"]:visible').waitFor();
     const local = await page.locator('.split-pane:visible').elementHandle();
+    assert.equal(await page.locator('.workspace-header').count(), 0);
+    const localBounds = await page.evaluate(() => {
+      const main = document.querySelector('.main-content').getBoundingClientRect();
+      const terminal = document.querySelector('.terminal-workspace').getBoundingClientRect();
+      return {
+        mainTop: main.top,
+        mainBottom: main.bottom,
+        top: terminal.top,
+        bottom: terminal.bottom,
+      };
+    });
+    assert(
+      Math.abs(localBounds.top - localBounds.mainTop) <= 1,
+      `${name}: local terminal starts at the top of the content area`,
+    );
+    assert(
+      Math.abs(localBounds.bottom - localBounds.mainBottom) <= 1,
+      `${name}: local terminal fills the content area`,
+    );
     const newSession = async () => {
       const trigger = page
         .locator('.local-session-sidebar')

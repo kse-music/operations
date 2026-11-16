@@ -8,7 +8,16 @@ use serverdeck_plugin_sdk::{
 
 use crate::docker::PRELUDE;
 
-pub const PROJECTS: &str = "d compose ls --all --format json";
+pub(crate) fn prelude() -> String {
+    format!(
+        "{PRELUDE}{}\n",
+        include_str!("compose-cli.sh").replace("\r\n", "\n")
+    )
+}
+
+pub fn projects_command() -> String {
+    format!("{}dc ls --all --format json", prelude())
+}
 const FORMAT: &str = r#"{"ID":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Config.Image}},"State":{{json .State.Status}},"ExitCode":{{json .State.ExitCode}},"Project":{{json (index .Config.Labels "com.docker.compose.project")}},"Service":{{json (index .Config.Labels "com.docker.compose.service")}},"OneOff":{{json (index .Config.Labels "com.docker.compose.oneoff")}},"WorkingDir":{{json (index .Config.Labels "com.docker.compose.project.working_dir")}},"ConfigFiles":{{json (index .Config.Labels "com.docker.compose.project.config_files")}}}"#;
 
 #[derive(Clone, Deserialize)]
@@ -127,7 +136,8 @@ pub(crate) fn command(project: &str, rows: &[Value], suffix: &str) -> Result<Com
     project_name(project)?;
     let target = target(rows)?;
     let mut body = format!(
-        "{PRELUDE}unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE; cd {} || exit; exec docker --host unix://$sd_socket compose --project-name {} --project-directory {} --profile '*'",
+        "{}unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE; cd {} || exit; sd_compose_exec --project-name {} --project-directory {} --profile '*'",
+        prelude(),
         quote(&target.directory)?,
         quote(project)?,
         quote(&target.directory)?
@@ -212,6 +222,52 @@ pub async fn logs(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires local WSL Python/sh; all Docker and Compose operations use isolated executables"]
+    fn shell_cli_selection_covers_queries_config_actions_and_logs_without_retries() {
+        use std::{
+            io::Write,
+            process::{Command as Process, Stdio},
+        };
+        let rows = [row("shop")];
+        let scripts = json!({
+            "prelude": PRELUDE,
+            "projects": projects_command(),
+            "config": crate::startup::compose_command(false).args[1],
+            "configRevealed": crate::startup::compose_command(true).args[1],
+            "start": command("shop", &rows, "start").unwrap().args[1],
+            "stop": command("shop", &rows, "stop --timeout 5").unwrap().args[1],
+            "restart": command("shop", &rows, "restart --timeout 5").unwrap().args[1],
+            "logs": command("shop", &rows, "logs --no-color --timestamps --tail 100 --follow").unwrap().args[1],
+        });
+        let mut process = Process::new("wsl")
+            .args([
+                "--exec",
+                "python3",
+                "-c",
+                include_str!("compose-cli-fixture.py"),
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        process
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&scripts).unwrap())
+            .unwrap();
+        let output = process.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn row(project: &str) -> Value {
         json!({"ID":"a".repeat(64),"Project":project,"Service":"web","State":"running","WorkingDir":"/srv/my app","ConfigFiles":"/srv/my app/compose.yaml,/srv/my app/override.yaml"})
     }

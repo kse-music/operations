@@ -98,7 +98,7 @@ impl Query {
             Self::Capabilities => CAPABILITIES.into(),
             Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
             Self::Images => "d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
-            Self::ComposeProjects => crate::compose::PROJECTS.into(),
+            Self::ComposeProjects => return Ok(crate::compose::projects_command()),
             Self::ComposeServices { project } => {
                 crate::compose::project_name(project)?;
                 return crate::compose::services_command();

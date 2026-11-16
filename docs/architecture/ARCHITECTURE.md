@@ -55,7 +55,7 @@ Workspace 将全局入口 `area`（首页、本地终端、设置）与运行期
 
 首页的 Docker 与助手卡片只读取本地插件 Store，复用 `primaryPluginPage` 和 `extensions` 的当前版本 UI 授权判定；未安装、未启用、授权不可用分别路由到插件管理或现有配置页，不自动改变授权。插件刷新失败时保留状态和重试，禁用插件快捷打开，SFTP 仍可独立访问。模型绑定通过助手的设置贡献进入，不为首页执行插件、读取模型秘密或探测远端能力。`WelcomeView` 发出目标明确的文件、插件、配置及管理事件，由 `App` 复用现有导航、工作区和弹窗流程；选择目标和渲染首页不创建连接或 Shell。键盘提示读取已保存快捷键，布局按工作区容器宽度换行或改为单列，使用既有主题和界面字号。主机标题不提供新增或收起按钮，新建入口保留在欢迎页和文件夹右键菜单。
 
-主窗口默认 1280×820，最小 960×600 逻辑像素；恢复时按当前最小尺寸及显示器约束放大已存尺寸。resize/显示缩放事件在保存普通窗口尺寸前复核内容区域最小尺寸，纠正无系统装饰窗口的原生边框偏差，不保存低于限制的尺寸；最小化、全屏和最大化不执行该纠正。`AppNavigation` 固定在第一栏，`HostSidebar`、本地会话列表和 `SettingsNavigation` 共享始终常驻的第二栏；第三栏为内容工作区。第二栏复用 `sidebarWidth` 配置及拖动保存，不变更配置格式。`TerminalsView` 将本地会话头通过 Teleport 放入第二栏，复用原会话行为；SSH 会话头仍在第三栏工具栏，所有 PaneKey 和 xterm 实例保持。
+主窗口默认 1280×820，最小 960×600 逻辑像素；恢复时按当前最小尺寸及显示器约束放大已存尺寸。resize/显示缩放事件在保存普通窗口尺寸前复核内容区域最小尺寸，纠正无系统装饰窗口的原生边框偏差，不保存低于限制的尺寸；最小化、全屏和最大化不执行该纠正。`AppNavigation` 固定在第一栏，`HostSidebar`、本地会话列表和 `SettingsNavigation` 共享始终常驻的第二栏；第三栏为内容工作区。第二栏复用 `sidebarWidth` 配置及拖动保存，不变更配置格式。`TerminalsView` 将本地会话头通过 Teleport 放入第二栏，复用原会话行为；本地第三栏不渲染工作区工具栏，终端填满内容区；SSH 会话头仍在第三栏工具栏，所有 PaneKey 和 xterm 实例保持。
 
 主窗口关闭系统窗口装饰，由 `AppHeader` 合并标题栏与工具栏，沿用主题变量。品牌标识使用 `apps/desktop/src/assets/serverdeck.svg`，标题栏直接引用同一矢量源；`npm run icons:generate` 通过已有 Tauri CLI 生成桌面 PNG、Windows 多尺寸 ICO 和 macOS ICNS 到 `src-tauri/icons/`，任务栏和打包资源由现有 Tauri 图标配置引用。`build.rs` 显式跟踪 `icons/` 目录，图标变更时开发与发布构建都会重新编译原生图标资源，避免复用旧的 Windows 资源缓存。Windows WebView 使用 `app-region: drag` 识别原生拖动区域，按钮显式使用 `no-drag`；Tauri 的 `data-tauri-drag-region="deep"` 为其他运行时提供非交互区域拖动与双击最大化，按钮由运行时排除。`useWindowControls` 通过当前窗口 API 最小化、切换最大化和请求关闭，并监听 resize 同步最大化/还原图标，卸载时释放监听；调用失败进入统一错误通知，浏览器预览不创建窗口 API。主窗口 capability 只增加所需窗口权限，不向插件或独立编辑器开放；关闭调用 `Window.close()` 触发已有 Rust `CloseRequested` 审核，再由确认退出用例排空资源，不直接销毁窗口或退出进程。
 
@@ -187,13 +187,15 @@ Models Store 缓存远程模型列表、本地 CLI 公开检测结果及各自�
 
 插件包构建时间由统一打包器写入可选 manifest 元数据，仓库校验后随安装快照传给设置列表，由前端按北京时间统一格式化为 `YYYY-MM-DD HH:mm:ss`；精确字段见[包格式](../plugins/PLUGIN_PACKAGE_FORMAT.md#构建时间)。旧包缺少时间时保持未知，不改写安装记录、不推断历史时间，也不改变权限和执行协议。
 
-Host/Rust/TS SDK 5.7.0，UI 4、ABI/wire 1。独立前端在受限 iframe，通过认证 MessageChannel 调用本包 action 和通用平台能力；WASM 无 WASI，受 fuel、内存、消息和并发限额。完整包、权限和生命周期见[插件架构](../plugins/PLUGIN_ARCHITECTURE.md)及[公开 SDK](../plugins/PLUGIN_SDK.md)。
+Host/Rust/TS SDK 5.7.1，UI 4、ABI/wire 1。独立前端在受限 iframe，通过认证 MessageChannel 调用本包 action 和通用平台能力；WASM 无 WASI，受 fuel、内存、消息和并发限额。完整包、权限和生命周期见[插件架构](../plugins/PLUGIN_ARCHITECTURE.md)及[公开 SDK](../plugins/PLUGIN_SDK.md)。
 
 一个安装修订共享有界 VM，每页有可信 owner；资源绑定插件/安装/VM/owner，目标另绑定 SSH 或模型修订。审批保存原 Future/请求，批准或拒绝从原等待点续接，不重跑动作。固定命令、交互会话和任务读取预授权是独立权限，不能互相替代或推断只读；完全访问由宿主首次批准并在当前会话持续有效，撤销不得被迟到批准恢复。
 
 system 来源由宿主从发行内置包写入，仅影响分发和预置授权；上传包默认禁用/未授权，同 ID 不继承来源。构建自动发现完整源码目录，统一校验和安装；单插件记录故障隔离，原件保留。用户明确备份重装后新记录默认禁用且不继承旧授权。库存快照的 `availableBundled` 只列出无安装记录的当前嵌入包；恢复 IPC 用空记录摘要表示预期未安装，仓库再次校验缺失状态并以系统来源安装，拒绝覆盖正常或损坏记录。非空摘要继续绑定原损坏记录并先备份。恢复保留已有配置、重新生成当前系统预置授权且默认禁用，不修改既有卸载标记策略。包尚无密码学签名验证。
 
 Docker 管理页面、Compose、解析和日常容器/镜像命令归 Docker 插件；资产匹配、脱敏、提示词、连续工具循环、计划及按需 Skill 加载归助手。匹配与执行都使用成对对话历史及明确的入口主机上下文，任务需要来源且未另行指定时采用当前工作区；保留运维所需的主机地址和原始匹配 ID，凭据继续脱敏。两个插件复用独立的镜像归档脚本模块，导出使用固定脚本与受限 argv，宿主的普通执行和长任务通道共用严格模板及审批模式校验。助手由模型组合镜像导出/导入、普通传输等工具并复查目标镜像 ID/标签，不在执行器中固定迁移流程。宿主只提供连接/执行/文件/模型/审批等原语，不按插件 ID 提供业务后门。助手工具、任务、局部文件修改、传输、流式脱敏和限额见[助手架构](ASSISTANT_AGENT.md)。
+
+Docker 插件的 `compose-cli.sh` 在每次命令作用域内用只读版本探测选择 Compose 入口，优先 `docker compose`，再检测独立 `docker-compose`，要求主版本至少为 2。项目列表、配置快照、整组操作和日志复用该选择；同一脚本内选定后不再重新探测，实际业务失败也不切换入口重放。CLI 插件显式传入 `--host`，独立程序通过 `DOCKER_HOST` 指向同一 Unix socket；既有 Docker context/TLS 环境清理、路径引用、目标复验和审批保持。变更与日志经 `exec` 直接替换命令 Shell，沿用日志监督与取消。三个包含入口探测的固定读取脚本同步进入完整命令预授权，不新增通配授权或宿主原语。
 
 Docker 镜像归档由插件编排本机选择、SFTP 队列及受主机修订绑定的长命令流，使用独立的 `sftp.transfer.preapproved` 与交互预授权，使点击操作后无需逐次确认，不受单次 Execute 的 30 秒限额限制。命令流在 `/tmp/serverdeck-image-<nonce>/` 创建私有目录，导入等待原子上传文件后 load，导出复核标签指向完整 ID 后 save 并等待下载；完成标记绑定随机 nonce。UI 先取消并排空文件传输，再停止命令流；远端脚本跟踪并终止子 CLI，退出时仅删除已知归档并尝试移除空目录，不递归清理未知内容。SSH 断线与异常退出无法保证远端收尾，失败显示暂存位置，Docker daemon 已接受的变更不保证回滚。通用下载原语复用 SFTP 的暂存、双端 SHA-256 和不覆盖提交，并持续校验 owner、安装、权限、SSH 及配置修订；宿主不理解镜像或执行 Docker 专用逻辑。镜像页面按原生传输状态与实际字节数区分传输、校验提交、Docker 加载及清理；字节传完即隐藏吞吐速度，收到已校验的 completed 后才继续下一阶段，清理返回后才报告整体成功。远端 SHA-256 通过 SFTP 回读，可能在字节进度已满后继续占用网络和磁盘。
 
@@ -210,6 +212,8 @@ Docker 工作区的全局统计由 `docker-summary.ts` 独立于 KeepAlive 页�
 桌面组合根注册 Tauri 官方 updater，`update_commands` 持有有界单操作状态、取消信号、已核验的候选更新及内存安装包。前端更新 Store 在 bootstrap 就绪后延迟发起自动检查，关于页展示状态，导航显示更新提示；页面切换不释放下载。仅主窗口获得本应用的窄更新 IPC，不向任何窗口授予 updater 原生安装权限，插件和独立编辑器不能绕过退出协调直接安装。
 
 更新源为 `kse-music/operations` GitHub Releases 的固定 `latest.json`，只接受更高正式版本，安装包 URL 必须精确对应同仓库、同版本的 NSIS 文件。运行期同时检查 Windows x64 和 NSIS 安装标记，开发版、独立 EXE 与其他平台不执行应用内更新，避免覆盖构建目录或错误改变安装范围。请求与重定向限定 HTTPS；更新器强制验证编译内置公钥及签名中的版本。更新说明按纯文本显示并限 64 KiB，安装包限 512 MiB；检查与下载分别有超时及可取消生命周期，普通退出先取消并排空更新请求。下载完成事件不代表校验完成，只有签名校验成功才进入可安装状态。安装包不持久化，进程退出后重新下载。
+
+Windows NSIS 通过 `windows/installer-hooks.nsh` 的 `NSIS_HOOK_POSTINSTALL` 在 EXE 替换和快捷方式处理之后，以 `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, ...)` 通知 Shell 使图标缓存失效，再以 `SHCNE_UPDATEITEM`、`SHCNF_PATHW | SHCNF_FLUSH` 刷新 EXE、已有开始菜单和桌面快捷方式。仅发送文件变化通知不能可靠清除旧图标。普通安装、静默安装及 updater 的被动安装共用该钩子；路径使用安装器变量和 Unicode 参数。缓存失效通知可使其他图标重新加载，但不删除缓存文件、不重启 Explorer、不修改任务栏固定项；通知返回仅代表已投递，最终呈现仍须在目标 Windows 环境验收。
 
 更新偏好以独立 `software_updates` 设置项保存，格式 v1，字段为自动检查开关、最近尝试与最近成功检查时间；不改变 SQLite schema 或应用主配置 v2。不存在时使用固定 v1 默认值，未知字段及未来版本按需拒绝，不重置原值或阻断主业务启动。所有读写沿用 Application 的有界存储执行器，避免偏好保存与检查记录相互覆盖；失败尝试也计入自动检查的每日限制。
 

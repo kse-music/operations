@@ -754,21 +754,19 @@ watch(
         </div>
       </div>
       <div
-        v-show="!settingsOpen && isHostWorkspace"
+        v-if="isHostWorkspace && currentHostId"
+        v-show="!settingsOpen"
         class="workspace-header"
         :inert="workspace.closing.includes(workspace.active)"
       >
         <HostTools
-          v-if="isHostWorkspace && view && currentHostId"
+          v-if="view"
           :active="view"
           :active-plugin="workspace.current?.pluginId"
           :local="false"
           @navigate="navigate($event)"
           @plugin="openPlugin"
         />
-        <strong v-if="isHostWorkspace && !currentHost" class="workspace-local-label">{{
-          tr('本地终端')
-        }}</strong>
       </div>
       <div
         v-show="!settingsOpen && view === 'terminals' && workspace.area === 'home'"

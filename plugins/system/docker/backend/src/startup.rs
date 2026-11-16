@@ -22,7 +22,7 @@ pub fn snapshot_command() -> Result<String, ApiError> {
 pub fn compose_command(reveal: bool) -> Command {
     Command::script(format!(
         "{}\nsd_reveal={}\n{}",
-        docker::PRELUDE,
+        compose::prelude(),
         reveal,
         include_str!("compose-config.sh").replace("\r\n", "\n")
     ))

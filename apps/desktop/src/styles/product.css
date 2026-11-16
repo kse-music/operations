@@ -99,10 +99,6 @@ kbd {
   margin-left: auto;
   white-space: nowrap;
 }
-.workspace-local-label {
-  font-size: var(--font-size-body);
-  font-weight: 500;
-}
 .shell-icon-button {
   display: inline-flex;
   align-items: center;

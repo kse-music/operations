@@ -3,6 +3,7 @@
 cd() { test "$1" = "$sd_qa_dir"; }
 d() {
     case "$1 $2" in
+        'compose version') printf '%s\n' '2.20.3';;
         'container ls')
             case "$*" in
                 *project=shop*) printf '%s\n' "$sd_qa_a" "$sd_qa_b";;

@@ -87,7 +87,9 @@ async function newSession(): Promise<void> {
 }
 async function closeSession(index: number): Promise<void> {
   root
-    .querySelectorAll<HTMLButtonElement>('.terminal-tab [aria-label^="关闭标签 "]')
+    .querySelectorAll<HTMLButtonElement>(
+      '.terminal-tab [aria-label^="关闭标签 "], .terminal-tab [aria-label^="删除会话 "]',
+    )
     [index]!.click();
   await flush();
 }
@@ -1166,6 +1168,8 @@ it('keeps all three columns and preserves the host tree and search across naviga
   expect(document.querySelector('.sidebar')).toBe(sidebar);
   expect(document.querySelector('.activity-rail')).toBe(rail);
   expect(document.querySelector('.local-session-sidebar .terminal-tabs')).not.toBeNull();
+  expect(document.querySelector('.local-session-sidebar h2')?.textContent).toBe('本地终端');
+  expect(document.querySelector('.workspace-header')).toBeNull();
   await openNavigation('关于');
   expect(workspace.area).toBe('settings');
   expect(document.querySelector('dialog[aria-label="设置"]')).toBeNull();
@@ -1917,7 +1921,7 @@ it.each(['button', 'middle', 'menu'])(
     } else {
       for (const tab of tabs) {
         if (action === 'button')
-          tab.querySelector<HTMLButtonElement>('[aria-label^="关闭标签 "]')!.click();
+          tab.querySelector<HTMLButtonElement>('[aria-label^="删除会话 "]')!.click();
         else tab.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
         await flush();
       }
@@ -1945,7 +1949,7 @@ it('keeps an empty local session list after the last close and opens a replaceme
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
   document
-    .querySelector<HTMLButtonElement>('.terminal-tab [aria-label="关闭标签 会话 1"]')!
+    .querySelector<HTMLButtonElement>('.terminal-tab [aria-label="删除会话 会话 1"]')!
     .click();
   await flush();
   expect(terminals.panes).toHaveLength(0);
@@ -2284,7 +2288,9 @@ it.each(['remote', 'local'])(
         button.querySelector('.terminal-session-title')?.textContent?.trim(),
       );
     expect(names()).toEqual(['会话 1', '会话 2', '会话 3']);
-    document.querySelector<HTMLButtonElement>('[aria-label="关闭标签 会话 2"]')!.click();
+    document
+      .querySelector<HTMLButtonElement>(`[aria-label="${host ? '关闭标签' : '删除会话'} 会话 2"]`)!
+      .click();
     await flush();
     expect(names()).toEqual(['会话 1', '会话 3']);
     await newSession();

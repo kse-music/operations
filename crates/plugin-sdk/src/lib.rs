@@ -215,5 +215,56 @@ pub fn json_reply(result: Value) -> Value {
     serde_json::json!({"protocolVersion":1,"result":result,"error":null})
 }
 pub fn json_error(code: &str, message: &str) -> Value {
+    let code = bounded_error_field(code, 80);
+    let message = bounded_error_field(message, 1024);
     serde_json::json!({"protocolVersion":1,"result":null,"error":{"code":code,"message":message}})
+}
+
+fn bounded_error_field(value: &str, max_bytes: usize) -> std::borrow::Cow<'_, str> {
+    const SUFFIX: &str = "... [truncated]";
+    if value.len() <= max_bytes {
+        return value.into();
+    }
+    let mut end = max_bytes - SUFFIX.len();
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{SUFFIX}", &value[..end]).into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_replies_preserve_fields_within_the_wire_limits() {
+        for (code, message) in [
+            ("REMOTE_COMMAND".to_owned(), "permission denied".to_owned()),
+            ("c".repeat(80), "m".repeat(1024)),
+            ("错".repeat(26), "错".repeat(341)),
+        ] {
+            let reply = json_error(&code, &message);
+            assert_eq!(reply["protocolVersion"], 1);
+            assert!(reply["result"].is_null());
+            assert_eq!(reply["error"]["code"], code);
+            assert_eq!(reply["error"]["message"], message);
+        }
+    }
+
+    #[test]
+    fn oversized_error_fields_fit_the_wire_limits_and_mark_truncation() {
+        for (code, message) in [
+            ("c".repeat(81), "m".repeat(1025)),
+            ("错".repeat(27), "错".repeat(342)),
+            ("c".repeat(79) + "错", "m".repeat(1023) + "错"),
+        ] {
+            let reply = json_error(&code, &message);
+            for (field, original, limit) in [("code", code, 80), ("message", message, 1024)] {
+                let value = reply["error"][field].as_str().unwrap();
+                assert!(value.len() <= limit, "{field} exceeds the wire limit");
+                assert!(value.starts_with(original.chars().next().unwrap()));
+                assert!(value.ends_with("[truncated]"));
+            }
+        }
+    }
 }

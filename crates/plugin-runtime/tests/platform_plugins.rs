@@ -90,6 +90,51 @@ fn done(reply: &Reply) -> &Value {
 }
 
 #[tokio::test]
+async fn docker_long_command_errors_preserve_the_cause_and_keep_the_plugin_active() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    for field in ["stderr", "message", "stdout"] {
+        let cause = "unknown flag: --all\nSee 'docker --help'.\n";
+        let detail = format!("{cause}{}", "Usage: docker [OPTIONS] COMMAND\n".repeat(100));
+        assert!(detail.len() > 1024);
+        let reply = invoke(
+            &runtime,
+            &id,
+            "query",
+            json!({"hostId":"failing-host","request":{"kind":"capabilities"}}),
+            |request| {
+                assert_eq!(request["kind"], "execute");
+                let mut result = json!({"state":"completed","exitCode":1,"stdout":"","stderr":"","truncated":false,"message":null});
+                result[field] = json!(detail);
+                result
+            },
+        )
+        .await;
+        let error = reply.error.unwrap();
+        assert_eq!(error.code, "REMOTE_COMMAND");
+        assert!(error.message.starts_with(cause));
+        assert!(error.message.len() <= 1024);
+        assert!(error.message.ends_with("[truncated]"));
+        let status = runtime.statuses().unwrap().remove(0);
+        assert_eq!(
+            status.state,
+            serverdeck_plugin_runtime::protocol::State::Active
+        );
+        assert!(status.error_code.is_none());
+    }
+    let reply = invoke(
+        &runtime,
+        &id,
+        "query",
+        json!({"hostId":"working-host","request":{"kind":"capabilities"}}),
+        |_| json!({"state":"completed","exitCode":0,"stdout":"{\"dockerVersion\":{\"Server\":{\"Version\":\"27.5.1\"}},\"dockerOperatingSystem\":\"Linux\"}","stderr":"","truncated":false,"message":null}),
+    )
+    .await;
+    assert_eq!(done(&reply)["detail"]["dockerState"], "running");
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn docker_image_archive_uses_bound_long_streams_and_returns_native_transfer_paths() {
     let (_directory, runtime, id) = packaged("docker");
     runtime.activate(&id).await.unwrap();
@@ -805,7 +850,7 @@ async fn docker_compose_prepares_project_commands_and_survives_denial() {
     let snapshot = json!({"ID":"a".repeat(64),"Name":"/shop-web-1","Image":"nginx","State":"running","ExitCode":0,"Project":"shop","Service":"web","OneOff":"False","WorkingDir":"/srv/my shop","ConfigFiles":"/srv/my shop/compose.yaml"}).to_string();
     let completed = |stdout: &str| json!({"state":"completed","exitCode":0,"stdout":stdout,"stderr":"","truncated":false,"message":null});
     let projects = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"compose_projects"}}), |request| {
-        assert!(request["command"]["args"][1].as_str().unwrap().ends_with("d compose ls --all --format json"));
+        assert!(request["command"]["args"][1].as_str().unwrap().ends_with("dc ls --all --format json"));
         completed(r#"[{"Name":"shop","Status":"running(1)","ConfigFiles":"/srv/my shop/compose.yaml"}]"#)
     }).await;
     assert_eq!(done(&projects)["records"][0]["Name"], "shop");

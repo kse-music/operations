@@ -1,6 +1,6 @@
-# Plugin SDK 5.7.0
+# Plugin SDK 5.7.1
 
-Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.7.0**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
+Host 语义 API、Rust SDK、TypeScript SDK 均为 **5.7.1**；WASM ABI / wire 为 1，界面为 UI v4。宿主严格校验 API、权限、包和 UI 契约，不兼容不受支持的执行协议。
 
 ## 职责边界
 
@@ -208,5 +208,7 @@ Context 只含主题/字号、入口 hostId、可见状态和获授权的公开�
 - 原子文件提交已开始后等待安全收尾；中断不等于远端命令未执行，须展示真实错误并独立核对，禁止自动重放。
 
 失败保留 `{code,message}`，不要静默替换为空列表或成功。常见错误有 `PLUGIN_PERMISSION_DENIED`、`PLUGIN_CANCELLED`、`USER_CANCELLED`、`PLUGIN_TARGET_CHANGED`、`PLUGIN_CONFIRMATION_EXPIRED`、输出/配额错误。清理和原请求同时失败时保留两者原因。
+
+WASM 错误响应的 `code` 最多 80 字节，`message` 最多 1024 字节。Rust SDK 的 `json_error`（包括 `backend::Runtime` 返回的动作错误）在序列化边界保留限额内的原文，超限时保留 UTF-8 完整前缀并追加 `... [truncated]`，标记计入字节上限。远程命令失败仍返回 `REMOTE_COMMAND`，不会因长诊断变成协议故障或使插件崩溃；手写响应仍须遵守限额，宿主严格拒绝不合规消息。
 
 参见[开发指南](PLUGIN_DEVELOPMENT.md)、[安全边界](PLUGIN_SECURITY.md)、[运行时](PLUGIN_RUNTIME.md)。

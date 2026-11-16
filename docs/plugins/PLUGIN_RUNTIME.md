@@ -4,7 +4,7 @@
 
 导出memory、`sd_api_version()->i32`、`sd_alloc(length)->i32`、`sd_handle(operation,pointer,length)->i64`。高32位为响应地址、低32位为长度。Host检查所有指针/长度/JSON；SDK export_plugin宏封装安全缓冲访问。
 
-操作码0 startup、1 activate、2 deactivate、3 health、4 cancel、5 exit、6 invoke、7 resume。Reply为`{protocolVersion:1,result,error}`，错误`{code,message}`。业务invoke接收`{action,input}`；只有宿主能resume返回hostResponse，普通UI不能伪造能力响应。
+操作码0 startup、1 activate、2 deactivate、3 health、4 cancel、5 exit、6 invoke、7 resume。Reply为`{protocolVersion:1,result,error}`，错误`{code,message}`。错误字段的字节限额和 SDK 截断规则见[资源与错误](PLUGIN_SDK.md#资源与错误)，宿主仍严格拒绝不合规响应。业务invoke接收`{action,input}`；只有宿主能resume返回hostResponse，普通UI不能伪造能力响应。
 
 推荐backend::Runtime顺序async编排：平台等待让出WASM，原生收到能力请求后授权/审批/执行，resume原Future。每插件单动作；审批continuation为owner绑定的一次性本机token，不能重放动作开头或跨页使用。平台业务结果与大输出由SDK自动分块、校验UTF8和释放，原错误与清理错误一起保留。
 

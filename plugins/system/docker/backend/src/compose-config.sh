@@ -1,6 +1,7 @@
 set -f
 unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
-sd_help=$(d compose config --help) || exit
+sd_compose_select || exit
+sd_help=$(dc config --help) || exit
 sd_can_skip_env=false
 case "$sd_help" in *--no-env-resolution*) sd_can_skip_env=true;; esac
 sd_ids=$(d container ls --all --quiet --no-trunc --filter label=com.docker.compose.project) || exit
@@ -34,7 +35,7 @@ sd_read_config() {
         if test "$sd_line" != "$sd_identity"; then printf conflict; break; fi
     done)
     test -z "$sd_conflict" || { printf '%s\n' '同名项目的工作目录或有序配置文件不一致' >&2; return 2; }
-    set -- compose --project-name "$sd_project" --project-directory "$sd_dir" --profile '*'
+    set -- --project-name "$sd_project" --project-directory "$sd_dir" --profile '*'
     sd_count=0
     while :; do
         case "$sd_files" in
@@ -52,7 +53,7 @@ sd_read_config() {
         set -- "$@" --no-interpolate
         if test "$sd_can_skip_env" = true; then set -- "$@" --no-env-resolution; fi
     fi
-    (cd "$sd_dir" && d "$@")
+    (cd "$sd_dir" && dc "$@")
 }
 
 for sd_id in $sd_ids; do
