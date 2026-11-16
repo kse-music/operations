@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ensureReleaseTag, prepareReleaseNotes, releaseTag } from './update-release.mjs';
+import {
+  ensureReleaseTag,
+  prepareReleaseNotes,
+  releaseAssets,
+  releaseTag,
+} from './update-release.mjs';
 import { updateManifest } from './update-manifest.mjs';
 
 const qa = fileURLToPath(new URL('../.local/qa/update-release/', import.meta.url));
 
-async function fixture(t) {
+async function temporaryRoot(t) {
   await mkdir(qa, { recursive: true });
   const root = await mkdtemp(path.join(qa, 'unit-'));
   t.after(async () => {
@@ -17,6 +22,11 @@ async function fixture(t) {
     assert.equal((await lstat(root)).isSymbolicLink(), false);
     await rm(root, { recursive: true });
   });
+  return root;
+}
+
+async function fixture(t) {
+  const root = await temporaryRoot(t);
   const remote = path.join(root, 'origin.git');
   const cwd = path.join(root, 'work');
   const gitAt = (directory, ...args) =>
@@ -60,7 +70,7 @@ test('release entries reject automatic events and manual runs outside main befor
     ['push', 'refs/heads/main', 'manual run'],
     ['workflow_dispatch', 'refs/heads/feature', 'must run from main'],
   ]) {
-    for (const command of ['--prepare', '--create-tag']) {
+    for (const command of ['--prepare', '--artifacts', '--create-tag']) {
       const result = spawnSync(process.execPath, [script, command], {
         env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_REF: ref },
         encoding: 'utf8',
@@ -70,6 +80,98 @@ test('release entries reject automatic events and manual runs outside main befor
       assert(result.stderr.includes(message));
     }
   }
+});
+
+async function builtRelease(t) {
+  const cwd = await temporaryRoot(t);
+  const version = '0.9.3';
+  const bundle = path.join(cwd, 'target/release/bundle');
+  const files = [
+    `nsis/ServerDeck_${version}_x64-setup.exe`,
+    `nsis/ServerDeck_${version}_x64-setup.exe.sig`,
+    'nsis/latest.json',
+    `deb/ServerDeck_${version}_amd64.deb`,
+    `appimage/ServerDeck_${version}_amd64.AppImage`,
+  ].map((file) => path.join(bundle, file));
+  const notes = 'Windows 与 Linux 发布说明\n';
+  const signature = Buffer.from(`trusted comment: timestamp:1\tversion:${version}\n`).toString(
+    'base64',
+  );
+  const manifest = updateManifest({
+    version,
+    notes,
+    signature,
+    publishedAt: '2026-11-17T00:00:00Z',
+  });
+  for (const file of files) {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, 'test release asset');
+  }
+  await writeFile(files[1], signature);
+  await writeFile(files[2], JSON.stringify(manifest));
+  const notesFile = path.join(bundle, 'nsis/notes.txt');
+  await writeFile(notesFile, notes);
+  return { cwd, version, files, notesFile, manifest };
+}
+
+test('collects Windows and both Linux packages for one version without uploading notes or stale files', async (t) => {
+  const { cwd, version, files } = await builtRelease(t);
+  await writeFile(path.join(cwd, 'target/release/bundle/deb/ServerDeck_0.9.2_amd64.deb'), 'stale');
+  assert.deepEqual(releaseAssets({ version, cwd }), files);
+  assert.equal(new Set(files.map((file) => path.basename(file))).size, 5);
+});
+
+for (const [index, name] of [
+  'Windows installer',
+  'signature',
+  'manifest',
+  'deb',
+  'AppImage',
+].entries()) {
+  test(`refuses an incomplete draft when ${name} is missing`, async (t) => {
+    const { cwd, version, files } = await builtRelease(t);
+    await rm(files[index]);
+    assert.throws(
+      () => releaseAssets({ version, cwd }),
+      (error) => {
+        assert.equal(error.code, 'ENOENT');
+        assert.equal(error.path, files[index]);
+        return true;
+      },
+    );
+  });
+}
+
+test('rejects empty packages and directories instead of treating them as built artifacts', async (t) => {
+  const { cwd, version, files } = await builtRelease(t);
+  await writeFile(files[3], '');
+  assert.throws(() => releaseAssets({ version, cwd }), /non-empty release file/);
+  await rm(files[3]);
+  await mkdir(files[3]);
+  assert.throws(() => releaseAssets({ version, cwd }), /non-empty release file/);
+});
+
+test('does not substitute a Linux package from another version', async (t) => {
+  const { cwd, version, files } = await builtRelease(t);
+  await rename(files[4], files[4].replace(version, '0.9.2'));
+  assert.throws(() => releaseAssets({ version, cwd }), { code: 'ENOENT' });
+});
+
+test('requires release notes and checks that downloaded manifest, version and signature agree', async (t) => {
+  const { cwd, version, files, notesFile, manifest } = await builtRelease(t);
+  await writeFile(notesFile, 'mismatched notes');
+  assert.throws(() => releaseAssets({ version, cwd }), /release manifest must match/);
+  await writeFile(notesFile, manifest.notes);
+  await writeFile(files[2], JSON.stringify({ ...manifest, version: '0.9.2' }));
+  assert.throws(() => releaseAssets({ version, cwd }), /release manifest must match/);
+  await writeFile(files[2], JSON.stringify(manifest));
+  await writeFile(
+    files[1],
+    Buffer.from(`trusted comment: timestamp:2\tversion:${version}\n`).toString('base64'),
+  );
+  assert.throws(() => releaseAssets({ version, cwd }), /release manifest must match/);
+  await rm(notesFile);
+  assert.throws(() => releaseAssets({ version, cwd }), { code: 'ENOENT' });
 });
 
 const notesInput = { version: '0.9.0', sha: 'a'.repeat(40), repo: 'kse-music/operations' };

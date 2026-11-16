@@ -23,7 +23,7 @@
 
 只修改根 [Cargo.toml](../../Cargo.toml) 的工作区版本，桌面 dev/build 自动检查来源并同步工作区锁记录，提交配套 `Cargo.lock`。SDK、插件及持久格式独立管理，具体准备见[构建指南](../guides/DEVELOPMENT.md#应用版本与构建)。关于页时间是本次前端构建时间，不等同于正式 Release 发布时刻。
 
-签名草稿和未签名候选是不同产物。同一提交应先通过 [Candidate builds (unsigned, no publish)](../../.github/workflows/release.yml)，再按 [Signed Windows update draft](../../.github/workflows/update-release.yml) 生成完整签名草稿；后者不运行全量测试。草稿成功不代表已上线或通过原生验收。发布顺序、密钥与 Authenticode 签名后重签规则见[更新分发](UPDATES.md#发布流程)。
+正式草稿和未签名候选是不同产物。同一提交应先通过 [Candidate builds (unsigned, no publish)](../../.github/workflows/release.yml)，再按 [Windows and Linux release draft](../../.github/workflows/update-release.yml) 生成包含 Windows updater 产物与 Linux deb、AppImage 的完整草稿；后者不运行全量测试。草稿成功不代表已上线或通过原生验收。核对两端构建成功、当前版本附件齐全及发布说明一致，Linux 安装包仍需单独原生验收。发布顺序、密钥与 Authenticode 签名后重签规则见[更新分发](UPDATES.md#发布流程)。
 
 ## 构建和产物
 

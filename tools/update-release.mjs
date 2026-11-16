@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readAppVersion } from './app-version.mjs';
+import { updateManifest } from './update-manifest.mjs';
 
 const repository = fileURLToPath(new URL('../', import.meta.url));
 
@@ -36,6 +37,35 @@ export function prepareReleaseNotes({ version, sha, repo, notes = '' }, run = ex
   assert(typeof notes === 'string' && notes.trim(), 'release notes are empty or invalid');
   assert(Buffer.byteLength(notes, 'utf8') <= 64 * 1024, 'release notes exceed 64 KiB');
   return notes;
+}
+
+export function releaseAssets({ version, cwd = repository }) {
+  releaseTag(version);
+  const bundle = path.join(cwd, 'target/release/bundle');
+  const installer = path.join(bundle, 'nsis', `ServerDeck_${version}_x64-setup.exe`);
+  const assets = [
+    installer,
+    `${installer}.sig`,
+    path.join(bundle, 'nsis/latest.json'),
+    path.join(bundle, 'deb', `ServerDeck_${version}_amd64.deb`),
+    path.join(bundle, 'appimage', `ServerDeck_${version}_amd64.AppImage`),
+  ];
+  for (const file of assets) {
+    const info = lstatSync(file);
+    assert(info.isFile() && info.size > 0, `expected a non-empty release file: ${file}`);
+  }
+  const manifest = JSON.parse(readFileSync(assets[2], 'utf8'));
+  assert.deepEqual(
+    manifest,
+    updateManifest({
+      version,
+      signature: readFileSync(assets[1], 'utf8'),
+      notes: readFileSync(path.join(bundle, 'nsis/notes.txt'), 'utf8'),
+      publishedAt: manifest.pub_date,
+    }),
+    'release manifest must match the built version, signature and release notes',
+  );
+  return assets;
 }
 
 export function ensureReleaseTag({ version, sha, cwd = repository }) {
@@ -71,8 +101,8 @@ export function ensureReleaseTag({ version, sha, cwd = repository }) {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const command = process.argv[2];
   assert(
-    ['--prepare', '--create-tag'].includes(command),
-    'usage: node tools/update-release.mjs <--prepare|--create-tag>',
+    ['--prepare', '--artifacts', '--create-tag'].includes(command),
+    'usage: node tools/update-release.mjs <--prepare|--artifacts|--create-tag>',
   );
   assert.equal(process.env.GITHUB_EVENT_NAME, 'workflow_dispatch', 'release requires a manual run');
   assert.equal(process.env.GITHUB_REF, 'refs/heads/main', 'release must run from main');
@@ -90,6 +120,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     mkdirSync(directory, { recursive: true });
     writeFileSync(path.join(directory, 'notes.txt'), notes);
     appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=${releaseTag(version)}\n`);
+  } else if (command === '--artifacts') {
+    console.log(JSON.stringify(releaseAssets({ version })));
   } else {
     const result = ensureReleaseTag({ version, sha });
     console.log(`${result.created ? 'Created' : 'Reused'} ${result.tag} at ${sha}`);
