@@ -38,7 +38,7 @@ const form = ref<HTMLFormElement | null>(null);
 const testing = ref(false);
 const testId = ref('');
 const testMessage = ref('');
-const testError = ref('');
+const testResult = ref<{ success: boolean; message: string }>();
 const trust = ref<HostKeyFingerprint>();
 const busy = computed(() => store.busy || testing.value);
 let expiry: ReturnType<typeof setTimeout> | undefined;
@@ -92,7 +92,7 @@ function selectKey(event: Event): void {
 function invalidateTest(): void {
   testId.value = '';
   testMessage.value = '';
-  testError.value = '';
+  testResult.value = undefined;
   trust.value = undefined;
   clearTimeout(expiry);
 }
@@ -139,12 +139,13 @@ async function testConnection(confirmed?: HostKeyFingerprint): Promise<void> {
     }
     testId.value = result.testId;
     testMessage.value = tr('SSH 连接和认证成功，可以保存主机。');
+    testResult.value = { success: true, message: testMessage.value };
     expiry = setTimeout(() => {
       invalidateTest();
       testMessage.value = tr('测试结果已过期，请重新测试连接。');
     }, result.expiresInSeconds * 1000);
   } catch (error) {
-    if (!disposed) testError.value = errorMessage(error);
+    if (!disposed) testResult.value = { success: false, message: errorMessage(error) };
   } finally {
     testing.value = false;
   }
@@ -413,22 +414,6 @@ function proxyPasswordSaved(id: string): void {
           </div>
         </details>
       </fieldset>
-      <section v-if="trust" class="banner" :aria-label="tr('核对 SSH 主机指纹')">
-        <p>
-          {{ tr('首次连接 ') }}{{ trust.hostname }}:{{ trust.port
-          }}{{ tr('。请通过可信渠道核对指纹。') }}
-        </p>
-        <p>
-          {{ trust.algorithm }} <code class="fingerprint">{{ trust.fingerprint }}</code>
-        </p>
-        <div class="toolbar">
-          <button class="button" type="button" @click="invalidateTest">{{ tr('拒绝指纹') }}</button>
-          <button class="button" type="button" @click="testConnection(trust)">
-            {{ tr(' 信任并继续测试 ') }}
-          </button>
-        </div>
-      </section>
-      <p v-if="testError" class="banner" role="alert">{{ testError }}</p>
       <p class="subtle" role="status">
         {{
           testMessage || (testing ? tr('正在连接并验证 SSH 登录…') : tr('测试连接成功后即可保存。'))
@@ -444,6 +429,34 @@ function proxyPasswordSaved(id: string): void {
       </footer>
     </form>
   </Modal>
+  <Modal v-if="trust" :title="tr('核对 SSH 主机指纹')" focus-heading @close="invalidateTest">
+    <p>
+      {{ tr('首次连接 ') }}{{ trust.hostname }}:{{ trust.port
+      }}{{ tr('。请通过可信渠道核对指纹。') }}
+    </p>
+    <p>{{ trust.algorithm }}</p>
+    <code class="fingerprint">{{ trust.fingerprint }}</code>
+    <footer class="dialog-actions">
+      <button class="button" type="button" @click="invalidateTest">{{ tr('拒绝指纹') }}</button>
+      <button class="button primary" type="button" @click="testConnection(trust)">
+        {{ tr(' 信任并继续测试 ') }}
+      </button>
+    </footer>
+  </Modal>
+  <Modal
+    v-if="testResult"
+    :title="testResult.success ? tr('连接测试成功') : tr('连接测试失败')"
+    @close="testResult = undefined"
+  >
+    <p class="connection-test-message" :role="testResult.success ? 'status' : 'alert'">
+      {{ testResult.message }}
+    </p>
+    <footer class="dialog-actions">
+      <button class="button primary" type="button" @click="testResult = undefined">
+        {{ tr('关闭') }}
+      </button>
+    </footer>
+  </Modal>
   <ProxyPasswordDialog
     v-if="newProxyPassword"
     @close="newProxyPassword = false"
@@ -454,5 +467,9 @@ function proxyPasswordSaved(id: string): void {
 <style scoped>
 .private-key-input {
   -webkit-text-security: disc;
+}
+.connection-test-message {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 </style>

@@ -35,17 +35,43 @@ pub fn select_configuration(
     project: &str,
 ) -> Result<(Value, bool, Vec<String>), ApiError> {
     let mut found = None;
-    for (index, item) in serde_json::Deserializer::from_str(stdout)
-        .into_iter::<Value>()
-        .enumerate()
-    {
-        if index >= 10000 {
+    let mut remaining = stdout;
+    let mut count = 0;
+    while !remaining.trim().is_empty() {
+        count += 1;
+        if count > 10000 {
             return Err(invalid("Compose 配置快照超过项目数量限制"));
         }
-        let row = item.map_err(|_| invalid("Compose 配置快照格式无效"))?;
+        let mut stream = serde_json::Deserializer::from_str(remaining).into_iter::<Value>();
+        let row = stream
+            .next()
+            .ok_or_else(|| invalid("Compose 配置快照缺失"))?
+            .map_err(|_| invalid("Compose 配置快照格式无效"))?;
+        remaining = &remaining[stream.byte_offset()..];
         if !row.is_object() {
             return Err(invalid("Compose 配置快照格式无效"));
         }
+        let yaml = match row.get("ModelFormat") {
+            None => None,
+            Some(format) if format == "yaml" => {
+                let bytes = row["ModelBytes"]
+                    .as_u64()
+                    .and_then(|n| usize::try_from(n).ok())
+                    .filter(|n| *n <= 256 * 1024)
+                    .ok_or_else(|| invalid("Compose YAML 长度无效或超过限制"))?;
+                let body = remaining
+                    .strip_prefix('\n')
+                    .ok_or_else(|| invalid("Compose YAML 帧缺少分隔符"))?;
+                let text = body
+                    .get(..bytes)
+                    .ok_or_else(|| invalid("Compose YAML 帧不完整"))?;
+                remaining = body[bytes..]
+                    .strip_prefix('\n')
+                    .ok_or_else(|| invalid("Compose YAML 帧尾无效"))?;
+                Some(text)
+            }
+            Some(_) => return Err(invalid("Compose 配置编码无效")),
+        };
         if row["Project"].as_str() != Some(project) {
             continue;
         }
@@ -91,14 +117,33 @@ pub fn select_configuration(
             }
             None => return Err(invalid("Compose 配置快照缺少执行结果")),
         }
-        if !row["Model"].is_object() {
+        let model = match yaml {
+            Some(text) => {
+                let options = serde_saphyr::options! {
+                    budget: serde_saphyr::budget! {
+                        max_documents: 1,
+                        max_depth: 32,
+                        max_nodes: 16384,
+                        max_events: 65536,
+                        max_aliases: 128,
+                        max_anchors: 128,
+                        max_recorded_anchor_bytes: 256 * 1024,
+                        max_total_scalar_bytes: 256 * 1024,
+                    },
+                };
+                serde_saphyr::from_str_with_options::<Value>(text, options)
+                    .map_err(|_| invalid("Compose V1 YAML 格式无效或超过解析限制"))?
+            }
+            None => row["Model"].clone(),
+        };
+        if !model.is_object() {
             return Err(invalid("Compose 配置输出格式无效"));
         }
         let resolved = row["EnvironmentFilesResolved"]
             .as_bool()
             .ok_or_else(|| invalid("Compose 配置快照缺少环境解析状态"))?;
         found = Some((
-            row["Model"].clone(),
+            model,
             resolved,
             if diagnostic.is_empty() {
                 vec![]
@@ -205,7 +250,15 @@ pub fn from_compose(model: &Value, service: &str, reveal: bool) -> Result<Value,
                     if section == "networks" {
                         item.as_str()
                     } else {
-                        item.as_str().or_else(|| item["source"].as_str())
+                        item.as_str()
+                            .map(|value| {
+                                if section == "volumes" {
+                                    value.split_once(':').map_or(value, |(source, _)| source)
+                                } else {
+                                    value
+                                }
+                            })
+                            .or_else(|| item["source"].as_str())
                     }
                 })
                 .collect()
@@ -753,6 +806,47 @@ mod tests {
 
     fn config_record(selected: &Value) -> Value {
         json!({"Id":selected["Id"],"Members":[selected["Id"]],"Project":"shop","WorkingDir":selected["Config"]["Labels"]["com.docker.compose.project.working_dir"],"ConfigFiles":selected["Config"]["Labels"]["com.docker.compose.project.config_files"],"ExitCode":0,"EnvironmentFilesResolved":false,"Model":{"services":{"web":{"image":"nginx"}}}})
+    }
+
+    #[test]
+    fn v1_yaml_frames_preserve_types_and_isolate_services_and_failures() {
+        let selected = compose_container("/srv/my app");
+        let frame = |project: &str, yaml: &str| {
+            let mut row = config_record(&selected);
+            row.as_object_mut().unwrap().remove("Model");
+            row["Project"] = json!(project);
+            row["ModelFormat"] = json!("yaml");
+            row["ModelBytes"] = json!(yaml.len());
+            row["EnvironmentFilesResolved"] = json!(true);
+            format!("{row}\n{yaml}\n")
+        };
+        let yaml = "version: '3.9'\nservices:\n  web:\n    image: nginx\n    command: [sh, -c, 'echo $${TOKEN}']\n    environment:\n      TOKEN: private-value\n      MODE: 'on'\n      CODE: '0123'\n    labels:\n      title: 中文配置\n    volumes: [data:/data:ro]\n  other:\n    environment:\n      OTHER: other-private\nvolumes:\n  data:\n    external: true\n    name: existing-volume\n";
+        let stream = frame("unrelated", "bad: [") + &frame("shop", yaml);
+        let (model, resolved, warnings) =
+            select_configuration(&stream, "", &selected, "shop").unwrap();
+        assert!(resolved && warnings.is_empty());
+        assert_eq!(model["services"]["web"]["environment"]["CODE"], "0123");
+        assert_eq!(model["services"]["web"]["environment"]["MODE"], "on");
+        assert_eq!(model["services"]["web"]["labels"]["title"], "中文配置");
+        let hidden_config = from_compose(&model, "web", false).unwrap();
+        assert_eq!(hidden_config["volumes"]["data"]["name"], "existing-volume");
+        let hidden = hidden_config.to_string();
+        assert!(!hidden.contains("private-value") && !hidden.contains("other-private"));
+        let shown = from_compose(&model, "web", true).unwrap().to_string();
+        assert!(shown.contains("private-value") && !shown.contains("other-private"));
+        for invalid in [
+            "bad: [",
+            "services: {}\nservices: {}",
+            "services: {}\n---\nservices: {}",
+        ] {
+            assert!(select_configuration(&frame("shop", invalid), "", &selected, "shop").is_err());
+        }
+        let truncated = frame("shop", yaml);
+        assert!(
+            select_configuration(&truncated[..truncated.len() - 2], "", &selected, "shop").is_err()
+        );
+        let deep = format!("services: {}0{}", "[".repeat(40), "]".repeat(40));
+        assert!(select_configuration(&frame("shop", &deep), "", &selected, "shop").is_err());
     }
 
     #[test]

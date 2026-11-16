@@ -84,7 +84,7 @@ onBeforeUnmount(() => {
         </span>
       </div>
       <p v-for="warning in warnings" :key="warning" class="subtle">{{ tr(warning) }}</p>
-      <p class="subtle">{{ tr('环境变量可能包含敏感值，切换标签或关闭详情时会清除。') }}</p>
+      <p class="subtle">{{ tr('环境变量可能包含敏感值，仅在本次详情弹窗内保留，关闭后清除。') }}</p>
       <pre
         class="docker-startup-yaml"
         :aria-label="tr('Compose 启动配置')"

@@ -1,4 +1,5 @@
 sd_compose_entry=
+sd_compose_legacy=false
 sd_compose_modern() {
     sd_compose_major=${1#v}
     sd_compose_major=${sd_compose_major%%.*}
@@ -19,7 +20,13 @@ sd_compose_select() {
         sd_compose_entry=standalone
         return 0
     fi
-    printf '%s\n' 'Compose V2 不可用；已检测 docker compose 和 docker-compose，容器及镜像管理仍可使用。' "docker compose: $sd_compose_plugin_version" "docker-compose: $sd_compose_standalone_version" >&2
+    if test "$sd_compose_standalone_status" -eq 0; then
+        case "$sd_compose_standalone_version" in
+            1.29.2|v1.29.2) sd_compose_entry=standalone; sd_compose_legacy=true; return 0;;
+        esac
+    fi
+    sd_compose_reason='Compose 不可用；支持 docker-compose 1.29.2 和 Compose V2 或后续版本，容器及镜像管理仍可使用。'
+    printf '%s\n' "$sd_compose_reason" "docker-compose: $sd_compose_standalone_version" "docker compose: $sd_compose_plugin_version" >&2
     return 127
 }
 dc() {

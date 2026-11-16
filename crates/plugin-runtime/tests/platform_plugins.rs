@@ -90,6 +90,25 @@ fn done(reply: &Reply) -> &Value {
 }
 
 #[tokio::test]
+async fn docker_removed_resource_query_is_rejected_before_host_calls() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let reply = runtime
+        .call(
+            &id,
+            json!({"action":"query","input":{"hostId":"host","request":{"kind":"container_stats","id":"a".repeat(64)}}}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.error.as_ref().map(|error| error.code.as_str()),
+        Some("INPUT")
+    );
+    runtime.health(&id).await.unwrap();
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn docker_long_command_errors_preserve_the_cause_and_keep_the_plugin_active() {
     let (_directory, runtime, id) = packaged("docker");
     runtime.activate(&id).await.unwrap();
@@ -159,15 +178,36 @@ async fn docker_image_archive_uses_bound_long_streams_and_returns_native_transfe
             reply.result["request"]["operation"]["bindings"],
             json!(["host-binding"])
         );
-        let script = operation(&reply)["command"]["args"][1].as_str().unwrap();
+        let command = &operation(&reply)["command"];
+        let args = command["args"].as_array().unwrap();
+        assert_eq!(command["program"], "sh");
+        assert_eq!(args[0], "-c");
+        let script = args[1].as_str().unwrap();
         assert!(script.contains(if request["kind"] == "import" {
             "image load --input"
         } else {
             "image save --output"
         }));
-        assert!(script.contains(&format!("SD_ARCHIVE_READY:{nonce}")));
+        if request["kind"] == "export" {
+            assert_eq!(args.len(), 7);
+            assert_eq!(args[2], "serverdeck-image-export");
+            assert_eq!(args[3], nonce);
+            assert_eq!(args[4], request["id"]);
+            assert_eq!(args[6], request["fileName"]);
+            assert!(script.contains("printf 'SD_ARCHIVE_PREPARED:%s\\n' \"$1\""));
+            assert!(script.contains("printf '\\nSD_ARCHIVE_READY:%s\\n' \"$1\""));
+        } else {
+            assert_eq!(args.len(), 2);
+            assert!(script.contains(&format!("SD_ARCHIVE_PREPARED:{nonce}")));
+            assert!(script.contains(&format!("SD_ARCHIVE_READY:{nonce}")));
+        }
         reply = resume(&runtime, &id, &reply, json!({"id":"archive-stream"})).await;
         assert_eq!(done(&reply)["streamId"], "archive-stream");
+        assert_eq!(done(&reply)["nonce"], nonce);
+        assert_eq!(
+            done(&reply)["directory"],
+            format!("/tmp/serverdeck-image-{nonce}")
+        );
         assert_eq!(
             done(&reply)["path"],
             format!("/tmp/serverdeck-image-{nonce}/image.tar")
@@ -847,10 +887,12 @@ fn operation(reply: &Reply) -> &Value {
 async fn docker_compose_prepares_project_commands_and_survives_denial() {
     let (_directory, runtime, id) = packaged("docker");
     runtime.activate(&id).await.unwrap();
+    let manifest: Value =
+        serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
     let snapshot = json!({"ID":"a".repeat(64),"Name":"/shop-web-1","Image":"nginx","State":"running","ExitCode":0,"Project":"shop","Service":"web","OneOff":"False","WorkingDir":"/srv/my shop","ConfigFiles":"/srv/my shop/compose.yaml"}).to_string();
     let completed = |stdout: &str| json!({"state":"completed","exitCode":0,"stdout":stdout,"stderr":"","truncated":false,"message":null});
     let projects = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"compose_projects"}}), |request| {
-        assert!(request["command"]["args"][1].as_str().unwrap().ends_with("dc ls --all --format json"));
+        assert_eq!(request["command"], manifest["preapprovedCommands"][5]);
         completed(r#"[{"Name":"shop","Status":"running(1)","ConfigFiles":"/srv/my shop/compose.yaml"}]"#)
     }).await;
     assert_eq!(done(&projects)["records"][0]["Name"], "shop");
@@ -873,9 +915,8 @@ async fn docker_compose_prepares_project_commands_and_survives_denial() {
     reply = resume(&runtime, &id, &reply, completed(&snapshot)).await;
     let script = operation(&reply)["command"]["args"][1].as_str().unwrap();
     assert!(script.contains("--project-name 'shop'"));
-    assert!(script.contains("--file '/srv/my shop/compose.yaml' stop --timeout 5"));
-    let manifest: Value =
-        serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
+    assert!(script.contains("--file '/srv/my shop/compose.yaml'"));
+    assert!(script.contains("sd_compose_exec \"$@\" stop --timeout 5 -- 'web'"));
     assert!(
         !manifest["preapprovedCommands"]
             .as_array()
@@ -920,7 +961,7 @@ async fn docker_startup_unifies_inspect_and_compose_without_leaking_other_contai
                 "execute" => {
                     let command = &request["command"];
                     let script = command["args"][1].as_str().unwrap();
-                    if script.contains("config --format json") {
+                    if script.contains("sd_reveal=") {
                         config_read = true;
                         assert!(manifest["preapprovedCommands"].as_array().unwrap().contains(command), "every startup read must be exactly preapproved");
                         assert!(script.contains("sd_reveal="));
@@ -961,6 +1002,44 @@ async fn docker_startup_unifies_inspect_and_compose_without_leaking_other_contai
                 "/src"
             );
         }
+    }
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn docker_v1_projects_and_yaml_config_use_normal_wasm_limits_and_isolate_secrets() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let target = "a".repeat(64);
+    let snapshot = json!({"ID":target,"Project":"shop","Service":"web","State":"running","OneOff":"False","ConfigFiles":"/srv/shop/compose.yaml"});
+    let projects = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"compose_projects"}}), |_| {
+        json!({"state":"completed","exitCode":0,"stdout":format!("SERVERDECK_COMPOSE_V1\n{snapshot}\n"),"stderr":"","truncated":false,"message":null})
+    }).await;
+    assert_eq!(done(&projects)["records"][0]["Status"], "running(1)");
+    for reveal in [false, true] {
+        let reply = invoke(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"container_startup","id":target,"revealEnv":reveal,"inspectOnly":false}}), |request| {
+            if request["kind"] == "host" { return metadata(request); }
+            assert_eq!(request["kind"], "execute");
+            let script = request["command"]["args"][1].as_str().unwrap();
+            let stdout = if script.contains("sd_reveal=") {
+                let mut yaml = String::from("version: '3.9'\nservices:\n  web:\n    image: nginx\n    environment:\n      TOKEN: selected-private\n      CODE: '0123'\n    labels:\n");
+                for n in 0..160 { yaml.push_str(&format!("      item{n}: '{}'\n", "x".repeat(80))); }
+                yaml.push_str("  other:\n    environment:\n      OTHER: other-private\n");
+                let header = json!({"Id":target,"Members":[target],"Project":"shop","WorkingDir":"/srv/shop","ConfigFiles":"/srv/shop/compose.yaml","ModelFormat":"yaml","ModelBytes":yaml.len(),"ExitCode":0,"EnvironmentFilesResolved":true});
+                format!("{header}\n{yaml}\n")
+            } else {
+                json!({"Id":target,"Name":"/web","Config":{"Image":"nginx","Labels":{"com.docker.compose.project":"shop","com.docker.compose.service":"web","com.docker.compose.project.working_dir":"/srv/shop","com.docker.compose.project.config_files":"/srv/shop/compose.yaml"}},"EnvironmentKeys":["TOKEN","CODE"],"HostConfig":{},"Mounts":[]}).to_string()
+            };
+            json!({"state":"completed","exitCode":0,"stdout":stdout,"stderr":"","truncated":false,"message":null})
+        }).await;
+        let detail = &done(&reply)["detail"];
+        assert_eq!(detail["source"], "compose");
+        assert_eq!(
+            detail["configuration"]["services"]["web"]["labels"]["item159"],
+            "x".repeat(80)
+        );
+        assert_eq!(detail.to_string().contains("selected-private"), reveal);
+        assert!(!detail.to_string().contains("other-private"));
     }
     runtime.shutdown().await.unwrap();
 }
@@ -1010,68 +1089,82 @@ async fn docker_information_and_individual_restart_use_current_contract() {
 async fn docker_maintenance_requires_confirmation_and_reports_partial_failures() {
     let manifest: Value =
         serde_json::from_str(include_str!("../../../plugins/system/docker/manifest.json")).unwrap();
-    for action in ["restart_exited", "clear_logs"] {
-        let (_directory, runtime, id) = packaged("docker");
-        runtime.activate(&id).await.unwrap();
-        let input = json!({"hostId":"host","request":{"kind":"container_maintenance","action":action,"confirmed":false}});
-        let unconfirmed = invoke(&runtime, &id, "query", input.clone(), |_| {
-            panic!("unconfirmed action reached host")
-        })
-        .await;
-        assert_eq!(unconfirmed.error.unwrap().code, "DOCKER_INPUT");
-        let mut input = input;
-        input["request"]["confirmed"] = json!(true);
-        let pending = runtime
-            .call(&id, json!({"action":"query","input":input}))
-            .await
-            .unwrap();
-        let request = operation(&pending);
-        assert_eq!(request["kind"], "execute");
-        assert_eq!(request["hostId"], "host");
-        assert!(
-            !manifest["preapprovedCommands"]
-                .as_array()
-                .unwrap()
-                .contains(&request["command"])
-        );
-        let script = request["command"]["args"][1].as_str().unwrap();
-        assert_eq!(
-            script.contains("--filter status=exited"),
-            action == "restart_exited"
-        );
-        assert_eq!(
-            script.contains("truncate --no-create"),
-            action == "clear_logs"
-        );
-        let cancelled = runtime.resume(&id, json!({"hostResponse":{"requestId":pending.result["request"]["requestId"],"result":null,"error":{"code":"USER_CANCELLED","message":"取消"}}})).await.unwrap();
-        assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
-        let completed = invoke(&runtime, &id, "query", input.clone(), |_| json!({"state":"completed","exitCode":0,"stdout":"{\"matched\":2,\"succeeded\":2,\"failed\":0,\"skipped\":0}","stderr":"","truncated":false,"message":null})).await;
-        assert_eq!(done(&completed)["success"], true);
-        assert!(
-            done(&completed)["message"]
-                .as_str()
-                .unwrap()
-                .contains("成功 2 个")
-        );
-        let partial = invoke(&runtime, &id, "query", input.clone(), |_| json!({"state":"completed","exitCode":0,"stdout":"{\"matched\":2,\"succeeded\":1,\"failed\":1,\"skipped\":0}","stderr":"Permission denied","truncated":false,"message":null})).await;
-        assert_eq!(done(&partial)["success"], false);
-        assert_eq!(done(&partial)["code"], "DOCKER_PARTIAL_FAILURE");
-        assert!(
-            done(&partial)["message"]
-                .as_str()
-                .unwrap()
-                .contains("失败 1 个")
-        );
-        assert!(
-            done(&partial)["message"]
-                .as_str()
-                .unwrap()
-                .contains("Permission denied")
-        );
-        let failed = invoke(&runtime, &id, "query", input, |_| json!({"state":"completed","exitCode":1,"stdout":"","stderr":"daemon unavailable","truncated":false,"message":null})).await;
-        assert!(failed.error.is_some());
-        runtime.shutdown().await.unwrap();
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    let mut input = json!({"hostId":"host","request":{"kind":"container_maintenance","action":"restart_exited","confirmed":false}});
+    let unconfirmed = invoke(&runtime, &id, "query", input.clone(), |_| {
+        panic!("unconfirmed action reached host")
+    })
+    .await;
+    assert_eq!(unconfirmed.error.unwrap().code, "DOCKER_INPUT");
+    input["request"]["confirmed"] = json!(true);
+    let pending = runtime
+        .call(&id, json!({"action":"query","input":input}))
+        .await
+        .unwrap();
+    let request = operation(&pending);
+    assert_eq!(request["kind"], "execute");
+    assert_eq!(request["hostId"], "host");
+    assert!(
+        !manifest["preapprovedCommands"]
+            .as_array()
+            .unwrap()
+            .contains(&request["command"])
+    );
+    let script = request["command"]["args"][1].as_str().unwrap();
+    assert!(script.contains("--filter status=exited"));
+    assert!(!script.contains("truncate --no-create"));
+    let cancelled = runtime.resume(&id, json!({"hostResponse":{"requestId":pending.result["request"]["requestId"],"result":null,"error":{"code":"USER_CANCELLED","message":"取消"}}})).await.unwrap();
+    assert_eq!(cancelled.error.unwrap().code, "USER_CANCELLED");
+    let completed = invoke(&runtime, &id, "query", input.clone(), |_| json!({"state":"completed","exitCode":0,"stdout":"{\"matched\":2,\"succeeded\":2,\"failed\":0,\"skipped\":0}","stderr":"","truncated":false,"message":null})).await;
+    assert_eq!(done(&completed)["success"], true);
+    assert!(
+        done(&completed)["message"]
+            .as_str()
+            .unwrap()
+            .contains("成功 2 个")
+    );
+    let partial = invoke(&runtime, &id, "query", input.clone(), |_| json!({"state":"completed","exitCode":0,"stdout":"{\"matched\":2,\"succeeded\":1,\"failed\":1,\"skipped\":0}","stderr":"Permission denied","truncated":false,"message":null})).await;
+    assert_eq!(done(&partial)["success"], false);
+    assert_eq!(done(&partial)["code"], "DOCKER_PARTIAL_FAILURE");
+    assert!(
+        done(&partial)["message"]
+            .as_str()
+            .unwrap()
+            .contains("失败 1 个")
+    );
+    assert!(
+        done(&partial)["message"]
+            .as_str()
+            .unwrap()
+            .contains("Permission denied")
+    );
+    let failed = invoke(&runtime, &id, "query", input, |_| json!({"state":"completed","exitCode":1,"stdout":"","stderr":"daemon unavailable","truncated":false,"message":null})).await;
+    let error = failed.error.unwrap();
+    assert_eq!(error.code, "REMOTE_COMMAND");
+    assert!(error.message.contains("daemon unavailable"));
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn docker_removed_maintenance_actions_are_rejected_before_host_calls() {
+    let (_directory, runtime, id) = packaged("docker");
+    runtime.activate(&id).await.unwrap();
+    for action in ["clear_logs", "restart_all"] {
+        for confirmed in [false, true] {
+            let reply = invoke(
+                &runtime,
+                &id,
+                "query",
+                json!({"hostId":"host","request":{"kind":"container_maintenance","action":action,"confirmed":confirmed}}),
+                |_| panic!("removed maintenance action reached host"),
+            )
+            .await;
+            assert_eq!(reply.error.unwrap().code, "INPUT");
+            runtime.health(&id).await.unwrap();
+        }
     }
+    runtime.shutdown().await.unwrap();
 }
 
 // Opt-in only: the caller creates and owns this isolated, networkless QA project.
@@ -1107,24 +1200,49 @@ async fn docker_compose_live_project_lifecycle() {
                 ));
                 let command = &request["command"];
                 let script = command["args"][1].as_str().unwrap();
-                if script.contains("exec docker") {
-                    assert!(script.contains(&format!("--project-name '{project}'")));
+                if script.contains("sd_compose_exec \"$@\"") {
+                    assert!(script.contains(project));
                     assert!(!script.contains("down"));
                     assert!(!script.contains("up -d"));
                 }
                 let program = command["program"].as_str().unwrap().to_string();
-                let args = command["args"]
+                let mut args = command["args"]
                     .as_array()
                     .unwrap()
                     .iter()
                     .map(|a| a.as_str().unwrap().to_string())
                     .collect::<Vec<_>>();
+                if let Ok(bin) = std::env::var("SERVERDECK_COMPOSE_QA_BIN") {
+                    assert!(
+                        bin.starts_with('/')
+                            && bin
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
+                    );
+                    args[1] = args[1].replace(
+                        "export PATH=/usr/local/bin:",
+                        &format!("export PATH={bin}:/usr/local/bin:"),
+                    );
+                }
+                // Keep the opt-in read fixture scoped to the explicitly owned project.
+                args[1] = args[1].replace(
+                    "--filter label=com.docker.compose.project)",
+                    &format!("--filter label=com.docker.compose.project={project})"),
+                );
                 let output = tokio::task::spawn_blocking(move || {
-                    std::process::Command::new("wsl")
+                    let mut child = std::process::Command::new("wsl")
                         .args(["--user", "root", "--exec", &program])
                         .args(args)
-                        .output()
-                        .unwrap()
+                        .stdin(std::process::Stdio::piped())
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    // Live stream ownership stays open until the non-following log command ends.
+                    let input = child.stdin.take();
+                    let output = child.wait_with_output().unwrap();
+                    drop(input);
+                    output
                 })
                 .await
                 .unwrap();
@@ -1174,7 +1292,26 @@ async fn docker_compose_live_project_lifecycle() {
         .await;
         let rows = detail["detail"]["services"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
-        assert!(rows.iter().all(|r| r["State"] == expected));
+        assert!(
+            rows.iter().all(|r| r["State"] == expected),
+            "{action}: {rows:?}"
+        );
+        if action == "restart" {
+            let web = rows.iter().find(|r| r["Service"] == "web").unwrap()["ID"]
+                .as_str()
+                .unwrap();
+            for reveal in [false, true] {
+                let detail = run(&runtime, &id, "query", json!({"hostId":"host","request":{"kind":"container_startup","id":web,"revealEnv":reveal,"inspectOnly":false}}), &project).await;
+                assert_eq!(detail["detail"]["source"], "compose");
+                let config = &detail["detail"]["configuration"];
+                assert_eq!(
+                    config["services"]["web"]["labels"]["qa.override"],
+                    "applied"
+                );
+                assert_eq!(config.to_string().contains("qa-env-private"), reveal);
+                assert!(config["services"].get("worker").is_none());
+            }
+        }
     }
     let logs = run(&runtime, &id, "logs", json!({"hostId":"host","source":{"kind":"compose","project":project},"lines":200,"follow":false}), &project).await;
     assert_eq!(logs["id"], "real-compose-logs");

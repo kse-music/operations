@@ -1,5 +1,6 @@
 // Rendering fixtures only. Uses the real host components, packaged UI and iframe bridge.
 // No user profile, credentials or remote hosts are accessed.
+/* global process, Buffer, URL, window, document, setTimeout, TextEncoder, TextDecoder, btoa, innerWidth, innerHeight, getComputedStyle, console */
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
@@ -312,16 +313,6 @@ try {
                     Status: n ? 'Up 3 days' : 'Exited (1)',
                     Ports: '0.0.0.0:8080->80/tcp',
                   })),
-                  container_stats: [
-                    {
-                      CPUPerc: '12.34%',
-                      MemUsage: '42 MiB / 128 MiB',
-                      MemPerc: '32.81%',
-                      NetIO: '1.2 MB / 500 kB',
-                      BlockIO: '0 B / 24 kB',
-                      PIDs: '4',
-                    },
-                  ],
                   images: imageDeleted
                     ? []
                     : [
@@ -600,33 +591,24 @@ try {
       await capture('docker-containers', '.plugin-workspace');
       await stoppedRow.getByRole('button', { name: '详情', exact: true }).click();
       const containerDetails = content().getByRole('dialog', { name: '容器详情', exact: true });
-      const panel = containerDetails.getByRole('tabpanel');
+      const panel = containerDetails.locator('.docker-detail-panel');
       await panel.getByText('app-service-1', { exact: true }).waitFor();
       await panel.getByText('除非手动停止，否则重启', { exact: true }).waitFor();
       assert.equal(await panel.locator('pre').count(), 0);
-      const detailTabs = containerDetails.getByRole('tablist');
-      assert.equal(
-        await detailTabs.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
-        false,
+      assert.deepEqual(
+        (await containerDetails.locator('summary').allTextContents()).map((label) => label.trim()),
+        ['概览', '启动配置', '环境变量'],
       );
       await capture('docker-container-overview', '.plugin-workspace');
-      const overviewTab = containerDetails.getByRole('tab', { name: '概览', exact: true });
-      const environmentTab = containerDetails.getByRole('tab', { name: '环境变量', exact: true });
-      await overviewTab.focus();
-      await overviewTab.press('End');
-      assert(await environmentTab.evaluate((tab) => document.activeElement === tab));
-      assert.equal(await overviewTab.getAttribute('aria-selected'), 'true');
-      await environmentTab.press('Enter');
+      const environment = containerDetails.locator('summary').filter({ hasText: /^环境变量$/ });
+      await environment.focus();
+      await environment.press('Enter');
       await panel.getByText('fixture=value', { exact: true }).waitFor();
       assert.equal(await content().getByRole('dialog').count(), 1);
       assert.equal(await page.getByRole('dialog', { name: '插件操作需要单独确认' }).count(), 0);
-      await containerDetails.getByRole('tab', { name: '端口映射', exact: true }).click();
-      await panel.getByText('8080', { exact: true }).waitFor();
-      assert.equal(await containerDetails.getByText('fixture=value', { exact: true }).count(), 0);
-      await containerDetails.getByRole('tab', { name: '挂载', exact: true }).click();
-      await panel.getByText('/srv/data', { exact: true }).waitFor();
-      await containerDetails.getByRole('tab', { name: '资源使用', exact: true }).click();
-      await panel.getByText('12.34%', { exact: true }).waitFor();
+      await environment.click();
+      await panel.getByText('fixture=value', { exact: true }).waitFor({ state: 'hidden' });
+      assert.equal(await containerDetails.locator('[role="tab"]').count(), 0);
       assert.equal(
         await containerDetails.evaluate((element) => element.scrollWidth > element.clientWidth + 1),
         false,

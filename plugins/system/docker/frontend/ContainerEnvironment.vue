@@ -12,7 +12,7 @@ const props = defineProps<{
 const variables = ref<{ name: string; value: string | null }[]>([]);
 const loading = ref(true);
 const error = ref<string>();
-let visible = true;
+let disposed = false;
 
 async function load() {
   loading.value = true;
@@ -23,7 +23,7 @@ async function load() {
       id: props.containerId,
       revealEnv: true,
     });
-    if (!visible) return;
+    if (disposed) return;
     if (
       detail?.id !== props.containerId ||
       detail.environmentRevealed !== true ||
@@ -39,14 +39,14 @@ async function load() {
           : { name: entry.slice(0, separator), value: entry.slice(separator + 1) };
       });
   } catch (cause) {
-    if (visible) error.value = errorMessage(cause);
+    if (!disposed) error.value = errorMessage(cause);
   } finally {
-    if (visible) loading.value = false;
+    if (!disposed) loading.value = false;
   }
 }
 onMounted(load);
 onBeforeUnmount(() => {
-  visible = false;
+  disposed = true;
   variables.value = [];
 });
 </script>
@@ -58,7 +58,7 @@ onBeforeUnmount(() => {
     <button type="button" class="button" @click="load">{{ tr('重试') }}</button>
   </template>
   <template v-else-if="variables.length">
-    <p class="subtle">{{ tr('环境变量可能包含敏感值，切换标签或关闭详情时会隐藏。') }}</p>
+    <p class="subtle">{{ tr('环境变量可能包含敏感值，仅在本次详情弹窗内保留，关闭后清除。') }}</p>
     <dl class="docker-env-values">
       <div v-for="({ name, value }, index) in variables" :key="index">
         <dt>{{ name }}</dt>

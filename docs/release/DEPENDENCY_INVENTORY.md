@@ -24,10 +24,13 @@
 | alloc-no-stdlib 3.0.0                   | BSD-3-Clause                                                                                                                        | Cargo |
 | alloc-stdlib 0.3.0                      | BSD-3-Clause                                                                                                                        | Cargo |
 | android_system_properties 0.1.6         | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| annotate-snippets 0.12.18               | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| anstyle 1.0.14                          | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | anyhow 1.0.104                          | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | apple-native-keyring-store 1.0.2        | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | arboard 3.7.0                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | argon2 0.6.0                            | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| arraydeque 0.5.1                        | MIT/Apache-2.0                                                                                                                      | Cargo |
 | async-broadcast 0.7.2                   | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | async-channel 2.5.0                     | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | async-executor 1.14.0                   | Apache-2.0 OR MIT                                                                                                                   | Cargo |
@@ -98,6 +101,7 @@
 | core-foundation-sys 0.8.7               | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | core-graphics 0.25.0                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | core-graphics-types 0.2.0               | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| core_detect 1.0.0                       | MIT/Apache-2.0                                                                                                                      | Cargo |
 | cpubits 0.1.1                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | cpufeatures 0.2.17                      | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | cpufeatures 0.3.1                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -152,6 +156,8 @@
 | elliptic-curve 0.14.3                   | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | embed-resource 3.0.12                   | MIT                                                                                                                                 | Cargo |
 | embed_plist 1.2.2                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| encoding_rs 0.8.44                      | (Apache-2.0 OR MIT) AND BSD-3-Clause                                                                                                | Cargo |
+| encoding_rs_io 0.1.8                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | endi 1.1.1                              | MIT                                                                                                                                 | Cargo |
 | enum_dispatch 0.3.13                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | enumflags2 0.7.12                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -216,6 +222,7 @@
 | glob 0.3.4                              | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | gloo-timers 0.4.0                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | gobject-sys 0.18.0                      | MIT                                                                                                                                 | Cargo |
+| granit-parser 2.1.0                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | group 0.14.0                            | MIT/Apache-2.0                                                                                                                      | Cargo |
 | gtk 0.18.2                              | MIT                                                                                                                                 | Cargo |
 | gtk-sys 0.18.2                          | MIT                                                                                                                                 | Cargo |
@@ -316,6 +323,7 @@
 | module-lattice 0.2.4                    | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | moxcms 0.8.1                            | BSD-3-Clause OR Apache-2.0                                                                                                          | Cargo |
 | muda 0.20.0                             | Apache-2.0 OR MIT                                                                                                                   | Cargo |
+| multiversion_no_op 1.0.0                | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | ndk 0.9.0                               | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | ndk-context 0.1.1                       | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | ndk-sys 0.6.0+11769913                  | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -465,6 +473,7 @@
 | selectors 0.38.0                        | MPL-2.0                                                                                                                             | Cargo |
 | semver 1.0.28                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | serde 1.0.229                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| serde-saphyr 2.1.1                      | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | serde-untagged 0.1.9                    | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | serde_bytes 0.11.19                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | serde_core 1.0.229                      | MIT OR Apache-2.0                                                                                                                   | Cargo |
@@ -498,6 +507,7 @@
 | siphasher 1.0.4                         | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | slab 0.4.12                             | MIT                                                                                                                                 | Cargo |
 | smallvec 1.16.4                         | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| smallvec 1.16.5                         | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | socket2 0.6.5                           | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | softbuffer 0.4.8                        | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | soup3 0.5.0                             | MIT                                                                                                                                 | Cargo |

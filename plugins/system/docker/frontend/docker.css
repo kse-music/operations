@@ -138,7 +138,6 @@
 .modal[open]:has(> .ops-detail-content > .docker-container-details) {
   display: flex;
   flex-direction: column;
-  height: min(760px, calc(100dvh - 60px));
   overflow: hidden;
 }
 .modal:has(> .ops-detail-content > .docker-container-details) > .modal-heading {
@@ -159,6 +158,42 @@
   min-height: 0;
   gap: 12px;
 }
+.modal[open]:has(> .ops-detail-content > .docker-compose-details) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.modal:has(> .ops-detail-content > .docker-compose-details) > .modal-heading {
+  flex-shrink: 0;
+}
+.ops-detail-content:has(> .docker-compose-details) {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.docker-compose-details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 12px;
+}
+.docker-compose-details > p {
+  flex-shrink: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.ops-detail-content .docker-compose-details > .ops-table {
+  min-height: 0;
+  max-height: none;
+  overscroll-behavior: contain;
+}
+.docker-compose-details th,
+.docker-compose-details td:nth-child(4) {
+  white-space: nowrap;
+}
 .docker-detail-panel {
   display: grid;
   align-content: start;
@@ -169,16 +204,37 @@
   overflow: auto;
   overscroll-behavior: contain;
 }
-.docker-detail-tabs {
-  align-self: stretch;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  gap: 3px;
+.docker-detail-section {
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
 }
-.docker-detail-tabs button {
-  padding: 7px 4px;
-  font-size: var(--font-size-body);
-  white-space: nowrap;
+.docker-detail-section > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  list-style: none;
+  font-weight: 600;
+}
+.docker-detail-section > summary::-webkit-details-marker {
+  display: none;
+}
+.docker-detail-section > summary:focus-visible {
+  outline: none;
+  background: var(--accent-bg);
+}
+.docker-detail-section > summary svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.docker-detail-section[open] > summary svg {
+  transform: rotate(90deg);
+}
+.docker-detail-section-content {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 4px 0 14px 24px;
 }
 .docker-detail-row,
 .docker-env-values > div {
@@ -215,27 +271,11 @@
   color: var(--text);
 }
 .docker-env-values dd,
-.docker-detail-panel > p {
+.docker-detail-section-content > p {
   margin: 0;
 }
-.docker-detail-panel > button {
+.docker-detail-section-content > button {
   justify-self: start;
-}
-.docker-resources {
-  display: grid;
-  gap: 8px;
-}
-.docker-resources .ops-detail-fields {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.docker-resources .ops-detail-fields > div {
-  padding: 8px 10px;
-}
-@media (min-width: 520px) {
-  .docker-resources .ops-detail-fields {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
 }
 .docker-workbench .ops-table td:first-child {
   min-width: 155px;

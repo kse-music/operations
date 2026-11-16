@@ -6,11 +6,17 @@ import { createServer } from 'node:http';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright-core';
 
-// --details runs container detail layout and close checks independently.
+// --details and --services isolate container and Compose service detail layout checks.
 const detailsOnly = process.argv.includes('--details');
+const servicesOnly = process.argv.includes('--services');
 const output = process.env.SERVERDECK_DOCKER_UI_OUTPUT ?? '.local/qa/compose/ui';
 await mkdir(output, { recursive: true });
-const pkg = JSON.parse(await readFile('plugins/system/packages/docker.sdplugin', 'utf8'));
+const pkg = JSON.parse(
+  await readFile(
+    process.env.SERVERDECK_DOCKER_UI_PACKAGE ?? 'plugins/system/packages/docker.sdplugin',
+    'utf8',
+  ),
+);
 const server = createServer((request, response) => {
   const file = pkg.files.find((file) => `/${file.path}` === request.url);
   response.setHeader(
@@ -36,7 +42,7 @@ const browser = await chromium.launch({
 const results = [];
 try {
   for (const [width, height, scale, theme] of [
-    [2361, 900, 1, 'dark'],
+    [2361, servicesOnly ? 1400 : 900, 1, 'dark'],
     [1280, 820, 1, 'dark'],
     [960, 600, 1.45, 'light'],
   ]) {
@@ -46,7 +52,14 @@ try {
     await page.goto(url);
     await page.evaluate(
       ({ scale, theme }) => {
-        window.fixture = { mode: 'normal', actions: [], stopped: [], state: 'running(2)' };
+        window.fixture = {
+          mode: 'normal',
+          actions: [],
+          stopped: [],
+          state: 'running(2)',
+          serviceCount: 2,
+          queries: [],
+        };
         window.addEventListener('message', (event) => {
           if (event.data?.kind !== 'serverdeck-sdk-ready') return;
           const channel = new MessageChannel();
@@ -73,6 +86,7 @@ try {
               error = null;
             if (method === 'invoke') {
               const request = args.input.request;
+              if (args.action === 'query') window.fixture.queries.push(request);
               if (args.action === 'logs') {
                 if (args.input.source.kind === 'container') {
                   window.fixture.logPaused = false;
@@ -160,21 +174,29 @@ try {
                       : request.kind === 'compose_services'
                         ? {
                             composeProject: 'shop-production',
-                            services: ['web', 'worker'].map((service) => ({
-                              ID: service,
-                              Name: `/shop-production-${service}-1`,
-                              Service: service,
-                              Image: `registry.example.com/application/${service}:stable`,
-                              State: 'running',
-                              ExitCode: 0,
-                            })),
+                            services: Array.from(
+                              { length: window.fixture.serviceCount },
+                              (_, index) => {
+                                const service = ['web', 'worker'][index] ?? `service-${index}`;
+                                return {
+                                  ID: service,
+                                  Name: `/shop-production-${service}-1`,
+                                  Service: service,
+                                  Image: `registry.example.com/application/${service}:stable`,
+                                  State:
+                                    ['running', 'exited', 'exited', 'created'][index] ?? 'running',
+                                  ExitCode: index === 2 ? 137 : 0,
+                                };
+                              },
+                            ),
                           }
                         : request.kind === 'container_details'
                           ? {
                               id: request.id,
                               name: '/production-web',
                               image: 'nginx:stable',
-                              environment: [],
+                              environment: request.revealEnv ? ['TOKEN=ENV_FIXTURE_SECRET'] : [],
+                              environmentRevealed: request.revealEnv,
                               state: { Status: 'running' },
                             }
                           : request.kind === 'container_startup'
@@ -262,21 +284,42 @@ try {
       assert(geometry.searchWidth >= 140 && geometry.searchWidth <= 322);
     };
     const checkDetails = async () => {
-      await frame
-        .locator(`[data-ops-target="${'a'.repeat(64)}"]`)
-        .getByRole('button', { name: '详情', exact: true })
-        .click();
+      const open = () =>
+        frame
+          .locator(`[data-ops-target="${'a'.repeat(64)}"]`)
+          .getByRole('button', { name: '详情', exact: true })
+          .click();
+      await open();
       const detail = frame.getByRole('dialog', { name: '容器详情', exact: true });
-      await detail.getByRole('tab', { name: '启动配置', exact: true }).click();
+      const summary = (label) =>
+        detail.locator('summary').filter({ hasText: new RegExp('^' + label + '$') });
+      const isOpen = (label) => summary(label).evaluate((element) => element.parentElement.open);
+      const panel = detail.locator('.docker-detail-panel');
+      const queryCounts = () =>
+        page.evaluate(() => ({
+          startup: window.fixture.queries.filter((request) => request.kind === 'container_startup')
+            .length,
+          environment: window.fixture.queries.filter(
+            (request) => request.kind === 'container_details' && request.revealEnv,
+          ).length,
+        }));
+      await summary('概览').waitFor();
+      assert.deepEqual(
+        (await detail.locator('summary').allTextContents()).map((label) => label.trim()),
+        ['概览', '启动配置', '环境变量'],
+      );
+      assert.equal(await isOpen('概览'), true);
+      assert.equal(await isOpen('启动配置'), false);
+      assert.equal(await isOpen('环境变量'), false);
+      assert.equal(await detail.locator('[role="tab"], [role="tablist"]').count(), 0);
+      await page.screenshot({ path: `${output}/overview-${width}-${theme}.png` });
+      await summary('启动配置').focus();
+      await summary('启动配置').press('Enter');
       const yaml = detail.getByLabel('Compose 启动配置');
       await yaml.getByText('read_only: true', { exact: false }).waitFor();
-      assert.deepEqual(
-        (await detail.getByRole('tab').allTextContents()).map((label) => label.trim()),
-        ['概览', '资源使用', '启动配置', '环境变量'],
-      );
+      assert.equal(await isOpen('概览'), true);
       assert((await yaml.textContent()).includes('published: "8080"'));
       assert((await yaml.textContent()).includes('/srv/业务系统/production deployment/html'));
-      const panel = detail.getByRole('tabpanel');
       await panel.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
       });
@@ -285,39 +328,35 @@ try {
       });
       const scrollGeometry = await detail.evaluate((element) => {
         const close = element.querySelector('[aria-label="关闭对话框"]').getBoundingClientRect();
-        const tabs = element.querySelector('[role="tablist"]').getBoundingClientRect();
-        const panel = element.querySelector('[role="tabpanel"]');
+        const panel = element.querySelector('.docker-detail-panel');
         const box = element.getBoundingClientRect();
         return {
           outerScroll: element.scrollTop,
           panelScroll: panel.scrollTop,
           closeTop: close.top,
           closeBottom: close.bottom,
-          tabsTop: tabs.top,
           boxTop: box.top,
           boxBottom: box.bottom,
+          outerOverflow: element.scrollWidth > element.clientWidth + 1,
         };
       });
       await page.screenshot({ path: `${output}/startup-scrolled-${width}-${theme}.png` });
       assert.equal(scrollGeometry.outerScroll, 0, '详情弹窗自身不应滚动');
-      assert(scrollGeometry.panelScroll > 0, '详情内容区应当可以独立滚动');
+      assert(scrollGeometry.panelScroll > 0, '折叠分组内容区应当可以独立滚动');
+      assert.equal(scrollGeometry.outerOverflow, false);
       assert(
         scrollGeometry.closeTop >= scrollGeometry.boxTop &&
           scrollGeometry.closeBottom <= scrollGeometry.boxBottom,
       );
-      assert(scrollGeometry.tabsTop >= scrollGeometry.boxTop);
       await detail.getByRole('button', { name: '关闭对话框' }).click();
       await detail.waitFor({ state: 'detached' });
-      await frame
-        .locator(`[data-ops-target="${'a'.repeat(64)}"]`)
-        .getByRole('button', { name: '详情', exact: true })
-        .click();
-      await detail.getByRole('tab', { name: '启动配置', exact: true }).click();
+      await open();
+      await summary('概览').waitFor();
+      assert.equal(await isOpen('启动配置'), false);
+      assert.equal(await isOpen('环境变量'), false);
+      assert(!(await detail.textContent()).includes('CONFIG_FIXTURE_SECRET'));
+      await summary('启动配置').click();
       await yaml.getByText('CONFIG_FIXTURE_SECRET', { exact: false }).waitFor();
-      await panel.evaluate((element) => {
-        element.scrollTop = 0;
-      });
-      assert((await detail.textContent()).includes('CONFIG_FIXTURE_SECRET'));
       assert.equal(
         await detail.getByRole('button', { name: '查看环境变量值', exact: true }).count(),
         0,
@@ -326,6 +365,12 @@ try {
         await detail.getByRole('button', { name: '隐藏环境变量值', exact: true }).count(),
         0,
       );
+      await summary('环境变量').focus();
+      await summary('环境变量').press('Space');
+      await detail.getByText('ENV_FIXTURE_SECRET', { exact: true }).waitFor();
+      await detail.getByText('ENV_FIXTURE_SECRET', { exact: true }).scrollIntoViewIfNeeded();
+      assert.equal(await isOpen('启动配置'), true);
+      assert.equal(await isOpen('概览'), true);
       const configBounds = await detail.boundingBox();
       assert(
         configBounds &&
@@ -335,18 +380,47 @@ try {
           configBounds.y + configBounds.height <= height + 1,
       );
       await measure();
-      await page.screenshot({ path: `${output}/startup-${width}-${theme}.png` });
-      await yaml.getByText('CONFIG_FIXTURE_SECRET', { exact: false }).waitFor();
-      await detail.getByRole('tab', { name: '概览', exact: true }).click();
-      assert(!(await detail.textContent()).includes('CONFIG_FIXTURE_SECRET'));
+      await page.screenshot({ path: `${output}/expanded-${width}-${theme}.png` });
+      const loadedCounts = await queryCounts();
+      await summary('启动配置').click();
+      await yaml.waitFor({ state: 'hidden' });
+      assert((await yaml.textContent()).includes('CONFIG_FIXTURE_SECRET'));
+      assert(await detail.getByText('ENV_FIXTURE_SECRET', { exact: true }).isVisible());
+      await summary('环境变量').click();
+      await detail.getByText('ENV_FIXTURE_SECRET', { exact: true }).waitFor({ state: 'hidden' });
       await page.evaluate(() => {
         window.fixture.mode = 'config-error';
       });
-      await detail.getByRole('tab', { name: '启动配置', exact: true }).click();
+      for (let repeat = 0; repeat < 2; repeat++) {
+        await summary('启动配置').click();
+        await yaml.waitFor();
+        await summary('启动配置').click();
+        await yaml.waitFor({ state: 'hidden' });
+        await summary('环境变量').click();
+        await detail.getByText('ENV_FIXTURE_SECRET', { exact: true }).waitFor();
+        await summary('环境变量').click();
+        await detail.getByText('ENV_FIXTURE_SECRET', { exact: true }).waitFor({ state: 'hidden' });
+      }
+      assert.deepEqual(await queryCounts(), loadedCounts, '折叠和展开不得重复读取');
+      await detail.getByRole('button', { name: '关闭对话框' }).click();
+      await detail.waitFor({ state: 'detached' });
+      assert(!(await frame.locator('body').textContent()).includes('CONFIG_FIXTURE_SECRET'));
+      assert(!(await frame.locator('body').textContent()).includes('ENV_FIXTURE_SECRET'));
+      await open();
+      await summary('概览').waitFor();
+      await summary('启动配置').click();
       await detail
         .getByRole('alert')
         .getByText('Compose 配置文件不存在', { exact: false })
         .waitFor();
+      const failedCounts = await queryCounts();
+      await summary('启动配置').click();
+      await summary('启动配置').click();
+      await detail
+        .getByRole('alert')
+        .getByText('Compose 配置文件不存在', { exact: false })
+        .waitFor();
+      assert.deepEqual(await queryCounts(), failedCounts, '失败仅通过显式重试重新读取');
       await detail.getByRole('button', { name: '使用容器信息转换', exact: true }).click();
       await detail.getByText('容器信息转换 · Compose 格式', { exact: true }).waitFor();
       await yaml.waitFor();
@@ -355,6 +429,123 @@ try {
         window.fixture.mode = 'normal';
       });
     };
+    if (servicesOnly) {
+      const sizes = {};
+      for (const count of [0, 2, 18, 60]) {
+        await page.evaluate((count) => {
+          window.fixture.serviceCount = count;
+        }, count);
+        await frame.getByRole('button', { name: '服务', exact: true }).click();
+        const detail = frame.getByRole('dialog', {
+          name: 'shop-production · 服务状态',
+          exact: true,
+        });
+        await detail.locator('.ops-detail-content > div').waitFor();
+        assert.equal(await detail.locator('tbody tr').count(), count);
+        if (count >= 2) {
+          const states = await detail
+            .locator('tbody tr')
+            .evaluateAll((rows) =>
+              rows
+                .slice(0, 2)
+                .map((row) =>
+                  [...row.querySelectorAll('td')].slice(3).map((cell) => cell.textContent),
+                ),
+            );
+          assert.deepEqual(states, [
+            ['运行中', '尚未退出'],
+            ['已退出', '正常结束'],
+          ]);
+        }
+        if (count >= 18) {
+          assert.equal(
+            await detail.locator('tbody tr').nth(2).locator('td').last().textContent(),
+            '异常退出（退出码 137）',
+          );
+          assert.equal(
+            await detail.locator('tbody tr').nth(3).locator('td').last().textContent(),
+            '尚未启动',
+          );
+        }
+        const geometry = await detail.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          const content = element.querySelector('.ops-detail-content').firstElementChild;
+          const note = content.lastElementChild.getBoundingClientRect();
+          const table = content.querySelector('.ops-table');
+          const tableBox = table?.getBoundingClientRect();
+          return {
+            top: box.top,
+            bottom: box.bottom,
+            height: box.height,
+            outerOverflow: element.scrollHeight > element.clientHeight + 1,
+            contentOverflow: content.scrollHeight > content.clientHeight + 1,
+            horizontalOverflow: element.scrollWidth > element.clientWidth + 1,
+            bottomGap: box.bottom - note.bottom,
+            contentWidth: content.getBoundingClientRect().width,
+            availableWidth: content.parentElement.clientWidth,
+            tableHeight: tableBox?.height ?? 0,
+            tableOverflow: !!table && table.scrollHeight > table.clientHeight + 1,
+            viewportHeight: window.innerHeight,
+          };
+        });
+        assert(geometry.top >= 0 && geometry.bottom <= height + 1);
+        assert.equal(geometry.outerOverflow, false, JSON.stringify(geometry));
+        assert.equal(geometry.contentOverflow, false, JSON.stringify(geometry));
+        assert.equal(geometry.horizontalOverflow, false, JSON.stringify(geometry));
+        assert(
+          Math.abs(geometry.contentWidth - geometry.availableWidth) <= 1,
+          JSON.stringify(geometry),
+        );
+        assert(geometry.bottomGap <= 26, `Unused space below note: ${JSON.stringify(geometry)}`);
+        if (count <= 2) {
+          assert.equal(geometry.tableOverflow, false);
+          assert(geometry.height < height * 0.8, JSON.stringify(geometry));
+        } else if (geometry.tableOverflow) {
+          assert(
+            geometry.height >= height - 62,
+            `Table scrolls before using viewport: ${JSON.stringify(geometry)}`,
+          );
+        }
+        if (count === 60) {
+          assert.equal(geometry.tableOverflow, true);
+          const table = detail.locator('.ops-table');
+          await table.evaluate((element) => {
+            element.scrollTop = element.scrollHeight;
+          });
+          const scrolled = await detail.evaluate((element) => {
+            const table = element.querySelector('.ops-table');
+            const box = table.getBoundingClientRect();
+            const heading = table.querySelector('thead th').getBoundingClientRect();
+            const last = table.querySelector('tbody tr:last-child').getBoundingClientRect();
+            const close = element
+              .querySelector('[aria-label="关闭对话框"]')
+              .getBoundingClientRect();
+            return {
+              outerScroll: element.scrollTop,
+              tableScroll: table.scrollTop,
+              headerVisible: heading.top >= box.top - 1 && heading.bottom <= box.bottom + 1,
+              lastVisible: last.bottom <= box.bottom + 1 && last.top >= box.top,
+              closeVisible: close.top >= 0 && close.bottom <= window.innerHeight,
+            };
+          });
+          assert.equal(scrolled.outerScroll, 0);
+          assert(
+            scrolled.tableScroll > 0 &&
+              scrolled.headerVisible &&
+              scrolled.lastVisible &&
+              scrolled.closeVisible,
+          );
+        }
+        sizes[count] = geometry;
+        await page.screenshot({ path: `${output}/services-${count}-${width}-${theme}.png` });
+        await detail.getByRole('button', { name: '关闭对话框' }).click();
+      }
+      assert(sizes[18].tableHeight > sizes[2].tableHeight);
+      assert.deepEqual(errors, []);
+      results.push({ width, height, scale, theme, scope: 'services', sizes, passed: true });
+      await page.close();
+      continue;
+    }
     if (detailsOnly) {
       await frame.getByRole('tab', { name: '容器', exact: true }).click();
       await frame.locator(`[data-ops-target="${'a'.repeat(64)}"]`).waitFor();

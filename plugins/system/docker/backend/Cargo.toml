@@ -8,5 +8,6 @@ crate-type = ["cdylib"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10.9"
+serde-saphyr = { version = "2.1.1", default-features = false, features = ["deserialize"] }
 serverdeck-plugin-sdk = { path = "../../../../crates/plugin-sdk" }
 [workspace]

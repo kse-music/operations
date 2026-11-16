@@ -89,6 +89,8 @@ it('reads and edits the exact host while leaving the active host and terminal in
   await nextTick();
   button('测试连接', dialog).click();
   await vi.waitFor(() => expect(button('保存主机', dialog).disabled).toBe(false));
+  button('关闭', document.querySelector('dialog[aria-label="连接测试成功"]')!).click();
+  await nextTick();
   button('保存主机', dialog).click();
   await vi.waitFor(() => expect(hosts.busy).toBe(false));
   await nextTick();

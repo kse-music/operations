@@ -2,11 +2,12 @@
 import { tr } from './i18n/messages';
 
 import { computed } from 'vue';
+import { containerExitText, containerStateText } from './container-status';
 const props = defineProps<{ detail: Record<string, unknown> }>();
 const services = computed(() => props.detail.services as Record<string, unknown>[]);
 </script>
 <template>
-  <div class="docker-container-details">
+  <div class="docker-compose-details">
     <p>
       {{ tr('项目：') }}{{ detail.composeProject }} · {{ services.length
       }}{{ tr(' 个已创建的服务容器') }}
@@ -22,7 +23,7 @@ const services = computed(() => props.detail.services as Record<string, unknown>
             <th>{{ tr('容器') }}</th>
             <th>{{ tr('镜像') }}</th>
             <th>{{ tr('状态') }}</th>
-            <th>{{ tr('退出码') }}</th>
+            <th>{{ tr('退出结果') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -30,8 +31,8 @@ const services = computed(() => props.detail.services as Record<string, unknown>
             <td>{{ service.Service }}</td>
             <td>{{ String(service.Name).replace(/^\//, '') }}</td>
             <td>{{ service.Image }}</td>
-            <td>{{ service.State }}</td>
-            <td>{{ service.ExitCode }}</td>
+            <td>{{ containerStateText(service.State) }}</td>
+            <td>{{ containerExitText(service.State, service.ExitCode) }}</td>
           </tr>
         </tbody>
       </table>

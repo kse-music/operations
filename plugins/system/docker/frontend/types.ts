@@ -30,7 +30,6 @@ export type OpsRequest =
       confirmed: boolean;
     }
   | { kind: 'container_details'; id: string; revealEnv: boolean }
-  | { kind: 'container_stats'; id: string }
   | { kind: 'container_startup'; id: string; revealEnv: boolean; inspectOnly: boolean }
   | {
       kind: 'container_maintenance';

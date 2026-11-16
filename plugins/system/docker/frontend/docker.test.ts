@@ -474,10 +474,9 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
   });
   pinia = createPinia();
   setActivePinia(pinia);
-  let statsAvailable = true;
   api.query.mockImplementation(async (_id, request) => ({
-    success: request.kind !== 'container_stats' || statsAvailable,
-    message: request.kind === 'container_stats' && !statsAvailable ? '资源查询失败' : null,
+    success: true,
+    message: null,
     code: null,
     detail:
       request.kind === 'capabilities'
@@ -521,9 +520,7 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
           ]
         : request.kind === 'images'
           ? [{ ID: 'image', Repository: 'owned-image' }]
-          : request.kind === 'container_stats'
-            ? [{ CPUPerc: '12.34%', MemUsage: '42 MiB / 128 MiB' }]
-            : [],
+          : [],
   }));
   const shell = vi.fn();
   mountDocker({ onShell: shell });
@@ -553,74 +550,132 @@ it('loads details on demand, opens logs and shell directly and delegates mutatio
     revealEnv: false,
   });
   const detail = () => document.querySelector('dialog[aria-label="容器详情"]');
-  const panel = () => detail()?.querySelector('[role="tabpanel"]');
-  const selectTab = async (label: string) => {
-    const tab = [...(detail()?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])].find(
-      (button) => button.textContent?.trim() === label,
+  const section = (label: string) =>
+    [...(detail()?.querySelectorAll<HTMLDetailsElement>('details') ?? [])].find(
+      (item) => item.querySelector('summary')?.textContent?.trim() === label,
     );
-    expect(tab).toBeDefined();
-    tab!.click();
+  const content = (label: string) =>
+    section(label)?.querySelector('.docker-detail-section-content');
+  const setExpanded = async (label: string, open: boolean) => {
+    const item = section(label)!;
+    expect(item).toBeDefined();
+    item.open = open;
+    item.dispatchEvent(new Event('toggle'));
     await settle();
   };
-  expect(panel()?.textContent).toContain('运行中');
-  expect(panel()?.textContent).toContain('健康');
-  expect(panel()?.textContent).toContain('异常退出时重启');
-  expect(panel()?.querySelector('pre')).toBeNull();
+  expect(section('概览')?.open).toBe(true);
+  expect(section('启动配置')?.open).toBe(false);
+  expect(section('环境变量')?.open).toBe(false);
+  expect(content('概览')?.textContent).toContain('运行中');
+  expect(content('概览')?.textContent).toContain('健康');
+  expect(content('概览')?.textContent).toContain('异常退出时重启');
+  expect(content('概览')?.textContent).toContain('尚未退出');
+  expect(content('概览')?.querySelector('pre')).toBeNull();
+  expect(content('启动配置')).toBeNull();
+  expect(content('环境变量')).toBeNull();
   expect(api.query.mock.calls.some(([, request]) => request.revealEnv)).toBe(false);
   expect(api.query.mock.calls.some(([, request]) => request.kind === 'container_stats')).toBe(
     false,
   );
-  await selectTab('资源使用');
-  expect(api.query).toHaveBeenCalledWith('host', { kind: 'container_stats', id: 'container' });
-  expect(panel()?.textContent).toContain('12.34%');
   expect(
-    [...(detail()?.querySelectorAll('[role="tab"]') ?? [])].map((tab) => tab.textContent?.trim()),
-  ).toEqual(['概览', '资源使用', '启动配置', '环境变量']);
-  await selectTab('启动配置');
+    [...(detail()?.querySelectorAll('summary') ?? [])].map((summary) =>
+      summary.textContent?.trim(),
+    ),
+  ).toEqual(['概览', '启动配置', '环境变量']);
+  expect(detail()?.querySelector('[role="tablist"], [role="tab"]')).toBeNull();
+  await setExpanded('启动配置', true);
   expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_startup',
     id: 'container',
     revealEnv: true,
     inspectOnly: false,
   });
-  expect(panel()?.querySelector('pre')?.textContent).toContain('published: "8081"');
-  expect(panel()?.querySelector('pre')?.textContent).toContain('"8443/tcp"');
-  expect(panel()?.querySelector('pre')?.textContent).toContain('/srv/fixture');
-  expect(panel()?.querySelector('pre')?.textContent).toContain('/data');
-  expect(panel()?.querySelector('pre')?.textContent).toContain('read_only: true');
-  await selectTab('环境变量');
+  expect(content('启动配置')?.querySelector('pre')?.textContent).toContain('published: "8081"');
+  expect(content('启动配置')?.querySelector('pre')?.textContent).toContain('"8443/tcp"');
+  expect(content('启动配置')?.querySelector('pre')?.textContent).toContain('/srv/fixture');
+  expect(content('启动配置')?.querySelector('pre')?.textContent).toContain('/data');
+  expect(content('启动配置')?.querySelector('pre')?.textContent).toContain('read_only: true');
+  expect(section('概览')?.open).toBe(true);
+  await setExpanded('环境变量', true);
   expect(api.query).toHaveBeenCalledWith('host', {
     kind: 'container_details',
     id: 'container',
     revealEnv: true,
   });
-  expect(panel()?.querySelector('dt')?.textContent).toBe('TOKEN');
-  expect(panel()?.querySelector('code')?.textContent).toBe('fixture=value');
+  expect(content('环境变量')?.querySelector('dt')?.textContent).toBe('TOKEN');
+  expect(content('环境变量')?.querySelector('code')?.textContent).toBe('fixture=value');
+  expect(section('启动配置')?.open).toBe(true);
   expect(document.querySelectorAll('dialog')).toHaveLength(1);
-  await selectTab('概览');
-  expect(detail()?.textContent).not.toContain('fixture=value');
-  statsAvailable = false;
-  await selectTab('资源使用');
-  expect(detail()?.querySelector('[role="alert"]')?.textContent).toContain('资源查询失败');
-  await selectTab('概览');
-  expect(panel()?.textContent).toContain('owned-image');
-  let finishEnvironment: (value: unknown) => void = () => {};
-  api.query.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finishEnvironment = resolve;
-      }),
-  );
-  await selectTab('环境变量');
-  expect(panel()?.querySelector('[role="status"]')?.textContent).toContain('正在读取');
+  const loadedRequests = api.query.mock.calls.length;
+  await setExpanded('环境变量', false);
+  await setExpanded('启动配置', false);
+  expect(content('启动配置')?.querySelector('pre')?.textContent).toContain('read_only: true');
+  expect(content('环境变量')?.querySelector('code')?.textContent).toBe('fixture=value');
+  await setExpanded('启动配置', true);
+  await setExpanded('环境变量', true);
+  expect(api.query.mock.calls).toHaveLength(loadedRequests);
+  expect(content('环境变量')?.querySelector('code')?.textContent).toBe('fixture=value');
   await click('关闭对话框');
-  finishEnvironment({
-    success: true,
-    detail: { id: 'container', environmentRevealed: true, environment: ['TOKEN=late-fixture'] },
-    records: [],
-  });
-  await settle();
-  expect(document.body.textContent).not.toContain('late-fixture');
+  expect(document.body.textContent).not.toContain('fixture=value');
+  await click('详情');
+  expect(section('启动配置')?.open).toBe(false);
+  expect(content('启动配置')).toBeNull();
+  expect(content('环境变量')).toBeNull();
+  api.query.mockRejectedValueOnce(new Error('环境变量查询失败'));
+  await setExpanded('环境变量', true);
+  expect(content('环境变量')?.querySelector('[role="alert"]')?.textContent).toContain(
+    '环境变量查询失败',
+  );
+  const failedRequests = api.query.mock.calls.length;
+  await setExpanded('环境变量', false);
+  await setExpanded('环境变量', true);
+  expect(api.query.mock.calls).toHaveLength(failedRequests);
+  expect(content('环境变量')?.querySelector('[role="alert"]')?.textContent).toContain(
+    '环境变量查询失败',
+  );
+  await click('重试');
+  expect(content('环境变量')?.querySelector('code')?.textContent).toBe('fixture=value');
+  await setExpanded('环境变量', false);
+  expect(content('概览')?.textContent).toContain('owned-image');
+  await click('关闭对话框');
+  for (const action of ['collapse', 'close']) {
+    await click('详情');
+    let finishEnvironment: (value: unknown) => void = () => {};
+    api.query.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishEnvironment = resolve;
+        }),
+    );
+    await setExpanded('环境变量', true);
+    expect(content('环境变量')?.querySelector('[role="status"]')?.textContent).toContain(
+      '正在读取',
+    );
+    const pendingRequests = api.query.mock.calls.length;
+    if (action === 'collapse') {
+      await setExpanded('环境变量', false);
+      await setExpanded('环境变量', true);
+      expect(api.query.mock.calls).toHaveLength(pendingRequests);
+      expect(content('环境变量')?.querySelector('[role="status"]')?.textContent).toContain(
+        '正在读取',
+      );
+      await setExpanded('环境变量', false);
+    } else await click('关闭对话框');
+    finishEnvironment({
+      success: true,
+      detail: { id: 'container', environmentRevealed: true, environment: ['TOKEN=late-fixture'] },
+      records: [],
+    });
+    await settle();
+    if (action === 'collapse') {
+      expect(section('环境变量')?.open).toBe(false);
+      await setExpanded('环境变量', true);
+      expect(api.query.mock.calls).toHaveLength(pendingRequests);
+      expect(content('环境变量')?.querySelector('code')?.textContent).toBe('late-fixture');
+      await click('关闭对话框');
+    }
+    expect(document.body.textContent).not.toContain('late-fixture');
+  }
   await click('日志');
   expect(document.querySelector('dialog')?.getAttribute('aria-label')).toBe(
     'owned-container · 单次最多 10 分钟',

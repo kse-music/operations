@@ -5,6 +5,7 @@ use serverdeck_plugin_sdk::{
     platform::{Command, Request, quote},
     serde_json::{self, Value, json},
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::docker::PRELUDE;
 
@@ -15,8 +16,12 @@ pub(crate) fn prelude() -> String {
     )
 }
 
-pub fn projects_command() -> String {
-    format!("{}dc ls --all --format json", prelude())
+pub fn projects_command() -> Result<String, ApiError> {
+    Ok(format!(
+        "{}sd_compose_select || exit; if test \"$sd_compose_legacy\" = true; then printf 'SERVERDECK_COMPOSE_V1\\n'; {}; else dc ls --all --format json; fi",
+        prelude(),
+        services_body()?
+    ))
 }
 const FORMAT: &str = r#"{"ID":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Config.Image}},"State":{{json .State.Status}},"ExitCode":{{json .State.ExitCode}},"Project":{{json (index .Config.Labels "com.docker.compose.project")}},"Service":{{json (index .Config.Labels "com.docker.compose.service")}},"OneOff":{{json (index .Config.Labels "com.docker.compose.oneoff")}},"WorkingDir":{{json (index .Config.Labels "com.docker.compose.project.working_dir")}},"ConfigFiles":{{json (index .Config.Labels "com.docker.compose.project.config_files")}}}"#;
 
@@ -46,13 +51,20 @@ pub fn project_name(name: &str) -> Result<(), ApiError> {
 }
 
 pub fn services_command() -> Result<String, ApiError> {
+    Ok(format!("{PRELUDE}{}", services_body()?))
+}
+
+fn services_body() -> Result<String, ApiError> {
     Ok(format!(
-        "{PRELUDE}sd_ids=$(d container ls --all --quiet --no-trunc --filter label=com.docker.compose.project) || exit; if test -n \"$sd_ids\"; then set -f; d container inspect --format {} -- $sd_ids; fi",
+        "sd_ids=$(d container ls --all --quiet --no-trunc --filter label=com.docker.compose.project) || exit; if test -n \"$sd_ids\"; then set -f; d container inspect --format {} -- $sd_ids; fi",
         quote(FORMAT)?
     ))
 }
 
 pub fn projects(text: &str) -> Result<Value, ApiError> {
+    if let Some(snapshot) = text.strip_prefix("SERVERDECK_COMPOSE_V1\n") {
+        return legacy_projects(snapshot);
+    }
     let rows: Vec<Value> = serde_json::from_str(text)
         .map_err(|_| ApiError::new("COMPOSE_FORMAT", "Compose 项目列表格式无效"))?;
     for row in &rows {
@@ -65,6 +77,49 @@ pub fn projects(text: &str) -> Result<Value, ApiError> {
             return Err(ApiError::new("COMPOSE_FORMAT", "Compose 项目信息不完整"));
         }
     }
+    Ok(json!({"success":true,"records":rows,"detail":null,"message":null,"code":null}))
+}
+
+fn legacy_projects(snapshot: &str) -> Result<Value, ApiError> {
+    #[derive(Default)]
+    struct Project {
+        states: BTreeMap<String, usize>,
+        files: BTreeSet<String>,
+    }
+    let mut projects = BTreeMap::<String, Project>::new();
+    for (index, row) in serde_json::Deserializer::from_str(snapshot)
+        .into_iter::<Value>()
+        .enumerate()
+    {
+        if index >= 10000 {
+            return Err(error("Compose 项目快照超过容器数量限制"));
+        }
+        let row = row.map_err(|_| error("Compose V1 项目快照格式无效"))?;
+        if row["OneOff"]
+            .as_str()
+            .is_some_and(|s| s.eq_ignore_ascii_case("true"))
+        {
+            continue;
+        }
+        crate::docker::container_id(row["ID"].as_str().unwrap_or_default())?;
+        let name = row["Project"]
+            .as_str()
+            .ok_or_else(|| error("缺少 Compose 项目名称"))?;
+        project_name(name)?;
+        let state = row["State"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| error("Compose 容器状态无效"))?;
+        let project = projects.entry(name.into()).or_default();
+        *project.states.entry(state.into()).or_default() += 1;
+        if let Some(files) = row["ConfigFiles"].as_str().filter(|s| !s.is_empty()) {
+            project.files.insert(files.into());
+        }
+    }
+    let rows = projects.into_iter().map(|(name, project)| {
+        let status = project.states.into_iter().map(|(state, count)| format!("{state}({count})")).collect::<Vec<_>>().join(", ");
+        json!({"Name":name,"Status":status,"ConfigFiles":project.files.into_iter().collect::<Vec<_>>().join("\n")})
+    }).collect::<Vec<_>>();
     Ok(json!({"success":true,"records":rows,"detail":null,"message":null,"code":null}))
 }
 
@@ -136,17 +191,41 @@ pub(crate) fn command(project: &str, rows: &[Value], suffix: &str) -> Result<Com
     project_name(project)?;
     let target = target(rows)?;
     let mut body = format!(
-        "{}unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE; cd {} || exit; sd_compose_exec --project-name {} --project-directory {} --profile '*'",
+        "{}unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE; cd {} || exit; set -- --project-name {} --project-directory {}; sd_compose_select || exit; if test \"$sd_compose_legacy\" = false; then set -- \"$@\" --profile '*'; fi",
         prelude(),
         quote(&target.directory)?,
         quote(project)?,
         quote(&target.directory)?
     );
     for file in &target.files {
-        body.push_str(&format!(" --file {}", quote(file)?));
+        body.push_str(&format!("; set -- \"$@\" --file {}", quote(file)?));
     }
-    body.push(' ');
-    body.push_str(suffix);
+    let mut services = BTreeSet::new();
+    let mut option_service = false;
+    for row in rows {
+        let service = row["Service"]
+            .as_str()
+            .filter(|s| {
+                !s.is_empty()
+                    && s.len() <= 255
+                    && s.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+            })
+            .ok_or_else(|| error("Compose service 名称无效"))?;
+        option_service |= service.starts_with('-');
+        services.insert(quote(service)?);
+    }
+    let separator = if suffix == "start" { "" } else { " --" };
+    let legacy = if suffix == "start" && option_service {
+        "printf '%s\\n' 'Compose V1 无法安全启动以 - 开头的服务名，请在终端核对。' >&2; exit 2"
+            .into()
+    } else {
+        format!(
+            "sd_compose_exec \"$@\" {suffix}{separator} {}",
+            services.into_iter().collect::<Vec<_>>().join(" ")
+        )
+    };
+    body.push_str(&format!("; if test \"$sd_compose_legacy\" = true; then {legacy}; else sd_compose_exec \"$@\" {suffix}; fi"));
     Ok(Command::script(body))
 }
 
@@ -230,16 +309,22 @@ mod tests {
             io::Write,
             process::{Command as Process, Stdio},
         };
-        let rows = [row("shop")];
+        let mut worker = row("shop");
+        worker["ID"] = json!("b".repeat(64));
+        worker["Service"] = json!("worker");
+        let rows = [row("shop"), worker];
+        let mut option_service = row("shop");
+        option_service["Service"] = json!("--help");
         let scripts = json!({
             "prelude": PRELUDE,
-            "projects": projects_command(),
+            "projects": projects_command().unwrap(),
             "config": crate::startup::compose_command(false).args[1],
             "configRevealed": crate::startup::compose_command(true).args[1],
             "start": command("shop", &rows, "start").unwrap().args[1],
             "stop": command("shop", &rows, "stop --timeout 5").unwrap().args[1],
             "restart": command("shop", &rows, "restart --timeout 5").unwrap().args[1],
             "logs": command("shop", &rows, "logs --no-color --timestamps --tail 100 --follow").unwrap().args[1],
+            "optionService": command("shop", &[option_service], "start").unwrap().args[1],
         });
         let mut process = Process::new("wsl")
             .args([
@@ -291,9 +376,15 @@ mod tests {
         a["WorkingDir"] = json!("/srv/app'$(touch injected)");
         let cmd = command("shop", &[a], "start").unwrap();
         assert!(cmd.args[1].contains("cd '/srv/app'\"'\"'$(touch injected)' || exit"));
-        assert!(cmd.args[1].contains(
-            "--file '/srv/my app/compose.yaml' --file '/srv/my app/override.yaml' start"
-        ));
+        assert!(
+            cmd.args[1]
+                .find("--file '/srv/my app/compose.yaml'")
+                .unwrap()
+                < cmd.args[1]
+                    .find("--file '/srv/my app/override.yaml'")
+                    .unwrap()
+        );
+        assert!(cmd.args[1].contains("start 'web'"));
         assert!(!cmd.args[1].contains("up -d"));
         assert!(command("-shop", &[row("shop")], "start").is_err());
         assert!(command("shop;id", &[row("shop")], "start").is_err());
@@ -304,6 +395,9 @@ mod tests {
         let mut b = row("shop");
         b["ConfigFiles"] = json!("relative.yaml");
         assert!(command("shop", &[b], "start").is_err());
+        let mut b = row("shop");
+        b["Service"] = json!("--help");
+        assert!(command("shop", &[b], "start").is_ok());
     }
 
     #[test]
@@ -315,5 +409,28 @@ mod tests {
                 serde_json::to_value(command("shop", &[row("shop")], suffix).unwrap()).unwrap();
             assert!(!approved.contains(&value));
         }
+    }
+
+    #[test]
+    fn v1_projects_aggregate_real_container_labels_and_exclude_one_offs() {
+        let mut a = row("shop");
+        a["ConfigFiles"] = json!("/srv/compose.yaml");
+        let mut b = a.clone();
+        b["ID"] = json!("b".repeat(64));
+        b["State"] = json!("exited");
+        let mut oneoff = row("temporary");
+        oneoff["OneOff"] = json!("True");
+        let value = projects(&format!("SERVERDECK_COMPOSE_V1\n{a}\n{b}\n{oneoff}\n")).unwrap();
+        assert_eq!(
+            value["records"],
+            json!([{"Name":"shop","Status":"exited(1), running(1)","ConfigFiles":"/srv/compose.yaml"}])
+        );
+        assert_eq!(
+            projects("SERVERDECK_COMPOSE_V1\n").unwrap()["records"],
+            json!([])
+        );
+        assert!(projects("SERVERDECK_COMPOSE_V1\nbad json").is_err());
+        a["Project"] = json!("bad;name");
+        assert!(projects(&format!("SERVERDECK_COMPOSE_V1\n{a}")).is_err());
     }
 }

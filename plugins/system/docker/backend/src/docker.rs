@@ -60,9 +60,6 @@ pub enum Query {
         id: String,
         reveal_env: bool,
     },
-    ContainerStats {
-        id: String,
-    },
     ContainerStartup {
         id: String,
         reveal_env: bool,
@@ -98,7 +95,7 @@ impl Query {
             Self::Capabilities => CAPABILITIES.into(),
             Self::Containers => "d container ls --all --no-trunc --format '{{json .}}'".into(),
             Self::Images => "d image ls --all --no-trunc --digests --format '{{json .}}'".into(),
-            Self::ComposeProjects => return Ok(crate::compose::projects_command()),
+            Self::ComposeProjects => return crate::compose::projects_command(),
             Self::ComposeServices { project } => {
                 crate::compose::project_name(project)?;
                 return crate::compose::services_command();
@@ -113,10 +110,6 @@ impl Query {
                 } else {
                     DETAILS_FORMAT
                 })?
-            }
-            Self::ContainerStats { id } => {
-                container_id(id)?;
-                "d stats --all --no-stream --no-trunc --format '{{json .}}'".into()
             }
             Self::ContainerAction {
                 id,
@@ -162,10 +155,7 @@ impl Query {
         let mut rows = vec![];
         let mut detail = Value::Null;
         match self {
-            Self::Containers
-            | Self::Images
-            | Self::ContainerStats { .. }
-            | Self::ContainerDetails { .. } => {
+            Self::Containers | Self::Images | Self::ContainerDetails { .. } => {
                 for line in text.lines().filter(|l| !l.trim().is_empty()) {
                     if rows.len() >= 10000 {
                         return Err(format());
@@ -176,26 +166,20 @@ impl Query {
                     }
                     rows.push(row);
                 }
-                match self {
-                    Self::ContainerDetails { id, reveal_env } => {
-                        let v = rows
-                            .iter()
-                            .find(|row| row["Id"].as_str() == Some(id))
-                            .ok_or_else(|| {
-                                ApiError::new("DOCKER_NOT_FOUND", "容器已不存在，请刷新列表")
-                            })?;
-                        let env = if *reveal_env {
-                            v["Config"]["Env"].as_array().cloned().unwrap_or_default()
-                        } else {
-                            vec![]
-                        };
-                        detail = json!({"id":v["Id"],"name":v["Name"],"image":v["Config"]["Image"],"created":v["Created"],"state":v["State"],"environment":env,"environmentRevealed":reveal_env,"ports":v["NetworkSettings"]["Ports"],"mounts":v["Mounts"],"restartPolicy":v["HostConfig"]["RestartPolicy"]});
-                        rows.clear();
-                    }
-                    Self::ContainerStats { id } => {
-                        rows.retain(|row| row["ID"].as_str() == Some(id))
-                    }
-                    _ => (),
+                if let Self::ContainerDetails { id, reveal_env } = self {
+                    let v = rows
+                        .iter()
+                        .find(|row| row["Id"].as_str() == Some(id))
+                        .ok_or_else(|| {
+                            ApiError::new("DOCKER_NOT_FOUND", "容器已不存在，请刷新列表")
+                        })?;
+                    let env = if *reveal_env {
+                        v["Config"]["Env"].as_array().cloned().unwrap_or_default()
+                    } else {
+                        vec![]
+                    };
+                    detail = json!({"id":v["Id"],"name":v["Name"],"image":v["Config"]["Image"],"created":v["Created"],"state":v["State"],"environment":env,"environmentRevealed":reveal_env,"ports":v["NetworkSettings"]["Ports"],"mounts":v["Mounts"],"restartPolicy":v["HostConfig"]["RestartPolicy"]});
+                    rows.clear();
                 }
             }
             Self::Capabilities => {
@@ -310,7 +294,6 @@ mod tests {
                 id: "a".repeat(64),
                 reveal_env: true,
             },
-            Query::ContainerStats { id: "a".repeat(64) },
             Query::ComposeProjects,
             Query::ComposeServices {
                 project: "shop".into(),
@@ -359,13 +342,6 @@ mod tests {
                 ))
             );
         }
-        assert!(
-            commands.contains(&serverdeck_plugin_sdk::platform::Command::script(
-                Query::ContainerStats { id: "b".repeat(64) }
-                    .command()
-                    .unwrap()
-            ))
-        );
         for command in [
             log_command(&id, 200, true).unwrap(),
             shell_command(&id, false).unwrap(),
@@ -412,7 +388,6 @@ mod tests {
                 .command()
                 .is_err()
             );
-            assert!(Query::ContainerStats { id: id.into() }.command().is_err());
         }
         let id = "a".repeat(64);
         assert!(
@@ -475,23 +450,24 @@ mod tests {
         );
     }
     #[test]
-    fn resource_snapshots_match_full_container_ids() {
-        let id = "a".repeat(64);
-        let output = format!(
-            "{}\n{}",
-            json!({"ID":"b".repeat(64),"CPUPerc":"99%"}),
-            json!({"ID":id,"CPUPerc":"12.34%"})
-        );
-        let q = Query::ContainerStats { id };
-        let value = q.response(&output).unwrap();
-        assert_eq!(value["records"].as_array().unwrap().len(), 1);
-        assert_eq!(value["records"][0]["CPUPerc"], "12.34%");
+    fn removed_resource_requests_are_rejected_and_not_preapproved() {
         assert!(
-            q.response("").unwrap()["records"]
+            serde_json::from_value::<Query>(json!({
+                "kind":"container_stats", "id":"a".repeat(64)
+            }))
+            .is_err()
+        );
+        let manifest: Value = serde_json::from_str(include_str!("../../manifest.json")).unwrap();
+        assert!(
+            !manifest["preapprovedCommands"]
                 .as_array()
                 .unwrap()
-                .is_empty()
+                .iter()
+                .any(|command| {
+                    command["args"][1]
+                        .as_str()
+                        .is_some_and(|script| script.contains("d stats"))
+                })
         );
-        assert!(q.response("broken").is_err());
     }
 }

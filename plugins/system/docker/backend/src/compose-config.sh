@@ -35,7 +35,8 @@ sd_read_config() {
         if test "$sd_line" != "$sd_identity"; then printf conflict; break; fi
     done)
     test -z "$sd_conflict" || { printf '%s\n' '同名项目的工作目录或有序配置文件不一致' >&2; return 2; }
-    set -- --project-name "$sd_project" --project-directory "$sd_dir" --profile '*'
+    set -- --project-name "$sd_project" --project-directory "$sd_dir"
+    if test "$sd_compose_legacy" = false; then set -- "$@" --profile '*'; fi
     sd_count=0
     while :; do
         case "$sd_files" in
@@ -48,7 +49,8 @@ sd_read_config() {
         set -- "$@" --file "$sd_file"
         test "$sd_more" = true || break
     done
-    set -- "$@" config --format json
+    set -- "$@" config
+    if test "$sd_compose_legacy" = false; then set -- "$@" --format json; fi
     if test "$sd_reveal" = false; then
         set -- "$@" --no-interpolate
         if test "$sd_can_skip_env" = true; then set -- "$@" --no-env-resolution; fi
@@ -77,6 +79,11 @@ for sd_id in $sd_ids; do
     test "$sd_status" -eq 0 || sd_model=null
     sd_resolved=true
     if test "$sd_reveal" = false && test "$sd_can_skip_env" = true; then sd_resolved=false; fi
-    printf '%s,"Members":[%s],"Model":%s,"ExitCode":%s,"EnvironmentFilesResolved":%s}\n' "${sd_meta%?}" "${sd_members_json%,}" "$sd_model" "$sd_status" "$sd_resolved"
+    if test "$sd_compose_legacy" = true; then
+        printf '%s,"Members":[%s],"ModelFormat":"yaml","ModelBytes":%s,"ExitCode":%s,"EnvironmentFilesResolved":%s}\n' "${sd_meta%?}" "${sd_members_json%,}" "${#sd_model}" "$sd_status" "$sd_resolved"
+        printf '%s\n' "$sd_model"
+    else
+        printf '%s,"Members":[%s],"Model":%s,"ExitCode":%s,"EnvironmentFilesResolved":%s}\n' "${sd_meta%?}" "${sd_members_json%,}" "$sd_model" "$sd_status" "$sd_resolved"
+    fi
     printf 'SERVERDECK_COMPOSE_END %s\n' "$sd_id" >&2
 done

@@ -2,29 +2,24 @@
 import { tr } from './i18n/messages';
 import { locale } from '@serverdeck/plugin-sdk/i18n';
 
-import { computed, ref, useId } from 'vue';
+import { computed, reactive } from 'vue';
+import { ChevronRight } from '@lucide/vue';
 import OpsDetails from './OpsDetails.vue';
 import type { OpsRequest, OpsResponse } from './types';
-import ContainerResources from './ContainerResources.vue';
 import ContainerEnvironment from './ContainerEnvironment.vue';
 import ContainerStartup from './ContainerStartup.vue';
+import { containerExitText, containerStateText } from './container-status';
 
 const props = defineProps<{
   containerId: string;
   detail: Record<string, unknown>;
   query: (request: OpsRequest) => Promise<OpsResponse>;
 }>();
-const tabs = [
+const sections = [
   {
     key: 'overview',
     get label() {
       return tr('概览');
-    },
-  },
-  {
-    key: 'resources',
-    get label() {
-      return tr('资源使用');
     },
   },
   {
@@ -40,29 +35,17 @@ const tabs = [
     },
   },
 ] as const;
-type Tab = (typeof tabs)[number]['key'];
-const activeTab = ref<Tab>('overview');
-const focusedTab = ref<Tab>('overview');
-const panelId = useId();
+type Section = (typeof sections)[number]['key'];
+const expanded = reactive<Record<Section, boolean>>({
+  overview: true,
+  startup: false,
+  environment: false,
+});
+const visited = reactive(new Set<Section>(['overview']));
 
-function moveTabFocus(event: KeyboardEvent) {
-  const buttons = Array.from(
-    (event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="tab"]'),
-  );
-  const index = tabs.findIndex((tab) => tab.key === focusedTab.value);
-  const next =
-    event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? tabs.length - 1
-        : event.key === 'ArrowRight'
-          ? (index + 1) % tabs.length
-          : event.key === 'ArrowLeft'
-            ? (index + tabs.length - 1) % tabs.length
-            : -1;
-  if (next < 0) return;
-  event.preventDefault();
-  buttons[next]?.focus();
+function toggleSection(section: Section, event: Event) {
+  expanded[section] = (event.currentTarget as HTMLDetailsElement).open;
+  if (expanded[section]) visited.add(section);
 }
 
 function fields(value: unknown): Record<string, unknown> {
@@ -80,15 +63,6 @@ function dateTime(value: unknown): string {
   return Number.isNaN(date.getTime()) ? raw : date.toLocaleString(locale.value, { hour12: false });
 }
 
-const stateLabels = new Map([
-  ['created', '已创建'],
-  ['running', '运行中'],
-  ['paused', '已暂停'],
-  ['restarting', '重启中'],
-  ['exited', '已退出'],
-  ['removing', '删除中'],
-  ['dead', '已失效'],
-]);
 const healthLabels = new Map([
   ['starting', '检查中'],
   ['healthy', '健康'],
@@ -113,7 +87,7 @@ const overview = computed(() => {
     [tr('名称')]: fieldText(detail.name).replace(/^\//, ''),
     [tr('镜像')]: fieldText(detail.image),
     [tr('容器 ID')]: props.containerId,
-    [tr('运行状态')]: stateLabels.has(status) ? tr(stateLabels.get(status)!) : status,
+    [tr('运行状态')]: containerStateText(status),
     [tr('健康检查')]: health
       ? healthLabels.has(health)
         ? tr(healthLabels.get(health)!)
@@ -123,7 +97,7 @@ const overview = computed(() => {
     [tr('创建时间')]: dateTime(detail.created),
     [tr('最近启动')]: dateTime(state.StartedAt),
     [tr('最近退出')]: dateTime(state.FinishedAt),
-    [tr('退出码')]: state.Running === false ? fieldText(state.ExitCode) : '—',
+    [tr('退出结果')]: containerExitText(status, state.ExitCode),
     [tr('重启策略')]:
       typeof policy.Name === 'string'
         ? policyLabels.has(restart)
@@ -141,47 +115,28 @@ const overview = computed(() => {
 
 <template>
   <div class="docker-container-details">
-    <div
-      class="server-tabs docker-detail-tabs"
-      role="tablist"
-      :aria-label="tr('容器详情分类')"
-      @keydown="moveTabFocus"
-    >
-      <button
-        v-for="tab in tabs"
-        :id="`${panelId}-${tab.key}`"
-        :key="tab.key"
-        type="button"
-        role="tab"
-        :aria-selected="activeTab === tab.key"
-        :aria-controls="panelId"
-        :tabindex="focusedTab === tab.key ? 0 : -1"
-        @focus="focusedTab = tab.key"
-        @click="activeTab = tab.key"
+    <div class="docker-detail-panel">
+      <details
+        v-for="section in sections"
+        :key="section.key"
+        class="docker-detail-section"
+        :open="expanded[section.key]"
+        @toggle.self="toggleSection(section.key, $event)"
       >
-        {{ tab.label }}
-      </button>
+        <summary>
+          <ChevronRight :size="16" aria-hidden="true" />
+          <span>{{ section.label }}</span>
+        </summary>
+        <div v-if="visited.has(section.key)" class="docker-detail-section-content">
+          <OpsDetails v-if="section.key === 'overview'" :detail="overview" />
+          <ContainerStartup
+            v-else-if="section.key === 'startup'"
+            :container-id="containerId"
+            :query="query"
+          />
+          <ContainerEnvironment v-else :container-id="containerId" :query="query" />
+        </div>
+      </details>
     </div>
-    <section
-      :id="panelId"
-      :key="activeTab"
-      class="docker-detail-panel"
-      role="tabpanel"
-      :aria-labelledby="`${panelId}-${activeTab}`"
-      tabindex="0"
-    >
-      <OpsDetails v-if="activeTab === 'overview'" :detail="overview" />
-      <ContainerResources
-        v-else-if="activeTab === 'resources'"
-        :container-id="containerId"
-        :query="query"
-      />
-      <ContainerStartup
-        v-else-if="activeTab === 'startup'"
-        :container-id="containerId"
-        :query="query"
-      />
-      <ContainerEnvironment v-else :container-id="containerId" :query="query" />
-    </section>
   </div>
 </template>
