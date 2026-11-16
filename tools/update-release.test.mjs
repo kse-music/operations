@@ -92,6 +92,10 @@ async function builtRelease(t) {
     'nsis/latest.json',
     `deb/ServerDeck_${version}_amd64.deb`,
     `appimage/ServerDeck_${version}_amd64.AppImage`,
+    `macos-x64/ServerDeck_${version}_x64.dmg`,
+    `macos-x64/ServerDeck_${version}_x64.app.zip`,
+    `macos-aarch64/ServerDeck_${version}_aarch64.dmg`,
+    `macos-aarch64/ServerDeck_${version}_aarch64.app.zip`,
   ].map((file) => path.join(bundle, file));
   const notes = 'Windows 与 Linux 发布说明\n';
   const signature = Buffer.from(`trusted comment: timestamp:1\tversion:${version}\n`).toString(
@@ -114,11 +118,11 @@ async function builtRelease(t) {
   return { cwd, version, files, notesFile, manifest };
 }
 
-test('collects Windows and both Linux packages for one version without uploading notes or stale files', async (t) => {
+test('collects Windows, Linux and both macOS architectures without uploading notes or stale files', async (t) => {
   const { cwd, version, files } = await builtRelease(t);
   await writeFile(path.join(cwd, 'target/release/bundle/deb/ServerDeck_0.9.2_amd64.deb'), 'stale');
   assert.deepEqual(releaseAssets({ version, cwd }), files);
-  assert.equal(new Set(files.map((file) => path.basename(file))).size, 5);
+  assert.equal(new Set(files.map((file) => path.basename(file))).size, 9);
 });
 
 for (const [index, name] of [
@@ -127,6 +131,10 @@ for (const [index, name] of [
   'manifest',
   'deb',
   'AppImage',
+  'Intel macOS DMG',
+  'Intel macOS application archive',
+  'Apple Silicon macOS DMG',
+  'Apple Silicon macOS application archive',
 ].entries()) {
   test(`refuses an incomplete draft when ${name} is missing`, async (t) => {
     const { cwd, version, files } = await builtRelease(t);
@@ -151,9 +159,24 @@ test('rejects empty packages and directories instead of treating them as built a
   assert.throws(() => releaseAssets({ version, cwd }), /non-empty release file/);
 });
 
-test('does not substitute a Linux package from another version', async (t) => {
+for (const [index, name] of [
+  [4, 'Linux'],
+  [5, 'Intel macOS'],
+  [8, 'Apple Silicon macOS'],
+]) {
+  test(`does not substitute a ${name} package from another version`, async (t) => {
+    const { cwd, version, files } = await builtRelease(t);
+    await rename(files[index], files[index].replace(version, '0.9.2'));
+    assert.throws(() => releaseAssets({ version, cwd }), { code: 'ENOENT' });
+  });
+}
+
+test('rejects an empty macOS archive and cannot substitute the other architecture', async (t) => {
   const { cwd, version, files } = await builtRelease(t);
-  await rename(files[4], files[4].replace(version, '0.9.2'));
+  await writeFile(files[6], '');
+  assert.throws(() => releaseAssets({ version, cwd }), /non-empty release file/);
+  await rm(files[6]);
+  await rename(files[8], path.join(path.dirname(files[6]), path.basename(files[8])));
   assert.throws(() => releaseAssets({ version, cwd }), { code: 'ENOENT' });
 });
 

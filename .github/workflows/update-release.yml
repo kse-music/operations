@@ -1,4 +1,4 @@
-name: Windows and Linux release draft
+name: Windows, Linux and macOS release draft
 on:
   workflow_dispatch:
     inputs:
@@ -144,8 +144,86 @@ jobs:
             target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
           if-no-files-found: error
           retention-days: 14
+  macos-packages:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+            mach-arch: x86_64
+          - os: macos-15
+            target: aarch64-apple-darwin
+            arch: aarch64
+            mach-arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      MACOS_TARGET: ${{ matrix.target }}
+      MACOS_ARCH: ${{ matrix.arch }}
+      MACOS_MACH_ARCH: ${{ matrix.mach-arch }}
+    steps:
+      - name: Preserve repository LF line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Prepare Rust and WASM toolchain
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --target wasm32-unknown-unknown
+          rustup default 1.97.1
+          rustup target add "$MACOS_TARGET"
+      - name: Cache macOS Rust dependencies and release compilation
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+            target/${{ matrix.target }}/release/deps
+            target/${{ matrix.target }}/release/build
+            target/${{ matrix.target }}/release/.fingerprint
+            .local/plugin-build/assistant
+            .local/plugin-build/docker
+          key: release-macos-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.target }}-rust-1.97.1-v1-${{ hashFiles('Cargo.toml', 'Cargo.lock', '.cargo/config.toml', 'plugins/system/*/backend/Cargo.toml', 'plugins/system/*/backend/Cargo.lock') }}
+          restore-keys: |
+            release-macos-${{ matrix.os }}-${{ runner.arch }}-${{ matrix.target }}-rust-1.97.1-v1-
+      - run: npm ci --no-audit
+      - name: Fetch locked macOS workspace dependencies
+        run: cargo fetch --locked --target "$MACOS_TARGET"
+      - name: Fetch locked production WASM plugin dependencies
+        run: node tools/build-system-plugins.mjs --fetch-only
+      - run: npm audit --audit-level=moderate
+      - name: Build macOS DMG and application bundle
+        run: node tools/tauri.mjs build --target "$MACOS_TARGET" --config src-tauri/tauri.macos.conf.json --bundles dmg,app --config '{"bundle":{"createUpdaterArtifacts":false}}'
+      - name: Verify architecture and archive macOS application
+        run: |
+          release_version=$(node --input-type=module -e "import { readAppVersion } from './tools/app-version.mjs'; console.log(readAppVersion())")
+          bundle="target/$MACOS_TARGET/release/bundle"
+          app="$bundle/macos/ServerDeck.app"
+          staging="$bundle/release"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+          xcrun lipo -verify_arch "$MACOS_MACH_ARCH" "$app/Contents/MacOS/$executable"
+          mkdir -p "$staging"
+          cp "$bundle/dmg/ServerDeck_${release_version}_${MACOS_ARCH}.dmg" "$staging/"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$staging/ServerDeck_${release_version}_${MACOS_ARCH}.app.zip"
+      - name: Upload macOS artifacts for draft assembly
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release/bundle/release/*
+          if-no-files-found: error
+          retention-days: 14
   publish-draft:
-    needs: [windows-update, linux-packages]
+    needs: [windows-update, linux-packages, macos-packages]
     runs-on: windows-latest
     timeout-minutes: 15
     environment: release
@@ -175,6 +253,16 @@ jobs:
         with:
           name: release-linux
           path: target/release/bundle
+      - name: Download Intel macOS artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-macos-x64
+          path: target/release/bundle/macos-x64
+      - name: Download Apple Silicon macOS artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-macos-aarch64
+          path: target/release/bundle/macos-aarch64
       - name: Verify all artifacts, create version tag and upload complete draft
         env:
           GH_TOKEN: ${{ github.token }}

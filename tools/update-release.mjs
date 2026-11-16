@@ -50,6 +50,12 @@ export function releaseAssets({ version, cwd = repository }) {
     path.join(bundle, 'deb', `ServerDeck_${version}_amd64.deb`),
     path.join(bundle, 'appimage', `ServerDeck_${version}_amd64.AppImage`),
   ];
+  for (const arch of ['x64', 'aarch64']) {
+    assets.push(
+      path.join(bundle, `macos-${arch}`, `ServerDeck_${version}_${arch}.dmg`),
+      path.join(bundle, `macos-${arch}`, `ServerDeck_${version}_${arch}.app.zip`),
+    );
+  }
   for (const file of assets) {
     const info = lstatSync(file);
     assert(info.isFile() && info.size > 0, `expected a non-empty release file: ${file}`);

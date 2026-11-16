@@ -81,7 +81,7 @@ system 来源由宿主从发行内置包写入，仅影响分发和预置授权�
 
 ## 软件更新
 
-`.github/workflows/update-release.yml` 固定手动运行时的提交 SHA，分别构建 Windows updater 产物与 Linux 安装包，通过当前运行的 Actions Artifact 交给依赖两个构建成功的汇总任务。汇总先校验当前版本所需附件、Windows 更新清单及说明的一致性，再创建或复用指向该提交的版本标签，并上传同一个 Release 草稿；任一构建或附件校验失败不新建标签，不自动公开草稿。Linux 安装包仅用于手动分发，不进入 Windows 更新清单。操作和文件契约见[更新分发](../release/UPDATES.md)。
+`.github/workflows/update-release.yml` 固定手动运行时的提交 SHA，分别构建 Windows updater 产物、Linux 安装包，以及 macOS Intel/Apple Silicon 的 DMG 和应用归档。macOS 使用对应架构的原生 runner，读取应用 Info.plist 定位可执行文件并用 `lipo` 验证架构，再由 `ditto` 将 `.app` 归档为保留权限和符号链接的 ZIP。各架构缓存和中间 Artifact 独立命名；汇总任务依赖所有构建成功，先校验当前版本所需附件、Windows 更新清单及说明的一致性，再创建或复用指向该提交的版本标签，并上传同一个 Release 草稿。任一构建或附件校验失败不新建标签，不自动公开草稿。Linux、macOS 安装包仅用于手动分发，不进入 Windows 更新清单；macOS 未接入开发者证书签名及公证。操作和文件契约见[更新分发](../release/UPDATES.md)。
 
 桌面组合根注册 Tauri 官方 updater，`update_commands` 持有有界单操作状态、取消信号、已核验的候选更新及内存安装包。前端更新 Store 在 bootstrap 就绪后延迟发起自动检查，关于页展示状态，导航显示更新提示；页面切换不释放下载。仅主窗口获得本应用的窄更新 IPC，不向任何窗口授予 updater 原生安装权限，插件和独立编辑器不能绕过退出协调直接安装。
 
