@@ -9,7 +9,7 @@ ServerDeck is a local-first server workbench for developers and operations teams
 - **Host management**: Nested folders, search, drag and drop, duplication, connection tests, and preview-based import of a supported subset of OpenSSH Config. Passwords and private keys are stored in the system credential store.
 - **Terminals**: Local and SSH shells, multiple sessions, split panes, search, keyboard shortcuts, native clipboard support, opening URLs, rz uploads, and dropping files or folders into the current shell directory. Jump hosts and proxies are supported.
 - **File management**: Local/remote dual-pane SFTP, directory operations, background transfers, conflict handling, SHA-256 verification, confirmed user switching through sudo, separate text editor windows, and editing with Windows system applications.
-- **Docker plugin**: Containers, images, Compose projects, resource and startup configuration, logs, shells, and confirmed start, stop, restart, deletion, and log cleanup operations.
+- **Docker plugin**: Containers, images, Compose projects, read-only startup configuration and environment variables, logs, shells, confirmed container operations, and image import/export/remote transfer.
 - **AI operations assistant**: Matches registered hosts, collects relevant information with sensitive data redacted, and streams model responses. Preview and execute plans with fixed targets, targeted text edits, and single-file transfers under the selected approval mode, then verify the results.
 - **Model and plugin management**: Remote OpenAI-compatible models and local Codex/Claude Code sources; local plugin package installation, permissions, configuration, enabling, disabling, and removal, plus a downloadable standalone development kit.
 - **Desktop workspace**: Host tabs, global search, light and dark themes, Chinese and English interfaces, font size and keyboard shortcut settings, data directory migration, and safe shutdown.
@@ -33,7 +33,7 @@ This repository provides source code. Installers and checksum files are distribu
 
 ## Development and Build
 
-Requirements: Rust stable 1.94+, Node.js 22.13+, npm, and the `wasm32-unknown-unknown` target. Windows also requires MSVC C++ Build Tools, the Windows SDK, and WebView2. Other platforms require their corresponding Tauri system dependencies.
+Requirements: Rust stable 1.94+, Node.js 22.13+, npm, and the `wasm32-unknown-unknown` target. Windows also needs MSVC C++ Build Tools, the Windows SDK, and WebView2.
 
 ```powershell
 npm ci
@@ -42,40 +42,13 @@ npm run plugins:fetch
 npm run tauri -- dev
 ```
 
-`npm run dev` starts only the browser frontend. Full functionality requires the Tauri/Rust backend.
+`npm run dev` starts the browser frontend only. Full functionality requires the Tauri/Rust backend. Bundled plugins are compiled independently with locked, offline dependencies; fetch them before the first build or after lockfile changes.
 
-Desktop development and packaging automatically scan `plugins/system/`, compile each plugin independently, and generate packages and the Rust registry. Plugin builds use locked, offline dependencies. Run `npm run plugins:fetch` before the first build or after plugin dependencies or lockfiles change. Rebuild the client after adding a plugin source directory.
-
-```powershell
-# Windows NSIS installer
-node tools/tauri.mjs build --bundles nsis
-# Debug executable with embedded frontend assets
-node tools/tauri.mjs build --debug --no-bundle
-```
-
-For a release, change only the Cargo workspace version. The build entry point checks the version source and synchronizes workspace lockfile entries; commit the resulting `Cargo.lock` as well. See the [release checklist](docs/release/RELEASE_CHECKLIST.md) for artifact paths and native validation.
-
-Before building, ensure the output drive has at least 10 GiB of free space. Follow `.cargo/config.toml`: incremental compilation is disabled, and development/test builds use line-table-only debug information. Desktop builds and native tests share the root `target/` directory; WASM caches use `.local/plugin-build/<plugin>/`. Run native QA from a copied EXE to avoid locking build outputs. `.local/` contains data and diagnostic artifacts and must not be deleted wholesale. Before cleaning caches, verify paths, usage, and directory links, and preserve installers and user data.
+See [development and validation](docs/guides/DEVELOPMENT.md) for build commands, shared Cargo output, disk requirements, and plugin development kit verification. The application version comes from the Cargo workspace; SDK and plugin versions are independent.
 
 ## Testing
 
-Generate plugins and test fixtures before running Cargo checks that depend on plugin assets:
-
-```powershell
-npm run plugins:fetch
-npm run plugins:build
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --locked
-npm run test:build
-npm run format:check
-npm run lint
-npm run typecheck
-npm test
-npm run build
-```
-
-These commands are entry points for validation, not a claim that checks have passed. Checks involving real SSH connections, system credentials, desktop interactions, and installers require isolated environments and appropriate authorization. See [native validation](docs/release/RELEASE_CHECKLIST.md#原生验收).
+Use the [local checks](docs/guides/DEVELOPMENT.md#本地检查) and [native validation](docs/release/NATIVE_VALIDATION.md) appropriate to the change. Native tests run from copied executables in isolated QA directories. Real remote changes require an authorized test environment. These instructions do not claim that the current candidate has passed release checks.
 
 ## Limitations
 
@@ -83,7 +56,7 @@ These commands are entry points for validation, not a claim that checks have pas
 - Host keys must be verified. Changes require authorization under the host application's approval rules; privileges are not elevated automatically.
 - Failed file transfers restart from the beginning; resuming transfers or recovering them across application restarts is not supported. Desktop text editing is limited to 2 MiB, and assistant text editing to 32 KiB. Atomic replacement does not guarantee preservation of ACLs, extended attributes, or hard links.
 - Assistant tasks and conversations are retained only during the current run. Remote operations may already have taken effect after a timeout, disconnection, or cancellation. Verify the actual result rather than automatically replaying changes.
-- Automatic updates and cryptographic plugin signature verification are not currently available. File digests do not establish publisher identity.
+- In-app updates are available for stable Windows x64 NSIS installations, with signature and version verification. Plugin packages do not have cryptographic signature verification; file digests do not establish publisher identity.
 
 See the [security notes](docs/release/SECURITY.md) for the full boundaries.
 

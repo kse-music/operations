@@ -231,7 +231,7 @@ impl Files {
             &parent,
             &format!(".serverdeck-editor-{}.part", Uuid::new_v4()),
         )?;
-        let handle = remote.stage(&temporary).await?;
+        let handle = remote.stage(&temporary, 0o600).await?;
         let result = async {
             let mut digest = Sha256::new();
             let writing = async {

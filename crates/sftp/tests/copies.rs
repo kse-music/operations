@@ -173,13 +173,16 @@ async fn local_upload_and_remote_relay_commit_verified_bytes_in_shared_queue() {
         .unwrap()
         .set_modified(modified)
         .unwrap();
-    for origin in [
+    for (index, origin) in [
         local(&input),
         CopySource::Remote {
             session: src.id.clone(),
             path: "/archive.tar.gz".into(),
         },
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         std::fs::write(source.root.path().join("archive.tar.gz"), &content).unwrap();
         std::fs::OpenOptions::new()
             .write(true)
@@ -197,6 +200,9 @@ async fn local_upload_and_remote_relay_commit_verified_bytes_in_shared_queue() {
         let job = files.transfers.start_copy(plan, auth.clone()).unwrap();
         let done = finished(&job).await;
         assert_eq!(done.state, "completed", "{:?}", done.message);
+        let created = std::mem::take(&mut *target.faults.created_permissions.lock().unwrap());
+        assert_eq!(created.len(), 1, "{created:?}");
+        assert_eq!(created[0].1, Some(if index == 0 { 0o644 } else { 0o600 }));
         assert_eq!(done.transferred_bytes, content.len() as u64);
         assert_eq!(
             std::fs::metadata(target.root.path().join("archive.tar.gz"))

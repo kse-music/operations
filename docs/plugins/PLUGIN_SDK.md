@@ -196,7 +196,7 @@ const result = await invoke('inspect', { hostId });
 
 Context 只含主题/字号、入口 hostId、可见状态和获授权的公开元数据。资产目录需 hosts.read；仅 SSH/SFTP 权限只能看到入口主机的安全连接状态。无凭据表、认证配置、代理命令、内部连接/transport ID。models.use 允许模型公开状态；修改模型、Key、授权和安装工具不属于插件桥。
 
-`setDraftDirty(boolean)` 仅报告当前页草稿状态，不传正文。`usePluginVisibility()` 用于停止隐藏页面的交互与轮询。每个打开的页面拥有隔离 owner；系统与上传插件采用相同规则。隐藏页不能发起新调用或审批，已开始的保留工作可收尾；Stream/PTY 关闭。关闭 owner 只清理其自有资源，最后一个 owner 离开才释放共享 VM 根。
+`setDraftDirty(boolean)` 仅报告当前页草稿状态，不传正文。`usePluginVisibility()` 用于停止隐藏页面的交互。每个页面拥有隔离 owner，系统与上传插件采用相同规则。默认隐藏后禁止新动作和审批，并关闭流/PTY；宿主明确保留的已打开工作区可继续已声明的任务动作、命令流、传输/进度轮询，后续操作仍按原权限及精确自动审批规则处理，需要新确认时等待页面可见。PTY 在隐藏时关闭，插件自报 `keepRunning` 不授予后台权。关闭 owner 清理自有资源，最后一个 owner 离开释放共享 VM 根；完整规则见 [UI 生命周期](PLUGIN_UI_EXTENSION.md)。
 
 ## 资源与错误
 

@@ -1,6 +1,6 @@
 # 依赖许可证清单
 
-本清单汇总 Cargo 全平台解析和 npm 生产依赖的许可证元数据。构建/测试及非当前平台的解析项可能包含在内，不表示所有条目进入安装包。完整许可文本见[第三方声明](THIRD_PARTY_NOTICES.txt)。发布时须对候选锁文件、实际包内容和许可原文逐项复核；元数据整理不等于法律审查完成。
+本清单汇总主工作区及生产内置插件 Cargo 锁文件的全平台解析，以及根 npm 锁文件的生产依赖（含可选 peer 元数据）。构建/测试及非当前平台的解析项可能包含在内，不表示所有条目进入安装包。完整许可文本见[第三方声明](THIRD_PARTY_NOTICES.txt)。独立开发包和第三方插件还须按各自锁文件、打包内容复核。发布时须对候选锁文件、实际包内容和许可原文逐项复核；元数据整理不等于法律审查完成。
 
 ## 许可来源与复核边界
 
@@ -111,6 +111,7 @@
 | crunchy 0.2.4                           | MIT                                                                                                                                 | Cargo |
 | crypto-bigint 0.7.11                    | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | crypto-common 0.1.6                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
+| crypto-common 0.1.7                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | crypto-common 0.2.2                     | MIT OR Apache-2.0                                                                                                                   | Cargo |
 | crypto-primes 0.7.2                     | Apache-2.0 OR MIT                                                                                                                   | Cargo |
 | cssparser 0.37.0                        | MPL-2.0                                                                                                                             | Cargo |
@@ -207,6 +208,7 @@
 | gdkwayland-sys 0.18.2                   | MIT                                                                                                                                 | Cargo |
 | gdkx11 0.18.2                           | MIT                                                                                                                                 | Cargo |
 | gdkx11-sys 0.18.2                       | MIT                                                                                                                                 | Cargo |
+| generic-array 0.14.7                    | MIT                                                                                                                                 | Cargo |
 | generic-array 0.14.9                    | MIT                                                                                                                                 | Cargo |
 | generic-array 1.4.5                     | MIT                                                                                                                                 | Cargo |
 | gethostname 1.1.0                       | Apache-2.0                                                                                                                          | Cargo |

@@ -515,7 +515,12 @@ pub(super) async fn run(
         info.state = "running".into();
     }
     let temp = remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?;
-    let handle = target.stage(&temp).await?;
+    let permissions = if plan.target_before.is_some() {
+        0o600
+    } else {
+        0o644
+    };
+    let handle = target.stage(&temp, permissions).await?;
     task.temp(true, temp.clone())?;
     // Bounded SFTP request window. Hash results in file order even if replies arrive out of order.
     type Block<'a> = Pin<Box<dyn Future<Output = Result<Vec<u8>, Error>> + Send + 'a>>;

@@ -51,7 +51,7 @@ async fn assert_completed(files: &Files, id: &str) {
 }
 
 #[tokio::test]
-async fn uploads_preserve_source_modified_time_for_new_empty_nested_and_replaced_files() {
+async fn uploads_apply_default_permissions_and_preserve_modified_time_and_existing_permissions() {
     let server = Server::start(true, Duration::ZERO).await;
     let session = server.open().await;
     let files = Files::new(server.engine.clone(), 1);
@@ -76,6 +76,7 @@ async fn uploads_preserve_source_modified_time_for_new_empty_nested_and_replaced
             .set_modified(modified)
             .unwrap();
     }
+    std::fs::create_dir(local.path().join("folder/empty")).unwrap();
     std::fs::write(server.root.path().join("replaced.bin"), b"old").unwrap();
     for source in ["new.bin", "empty.bin", "folder", "replaced.bin"] {
         let task = files
@@ -89,7 +90,37 @@ async fn uploads_preserve_source_modified_time_for_new_empty_nested_and_replaced
             ))
             .unwrap();
         assert_completed(&files, &task.id).await;
+        let created = std::mem::take(&mut *server.faults.created_permissions.lock().unwrap());
+        let staged: Vec<_> = created
+            .iter()
+            .filter(|(path, _)| path.ends_with(".part"))
+            .collect();
+        assert_eq!(staged.len(), 1, "{source}: {created:?}");
+        assert_eq!(
+            staged[0].1,
+            Some(if source == "replaced.bin" {
+                0o600
+            } else {
+                0o644
+            }),
+            "{source}"
+        );
+        if source == "folder" {
+            assert!(created.contains(&("/folder".into(), Some(0o755))));
+            assert!(created.contains(&("/folder/empty".into(), Some(0o755))));
+        }
     }
+    let replaced = files
+        .list(&session.id, "/")
+        .await
+        .unwrap()
+        .entries
+        .into_iter()
+        .find(|entry| entry.name == "replaced.bin")
+        .unwrap();
+    assert_eq!(replaced.permissions, Some(0o600));
+    assert_eq!(replaced.uid, Some(1000));
+    assert_eq!(replaced.gid, Some(1000));
     for name in ["new.bin", "empty.bin", "folder/nested.bin", "replaced.bin"] {
         assert_eq!(
             std::fs::metadata(server.root.path().join(name))

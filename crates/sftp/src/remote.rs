@@ -344,7 +344,7 @@ impl Remote {
             .mkdir(
                 path,
                 FileAttributes {
-                    permissions: Some(0o700),
+                    permissions: Some(0o755),
                     ..Default::default()
                 },
             )
@@ -379,14 +379,14 @@ impl Remote {
             _ => Err(fail("SFTP_PROTOCOL", "原子替换响应无效，未尝试删除原文件")),
         }
     }
-    pub async fn stage(&self, path: &str) -> Result<String, Error> {
+    pub async fn stage(&self, path: &str, permissions: u32) -> Result<String, Error> {
         Ok(self
             .raw
             .open(
                 path,
                 OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
                 FileAttributes {
-                    permissions: Some(0o600),
+                    permissions: Some(permissions),
                     ..Default::default()
                 },
             )

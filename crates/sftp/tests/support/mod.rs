@@ -109,6 +109,7 @@ pub struct FileFaults {
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub ignore_times: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
+    pub created_permissions: Mutex<Vec<(String, Option<u32>)>>,
     pub links: Mutex<HashMap<String, String>>,
     pub reported_sizes: Mutex<HashMap<String, u64>>,
     pub sudo_password: Mutex<Option<String>>,
@@ -245,8 +246,15 @@ impl russh_sftp::server::Handler for Disk {
         id: u32,
         path: String,
         flags: OpenFlags,
-        _: FileAttributes,
+        attrs: FileAttributes,
     ) -> Result<Handle, StatusCode> {
+        if flags.contains(OpenFlags::CREATE) {
+            self.faults
+                .created_permissions
+                .lock()
+                .unwrap()
+                .push((path.clone(), attrs.permissions));
+        }
         let path = self.path(&path)?;
         if flags.contains(OpenFlags::WRITE)
             && tokio::fs::metadata(&path)
@@ -383,9 +391,14 @@ impl russh_sftp::server::Handler for Disk {
         &mut self,
         id: u32,
         path: String,
-        _: FileAttributes,
+        attrs: FileAttributes,
     ) -> Result<Status, StatusCode> {
         tokio::fs::create_dir(self.path(&path)?).await.map_err(io)?;
+        self.faults
+            .created_permissions
+            .lock()
+            .unwrap()
+            .push((path, attrs.permissions));
         Ok(status(id))
     }
     async fn rmdir(&mut self, id: u32, path: String) -> Result<Status, StatusCode> {

@@ -16,7 +16,7 @@ Windows 安装包在文件替换后通过 NSIS 安装完成钩子通知系统刷
 
 ## 发布密钥
 
-公钥固定在 `apps/desktop/src-tauri/tauri.conf.json`，对应私钥在本机 Git 忽略目录 `.local/updater-signing/serverdeck.key`，已限制为当前 Windows 账户访问。应单独安全备份；不得随着 QA、构建缓存或临时文件清理，不覆盖或反复生成。公钥可公开，私钥内容不得进入源码、命令参数、聊天、日志或 Release。
+公钥固定在 `apps/desktop/src-tauri/tauri.conf.json`。本地既有私钥的约定位置为 Git 忽略目录 `.local/updater-signing/serverdeck.key`；发布前须在持有该密钥的环境核对其与公钥匹配、访问权限及安全备份，不能从源码或本文推断密钥已准备好。私钥不得随 QA、构建缓存或临时文件清理，不覆盖或反复生成。公钥可公开，私钥内容不得进入源码、命令参数、聊天、日志或 Release。
 
 在 GitHub 仓库创建受保护的 `release` Environment，配置 Secret `TAURI_SIGNING_PRIVATE_KEY` 为该私钥内容；若密钥设置了口令，同时配置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。通过 GitHub 的 Secret 输入界面填写，不把值写入 workflow。需限制可使用该 Environment 的发布引用及人员，并在替换发布密钥前设计已经安装客户端的公钥过渡。
 

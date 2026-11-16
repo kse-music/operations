@@ -1,27 +1,37 @@
 # ServerDeck 文档
 
-文档以当前产品和实现为基线，按用途直接维护。
+文档以当前代码和真实产品入口为基线，按用途维护。本文是统一导航；功能已实现、源码测试通过与候选产物发布验收分别判断。
 
 ## 阅读入口
 
-| 用途               | 文档                                                                                                                                         |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 了解产品功能与边界 | [产品基线](product/PRD.md)                                                                                                                   |
-| 安装和日常使用     | [使用说明](guides/USER_GUIDE.md)、[AI 助手](guides/AI_ASSISTANT.md)                                                                          |
-| 理解实现           | [总体架构](architecture/ARCHITECTURE.md)、[助手工具与任务](architecture/ASSISTANT_AGENT.md)、[数据升级契约](architecture/DATA_MIGRATIONS.md) |
-| 开发和安装插件     | [开发指南](plugins/PLUGIN_DEVELOPMENT.md)、[公开 SDK](plugins/PLUGIN_SDK.md)                                                                 |
-| 准备发布           | [发布检查表](release/RELEASE_CHECKLIST.md)、[更新分发](release/UPDATES.md)、[安全说明](release/SECURITY.md)                                  |
-| 查看第三方许可     | [依赖清单](release/DEPENDENCY_INVENTORY.md)、[第三方声明](release/THIRD_PARTY_NOTICES.txt)                                                   |
+| 用途           | 入口                                                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 了解产品       | [产品基线（PRD）](product/PRD.md)                                                                                               |
+| 安装与日常操作 | [使用说明](guides/USER_GUIDE.md)、[Docker](guides/DOCKER.md)、[AI 运维助手](guides/AI_ASSISTANT.md)                             |
+| 本地开发与检查 | [开发、构建与验证](guides/DEVELOPMENT.md)、[开发规范](../AGENTS.md)                                                             |
+| 理解实现       | [总体架构](architecture/ARCHITECTURE.md)及下方模块说明                                                                          |
+| 开发和安装插件 | [插件开发指南](plugins/PLUGIN_DEVELOPMENT.md)、[公开 SDK](plugins/PLUGIN_SDK.md)                                                |
+| 准备上线       | [发布门禁](release/RELEASE_CHECKLIST.md)、[原生验收](release/NATIVE_VALIDATION.md)、[更新分发](release/UPDATES.md)              |
+| 安全与许可     | [安全说明](release/SECURITY.md)、[依赖清单](release/DEPENDENCY_INVENTORY.md)、[第三方许可原文](release/THIRD_PARTY_NOTICES.txt) |
+
+## 架构模块
+
+- [桌面工作区与设置](architecture/DESKTOP.md)：窗口、导航、偏好、语言和页面生命周期。
+- [主机连接、凭据与终端](architecture/CONNECTIONS_TERMINALS.md)：主机目录、SSH 信任、路由、PTY、本地会话和上传协议。
+- [文件、传输与编辑](architecture/FILES.md)：SFTP 身份、校验提交、系统拖放、回收站和独立编辑器。
+- [Docker 插件实现](architecture/DOCKER.md)：业务职责、Compose、详情与列表缓存、日志及镜像传输。
+- [助手工具与运行期任务](architecture/ASSISTANT_AGENT.md)：模型协议、审批、任务、局部文件修改、跨工具资源和 Skill。
+- [数据库与配置升级](architecture/DATA_MIGRATIONS.md)：当前格式、全部支持版本、迁移链、备份和失败/恢复规则。
 
 ## 插件规范
 
-- [内置插件](plugins/BUILTIN_PLUGINS.md)：分发、管理和能力入口。
-- [插件架构](plugins/PLUGIN_ARCHITECTURE.md)：业务与平台的职责边界。
+- [内置插件](plugins/BUILTIN_PLUGINS.md)：分发、入口、管理和能力边界。
+- [插件架构](plugins/PLUGIN_ARCHITECTURE.md)：业务与平台职责及资源归属。
 - [开发与安装](plugins/PLUGIN_DEVELOPMENT.md)：独立开发包、目录、构建和安装。
 - [包格式](plugins/PLUGIN_PACKAGE_FORMAT.md)：清单、载荷、摘要、路径和大小限制。
 - [公开 SDK](plugins/PLUGIN_SDK.md)：平台原语、权限、审批、资源和错误契约。
 - [运行时与 ABI](plugins/PLUGIN_RUNTIME.md)：WASM 导出、异步续接和执行限额。
-- [版本约定](plugins/PLUGIN_API_VERSIONING.md)：当前版本与版本变更规则。
+- [版本约定](plugins/PLUGIN_API_VERSIONING.md)：当前版本与变更规则。
 - [安全边界](plugins/PLUGIN_SECURITY.md)：授权、隔离、目标复验与取消。
 - [UI 扩展](plugins/PLUGIN_UI_EXTENSION.md)：独立前端、通信、上下文和生命周期。
 

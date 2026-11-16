@@ -102,7 +102,13 @@ try {
   answerSaveDialog(child.pid, zip);
   await page.getByText(`插件开发包已保存到 ${zip}`, { exact: true }).waitFor();
   run('tar.exe', ['-xf', zip]);
-  assert.match(await readFile(path.join(sample, 'docs/plugins/PLUGIN_SDK.md'), 'utf8'), /4\.0\.0/);
+  const sdk = JSON.parse(
+    await readFile(path.join(sample, 'packages/plugin-sdk/package.json'), 'utf8'),
+  );
+  assert.equal(
+    (await readFile(path.join(sample, 'docs/plugins/PLUGIN_SDK.md'), 'utf8')).split(/\r?\n/u)[0],
+    `# Plugin SDK ${sdk.version}`,
+  );
 
   const manifestPath = path.join(sample, 'example/manifest.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));

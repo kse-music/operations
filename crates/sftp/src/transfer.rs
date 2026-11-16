@@ -921,7 +921,8 @@ async fn upload(
         .map_err(local::io)?;
     let mut file = tokio::io::BufReader::with_capacity(remote::IO_CHUNK * remote::IO_WINDOW, file);
     let temp = remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?;
-    let handle = remote.stage(&temp).await?;
+    let permissions = if expected.is_some() { 0o600 } else { 0o644 };
+    let handle = remote.stage(&temp, permissions).await?;
     task.temp(true, temp.clone())?;
     let copying = async {
         let data = task.start_data()?;

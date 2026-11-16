@@ -49,6 +49,7 @@ function createArchive(): Uint8Array {
     'tools/build-plugin-ui.mjs',
     'tools/build-space.mjs',
     'tools/package-plugin.mjs',
+    'docs/plugins/PLUGIN_ARCHITECTURE.md',
     'docs/plugins/PLUGIN_DEVELOPMENT.md',
     'docs/plugins/PLUGIN_SDK.md',
     'docs/plugins/PLUGIN_UI_EXTENSION.md',

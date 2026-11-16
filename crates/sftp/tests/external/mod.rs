@@ -93,6 +93,9 @@ async fn external_binary_roundtrip_requires_confirmation_preserves_metadata_and_
     assert_eq!(result.permissions, Some(0o600));
     assert_eq!(result.uid, Some(1000));
     assert_eq!(result.gid, Some(1000));
+    let created = server.faults.created_permissions.lock().unwrap().clone();
+    assert_eq!(created.len(), 1, "{created:?}");
+    assert_eq!(created[0].1, Some(0o600));
     assert_eq!(
         files.dirty_count(),
         1,

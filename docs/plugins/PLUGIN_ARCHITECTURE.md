@@ -1,6 +1,6 @@
 # 插件架构
 
-当前契约为 Host/Rust/TS SDK5、UI4、ABI/wire1。插件以独立 Vue UI + WASM 后端提供完整业务，内置与上传使用相同运行、审批和资源边界。
+当前契约见[版本约定](PLUGIN_API_VERSIONING.md)。插件以独立 Vue UI + WASM 后端提供完整业务，内置与上传使用相同运行、审批和资源边界。
 
 ```text
 插件 Vue 页面 → authenticated MessageChannel → 可信 UI 桥
