@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +79,39 @@ test('release entries reject automatic events and manual runs outside main befor
       assert.equal(result.status, 1);
       assert(result.stderr.includes(message));
     }
+  }
+});
+
+test('macOS lipo verification passes the input before the variadic architecture list', async () => {
+  const workflow = await readFile(
+    new URL('../.github/workflows/update-release.yml', import.meta.url),
+    'utf8',
+  );
+  const command = workflow.split(/\r?\n/).find((line) => /^\s+xcrun lipo /.test(line));
+  assert(command, 'macOS release must verify the application architecture');
+  const bash =
+    process.platform === 'win32'
+      ? path.resolve(
+          execFileSync('git', ['--exec-path'], { encoding: 'utf8', windowsHide: true }).trim(),
+          '../../../bin/bash.exe',
+        )
+      : '/bin/bash';
+  for (const arch of ['x86_64', 'arm64']) {
+    const app = '/release output/ServerDeck.app';
+    const executable = 'serverdeck desktop';
+    // Capture the actual workflow command's argv; lipo consumes all values after -verify_arch as architectures.
+    const result = spawnSync(bash, ['-c', `xcrun() { printf '%s\\n' "$@"; }\n${command}`], {
+      env: { ...process.env, app, executable, MACOS_MACH_ARCH: arch },
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split(/\r?\n/), [
+      'lipo',
+      `${app}/Contents/MacOS/${executable}`,
+      '-verify_arch',
+      arch,
+    ]);
   }
 });
 

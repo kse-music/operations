@@ -211,7 +211,7 @@ jobs:
           app="$bundle/macos/ServerDeck.app"
           staging="$bundle/release"
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
-          xcrun lipo -verify_arch "$MACOS_MACH_ARCH" "$app/Contents/MacOS/$executable"
+          xcrun lipo "$app/Contents/MacOS/$executable" -verify_arch "$MACOS_MACH_ARCH"
           mkdir -p "$staging"
           cp "$bundle/dmg/ServerDeck_${release_version}_${MACOS_ARCH}.dmg" "$staging/"
           ditto -c -k --sequesterRsrc --keepParent "$app" "$staging/ServerDeck_${release_version}_${MACOS_ARCH}.app.zip"
