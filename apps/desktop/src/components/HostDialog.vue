@@ -460,7 +460,12 @@ function proxyPasswordSaved(id: string): void {
   -webkit-text-security: disc;
 }
 .connection-test-message {
+  margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+.connection-test-message + .dialog-actions {
+  margin-top: 0;
+  padding-top: 10px;
 }
 </style>
