@@ -29,7 +29,7 @@ const native = vi.hoisted(() => ({
 }));
 const terminals = vi.hoisted(() => ({
   instances: [] as {
-    osc?: (value: string) => boolean;
+    osc7?: (value: string) => boolean;
     writes: unknown[];
     options: ITerminalOptions;
   }[],
@@ -40,11 +40,11 @@ vi.mock('@xterm/xterm', () => ({
     buffer = { active: { type: 'normal', baseY: 0, viewportY: 0, cursorX: 0, cursorY: 0 } };
     cols = 80;
     rows = 24;
-    osc?: (value: string) => boolean;
+    osc7?: (value: string) => boolean;
     writes: unknown[] = [];
     parser = {
-      registerOscHandler: (_code: number, handler: (value: string) => boolean) => {
-        this.osc = handler;
+      registerOscHandler: (code: number, handler: (value: string) => boolean) => {
+        if (code === 7) this.osc7 = handler;
       },
     };
     constructor(public options: ITerminalOptions) {
@@ -398,7 +398,7 @@ it('isolates old-generation data when a connection request reuses the same pane'
 });
 
 it('retains the validated OSC 7 path without terminal file navigation', async () => {
-  terminals.instances[0]!.osc!('file:///srv/project');
+  terminals.instances[0]!.osc7!('file:///srv/project');
   await flush();
   expect(useTerminalsStore().panes[0]?.cwd).toBe('/srv/project');
   expect(pane().querySelector('.terminal-footnote')).toBeNull();

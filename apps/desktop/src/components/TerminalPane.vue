@@ -13,6 +13,7 @@ import { SearchAddon } from '@xterm/addon-search';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { filesApi } from '../services/files';
 import { osc7Path } from '../services/osc7';
+import { osc52Text } from '../services/osc52';
 import { hostDisplayName, type Host } from '../types/hosts';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
@@ -89,6 +90,7 @@ let session: TerminalSession | LocalTerminalSession | undefined;
 let generation = 0;
 let disposed = false;
 let approvedPaste = false;
+let pendingSelectionCopy = false;
 const inputQueue = new TerminalInputQueue(terminalApi.input, (error) => {
   message.value = errorMessage(error);
 });
@@ -265,6 +267,7 @@ async function connect(): Promise<void> {
   upload = undefined;
   uploadProgress.value = null;
   pendingPaste.value = null;
+  pendingSelectionCopy = false;
   message.value = null;
   trust.value = null;
   inputQueue.reset();
@@ -477,21 +480,46 @@ async function confirm(accept: boolean): Promise<void> {
     message.value = errorMessage(cause);
   }
 }
-async function copy(): Promise<void> {
+async function copy(text = terminal.getSelection()): Promise<void> {
+  if (!text) return;
+  const attempt = generation;
   try {
-    await clipboardApi.writeText(terminal.getSelection());
+    await clipboardApi.writeText(text);
   } catch {
-    message.value = tr('无法写入剪贴板，请检查系统权限。');
+    if (!disposed && attempt === generation) message.value = tr('无法写入剪贴板，请检查系统权限。');
   }
 }
 function copySelection(): void {
-  if (preferences.value.quickCopyPaste && props.active && terminal.hasSelection()) void copy();
+  if (preferences.value.quickCopyPaste && props.active && terminal.hasSelection()) {
+    pendingSelectionCopy = false;
+    void copy();
+  }
 }
-function preventTerminalRightClick(event: MouseEvent): void {
+function requestTerminalCopy(data: string): boolean {
+  if (
+    !isConnected(generation) ||
+    !props.active ||
+    (!props.standalone && store.focused !== props.tab.key) ||
+    dialogBlocksTerminal() ||
+    upload?.busy ||
+    dropUpload.value?.busy
+  )
+    return true;
+  const text = osc52Text(data);
+  if (text !== null) void copy(text);
+  return true;
+}
+function terminalMouseDown(event: MouseEvent): void {
+  if (event.button === 0) pendingSelectionCopy = true;
   if (event.button === 2) {
     event.preventDefault();
     event.stopImmediatePropagation();
   }
+}
+function releasedTerminalSelection(event: MouseEvent): void {
+  if (event.button !== 0 || !pendingSelectionCopy) return;
+  pendingSelectionCopy = false;
+  if (!disposed && !dialogBlocksTerminal()) copySelection();
 }
 function zoomWithWheel(event: WheelEvent): void {
   if (!props.active || !event.ctrlKey || event.deltaY === 0 || dialogBlocksTerminal()) return;
@@ -681,6 +709,7 @@ onMounted(() => {
     if (cwd) update({ cwd });
     return true;
   });
+  terminal.parser.registerOscHandler(52, requestTerminalCopy);
   container.value!.addEventListener('paste', nativePaste, true);
   terminal.onSelectionChange(copySelection);
   terminal.onCursorMove(updateScreen);
@@ -744,6 +773,7 @@ onMounted(() => {
   observer = new ResizeObserver(() => fitTerminal());
   observer.observe(container.value!);
   window.addEventListener('resize', resizeTerminal);
+  window.addEventListener('mouseup', releasedTerminalSelection);
   fitTerminal();
   updateScreen();
   if (props.tab.connectRequested) void connect();
@@ -756,6 +786,7 @@ watch(
     else {
       clearTimeout(resizeTimer);
       pendingPaste.value = null;
+      pendingSelectionCopy = false;
       inputQueue.reset();
     }
   },
@@ -795,6 +826,7 @@ watch(
       focusTerminal();
     } else {
       menu.value = null;
+      pendingSelectionCopy = false;
     }
   },
 );
@@ -819,6 +851,7 @@ onBeforeUnmount(() => {
   if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
   observer?.disconnect();
   window.removeEventListener('resize', resizeTerminal);
+  window.removeEventListener('mouseup', releasedTerminalSelection);
   container.value?.removeEventListener('paste', nativePaste, true);
   if (session)
     void terminalApi.close(session.id).catch((cause: unknown) => {
@@ -878,7 +911,7 @@ defineExpose({
       :data-state="tab.state"
       :style="{ backgroundColor: terminalThemes[preferences.theme].background }"
       @wheel.capture="zoomWithWheel"
-      @mousedown.capture="preventTerminalRightClick"
+      @mousedown.capture="terminalMouseDown"
       @contextmenu.capture="terminalContextMenu"
     ></div>
     <TerminalDropUpload

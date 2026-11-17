@@ -22,6 +22,7 @@ const xterm = vi.hoisted(() => ({
   input: vi.fn() as (data: string) => void,
   keyHandler: vi.fn(() => true) as (event: KeyboardEvent) => boolean,
   pasted: vi.fn(),
+  oscHandlers: new Map<number, (data: string) => boolean | Promise<boolean>>(),
   options: {} as ITerminalOptions,
   activateLink: (() => {}) as (event: MouseEvent, url: string) => void,
 }));
@@ -34,7 +35,11 @@ vi.mock('@xterm/xterm', () => ({
     options = {};
     cols = 80;
     rows = 24;
-    parser = { registerOscHandler: vi.fn() };
+    parser = {
+      registerOscHandler(id: number, handler: (data: string) => boolean | Promise<boolean>) {
+        xterm.oscHandlers.set(id, handler);
+      },
+    };
     loadAddon() {}
     open() {}
     focus() {}
@@ -106,6 +111,7 @@ const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prot
 beforeEach(async () => {
   vi.clearAllMocks();
   xterm.selection = '';
+  xterm.oscHandlers.clear();
   active.value = true;
   writeText.mockResolvedValue(undefined);
   readText.mockResolvedValue('clipboard text');
@@ -180,6 +186,161 @@ afterEach(() => {
 function enable(value = true) {
   useApplicationStore().state!.config.terminal.quickCopyPaste = value;
 }
+function requestCopy(text: string): void {
+  const handler = xterm.oscHandlers.get(52);
+  expect(handler).toBeDefined();
+  expect(handler!(`c;${Buffer.from(text, 'utf8').toString('base64')}`)).toBe(true);
+}
+function clipboardKey(letter: 'C' | 'V', altKey = false): KeyboardEvent {
+  return new KeyboardEvent('keydown', {
+    key: letter,
+    code: `Key${letter}`,
+    ctrlKey: true,
+    shiftKey: !altKey,
+    altKey,
+    bubbles: true,
+    cancelable: true,
+  });
+}
+
+it('keeps the clipboard intact when copying without a local selection, then allows paste', async () => {
+  expect(xterm.keyHandler(clipboardKey('C'))).toBe(false);
+  await nextTick();
+  expect(writeText).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+  expect(xterm.keyHandler(clipboardKey('V'))).toBe(false);
+  await vi.waitFor(() => expect(xterm.pasted).toHaveBeenCalledExactlyOnceWith('clipboard text'));
+});
+
+it('copies repeated mouse selections even when xterm omits a change event, without copying twice', () => {
+  enable();
+  const area = root.querySelector('.xterm-container')!;
+  const begin = () => area.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }));
+  const release = () => area.dispatchEvent(new MouseEvent('mouseup', { button: 0, bubbles: true }));
+  begin();
+  xterm.selection = 'same location';
+  xterm.selectionChanged();
+  release();
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('same location');
+  xterm.selection = '';
+  xterm.selectionChanged();
+  begin();
+  xterm.selection = 'same location';
+  release();
+  expect(writeText).toHaveBeenCalledTimes(2);
+  expect(writeText).toHaveBeenLastCalledWith('same location');
+  expect(document.querySelector('dialog')).toBeNull();
+});
+
+it.each([false, true])(
+  'copies OSC 52 text directly and keeps saved copy/paste shortcuts usable (rebound=%s)',
+  async (rebound) => {
+    if (rebound) {
+      useApplicationStore().state!.config.terminal.shortcuts.copy = 'Ctrl+Alt+C';
+      useApplicationStore().state!.config.terminal.shortcuts.paste = 'Ctrl+Alt+V';
+    }
+    const text = '你好 🙂\n<script>selected text</script>';
+    requestCopy(text);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(text);
+    await nextTick();
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(document.querySelector('script')).toBeNull();
+    expect(readText).not.toHaveBeenCalled();
+    expect(terminalApi.input).not.toHaveBeenCalled();
+    // Claude owns this selection; Ctrl+Shift+C must preserve the OSC 52 result.
+    const copyKey = clipboardKey('C', rebound);
+    expect(xterm.keyHandler(copyKey)).toBe(false);
+    expect(copyKey.defaultPrevented).toBe(true);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    readText.mockResolvedValueOnce(text);
+    const pasteKey = clipboardKey('V', rebound);
+    expect(xterm.keyHandler(pasteKey)).toBe(false);
+    expect(pasteKey.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(xterm.pasted).toHaveBeenCalledExactlyOnceWith(text));
+    expect(terminalApi.input).toHaveBeenCalledExactlyOnceWith(
+      'local:test',
+      new TextEncoder().encode(text),
+    );
+  },
+);
+
+it.each([false, true])(
+  'handles OSC 52 writes regardless of the local quick-copy preference (%s)',
+  async (quickCopy) => {
+    enable(quickCopy);
+    requestCopy('Claude selection');
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('Claude selection');
+    await nextTick();
+    expect(document.querySelector('dialog')).toBeNull();
+  },
+);
+
+it('never answers OSC 52 clipboard queries or clears the clipboard for invalid data', async () => {
+  const handler = xterm.oscHandlers.get(52)!;
+  for (const data of ['c;?', ';?', 'c;', 'c;invalid!', 'p;dGV4dA==', 'c;/w=='])
+    expect(handler(data)).toBe(true);
+  await nextTick();
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(readText).not.toHaveBeenCalled();
+  expect(writeText).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+});
+
+it('accepts consecutive OSC 52 selections without confirmation or dropping requests', async () => {
+  requestCopy('first selection');
+  requestCopy('second selection');
+  await nextTick();
+  requestCopy('third selection');
+  expect(writeText.mock.calls).toEqual([
+    ['first selection'],
+    ['second selection'],
+    ['third selection'],
+  ]);
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(readText).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+});
+
+it('ignores OSC 52 writes from inactive or disconnected panes and behind another dialog', async () => {
+  active.value = false;
+  await nextTick();
+  requestCopy('inactive');
+  active.value = true;
+  await nextTick();
+  const store = useTerminalsStore();
+  const focused = store.focused;
+  store.focused = 'other-pane';
+  requestCopy('unfocused');
+  store.focused = focused;
+  tab.state = 'disconnected';
+  requestCopy('disconnected');
+  tab.state = 'connected';
+  const dialog = document.createElement('dialog');
+  dialog.open = true;
+  document.body.append(dialog);
+  requestCopy('behind another dialog');
+  await nextTick();
+  expect(document.querySelectorAll('dialog')).toHaveLength(1);
+  expect(writeText).not.toHaveBeenCalled();
+  expect(readText).not.toHaveBeenCalled();
+});
+
+it('reports a native OSC 52 write failure without exposing text or sending terminal input', async () => {
+  writeText.mockRejectedValueOnce(new Error('private failure details'));
+  requestCopy('selected text');
+  await vi.waitFor(() =>
+    expect(useNotificationsStore().items.some((item) => item.text.includes('无法写入剪贴板'))).toBe(
+      true,
+    ),
+  );
+  expect(
+    useNotificationsStore().items.some((item) => item.text.includes('private failure details')),
+  ).toBe(false);
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(readText).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+});
+
 it('opens plain HTTP/HTTPS and OSC 8 links on a left click without sending shell input', async () => {
   const url = 'http://localhost:8080/login?state=abc&next=%2Fhome#result';
   const event = new MouseEvent('click', { button: 0, cancelable: true });
@@ -337,6 +498,11 @@ it('limits the remote context menu to copy and paste without connection metadata
   ).toEqual(['复制', '粘贴']);
   expect(menu.textContent).not.toContain(host.hostname);
   expect(menu.textContent).not.toContain(host.username);
+  document.querySelector<HTMLButtonElement>('[aria-label="关闭终端菜单"]')!.click();
+  requestCopy('远端选区');
+  await nextTick();
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(writeText).toHaveBeenCalledExactlyOnceWith('远端选区');
 });
 
 it('opens an idle SSH pane once after an explicit connection request and keeps trust confirmation', async () => {
