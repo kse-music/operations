@@ -11,11 +11,78 @@ export interface FileEntry {
   uid: number | null;
   gid: number | null;
 }
+export interface PropertyChange {
+  expected: FileEntry;
+  permissions: number | null;
+  uid: number | null;
+  gid: number | null;
+  recursive: boolean;
+  directoryExecute: boolean;
+  confirmed: boolean;
+}
+export type PropertyOperation =
+  { kind: 'size' | 'checksum' } | { kind: 'apply'; change: PropertyChange };
+export interface PropertyRequest {
+  requestId: string;
+  path: string;
+  operation: PropertyOperation;
+}
+export interface PropertyResult {
+  bytes: number;
+  files: number;
+  directories: number;
+  skippedLinks: number;
+  changed: number;
+  checksum: string | null;
+  cancelled: boolean;
+  message: string | null;
+}
 export interface DirectoryListing {
   path: string;
   parent: string | null;
   entries: FileEntry[];
 }
+export interface FileSearchInput {
+  requestId: string;
+  path: string;
+  query: string;
+  recursive: boolean;
+  includeHidden: boolean;
+}
+export type FileSearchStatus = 'running' | 'completed' | 'cancelled' | 'limited' | 'failed';
+export interface FileSearchResult {
+  entry: FileEntry;
+  parent: string;
+}
+export interface FileSearchEvent {
+  requestId: string;
+  status: FileSearchStatus;
+  entries: FileSearchResult[];
+  issues: { path: string; message: string }[];
+  scannedDirectories: number;
+  scannedEntries: number;
+  skippedDirectories: number;
+  currentPath: string | null;
+  message: string | null;
+}
+export type FileSearchOptions = Pick<
+  FileSearchInput,
+  'path' | 'query' | 'recursive' | 'includeHidden'
+>;
+export interface FileSearchState extends FileSearchOptions {
+  sessionId: string;
+  requestId: string;
+  status: FileSearchStatus | 'idle' | 'starting' | 'cancelling';
+  entries: FileSearchResult[];
+  issues: FileSearchEvent['issues'];
+  scannedDirectories: number;
+  scannedEntries: number;
+  skippedDirectories: number;
+  currentPath: string | null;
+  message: string | null;
+}
+export const fileSearchActive = (search?: FileSearchState): boolean =>
+  !!search && ['starting', 'running', 'cancelling'].includes(search.status);
 export interface LocalDrive {
   path: string;
   name: string;
@@ -44,11 +111,28 @@ export interface FileUserSession {
   session: import('./terminal').TerminalSession;
   listing: DirectoryListing;
 }
+export interface NewDirectorySettings {
+  permissions: number | null;
+}
+export interface NewDirectoryInput extends NewDirectorySettings {
+  name: string;
+  remember: boolean;
+}
 export type RemoteAction =
-  | { kind: 'mkdir'; path: string }
+  | { kind: 'mkdir'; path: string; permissions: number | null }
   | { kind: 'rename'; path: string; destination: string }
   | { kind: 'remove'; paths: string[]; recursive: boolean; confirmed: boolean };
 export type ConflictPolicy = 'fail' | 'skip' | 'rename' | 'overwrite';
+export interface RemoteCopyInput {
+  sessionId: string;
+  targetSessionId?: string | null;
+  sources: string[];
+  destination: string;
+  name: string | null;
+  conflict: Exclude<ConflictPolicy, 'rename'>;
+  confirmed: boolean;
+  confirmOverwrite: boolean;
+}
 export type Direction = 'upload' | 'download';
 export interface TransferInput {
   sessionId: string;
@@ -63,6 +147,10 @@ export interface TransferInfo {
   hostId: string;
   sessionId: string;
   direction: Direction;
+  remoteCopy?: boolean;
+  remoteName?: string | null;
+  remoteTargetHostId?: string | null;
+  remoteTargetSessionId?: string | null;
   state: string;
   sources: string[];
   destination: string;
@@ -106,6 +194,8 @@ export interface ExternalDocument {
 export type FileTerminalAction = { kind: 'directory' | 'view' | 'tail'; path: string };
 export const unfinished = (task: TransferInfo): boolean =>
   ['queued', 'scanning', 'running', 'verifying', 'cancelling'].includes(task.state);
+export const transferUsesHost = (task: TransferInfo, hostId: string): boolean =>
+  task.hostId === hostId || task.remoteTargetHostId === hostId;
 export const taskLabels: Record<string, string> = {
   get queued() {
     return tr('排队中');

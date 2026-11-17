@@ -5,12 +5,15 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   local: vi.fn(),
   tasks: vi.fn(),
+  remoteCopy: vi.fn(),
+  retry: vi.fn(),
   connections: vi.fn(),
   close: vi.fn(),
   clearTransfers: vi.fn(),
   switchUser: vi.fn(),
   read: vi.fn(),
   openEditor: vi.fn(),
+  createEditor: vi.fn(),
   editorStatus: vi.fn(),
   closeEditor: vi.fn(),
   externalPrepare: vi.fn(),
@@ -19,12 +22,20 @@ const mocks = vi.hoisted(() => ({
   openLocal: vi.fn(),
   cancel: vi.fn(),
   externalCancel: vi.fn(),
+  search: vi.fn(),
+  cancelSearch: vi.fn(),
 }));
 vi.mock('../services/files', () => ({ filesApi: mocks }));
 import { useFilesStore } from './files';
 import { usePluginsStore } from './plugins';
 import type { Host } from '../types/hosts';
-import type { DirectoryListing, TransferInfo, TextDocument } from '../types/files';
+import type {
+  DirectoryListing,
+  TransferInfo,
+  TextDocument,
+  FileSearchEvent,
+  FileSearchInput,
+} from '../types/files';
 import { useNotificationsStore } from './notifications';
 const host = {
   id: 'host',
@@ -32,6 +43,140 @@ const host = {
   hostname: 'server.example',
   username: 'ops',
 } as Host;
+describe('remote file search ownership and cancellation', () => {
+  function connected() {
+    const store = useFilesStore();
+    store.active = host.id;
+    store.connections[host.id] = {
+      host,
+      id: 'search-session',
+      state: 'connected',
+      error: null,
+      trust: null,
+      path: '/srv',
+      listing: null,
+      loading: false,
+    };
+    store.ensureSearch();
+    store.changeSearch({ query: 'config' });
+    return store;
+  }
+  function event(requestId: string, patch: Partial<FileSearchEvent> = {}): FileSearchEvent {
+    return {
+      requestId,
+      status: 'running',
+      entries: [],
+      issues: [],
+      scannedDirectories: 1,
+      scannedEntries: 2,
+      skippedDirectories: 0,
+      currentPath: '/srv',
+      message: null,
+      ...patch,
+    };
+  }
+  it('accumulates deltas, preserves conditions and drops responses for replaced requests or identities', async () => {
+    const receivers: ((event: FileSearchEvent) => void)[] = [];
+    mocks.search.mockImplementation(
+      (_id: string, _input: FileSearchInput, receive: (event: FileSearchEvent) => void) => {
+        receivers.push(receive);
+        return Promise.resolve();
+      },
+    );
+    const store = connected();
+    const search = store.current!.search!;
+    expect(search.path).toBe('/srv');
+    expect(search.recursive).toBe(false);
+    store.changeSearch({ recursive: true });
+    expect(store.ensureSearch()?.recursive).toBe(true);
+    await store.startSearch();
+    const first = search.requestId;
+    receivers[0]!(
+      event(first, {
+        entries: [
+          {
+            parent: '/srv',
+            entry: {
+              name: 'config',
+              path: '/srv/config',
+              kind: 'file',
+              size: 1,
+              modified: null,
+              permissions: null,
+              uid: null,
+              gid: null,
+            },
+          },
+        ],
+      }),
+    );
+    receivers[0]!(
+      event(first, {
+        status: 'completed',
+        skippedDirectories: 1,
+        issues: [{ path: '/srv/denied', message: 'permission denied' }],
+      }),
+    );
+    expect(search.entries).toHaveLength(1);
+    expect(search.issues).toHaveLength(1);
+    expect(store.ensureSearch()).toBe(search);
+    await store.startSearch();
+    const second = search.requestId;
+    expect(second).not.toBe(first);
+    receivers[0]!(event(first, { status: 'failed', message: 'stale' }));
+    expect(search.status).toBe('running');
+    expect(search.message).toBeNull();
+    expect(search.entries).toEqual([]);
+    store.current!.id = 'switched-user';
+    receivers[1]!(event(second, { status: 'completed' }));
+    expect(search.status).toBe('running');
+    expect(store.ensureSearch()?.sessionId).toBe('switched-user');
+    expect(store.current!.search?.query).toBe('');
+  });
+  it('waits for start registration and shares a stop request when closing immediately', async () => {
+    let register!: () => void;
+    mocks.search.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          register = resolve;
+        }),
+    );
+    mocks.cancelSearch.mockResolvedValue(undefined);
+    const store = connected();
+    const starting = store.startSearch();
+    const first = store.cancelSearch();
+    const second = store.cancelSearch();
+    await Promise.resolve();
+    expect(mocks.cancelSearch).not.toHaveBeenCalled();
+    expect(store.current!.search?.status).toBe('cancelling');
+    register();
+    await starting;
+    expect(await first).toBe(true);
+    expect(await second).toBe(true);
+    expect(mocks.cancelSearch).toHaveBeenCalledExactlyOnceWith(
+      'search-session',
+      store.current!.search!.requestId,
+    );
+    expect(store.current!.search?.status).toBe('cancelled');
+  });
+  it('surfaces start and stop failures and keeps an unconfirmed stop active for retry', async () => {
+    const store = connected();
+    mocks.search.mockImplementation(() => {
+      throw new Error('start unavailable');
+    });
+    await store.startSearch();
+    expect(store.current!.search?.status).toBe('failed');
+    expect(store.current!.search?.message).toContain('start unavailable');
+    mocks.search.mockResolvedValue(undefined);
+    await store.startSearch();
+    mocks.cancelSearch.mockRejectedValue(new Error('stop unavailable'));
+    expect(await store.cancelSearch()).toBe(false);
+    expect(store.current!.search?.status).toBe('running');
+    expect(store.current!.search?.message).toContain('stop unavailable');
+    mocks.cancelSearch.mockResolvedValue(undefined);
+    expect(await store.cancelSearch()).toBe(true);
+  });
+});
 it('refreshes only an existing local browser still at the renamed parent', async () => {
   const store = useFilesStore();
   store.active = 'a';
@@ -86,6 +231,70 @@ describe('file opening and external editing', () => {
     ready: false,
     atomicSave: true,
   };
+  it('creates a file directly in the built-in editor on the original connection', async () => {
+    const store = connected();
+    store.current!.path = '/srv';
+    store.current!.username = 'root';
+    const document = { token: 'new', sessionId: 'session', path: '/srv/中文 ;$file.txt' };
+    mocks.createEditor.mockResolvedValue(document);
+    expect(await store.createFile('中文 ;$file.txt')).toBe(true);
+    expect(mocks.createEditor).toHaveBeenCalledExactlyOnceWith(
+      'session',
+      document.path,
+      'root@server.example',
+    );
+    expect(mocks.openEditor).not.toHaveBeenCalled();
+    expect(mocks.externalPrepare).not.toHaveBeenCalled();
+    expect(store.document).toEqual(document);
+    expect(store.dirty).toBe(false);
+    expect(store.editorBusy).toBe(false);
+  });
+  it('shows creation failures without offering external editing or losing an existing document', async () => {
+    const store = connected();
+    mocks.createEditor.mockRejectedValue({
+      message: '同名文件、目录或链接已存在，请使用其他文件名',
+    });
+    expect(await store.createFile('exists.txt')).toBe(false);
+    expect(store.error).toContain('同名');
+    expect(store.openIssue).toBeNull();
+    mocks.createEditor.mockClear();
+    store.editorState({
+      document: { token: 'live', sessionId: 'session', path: '/live.txt' },
+      dirty: true,
+    });
+    expect(await store.createFile('another.txt')).toBe(false);
+    expect(mocks.createEditor).not.toHaveBeenCalled();
+    expect(store.document?.path).toBe('/live.txt');
+    expect(store.dirty).toBe(true);
+  });
+  it('blocks duplicate creates and retains newer native close events and the original identity', async () => {
+    const store = connected();
+    let complete!: (value: { token: string; sessionId: string; path: string }) => void;
+    mocks.createEditor.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const pending = store.createFile('first.txt');
+    expect(store.editorBusy).toBe(true);
+    expect(await store.createFile('duplicate.txt')).toBe(false);
+    store.active = 'other';
+    store.editorState({ document: null, dirty: false });
+    complete({ token: 'closed', sessionId: 'session', path: '/first.txt' });
+    expect(await pending).toBe(true);
+    expect(mocks.createEditor).toHaveBeenCalledExactlyOnceWith(
+      'session',
+      '/first.txt',
+      'ops@server.example',
+    );
+    expect(store.document).toBeNull();
+  });
+  it('rejects path traversal before invoking file creation', async () => {
+    const store = connected();
+    await expect(store.createFile('../escape')).rejects.toThrow();
+    expect(mocks.createEditor).not.toHaveBeenCalled();
+  });
   it('keeps native close state when an older open response arrives afterwards', async () => {
     const store = connected();
     let opened!: (value: { token: string; sessionId: string; path: string }) => void;
@@ -266,6 +475,44 @@ describe('file opening and external editing', () => {
 });
 
 describe('host transfer lifetime', () => {
+  it('keeps the source active while opening or reusing a target connection in the background', async () => {
+    const store = useFilesStore();
+    store.active = 'source';
+    mocks.open.mockImplementationOnce(async (_host, callback) => {
+      callback({ type: 'state', state: 'connected' });
+      return { id: 'target-session' };
+    });
+    mocks.list.mockResolvedValue({ path: '/target-home', parent: '/', entries: [] });
+    await store.open(host, undefined, undefined, { background: true });
+    expect(store.active).toBe('source');
+    expect(store.connections.host?.path).toBe('/target-home');
+    expect(mocks.local).not.toHaveBeenCalled();
+    mocks.list.mockClear();
+    await store.open(host, '/different', undefined, { background: true });
+    expect(mocks.open).toHaveBeenCalledOnce();
+    expect(mocks.list).not.toHaveBeenCalled();
+    expect(store.connections.host?.path).toBe('/target-home');
+  });
+  it('protects the target host close and clears the shared record without closing the source lease', async () => {
+    const store = useFilesStore();
+    const task = transfer({
+      state: 'running',
+      remoteCopy: true,
+      remoteTargetHostId: 'target',
+      remoteTargetSessionId: 'target-session',
+    });
+    mocks.connections.mockResolvedValue([
+      { id: 'session', hostId: 'host' },
+      { id: 'target-session', hostId: 'target' },
+    ]);
+    mocks.tasks.mockResolvedValueOnce([task]).mockResolvedValue([{ ...task, state: 'cancelled' }]);
+    const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
+    expect(await store.prepareHostClose('target')).toBe(true);
+    expect(ask).toHaveBeenCalledWith('取消传输并关闭主机', expect.stringContaining('1 个未完成'));
+    expect(mocks.close).toHaveBeenCalledExactlyOnceWith('target-session', true);
+    expect(await store.clearHostTransfers('target')).toBe(true);
+    expect(store.tasks).toEqual([]);
+  });
   it('keeps the connection and records when cancelling the close confirmation', async () => {
     const store = useFilesStore();
     const task = transfer({ state: 'running' });
@@ -754,6 +1001,139 @@ const transfer = (values: Partial<TransferInfo> = {}): TransferInfo => ({
 });
 
 describe('SFTP transfer notifications', () => {
+  it.each([false, true])(
+    'refreshes both copy endpoints without refreshing a replacement target identity (%s)',
+    async (replaced) => {
+      const store = useFilesStore();
+      store.active = 'host';
+      for (const [id, sessionId, path] of [
+        ['host', 'session', '/source'],
+        ['target', replaced ? 'replacement' : 'target-session', '/dest'],
+      ]) {
+        store.connections[id!] = {
+          host: { ...host, id: id! },
+          id: sessionId!,
+          state: 'connected',
+          error: null,
+          trust: null,
+          path: path!,
+          listing: null,
+          loading: false,
+        };
+      }
+      const task = transfer({
+        state: 'running',
+        remoteCopy: true,
+        remoteTargetHostId: 'target',
+        remoteTargetSessionId: 'target-session',
+      });
+      store.tasks = [task];
+      mocks.tasks.mockResolvedValue([{ ...task, state: 'completed' }]);
+      mocks.connections.mockResolvedValue([
+        { id: 'session', hostId: 'host' },
+        { id: replaced ? 'replacement' : 'target-session', hostId: 'target' },
+      ]);
+      mocks.list.mockImplementation(async (_session, path) => ({ path, parent: '/', entries: [] }));
+      await store.poll();
+      await vi.waitFor(() => expect(mocks.list).toHaveBeenCalledWith('session', '/source'));
+      expect(mocks.list).toHaveBeenCalledTimes(replaced ? 1 : 2);
+      if (!replaced) expect(mocks.list).toHaveBeenCalledWith('target-session', '/dest');
+      expect(mocks.local).not.toHaveBeenCalled();
+    },
+  );
+  it('retains a newly acknowledged remote task when an older poll finishes later', async () => {
+    const store = useFilesStore();
+    let finishOldPoll!: (tasks: TransferInfo[]) => void;
+    mocks.tasks.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOldPoll = resolve;
+        }),
+    );
+    const oldPoll = store.poll();
+    const task = transfer({ state: 'queued', remoteCopy: true });
+    mocks.remoteCopy.mockResolvedValue(task);
+    await store.startRemoteCopy({
+      sessionId: 'session',
+      sources: ['/source'],
+      destination: '/dest',
+      name: null,
+      conflict: 'fail',
+      confirmed: true,
+      confirmOverwrite: false,
+    });
+    finishOldPoll([]);
+    await oldPoll;
+    expect(store.tasks).toEqual([task]);
+  });
+  it.each(['failed', 'cancelled', 'completed'])(
+    'refreshes the original host after a remote copy becomes %s, including partial outcomes',
+    async (state) => {
+      const store = useFilesStore();
+      const other = { ...host, id: 'other-host' };
+      store.active = other.id;
+      store.connections.host = {
+        host,
+        id: 'session',
+        state: 'connected',
+        error: null,
+        trust: null,
+        path: '/source',
+        listing: null,
+        loading: false,
+      };
+      store.connections[other.id] = {
+        host: other,
+        id: 'other-session',
+        state: 'connected',
+        error: null,
+        trust: null,
+        path: '/other',
+        listing: null,
+        loading: false,
+      };
+      store.tasks = [transfer({ state: 'running', remoteCopy: true })];
+      mocks.connections.mockResolvedValue([
+        { id: 'session', hostId: 'host' },
+        { id: 'other-session', hostId: other.id },
+      ]);
+      mocks.tasks.mockResolvedValue([
+        transfer({
+          state,
+          remoteCopy: true,
+          filesDone: 1,
+          filesTotal: 2,
+          message: '部分项目已处理',
+        }),
+      ]);
+      mocks.list.mockResolvedValue({ path: '/source', parent: '/', entries: [] });
+      await store.poll();
+      await vi.waitFor(() =>
+        expect(mocks.list).toHaveBeenCalledExactlyOnceWith('session', '/source'),
+      );
+      expect(store.connections[other.id]?.path).toBe('/other');
+      expect(mocks.local).not.toHaveBeenCalled();
+    },
+  );
+  it('does not refresh a replacement identity after an old remote operation completes', async () => {
+    const store = useFilesStore();
+    store.active = host.id;
+    store.connections.host = {
+      host,
+      id: 'replacement',
+      state: 'connected',
+      error: null,
+      trust: null,
+      path: '/new-user',
+      listing: null,
+      loading: false,
+    };
+    store.tasks = [transfer({ state: 'running', remoteCopy: true })];
+    mocks.connections.mockResolvedValue([{ id: 'replacement', hostId: host.id }]);
+    mocks.tasks.mockResolvedValue([transfer({ state: 'completed', remoteCopy: true })]);
+    await store.poll();
+    expect(mocks.list).not.toHaveBeenCalled();
+  });
   it.each([
     transfer(),
     transfer({ filesTotal: 0, filesDone: 0, message: '目录传输完成，没有普通文件' }),

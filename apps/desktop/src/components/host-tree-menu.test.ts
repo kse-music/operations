@@ -4,7 +4,7 @@ import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import HostSidebar from './HostSidebar.vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
-import { hostInput } from '../types/hosts';
+import { hostInput, type HostGroup } from '../types/hosts';
 
 let app: App | undefined, pinia: Pinia, root: HTMLDivElement;
 const originalShow = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
@@ -56,7 +56,7 @@ async function mount(active = true) {
   return { store, create, select, saved };
 }
 const folder = (id = '') =>
-  root.querySelector<HTMLButtonElement>(`[data-group-id="${id}"] > .group-toggle`)!;
+  root.querySelector<HTMLElement>(`[data-group-id="${id}"] > .group-toggle`)!;
 const menu = () => document.querySelector<HTMLElement>('[aria-label="主机树操作"]')!;
 async function open(target: HTMLElement) {
   target.dispatchEvent(
@@ -89,6 +89,297 @@ async function pressDelete(target: HTMLElement, options: KeyboardEventInit = {})
   await nextTick();
   return event;
 }
+async function pressF2(target: HTMLElement, options: KeyboardEventInit = {}) {
+  target.focus();
+  const event = new KeyboardEvent('keydown', {
+    key: 'F2',
+    bubbles: true,
+    cancelable: true,
+    ...options,
+  });
+  target.dispatchEvent(event);
+  await nextTick();
+  return event;
+}
+const renameInput = () => root.querySelector<HTMLInputElement>('.tree-rename-input');
+function changeName(name: string): void {
+  const input = renameInput()!;
+  input.value = name;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+async function editKey(key: string, options: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...options });
+  renameInput()!.dispatchEvent(event);
+  await nextTick();
+  return event;
+}
+
+it('focuses folder names, icons and counts without collapsing and supports F2 immediately after the click', async () => {
+  await mount();
+  const row = folder('child');
+  const arrow = row.querySelector<HTMLButtonElement>('.group-expander')!;
+  const host = root.querySelector('[data-host-id="h1"]');
+  for (const target of [
+    row,
+    row.querySelector<HTMLElement>('.group-name')!,
+    row.querySelector<SVGElement>('.host-group-icon')!,
+    row.querySelector<HTMLElement>('.group-count')!,
+  ]) {
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await nextTick();
+    expect(arrow.getAttribute('aria-expanded')).toBe('true');
+    expect(root.querySelector('[data-host-id="h1"]')).toBe(host);
+    expect(document.activeElement).toBe(row);
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true }));
+    await nextTick();
+    expect(renameInput()!.value).toBe('上海');
+    expect(document.activeElement).toBe(renameInput());
+    expect(arrow.disabled).toBe(true);
+    await editKey('Escape');
+    expect(arrow.disabled).toBe(false);
+  }
+});
+
+it('toggles folders only from the arrow and permits F2 from both collapsed names and the arrow button', async () => {
+  await mount();
+  const row = folder('child');
+  const arrow = row.querySelector<HTMLButtonElement>('.group-expander')!;
+  arrow.click();
+  await nextTick();
+  expect(arrow.getAttribute('aria-expanded')).toBe('false');
+  expect(root.querySelector('[data-host-id="h1"]')).toBeNull();
+  row.querySelector<HTMLElement>('.group-name')!.click();
+  await nextTick();
+  expect(arrow.getAttribute('aria-expanded')).toBe('false');
+  expect(document.activeElement).toBe(row);
+  row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true }));
+  await nextTick();
+  expect(renameInput()!.value).toBe('上海');
+  await editKey('Escape');
+  arrow.click();
+  await nextTick();
+  expect(arrow.getAttribute('aria-expanded')).toBe('true');
+  expect(root.querySelector('[data-host-id="h1"]')).not.toBeNull();
+  await pressF2(arrow);
+  expect(renameInput()!.value).toBe('上海');
+});
+
+it.each(['menu', 'F2'])(
+  'renames the target folder inline via %s and preserves its parent, order and expansion',
+  async (entry) => {
+    const { store, select } = await mount();
+    const original = { ...store.catalog!.groups[1]!, sortOrder: 7 };
+    store.catalog!.groups[1] = original;
+    store.selectedId = 'h0';
+    const result = { ...original, name: '应用' };
+    const save = vi.spyOn(hostsApi, 'groupSave').mockResolvedValue(result);
+    const list = vi.spyOn(hostsApi, 'list');
+    if (entry === 'menu') {
+      await open(folder('child'));
+      await action('重命名');
+    } else await pressF2(folder('child'));
+    const input = renameInput()!;
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe('上海');
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect(input.closest('button')).toBeNull();
+    changeName(' 应用 ');
+    await editKey('Enter');
+    await vi.waitFor(() => expect(renameInput()).toBeNull());
+    expect(save).toHaveBeenCalledExactlyOnceWith('child', {
+      name: '应用',
+      parentId: 'parent',
+      sortOrder: 7,
+    });
+    expect(store.catalog!.groups[1]).toEqual(result);
+    expect(folder('child').textContent).toContain('应用');
+    expect(folder('child').querySelector('.group-expander')!.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+    expect(document.activeElement).toBe(folder('child'));
+    expect(store.selectedId).toBe('h0');
+    expect(select).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['menu', 'F2'])(
+  'renames only the context host name via %s without changing selection or authentication',
+  async (entry) => {
+    const { store, select, saved } = await mount();
+    const original = {
+      ...store.catalog!.hosts[1]!,
+      authType: 'password' as const,
+      credentialId: 'existing-credential',
+      favorite: true,
+      description: '保留备注',
+    };
+    store.catalog!.hosts[1] = original;
+    store.selectedId = 'h0';
+    const update = vi
+      .spyOn(hostsApi, 'update')
+      .mockResolvedValue({ ...original, name: '生产主机' });
+    const test = vi.spyOn(hostsApi, 'test');
+    const row = root.querySelector<HTMLElement>('[data-host-id="h1"]')!;
+    if (entry === 'menu') {
+      await open(row);
+      await action('重命名');
+    } else await pressF2(row);
+    expect(renameInput()!.value).toBe('Host 1');
+    expect(renameInput()!.closest('button')).toBeNull();
+    changeName('生产主机');
+    await editKey('Enter');
+    await vi.waitFor(() => expect(renameInput()).toBeNull());
+    expect(update).toHaveBeenCalledExactlyOnceWith('h1', {
+      ...hostInput(original),
+      name: '生产主机',
+    });
+    expect(store.catalog!.hosts[1]).toEqual({ ...original, name: '生产主机' });
+    expect(root.querySelector('[data-host-id="h1"] .host-name')?.textContent).toBe('生产主机');
+    expect(store.selectedId).toBe('h0');
+    expect(test).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(saved).not.toHaveBeenCalled();
+  },
+);
+
+it('keeps failed folder edits inline and allows retry after validation without losing the old name', async () => {
+  const { store } = await mount();
+  const group = store.catalog!.groups[1]!;
+  const save = vi
+    .spyOn(hostsApi, 'groupSave')
+    .mockRejectedValueOnce({ message: '同名文件夹已存在' })
+    .mockResolvedValueOnce({ ...group, name: '测试' });
+  await pressF2(folder('child'));
+  changeName('生产');
+  await editKey('Enter');
+  await vi.waitFor(() => expect(renameInput()!.readOnly).toBe(false));
+  expect(renameInput()!.value).toBe('生产');
+  expect(renameInput()!.getAttribute('aria-invalid')).toBe('true');
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('同名文件夹已存在');
+  expect(store.catalog!.groups[1]!.name).toBe('上海');
+  changeName('测试');
+  await editKey('Enter');
+  await vi.waitFor(() => expect(renameInput()).toBeNull());
+  expect(save).toHaveBeenCalledTimes(2);
+  expect(store.catalog!.groups[1]!.name).toBe('测试');
+});
+
+it('keeps host save failures inline without changing stored connection fields', async () => {
+  const { store } = await mount();
+  const original = { ...store.catalog!.hosts[0]! };
+  vi.spyOn(hostsApi, 'update').mockRejectedValue({ message: '主机保存失败' });
+  await pressF2(root.querySelector<HTMLElement>('[data-host-id="h0"]')!);
+  changeName('新的名称');
+  await editKey('Enter');
+  await vi.waitFor(() => expect(renameInput()!.readOnly).toBe(false));
+  expect(renameInput()!.value).toBe('新的名称');
+  expect(root.querySelector('[role="alert"]')?.textContent).toContain('主机保存失败');
+  expect(store.catalog!.hosts[0]).toEqual(original);
+  await editKey('Escape');
+  expect(renameInput()).toBeNull();
+  expect(document.activeElement).toBe(root.querySelector('[data-host-id="h0"]'));
+});
+
+it.each(['host', 'folder'])('cancels %s inline edits and skips unchanged names', async (kind) => {
+  await mount();
+  const save = vi.spyOn(hostsApi, 'groupSave');
+  const update = vi.spyOn(hostsApi, 'update');
+  const row = () =>
+    kind === 'host' ? root.querySelector<HTMLElement>('[data-host-id="h0"]')! : folder('child');
+  await pressF2(row());
+  changeName('取消草稿');
+  await editKey('Escape');
+  expect(renameInput()).toBeNull();
+  expect(document.activeElement).toBe(row());
+  await pressF2(row());
+  await editKey('Enter');
+  expect(renameInput()).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+  expect(update).not.toHaveBeenCalled();
+});
+
+it('allows clearing a host name and keeps an unchanged unnamed host unnamed', async () => {
+  const { store } = await mount();
+  const host = store.catalog!.hosts[0]!;
+  const update = vi.spyOn(hostsApi, 'update').mockResolvedValue({ ...host, name: '' });
+  const row = () => root.querySelector<HTMLElement>('[data-host-id="h0"]')!;
+  await pressF2(row());
+  changeName('');
+  await editKey('Enter');
+  await vi.waitFor(() => expect(renameInput()).toBeNull());
+  expect(row().querySelector('.host-name')?.textContent).toBe(host.hostname);
+  expect(row().querySelector('.host-address')).toBeNull();
+  await pressF2(row());
+  expect(renameInput()!.value).toBe(host.hostname);
+  await editKey('Enter');
+  expect(update).toHaveBeenCalledTimes(1);
+  expect(store.catalog!.hosts[0]!.name).toBe('');
+});
+
+it('rejects an empty folder name without submitting and ignores composition, Delete and F2 inside the editor', async () => {
+  await mount();
+  const save = vi.spyOn(hostsApi, 'groupSave');
+  await pressF2(folder('child'));
+  changeName('  ');
+  await editKey('Enter');
+  expect(root.querySelector('[role="alert"]')).not.toBeNull();
+  changeName('输入法草稿');
+  const input = renameInput();
+  for (const key of ['Enter', 'Escape']) await editKey(key, { isComposing: true });
+  await editKey('Delete');
+  await editKey('F2');
+  expect(renameInput()).toBe(input);
+  expect(renameInput()!.value).toBe('输入法草稿');
+  expect(document.querySelector('dialog')).toBeNull();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it('saves on blur once and preserves a newly selected row while the save is pending', async () => {
+  const { store } = await mount();
+  let complete!: (group: HostGroup) => void;
+  const save = vi.spyOn(hostsApi, 'groupSave').mockImplementation(
+    () =>
+      new Promise<HostGroup>((resolve) => {
+        complete = resolve;
+      }),
+  );
+  await pressF2(folder('child'));
+  changeName('后台保存');
+  const input = renameInput()!;
+  const other = root.querySelector<HTMLButtonElement>('[data-host-id="h0"]')!;
+  other.focus();
+  other.click();
+  await nextTick();
+  await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+  expect(input.readOnly).toBe(true);
+  await editKey('Enter');
+  input.dispatchEvent(new FocusEvent('blur'));
+  await nextTick();
+  expect(save).toHaveBeenCalledTimes(1);
+  complete({ ...store.catalog!.groups[1]!, name: '后台保存' });
+  await vi.waitFor(() => expect(renameInput()).toBeNull());
+  expect(store.selectedId).toBe('h0');
+  expect(document.activeElement).toBe(other);
+});
+
+it.each(['refresh', 'search'])(
+  'cancels an unsubmitted edit on %s without saving its draft',
+  async (change) => {
+    const { store } = await mount();
+    const save = vi.spyOn(hostsApi, 'groupSave');
+    await pressF2(folder('child'));
+    changeName('未提交');
+    if (change === 'refresh') store.catalog = { ...store.catalog! };
+    else store.search = 'Host';
+    await nextTick();
+    expect(renameInput()).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+    expect(store.catalog!.groups[1]!.name).toBe('上海');
+  },
+);
 
 it('keeps a root, removes toolbar operations, and places search directly below All Hosts', async () => {
   await mount();
@@ -111,11 +402,11 @@ it('creates hosts in the right-clicked folder while host menus exclude folder cr
   const { store, create, select } = await mount();
   store.selectedId = 'h0';
   await open(folder('child'));
-  expect(labels()).toEqual(['新建主机', '新建文件夹', '重命名文件夹', '删除文件夹']);
+  expect(labels()).toEqual(['新建主机', '新建文件夹', '重命名', '删除文件夹']);
   await action('新建主机');
   expect(create).toHaveBeenCalledExactlyOnceWith('child');
   await open(root.querySelector<HTMLElement>('[data-host-id="h1"]')!);
-  expect(labels()).toEqual(['连接', '编辑', '复制', '删除']);
+  expect(labels()).toEqual(['连接', '编辑', '重命名', '复制', '删除']);
   expect(store.selectedId).toBe('h0');
   expect(select).not.toHaveBeenCalled();
   await action('编辑');
@@ -267,7 +558,7 @@ it.each([true, false])(
   },
 );
 
-it('ignores Delete on the root and search field', async () => {
+it('ignores Delete and F2 on the root and search field', async () => {
   const { store } = await mount();
   await pressDelete(folder());
   const input = root.querySelector<HTMLInputElement>('#host-tree-search')!;
@@ -277,6 +568,10 @@ it('ignores Delete on the root and search field', async () => {
   expect(event.defaultPrevented).toBe(false);
   expect(input.value).toBe('Host');
   expect(document.querySelector('dialog')).toBeNull();
+  await pressF2(folder());
+  const rename = await pressF2(input);
+  expect(rename.defaultPrevented).toBe(false);
+  expect(renameInput()).toBeNull();
 });
 
 it.each([
@@ -290,7 +585,7 @@ it.each([
   'metaKey',
   'shiftKey',
   'prevented',
-])('ignores Delete on host and folder rows while %s', async (guard) => {
+])('ignores Delete and F2 on host and folder rows while %s', async (guard) => {
   const { store } = await mount(guard !== 'inactive');
   if (guard === 'busy') store.busy = true;
   if (guard === 'dialog') {
@@ -304,6 +599,8 @@ it.each([
     await pressDelete(target, { [guard]: true });
     expect(document.querySelector('[aria-label="确认删除主机"]')).toBeNull();
     expect(document.querySelector('[aria-label="确认删除文件夹"]')).toBeNull();
+    await pressF2(target, { [guard]: true });
+    expect(renameInput()).toBeNull();
   }
 });
 

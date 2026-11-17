@@ -4,8 +4,17 @@ import { useErrorNotifications } from '../composables/error-notifications';
 import { computed, onScopeDispose, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type { Host } from '../types/hosts';
-import type { DirectoryListing, ExternalDocument, SftpUser, TransferInfo } from '../types/files';
-import { unfinished } from '../types/files';
+import type {
+  DirectoryListing,
+  ExternalDocument,
+  SftpUser,
+  TransferInfo,
+  RemoteCopyInput,
+  FileSearchState,
+  FileSearchOptions,
+  NewDirectorySettings,
+} from '../types/files';
+import { unfinished, fileSearchActive, remoteJoin, transferUsesHost } from '../types/files';
 import type { TerminalEvent } from '../types/terminal';
 import { filesApi } from '../services/files';
 import type { EditorDocument, EditorStatus } from '../services/editor';
@@ -30,6 +39,8 @@ export interface FileConnection {
   username?: string;
   elevated?: boolean;
   switchingUser?: boolean;
+  search?: FileSearchState;
+  newDirectorySettings?: NewDirectorySettings & { sessionId: string };
 }
 
 type HistoryDirection = 'back' | 'forward';
@@ -94,7 +105,126 @@ export const useFilesStore = defineStore('files', () => {
   let transferGeneration = 0;
   const opening = new Map<string, Promise<TerminalSession>>();
   const generations = new Map<string, number>();
+  const searchStarts = new Map<string, Promise<void>>();
+  const searchStops = new Map<string, Promise<boolean>>();
   const remoteHistories = new WeakMap<FileConnection, DirectoryHistory>();
+  function ensureSearch(connection = current.value): FileSearchState | undefined {
+    if (!connection?.id || connection.state !== 'connected') return;
+    if (connection.search?.sessionId !== connection.id) {
+      connection.search = {
+        sessionId: connection.id,
+        requestId: '',
+        path: connection.path,
+        query: '',
+        recursive: false,
+        includeHidden: false,
+        status: 'idle',
+        entries: [],
+        issues: [],
+        scannedDirectories: 0,
+        scannedEntries: 0,
+        skippedDirectories: 0,
+        currentPath: null,
+        message: null,
+      };
+    }
+    return connection.search;
+  }
+  function changeSearch(patch: Partial<FileSearchOptions>, connection = current.value): void {
+    const search = ensureSearch(connection);
+    if (!search || fileSearchActive(search)) return;
+    Object.assign(search, patch);
+    search.status = 'idle';
+    search.entries = [];
+    search.issues = [];
+    search.message = null;
+    search.skippedDirectories = 0;
+  }
+  async function startSearch(connection = current.value): Promise<void> {
+    const search = ensureSearch(connection);
+    if (!search || !connection?.id || connection.switchingUser || fileSearchActive(search)) return;
+    const { id, host } = connection;
+    const requestId = crypto.randomUUID();
+    search.requestId = requestId;
+    search.status = 'starting';
+    search.entries = [];
+    search.issues = [];
+    search.scannedDirectories = 0;
+    search.scannedEntries = 0;
+    search.skippedDirectories = 0;
+    search.currentPath = null;
+    search.message = null;
+    const valid = () =>
+      connections.value[host.id] === connection &&
+      connection.id === id &&
+      connection.search === search &&
+      search.requestId === requestId;
+    const request = Promise.resolve().then(() =>
+      filesApi.search(
+        id,
+        {
+          requestId,
+          path: search.path,
+          query: search.query,
+          recursive: search.recursive,
+          includeHidden: search.includeHidden,
+        },
+        (event) => {
+          if (!valid() || event.requestId !== requestId) return;
+          search.entries.push(...event.entries);
+          search.issues.push(...event.issues);
+          search.scannedDirectories = event.scannedDirectories;
+          search.scannedEntries = event.scannedEntries;
+          search.skippedDirectories = event.skippedDirectories;
+          search.currentPath = event.currentPath;
+          search.message = event.message;
+          if (search.status !== 'cancelling' || event.status !== 'running')
+            search.status = event.status;
+        },
+      ),
+    );
+    searchStarts.set(id, request);
+    try {
+      await request;
+      if (valid() && search.status === 'starting') search.status = 'running';
+    } catch (cause) {
+      if (valid()) {
+        search.status = 'failed';
+        search.message = errorMessage(cause);
+      }
+    } finally {
+      if (searchStarts.get(id) === request) searchStarts.delete(id);
+    }
+  }
+  async function cancelSearch(connection = current.value): Promise<boolean> {
+    const search = connection?.search;
+    if (!search || !fileSearchActive(search)) return true;
+    const previous = searchStops.get(search.requestId);
+    if (previous) return previous;
+    const { sessionId, requestId } = search;
+    search.status = 'cancelling';
+    const request = (async () => {
+      try {
+        // Wait for registration, so a quick close cannot race ahead of the start IPC.
+        await searchStarts.get(sessionId)?.catch(() => undefined);
+        await filesApi.cancelSearch(sessionId, requestId);
+        if (search.requestId === requestId && search.status === 'cancelling')
+          search.status = 'cancelled';
+        return true;
+      } catch (cause) {
+        search.message = errorMessage(cause);
+        search.status = 'running';
+        error.value = search.message;
+        return false;
+      }
+    })();
+    searchStops.set(requestId, request);
+    try {
+      return await request;
+    } finally {
+      searchStops.delete(requestId);
+    }
+  }
   function ensureLocalBrowser(hostId: string): LocalFileBrowser {
     localBrowsers.value[hostId] ??= {
       listing: null,
@@ -198,12 +328,18 @@ export const useFilesStore = defineStore('files', () => {
     void navigate(path, connection, direction);
     return true;
   }
-  async function open(host: Host, path?: string, pane?: string): Promise<void> {
+  async function open(
+    host: Host,
+    path?: string,
+    pane?: string,
+    options: { background?: boolean } = {},
+  ): Promise<void> {
     if (closingHosts.value.includes(host.id)) return;
-    active.value = host.id;
+    if (!options.background) active.value = host.id;
     let connection = connections.value[host.id];
     if (connection?.switchingUser) return;
     if (connection?.id && connection.state === 'connected') {
+      if (options.background) return;
       connection.followPane = pane;
       await navigate(path ?? connection.path, connection);
       return;
@@ -256,7 +392,11 @@ export const useFilesStore = defineStore('files', () => {
     } finally {
       opening.delete(host.id);
     }
-    if (connections.value[host.id] === connection && !closingHosts.value.includes(host.id)) {
+    if (
+      !options.background &&
+      connections.value[host.id] === connection &&
+      !closingHosts.value.includes(host.id)
+    ) {
       const browser = ensureLocalBrowser(host.id);
       if (!browser.listing && !browser.loading) await localLoad(null, undefined, host.id);
     }
@@ -287,6 +427,7 @@ export const useFilesStore = defineStore('files', () => {
     generations.set(host.id, (generations.get(host.id) ?? 0) + 1);
     const request = (async () => {
       try {
+        if (fileSearchActive(connection.search) && !(await cancelSearch(connection))) return false;
         const value = await filesApi.switchUser(id, user);
         connection.id = value.session.id;
         connection.routeHostIds = value.session.routeHostIds;
@@ -298,6 +439,8 @@ export const useFilesStore = defineStore('files', () => {
         connection.error = null;
         connection.followPane = undefined;
         remoteHistories.delete(connection);
+        connection.search = undefined;
+        connection.newDirectorySettings = undefined;
         return true;
       } catch (cause) {
         error.value = errorMessage(cause);
@@ -314,13 +457,15 @@ export const useFilesStore = defineStore('files', () => {
       switching.delete(host.id);
     }
   }
-  async function trust(accept: boolean): Promise<void> {
-    if (!current.value?.id) return;
+  async function trust(accept: boolean, connection = current.value): Promise<void> {
+    if (!connection?.id) return;
+    const id = connection.id;
     try {
-      await terminalApi.trust(current.value.id, accept);
-      current.value.trust = null;
+      await terminalApi.trust(id, accept);
+      if (connection.id === id) connection.trust = null;
     } catch (cause) {
       error.value = errorMessage(cause);
+      connection.error = errorMessage(cause);
     }
   }
   async function refresh(): Promise<void> {
@@ -340,10 +485,30 @@ export const useFilesStore = defineStore('files', () => {
       await localLoad(browser.listing.path, undefined, hostId);
   }
   async function edit(path: string, size: number | null = null): Promise<void> {
-    if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value)) return;
+    await openInternalEditor(path, size, false);
+  }
+  async function createFile(name: string): Promise<boolean> {
+    const connection = current.value;
+    if (
+      !connection?.id ||
+      connection.state !== 'connected' ||
+      connection.loading ||
+      connection.switchingUser
+    )
+      return false;
+    error.value = null;
+    return openInternalEditor(remoteJoin(connection.path, name), 0, true);
+  }
+  async function openInternalEditor(
+    path: string,
+    size: number | null,
+    create: boolean,
+  ): Promise<boolean> {
+    if (!current.value?.id || editorBusy.value || closingHosts.value.includes(active.value))
+      return false;
     if (document.value || externalDocument.value) {
       error.value = tr('请先保存或关闭当前编辑文档。');
-      return;
+      return false;
     }
     const sessionId = current.value.id;
     openIssue.value = null;
@@ -354,20 +519,27 @@ export const useFilesStore = defineStore('files', () => {
         path,
         message: tr('文件超过内置编辑器的 2 MiB 上限，可使用系统应用编辑。'),
       };
-      return;
+      return false;
     }
     editorBusy.value = true;
     const generation = editorGeneration;
     const { host, username } = current.value;
     const connectionCaption = `${username ?? host.username}@${host.hostname}`;
     try {
-      const opened = await filesApi.openEditor(sessionId, path, connectionCaption);
+      const opened = await (create ? filesApi.createEditor : filesApi.openEditor)(
+        sessionId,
+        path,
+        connectionCaption,
+      );
       if (generation === editorGeneration) {
         document.value = opened;
         dirty.value = false;
       }
+      return true;
     } catch (cause) {
-      openIssue.value = { sessionId, path, message: errorMessage(cause) };
+      if (create) error.value = errorMessage(cause);
+      else openIssue.value = { sessionId, path, message: errorMessage(cause) };
+      return false;
     } finally {
       editorBusy.value = false;
     }
@@ -512,6 +684,9 @@ export const useFilesStore = defineStore('files', () => {
       if (connection?.id) ids.add(connection.id);
       for (const task of latest)
         if (task.hostId === hostId && unfinished(task)) ids.add(task.sessionId);
+      for (const task of latest)
+        if (task.remoteTargetHostId === hostId && task.remoteTargetSessionId && unfinished(task))
+          ids.add(task.remoteTargetSessionId);
       if (
         (document.value && ids.has(document.value.sessionId)) ||
         (externalDocument.value && ids.has(externalDocument.value.sessionId)) ||
@@ -520,7 +695,9 @@ export const useFilesStore = defineStore('files', () => {
         error.value = tr('请先关闭此主机的编辑文档，再关闭主机。');
         return false;
       }
-      const count = latest.filter((task) => task.hostId === hostId && unfinished(task)).length;
+      const count = latest.filter(
+        (task) => transferUsesHost(task, hostId) && unfinished(task),
+      ).length;
       if (
         count &&
         !(await usePluginsStore().ask(
@@ -563,7 +740,7 @@ export const useFilesStore = defineStore('files', () => {
     try {
       await filesApi.clearTransfers(hostId);
       transferGeneration++;
-      tasks.value = tasks.value.filter((task) => task.hostId !== hostId);
+      tasks.value = tasks.value.filter((task) => !transferUsesHost(task, hostId));
       delete connections.value[hostId];
       delete localBrowsers.value[hostId];
       return true;
@@ -597,10 +774,39 @@ export const useFilesStore = defineStore('files', () => {
       const finished = value.filter(
         (t) => t.state === 'completed' && before.get(t.id) && before.get(t.id) !== 'completed',
       );
+      const remoteFinished = value.filter(
+        (task) =>
+          task.remoteCopy &&
+          !unfinished(task) &&
+          before.has(task.id) &&
+          before.get(task.id) !== task.state,
+      );
       tasks.value = value;
       void finishExternalDownload();
       if (finished.length) {
-        void refresh();
+        if (finished.some((task) => !task.remoteCopy)) void refresh();
+      }
+      for (const hostId of new Set(
+        remoteFinished.flatMap((task) => [
+          task.hostId,
+          ...(task.remoteTargetHostId ? [task.remoteTargetHostId] : []),
+        ]),
+      )) {
+        const connection = connections.value[hostId];
+        if (
+          connection?.id &&
+          connection.state === 'connected' &&
+          !connection.loading &&
+          !connection.switchingUser &&
+          !closingHosts.value.includes(hostId) &&
+          remoteFinished.some(
+            (task) =>
+              (task.hostId === hostId && task.sessionId === connection.id) ||
+              (task.remoteTargetHostId === hostId && task.remoteTargetSessionId === connection.id),
+          )
+        ) {
+          void navigate(connection.path, connection);
+        }
       }
     } catch (cause) {
       error.value = errorMessage(cause);
@@ -608,6 +814,13 @@ export const useFilesStore = defineStore('files', () => {
       polling = false;
       if (!disposed) timer = setTimeout(() => void poll(), 750);
     }
+  }
+  async function startRemoteCopy(input: RemoteCopyInput): Promise<TransferInfo> {
+    const task = await filesApi.remoteCopy(input);
+    transferGeneration++;
+    tasks.value = [...tasks.value.filter((item) => item.id !== task.id), task];
+    void poll();
+    return task;
   }
   onScopeDispose(() => {
     disposed = true;
@@ -655,6 +868,7 @@ export const useFilesStore = defineStore('files', () => {
       ),
   ]);
   return {
+    startRemoteCopy,
     hostState,
     connections,
     active,
@@ -691,12 +905,17 @@ export const useFilesStore = defineStore('files', () => {
     open,
     switchUser,
     navigate,
+    ensureSearch,
+    changeSearch,
+    startSearch,
+    cancelSearch,
     stepHistory,
     localLoad,
     refreshLocal,
     trust,
     refresh,
     edit,
+    createFile,
     poll,
   };
 });

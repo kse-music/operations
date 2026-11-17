@@ -30,6 +30,11 @@
   flex: 1;
   min-height: 0;
 }
+.local-session-heading > h2 {
+  margin: 0;
+  font-size: var(--font-size-section);
+  font-weight: 600;
+}
 .local-session-sidebar .terminal-session-header {
   flex: 1;
   min-height: 0;

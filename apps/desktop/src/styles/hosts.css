@@ -84,12 +84,13 @@
   gap: 6px;
   align-items: center;
   width: 100%;
-  min-height: 26px;
+  min-height: 20px;
   background: none;
   color: var(--muted);
   border: 0;
-  padding: 4px 6px;
+  padding: 1px 6px;
   font-size: var(--font-size-body);
+  line-height: 1.2;
   text-align: left;
 }
 .group-toggle .group-name {
@@ -104,6 +105,24 @@
 }
 .group-toggle > svg {
   flex-shrink: 0;
+}
+.group-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  height: 18px;
+  margin-inline: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+}
+.group-expander:hover,
+.group-expander:focus-visible {
+  background: var(--accent-bg);
+  color: var(--text);
 }
 .host-group-icon {
   color: #ffd36f;
@@ -129,8 +148,9 @@
   border: 0;
   border-radius: 4px;
   background: none;
-  padding: 4px 10px 4px 26px;
-  min-height: 28px;
+  padding: 1px 10px 1px 42px;
+  min-height: 20px;
+  line-height: 1.2;
   text-align: left;
 }
 .tree-host.selected {
@@ -160,6 +180,39 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.host-label.renaming,
+.tree-rename {
+  flex: 1;
+}
+.tree-rename {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.tree-rename-input {
+  min-width: 0;
+  width: 100%;
+  padding: 1px 3px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  line-height: inherit;
+}
+.tree-rename-input:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+.tree-rename-input[readonly] {
+  opacity: 0.7;
+}
+.tree-rename-error {
+  margin-top: 3px;
+  font-size: var(--font-size-caption);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .host-icon {
   --host-icon-bezel: #5d747f;

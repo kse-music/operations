@@ -24,6 +24,7 @@ pub struct PreparedCopy {
     session: String,
     source_before: Snapshot,
     target_before: Option<FileAttributes>,
+    preserve_source_mode: bool,
     pub(super) attempted_commit: Arc<AtomicBool>,
     pub(super) checksum: Arc<Mutex<Option<String>>>,
 }
@@ -267,6 +268,7 @@ impl Transfers {
             session: session.into(),
             source_before,
             target_before: expected,
+            preserve_source_mode: false,
             attempted_commit: Arc::default(),
             checksum: Arc::default(),
         })
@@ -331,6 +333,7 @@ impl Transfers {
             session: session.into(),
             source_before: Snapshot::Remote(attrs),
             target_before: None,
+            preserve_source_mode: false,
             attempted_commit: Arc::default(),
             checksum: Arc::default(),
         })
@@ -371,8 +374,40 @@ impl Transfers {
                 plan,
                 guard: Mutex::new(Some(guard)),
             }),
+            None,
         )
         .map(|(_, task)| CopyHandle { task })
+    }
+}
+
+pub(super) fn remote_job(
+    session: &str,
+    target_session: &str,
+    source: String,
+    destination: String,
+    before: FileAttributes,
+    target_before: Option<FileAttributes>,
+    guard: Arc<dyn CopyGuard>,
+) -> Job {
+    Job {
+        plan: PreparedCopy {
+            source: CopySource::Remote {
+                session: session.into(),
+                path: source,
+            },
+            destination,
+            bytes: before.size.unwrap_or(0),
+            overwrite: target_before.is_some(),
+            target_exists: target_before.is_some(),
+            local_destination: None,
+            session: target_session.into(),
+            source_before: Snapshot::Remote(before),
+            target_before,
+            preserve_source_mode: true,
+            attempted_commit: Arc::default(),
+            checksum: Arc::default(),
+        },
+        guard: Mutex::new(Some(guard)),
     }
 }
 
@@ -447,6 +482,7 @@ pub(super) async fn run(
     task: &Task,
     target: &Remote,
     job: &Job,
+    aggregate: bool,
 ) -> Result<(), Error> {
     let plan = &job.plan;
     let guard = locked(&job.guard)?
@@ -508,7 +544,7 @@ pub(super) async fn run(
         return Err(Error::Conflict);
     }
     let mut source = Reader::open(engine, plan).await?;
-    {
+    if !aggregate {
         let mut info = locked(&task.info)?;
         info.total_bytes = plan.bytes;
         info.files_total = 1;
@@ -629,6 +665,33 @@ pub(super) async fn run(
     }
     if let Some(attrs) = &plan.target_before {
         target.preserve(&temp, attrs).await?;
+    } else if plan.preserve_source_mode
+        && let Snapshot::Remote(attrs) = &plan.source_before
+    {
+        let mode = attrs
+            .permissions
+            .map(|value| value & 0o777)
+            .ok_or_else(|| fail("SFTP_ATTRIBUTES", "源文件缺少权限信息"))?;
+        target
+            .raw
+            .setstat(
+                &temp,
+                FileAttributes {
+                    permissions: Some(mode),
+                    ..Default::default()
+                },
+            )
+            .await
+            .map_err(remote::map)?;
+        if target
+            .attrs(&temp)
+            .await?
+            .permissions
+            .map(|value| value & 0o777)
+            != Some(mode)
+        {
+            return Err(fail("SFTP_ATTRIBUTES", "服务器未保留复制文件的基本权限"));
+        }
     }
     let modified = match &plan.source_before {
         Snapshot::Local(metadata) => local::modified_seconds(metadata)?,

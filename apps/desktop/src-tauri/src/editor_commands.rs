@@ -194,6 +194,7 @@ pub async fn editor_open<R: Runtime>(
     id: String,
     path: String,
     connection_caption: Option<String>,
+    create: Option<bool>,
 ) -> Result<serde_json::Value, IpcError> {
     if app
         .state::<crate::file_commands::ExitApproval>()
@@ -218,7 +219,12 @@ pub async fn editor_open<R: Runtime>(
         return Err(Error::Validation("请先结束外部编辑，再打开内置编辑器").into());
     }
     let language = application.bootstrap().await?.config.product.language;
-    let document = application.text_read(&id, &path).await?;
+    let create = create.unwrap_or(false);
+    let document = if create {
+        application.text_create(&id, &path).await?
+    } else {
+        application.text_read(&id, &path).await?
+    };
     if let Err(error) = create_window(
         &app,
         document.clone(),
@@ -226,6 +232,14 @@ pub async fn editor_open<R: Runtime>(
         &language,
     ) {
         application.text_close(&document.token, false)?;
+        if create {
+            return Err(Error::Connection {
+                code: "EDITOR_CREATE_OPEN",
+                message: "远程文件已创建，但未能打开编辑器窗口；请刷新目录后重新打开",
+                source: Some(Box::new(error)),
+            }
+            .into());
+        }
         return Err(error.into());
     }
     Ok(summary(&document))

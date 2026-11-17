@@ -7,16 +7,16 @@ import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
 import { folderPath } from '../services/host-tree';
 import type { HostGroup } from '../types/hosts';
-const props = defineProps<{ parentId: string | null; group?: HostGroup }>();
+const props = defineProps<{ parentId: string | null }>();
 const emit = defineEmits<{ close: []; saved: [group: HostGroup] }>();
 const store = useHostsStore();
-const name = ref(props.group?.name ?? '');
+const name = ref('');
 async function save(): Promise<void> {
   const result = await store.run(
     () =>
-      hostsApi.groupSave(props.group?.id ?? null, {
+      hostsApi.groupSave(null, {
         name: name.value,
-        sortOrder: props.group?.sortOrder ?? 0,
+        sortOrder: 0,
         parentId: props.parentId,
       }),
     tr('文件夹已保存。'),
@@ -28,11 +28,7 @@ async function save(): Promise<void> {
 }
 </script>
 <template>
-  <Modal
-    :title="group ? tr('重命名文件夹') : tr('新建文件夹')"
-    :busy="store.busy"
-    @close="emit('close')"
-  >
+  <Modal :title="tr('新建文件夹')" :busy="store.busy" @close="emit('close')">
     <p class="subtle">
       {{ tr('父目录：') }}{{ folderPath(store.catalog?.groups ?? [], parentId) }}
     </p>
@@ -48,7 +44,7 @@ async function save(): Promise<void> {
           {{ tr(' 取消 ') }}
         </button>
         <button class="button primary" :disabled="store.busy" type="submit">
-          {{ group ? tr('保存文件夹') : tr('新建文件夹') }}
+          {{ tr('新建文件夹') }}
         </button>
       </footer>
     </form>

@@ -272,13 +272,13 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   );
   expect(root.textContent).not.toMatch(/收藏|标签|备注/);
   expect(root.querySelectorAll('.tree-host')).toHaveLength(2);
-  const group = [...root.querySelectorAll<HTMLButtonElement>('.group-toggle')].find((button) =>
+  const group = [...root.querySelectorAll<HTMLElement>('.group-toggle')].find((button) =>
     button.textContent?.includes('Servers'),
   )!;
-  group.click();
+  group.querySelector<HTMLButtonElement>('.group-expander')!.click();
   await nextTick();
   expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
-  expect(group.getAttribute('aria-expanded')).toBe('false');
+  expect(group.querySelector('.group-expander')!.getAttribute('aria-expanded')).toBe('false');
 });
 
 it('shows loading, failure and per-host status with the total in the root folder', async () => {
@@ -389,7 +389,7 @@ async function mountDragTree() {
 }
 it('moves hosts with pointer dragging into empty, collapsed and ungrouped targets and saves through the host API', async () => {
   const { store, host, select, update } = await mountDragTree();
-  const collapsed = root.querySelector<HTMLButtonElement>('[data-group-id="b"] .group-toggle')!;
+  const collapsed = root.querySelector<HTMLButtonElement>('[data-group-id="b"] .group-expander')!;
   collapsed.click();
   await nextTick();
   expect(collapsed.getAttribute('aria-expanded')).toBe('false');

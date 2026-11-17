@@ -60,6 +60,32 @@ pub async fn files_list(
     application.files_list(&id, &path).await.map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_search_start(
+    application: tauri::State<'_, Application>,
+    id: String,
+    input: FileSearchInput,
+    events: tauri::ipc::Channel<FileSearchEvent>,
+) -> Result<(), IpcError> {
+    application
+        .files_search_start(
+            &id,
+            input,
+            std::sync::Arc::new(move |event| events.send(event).is_ok()),
+        )
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_search_cancel(
+    application: tauri::State<'_, Application>,
+    id: String,
+    request_id: String,
+) -> Result<(), IpcError> {
+    application
+        .files_search_cancel(&id, &request_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn files_local(
     application: tauri::State<'_, Application>,
     path: Option<String>,
@@ -118,6 +144,59 @@ pub async fn files_properties(
         .files_properties(&id, &path)
         .await
         .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_property_operation(
+    application: tauri::State<'_, Application>,
+    id: String,
+    input: PropertyRequest,
+) -> Result<PropertyResult, IpcError> {
+    application
+        .files_property_operation(&id, input)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_property_cancel(
+    application: tauri::State<'_, Application>,
+    id: String,
+    request_id: String,
+) -> Result<(), IpcError> {
+    application
+        .files_property_cancel(&id, &request_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_local_properties<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    path: String,
+) -> Result<(), IpcError> {
+    #[cfg(windows)]
+    {
+        let parent = window
+            .hwnd()
+            .map_err(|error| IpcError::from(Error::Worker(Box::new(error))))?
+            .0 as isize;
+        tauri::async_runtime::spawn_blocking(move || {
+            serverdeck_windows_file_drag::properties(&path, Some(parent))
+        })
+        .await
+        .map_err(|error| IpcError::from(Error::Worker(Box::new(error))))?
+        .map_err(Into::into)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, path);
+        Err(Error::Validation("系统原生属性窗口当前仅支持 Windows").into())
+    }
+}
+#[tauri::command]
+pub async fn files_remote_copy(
+    application: tauri::State<'_, Application>,
+    input: RemoteCopyInput,
+) -> Result<TransferInfo, IpcError> {
+    application.files_remote_copy(input).map_err(Into::into)
 }
 #[tauri::command]
 pub async fn files_action(

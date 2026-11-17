@@ -1154,9 +1154,10 @@ it('keeps all three columns and preserves the host tree and search across naviga
   const rail = document.querySelector('.activity-rail');
   useHostsStore().search = 'Host a';
   await nextTick();
-  expect(
-    document.querySelector('[aria-label="收起主机栏"], [aria-label="展开主机列表"]'),
-  ).toBeNull();
+  expect(document.querySelector('[aria-label="收起主机栏"]')?.getAttribute('aria-expanded')).toBe(
+    'true',
+  );
+  expect(document.querySelector('[aria-label="展开主机列表"]')).toBeNull();
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
   expect(workspace.area).toBe('local');
@@ -1178,6 +1179,106 @@ it('keeps all three columns and preserves the host tree and search across naviga
   expect(document.querySelector<HTMLElement>('.host-tree-section')!.style.display).not.toBe('none');
   expect(useHostsStore().search).toBe('Host a');
   expect(document.querySelector('.sidebar')).toBe(sidebar);
+});
+
+it('collapses the host list and restores its width, search, scroll and keyboard focus without saving configuration', async () => {
+  loadSidebarConfig();
+  useApplicationStore().state!.config.sidebarWidth = 312;
+  const save = vi.spyOn(ipc, 'saveConfig');
+  const hosts = useHostsStore();
+  hosts.search = 'Host a';
+  hosts.selectedId = hosts.catalog!.hosts[0]!.id;
+  await flush();
+  const tree = document.querySelector<HTMLElement>('#host-tree-panel')!;
+  const scroll = tree.querySelector<HTMLElement>('.host-tree-scroll')!;
+  const search = tree.querySelector<HTMLInputElement>('input')!;
+  scroll.scrollTop = 64;
+  const collapse = tree.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!;
+  collapse.click();
+  await flush();
+  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
+  expect(tree.style.display).toBe('none');
+  expect(document.querySelector<HTMLElement>('.sidebar-resizer')!.style.display).toBe('none');
+  const expand = document.querySelector<HTMLButtonElement>('[aria-label="展开主机列表"]')!;
+  expect(expand.getAttribute('aria-expanded')).toBe('false');
+  expect(expand.getAttribute('aria-controls')).toBe('host-tree-panel');
+  expect(document.activeElement).toBe(expand);
+  expand.click();
+  await flush();
+  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(false);
+  expect(document.querySelector('#host-tree-panel')).toBe(tree);
+  expect(tree.style.display).not.toBe('none');
+  expect(tree.querySelector('input')).toBe(search);
+  expect(search.value).toBe('Host a');
+  expect(scroll.scrollTop).toBe(64);
+  expect(hosts.selectedId).toBe(hosts.catalog!.hosts[0]!.id);
+  expect(document.activeElement).toBe(collapse);
+  expect(
+    document.querySelector<HTMLElement>('.app-shell')!.style.getPropertyValue('--sidebar-width'),
+  ).toBe('312px');
+  expect(document.querySelector<HTMLElement>('.sidebar-resizer')!.style.display).not.toBe('none');
+  expect(save).not.toHaveBeenCalled();
+});
+
+it('keeps host and local collapse states independent while preserving live sessions and the settings menu', async () => {
+  document.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!.click();
+  await flush();
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
+  await flush();
+  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(false);
+  const terminals = useTerminalsStore();
+  terminals.update(terminals.focused, { state: 'connected', sessionId: 'collapse-live-local' });
+  const snapshot = JSON.stringify(terminals.tabs);
+  const pane = document.querySelector('.split-pane');
+  const header = document.querySelector('.local-session-sidebar .terminal-session-header');
+  const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  const sidebar = document.querySelector<HTMLElement>('#local-session-panel')!;
+  const collapse = sidebar.querySelector<HTMLButtonElement>('[aria-label="收起本地会话"]')!;
+  collapse.click();
+  await flush();
+  expect(sidebar.style.display).toBe('none');
+  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
+  const expand = document.querySelector<HTMLButtonElement>('[aria-label="展开本地会话"]')!;
+  expect(expand.getAttribute('aria-controls')).toBe('local-session-panel');
+  expect(document.activeElement).toBe(expand);
+  expect(document.querySelector('.split-pane')).toBe(pane);
+  expect(document.querySelector('.local-session-sidebar .terminal-session-header')).toBe(header);
+  expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
+  await openNavigation('关于');
+  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(false);
+  expect(document.querySelector<HTMLElement>('.settings-sidebar')!.style.display).not.toBe('none');
+  expect(document.querySelector('.sidebar-expand')).toBeNull();
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.click();
+  await flush();
+  document.querySelector<HTMLButtonElement>('[aria-label="展开主机列表"]')!.click();
+  await flush();
+  document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
+  await flush();
+  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
+  document.querySelector<HTMLButtonElement>('[aria-label="展开本地会话"]')!.click();
+  await flush();
+  expect(sidebar.style.display).not.toBe('none');
+  expect(document.querySelector('.local-session-sidebar .terminal-session-header')).toBe(header);
+  expect(document.querySelector('.split-pane')).toBe(pane);
+  expect(document.activeElement).toBe(collapse);
+  expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
+  expect(close).not.toHaveBeenCalled();
+});
+
+it('translates the host and local sidebar toggle labels', async () => {
+  loadSidebarConfig();
+  useApplicationStore().state!.config.product.language = 'en-US';
+  await flush();
+  document.querySelector<HTMLButtonElement>('[aria-label="Collapse host sidebar"]')!.click();
+  await flush();
+  expect(document.querySelector('[aria-label="Expand host list"]')).not.toBeNull();
+  document
+    .querySelector<HTMLButtonElement>('.activity-rail [aria-label="Local terminal"]')!
+    .click();
+  await flush();
+  document.querySelector<HTMLButtonElement>('[aria-label="Collapse local sessions"]')!.click();
+  await flush();
+  expect(document.querySelector('[aria-label="Expand local sessions"]')).not.toBeNull();
 });
 
 it('retains remote and local sessions and settings drafts while switching the fixed rail', async () => {
@@ -1293,7 +1394,8 @@ it('keeps the root folder count and search without a duplicate heading count or 
   expect(heading.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
   expect(heading.querySelector('.host-count')).toBeNull();
   expect(document.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('2');
-  expect(heading.querySelectorAll('button')).toHaveLength(0);
+  expect(heading.querySelectorAll('button')).toHaveLength(1);
+  expect(heading.querySelector('[aria-label="收起主机栏"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
   expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
 });

@@ -93,6 +93,34 @@ export const useHostsStore = defineStore('hosts', () => {
       return;
     await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), tr('主机分组已更新。'));
   }
+  async function renameHost(id: string, name: string): Promise<boolean> {
+    const host = catalog.value?.hosts.find((host) => host.id === id);
+    if (!host) {
+      error.value = tr('目标主机已不存在，请刷新后重试。');
+      return false;
+    }
+    const result = await run(() => hostsApi.update(id, { ...hostInput(host), name }));
+    if (!result.ok) return false;
+    const index = catalog.value?.hosts.findIndex((host) => host.id === id) ?? -1;
+    if (catalog.value && index >= 0) catalog.value.hosts[index] = result.value;
+    notice.value = tr('主机已重命名。');
+    return true;
+  }
+  async function renameGroup(id: string, name: string): Promise<boolean> {
+    const group = catalog.value?.groups.find((group) => group.id === id);
+    if (!group) {
+      error.value = tr('目标文件夹已不存在，请刷新后重试。');
+      return false;
+    }
+    const result = await run(() =>
+      hostsApi.groupSave(id, { name, sortOrder: group.sortOrder, parentId: group.parentId }),
+    );
+    if (!result.ok) return false;
+    const index = catalog.value?.groups.findIndex((group) => group.id === id) ?? -1;
+    if (catalog.value && index >= 0) catalog.value.groups[index] = result.value;
+    notice.value = tr('文件夹已保存。');
+    return true;
+  }
   useErrorNotifications(error);
   return {
     catalog,
@@ -106,5 +134,7 @@ export const useHostsStore = defineStore('hosts', () => {
     load,
     run,
     move,
+    renameHost,
+    renameGroup,
   };
 });

@@ -4,6 +4,8 @@ import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed } from 'vue';
 import { useFilesStore } from '../stores/files';
+import { useHostsStore } from '../stores/hosts';
+import { hostDisplayName } from '../types/hosts';
 import {
   bytes,
   taskLabels,
@@ -11,23 +13,32 @@ import {
   transferDuration,
   transferRemainingTime,
   type TransferInfo,
+  remoteJoin,
+  transferUsesHost,
 } from '../types/files';
 const store = useFilesStore();
+const hosts = useHostsStore();
+const hostLabel = (id: string) =>
+  hostDisplayName(hosts.catalog?.hosts.find((host) => host.id === id)) || id;
 const props = defineProps<{ hostId: string; history?: boolean; hideHeading?: boolean }>();
 const tasks = computed(() =>
   store.tasks.filter(
     (task) =>
-      task.hostId === props.hostId &&
+      transferUsesHost(task, props.hostId) &&
       unfinished(task) !== props.history &&
       (!task.dragExport || !props.history),
   ),
 );
 defineEmits<{ retry: [task: TransferInfo] }>();
 function displayedSources(task: TransferInfo): string[] {
-  return task.direction === 'upload' ? task.sources.map(displayLocalPath) : task.sources;
+  return !task.remoteCopy && task.direction === 'upload'
+    ? task.sources.map(displayLocalPath)
+    : task.sources;
 }
 function displayedDestination(task: TransferInfo): string {
   if (task.dragExport) return tr('拖放到的 Windows 文件夹');
+  if (task.remoteCopy)
+    return task.remoteName ? remoteJoin(task.destination, task.remoteName) : task.destination;
   return task.direction === 'download' ? displayLocalPath(task.destination) : task.destination;
 }
 </script>
@@ -53,13 +64,23 @@ function displayedDestination(task: TransferInfo): string {
       <div>
         <div class="transfer-summary">
           <strong
-            >{{ task.direction === 'upload' ? tr('↑ 上传') : tr('↓ 下载') }} ·
-            {{ taskLabels[task.state] ?? task.state }}</strong
+            >{{
+              task.remoteCopy
+                ? tr('远程复制')
+                : task.direction === 'upload'
+                  ? tr('↑ 上传')
+                  : tr('↓ 下载')
+            }}
+            · {{ taskLabels[task.state] ?? task.state }}</strong
           ><span class="subtle"
-            >{{ task.filesDone }} / {{ task.filesTotal }}{{ tr(' 文件 · 跳过 ')
+            >{{ task.filesDone }} / {{ task.filesTotal
+            }}{{ task.remoteCopy ? tr(' 项目 · 跳过 ') : tr(' 文件 · 跳过 ')
             }}{{ task.skipped }}</span
           >
         </div>
+        <p v-if="task.remoteCopy && task.remoteTargetHostId" class="subtle">
+          {{ tr('从 {0} 到 {1}', hostLabel(task.hostId), hostLabel(task.remoteTargetHostId)) }}
+        </p>
         <div class="transfer-paths">
           <div>
             <span class="subtle">{{ tr('文件') }}</span>
@@ -75,11 +96,18 @@ function displayedDestination(task: TransferInfo): string {
           </div>
         </div>
         <progress
-          :max="Math.max(task.totalBytes, 1)"
+          :max="
+            Math.max(
+              task.remoteCopy && task.totalBytes === 0 ? task.filesTotal : task.totalBytes,
+              1,
+            )
+          "
           :value="
-            task.totalBytes === 0 && task.state === 'completed'
-              ? 1
-              : task.totalBytes - task.remainingBytes
+            task.remoteCopy && task.totalBytes === 0
+              ? task.filesDone + task.skipped
+              : task.totalBytes === 0 && task.state === 'completed'
+                ? 1
+                : task.totalBytes - task.remainingBytes
           "
         ></progress>
         <dl class="transfer-details">

@@ -1,5 +1,6 @@
+/* eslint-disable vue/one-component-per-file -- Isolated FilePane and reactive refresh harnesses. */
 import { afterEach, expect, it, vi } from 'vitest';
-import { createApp, type App } from 'vue';
+import { createApp, h, nextTick, reactive, type App } from 'vue';
 import FilePane from './FilePane.vue';
 import type { DirectoryListing, FileEntry } from '../types/files';
 import { permissionText } from '../types/files';
@@ -33,6 +34,7 @@ function mountPane(
   loading = false,
   selected: string[] = [],
   pendingPath?: string,
+  focusPath?: string,
 ) {
   const select = vi.fn();
   const open = vi.fn();
@@ -45,6 +47,7 @@ function mountPane(
     listing: directory,
     loading,
     pendingPath,
+    focusPath,
     selected,
     onSelect: select,
     onOpen: open,
@@ -55,6 +58,57 @@ function mountPane(
   return { select, open, remove, rename };
 }
 
+it('reveals and focuses a located file beyond the first page', async () => {
+  const rows: FileEntry[] = Array.from({ length: 301 }, (_, index) => ({
+    ...listing.entries[0]!,
+    name: `file-${String(index).padStart(3, '0')}`,
+    path: `/srv/file-${String(index).padStart(3, '0')}`,
+  }));
+  mountPane(
+    'remote',
+    { ...listing, entries: rows },
+    false,
+    [rows[250]!.path],
+    undefined,
+    rows[250]!.path,
+  );
+  await nextTick();
+  await nextTick();
+  const active = document.activeElement as HTMLButtonElement;
+  expect(active.dataset.path).toBe(rows[250]!.path);
+  expect(active.closest('tr')?.classList.contains('selected')).toBe(true);
+  expect(root.querySelector('[data-path="/srv/file-000"]')).toBeNull();
+});
+it('does not reclaim focus or change pages on later refreshes after locating', async () => {
+  const rows: FileEntry[] = Array.from({ length: 301 }, (_, index) => ({
+    ...listing.entries[0]!,
+    name: `file-${String(index).padStart(3, '0')}`,
+    path: `/srv/file-${String(index).padStart(3, '0')}`,
+  }));
+  const state = reactive({ listing: { ...listing, entries: rows }, focusPath: rows[250]!.path });
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp({
+    render: () =>
+      h(FilePane, {
+        side: 'remote',
+        listing: state.listing,
+        loading: false,
+        selected: [],
+        focusPath: state.focusPath,
+      }),
+  });
+  app.mount(root);
+  await nextTick();
+  await nextTick();
+  const button = root.querySelector<HTMLButtonElement>('[data-path="/srv/file-201"]')!;
+  button.focus();
+  state.listing = { ...state.listing, entries: [...rows] };
+  await nextTick();
+  await nextTick();
+  expect(document.activeElement).toBe(button);
+  expect(root.querySelector('[data-path="/srv/file-000"]')).toBeNull();
+});
 it.each(['local', 'remote'] as const)(
   'uses F2 for exactly one selected %s item without requesting deletion',
   (side) => {

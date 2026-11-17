@@ -80,12 +80,110 @@ pub struct FileEntry {
     pub uid: Option<u32>,
     pub gid: Option<u32>,
 }
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PropertyRequest {
+    pub request_id: String,
+    pub path: String,
+    pub operation: PropertyOperation,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PropertyOperation {
+    Size,
+    Checksum,
+    Apply { change: PropertyChange },
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PropertyChange {
+    pub expected: FileEntry,
+    pub permissions: Option<u32>,
+    pub uid: Option<u32>,
+    pub gid: Option<u32>,
+    pub recursive: bool,
+    pub directory_execute: bool,
+    pub confirmed: bool,
+}
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PropertyResult {
+    pub bytes: u64,
+    pub files: usize,
+    pub directories: usize,
+    pub skipped_links: usize,
+    pub changed: usize,
+    pub checksum: Option<String>,
+    pub cancelled: bool,
+    pub message: Option<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectoryListing {
     pub path: String,
     pub parent: Option<String>,
     pub entries: Vec<FileEntry>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileSearchInput {
+    pub request_id: String,
+    pub path: String,
+    pub query: String,
+    pub recursive: bool,
+    pub include_hidden: bool,
+}
+impl FileSearchInput {
+    pub fn validate(&self) -> Result<(), Error> {
+        uuid::Uuid::parse_str(&self.request_id)
+            .map_err(|_| Error::Validation("文件搜索标识无效"))?;
+        remote_absolute(&self.path)?;
+        if self.query.trim().is_empty()
+            || self.query.len() > 256
+            || self.query.contains('/')
+            || self.query.chars().any(char::is_control)
+        {
+            return Err(Error::Validation(
+                "文件名关键词须为 1–256 字节，不能包含 / 或控制字符",
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileSearchStatus {
+    Running,
+    Completed,
+    Cancelled,
+    Limited,
+    Failed,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchResult {
+    pub entry: FileEntry,
+    pub parent: String,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchIssue {
+    pub path: String,
+    pub message: String,
+}
+/// Incremental batches; counters are cumulative, results and issues are deltas.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchEvent {
+    pub request_id: String,
+    pub status: FileSearchStatus,
+    pub entries: Vec<FileSearchResult>,
+    pub issues: Vec<FileSearchIssue>,
+    pub scanned_directories: usize,
+    pub scanned_entries: usize,
+    pub skipped_directories: usize,
+    pub current_path: Option<String>,
+    pub message: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,6 +210,7 @@ pub struct LocalRename {
 pub enum RemoteAction {
     Mkdir {
         path: String,
+        permissions: Option<u32>,
     },
     Rename {
         path: String,
@@ -136,6 +235,82 @@ pub enum ConflictPolicy {
     Skip,
     Rename,
     Overwrite,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoteCopyInput {
+    pub session_id: String,
+    #[serde(default)]
+    pub target_session_id: Option<String>,
+    pub sources: Vec<String>,
+    pub destination: String,
+    pub name: Option<String>,
+    pub conflict: ConflictPolicy,
+    pub confirmed: bool,
+    pub confirm_overwrite: bool,
+}
+impl RemoteCopyInput {
+    pub fn validate(&self) -> Result<(), Error> {
+        TransferInput {
+            session_id: self.session_id.clone(),
+            direction: Direction::Upload,
+            sources: self.sources.clone(),
+            destination: self.destination.clone(),
+            conflict: self.conflict,
+            confirm_overwrite: self.confirm_overwrite,
+        }
+        .validate()?;
+        remote_absolute(&self.destination)?;
+        if let Some(target) = &self.target_session_id {
+            uuid::Uuid::parse_str(target).map_err(|_| Error::Validation("目标文件会话标识无效"))?;
+        }
+        if !self.confirmed || self.conflict == ConflictPolicy::Rename {
+            return Err(Error::Validation("远程复制须确认目标及有效的冲突策略"));
+        }
+        if let Some(name) = &self.name {
+            if self.sources.len() != 1 {
+                return Err(Error::Validation("多选项目不能指定同一个新名称"));
+            }
+            remote_join("/", name)?;
+        }
+        let mut targets = std::collections::HashSet::new();
+        for (index, source) in self.sources.iter().enumerate() {
+            remote_absolute(source)?;
+            if source == "/" || source.ends_with('/') {
+                return Err(Error::Validation("不能复制远程根目录，源路径不能以 / 结尾"));
+            }
+            if self.sources.iter().enumerate().any(|(other, path)| {
+                other != index && (path == source || path.starts_with(&format!("{source}/")))
+            }) {
+                return Err(Error::Validation("源项目不能重复或相互包含"));
+            }
+            let name = self
+                .name
+                .as_deref()
+                .unwrap_or_else(|| source.rsplit('/').next().unwrap_or(""));
+            let directory = self.destination.trim_end_matches('/');
+            let destination =
+                remote_join(if directory.is_empty() { "/" } else { directory }, name)?;
+            if !targets.insert(destination.clone()) {
+                return Err(Error::Validation("多个源项目指向同一个目标，请分开操作"));
+            }
+            for original in self.sources.iter().filter(|_| {
+                self.target_session_id
+                    .as_ref()
+                    .is_none_or(|target| target == &self.session_id)
+            }) {
+                if destination == *original
+                    || destination.starts_with(&format!("{original}/"))
+                    || original.starts_with(&format!("{destination}/"))
+                {
+                    return Err(Error::Validation(
+                        "目标不能与源相同，或位于源项目的内部、祖先路径",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -180,6 +355,14 @@ pub struct TransferInfo {
     pub host_id: String,
     pub session_id: String,
     pub direction: Direction,
+    #[serde(default)]
+    pub remote_copy: bool,
+    #[serde(default)]
+    pub remote_name: Option<String>,
+    #[serde(default)]
+    pub remote_target_host_id: Option<String>,
+    #[serde(default)]
+    pub remote_target_session_id: Option<String>,
     pub state: String,
     pub sources: Vec<String>,
     pub destination: String,
@@ -196,6 +379,9 @@ pub struct TransferInfo {
     pub recovery_paths: Vec<String>,
 }
 impl TransferInfo {
+    pub fn uses_host(&self, host: &str) -> bool {
+        self.host_id == host || self.remote_target_host_id.as_deref() == Some(host)
+    }
     pub fn unfinished(&self) -> bool {
         matches!(
             self.state.as_str(),
@@ -304,6 +490,69 @@ impl FileTerminalAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mkdir_accepts_optional_permissions_and_rejects_unknown_fields() {
+        for value in [
+            serde_json::json!({"kind":"mkdir", "path":"/folder"}),
+            serde_json::json!({"kind":"mkdir", "path":"/folder", "permissions":null}),
+        ] {
+            assert!(matches!(
+                serde_json::from_value::<RemoteAction>(value).expect("default permissions"),
+                RemoteAction::Mkdir {
+                    permissions: None,
+                    ..
+                }
+            ));
+        }
+        assert!(matches!(
+            serde_json::from_value::<RemoteAction>(serde_json::json!({
+                "kind":"mkdir", "path":"/folder", "permissions":0o2770
+            }))
+            .expect("custom permissions"),
+            RemoteAction::Mkdir {
+                permissions: Some(0o2770),
+                ..
+            }
+        ));
+        for value in [
+            serde_json::json!({"kind":"mkdir", "path":"/folder", "permissions":-1}),
+            serde_json::json!({"kind":"mkdir", "path":"/folder", "permissions":"0755"}),
+            serde_json::json!({"kind":"mkdir", "path":"/folder", "shell":"mkdir"}),
+        ] {
+            assert!(serde_json::from_value::<RemoteAction>(value).is_err());
+        }
+    }
+    #[test]
+    fn file_search_accepts_literal_names_and_rejects_invalid_scope_and_unknown_fields() {
+        let mut input = FileSearchInput {
+            request_id: uuid::Uuid::new_v4().to_string(),
+            path: "/srv/中文 空格".into(),
+            query: " ;$(id)'*.txt ".into(),
+            recursive: true,
+            include_hidden: false,
+        };
+        input
+            .validate()
+            .expect("literal names do not execute shell syntax");
+        for path in ["relative", "/srv/../etc", "/srv/./app", "/bad\0path"] {
+            input.path = path.into();
+            assert!(input.validate().is_err(), "{path:?}");
+        }
+        input.path = "/".into();
+        for query in ["", "  ", "a/b", "bad\nname"] {
+            input.query = query.into();
+            assert!(input.validate().is_err());
+        }
+        input.query = "a".repeat(257);
+        assert!(input.validate().is_err());
+        input.query = "text".into();
+        input.request_id = "invalid".into();
+        assert!(input.validate().is_err());
+        assert!(serde_json::from_value::<FileSearchInput>(serde_json::json!({
+            "requestId":uuid::Uuid::new_v4().to_string(), "path":"/", "query":"a", "recursive":true,
+            "includeHidden":false, "shell":"find /"
+        })).is_err());
+    }
     #[test]
     fn paths_preserve_unicode_and_metacharacters_without_shell_execution() {
         let name = "中文 空格 ;$'\\.txt";

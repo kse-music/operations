@@ -213,6 +213,7 @@ async fn real_sudo_sftp_switch_preserves_identity_and_recovers_from_failure() {
         &nobody.session.id,
         RemoteAction::Mkdir {
             path: owned_directory.clone(),
+            permissions: None,
         },
     )
     .await

@@ -1,9 +1,12 @@
 mod editor;
 mod external;
 mod local;
+mod properties;
 mod remote;
+mod search;
 mod transfer;
 use remote::Remote;
+pub use search::SearchSink;
 use serverdeck_core::{Error, files::*};
 use std::{
     collections::HashMap,
@@ -34,6 +37,8 @@ pub struct Files {
     slots: Arc<Semaphore>,
     mutations: Mutations,
     stopping: Arc<std::sync::atomic::AtomicBool>,
+    searches: Arc<Mutex<HashMap<String, Arc<search::SearchJob>>>>,
+    property_jobs: Arc<Mutex<HashMap<String, Arc<properties::PropertyJob>>>>,
     pub transfers: Transfers,
 }
 impl Files {
@@ -47,6 +52,8 @@ impl Files {
             slots: Arc::new(Semaphore::new(4)),
             mutations,
             stopping: Arc::default(),
+            searches: Arc::default(),
+            property_jobs: Arc::default(),
         }
     }
     async fn slot(&self) -> Result<tokio::sync::OwnedSemaphorePermit, Error> {
@@ -136,9 +143,11 @@ impl Files {
         let _mutation = mutation.lock().await;
         let operation = async {
             match action {
-                RemoteAction::Mkdir { path } => {
+                RemoteAction::Mkdir { path, permissions } => {
                     remote_absolute(&path)?;
-                    remote.mkdir(&path).await
+                    remote
+                        .mkdir_with_permissions(&path, permissions.unwrap_or(0o755))
+                        .await
                 }
                 RemoteAction::Rename { path, destination } => {
                     remote_absolute(&path)?;
@@ -190,6 +199,8 @@ impl Files {
                 "此连接仍有传输，请明确选择取消后断开或继续后台传输",
             ));
         }
+        self.cancel_session_searches(Some(id)).await?;
+        self.cancel_property_jobs(Some(id)).await?;
         self.transfers.cancel_session(id).await?;
         locked(&self.browsers)?.remove(id);
         locked(&self.documents)?.retain(|_, d| d.public.session_id != id);
@@ -216,7 +227,13 @@ impl Files {
     pub async fn shutdown(&self) {
         self.stopping
             .store(true, std::sync::atomic::Ordering::Release);
+        if let Err(error) = self.cancel_session_searches(None).await {
+            tracing::warn!(operation = "files_search_shutdown", error = %error, "search cancellation failed");
+        }
         self.transfers.shutdown().await;
+        if let Err(error) = self.cancel_property_jobs(None).await {
+            tracing::warn!(operation = "files_properties_shutdown", error = %error, "property cancellation failed");
+        }
         if tokio::time::timeout(
             std::time::Duration::from_secs(35),
             self.slots.acquire_many(4),

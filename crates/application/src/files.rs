@@ -116,6 +116,17 @@ impl Application {
     pub async fn files_list(&self, id: &str, path: &str) -> Result<DirectoryListing, Error> {
         self.files.list(id, path).await
     }
+    pub fn files_search_start(
+        &self,
+        id: &str,
+        input: FileSearchInput,
+        sink: serverdeck_sftp::SearchSink,
+    ) -> Result<(), Error> {
+        self.files.start_search(id, input, sink)
+    }
+    pub async fn files_search_cancel(&self, id: &str, request_id: &str) -> Result<(), Error> {
+        self.files.cancel_search(id, request_id).await
+    }
     pub async fn files_local(&self, path: Option<String>) -> Result<DirectoryListing, Error> {
         self.files.local_list(path).await
     }
@@ -124,6 +135,16 @@ impl Application {
     }
     pub async fn files_properties(&self, id: &str, path: &str) -> Result<FileEntry, Error> {
         self.files.properties(id, path).await
+    }
+    pub async fn files_property_operation(
+        &self,
+        id: &str,
+        input: PropertyRequest,
+    ) -> Result<PropertyResult, Error> {
+        self.files.property_operation(id, input).await
+    }
+    pub async fn files_property_cancel(&self, id: &str, request_id: &str) -> Result<(), Error> {
+        self.files.cancel_property_operation(id, request_id).await
     }
     pub async fn files_action(&self, id: &str, action: RemoteAction) -> Result<(), Error> {
         self.files.action(id, action).await
@@ -136,6 +157,12 @@ impl Application {
             return Err(Error::ShuttingDown);
         }
         self.files.transfers.start(input)
+    }
+    pub fn files_remote_copy(&self, input: RemoteCopyInput) -> Result<TransferInfo, Error> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        self.files.transfers.start_remote_copy(input)
     }
     #[cfg(windows)]
     pub fn drag_download_names(
@@ -193,6 +220,12 @@ impl Application {
     }
     pub async fn text_read(&self, id: &str, path: &str) -> Result<TextDocument, Error> {
         self.files.read_text(id, path).await
+    }
+    pub async fn text_create(&self, id: &str, path: &str) -> Result<TextDocument, Error> {
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        self.files.create_text(id, path).await
     }
     pub async fn external_prepare(&self, id: &str, path: &str) -> Result<ExternalDocument, Error> {
         if self.shutting_down.load(Ordering::Acquire) {

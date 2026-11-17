@@ -15,11 +15,13 @@ use tokio::{
 };
 use uuid::Uuid;
 mod copy;
+mod remote_copy;
 pub use copy::{CopyGuard, CopyHandle, CopySource, PreparedCopy};
 
 struct Task {
     input: TransferInput,
     copy: Option<copy::Job>,
+    remote_copy: Option<remote_copy::Job>,
     drag_export: bool,
     info: Mutex<TransferInfo>,
     cancel: CancellationToken,
@@ -81,6 +83,10 @@ impl Task {
     }
     fn uses_session(&self, session: &str) -> bool {
         self.input.session_id == session
+            || self
+                .remote_copy
+                .as_ref()
+                .is_some_and(|job| job.target_session.as_deref() == Some(session))
             || self
                 .copy
                 .as_ref()
@@ -155,6 +161,16 @@ impl Task {
                 "SFTP_DISCONNECTED",
                 "文件连接已关闭，请重新连接后从头重试",
             ))
+        } else if self
+            .remote_copy
+            .as_ref()
+            .and_then(|job| job.target_closed.as_ref())
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            Err(fail(
+                "SFTP_DISCONNECTED",
+                "目标文件连接已关闭，请重新选择目标主机",
+            ))
         } else {
             Ok(())
         }
@@ -192,24 +208,43 @@ impl Transfers {
         self.schedule();
     }
     pub fn start(&self, input: TransferInput) -> Result<TransferInfo, Error> {
-        self.enqueue(input, false, None).map(|(info, _)| info)
+        self.enqueue(input, false, None, None).map(|(info, _)| info)
     }
     fn enqueue(
         &self,
         input: TransferInput,
         drag_export: bool,
         copy: Option<copy::Job>,
+        mut remote_copy: Option<remote_copy::Job>,
     ) -> Result<(TransferInfo, Arc<Task>), Error> {
         input.validate()?;
+        if remote_copy.is_some() && input.conflict == ConflictPolicy::Rename {
+            return Err(Error::Validation("远程复制须确认目标及有效的冲突策略"));
+        }
         tokio::runtime::Handle::try_current()
             .map_err(|_| fail("TRANSFER_RUNTIME", "传输必须从异步工作线程提交"))?;
         let session = self.engine.session_info(&input.session_id)?;
         let owner_closed = self.engine.session_closed(&input.session_id)?;
+        let remote_target = if let Some(job) = &mut remote_copy {
+            let target = job.target_session.as_deref().unwrap_or(&input.session_id);
+            let closed = self.engine.session_closed(target)?;
+            if closed.is_cancelled() {
+                return Err(Error::Validation("目标文件连接已关闭，请重新选择目标主机"));
+            }
+            job.target_closed = Some(closed);
+            Some(self.engine.session_info(target)?)
+        } else {
+            None
+        };
         let info = TransferInfo {
             id: Uuid::new_v4().to_string(),
             host_id: session.host_id,
             session_id: input.session_id.clone(),
             direction: input.direction,
+            remote_copy: remote_copy.is_some(),
+            remote_name: remote_copy.as_ref().and_then(|job| job.name.clone()),
+            remote_target_host_id: remote_target.as_ref().map(|target| target.host_id.clone()),
+            remote_target_session_id: remote_target.as_ref().map(|target| target.id.clone()),
             state: "queued".into(),
             sources: input.sources.clone(),
             destination: input.destination.clone(),
@@ -228,6 +263,7 @@ impl Transfers {
         let task = Arc::new(Task {
             input,
             copy,
+            remote_copy,
             drag_export,
             info: Mutex::new(info.clone()),
             cancel: CancellationToken::new(),
@@ -284,6 +320,7 @@ impl Transfers {
                 confirm_overwrite: false,
             },
             true,
+            None,
             None,
         )?;
         loop {
@@ -354,13 +391,13 @@ impl Transfers {
             .collect::<Result<Vec<_>, _>>()?;
         if snapshots
             .iter()
-            .any(|info| info.host_id == host_id && info.unfinished())
+            .any(|info| info.uses_host(host_id) && info.unfinished())
         {
             return Err(fail("TRANSFERS_ACTIVE", "请先取消并等待此主机的传输结束"));
         }
         let mut index = 0;
         queue.tasks.retain(|_| {
-            let keep = snapshots[index].host_id != host_id;
+            let keep = !snapshots[index].uses_host(host_id);
             index += 1;
             keep
         });
@@ -392,7 +429,7 @@ impl Transfers {
         conflict: ConflictPolicy,
         confirmed: bool,
     ) -> Result<TransferInfo, Error> {
-        let mut input = {
+        let (mut input, remote_copy) = {
             let queue = locked(&self.queue)?;
             let task = queue
                 .tasks
@@ -414,12 +451,13 @@ impl Transfers {
             if self.engine.session_info(session)?.host_id != info.host_id {
                 return Err(Error::Validation("重试必须使用同一主机的新文件连接"));
             }
-            task.input.clone()
+            (task.input.clone(), task.remote_copy.clone())
         };
         input.session_id = session.into();
         input.conflict = conflict;
         input.confirm_overwrite = confirmed;
-        self.start(input)
+        self.enqueue(input, false, None, remote_copy)
+            .map(|(info, _)| info)
     }
     fn schedule(&self) {
         let mut selected = Vec::new();
@@ -434,7 +472,13 @@ impl Transfers {
                     && info.unfinished()
                     && info.state != "queued"
                 {
-                    *active.entry(info.host_id).or_default() += 1;
+                    *active.entry(info.host_id.clone()).or_default() += 1;
+                    if let Some(target) = info
+                        .remote_target_host_id
+                        .filter(|target| target != &info.host_id)
+                    {
+                        *active.entry(target).or_default() += 1;
+                    }
                     total += 1;
                 }
             }
@@ -443,7 +487,13 @@ impl Transfers {
                     if info.state != "queued" {
                         continue;
                     }
-                    if task.owner_closed.is_cancelled() {
+                    if task.owner_closed.is_cancelled()
+                        || task
+                            .remote_copy
+                            .as_ref()
+                            .and_then(|job| job.target_closed.as_ref())
+                            .is_some_and(CancellationToken::is_cancelled)
+                    {
                         info.state = "failed".into();
                         info.message = Some("文件连接已关闭，请重新连接后重试".into());
                         if let Some(job) = &task.copy {
@@ -452,11 +502,23 @@ impl Transfers {
                         task.done.notify_waiters();
                         continue;
                     }
-                    let count = active.entry(info.host_id.clone()).or_default();
-                    if total < 12 && *count < usize::from(self.concurrency.load(Ordering::Acquire))
+                    let limit = usize::from(self.concurrency.load(Ordering::Acquire));
+                    if total < 12
+                        && active.get(&info.host_id).copied().unwrap_or(0) < limit
+                        && info
+                            .remote_target_host_id
+                            .as_ref()
+                            .is_none_or(|target| active.get(target).copied().unwrap_or(0) < limit)
                     {
                         info.state = "scanning".into();
-                        *count += 1;
+                        *active.entry(info.host_id.clone()).or_default() += 1;
+                        if let Some(target) = info
+                            .remote_target_host_id
+                            .as_ref()
+                            .filter(|target| *target != &info.host_id)
+                        {
+                            *active.entry(target.clone()).or_default() += 1;
+                        }
                         total += 1;
                         selected.push(task.clone());
                     }
@@ -471,8 +533,13 @@ impl Transfers {
         }
     }
     async fn run(&self, task: Arc<Task>) {
+        let execution_session = task
+            .remote_copy
+            .as_ref()
+            .and_then(|job| job.target_session.as_deref())
+            .unwrap_or(&task.input.session_id);
         let opened = tokio::select! {
-            result=Remote::connect(&self.engine,&task.input.session_id)=>result,
+            result=Remote::connect(&self.engine,execution_session)=>result,
             _=task.cancel.cancelled()=>Err(fail("TRANSFER_CANCELLED","任务已取消，未提交目标文件")),
             _=task.owner_closed.cancelled()=>Err(fail("SFTP_DISCONNECTED","文件连接已关闭")),
         };
@@ -481,8 +548,10 @@ impl Transfers {
             Ok(remote) => {
                 cleanup_remote = Some(remote.clone());
                 let operation = async {
-                    if let Some(job) = &task.copy {
-                        copy::run(&self.engine, &self.mutations, &task, &remote, job).await
+                    if let Some(job) = &task.remote_copy {
+                        remote_copy::run(self, &task, &remote, job).await
+                    } else if let Some(job) = &task.copy {
+                        copy::run(&self.engine, &self.mutations, &task, &remote, job, false).await
                     } else {
                         self.copy_tree(&task, &remote).await
                     }
@@ -492,7 +561,10 @@ impl Transfers {
                     result = &mut operation => result,
                     // Let the operation drain in-flight requests and close handles before cleanup.
                     _ = task.cancel.cancelled() => operation.await,
-                    _ = remote.owner_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "文件连接已关闭，传输失败")),
+                    _ = task.owner_closed.cancelled(), if task.remote_copy.is_some() => operation.await,
+                    _ = remote.owner_closed.cancelled() => {
+                        if task.remote_copy.is_some() { operation.await } else { Err(fail("SFTP_DISCONNECTED", "文件连接已关闭，传输失败")) }
+                    },
                     _ = remote.transport_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "网络中断，传输失败；可重新连接后从头重试")),
                 }
             }
@@ -535,7 +607,12 @@ impl Transfers {
             match result {
                 Ok(()) => {
                     info.state = "completed".into();
-                    info.message = Some(if info.files_total == 0 {
+                    info.message = Some(if info.remote_copy {
+                        format!(
+                            "远程复制完成，已处理 {} 个项目，跳过 {} 个项目",
+                            info.files_done, info.skipped
+                        )
+                    } else if info.files_total == 0 {
                         "目录传输完成，没有普通文件".into()
                     } else {
                         format!(

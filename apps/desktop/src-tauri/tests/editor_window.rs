@@ -168,6 +168,10 @@ fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
             json!({"id":"other-session","path":"/etc/shadow"}),
         ),
         (
+            "editor_open",
+            json!({"id":"other-session","path":"/new.txt","create":true}),
+        ),
+        (
             "text_read",
             json!({"id":"other-session","path":"/etc/shadow"}),
         ),
@@ -234,7 +238,41 @@ fn a_failed_open_does_not_reserve_the_single_editor_slot() {
         .is_err()
     );
     assert!(!app.state::<EditorWindows>().is_open());
+    assert!(
+        get_ipc_response(
+            &main,
+            request(
+                "editor_open",
+                json!({"id":"missing-session","path":"/new.txt","create":true}),
+                false
+            )
+        )
+        .is_err()
+    );
+    assert!(!app.state::<EditorWindows>().is_open());
     create_window(app.handle(), document(), None, "zh-CN").unwrap();
+}
+
+#[test]
+fn creating_a_file_checks_the_existing_editor_before_accessing_the_remote_session() {
+    let (_directory, app, main) = fixture();
+    create_window(app.handle(), document(), None, "zh-CN").unwrap();
+    let error = get_ipc_response(
+        &main,
+        request(
+            "editor_open",
+            json!({"id":"missing-session","path":"/new.txt","create":true}),
+            false,
+        ),
+    )
+    .unwrap_err();
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("请先关闭当前编辑文档")
+    );
+    assert!(app.state::<EditorWindows>().is_open());
 }
 
 #[test]

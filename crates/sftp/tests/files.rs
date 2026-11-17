@@ -1,4 +1,7 @@
 mod external;
+mod properties;
+mod remote_copy;
+mod search;
 mod support;
 mod throughput;
 use serverdeck_core::{IpcError, files::*};
@@ -48,6 +51,69 @@ async fn assert_completed(files: &Files, id: &str) {
     let info = finished(files, id).await;
     assert_eq!(info.state, "completed", "{:?}", info.message);
     assert_eq!(info.remaining_bytes, 0);
+}
+
+#[tokio::test]
+async fn mkdir_sends_selected_permissions_and_rejects_invalid_modes_without_creating() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    for (name, permissions, expected) in [
+        ("default", None, 0o755),
+        ("private", Some(0o700), 0o700),
+        ("special 中文 ;$(id)", Some(0o3770), 0o3770),
+        ("zero", Some(0), 0),
+    ] {
+        let path = format!("/{name}");
+        files
+            .action(
+                &session.id,
+                RemoteAction::Mkdir {
+                    path: path.clone(),
+                    permissions,
+                },
+            )
+            .await
+            .expect("create directory");
+        assert!(server.root.path().join(name).is_dir());
+        assert!(
+            server
+                .faults
+                .created_permissions
+                .lock()
+                .unwrap()
+                .contains(&(path, Some(expected)))
+        );
+    }
+    for permissions in [0o10000, 0o40755, u32::MAX] {
+        let error = files
+            .action(
+                &session.id,
+                RemoteAction::Mkdir {
+                    path: "/invalid".into(),
+                    permissions: Some(permissions),
+                },
+            )
+            .await
+            .expect_err("invalid permissions");
+        assert!(matches!(error, serverdeck_core::Error::Validation(_)));
+        assert!(!server.root.path().join("invalid").exists());
+    }
+    assert!(
+        files
+            .action(
+                &session.id,
+                RemoteAction::Mkdir {
+                    path: "/private".into(),
+                    permissions: Some(0o777)
+                }
+            )
+            .await
+            .is_err(),
+        "existing directories must not be modified"
+    );
+    assert_eq!(server.faults.created_permissions.lock().unwrap().len(), 4);
+    server.engine.close_all().await.expect("close leases");
 }
 
 #[tokio::test]
@@ -839,7 +905,13 @@ async fn real_protocol_crud_unicode_properties_and_terminal_lease_independence()
     let name = "中文 空格 ;$'目录";
     let root = format!("/{name}");
     files
-        .action(&info.id, RemoteAction::Mkdir { path: root.clone() })
+        .action(
+            &info.id,
+            RemoteAction::Mkdir {
+                path: root.clone(),
+                permissions: None,
+            },
+        )
         .await
         .expect("mkdir");
     tokio::fs::write(
@@ -1141,6 +1213,166 @@ async fn bounded_host_queue_cancel_cleanup_disconnect_and_retry() {
     server.engine.shutdown().await;
     assert_eq!(server.engine.counts().expect("counts"), (0, 0));
 }
+#[tokio::test]
+async fn new_text_creates_empty_document_and_uses_verified_editor_save() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    let name = "中文 ;$'new.conf";
+    let path = format!("/{name}");
+    let document = files
+        .create_text(&session.id, &path)
+        .await
+        .expect("create and read");
+    assert_eq!(document.session_id, session.id);
+    assert_eq!(document.path, path);
+    assert!(document.content.is_empty());
+    assert!(document.atomic_save);
+    assert_eq!(std::fs::read(server.root.path().join(name)).unwrap(), b"");
+    assert!(
+        server
+            .faults
+            .created_permissions
+            .lock()
+            .unwrap()
+            .contains(&(path, Some(0o644)))
+    );
+    files.editor_dirty(&document.token, true).unwrap();
+    let saved = files
+        .save_text(SaveText {
+            token: document.token.clone(),
+            content: "真实新内容\n".into(),
+            confirm_replace: true,
+        })
+        .await
+        .expect("save");
+    assert!(saved.document.is_some());
+    files.verify_saved(&document.token).await.expect("verify");
+    assert_eq!(
+        std::fs::read_to_string(server.root.path().join(name)).unwrap(),
+        "真实新内容\n"
+    );
+    files.close_editor(&document.token, false).unwrap();
+    assert_eq!(
+        server
+            .faults
+            .open_handles
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    server.engine.close_all().await.unwrap();
+}
+
+#[tokio::test]
+async fn new_text_rejects_existing_entries_and_concurrent_creation_without_overwrite() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 3);
+    std::fs::write(server.root.path().join("existing"), b"original").unwrap();
+    std::fs::create_dir(server.root.path().join("directory")).unwrap();
+    server
+        .faults
+        .links
+        .lock()
+        .unwrap()
+        .insert("/linked".into(), "/existing".into());
+    for path in ["/existing", "/directory", "/linked"] {
+        assert_eq!(
+            IpcError::from(
+                files
+                    .create_text(&session.id, path)
+                    .await
+                    .expect_err("collision")
+            )
+            .code,
+            "FILE_EXISTS"
+        );
+    }
+    assert_eq!(
+        std::fs::read(server.root.path().join("existing")).unwrap(),
+        b"original"
+    );
+    let (first, second) = tokio::join!(
+        files.create_text(&session.id, "/race"),
+        files.create_text(&session.id, "/race")
+    );
+    assert_eq!(usize::from(first.is_ok()) + usize::from(second.is_ok()), 1);
+    for document in [first, second].into_iter().flatten() {
+        files.close_editor(&document.token, false).unwrap();
+    }
+    assert_eq!(std::fs::read(server.root.path().join("race")).unwrap(), b"");
+    server.engine.close_all().await.unwrap();
+}
+
+#[tokio::test]
+async fn new_text_rejects_missing_parents_invalid_paths_and_unsupported_atomic_before_creation() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    for path in ["/missing/new.txt", "relative", "/srv/../escape"] {
+        assert!(files.create_text(&session.id, path).await.is_err());
+    }
+    assert!(
+        std::fs::read_dir(server.root.path())
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    server.engine.close_all().await.unwrap();
+    let server = Server::start(false, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    assert_eq!(
+        IpcError::from(
+            files
+                .create_text(&session.id, "/no-atomic.txt")
+                .await
+                .expect_err("unsupported")
+        )
+        .code,
+        "SFTP_ATOMIC_UNSUPPORTED"
+    );
+    assert!(!server.root.path().join("no-atomic.txt").exists());
+    server.engine.close_all().await.unwrap();
+}
+
+#[tokio::test]
+async fn new_text_load_failure_preserves_created_file_and_error_cause() {
+    let server = Server::start(true, Duration::ZERO).await;
+    let session = server.open().await;
+    let files = Files::new(server.engine.clone(), 1);
+    server
+        .faults
+        .reported_sizes
+        .lock()
+        .unwrap()
+        .insert("/changed.txt".into(), 3 * 1024 * 1024);
+    let error = files
+        .create_text(&session.id, "/changed.txt")
+        .await
+        .expect_err("changed before load");
+    assert!(matches!(
+        &error,
+        serverdeck_core::Error::Connection {
+            source: Some(_),
+            ..
+        }
+    ));
+    assert_eq!(IpcError::from(error).code, "EDITOR_CREATE_OPEN");
+    assert_eq!(
+        std::fs::read(server.root.path().join("changed.txt")).unwrap(),
+        b""
+    );
+    assert_eq!(
+        server
+            .faults
+            .open_handles
+            .load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    server.engine.close_all().await.unwrap();
+}
+
 #[tokio::test]
 async fn text_save_hash_conflict_permission_and_unsupported_atomic_never_truncate() {
     let server = Server::start(true, Duration::ZERO).await;

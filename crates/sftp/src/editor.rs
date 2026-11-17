@@ -74,7 +74,54 @@ impl Files {
         remote_absolute(path)?;
         let _permit = self.slot().await?;
         let remote = self.client(session).await?;
-        let (content, sha256, attrs) = guard(&remote, remote.read_text(path)).await?;
+        let text = guard(&remote, remote.read_text(path)).await?;
+        self.register_document(session, path, remote.atomic, text)
+    }
+    pub async fn create_text(&self, session: &str, path: &str) -> Result<TextDocument, Error> {
+        remote_absolute(path)?;
+        let _permit = self.slot().await?;
+        let remote = self.client(session).await?;
+        let mutation = self.mutation(session)?;
+        let _mutation = mutation.lock().await;
+        if !remote.atomic {
+            return Err(fail(
+                "SFTP_ATOMIC_UNSUPPORTED",
+                "服务器不支持原子保存，未创建新文件",
+            ));
+        }
+        if locked(&self.documents)?.len() >= 8 {
+            return Err(fail(
+                "EDITOR_LIMIT",
+                "最多保留 8 个编辑文档，请先关闭不需要的文档",
+            ));
+        }
+        if guard(&remote, remote.optional_attrs(path)).await?.is_some() {
+            return Err(fail(
+                "FILE_EXISTS",
+                "同名文件、目录或链接已存在，请使用其他文件名",
+            ));
+        }
+        let handle = guard(&remote, remote.stage(path, 0o644)).await?;
+        let opening = async {
+            remote.close_write(handle).await?;
+            let text = remote.read_text(path).await?;
+            self.register_document(session, path, remote.atomic, text)
+        };
+        guard(&remote, opening)
+            .await
+            .map_err(|error| Error::Connection {
+                code: "EDITOR_CREATE_OPEN",
+                message: "远程文件已创建，但未能载入编辑器；请刷新目录后重新打开",
+                source: Some(Box::new(error)),
+            })
+    }
+    fn register_document(
+        &self,
+        session: &str,
+        path: &str,
+        atomic_save: bool,
+        (content, sha256, attrs): (String, String, FileAttributes),
+    ) -> Result<TextDocument, Error> {
         let public = TextDocument {
             token: Uuid::new_v4().to_string(),
             session_id: session.into(),
@@ -84,7 +131,7 @@ impl Files {
             permissions: attrs.permissions.map(|v| v & 0o7777),
             uid: attrs.uid,
             gid: attrs.gid,
-            atomic_save: remote.atomic,
+            atomic_save,
         };
         let mut documents = locked(&self.documents)?;
         if documents.len() >= 8 {

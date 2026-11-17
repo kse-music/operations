@@ -777,7 +777,7 @@ h2 {
   text-align: left;
   gap: 18px;
   background: none;
-  padding: 21px 12px 21px 0;
+  padding: 21px 16px;
   border-bottom: 1px solid var(--line);
   color: var(--text);
   opacity: 0.65;
@@ -853,10 +853,9 @@ h2 {
   border-block: 1px solid var(--line);
 }
 .capability-grid article {
-  padding: 35px 35px 35px 0;
+  padding: 35px;
 }
 .capability-grid article + article {
-  padding-left: 35px;
   border-left: 1px solid var(--line);
 }
 .capability-grid .lucide {

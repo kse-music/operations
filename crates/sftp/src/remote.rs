@@ -113,18 +113,28 @@ impl Remote {
         }
     }
     pub async fn entries(&self, path: &str) -> Result<Vec<(String, FileAttributes)>, Error> {
+        self.entries_with_cancel(path, None).await
+    }
+    pub async fn entries_with_cancel(
+        &self,
+        path: &str,
+        cancel: Option<&CancellationToken>,
+    ) -> Result<Vec<(String, FileAttributes)>, Error> {
+        crate::search::check_cancel(cancel)?;
         let handle = self.raw.opendir(path).await.map_err(map)?.handle;
         let result = async {
             let mut entries = Vec::new();
             let mut names_bytes = 0usize;
             let mut batches = 0usize;
             loop {
+                crate::search::check_cancel(cancel)?;
                 batches += 1;
                 if batches > LIST_LIMIT * 2 {
                     return Err(fail("SFTP_LIMIT", "目录响应过多或无法到达结尾"));
                 }
                 match self.raw.readdir(&handle).await {
                     Ok(batch) => {
+                        crate::search::check_cancel(cancel)?;
                         for mut file in batch.files {
                             if matches!(file.filename.as_str(), "." | "..") {
                                 continue;
@@ -340,11 +350,17 @@ impl Remote {
         }
     }
     pub async fn mkdir(&self, path: &str) -> Result<(), Error> {
+        self.mkdir_with_permissions(path, 0o755).await
+    }
+    pub async fn mkdir_with_permissions(&self, path: &str, permissions: u32) -> Result<(), Error> {
+        if permissions > 0o7777 {
+            return Err(Error::Validation("目录权限必须在八进制 0000–7777 范围内"));
+        }
         self.raw
             .mkdir(
                 path,
                 FileAttributes {
-                    permissions: Some(0o755),
+                    permissions: Some(permissions),
                     ..Default::default()
                 },
             )

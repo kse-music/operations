@@ -27,7 +27,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-it('automatically dismisses a non-error toast after three seconds while keeping errors visible', async () => {
+it('automatically dismisses a non-error toast after two seconds while keeping errors visible', async () => {
   vi.useFakeTimers();
   const notifications = useNotificationsStore();
   notifications.push('设置已保存。日志级别在下次启动时生效。');
@@ -35,7 +35,7 @@ it('automatically dismisses a non-error toast after three seconds while keeping 
   await flush();
   expect(document.querySelector('[role="status"]')?.textContent).toContain('设置已保存');
 
-  await vi.advanceTimersByTimeAsync(2999);
+  await vi.advanceTimersByTimeAsync(1999);
   expect(document.querySelector('[role="status"]')).not.toBeNull();
   await vi.advanceTimersByTimeAsync(1);
   expect(document.querySelector('[role="status"]')).toBeNull();
@@ -59,7 +59,7 @@ it('allows early dismissal without shortening the lifetime of a repeated non-err
 
   notifications.push('设置已保存');
   await flush();
-  await vi.advanceTimersByTimeAsync(2999);
+  await vi.advanceTimersByTimeAsync(1999);
   expect(document.querySelector('[role="status"]')?.textContent).toContain('设置已保存');
   await vi.advanceTimersByTimeAsync(1);
   expect(document.querySelector('.toast')).toBeNull();

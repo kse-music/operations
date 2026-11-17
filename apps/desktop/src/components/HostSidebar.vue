@@ -37,6 +37,7 @@ import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
 import HostTreeControls from './HostTreeControls.vue';
 import HostIcon from './HostIcon.vue';
+import TreeRenameInput from './TreeRenameInput.vue';
 import GroupManager from './GroupManager.vue';
 import Modal from './Modal.vue';
 import { hostsApi } from '../services/hosts';
@@ -84,7 +85,7 @@ function targetGroup(event: PointerEvent): string | null {
   return id === pendingDrag.value?.host.groupId ? null : (id ?? 'root');
 }
 function beginDrag(host: Host, event: PointerEvent): void {
-  if (event.button !== 0 || event.pointerType === 'touch' || store.busy) return;
+  if (event.button !== 0 || event.pointerType === 'touch' || store.busy || renaming.value) return;
   endDrag();
   pendingDrag.value = {
     host,
@@ -159,7 +160,7 @@ function ignoreDragClick(event: MouseEvent): void {
   event.stopPropagation();
 }
 function openHost(host: Host): void {
-  if (suppressClick || store.busy) return;
+  if (suppressClick || store.busy || renaming.value) return;
   store.selectedId = host.id;
   emit('select', host);
 }
@@ -220,6 +221,77 @@ function toggle(id: string): void {
 }
 
 type ContextTarget = { kind: 'folder'; id: string | null } | { kind: 'host'; id: string };
+const renaming = ref<{
+  target: ContextTarget;
+  name: string;
+  initialName: string;
+  busy: boolean;
+  error: string | null;
+}>();
+function isRenaming(kind: ContextTarget['kind'], id: string | null): boolean {
+  return renaming.value?.target.kind === kind && renaming.value.target.id === id;
+}
+function beginRename(target: ContextTarget): void {
+  if (
+    !props.active ||
+    store.busy ||
+    renaming.value ||
+    dragged.value ||
+    document.querySelector('dialog[open]')
+  )
+    return;
+  const host =
+    target.kind === 'host' ? store.catalog?.hosts.find((host) => host.id === target.id) : undefined;
+  const name = host
+    ? hostDisplayName(host)
+    : target.kind === 'folder'
+      ? store.catalog?.groups.find((group) => group.id === target.id)?.name
+      : undefined;
+  if (name === undefined) return;
+  renaming.value = { target, name, initialName: name, busy: false, error: null };
+}
+async function finishRename(restoreFocus: boolean): Promise<void> {
+  const target = renaming.value?.target;
+  renaming.value = undefined;
+  if (!restoreFocus || !target) return;
+  await nextTick();
+  const row =
+    target.kind === 'host'
+      ? [...(tree.value?.querySelectorAll<HTMLElement>('.tree-host') ?? [])].find(
+          (row) => row.dataset.hostId === target.id,
+        )
+      : [...(tree.value?.querySelectorAll<HTMLElement>('.tree-group') ?? [])]
+          .find((row) => row.dataset.groupId === target.id)
+          ?.querySelector<HTMLElement>('.group-toggle');
+  row?.focus({ preventScroll: true });
+}
+function changeRename(name: string): void {
+  if (!renaming.value || renaming.value.busy) return;
+  renaming.value.name = name;
+  renaming.value.error = null;
+}
+async function saveRename(reason: 'enter' | 'blur'): Promise<void> {
+  const edit = renaming.value;
+  if (!edit || edit.busy || store.busy) return;
+  const name = edit.name.trim();
+  if (edit.target.kind === 'folder' && !name) {
+    edit.error = tr('名称须为 1–128 个字符，且不含控制字符');
+    return;
+  }
+  if (name === edit.initialName.trim()) {
+    await finishRename(reason === 'enter');
+    return;
+  }
+  edit.busy = true;
+  const ok =
+    edit.target.kind === 'host'
+      ? await store.renameHost(edit.target.id, name)
+      : edit.target.id !== null && (await store.renameGroup(edit.target.id, name));
+  if (renaming.value !== edit) return;
+  edit.busy = false;
+  if (ok) await finishRename(reason === 'enter');
+  else edit.error = store.error ?? tr('操作未完成，请重试并检查本地应用日志。');
+}
 type MenuAction =
   | 'newHost'
   | 'newFolder'
@@ -240,7 +312,7 @@ function setControls(id: string, component: unknown): void {
   if (component) controls.set(id, component as InstanceType<typeof HostTreeControls>);
   else controls.delete(id);
 }
-const folderEditor = ref<{ parentId: string | null; group?: HostGroup }>();
+const folderEditor = ref<{ parentId: string | null }>();
 const deletingFolder = ref<HostGroup>();
 function confirmDelete(target: ContextTarget): void {
   if (target.kind === 'host') controls.get(target.id)?.confirmDelete();
@@ -258,6 +330,7 @@ const menuItems = computed<
     return [
       { key: 'connect', label: tr('连接'), icon: Plug, iconClass: 'menu-icon-green' },
       { key: 'edit', label: tr('编辑'), icon: Pencil, iconClass: 'menu-icon-gold' },
+      { key: 'rename', label: tr('重命名'), icon: TextCursorInput, iconClass: 'menu-icon-gold' },
       { key: 'copy', label: tr('复制'), icon: Copy, iconClass: 'menu-icon-blue' },
       ...plugins.extensions
         .filter((e) => e.kind === 'host_menu')
@@ -290,7 +363,7 @@ const menuItems = computed<
       : [
           {
             key: 'rename' as const,
-            label: tr('重命名文件夹'),
+            label: tr('重命名'),
             icon: TextCursorInput,
             iconClass: 'menu-icon-gold',
           },
@@ -323,7 +396,8 @@ async function openContext(
     props.active === false ||
     !store.catalog ||
     document.querySelector('dialog[open]') ||
-    dragged.value
+    dragged.value ||
+    renaming.value
   )
     return;
   contextTrigger = event.currentTarget as HTMLElement;
@@ -345,8 +419,13 @@ async function openContext(
     ?.focus({ preventScroll: true });
 }
 function rowKeys(target: ContextTarget, event: KeyboardEvent): void {
-  if (event.defaultPrevented) return;
-  if (event.key === 'Delete') {
+  if (
+    event.defaultPrevented ||
+    (event.target !== event.currentTarget &&
+      !(event.target instanceof HTMLElement && event.target.matches('.group-expander')))
+  )
+    return;
+  if (event.key === 'Delete' || event.key === 'F2') {
     if (
       event.repeat ||
       event.isComposing ||
@@ -360,12 +439,14 @@ function rowKeys(target: ContextTarget, event: KeyboardEvent): void {
       document.querySelector('dialog[open]') ||
       dragged.value ||
       context.value ||
+      renaming.value ||
       (target.kind === 'folder' && target.id === null)
     )
       return;
     event.preventDefault();
     event.stopPropagation();
-    confirmDelete(target);
+    if (event.key === 'F2') beginRename(target);
+    else confirmDelete(target);
     return;
   }
   if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return;
@@ -407,8 +488,7 @@ async function runContext(action: MenuAction): Promise<void> {
     if (action === 'newHost') emit('create', target.id);
     else if (action === 'newFolder') folderEditor.value = { parentId: target.id };
     else if (action === 'importOpenssh') emit('importOpenssh');
-    else if (action === 'rename' && group)
-      folderEditor.value = { parentId: group.parentId ?? null, group: { ...group } };
+    else if (action === 'rename' && group) beginRename(target);
     else if (action === 'deleteFolder' && group) confirmDelete(target);
     return;
   }
@@ -424,6 +504,7 @@ async function runContext(action: MenuAction): Promise<void> {
     store.selectedId = host.id;
     emit('select', host);
   } else if (action === 'edit') controls.get(host.id)?.edit();
+  else if (action === 'rename') beginRename(target);
   else if (action === 'deleteHost') confirmDelete(target);
   else if (action === 'copy') {
     const result = await store.run(() => hostsApi.copy(host.id), tr('主机已复制。'));
@@ -447,9 +528,18 @@ async function removeFolder(): Promise<void> {
 const closeContext = () => dismissContext();
 watch(() => store.catalog, closeContext);
 watch(
+  () => [store.catalog, store.search] as const,
+  () => {
+    if (!renaming.value?.busy) void finishRename(false);
+  },
+);
+watch(
   () => props.active,
   (active) => {
-    if (active === false) dismissContext();
+    if (active === false) {
+      dismissContext();
+      void finishRename(false);
+    }
   },
 );
 onMounted(() => {
@@ -476,6 +566,7 @@ onBeforeUnmount(() => {
   >
     <div class="host-list-heading">
       <span class="host-list-title">{{ tr(' 主机') }}</span>
+      <slot name="heading-actions"></slot>
     </div>
     <div class="host-sidebar-controls">
       <label class="host-search-field">
@@ -503,16 +594,27 @@ onBeforeUnmount(() => {
         :data-group-id="group.id ?? ''"
         :class="{ 'drop-target': dropTarget === (group.id ?? 'root') }"
       >
-        <button
+        <div
           class="group-toggle"
-          :aria-expanded="!isCollapsed(group.id)"
+          tabindex="0"
           :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
           @contextmenu.prevent.stop="openContext({ kind: 'folder', id: group.id }, $event)"
           @keydown="rowKeys({ kind: 'folder', id: group.id }, $event)"
-          @click="toggle(group.id ?? 'root')"
+          @click="($event.currentTarget as HTMLElement).focus({ preventScroll: true })"
         >
-          <ChevronRight v-if="isCollapsed(group.id)" :size="12" aria-hidden="true" />
-          <ChevronDown v-else :size="12" aria-hidden="true" />
+          <button
+            type="button"
+            class="group-expander"
+            :aria-expanded="!isCollapsed(group.id)"
+            :aria-label="
+              isCollapsed(group.id) ? tr('展开 {0}', group.name) : tr('收起 {0}', group.name)
+            "
+            :disabled="!!renaming"
+            @click.stop="toggle(group.id ?? 'root')"
+          >
+            <ChevronRight v-if="isCollapsed(group.id)" :size="12" aria-hidden="true" />
+            <ChevronDown v-else :size="12" aria-hidden="true" />
+          </button>
           <Folder
             v-if="isCollapsed(group.id)"
             class="host-group-icon"
@@ -527,9 +629,20 @@ onBeforeUnmount(() => {
             :stroke-width="1.2"
             aria-hidden="true"
           />
-          <span class="group-name">{{ group.name }}</span
+          <TreeRenameInput
+            v-if="isRenaming('folder', group.id) && renaming"
+            :name="renaming.name"
+            :label="tr('重命名 {0}', renaming.initialName)"
+            :required="true"
+            :busy="renaming.busy"
+            :error="renaming.error"
+            @change="changeRename"
+            @submit="saveRename"
+            @cancel="finishRename(true)"
+          />
+          <span v-else class="group-name">{{ group.name }}</span
           ><span class="group-count">{{ group.count }}</span>
-        </button>
+        </div>
         <template v-if="!isCollapsed(group.id)">
           <div
             v-for="host in group.hosts"
@@ -537,7 +650,8 @@ onBeforeUnmount(() => {
             class="tree-host-row"
             :style="{ paddingLeft: `${group.depth * 14}px` }"
           >
-            <button
+            <component
+              :is="isRenaming('host', host.id) ? 'div' : 'button'"
               :data-host-id="host.id"
               class="tree-host"
               :class="{
@@ -559,13 +673,24 @@ onBeforeUnmount(() => {
                 :connected="hostState(host.id) === tr('已连接')"
                 :label="hostState(host.id)"
               />
-              <span class="host-label"
-                ><span class="host-name">{{ hostDisplayName(host) }}</span
+              <span class="host-label" :class="{ renaming: isRenaming('host', host.id) }"
+                ><TreeRenameInput
+                  v-if="isRenaming('host', host.id) && renaming"
+                  :name="renaming.name"
+                  :label="tr('重命名 {0}', renaming.initialName)"
+                  :required="false"
+                  :busy="renaming.busy"
+                  :error="renaming.error"
+                  @change="changeRename"
+                  @submit="saveRename"
+                  @cancel="finishRename(true)"
+                />
+                <span v-else class="host-name">{{ hostDisplayName(host) }}</span
                 ><span v-if="hostDisplayName(host) !== hostAddress(host)" class="host-address">{{
                   hostAddress(host)
                 }}</span></span
               >
-            </button>
+            </component>
             <HostTreeControls
               :ref="(component) => setControls(host.id, component)"
               :host="host"
@@ -610,7 +735,6 @@ onBeforeUnmount(() => {
     <GroupManager
       v-if="folderEditor"
       :parent-id="folderEditor.parentId"
-      :group="folderEditor.group"
       @saved="folderSaved"
       @close="folderEditor = undefined"
     />

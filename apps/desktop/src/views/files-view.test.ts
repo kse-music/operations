@@ -20,6 +20,9 @@ vi.mock('@tauri-apps/api/webview', () => ({
 }));
 let app: App | undefined, pinia: Pinia, root: HTMLDivElement;
 const originalShowModal = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
+const originalPopover = ['showPopover', 'hidePopover'].map(
+  (name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const,
+);
 const entry: FileEntry = {
   name: 'config',
   path: '/srv/api/config',
@@ -36,6 +39,8 @@ async function mountView() {
   await nextTick();
 }
 beforeEach(async () => {
+  for (const [name] of originalPopover)
+    Object.defineProperty(HTMLElement.prototype, name, { configurable: true, value() {} });
   pinia = createPinia();
   const host = {
     ...hostInput(),
@@ -82,12 +87,275 @@ afterEach(() => {
   root.remove();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  for (const [name, descriptor] of originalPopover) {
+    if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+    else Reflect.deleteProperty(HTMLElement.prototype, name);
+  }
   if (originalShowModal)
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
 
 const drivePicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择本地磁盘"]')!;
+async function newFile() {
+  root.querySelector<HTMLButtonElement>('[aria-label="新建文件"]')!.click();
+  await nextTick();
+  return document.querySelector<HTMLDialogElement>('.new-file-dialog')!;
+}
+it('offers new file beside new folder and opens its created document directly in the built-in editor', async () => {
+  const files = useFilesStore(pinia);
+  const button = root.querySelector<HTMLButtonElement>('[aria-label="新建文件"]')!;
+  expect(button.previousElementSibling?.getAttribute('aria-label')).toBe('新建文件夹');
+  expect(button.textContent?.trim()).toBe('');
+  const document = { token: 'created', sessionId: 'sftp-a', path: '/srv/api/中文 ;$config.ini' };
+  const create = vi.spyOn(filesApi, 'createEditor').mockResolvedValue(document);
+  const existing = vi.spyOn(filesApi, 'openEditor');
+  const listing = vi.spyOn(filesApi, 'list').mockResolvedValue(files.current!.listing!);
+  const dialog = await newFile();
+  await nameFolder(dialog, '中文 ;$config.ini');
+  createFolder(dialog);
+  await vi.waitFor(() => expect(window.document.querySelector('.new-file-dialog')).toBeNull());
+  expect(create).toHaveBeenCalledExactlyOnceWith('sftp-a', document.path, 'operator@192.0.2.11');
+  expect(existing).not.toHaveBeenCalled();
+  expect(files.document).toEqual(document);
+  expect(listing).toHaveBeenCalledWith('sftp-a', '/srv/api');
+});
+it('retains the file name and error when creation fails and refreshes the original directory', async () => {
+  const files = useFilesStore(pinia);
+  vi.spyOn(filesApi, 'createEditor').mockRejectedValue({
+    message: '同名文件、目录或链接已存在，请使用其他文件名',
+  });
+  const listing = vi.spyOn(filesApi, 'list').mockResolvedValue(files.current!.listing!);
+  const dialog = await newFile();
+  await nameFolder(dialog, 'existing.txt');
+  createFolder(dialog);
+  await vi.waitFor(() =>
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain('同名'),
+  );
+  expect(dialog.querySelector<HTMLInputElement>('input[autofocus]')!.value).toBe('existing.txt');
+  expect(files.openIssue).toBeNull();
+  expect(listing).toHaveBeenCalledWith('sftp-a', '/srv/api');
+});
+it('blocks duplicate creation and avoids refreshing a replacement SFTP identity', async () => {
+  const files = useFilesStore(pinia);
+  let complete!: (value: { token: string; sessionId: string; path: string }) => void;
+  const create = vi.spyOn(filesApi, 'createEditor').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  const listing = vi.spyOn(filesApi, 'list');
+  const dialog = await newFile();
+  await nameFolder(dialog, 'pending.txt');
+  createFolder(dialog);
+  createFolder(dialog);
+  await nextTick();
+  expect(create).toHaveBeenCalledTimes(1);
+  expect(dialog.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
+  files.current!.id = 'new-identity';
+  complete({ token: 'pending', sessionId: 'sftp-a', path: '/srv/api/pending.txt' });
+  await vi.waitFor(() => expect(document.querySelector('.new-file-dialog')).toBeNull());
+  expect(listing).not.toHaveBeenCalled();
+});
+it('cancels an unsubmitted file name when the remote directory changes', async () => {
+  const files = useFilesStore(pinia);
+  const create = vi.spyOn(filesApi, 'createEditor');
+  const dialog = await newFile();
+  await nameFolder(dialog, 'unsubmitted.txt');
+  files.current!.path = '/different';
+  await nextTick();
+  expect(document.querySelector('.new-file-dialog')).toBeNull();
+  expect(create).not.toHaveBeenCalled();
+});
+const newFolder = async () => {
+  root.querySelector<HTMLButtonElement>('[aria-label="新建文件夹"]')!.click();
+  await nextTick();
+  return document.querySelector<HTMLDialogElement>('.new-directory-dialog')!;
+};
+async function nameFolder(dialog: HTMLDialogElement, name: string) {
+  const input = dialog.querySelector<HTMLInputElement>('input[autofocus]')!;
+  input.value = name;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+}
+function createFolder(dialog: HTMLDialogElement) {
+  dialog.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+}
+it('creates a remote directory with the selected mode and remembers it only for the original session', async () => {
+  const files = useFilesStore(pinia);
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue(undefined);
+  vi.spyOn(filesApi, 'list').mockResolvedValue(files.current!.listing!);
+  const dialog = await newFolder();
+  await nameFolder(dialog, '中文 ;$folder');
+  dialog.querySelector<HTMLInputElement>('.directory-attributes > .checkbox-label input')!.click();
+  const mode = dialog.querySelector<HTMLInputElement>('.directory-mode input')!;
+  mode.value = '2770';
+  mode.dispatchEvent(new Event('input', { bubbles: true }));
+  dialog.querySelector<HTMLInputElement>('.directory-remember input')!.click();
+  await nextTick();
+  createFolder(dialog);
+  await vi.waitFor(() => expect(document.querySelector('.new-directory-dialog')).toBeNull());
+  expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+    kind: 'mkdir',
+    path: '/srv/api/中文 ;$folder',
+    permissions: 0o2770,
+  });
+  const reopened = await newFolder();
+  expect(reopened.querySelector<HTMLInputElement>('.directory-mode input')!.value).toBe('2770');
+  expect(reopened.querySelector<HTMLInputElement>('.directory-remember input')!.checked).toBe(true);
+  files.current!.id = 'another-identity';
+  await nextTick();
+  expect(document.querySelector('.new-directory-dialog')).toBeNull();
+  const next = await newFolder();
+  expect(next.querySelector<HTMLInputElement>('.directory-mode input')!.value).toBe('0755');
+  expect(
+    next.querySelector<HTMLInputElement>('.directory-attributes > .checkbox-label input')!.checked,
+  ).toBe(false);
+  expect(next.querySelector<HTMLInputElement>('.directory-remember input')!.checked).toBe(false);
+});
+it('uses default permissions and clears remembered options after a successful creation without remembering', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.newDirectorySettings = { sessionId: 'sftp-a', permissions: 0o700 };
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue(undefined);
+  vi.spyOn(filesApi, 'list').mockResolvedValue(files.current!.listing!);
+  const dialog = await newFolder();
+  await nameFolder(dialog, 'default');
+  dialog.querySelector<HTMLInputElement>('.directory-attributes > .checkbox-label input')!.click();
+  dialog.querySelector<HTMLInputElement>('.directory-remember input')!.click();
+  await nextTick();
+  createFolder(dialog);
+  await vi.waitFor(() => expect(document.querySelector('.new-directory-dialog')).toBeNull());
+  expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+    kind: 'mkdir',
+    path: '/srv/api/default',
+    permissions: null,
+  });
+  expect(files.current!.newDirectorySettings).toBeUndefined();
+});
+it('retains a failed creation draft and remembered settings, then blocks duplicate retries until completion', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.newDirectorySettings = { sessionId: 'sftp-a', permissions: 0o700 };
+  let complete!: () => void;
+  const action = vi
+    .spyOn(filesApi, 'action')
+    .mockRejectedValueOnce(new Error('权限不足'))
+    .mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
+  vi.spyOn(filesApi, 'list').mockResolvedValue(files.current!.listing!);
+  const dialog = await newFolder();
+  await nameFolder(dialog, 'retry');
+  dialog.querySelector<HTMLInputElement>('.directory-remember input')!.click();
+  await nextTick();
+  createFolder(dialog);
+  await vi.waitFor(() =>
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe('权限不足'),
+  );
+  expect(dialog.querySelector<HTMLInputElement>('input[autofocus]')!.value).toBe('retry');
+  expect(dialog.querySelector<HTMLInputElement>('.directory-mode input')!.value).toBe('0700');
+  expect(files.current!.newDirectorySettings?.permissions).toBe(0o700);
+  createFolder(dialog);
+  createFolder(dialog);
+  await nextTick();
+  expect(action).toHaveBeenCalledTimes(2);
+  expect(dialog.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(true);
+  dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+  expect(dialog.isConnected).toBe(true);
+  complete();
+  await vi.waitFor(() => expect(document.querySelector('.new-directory-dialog')).toBeNull());
+});
+it('cancels a creation draft when its parent directory changes without submitting', async () => {
+  const files = useFilesStore(pinia);
+  const action = vi.spyOn(filesApi, 'action');
+  const dialog = await newFolder();
+  await nameFolder(dialog, 'unsubmitted');
+  files.current!.path = '/other';
+  await nextTick();
+  expect(document.querySelector('.new-directory-dialog')).toBeNull();
+  expect(action).not.toHaveBeenCalled();
+});
+it('places an accessible icon-only search button beside hidden items and defaults to the current directory', async () => {
+  const button = root.querySelector<HTMLButtonElement>('.file-search-open')!;
+  expect(button.classList.contains('tool-button')).toBe(true);
+  expect(button.textContent?.trim()).toBe('');
+  expect(button.getAttribute('aria-label')).toBe('搜索远程文件');
+  expect(button.title).toBe('搜索远程文件');
+  expect(button.previousElementSibling?.getAttribute('aria-label')).toBe('显示隐藏项');
+  button.click();
+  await nextTick();
+  expect(document.querySelector<HTMLInputElement>('.file-search-options input')?.checked).toBe(
+    false,
+  );
+});
+it('searches in a dialog and double-clicks a result to reveal its page without opening the file', async () => {
+  const files = useFilesStore(pinia);
+  const state = files.ensureSearch()!;
+  const target: FileEntry = {
+    ...entry,
+    kind: 'file',
+    name: 'z-config.txt',
+    path: '/srv/api/z-config.txt',
+    size: 12,
+  };
+  state.query = 'config';
+  state.status = 'completed';
+  state.entries = [{ entry: target, parent: '/srv/api' }];
+  const rows = Array.from({ length: 240 }, (_, index) => ({
+    ...target,
+    name: `a-${index}`,
+    path: `/srv/api/a-${index}`,
+  }));
+  vi.spyOn(filesApi, 'list').mockResolvedValue({
+    path: '/srv/api',
+    parent: '/srv',
+    entries: [...rows, target],
+  });
+  const editor = vi.spyOn(filesApi, 'openEditor');
+  root.querySelector<HTMLButtonElement>('.file-search-open')!.click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('.file-search-dialog')!;
+  expect(dialog.querySelector('footer')).toBeNull();
+  dialog
+    .querySelector('.file-search-result-name')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await vi.waitFor(() => {
+    expect(document.querySelector('.file-search-dialog')).toBeNull();
+    expect((document.activeElement as HTMLElement)?.dataset.path).toBe(target.path);
+  });
+  expect(editor).not.toHaveBeenCalled();
+  expect(
+    root
+      .querySelector('.file-name[data-path="/srv/api/z-config.txt"]')
+      ?.closest('tr')
+      ?.classList.contains('selected'),
+  ).toBe(true);
+  root.querySelector<HTMLButtonElement>('.file-search-open')!.click();
+  await nextTick();
+  expect(document.querySelector<HTMLInputElement>('#file-search-query')?.value).toBe('config');
+  expect(document.querySelector('[aria-label="搜索结果"]')?.textContent).toContain('z-config.txt');
+});
+it('keeps the search dialog open when a result was removed before locating', async () => {
+  const files = useFilesStore(pinia);
+  const state = files.ensureSearch()!;
+  state.query = 'config';
+  state.status = 'completed';
+  state.entries = [{ entry, parent: '/srv/api' }];
+  vi.spyOn(filesApi, 'list').mockResolvedValue({ path: '/srv/api', parent: '/srv', entries: [] });
+  root.querySelector<HTMLButtonElement>('.file-search-open')!.click();
+  await nextTick();
+  document
+    .querySelector('.file-search-result-name')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await vi.waitFor(() =>
+    expect(document.querySelector('.file-search-dialog')?.textContent).toContain(
+      '文件已移动或删除',
+    ),
+  );
+});
 const remoteTable = () => root.querySelector<HTMLElement>('[aria-label="远程文件"]')!;
 const renameTable = (side: 'local' | 'remote') =>
   root.querySelector<HTMLElement>(`[aria-label="${side === 'local' ? '本地' : '远程'}文件"]`)!;
@@ -513,6 +781,61 @@ it('keeps the row selected and focused by the user during a blur save', async ()
   ).toBe(false);
 });
 
+it('binds the remote copy dialog to the selected paths and closes it when identity changes', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.listing!.entries = [entry, { ...entry, name: 'second', path: '/srv/api/second' }];
+  const start = vi.spyOn(filesApi, 'remoteCopy').mockRejectedValue({ message: '测试提交失败' });
+  await nextTick();
+  for (const checkbox of root.querySelectorAll<HTMLInputElement>(
+    '[aria-label="远程文件"] tbody input[type="checkbox"]',
+  )) {
+    checkbox.click();
+    await nextTick();
+  }
+  root
+    .querySelector('[aria-label="远程文件"] tbody tr')!
+    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  await nextTick();
+  [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    .find((button) => button.textContent?.trim() === '远程复制')!
+    .click();
+  await nextTick();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog:has(.remote-copy)')!;
+  const target = dialog.querySelector('select')!;
+  target.value = 'a';
+  target.dispatchEvent(new Event('change', { bubbles: true }));
+  await nextTick();
+  expect(dialog.textContent).toContain('2 个选中项目');
+  expect(dialog.querySelector('pre')?.textContent).toBe('/srv/api/config\n/srv/api/second');
+  expect(start).not.toHaveBeenCalled();
+  vi.spyOn(filesApi, 'list').mockResolvedValue({
+    path: '/',
+    parent: null,
+    entries: [{ ...entry, name: 'target', path: '/target' }],
+  });
+  dialog.querySelector<HTMLButtonElement>('.remote-directory-select')!.click();
+  await vi.waitFor(() => expect(dialog.querySelector('[data-path="/target"]')).not.toBeNull());
+  dialog.querySelector<HTMLButtonElement>('[data-path="/target"] .directory-entry')!.click();
+  await nextTick();
+  dialog
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await vi.waitFor(() =>
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'sftp-a',
+        sources: ['/srv/api/config', '/srv/api/second'],
+        destination: '/target',
+        name: null,
+        confirmed: true,
+      }),
+    ),
+  );
+  files.current!.id = 'replacement';
+  await nextTick();
+  expect(document.querySelector('.remote-copy')).toBeNull();
+});
+
 it.each(['local', 'remote'] as const)(
   'keeps a failed %s blur save editable and cancels with Esc',
   async (side) => {
@@ -739,7 +1062,7 @@ it.each([
   ['remote', 'directory', '进入目录', '下载选中'],
   ['remote', 'file', '打开文本', '下载选中'],
 ] as const)(
-  'shows icons beside every %s %s menu action without changing its labels',
+  'shows the expected icons, labels and action order for the %s %s menu',
   async (side, kind, open, transfer) => {
     const files = useFilesStore(pinia);
     const selected = { ...entry, kind };
@@ -757,18 +1080,17 @@ it.each([
       open,
       ...(side === 'remote' && kind === 'file' ? ['使用系统应用编辑…'] : []),
       transfer,
-      '复制绝对路径',
-      '查看属性',
+      ...(side === 'remote' ? ['远程复制'] : []),
+      '删除',
       '重命名',
-      ...(side === 'remote' ? ['删除选中', '在新终端中打开'] : ['删除']),
+      ...(side === 'remote' ? ['在新终端中打开'] : []),
+      '属性',
     ]);
     for (const button of buttons) {
       expect(button.firstElementChild?.tagName).toBe('svg');
       expect(button.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
     }
-    const write = vi.spyOn(clipboardApi, 'writeText').mockResolvedValue(undefined);
-    buttons.find((button) => button.textContent?.trim() === '复制绝对路径')!.click();
-    expect(write).toHaveBeenCalledExactlyOnceWith(selected.path);
+    buttons.find((button) => button.textContent?.trim() === '删除')!.click();
     await nextTick();
     expect(root.querySelector('.file-context-menu')).toBeNull();
   },
@@ -827,7 +1149,6 @@ it.each([
     path: `/srv/api/${name}`,
     kind: 'file' as const,
   }));
-  const write = vi.spyOn(clipboardApi, 'writeText').mockResolvedValue();
   await nextTick();
   const row = (side: 'local' | 'remote', name: string) =>
     root.querySelector(
@@ -845,18 +1166,20 @@ it.each([
   const menu = root.querySelector<HTMLElement>('.file-context-menu')!;
   expect(menu.style.left).toBe('80px');
   expect(menu.style.top).toBe('90px');
-  const copy = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent?.trim() === '复制绝对路径',
+  const remove = [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '删除',
   )!;
-  copy.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  remove.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
   await nextTick();
   expect(menu.isConnected).toBe(true);
-  copy.click();
-  await vi.waitFor(() =>
-    expect(write).toHaveBeenCalledExactlyOnceWith(
-      to === 'local' ? 'D:/test/second' : '/srv/api/second',
-    ),
-  );
+  remove.click();
+  await vi.waitFor(() => {
+    const dialog = document.querySelector(
+      `dialog[aria-label="${to === 'local' ? '确认移入回收站' : '确认删除远程项目'}"]`,
+    );
+    expect(dialog?.textContent).toContain('second');
+    expect(dialog?.textContent).not.toContain('first');
+  });
 });
 
 it('closes a file menu on outside pointer presses and removes its global listeners on unmount', async () => {
@@ -1762,13 +2085,13 @@ it.each([
 );
 
 it.each([
-  ['local', '\\\\?\\C:\\Users\\DingHao\\.hyperframes', 'C:\\Users\\DingHao\\.hyperframes'],
-  ['local', '\\\\?\\UNC\\server\\share\\资料', '\\\\server\\share\\资料'],
-  ['local', '/home/user/资料', '/home/user/资料'],
-  ['remote', '/srv/api/config', '/srv/api/config'],
+  ['local', '\\\\?\\C:\\Users\\DingHao\\.hyperframes'],
+  ['local', '\\\\?\\UNC\\server\\share\\资料'],
+  ['local', '/home/user/资料'],
+  ['remote', '/srv/api/config'],
 ] as const)(
-  'copies the displayed %s entry path from its context menu',
-  async (side, path, display) => {
+  'omits absolute-path copying from the %s context menu without changing the entry',
+  async (side, path) => {
     const files = useFilesStore(pinia);
     const copy = vi.spyOn(clipboardApi, 'writeText').mockResolvedValue(undefined);
     const listing = side === 'local' ? files.local! : files.current!.listing!;
@@ -1780,9 +2103,9 @@ it.each([
     await nextTick();
     const copyButton = [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
       (button) => button.textContent?.trim() === '复制绝对路径',
-    )!;
-    copyButton.click();
-    expect(copy).toHaveBeenCalledExactlyOnceWith(display);
+    );
+    expect(copyButton).toBeUndefined();
+    expect(copy).not.toHaveBeenCalled();
     expect(listing.entries[0]!.path).toBe(path);
   },
 );
@@ -1824,28 +2147,42 @@ it('uses the original path when reopening a displayed long path and accepts a ty
 it.each([
   ['local', '\\\\?\\C:\\Users\\DH\\.sts4', 'C:\\Users\\DH\\.sts4'],
   ['local', '\\\\?\\UNC\\server\\share\\资料', '\\\\server\\share\\资料'],
-  ['remote', '/srv/api/\\\\?\\C:\\file', '/srv/api/\\\\?\\C:\\file'],
-] as const)('formats only local paths in %s file properties', async (side, path, expected) => {
-  const files = useFilesStore(pinia);
-  const listing = side === 'local' ? files.local! : files.current!.listing!;
-  const selected = { ...entry, path };
-  listing.entries = [selected];
-  const properties = vi.spyOn(filesApi, 'properties').mockResolvedValue(selected);
-  await nextTick();
-  root
-    .querySelector(`[aria-label="${side === 'local' ? '本地' : '远程'}文件"] tbody tr`)!
-    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-  await nextTick();
-  [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-    .find((button) => button.textContent?.trim() === '查看属性')!
-    .click();
-  await vi.waitFor(() => {
-    expect(document.querySelector('.file-properties dd')?.textContent).toBe(expected);
-  });
-  expect(listing.entries[0]!.path).toBe(path);
-  if (side === 'remote') expect(properties).toHaveBeenCalledExactlyOnceWith('sftp-a', path);
-  else expect(properties).not.toHaveBeenCalled();
-});
+  ['remote', '/srv/api/\\\\?\\C:\\directory/file', '/srv/api/\\\\?\\C:\\directory'],
+] as const)(
+  'opens native local properties or shows the unchanged %s parent',
+  async (side, path, expected) => {
+    const files = useFilesStore(pinia);
+    const listing = side === 'local' ? files.local! : files.current!.listing!;
+    const selected = { ...entry, path };
+    listing.entries = [selected];
+    const properties = vi.spyOn(filesApi, 'properties').mockResolvedValue(selected);
+    const nativeProperties = vi.spyOn(filesApi, 'localProperties').mockResolvedValue();
+    await nextTick();
+    root
+      .querySelector(`[aria-label="${side === 'local' ? '本地' : '远程'}文件"] tbody tr`)!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await nextTick();
+    [...root.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === '属性')!
+      .click();
+    if (side === 'remote')
+      await vi.waitFor(() => {
+        const details = document.querySelector('.file-properties')!;
+        expect([...details.querySelectorAll('dt')].map((item) => item.textContent)).toEqual([
+          '位置',
+          '大小',
+        ]);
+        expect(details.querySelector('dd')?.textContent).toBe(expected);
+      });
+    else {
+      expect(nativeProperties).toHaveBeenCalledExactlyOnceWith(path);
+      expect(document.querySelector('.file-properties-dialog')).toBeNull();
+    }
+    expect(listing.entries[0]!.path).toBe(path);
+    if (side === 'remote') expect(properties).toHaveBeenCalledExactlyOnceWith('sftp-a', path);
+    else expect(properties).not.toHaveBeenCalled();
+  },
+);
 
 it.each(['local', 'preference', 'picker', 'edited', 'retry'] as const)(
   'formats the %s download destination while preserving the actual transfer path',

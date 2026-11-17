@@ -8,7 +8,10 @@ import type {
   LocalRecycle,
   LocalRename,
   FileEntry,
+  PropertyRequest,
+  PropertyResult,
   RemoteAction,
+  RemoteCopyInput,
   TransferInput,
   TransferInfo,
   ConflictPolicy,
@@ -18,6 +21,8 @@ import type {
   SftpUser,
   FileUserSession,
   ExternalDocument,
+  FileSearchInput,
+  FileSearchEvent,
 } from '../types/files';
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   ensureDesktop();
@@ -43,12 +48,29 @@ export const filesApi = {
     return call('file_terminal', { hostId, size, action, events });
   },
   list: (id: string, path: string) => call<DirectoryListing>('files_list', { id, path }),
+  search(
+    id: string,
+    input: FileSearchInput,
+    receive: (event: FileSearchEvent) => void,
+  ): Promise<void> {
+    const events = new Channel<FileSearchEvent>();
+    events.onmessage = receive;
+    return call('files_search_start', { id, input, events });
+  },
+  cancelSearch: (id: string, requestId: string) =>
+    call<void>('files_search_cancel', { id, requestId }),
   local: (path: string | null) => call<DirectoryListing>('files_local', { path }),
   localRecycle: (input: LocalRecycle) => call<void>('files_local_recycle', { input }),
   localRename: (input: LocalRename) => call<string>('files_local_rename', { input }),
   localDrives: () => call<LocalDrive[]>('files_local_drives'),
   properties: (id: string, path: string) => call<FileEntry>('files_properties', { id, path }),
+  localProperties: (path: string) => call<void>('files_local_properties', { path }),
+  propertyOperation: (id: string, input: PropertyRequest) =>
+    call<PropertyResult>('files_property_operation', { id, input }),
+  propertyCancel: (id: string, requestId: string) =>
+    call<void>('files_property_cancel', { id, requestId }),
   action: (id: string, action: RemoteAction) => call<void>('files_action', { id, action }),
+  remoteCopy: (input: RemoteCopyInput) => call<TransferInfo>('files_remote_copy', { input }),
   close: (id: string, cancel: boolean) => call<void>('files_close', { id, cancel }),
   pick: (kind: 'files' | 'folder') => call<string[]>('files_pick', { kind }),
   dragDownload: (sessionId: string, sources: string[]) =>
@@ -62,6 +84,8 @@ export const filesApi = {
   read: (id: string, path: string) => call<TextDocument>('text_read', { id, path }),
   openEditor: (id: string, path: string, connectionCaption: string) =>
     call<EditorDocument>('editor_open', { id, path, connectionCaption }),
+  createEditor: (id: string, path: string, connectionCaption: string) =>
+    call<EditorDocument>('editor_open', { id, path, connectionCaption, create: true }),
   editorStatus: () => call<EditorStatus>('editor_status'),
   openLocal: (path: string) => call<boolean>('files_open_local', { path }),
   externalPrepare: (id: string, path: string) =>

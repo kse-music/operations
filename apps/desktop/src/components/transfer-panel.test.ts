@@ -69,6 +69,26 @@ it('shows active transfers for the chosen host and keeps finished records in his
   await nextTick();
   expect(root.querySelector('.transfer-panel')).toBeNull();
 });
+it('labels remote copies accurately, preserves remote paths and supports retry', async () => {
+  history.value = true;
+  useFilesStore(pinia).tasks = [
+    {
+      ...task('copy', 'a', 'failed'),
+      remoteCopy: true,
+      sources: ['/srv/\\\\?\\C:\\source'],
+      destination: '/target',
+      remoteName: 'renamed.txt',
+    },
+  ];
+  await nextTick();
+  const copied = root.querySelector('[data-task-id="copy"]')!;
+  expect(copied.textContent).toContain('远程复制');
+  expect(copied.textContent).toContain('/srv/\\\\?\\C:\\source');
+  expect(copied.textContent).toContain('/target/renamed.txt');
+  copied.querySelector<HTMLButtonElement>('button')!.click();
+  expect(retry).toHaveBeenCalledWith(expect.objectContaining({ id: 'copy' }));
+});
+
 it('removes per-task cancellation and keeps retry bound to its original transfer and host', async () => {
   const transfer = task('a-task', 'a', 'running');
   useFilesStore(pinia).tasks = [transfer];
@@ -113,6 +133,25 @@ it.each(['upload', 'download'] as const)(
 
 const elapsed = () => root.querySelector('[data-time="elapsed"]')?.textContent?.trim();
 const remainingTime = () => root.querySelector('[data-time="remaining"]')?.textContent?.trim();
+it('shows a cross-host copy on both endpoints and keeps it out of unrelated hosts', async () => {
+  useFilesStore(pinia).tasks = [
+    {
+      ...task('remote', 'a', 'running'),
+      remoteCopy: true,
+      remoteTargetHostId: 'b',
+      remoteTargetSessionId: 'target',
+    },
+  ];
+  await nextTick();
+  expect(root.textContent).toContain('远程复制');
+  expect(root.textContent).toContain('从 a 到 b');
+  chosen.value = 'b';
+  await nextTick();
+  expect(root.querySelector('[data-task-id="remote"]')).not.toBeNull();
+  chosen.value = 'unrelated';
+  await nextTick();
+  expect(root.querySelector('.transfer-panel')).toBeNull();
+});
 it('updates elapsed time and estimates from task snapshots across host switches', async () => {
   const files = useFilesStore(pinia);
   files.tasks = [

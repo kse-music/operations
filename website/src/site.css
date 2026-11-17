@@ -679,7 +679,6 @@ svg {
   }
   .feature-choice.active {
     background: #1b2a20;
-    padding-left: 10px;
   }
   .feature-choice p {
     display: block;
@@ -959,7 +958,7 @@ svg {
     gap: 0;
   }
   .feature-choice {
-    padding: 18px 0;
+    padding: 18px 16px;
     gap: 12px;
   }
   .feature-choice h3 {
@@ -993,7 +992,7 @@ svg {
   .capability-grid article,
   .capability-grid article + article {
     border-left: 0;
-    padding: 25px 0;
+    padding: 25px 20px;
   }
   .capability-grid article + article {
     border-top: 1px solid var(--line);

@@ -19,6 +19,7 @@ import SettingsView from './views/SettingsView.vue';
 import SettingsNavigation from './components/SettingsNavigation.vue';
 import TerminalStatus from './components/TerminalStatus.vue';
 import HostSidebar from './components/HostSidebar.vue';
+import SidebarToggle from './components/SidebarToggle.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
 import WelcomeView from './views/WelcomeView.vue';
@@ -364,6 +365,21 @@ function globalShortcut(event: KeyboardEvent) {
   else if (action === 'settings') navigate('settings');
 }
 const sidebarDraft = ref<number | null>(null);
+const sidebarElement = ref<HTMLElement>();
+const collapsedSidebars = ref({ home: false, local: false });
+const sidebarCollapsed = computed(
+  () => workspace.area !== 'settings' && collapsedSidebars.value[workspace.area],
+);
+async function toggleSidebar(): Promise<void> {
+  const area = workspace.area;
+  if (area === 'settings') return;
+  collapsedSidebars.value[area] = !collapsedSidebars.value[area];
+  await nextTick();
+  const selector = collapsedSidebars.value[area]
+    ? '.sidebar-expand'
+    : `.sidebar-toggle[aria-controls="${area === 'home' ? 'host-tree-panel' : 'local-session-panel'}"]`;
+  sidebarElement.value?.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
+}
 function clampSidebarWidth(width: number): number {
   return Math.max(200, Math.min(400, Math.round(width)));
 }
@@ -649,7 +665,7 @@ watch(
 </script>
 
 <template>
-  <div class="app-shell" :style="layoutStyle">
+  <div class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }" :style="layoutStyle">
     <AppHeader
       :search-shortcut="
         application.state?.config.product?.shortcuts.search ?? defaultShortcuts.search!
@@ -664,28 +680,53 @@ watch(
       @local="navigate('terminals', '')"
       @settings="updates.available ? workspace.navigate('about') : workspace.showSettings()"
     />
-    <aside id="host-sidebar" class="sidebar" :aria-label="tr('侧栏菜单')">
+    <aside id="host-sidebar" ref="sidebarElement" class="sidebar" :aria-label="tr('侧栏菜单')">
+      <SidebarToggle
+        v-if="sidebarCollapsed"
+        class="sidebar-expand"
+        collapsed
+        :controls="workspace.area === 'home' ? 'host-tree-panel' : 'local-session-panel'"
+        :label="workspace.area === 'home' ? tr('展开主机列表') : tr('展开本地会话')"
+        @toggle="toggleSidebar"
+      />
       <HostSidebar
-        v-show="workspace.area === 'home'"
+        v-show="workspace.area === 'home' && !sidebarCollapsed"
         id="host-tree-panel"
-        :active="workspace.area === 'home'"
+        :active="workspace.area === 'home' && !sidebarCollapsed"
         @plugin="openPlugin"
         @create="openHost($event)"
         @import-openssh="importingOpenSsh = true"
         @select="setContext($event.id, true)"
         @saved="revealHost"
-      />
+      >
+        <template #heading-actions>
+          <SidebarToggle
+            controls="host-tree-panel"
+            :label="tr('收起主机栏')"
+            @toggle="toggleSidebar"
+          />
+        </template>
+      </HostSidebar>
       <section
-        v-show="workspace.area === 'local'"
+        v-show="workspace.area === 'local' && !sidebarCollapsed"
+        id="local-session-panel"
         class="local-session-sidebar"
         :aria-label="tr('本地终端会话')"
       >
-        <h2>{{ tr('本地终端') }}</h2>
+        <div class="host-list-heading local-session-heading">
+          <h2>{{ tr('本地终端') }}</h2>
+          <SidebarToggle
+            controls="local-session-panel"
+            :label="tr('收起本地会话')"
+            @toggle="toggleSidebar"
+          />
+        </div>
         <div id="local-terminal-session-list"></div>
       </section>
       <SettingsNavigation v-show="settingsOpen" />
     </aside>
     <div
+      v-show="!sidebarCollapsed"
       class="sidebar-resizer"
       role="separator"
       :aria-label="tr('调整主机侧栏宽度')"

@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 import { tr } from '../i18n/messages';
 
 import { clipboardApi } from '../services/clipboard';
-import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import {
   ArrowUp,
   ArrowRight,
@@ -13,6 +12,7 @@ import {
   Eye,
   EyeOff,
   FilePenLine,
+  FilePlus,
   FolderOpen,
   FolderPlus,
   FileUp,
@@ -26,6 +26,7 @@ import {
   SquareTerminal,
   TextCursorInput,
   UserRoundCog,
+  Search,
 } from '@lucide/vue';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { isTauri } from '@tauri-apps/api/core';
@@ -34,23 +35,30 @@ import FilePane from '../components/FilePane.vue';
 import FileLocationPicker from '../components/FileLocationPicker.vue';
 import TransferPanel from '../components/TransferPanel.vue';
 import Modal from '../components/Modal.vue';
-import { useFilesStore } from '../stores/files';
+import FilePropertiesDialog from '../components/FilePropertiesDialog.vue';
+import RemoteFileSearchDialog from '../components/RemoteFileSearchDialog.vue';
+import RemoteCopyDialog from '../components/RemoteCopyDialog.vue';
+import NewRemoteDirectoryDialog from '../components/NewRemoteDirectoryDialog.vue';
+import NewRemoteFileDialog from '../components/NewRemoteFileDialog.vue';
+import { useFilesStore, type FileConnection } from '../stores/files';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
 import { filesApi } from '../services/files';
 import { errorMessage } from '../services/ipc';
 import {
-  bytes,
   remoteJoin,
   remoteDirectoryLocations,
   unfinished,
+  transferUsesHost,
   type FileEntry,
   type LocalDrive,
   type ConflictPolicy,
   type Direction,
   type TransferInfo,
   type FileTerminalAction,
+  type FileSearchResult,
+  type NewDirectoryInput,
 } from '../types/files';
 import { hostDisplayName, type Host } from '../types/hosts';
 const props = defineProps<{ hostId?: string }>();
@@ -76,6 +84,87 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   transferHistory = ref(false),
   localArea = ref<HTMLElement>(),
   remoteArea = ref<HTMLElement>();
+const searchTarget = shallowRef<FileConnection>();
+const searchOpen = ref(false),
+  locatingSearch = ref(false),
+  searchLocateError = ref<string | null>(null),
+  remoteFocusPath = ref('');
+function openRemoteSearch(): void {
+  const connection = store.current;
+  if (
+    !connection?.id ||
+    connection.state !== 'connected' ||
+    !connection.listing ||
+    connection.loading ||
+    busy.value ||
+    connection.switchingUser ||
+    store.closingHosts.includes(chosen.value)
+  )
+    return;
+  if (!store.ensureSearch(connection)) return;
+  menu.value = null;
+  operation.value = null;
+  searchTarget.value = connection;
+  searchLocateError.value = null;
+  searchOpen.value = true;
+}
+async function closeRemoteSearch(): Promise<void> {
+  if (locatingSearch.value) return;
+  if (await store.cancelSearch(searchTarget.value)) searchOpen.value = false;
+}
+async function locateSearchResult(result: FileSearchResult): Promise<void> {
+  const connection = searchTarget.value;
+  if (!connection?.id || connection.search?.sessionId !== connection.id || locatingSearch.value)
+    return;
+  const id = connection.id;
+  const valid = () =>
+    store.current === connection &&
+    connection.id === id &&
+    connection.state === 'connected' &&
+    !connection.switchingUser &&
+    connection.host.id === chosen.value &&
+    !store.closingHosts.includes(chosen.value);
+  if (!valid()) return;
+  locatingSearch.value = true;
+  searchLocateError.value = null;
+  try {
+    if (!(await store.cancelSearch(connection)) || !valid()) return;
+    remoteFocusPath.value = '';
+    await store.navigate(result.parent, connection);
+    if (!valid()) return;
+    if (connection.error || connection.listing?.path !== result.parent) {
+      searchLocateError.value = connection.error ?? tr('目录已变化，请重新搜索。');
+      return;
+    }
+    if (!connection.listing.entries.some((entry) => entry.path === result.entry.path)) {
+      searchLocateError.value = tr('文件已移动或删除，请重新搜索。');
+      return;
+    }
+    if (result.entry.name.startsWith('.')) showRemoteHidden.value = true;
+    remoteSelection.value = [result.entry.path];
+    remoteFocusPath.value = result.entry.path;
+    searchOpen.value = false;
+  } finally {
+    locatingSearch.value = false;
+  }
+}
+watch(
+  () => [chosen.value, store.current?.id, store.current?.state, store.current?.switchingUser],
+  () => {
+    const connection = searchTarget.value;
+    if (
+      connection &&
+      (store.current !== connection ||
+        connection.id !== connection.search?.sessionId ||
+        connection.state !== 'connected' ||
+        connection.switchingUser ||
+        connection.host.id !== chosen.value)
+    ) {
+      searchOpen.value = false;
+      void store.cancelSearch(connection);
+    }
+  },
+);
 const userForm = ref<{
   id: string;
   hostId: string;
@@ -133,10 +222,12 @@ async function submitUser(): Promise<void> {
   }
 }
 const hasTransferHistory = computed(() =>
-  store.tasks.some((task) => !task.dragExport && task.hostId === chosen.value && !unfinished(task)),
+  store.tasks.some(
+    (task) => !task.dragExport && transferUsesHost(task, chosen.value) && !unfinished(task),
+  ),
 );
 const activeTransfers = computed(() =>
-  store.tasks.filter((task) => task.hostId === chosen.value && unfinished(task)),
+  store.tasks.filter((task) => transferUsesHost(task, chosen.value) && unfinished(task)),
 );
 const transferCancellationPending = computed(
   () =>
@@ -175,7 +266,7 @@ watch(
 );
 const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: number } | null>(null),
   operation = ref<{
-    kind: 'mkdir' | 'rename' | 'delete';
+    kind: 'mkdir' | 'newfile' | 'rename' | 'delete';
     side: 'local' | 'remote';
     hostId: string;
     id: string;
@@ -185,10 +276,28 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
     name: string;
     hasDirectory: boolean;
   } | null>(null),
-  properties = ref<(FileEntry & { side: 'local' | 'remote' }) | null>(null),
+  properties = ref<{ id: string; hostId: string; entry: FileEntry } | null>(null),
   terminalAction = ref<FileTerminalAction | null>(null);
+const remoteCopy = ref<{
+  id: string;
+  hostId: string;
+  viewHostId: string;
+  host: string;
+  sources: string[];
+  directory: string;
+  retry?: TransferInfo;
+} | null>(null);
+watch(
+  () => [chosen.value, store.current?.id, store.current?.state],
+  () => {
+    properties.value = null;
+    remoteCopy.value = null;
+  },
+);
 const menuElement = ref<HTMLElement>();
 const renameError = ref<string | null>(null);
+const directoryError = ref<string | null>(null);
+const newFileError = ref<string | null>(null);
 const renaming = computed(() =>
   operation.value?.kind === 'rename'
     ? {
@@ -225,6 +334,16 @@ function operationTargetCurrent(op: NonNullable<typeof operation.value>): boolea
 
 watch(
   () => operation.value?.kind === 'rename' && !operationTargetCurrent(operation.value),
+  (changed) => {
+    if (changed) operation.value = null;
+  },
+  { flush: 'sync' },
+);
+watch(
+  () =>
+    (operation.value?.kind === 'mkdir' || operation.value?.kind === 'newfile') &&
+    !busy.value &&
+    !operationTargetCurrent(operation.value),
   (changed) => {
     if (changed) operation.value = null;
   },
@@ -336,6 +455,7 @@ watch(
   (value) => {
     remotePath.value = value ?? '';
     remoteSelection.value = [];
+    remoteFocusPath.value = '';
   },
   { immediate: true },
 );
@@ -572,6 +692,28 @@ async function retry(task: TransferInfo): Promise<void> {
   transferHistory.value = false;
   const host = hosts.catalog?.hosts.find((h) => h.id === task.hostId);
   if (!host) return;
+  if (task.remoteCopy) {
+    const source = store.connections[task.hostId];
+    if (
+      !source?.id ||
+      source.state !== 'connected' ||
+      source.switchingUser ||
+      store.closingHosts.includes(host.id)
+    ) {
+      store.error = tr('请先连接源主机，再重试远程复制。');
+      return;
+    }
+    remoteCopy.value = {
+      id: source.id,
+      hostId: host.id,
+      viewHostId: chosen.value,
+      host: hostDisplayName(host),
+      sources: [...task.sources],
+      directory: task.destination,
+      retry: task,
+    };
+    return;
+  }
   if (store.active !== host.id || store.current?.state !== 'connected') {
     await store.open(host);
     if (store.current?.state !== 'connected') {
@@ -589,6 +731,37 @@ async function retry(task: TransferInfo): Promise<void> {
     confirmed: false,
     retry: task.id,
   };
+}
+function showRemoteCopy(): void {
+  const item = menu.value,
+    connection = store.current;
+  if (
+    !item ||
+    item.side !== 'remote' ||
+    !connection?.id ||
+    connection.state !== 'connected' ||
+    connection.loading ||
+    connection.switchingUser ||
+    store.closingHosts.includes(chosen.value)
+  )
+    return;
+  const paths = [...remoteSelection.value];
+  if (
+    !paths.length ||
+    paths.some((path) => !connection.listing?.entries.some((entry) => entry.path === path))
+  ) {
+    store.error = tr('部分选中项目已不在当前目录，请刷新后重试。');
+    return;
+  }
+  remoteCopy.value = {
+    id: connection.id,
+    hostId: chosen.value,
+    viewHostId: chosen.value,
+    host: hostDisplayName(connection.host),
+    sources: paths,
+    directory: connection.path,
+  };
+  menu.value = null;
 }
 function closeMenu(): void {
   menu.value = null;
@@ -614,7 +787,7 @@ async function context(
   menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - bounds.height - 8));
 }
 function mutate(
-  kind: 'mkdir' | 'rename' | 'delete',
+  kind: 'mkdir' | 'newfile' | 'rename' | 'delete',
   side: 'local' | 'remote' = 'remote',
   target?: FileEntry,
 ): void {
@@ -635,14 +808,14 @@ function mutate(
     return;
   const renameTarget = target ?? menu.value?.entry;
   const paths =
-    kind === 'mkdir'
+    kind === 'mkdir' || kind === 'newfile'
       ? []
       : kind === 'rename'
         ? renameTarget
           ? [renameTarget.path]
           : []
         : [...(side === 'local' ? localSelection.value : remoteSelection.value)];
-  if (kind !== 'mkdir' && !paths.length) return;
+  if (kind !== 'mkdir' && kind !== 'newfile' && !paths.length) return;
   if (kind === 'rename' && paths.length !== 1) return;
   if (paths.some((path) => !listing.entries.some((entry) => entry.path === path))) {
     store.error = tr('部分选中项目已不在当前目录，请刷新后重试。');
@@ -662,6 +835,8 @@ function mutate(
       listing.entries.some((entry) => entry.kind === 'directory' && paths.includes(entry.path)),
   };
   renameError.value = null;
+  directoryError.value = null;
+  newFileError.value = null;
   if (kind === 'rename') {
     endDownloadDrag();
     (side === 'local' ? localSelection : remoteSelection).value = paths;
@@ -669,7 +844,46 @@ function mutate(
   }
   menu.value = null;
 }
-async function submitOperation(reason: 'enter' | 'blur' = 'enter'): Promise<void> {
+async function submitDirectory(input: NewDirectoryInput): Promise<void> {
+  if (operation.value?.kind !== 'mkdir' || busy.value) return;
+  operation.value.name = input.name;
+  await submitOperation('enter', input);
+}
+async function submitFile(name: string): Promise<void> {
+  const op = operation.value;
+  if (op?.kind !== 'newfile' || busy.value) return;
+  if (!operationTargetCurrent(op)) {
+    operation.value = null;
+    store.error = tr('文件操作目标已变化，请重新选择。');
+    return;
+  }
+  busy.value = true;
+  newFileError.value = null;
+  try {
+    const opened = await store.createFile(name);
+    if (opened) operation.value = null;
+    else newFileError.value = store.error ?? tr('未能创建文件或打开编辑器，请检查连接后重试。');
+    const connection = store.connections[op.hostId];
+    if (
+      connection?.id === op.id &&
+      connection.state === 'connected' &&
+      connection.path === op.parent &&
+      !connection.loading &&
+      !connection.switchingUser &&
+      !store.closingHosts.includes(op.hostId)
+    )
+      await store.navigate(op.parent, connection);
+  } catch (cause) {
+    newFileError.value = errorMessage(cause);
+    store.error = newFileError.value;
+  } finally {
+    busy.value = false;
+  }
+}
+async function submitOperation(
+  reason: 'enter' | 'blur' = 'enter',
+  directory?: NewDirectoryInput,
+): Promise<void> {
   const op = operation.value;
   if (!op || busy.value) return;
   if (!operationTargetCurrent(op)) {
@@ -691,6 +905,7 @@ async function submitOperation(reason: 'enter' | 'blur' = 'enter'): Promise<void
   }
   busy.value = true;
   store.error = null;
+  directoryError.value = null;
   try {
     if (op.kind === 'rename') {
       const destination =
@@ -729,9 +944,19 @@ async function submitOperation(reason: 'enter' | 'blur' = 'enter'): Promise<void
     }
     if (op.side === 'local')
       await filesApi.localRecycle({ parent: op.parent, paths: op.paths, confirmed: true });
-    else if (op.kind === 'mkdir')
-      await filesApi.action(op.id, { kind: 'mkdir', path: remoteJoin(op.parent, op.name) });
-    else
+    else if (op.kind === 'mkdir') {
+      if (!directory) return;
+      await filesApi.action(op.id, {
+        kind: 'mkdir',
+        path: remoteJoin(op.parent, op.name),
+        permissions: directory.permissions,
+      });
+      const connection = store.connections[op.hostId];
+      if (connection?.id === op.id)
+        connection.newDirectorySettings = directory.remember
+          ? { sessionId: op.id, permissions: directory.permissions }
+          : undefined;
+    } else
       await filesApi.action(op.id, {
         kind: 'remove',
         paths: op.paths,
@@ -750,6 +975,7 @@ async function submitOperation(reason: 'enter' | 'blur' = 'enter'): Promise<void
   } catch (cause) {
     store.error = errorMessage(cause);
     if (op.kind === 'rename' && operation.value === op) renameError.value = store.error;
+    if (op.kind === 'mkdir' && operation.value === op) directoryError.value = store.error;
   } finally {
     busy.value = false;
   }
@@ -759,11 +985,9 @@ async function showProperties(): Promise<void> {
   if (!item) return;
   menu.value = null;
   try {
-    const entry =
-      item.side === 'local'
-        ? item.entry
-        : await filesApi.properties(store.current!.id!, item.entry.path);
-    properties.value = { ...entry, side: item.side };
+    if (item.side === 'local') await filesApi.localProperties(item.entry.path);
+    else if (store.current?.id)
+      properties.value = { id: store.current.id, hostId: store.active!, entry: item.entry };
   } catch (cause) {
     store.error = errorMessage(cause);
   }
@@ -813,6 +1037,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  if (searchTarget.value) void store.cancelSearch(searchTarget.value);
   window.removeEventListener('contextmenu', closeMenu, true);
   window.removeEventListener('pointerdown', outsideMenu, true);
   if (userForm.value) userForm.value.password = '';
@@ -1044,6 +1269,23 @@ onBeforeUnmount(() => {
             <FolderPlus :size="15" aria-hidden="true" /></button
           ><button
             class="tool-button"
+            :aria-label="tr('新建文件')"
+            :title="tr('新建文件')"
+            :disabled="
+              store.current?.state !== 'connected' ||
+              store.current.loading ||
+              store.current.switchingUser ||
+              store.editorBusy ||
+              !!store.document ||
+              !!store.externalDocument ||
+              busy ||
+              store.closingHosts.includes(chosen)
+            "
+            @click="mutate('newfile')"
+          >
+            <FilePlus :size="15" aria-hidden="true" /></button
+          ><button
+            class="tool-button"
             :aria-label="tr('刷新远程')"
             :title="tr('刷新远程')"
             :disabled="!store.current?.id"
@@ -1087,6 +1329,21 @@ onBeforeUnmount(() => {
           >
             <component :is="showRemoteHidden ? Eye : EyeOff" :size="14" aria-hidden="true" />
           </button>
+          <button
+            class="tool-button file-search-open"
+            type="button"
+            :aria-label="tr('搜索远程文件')"
+            :title="tr('搜索远程文件')"
+            :disabled="
+              store.current?.state !== 'connected' ||
+              !store.current?.listing ||
+              store.current?.loading ||
+              busy
+            "
+            @click="openRemoteSearch"
+          >
+            <Search :size="15" aria-hidden="true" />
+          </button>
         </div>
         <FilePane
           side="remote"
@@ -1095,6 +1352,7 @@ onBeforeUnmount(() => {
           :pending-path="store.current?.pendingPath"
           :selected="remoteSelection"
           :hide-dotfiles="!showRemoteHidden"
+          :focus-path="remoteFocusPath"
           :renaming="operation?.side === 'remote' ? renaming : undefined"
           @select="remoteSelection = $event"
           @open="openEntry('remote', $event)"
@@ -1109,6 +1367,17 @@ onBeforeUnmount(() => {
       </section>
     </div>
   </section>
+  <RemoteFileSearchDialog
+    v-if="searchOpen && searchTarget?.search"
+    :state="searchTarget.search"
+    :locating="locatingSearch"
+    :locate-error="searchLocateError"
+    @change="store.changeSearch($event, searchTarget)"
+    @search="store.startSearch(searchTarget)"
+    @stop="store.cancelSearch(searchTarget)"
+    @close="closeRemoteSearch"
+    @locate="locateSearchResult"
+  />
   <Modal
     v-if="transferProgress && activeTransfers.length && !transfer"
     :title="tr('传输任务（{0}）', activeTransfers.length)"
@@ -1267,32 +1536,22 @@ onBeforeUnmount(() => {
           aria-hidden="true"
         />
         {{ menu.side === 'local' ? tr('上传选中') : tr('下载选中') }}</button
-      ><button
-        role="menuitem"
-        @click="
-          copy(menu.side === 'local' ? displayLocalPath(menu.entry.path) : menu.entry.path);
-          menu = null;
-        "
-      >
-        <Copy class="file-menu-copy" aria-hidden="true" />
-        {{ tr(' 复制绝对路径') }}</button
-      ><button role="menuitem" @click="showProperties">
-        <Info class="file-menu-properties" aria-hidden="true" />{{ tr('查看属性') }}</button
+      ><button v-if="menu.side === 'remote'" role="menuitem" @click="showRemoteCopy">
+        <Copy class="file-menu-copy" aria-hidden="true" />{{ tr('远程复制') }}</button
+      ><button role="menuitem" @click="mutate('delete', menu!.side)">
+        <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除') }}</button
       ><button role="menuitem" @click="mutate('rename', menu!.side)">
         <TextCursorInput class="file-menu-rename" aria-hidden="true" />{{ tr('重命名') }}</button
-      ><button v-if="menu.side === 'local'" role="menuitem" @click="mutate('delete', 'local')">
-        <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除') }}</button
-      ><template v-if="menu.side === 'remote'"
-        ><button role="menuitem" @click="mutate('delete')">
-          <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除选中') }}</button
-        ><button
-          role="menuitem"
-          @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
-        >
-          <SquareTerminal class="file-menu-terminal" aria-hidden="true" />
-          {{ tr(' 在新终端中打开 ') }}
-        </button></template
+      ><button
+        v-if="menu.side === 'remote'"
+        role="menuitem"
+        @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
       >
+        <SquareTerminal class="file-menu-terminal" aria-hidden="true" />
+        {{ tr(' 在新终端中打开 ') }}</button
+      ><button role="menuitem" @click="showProperties">
+        <Info class="file-menu-properties" aria-hidden="true" />{{ tr('属性') }}
+      </button>
     </div></template
   >
   <Modal
@@ -1334,27 +1593,25 @@ onBeforeUnmount(() => {
       </footer>
     </form>
   </Modal>
-  <Modal
+  <NewRemoteDirectoryDialog
     v-else-if="operation?.kind === 'mkdir'"
-    :title="tr('创建远程文件夹')"
     :busy="busy"
+    :error="directoryError"
+    :settings="
+      store.current?.newDirectorySettings?.sessionId === operation.id
+        ? store.current.newDirectorySettings
+        : undefined
+    "
     @close="operation = null"
-    ><p>{{ operation.host }} · {{ operation.parent }}</p>
-
-    <form class="editor-form" @submit.prevent="submitOperation()">
-      <label
-        >{{ tr('文件夹名称')
-        }}<input v-model="operation.name" :aria-label="tr('远程项目名称')" required maxlength="255"
-      /></label>
-      <footer class="dialog-actions">
-        <button class="button" type="button" :disabled="busy" @click="operation = null">
-          {{ tr('取消') }}</button
-        ><button class="button danger" :disabled="busy">
-          {{ tr('创建文件夹') }}
-        </button>
-      </footer>
-    </form></Modal
-  >
+    @submit="submitDirectory"
+  />
+  <NewRemoteFileDialog
+    v-else-if="operation?.kind === 'newfile'"
+    :busy="busy"
+    :error="newFileError"
+    @close="operation = null"
+    @submit="submitFile"
+  />
   <Modal
     v-if="transfer"
     :title="transfer.retry ? tr('重试传输') : tr('确认文件传输')"
@@ -1418,36 +1675,30 @@ onBeforeUnmount(() => {
       </footer>
     </form></Modal
   >
-  <Modal v-if="properties" :title="tr('文件属性')" @close="properties = null"
-    ><dl class="file-properties">
-      <dt>{{ tr('路径') }}</dt>
-      <dd>
-        {{ properties.side === 'local' ? displayLocalPath(properties.path) : properties.path }}
-      </dd>
-      <dt>{{ tr('类型') }}</dt>
-      <dd>{{ properties.kind }}</dd>
-      <dt>{{ tr('大小') }}</dt>
-      <dd>{{ bytes(properties.size) }}</dd>
-      <dt>{{ tr('修改时间') }}</dt>
-      <dd>
-        {{
-          properties.modified === null
-            ? tr('未提供')
-            : new Date(properties.modified * 1000).toLocaleString(locale)
-        }}
-      </dd>
-      <dt>{{ tr('权限（八进制）') }}</dt>
-      <dd>
-        {{
-          properties.permissions === null
-            ? tr('未提供')
-            : properties.permissions.toString(8).padStart(4, '0')
-        }}
-      </dd>
-      <dt>UID / GID</dt>
-      <dd>{{ properties.uid ?? '—' }} / {{ properties.gid ?? '—' }}</dd>
-    </dl></Modal
-  >
+  <RemoteCopyDialog
+    v-if="
+      remoteCopy &&
+      remoteCopy.viewHostId === chosen &&
+      remoteCopy.id === store.connections[remoteCopy.hostId]?.id &&
+      store.connections[remoteCopy.hostId]?.state === 'connected'
+    "
+    :key="`${remoteCopy.id}:${remoteCopy.sources.join('|')}`"
+    :session-id="remoteCopy.id"
+    :source-host-id="remoteCopy.hostId"
+    :host="remoteCopy.host"
+    :sources="remoteCopy.sources"
+    :directory="remoteCopy.directory"
+    :retry="remoteCopy.retry"
+    @close="remoteCopy = null"
+  />
+  <FilePropertiesDialog
+    v-if="properties && properties.id === store.current?.id && properties.hostId === chosen"
+    :id="properties.id"
+    :key="`${properties.id}:${properties.entry.path}`"
+    :entry="properties.entry"
+    @close="properties = null"
+    @changed="store.current?.id === properties?.id && store.refresh()"
+  />
   <Modal v-if="store.current?.trust" :title="tr('确认 SFTP 主机指纹')" @close="store.trust(false)"
     ><p>
       {{ store.current.trust.hostname }}:{{ store.current.trust.port }} ·

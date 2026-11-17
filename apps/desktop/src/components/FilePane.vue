@@ -24,6 +24,7 @@ const props = defineProps<{
   pendingPath?: string | null;
   selected: string[];
   hideDotfiles?: boolean;
+  focusPath?: string;
   renaming?: { path: string; name: string; busy: boolean; error: string | null };
 }>();
 const emit = defineEmits<{
@@ -161,6 +162,23 @@ watch(
 watch(pages, (value) => {
   page.value = Math.min(page.value, value);
 });
+watch(
+  () => props.focusPath,
+  async (path) => {
+    if (!path) return;
+    const index = entries.value.findIndex((entry) => entry.path === path);
+    if (index < 0) return;
+    page.value = Math.floor(index / 200) + 1;
+    await nextTick();
+    if (props.focusPath !== path) return;
+    const button = [...(table.value?.querySelectorAll<HTMLButtonElement>('.file-name') ?? [])].find(
+      (item) => item.dataset.path === path,
+    );
+    button?.focus({ preventScroll: true });
+    button?.scrollIntoView?.({ block: 'nearest' });
+  },
+  { immediate: true },
+);
 function toggle(path: string): void {
   emit(
     'select',
@@ -421,6 +439,7 @@ function entryIcon(entry: FileEntry) {
               v-else
               type="button"
               class="file-name"
+              :data-path="entry.path"
               :title="entry.name"
               @click.stop="clicked(entry, $event)"
               @dblclick.stop="emit('open', entry)"

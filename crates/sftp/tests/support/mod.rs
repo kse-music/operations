@@ -110,11 +110,15 @@ pub struct FileFaults {
     pub ignore_times: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
     pub created_permissions: Mutex<Vec<(String, Option<u32>)>>,
+    pub property_attributes: Mutex<HashMap<String, FileAttributes>>,
+    pub property_writes: Mutex<Vec<(String, FileAttributes)>>,
+    pub reject_property_path: Mutex<Option<String>>,
     pub links: Mutex<HashMap<String, String>>,
     pub reported_sizes: Mutex<HashMap<String, u64>>,
     pub sudo_password: Mutex<Option<String>>,
     pub sudo_commands: Mutex<Vec<String>>,
     pub reject_sudo: std::sync::atomic::AtomicBool,
+    pub unreadable_directories: Mutex<std::collections::HashSet<String>>,
 }
 enum HandleValue {
     File(tokio::fs::File),
@@ -197,6 +201,11 @@ impl russh_sftp::server::Handler for Disk {
         if let Some(size) = self.faults.reported_sizes.lock().unwrap().get(&path) {
             attributes.size = Some(*size);
         }
+        if let Some(value) = self.faults.property_attributes.lock().unwrap().get(&path) {
+            attributes.permissions = value.permissions.or(attributes.permissions);
+            attributes.uid = value.uid.or(attributes.uid);
+            attributes.gid = value.gid.or(attributes.gid);
+        }
         Ok(Attrs {
             id,
             attrs: attributes,
@@ -206,6 +215,15 @@ impl russh_sftp::server::Handler for Disk {
         self.lstat(id, path).await
     }
     async fn opendir(&mut self, id: u32, path: String) -> Result<Handle, StatusCode> {
+        if self
+            .faults
+            .unreadable_directories
+            .lock()
+            .expect("fixture permissions")
+            .contains(&path)
+        {
+            return Err(StatusCode::PermissionDenied);
+        }
         let mut dir = tokio::fs::read_dir(self.path(&path)?).await.map_err(io)?;
         let mut files = vec![];
         while let Some(entry) = dir.next_entry().await.map_err(io)? {
@@ -359,6 +377,28 @@ impl russh_sftp::server::Handler for Disk {
         path: String,
         value: FileAttributes,
     ) -> Result<Status, StatusCode> {
+        if self.faults.reject_property_path.lock().unwrap().as_deref() == Some(&path) {
+            return Err(StatusCode::PermissionDenied);
+        }
+        self.faults
+            .property_writes
+            .lock()
+            .unwrap()
+            .push((path.clone(), value.clone()));
+        if let Some(attributes) = self
+            .faults
+            .property_attributes
+            .lock()
+            .unwrap()
+            .get_mut(&path)
+        {
+            attributes.permissions = value
+                .permissions
+                .map(|mode| (attributes.permissions.unwrap_or(0) & 0o170000) | mode)
+                .or(attributes.permissions);
+            attributes.uid = value.uid.or(attributes.uid);
+            attributes.gid = value.gid.or(attributes.gid);
+        }
         let path = self.path(&path)?;
         if let Some(modified) = value.mtime
             && !self
