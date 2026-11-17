@@ -12,7 +12,7 @@ export default defineConfig({
   appearance: 'dark',
   cleanUrls: false,
   // Marketing pages are built separately; docs:check validates the merged output.
-  ignoreDeadLinks: ['/index', '/privacy', '/security'],
+  ignoreDeadLinks: ['/index', '/marketplace', '/privacy', '/security'],
   outDir: fileURLToPath(new URL('../../.ssr/documentation/dist/', import.meta.url)),
   cacheDir: fileURLToPath(new URL('../../.ssr/documentation/cache/', import.meta.url)),
   assetsDir: 'docs-assets',
@@ -50,8 +50,11 @@ export default defineConfig({
     config(md) {
       const renderInlineHtml = md.renderer.rules.html_inline!;
       md.renderer.rules.html_inline = (tokens, index, options, env, renderer) => {
-        // Specification paths such as <ID> are literal placeholders, not components.
-        if (env.relativePath?.startsWith('developers/reference/')) {
+        // Escape specification placeholders such as <ID>, but preserve generated anchor symbols.
+        if (
+          env.relativePath?.startsWith('developers/reference/') &&
+          !tokens[index].meta?.isPermalinkSymbol
+        ) {
           return md.utils.escapeHtml(tokens[index].content);
         }
         return renderInlineHtml(tokens, index, options, env, renderer);
@@ -96,6 +99,7 @@ export default defineConfig({
           text: '开发入门',
           items: [
             { text: '开发者中心', link: '/developers/' },
+            { text: '开发包下载', link: '/developers/downloads' },
             { text: '第一个插件', link: '/developers/quickstart' },
             { text: 'UI 与 WASM 协作', link: '/developers/ui-and-backend' },
             { text: '权限与审批', link: '/developers/permissions' },

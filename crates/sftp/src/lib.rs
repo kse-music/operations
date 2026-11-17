@@ -95,6 +95,23 @@ impl Files {
         let _permit = self.slot().await?;
         local::listing(path).await
     }
+    pub async fn local_rename(&self, input: LocalRename) -> Result<String, Error> {
+        let permit = self.slot().await?;
+        #[cfg(windows)]
+        {
+            tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                serverdeck_windows_file_drag::rename(input)
+            })
+            .await
+            .map_err(|error| Error::Worker(Box::new(error)))?
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = (permit, input);
+            Err(Error::Validation("本地重命名当前仅支持 Windows"))
+        }
+    }
     pub async fn properties(&self, id: &str, path: &str) -> Result<FileEntry, Error> {
         let _permit = self.slot().await?;
         let remote = self.client(id).await?;

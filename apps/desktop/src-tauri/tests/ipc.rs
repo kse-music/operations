@@ -8,6 +8,28 @@ use tauri::{
 use tauri_plugin_updater::UpdaterExt;
 
 #[test]
+fn retired_development_kit_export_is_unavailable() {
+    let app = mock_builder()
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    assert!(
+        get_ipc_response(
+            &main,
+            request("plugin_save_development_kit", json!({}), origin)
+        )
+        .is_err()
+    );
+}
+#[test]
 fn updater_preferences_and_installation_are_limited_to_the_main_local_window() {
     let directory = tempfile::tempdir().unwrap();
     let app = mock_builder()
@@ -309,6 +331,56 @@ fn local_drives_use_real_system_roots_and_main_window_acl() {
         )
         .is_err()
     );
+}
+
+#[test]
+fn local_renaming_is_scoped_to_the_local_main_window_and_rejects_unknown_fields() {
+    let directory = tempfile::tempdir().unwrap();
+    let application =
+        Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+            .unwrap();
+    let app = mock_builder()
+        .manage(application)
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let other = tauri::WebviewWindowBuilder::new(&app, "untrusted-rename", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let input = json!({"input":{"parent":"C:\\","path":"C:\\source","name":"new","extra":true}});
+    let error =
+        get_ipc_response(&main, request("files_local_rename", input.clone(), origin)).unwrap_err();
+    assert!(error.to_string().contains("unknown field"));
+    for (window, url) in [(&other, origin), (&main, "https://untrusted.invalid")] {
+        let error = get_ipc_response(window, request("files_local_rename", input.clone(), url))
+            .unwrap_err();
+        assert!(error.to_string().contains("not allowed"));
+    }
+    #[cfg(windows)]
+    {
+        let parent = directory.path().canonicalize().unwrap();
+        let source = parent.join("local-name.txt");
+        std::fs::write(&source, b"local-rename IPC fixture").unwrap();
+        let input = json!({"input":{"parent":parent,"path":source,"name":"new-name.txt"}});
+        let result = get_ipc_response(&main, request("files_local_rename", input, origin)).unwrap();
+        assert_eq!(
+            result.deserialize::<Value>().unwrap(),
+            json!(parent.join("new-name.txt"))
+        );
+        assert_eq!(
+            std::fs::read(parent.join("new-name.txt")).unwrap(),
+            b"local-rename IPC fixture"
+        );
+        assert!(!source.exists());
+    }
 }
 
 #[test]
@@ -723,7 +795,6 @@ fn plugin_metadata_real_ipc_lifecycle_and_acl() {
         "plugin_preview_info",
         "plugin_ui",
         "plugin_pick",
-        "plugin_save_development_kit",
         "plugin_install",
         "plugin_list",
         "plugin_inventory",

@@ -4,6 +4,22 @@ import { filesApi } from './files';
 import { osc7Path } from './osc7';
 import { remoteDirectoryLocations, remoteJoin } from '../types/files';
 describe('trusted file navigation contracts', () => {
+  it('binds a local rename to its parent, source and new leaf name over IPC', async () => {
+    Reflect.set(window, 'isTauri', true);
+    const input = { parent: 'D:/test', path: 'D:/test/config.json', name: '配置.json' };
+    mockIPC((command, args) => {
+      expect(command).toBe('files_local_rename');
+      expect(args).toEqual({ input });
+      return 'D:/test/配置.json';
+    });
+    try {
+      expect(await filesApi.localRename(input)).toBe('D:/test/配置.json');
+    } finally {
+      clearMocks();
+      Reflect.deleteProperty(window, 'isTauri');
+      Reflect.deleteProperty(window, '__TAURI_INTERNALS__');
+    }
+  });
   it('binds recycling to the exact confirmed local parent and paths over IPC', async () => {
     Reflect.set(window, 'isTauri', true);
     const input = { parent: 'D:/test', paths: ['D:/test/中文 空格.txt'], confirmed: true };

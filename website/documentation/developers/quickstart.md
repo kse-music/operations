@@ -3,15 +3,21 @@ title: 第一个插件
 description: 使用独立开发包完成准备、构建、打包、安装和首次真实调用。
 ---
 
+<script setup>
+import manifest from '../reference-manifest.json'
+</script>
+
 # 第一个插件
 
 目标是先跑通下载包中的样例，再开始自己的业务。开发第三方插件不需要宿主源码或 Tauri 工具链。
 
 ## 准备独立开发包
 
-1. 在 ServerDeck 中打开 **设置 → 插件 → 下载插件开发包**。
+1. <a :href="`/downloads/serverdeck-plugin-development-kit-${manifest.sdkVersion}.zip`" download>下载插件开发包（SDK {{ manifest.sdkVersion }}）</a>；需要其他已提供的版本时，前往[开发包下载](/developers/downloads.html)选择。
 2. 将 ZIP 解压到独立目录，确认包含 `example/`、公开 SDK、构建工具和规范。
 3. 准备 Node.js 22.13+、Rust stable 1.94+ 和至少 10 GiB 构建空间。
+
+本教程与当前 SDK 文档配套。开发前核对客户端支持的 SDK 与所选开发包；使用其他版本时，按对应开发包内的规范确认兼容范围。客户端 **设置 → 插件 → 开发者中心** 可打开官网获取开发包。
 
 在开发包根目录执行：
 

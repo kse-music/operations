@@ -101,6 +101,13 @@ pub struct LocalRecycle {
     pub confirmed: bool,
 }
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalRename {
+    pub parent: String,
+    pub path: String,
+    pub name: String,
+}
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteAction {
     Mkdir {

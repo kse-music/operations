@@ -119,6 +119,9 @@ impl Application {
     pub async fn files_local(&self, path: Option<String>) -> Result<DirectoryListing, Error> {
         self.files.local_list(path).await
     }
+    pub async fn files_local_rename(&self, input: LocalRename) -> Result<String, Error> {
+        self.files.local_rename(input).await
+    }
     pub async fn files_properties(&self, id: &str, path: &str) -> Result<FileEntry, Error> {
         self.files.properties(id, path).await
     }

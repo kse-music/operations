@@ -33,7 +33,7 @@ it('shows ordinary data and log paths without changing backend state', () => {
   }
 });
 
-it('renders release notes as text and gates installation on a verified package', async () => {
+it('renders release Markdown and gates installation on a verified package', async () => {
   const pinia = createPinia();
   useApplicationStore(pinia).state = {
     appVersion: '0.8.0',
@@ -43,7 +43,11 @@ it('renders release notes as text and gates installation on a verified package',
   updates.state = {
     supported: true,
     phase: 'available',
-    release: { version: '0.8.1', notes: '<img src="https://untrusted.invalid/image">' },
+    release: {
+      version: '0.8.1',
+      notes:
+        '**Full Changelog**: https://github.com/kse-music/operations/compare/v0.9.2...v0.9.3\n\n<img src="https://untrusted.invalid/image">',
+    },
     downloadedBytes: 0,
     totalBytes: null,
     error: null,
@@ -53,6 +57,10 @@ it('renders release notes as text and gates installation on a verified package',
   const app = createApp(AboutView).use(pinia);
   try {
     app.mount(root);
+    expect(root.querySelector('.update-notes strong')?.textContent).toBe('Full Changelog');
+    expect(root.querySelector('.update-notes a')?.getAttribute('href')).toBe(
+      'https://github.com/kse-music/operations/compare/v0.9.2...v0.9.3',
+    );
     expect(root.querySelector('.update-notes')?.textContent).toContain('<img');
     expect(root.querySelector('.update-notes img')).toBeNull();
     expect(root.textContent).toContain('下载更新');
@@ -66,6 +74,9 @@ it('renders release notes as text and gates installation on a verified package',
         (button) => button.textContent?.trim() === '检查更新',
       )?.disabled,
     ).toBe(true);
+    updates.state.release!.notes = '';
+    await nextTick();
+    expect(root.querySelector('.update-notes')?.textContent).toBe('此版本未提供更新说明。\n');
   } finally {
     app.unmount();
     disposePinia(pinia);

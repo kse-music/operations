@@ -14,15 +14,17 @@ import {
   Folder,
   LoaderCircle,
 } from '@lucide/vue';
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { DirectoryListing, FileEntry } from '../types/files';
 import { bytes, permissionText } from '../types/files';
 const props = defineProps<{
   side: 'local' | 'remote';
   listing: DirectoryListing | null;
   loading: boolean;
+  pendingPath?: string | null;
   selected: string[];
   hideDotfiles?: boolean;
+  renaming?: { path: string; name: string; busy: boolean; error: string | null };
 }>();
 const emit = defineEmits<{
   select: [paths: string[]];
@@ -30,7 +32,60 @@ const emit = defineEmits<{
   menu: [entry: FileEntry, event: MouseEvent];
   drag: [entry: FileEntry, event: PointerEvent];
   remove: [];
+  rename: [entry: FileEntry];
+  renameChange: [name: string];
+  renameSubmit: [reason: 'enter' | 'blur'];
+  renameCancel: [];
 }>();
+const table = ref<HTMLElement>();
+
+watch(
+  () => props.renaming?.path,
+  async (path) => {
+    if (!path) return;
+    await nextTick();
+    if (props.renaming?.path !== path) return;
+    const input = table.value?.querySelector<HTMLInputElement>('.file-rename-input');
+    const entry = props.listing?.entries.find((item) => item.path === path);
+    if (!input || !entry) return;
+    input.focus();
+    const dot = entry.name.lastIndexOf('.');
+    input.setSelectionRange(
+      0,
+      entry.kind === 'file' && dot > 0 && dot < entry.name.length - 1 ? dot : entry.name.length,
+    );
+  },
+);
+
+async function renameKeys(event: KeyboardEvent): Promise<void> {
+  if (event.key !== 'Enter' && event.key !== 'Escape') return;
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (!props.renaming || props.renaming.busy || event.repeat) return;
+  if (event.key === 'Enter') {
+    if ((event.target as HTMLInputElement).reportValidity()) emit('renameSubmit', 'enter');
+  } else {
+    const name = props.listing?.entries.find((entry) => entry.path === props.renaming?.path)?.name;
+    emit('renameCancel');
+    await nextTick();
+    [...(table.value?.querySelectorAll<HTMLButtonElement>('.file-name') ?? [])]
+      .find((button) => button.title === name)
+      ?.focus({ preventScroll: true });
+  }
+}
+async function blurRename(event: FocusEvent): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const path = props.renaming?.path;
+  await nextTick();
+  if (
+    input.isConnected &&
+    document.activeElement !== input &&
+    path &&
+    props.renaming?.path === path &&
+    !props.renaming.busy
+  )
+    emit('renameSubmit', 'blur');
+}
 const localColumns = [
   ['name', '名称'],
   ['size', '大小'],
@@ -76,9 +131,18 @@ const entries = computed(() => {
 });
 const page = ref(1);
 const pages = computed(() => Math.max(1, Math.ceil(entries.value.length / 200)));
-const visibleEntries = computed(() =>
-  props.loading ? [] : entries.value.slice((page.value - 1) * 200, page.value * 200),
+const refreshing = computed(
+  () => props.loading && !!props.listing && props.pendingPath === props.listing.path,
 );
+const visibleEntries = computed(() =>
+  props.loading && !refreshing.value
+    ? []
+    : entries.value.slice((page.value - 1) * 200, page.value * 200),
+);
+watch(visibleEntries, (rows) => {
+  if (props.renaming && !rows.some((entry) => entry.path === props.renaming?.path))
+    emit('renameCancel');
+});
 watch([() => props.listing?.path, sort, descending], () => {
   page.value = 1;
 });
@@ -115,7 +179,7 @@ function clicked(entry: FileEntry, event: MouseEvent): void {
 }
 function keys(event: KeyboardEvent): void {
   if (
-    event.key !== 'Delete' ||
+    (event.key !== 'Delete' && event.key !== 'F2') ||
     event.defaultPrevented ||
     event.repeat ||
     event.isComposing ||
@@ -131,6 +195,15 @@ function keys(event: KeyboardEvent): void {
     )
   )
     return;
+  if (event.key === 'F2') {
+    if (props.selected.length !== 1 || props.renaming) return;
+    const entry = visibleEntries.value.find((item) => item.path === props.selected[0]);
+    if (!entry) return;
+    event.preventDefault();
+    event.stopPropagation();
+    emit('rename', entry);
+    return;
+  }
   event.preventDefault();
   event.stopPropagation();
   emit('remove');
@@ -245,7 +318,7 @@ function entryIcon(entry: FileEntry) {
       }}{{ tr(' 已选') }}</span
     >
   </div>
-  <div class="file-table" :aria-busy="loading" @keydown="keys">
+  <div ref="table" class="file-table" :aria-busy="loading" @keydown="keys">
     <table :aria-label="side === 'local' ? tr('本地文件') : tr('远程文件')">
       <thead>
         <tr>
@@ -305,7 +378,47 @@ function entryIcon(entry: FileEntry) {
             />
           </td>
           <td>
+            <div
+              v-if="renaming?.path === entry.path"
+              class="file-rename"
+              :aria-busy="renaming.busy"
+              @pointerdown.stop
+              @click.stop
+              @dblclick.stop
+              @contextmenu.stop
+            >
+              <div class="file-name-edit">
+                <component
+                  :is="entryIcon(entry)"
+                  class="file-entry-icon"
+                  :data-kind="entry.kind"
+                  aria-hidden="true"
+                />
+                <input
+                  class="file-rename-input"
+                  :value="renaming.name"
+                  :readonly="renaming.busy"
+                  :aria-label="tr('重命名 {0}', entry.name)"
+                  :aria-invalid="!!renaming.error"
+                  :aria-describedby="renaming.error ? 'file-rename-error' : undefined"
+                  required
+                  maxlength="255"
+                  @input="emit('renameChange', ($event.target as HTMLInputElement).value)"
+                  @keydown.stop="renameKeys"
+                  @blur="blurRename"
+                />
+              </div>
+              <p
+                v-if="renaming.error"
+                id="file-rename-error"
+                class="file-rename-error error-text"
+                role="alert"
+              >
+                {{ renaming.error }}
+              </p>
+            </div>
             <button
+              v-else
               type="button"
               class="file-name"
               :title="entry.name"
@@ -348,9 +461,12 @@ function entryIcon(entry: FileEntry) {
       <span>{{ tr('正在读取目录…') }}</span>
     </div>
   </div>
-  <div v-if="!loading && pages > 1" class="file-pagination">
-    <button class="button" :disabled="page === 1" @click="page--">{{ tr('上一页') }}</button
+  <div v-if="(!loading || refreshing) && pages > 1" class="file-pagination">
+    <button class="button" :disabled="loading || page === 1" @click="page--">
+      {{ tr('上一页') }}</button
     ><span>{{ tr('第 ') }}{{ page }} / {{ pages }}{{ tr(' 页，每页 200 项') }}</span
-    ><button class="button" :disabled="page === pages" @click="page++">{{ tr('下一页') }}</button>
+    ><button class="button" :disabled="loading || page === pages" @click="page++">
+      {{ tr('下一页') }}
+    </button>
   </div>
 </template>

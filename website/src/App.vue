@@ -20,6 +20,7 @@ import type { Page } from './pages';
 import WorkspacePreview from './components/WorkspacePreview.vue';
 import InfoPage from './components/InfoPage.vue';
 import SiteHeader from './components/SiteHeader.vue';
+import PluginMarketplace from './components/PluginMarketplace.vue';
 
 const props = defineProps<{ page: Page }>();
 const isHome = computed(() => props.page === 'home');
@@ -31,7 +32,7 @@ const symbol = { terminal: Terminal, files: FolderOpen, docker: Container, assis
 <template>
   <div class="site concept-workbench">
     <a class="skip-link" href="#main-content">跳至主要内容</a>
-    <SiteHeader />
+    <SiteHeader :section="page === 'marketplace' ? 'marketplace' : 'site'" />
     <main v-if="isHome" id="main-content">
       <section class="hero-a wrap" aria-labelledby="hero-title">
         <div class="hero-a-copy">
@@ -262,6 +263,7 @@ const symbol = { terminal: Terminal, files: FolderOpen, docker: Container, assis
         </div>
       </section>
     </main>
+    <PluginMarketplace v-else-if="page === 'marketplace'" />
     <InfoPage v-else-if="page === 'privacy' || page === 'security'" :kind="page" />
     <main v-else id="main-content" class="not-found wrap">
       <p class="eyebrow">404 / PAGE NOT FOUND</p>
@@ -279,8 +281,9 @@ const symbol = { terminal: Terminal, files: FolderOpen, docker: Container, assis
         <p>让每一次连接，都更从容。</p>
       </div>
       <div class="footer-links">
-        <a :href="links.guide">使用文档</a><a :href="links.plugins">开发者中心</a
-        ><a href="/security.html">安全设计</a><a href="/privacy.html">隐私与数据</a
+        <a :href="links.guide">使用文档</a><a href="/marketplace.html">插件市场</a
+        ><a :href="links.plugins">开发者中心</a><a href="/security.html">安全设计</a
+        ><a href="/privacy.html">隐私与数据</a
         ><a :href="links.repository" target="_blank" rel="noopener noreferrer"
           >GitHub <ArrowUpRight :size="12"
         /></a>

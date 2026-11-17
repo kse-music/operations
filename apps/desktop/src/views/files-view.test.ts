@@ -88,6 +88,460 @@ afterEach(() => {
 });
 
 const drivePicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择本地磁盘"]')!;
+const remoteTable = () => root.querySelector<HTMLElement>('[aria-label="远程文件"]')!;
+const renameTable = (side: 'local' | 'remote') =>
+  root.querySelector<HTMLElement>(`[aria-label="${side === 'local' ? '本地' : '远程'}文件"]`)!;
+const renameInput = (side: 'local' | 'remote' = 'remote') =>
+  renameTable(side).querySelector<HTMLInputElement>('.file-rename-input');
+function renameKey(input: Element, key: string, extra: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra });
+  input.dispatchEvent(event);
+  return event;
+}
+function changeRename(value: string, side: 'local' | 'remote' = 'remote') {
+  const input = renameInput(side)!;
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+async function beginRename(
+  name: string,
+  trigger: 'F2' | 'menu' = 'F2',
+  side: 'local' | 'remote' = 'remote',
+) {
+  const button = [...renameTable(side).querySelectorAll<HTMLButtonElement>('.file-name')].find(
+    (item) => item.title === name,
+  )!;
+  button.click();
+  await nextTick();
+  if (trigger === 'F2') renameKey(button, 'F2');
+  else {
+    button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await nextTick();
+    [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.trim() === '重命名')!
+      .click();
+  }
+  await vi.waitFor(() => expect(document.activeElement).toBe(renameInput(side)));
+  return renameInput(side)!;
+}
+
+it.each([
+  { name: 'config.json', kind: 'file' as const, end: 6, trigger: 'F2' as const },
+  { name: 'folder.with.dots', kind: 'directory' as const, end: 16, trigger: 'F2' as const },
+  { name: 'README', kind: 'file' as const, end: 6, trigger: 'menu' as const },
+  { name: 'archive.tar.gz', kind: 'file' as const, end: 11, trigger: 'F2' as const },
+  { name: '.env', kind: 'file' as const, end: 4, trigger: 'F2' as const },
+  { name: 'trailing.', kind: 'file' as const, end: 9, trigger: 'F2' as const },
+])(
+  'edits $name inline via $trigger and selects the expected name segment',
+  async ({ name, kind, end, trigger }) => {
+    const files = useFilesStore(pinia);
+    files.current!.listing!.entries = [{ ...entry, name, kind, path: `/srv/api/${name}` }];
+    const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+    await nextTick();
+    if (name.startsWith('.')) {
+      root.querySelector<HTMLButtonElement>('[aria-label="显示隐藏项"]')!.click();
+      await nextTick();
+    }
+    const input = await beginRename(name, trigger);
+    expect(document.querySelector('dialog')).toBeNull();
+    expect(input.closest('tr')).not.toBeNull();
+    expect(input.value).toBe(name);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(end);
+    expect(action).not.toHaveBeenCalled();
+  },
+);
+
+it.each(['Escape', 'unchanged'] as const)(
+  'cancels inline renaming with %s without a remote request',
+  async (trigger) => {
+    const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+    const input = await beginRename('config');
+    if (trigger === 'unchanged') renameKey(input, 'Enter');
+    else {
+      changeRename('draft');
+      renameKey(input, 'Escape');
+    }
+    await nextTick();
+    expect(renameInput()).toBeNull();
+    expect(remoteTable().querySelector('.file-name')?.textContent).toContain('config');
+    expect(action).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(remoteTable().querySelector('.file-name'));
+  },
+);
+
+it('commits once on Enter, retains focus while saving, then selects and focuses the renamed row', async () => {
+  const files = useFilesStore(pinia);
+  let finish!: () => void;
+  const action = vi.spyOn(filesApi, 'action').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const refresh = vi.spyOn(files, 'refresh').mockResolvedValue();
+  const list = vi.spyOn(filesApi, 'list').mockResolvedValue({
+    path: '/srv/api',
+    parent: '/srv',
+    entries: [{ ...entry, name: 'renamed', path: '/srv/api/renamed' }],
+  });
+  const local = vi
+    .spyOn(filesApi, 'local')
+    .mockResolvedValue({ path: 'D:/test', parent: null, entries: [] });
+  const input = await beginRename('config');
+  changeRename('renamed');
+  renameKey(input, 'Enter');
+  renameKey(input, 'Enter');
+  renameKey(input, 'Escape');
+  await nextTick();
+  expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+    kind: 'rename',
+    path: '/srv/api/config',
+    destination: '/srv/api/renamed',
+  });
+  expect(renameInput()).toBe(input);
+  expect(input.readOnly).toBe(true);
+  expect(document.activeElement).toBe(input);
+  finish();
+  await vi.waitFor(() => expect(renameInput()).toBeNull());
+  await vi.waitFor(() =>
+    expect(document.activeElement).toBe(remoteTable().querySelector('.file-name')),
+  );
+  expect(remoteTable().querySelector<HTMLInputElement>('tbody input')!.checked).toBe(true);
+  expect(remoteTable().querySelector('.file-name')?.textContent).toContain('renamed');
+  expect(list).toHaveBeenCalledExactlyOnceWith('sftp-a', '/srv/api');
+  expect(local).not.toHaveBeenCalled();
+  expect(refresh).not.toHaveBeenCalled();
+});
+
+it('keeps a failed rename editable with its error and allows a corrected retry', async () => {
+  const files = useFilesStore(pinia);
+  const action = vi
+    .spyOn(filesApi, 'action')
+    .mockRejectedValueOnce({ message: '目标已存在，不能覆盖' })
+    .mockResolvedValue();
+  vi.spyOn(files, 'navigate').mockResolvedValue();
+  const input = await beginRename('config', 'menu');
+  changeRename('existing');
+  renameKey(input, 'Enter');
+  await vi.waitFor(() =>
+    expect(remoteTable().querySelector('[role="alert"]')?.textContent).toBe('目标已存在，不能覆盖'),
+  );
+  expect(renameInput()).toBe(input);
+  expect(input.readOnly).toBe(false);
+  expect(input.value).toBe('existing');
+  changeRename('different');
+  await nextTick();
+  expect(remoteTable().querySelector('[role="alert"]')).toBeNull();
+  renameKey(input, 'Enter');
+  await vi.waitFor(() => expect(renameInput()).toBeNull());
+  expect(action).toHaveBeenLastCalledWith('sftp-a', {
+    kind: 'rename',
+    path: '/srv/api/config',
+    destination: '/srv/api/different',
+  });
+});
+
+it.each(['', '..', 'sub/name'])(
+  'rejects invalid inline names (%s) before calling the backend',
+  async (name) => {
+    const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+    const input = await beginRename('config');
+    changeRename(name);
+    renameKey(input, 'Enter');
+    await nextTick();
+    expect(renameInput()).toBe(input);
+    expect(action).not.toHaveBeenCalled();
+    if (name)
+      expect(remoteTable().querySelector('[role="alert"]')?.textContent).toContain('名称不能包含');
+  },
+);
+
+it('leaves IME Enter, repeated Enter, Delete and double-clicks inside the rename editor', async () => {
+  const files = useFilesStore(pinia);
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+  const navigate = vi.spyOn(files, 'navigate').mockResolvedValue();
+  const input = await beginRename('config');
+  changeRename('draft');
+  renameKey(input, 'Enter', { isComposing: true });
+  renameKey(input, 'Enter', { keyCode: 229 });
+  renameKey(input, 'Enter', { repeat: true });
+  renameKey(input, 'Delete');
+  input.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await nextTick();
+  expect(renameInput()).toBe(input);
+  expect(action).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+  expect(document.querySelector('dialog')).toBeNull();
+});
+
+it.each([
+  'host',
+  'session',
+  'directory',
+  'disconnect',
+  'loading',
+  'switching',
+  'closing',
+  'removed',
+] as const)('cancels an unsubmitted rename when its %s changes', async (change) => {
+  const files = useFilesStore(pinia);
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+  const input = await beginRename('config');
+  changeRename('draft');
+  if (change === 'host') files.active = 'other';
+  if (change === 'session') files.current!.id = 'replacement';
+  if (change === 'directory') files.current!.path = '/other';
+  if (change === 'disconnect') files.current!.state = 'disconnected';
+  if (change === 'loading') files.current!.loading = true;
+  if (change === 'switching') files.current!.switchingUser = true;
+  if (change === 'closing') files.closingHosts.push('a');
+  if (change === 'removed') files.current!.listing!.entries = [];
+  await nextTick();
+  expect(renameInput()).toBeNull();
+  renameKey(input, 'Enter');
+  expect(action).not.toHaveBeenCalled();
+});
+
+it('keeps an in-flight rename and its refresh bound to the original host', async () => {
+  const files = useFilesStore(pinia);
+  const original = files.connections.a!;
+  let finish!: () => void;
+  const action = vi.spyOn(filesApi, 'action').mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const refresh = vi.spyOn(files, 'refresh').mockResolvedValue();
+  const navigate = vi.spyOn(files, 'navigate').mockResolvedValue();
+  const input = await beginRename('config');
+  changeRename('renamed');
+  renameKey(input, 'Enter');
+  files.connections.b = { ...original, host: { ...original.host, id: 'b' }, id: 'sftp-b' };
+  files.active = 'b';
+  await nextTick();
+  finish();
+  await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith('/srv/api', original));
+  expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+    kind: 'rename',
+    path: '/srv/api/config',
+    destination: '/srv/api/renamed',
+  });
+  expect(refresh).not.toHaveBeenCalled();
+  expect(files.current!.id).toBe('sftp-b');
+});
+
+it.each(['directory', 'session'] as const)(
+  'does not disturb a new %s after a rename was submitted',
+  async (change) => {
+    const files = useFilesStore(pinia);
+    let finish!: () => void;
+    const action = vi.spyOn(filesApi, 'action').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const refresh = vi.spyOn(files, 'refresh').mockResolvedValue();
+    const navigate = vi.spyOn(files, 'navigate').mockResolvedValue();
+    const input = await beginRename('config');
+    changeRename('renamed');
+    renameKey(input, 'Enter');
+    if (change === 'directory') {
+      files.current!.path = '/other';
+      files.current!.listing = {
+        path: '/other',
+        parent: '/',
+        entries: [{ ...entry, path: '/other/config' }],
+      };
+    } else files.current!.id = 'sftp-replacement';
+    await nextTick();
+    const checkbox = remoteTable().querySelector<HTMLInputElement>('tbody input')!;
+    if (!checkbox.checked) checkbox.click();
+    await nextTick();
+    expect(checkbox.checked).toBe(true);
+    finish();
+    await vi.waitFor(() => expect(action).toHaveResolved());
+    await nextTick();
+    expect(checkbox.checked).toBe(true);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(action).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+      kind: 'rename',
+      path: '/srv/api/config',
+      destination: '/srv/api/renamed',
+    });
+  },
+);
+
+it('cancels the draft when a hidden target is removed from the visible list', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.listing!.entries = [{ ...entry, name: '.config', path: '/srv/api/.config' }];
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+  root.querySelector<HTMLButtonElement>('[aria-label="显示隐藏项"]')!.click();
+  await nextTick();
+  await beginRename('.config');
+  changeRename('draft');
+  root.querySelector<HTMLButtonElement>('[aria-label="显示隐藏项"]')!.click();
+  await nextTick();
+  expect(renameInput()).toBeNull();
+  expect(action).not.toHaveBeenCalled();
+});
+
+it('cancels the draft when paging away from its row', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.listing!.entries = [
+    entry,
+    ...Array.from({ length: 200 }, (_, index) => ({
+      ...entry,
+      name: `z-${index}`,
+      path: `/srv/api/z-${index}`,
+      kind: 'file' as const,
+    })),
+  ];
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+  await nextTick();
+  await beginRename('config');
+  changeRename('draft');
+  remoteTable()
+    .closest('.file-side')!
+    .querySelector<HTMLButtonElement>('.file-pagination button:last-child')!
+    .click();
+  await nextTick();
+  expect(renameInput()).toBeNull();
+  expect(remoteTable().querySelectorAll('tbody tr')).toHaveLength(1);
+  expect(action).not.toHaveBeenCalled();
+});
+it.each([
+  { side: 'local' as const, kind: 'file' as const, trigger: 'F2' as const, save: 'blur' },
+  { side: 'local' as const, kind: 'directory' as const, trigger: 'menu' as const, save: 'Enter' },
+  { side: 'remote' as const, kind: 'file' as const, trigger: 'F2' as const, save: 'blur' },
+  { side: 'remote' as const, kind: 'directory' as const, trigger: 'menu' as const, save: 'blur' },
+])(
+  'renames a $side $kind using $trigger and $save without refreshing the other pane',
+  async ({ side, kind, trigger, save }) => {
+    const files = useFilesStore(pinia);
+    const parent = side === 'local' ? 'D:/test' : '/srv/api';
+    const name = 'config.json';
+    const source = { ...entry, kind, name, path: `${parent}/${name}` };
+    const changed = { ...source, name: 'new.json', path: `${parent}/new.json` };
+    if (side === 'local') {
+      files.local!.entries = [source];
+      files.current!.state = 'disconnected';
+    } else files.current!.listing!.entries = [source];
+    const remote = vi.spyOn(filesApi, 'action').mockResolvedValue();
+    const native = vi.spyOn(filesApi, 'localRename').mockResolvedValue(changed.path);
+    const localRead = vi
+      .spyOn(filesApi, 'local')
+      .mockResolvedValue({ path: parent, parent: null, entries: [changed] });
+    const remoteRead = vi
+      .spyOn(filesApi, 'list')
+      .mockResolvedValue({ path: parent, parent: '/srv', entries: [changed] });
+    const both = vi.spyOn(files, 'refresh').mockResolvedValue();
+    await nextTick();
+    const input = await beginRename(name, trigger, side);
+    expect([input.selectionStart, input.selectionEnd]).toEqual([
+      0,
+      kind === 'file' ? 6 : name.length,
+    ]);
+    changeRename(changed.name, side);
+    const outside = root.querySelector<HTMLInputElement>(
+      `[aria-label="${side === 'local' ? '本地路径' : '远程路径'}"]`,
+    )!;
+    if (save === 'blur') outside.focus();
+    else {
+      renameKey(input, 'Enter');
+      input.blur();
+    }
+    await vi.waitFor(() =>
+      expect(renameTable(side).querySelector('.file-name')?.textContent).toContain(changed.name),
+    );
+    expect(renameInput(side)).toBeNull();
+    expect(document.querySelector('dialog')).toBeNull();
+    if (side === 'local') {
+      expect(native).toHaveBeenCalledExactlyOnceWith({
+        parent,
+        path: source.path,
+        name: changed.name,
+      });
+      expect(localRead).toHaveBeenCalledExactlyOnceWith(parent);
+      expect(remote).not.toHaveBeenCalled();
+      expect(remoteRead).not.toHaveBeenCalled();
+    } else {
+      expect(remote).toHaveBeenCalledExactlyOnceWith('sftp-a', {
+        kind: 'rename',
+        path: source.path,
+        destination: changed.path,
+      });
+      expect(remoteRead).toHaveBeenCalledExactlyOnceWith('sftp-a', parent);
+      expect(native).not.toHaveBeenCalled();
+      expect(localRead).not.toHaveBeenCalled();
+    }
+    expect(both).not.toHaveBeenCalled();
+    if (save === 'blur') expect(document.activeElement).toBe(outside);
+  },
+);
+
+it('keeps the row selected and focused by the user during a blur save', async () => {
+  const files = useFilesStore(pinia);
+  const other = { ...entry, name: 'other', path: '/srv/api/other' };
+  files.current!.listing!.entries = [entry, other];
+  const action = vi.spyOn(filesApi, 'action').mockResolvedValue();
+  vi.spyOn(filesApi, 'list').mockResolvedValue({
+    path: '/srv/api',
+    parent: '/srv',
+    entries: [{ ...entry, name: 'renamed', path: '/srv/api/renamed' }, other],
+  });
+  await nextTick();
+  await beginRename('config');
+  changeRename('renamed');
+  const otherButton = [...remoteTable().querySelectorAll<HTMLButtonElement>('.file-name')].find(
+    (button) => button.title === 'other',
+  )!;
+  otherButton.click();
+  await vi.waitFor(() => expect(renameInput()).toBeNull());
+  await vi.waitFor(() => expect(remoteTable().textContent).toContain('renamed'));
+  expect(action).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).toBe(otherButton);
+  expect(remoteTable().querySelector<HTMLInputElement>('[aria-label="选择 other"]')!.checked).toBe(
+    true,
+  );
+  expect(
+    remoteTable().querySelector<HTMLInputElement>('[aria-label="选择 renamed"]')!.checked,
+  ).toBe(false);
+});
+
+it.each(['local', 'remote'] as const)(
+  'keeps a failed %s blur save editable and cancels with Esc',
+  async (side) => {
+    const files = useFilesStore(pinia);
+    if (side === 'local') files.local!.entries = [{ ...entry, path: 'D:/test/config' }];
+    const backend =
+      side === 'local'
+        ? vi.spyOn(filesApi, 'localRename').mockRejectedValue({ message: '目标已存在，未覆盖' })
+        : vi.spyOn(filesApi, 'action').mockRejectedValue({ message: '目标已存在，未覆盖' });
+    await nextTick();
+    const input = await beginRename('config', 'F2', side);
+    changeRename('existing', side);
+    input.blur();
+    await vi.waitFor(() =>
+      expect(renameTable(side).querySelector('[role="alert"]')?.textContent).toBe(
+        '目标已存在，未覆盖',
+      ),
+    );
+    expect(renameInput(side)).toBe(input);
+    expect(input.value).toBe('existing');
+    expect(input.readOnly).toBe(false);
+    input.focus();
+    renameKey(input, 'Escape');
+    await nextTick();
+    expect(renameInput(side)).toBeNull();
+    expect(backend).toHaveBeenCalledTimes(1);
+  },
+);
+
 const progressTask = (id: string, hostId = 'a'): TransferInfo => ({
   id,
   hostId,
@@ -305,7 +759,8 @@ it.each([
       transfer,
       '复制绝对路径',
       '查看属性',
-      ...(side === 'remote' ? ['重命名', '删除选中', '在新终端中打开'] : ['删除']),
+      '重命名',
+      ...(side === 'remote' ? ['删除选中', '在新终端中打开'] : ['删除']),
     ]);
     for (const button of buttons) {
       expect(button.firstElementChild?.tagName).toBe('svg');

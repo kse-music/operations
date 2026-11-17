@@ -1,7 +1,7 @@
 // Run against an isolated Windows debug build with appDirectoriesOverride set to QA_DIR/data.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,8 +17,12 @@ import {
 } from './ui-navigation.mjs';
 
 assert.equal(process.platform, 'win32');
-assert(process.argv[2], 'Usage: node tools/native-plugin-development-kit-e2e.mjs QA_DIR');
+assert(
+  process.argv[2] && process.argv[3],
+  'Usage: node tools/native-plugin-development-kit-e2e.mjs QA_DIR DOWNLOADED_KIT_ZIP',
+);
 const qa = await realpath(process.argv[2]);
+const archive = await realpath(process.argv[3]);
 const data = path.join(qa, 'data');
 const root = await realpath(fileURLToPath(new URL('../', import.meta.url)));
 const temp = await realpath(tmpdir());
@@ -35,20 +39,6 @@ function run(program, args) {
   const result = spawnSync(program, args, { cwd: sample, stdio: 'inherit', windowsHide: true });
   if (result.error) throw result.error;
   assert.equal(result.status, 0, `${program} ${args.join(' ')}`);
-}
-
-function answerSaveDialog(pid, destination) {
-  run('powershell.exe', [
-    '-NoProfile',
-    '-NonInteractive',
-    '-File',
-    path.join(root, 'tools/native-save-dialog.ps1'),
-    '-AppProcessId',
-    String(pid),
-    '-DialogTitle',
-    '保存插件开发包',
-    ...(destination ? ['-Destination', destination] : []),
-  ]);
 }
 
 const port = await new Promise((resolve, reject) => {
@@ -88,19 +78,13 @@ try {
   assert.equal(path.resolve(bootstrap.dataDirectory), data, 'refuse non-QA data directory');
   await navigateWorkspace(page, '插件管理');
 
-  const save = page.getByRole('button', { name: '下载插件开发包', exact: true });
-  assert.equal(await save.evaluate((el) => el.nextElementSibling.textContent.trim()), '安装插件');
+  const developerCenter = page.getByRole('link', { name: '开发者中心', exact: true });
+  assert.equal(await developerCenter.getAttribute('href'), 'https://ops.hiboot.cn/developers/');
+  assert.equal(await page.getByRole('button', { name: '下载插件开发包', exact: true }).count(), 0);
   await page.screenshot({ path: path.join(qa, 'plugin-management.png') });
-  await save.click();
-  answerSaveDialog(child.pid);
-  await save.and(page.locator(':enabled')).waitFor();
-  assert.deepEqual(await readdir(external), ['starter project']);
-  assert.equal(await page.getByText(/^插件开发包已保存到 /).count(), 0);
 
   const zip = path.join(external, 'serverdeck-plugin-development-kit.zip');
-  await save.click();
-  answerSaveDialog(child.pid, zip);
-  await page.getByText(`插件开发包已保存到 ${zip}`, { exact: true }).waitFor();
+  await copyFile(archive, zip);
   run('tar.exe', ['-xf', zip]);
   const sdk = JSON.parse(
     await readFile(path.join(sample, 'packages/plugin-sdk/package.json'), 'utf8'),
@@ -130,14 +114,7 @@ try {
   );
   const cmd = process.env.ComSpec ?? 'cmd.exe';
   run(cmd, ['/d', '/c', 'npm.cmd', 'ci', '--no-audit', '--no-fund']);
-  run('cargo', [
-    'fetch',
-    '--manifest-path',
-    'example/backend/Cargo.toml',
-    '--target',
-    'wasm32-unknown-unknown',
-    '--locked',
-  ]);
+  run('cargo', ['fetch', '--manifest-path', 'example/backend/Cargo.toml', '--locked']);
   run(cmd, ['/d', '/c', 'npm.cmd', 'run', 'package']);
 
   const preview = await previewPluginPackage(page, path.join(sample, 'example.sdplugin'));
@@ -164,20 +141,15 @@ try {
   await greet.click();
   await frame.getByText('独立构建的 WASM 向 ServerDeck 问好！', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(qa, 'installed-sample.png') });
-  const result = { downloadedZip: zip, independentProject: sample, plugin: manifest.id };
+  const result = { downloadedZip: archive, independentProject: sample, plugin: manifest.id };
   await writeFile(path.join(qa, 'results.json'), JSON.stringify(result, null, 2));
   console.log(
-    'PASS native download, external build, upload, authorization, and WASM invocation',
+    'PASS website development kit, external build, upload, authorization, and WASM invocation',
     result,
   );
 } catch (error) {
   if (page) {
     await page.screenshot({ path: path.join(qa, 'failure.png'), timeout: 3000 }).catch(() => {});
-    const notices = await page
-      .getByText(/^插件开发包保存失败/)
-      .allTextContents()
-      .catch(() => []);
-    if (notices.length) console.error(notices);
   }
   throw error;
 } finally {

@@ -25,6 +25,11 @@ export interface LocalRecycle {
   paths: string[];
   confirmed: boolean;
 }
+export interface LocalRename {
+  parent: string;
+  path: string;
+  name: string;
+}
 export interface FileLocation {
   path: string;
   name: string;

@@ -5,6 +5,7 @@ import { siteOrigin as origin } from './site-config.mjs';
 // A real origin is supplied by Sites or the explicitly selected custom domain.
 const pages = [
   ['index.html', 'home', '/'],
+  ['marketplace.html', 'marketplace', '/marketplace.html'],
   ['privacy.html', 'privacy', '/privacy.html'],
   ['security.html', 'security', '/security.html'],
   ['404.html', 'not-found', '/404.html'],

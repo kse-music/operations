@@ -188,6 +188,65 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
   properties = ref<(FileEntry & { side: 'local' | 'remote' }) | null>(null),
   terminalAction = ref<FileTerminalAction | null>(null);
 const menuElement = ref<HTMLElement>();
+const renameError = ref<string | null>(null);
+const renaming = computed(() =>
+  operation.value?.kind === 'rename'
+    ? {
+        path: operation.value.paths[0]!,
+        name: operation.value.name,
+        busy: busy.value,
+        error: renameError.value,
+      }
+    : undefined,
+);
+
+function operationLocationCurrent(op: NonNullable<typeof operation.value>): boolean {
+  return (
+    store.active === op.hostId &&
+    chosen.value === op.hostId &&
+    !store.closingHosts.includes(op.hostId) &&
+    (op.side === 'local'
+      ? !store.localLoading && store.local?.path === op.parent
+      : store.current?.id === op.id &&
+        store.current.state === 'connected' &&
+        !store.current.loading &&
+        !store.current.switchingUser &&
+        store.current.path === op.parent &&
+        store.current.listing?.path === op.parent)
+  );
+}
+function operationTargetCurrent(op: NonNullable<typeof operation.value>): boolean {
+  const listing = op.side === 'local' ? store.local : store.current?.listing;
+  return (
+    operationLocationCurrent(op) &&
+    (op.kind !== 'rename' || !!listing?.entries.some((entry) => entry.path === op.paths[0]))
+  );
+}
+
+watch(
+  () => operation.value?.kind === 'rename' && !operationTargetCurrent(operation.value),
+  (changed) => {
+    if (changed) operation.value = null;
+  },
+  { flush: 'sync' },
+);
+
+function cancelRename(): void {
+  if (operation.value?.kind === 'rename' && !busy.value) operation.value = null;
+}
+function changeRename(name: string): void {
+  if (operation.value?.kind !== 'rename' || busy.value) return;
+  operation.value.name = name;
+  renameError.value = null;
+}
+async function focusRenamedEntry(op: NonNullable<typeof operation.value>): Promise<void> {
+  await nextTick();
+  if (!operationLocationCurrent(op)) return;
+  const area = op.side === 'local' ? localArea.value : remoteArea.value;
+  [...(area?.querySelectorAll<HTMLButtonElement>('.file-name') ?? [])]
+    .find((button) => button.title === op.name)
+    ?.focus({ preventScroll: true });
+}
 const transfer = ref<{
   id: string;
   host: string;
@@ -554,7 +613,11 @@ async function context(
   menu.value.x = Math.max(8, Math.min(menu.value.x, window.innerWidth - bounds.width - 8));
   menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - bounds.height - 8));
 }
-function mutate(kind: 'mkdir' | 'rename' | 'delete', side: 'local' | 'remote' = 'remote'): void {
+function mutate(
+  kind: 'mkdir' | 'rename' | 'delete',
+  side: 'local' | 'remote' = 'remote',
+  target?: FileEntry,
+): void {
   const current = store.current;
   const listing = side === 'local' ? store.local : current?.listing;
   if (
@@ -570,13 +633,17 @@ function mutate(kind: 'mkdir' | 'rename' | 'delete', side: 'local' | 'remote' = 
       : !current?.id || current.state !== 'connected' || current.loading || current.switchingUser)
   )
     return;
+  const renameTarget = target ?? menu.value?.entry;
   const paths =
     kind === 'mkdir'
       ? []
-      : kind === 'rename' && menu.value
-        ? [menu.value.entry.path]
+      : kind === 'rename'
+        ? renameTarget
+          ? [renameTarget.path]
+          : []
         : [...(side === 'local' ? localSelection.value : remoteSelection.value)];
   if (kind !== 'mkdir' && !paths.length) return;
+  if (kind === 'rename' && paths.length !== 1) return;
   if (paths.some((path) => !listing.entries.some((entry) => entry.path === path))) {
     store.error = tr('部分选中项目已不在当前目录，请刷新后重试。');
     return;
@@ -589,45 +656,81 @@ function mutate(kind: 'mkdir' | 'rename' | 'delete', side: 'local' | 'remote' = 
     host: hostDisplayName(current?.host),
     parent: listing.path,
     paths,
-    name: kind === 'rename' ? (menu.value?.entry.name ?? '') : '',
+    name: kind === 'rename' ? listing.entries.find((entry) => entry.path === paths[0])!.name : '',
     hasDirectory:
       kind === 'delete' &&
       listing.entries.some((entry) => entry.kind === 'directory' && paths.includes(entry.path)),
   };
+  renameError.value = null;
+  if (kind === 'rename') {
+    endDownloadDrag();
+    (side === 'local' ? localSelection : remoteSelection).value = paths;
+    store.error = null;
+  }
   menu.value = null;
 }
-async function submitOperation(): Promise<void> {
+async function submitOperation(reason: 'enter' | 'blur' = 'enter'): Promise<void> {
   const op = operation.value;
   if (!op || busy.value) return;
-  if (
-    store.active !== op.hostId ||
-    chosen.value !== op.hostId ||
-    store.closingHosts.includes(op.hostId) ||
-    (op.side === 'local'
-      ? store.localLoading || store.local?.path !== op.parent
-      : store.current?.id !== op.id ||
-        store.current.state !== 'connected' ||
-        store.current.loading ||
-        store.current.switchingUser ||
-        store.current.path !== op.parent)
-  ) {
+  if (!operationTargetCurrent(op)) {
     operation.value = null;
     store.error = tr('文件操作目标已变化，请重新选择。');
+    return;
+  }
+  const listing = op.side === 'local' ? store.local : store.current?.listing;
+  const selection = op.side === 'local' ? localSelection : remoteSelection;
+  const area = op.side === 'local' ? localArea.value : remoteArea.value;
+  const input = area?.querySelector<HTMLInputElement>('.file-rename-input');
+  if (
+    op.kind === 'rename' &&
+    listing?.entries.find((entry) => entry.path === op.paths[0])?.name === op.name
+  ) {
+    operation.value = null;
+    if (reason === 'enter') await focusRenamedEntry(op);
     return;
   }
   busy.value = true;
   store.error = null;
   try {
+    if (op.kind === 'rename') {
+      const destination =
+        op.side === 'local'
+          ? await filesApi.localRename({ parent: op.parent, path: op.paths[0]!, name: op.name })
+          : remoteJoin(op.parent, op.name);
+      if (op.side === 'remote')
+        await filesApi.action(op.id, { kind: 'rename', path: op.paths[0]!, destination });
+      const focus = reason === 'enter' && document.activeElement === input;
+      operation.value = null;
+      if (op.side === 'local') await store.refreshLocal(op.hostId, op.parent);
+      else {
+        const connection = store.connections[op.hostId];
+        if (
+          connection?.id === op.id &&
+          connection.state === 'connected' &&
+          connection.path === op.parent &&
+          !connection.loading &&
+          !connection.switchingUser &&
+          !store.closingHosts.includes(op.hostId)
+        ) {
+          await store.navigate(op.parent, connection);
+        }
+      }
+      if (operationLocationCurrent(op)) {
+        const updated = op.side === 'local' ? store.local : store.current?.listing;
+        if (updated?.entries.some((entry) => entry.path === destination)) {
+          // A blur save must retain the row the user just selected, rather than reclaiming it.
+          selection.value = selection.value.map((path) =>
+            path === op.paths[0] ? destination : path,
+          );
+          if (focus) await focusRenamedEntry(op);
+        }
+      }
+      return;
+    }
     if (op.side === 'local')
       await filesApi.localRecycle({ parent: op.parent, paths: op.paths, confirmed: true });
     else if (op.kind === 'mkdir')
       await filesApi.action(op.id, { kind: 'mkdir', path: remoteJoin(op.parent, op.name) });
-    else if (op.kind === 'rename')
-      await filesApi.action(op.id, {
-        kind: 'rename',
-        path: op.paths[0]!,
-        destination: remoteJoin(op.parent, op.name),
-      });
     else
       await filesApi.action(op.id, {
         kind: 'remove',
@@ -646,6 +749,7 @@ async function submitOperation(): Promise<void> {
       await store.navigate(op.parent, store.connections[op.hostId]);
   } catch (cause) {
     store.error = errorMessage(cause);
+    if (op.kind === 'rename' && operation.value === op) renameError.value = store.error;
   } finally {
     busy.value = false;
   }
@@ -851,11 +955,17 @@ onBeforeUnmount(() => {
           side="local"
           :listing="store.local"
           :loading="store.localLoading"
+          :pending-path="store.localPendingPath"
+          :renaming="operation?.side === 'local' ? renaming : undefined"
           :selected="localSelection"
           @select="localSelection = $event"
           @open="openEntry('local', $event)"
           @menu="(entry, event) => context('local', entry, event)"
           @remove="mutate('delete', 'local')"
+          @rename="mutate('rename', 'local', $event)"
+          @rename-change="changeRename"
+          @rename-submit="submitOperation"
+          @rename-cancel="cancelRename"
         />
       </section>
       <section
@@ -982,13 +1092,19 @@ onBeforeUnmount(() => {
           side="remote"
           :listing="store.current?.listing ?? null"
           :loading="store.current?.loading ?? false"
+          :pending-path="store.current?.pendingPath"
           :selected="remoteSelection"
           :hide-dotfiles="!showRemoteHidden"
+          :renaming="operation?.side === 'remote' ? renaming : undefined"
           @select="remoteSelection = $event"
           @open="openEntry('remote', $event)"
           @menu="(entry, event) => context('remote', entry, event)"
           @drag="beginDownloadDrag"
           @remove="mutate('delete')"
+          @rename="mutate('rename', 'remote', $event)"
+          @rename-change="changeRename"
+          @rename-submit="submitOperation"
+          @rename-cancel="cancelRename"
         />
       </section>
     </div>
@@ -1162,11 +1278,11 @@ onBeforeUnmount(() => {
         {{ tr(' 复制绝对路径') }}</button
       ><button role="menuitem" @click="showProperties">
         <Info class="file-menu-properties" aria-hidden="true" />{{ tr('查看属性') }}</button
+      ><button role="menuitem" @click="mutate('rename', menu!.side)">
+        <TextCursorInput class="file-menu-rename" aria-hidden="true" />{{ tr('重命名') }}</button
       ><button v-if="menu.side === 'local'" role="menuitem" @click="mutate('delete', 'local')">
         <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除') }}</button
       ><template v-if="menu.side === 'remote'"
-        ><button role="menuitem" @click="mutate('rename')">
-          <TextCursorInput class="file-menu-rename" aria-hidden="true" />{{ tr('重命名') }}</button
         ><button role="menuitem" @click="mutate('delete')">
           <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除选中') }}</button
         ><button
@@ -1185,7 +1301,7 @@ onBeforeUnmount(() => {
     :busy="busy"
     @close="operation = null"
   >
-    <form class="file-delete-confirm" @submit.prevent="submitOperation">
+    <form class="file-delete-confirm" @submit.prevent="submitOperation()">
       <div class="file-delete-message">
         <CircleX :size="32" aria-hidden="true" />
         <p class="file-delete-question">
@@ -1219,22 +1335,22 @@ onBeforeUnmount(() => {
     </form>
   </Modal>
   <Modal
-    v-else-if="operation"
-    :title="operation.kind === 'mkdir' ? tr('创建远程文件夹') : tr('重命名远程项目')"
+    v-else-if="operation?.kind === 'mkdir'"
+    :title="tr('创建远程文件夹')"
     :busy="busy"
     @close="operation = null"
     ><p>{{ operation.host }} · {{ operation.parent }}</p>
 
-    <form class="editor-form" @submit.prevent="submitOperation">
+    <form class="editor-form" @submit.prevent="submitOperation()">
       <label
-        >{{ operation.kind === 'mkdir' ? tr('文件夹名称') : tr('新名称')
+        >{{ tr('文件夹名称')
         }}<input v-model="operation.name" :aria-label="tr('远程项目名称')" required maxlength="255"
       /></label>
       <footer class="dialog-actions">
         <button class="button" type="button" :disabled="busy" @click="operation = null">
           {{ tr('取消') }}</button
         ><button class="button danger" :disabled="busy">
-          {{ operation.kind === 'mkdir' ? tr('创建文件夹') : tr('确认重命名') }}
+          {{ tr('创建文件夹') }}
         </button>
       </footer>
     </form></Modal

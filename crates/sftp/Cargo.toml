@@ -18,6 +18,9 @@ tracing.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+serverdeck-windows-file-drag = { path = "../windows-file-drag" }
+
 [dev-dependencies]
 tempfile.workspace = true
 serverdeck-storage.workspace = true

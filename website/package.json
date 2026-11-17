@@ -17,7 +17,7 @@
     "build:docs": "vitepress build documentation",
     "docs:check": "node scripts/check-docs.mjs",
     "docs:import": "node scripts/import-plugin-docs.mjs",
-    "test": "node --test scripts/documentation.test.mjs scripts/search-index.test.mjs"
+    "test": "node --test scripts/documentation.test.mjs scripts/search-index.test.mjs scripts/marketplace.test.mjs"
   },
   "dependencies": {
     "@lucide/vue": "1.66.0",

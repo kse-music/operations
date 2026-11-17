@@ -12,9 +12,11 @@ import manifest from '../reference-manifest.json'
 
 <p class="portal-intro">用 Vue 构建界面，用 WASM 承载业务。通过公开 SDK 调用连接、文件和模型能力，让宿主处理权限、身份与资源边界。</p>
 
-<div class="portal-actions"><a href="/developers/quickstart.html">构建第一个插件 →</a><a href="/developers/reference/sdk.html">查阅 SDK 参考</a></div>
+<div class="portal-actions"><a :href="`/downloads/serverdeck-plugin-development-kit-${manifest.sdkVersion}.zip`" download>下载插件开发包</a><a href="/developers/quickstart.html">构建第一个插件 →</a><a href="/developers/reference/sdk.html">查阅 SDK 参考</a></div>
 
 <div class="version-badges"><span>SDK {{ manifest.sdkVersion }}</span><span>UI v{{ manifest.uiVersion }}</span><span>ABI {{ manifest.abiVersion }}</span><span>包格式 {{ manifest.packageVersion }}</span></div>
+
+开发包与本站 SDK 版本配套，包含公开 SDK、锁文件、构建工具和可运行样例。也可[按 SDK 版本选择开发包](/developers/downloads.html)，使用前核对客户端支持的 SDK 与[兼容性规则](/developers/reference/versions.html)。
 
 <div class="portal-grid">
 <a class="portal-card" href="/developers/quickstart.html"><small>01 / START</small><strong>从可运行样例开始</strong><span>下载独立开发包，准备环境，构建并安装第一个插件。</span></a>
@@ -31,4 +33,4 @@ import manifest from '../reference-manifest.json'
 
 ## 当前交付方式
 
-当前通过本地 `.sdplugin` 包安装和分发，没有在线市场或付费安装接口。开发者身份是包内自述，当前没有密码学签名验证；不能用作者信息或摘要代替来源核对。
+当前通过本地 `.sdplugin` 包安装和分发。官网[插件市场](/marketplace.html)为静态展示，下载统一提示“建设中”，没有在线下载安装或付费安装接口。开发者身份是包内自述，当前没有密码学签名验证；不能用作者信息或摘要代替来源核对。

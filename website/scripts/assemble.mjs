@@ -28,7 +28,7 @@ async function merge(relative = '') {
   }
 }
 await merge();
-const routes = ['/', '/privacy.html', '/security.html'];
+const routes = ['/', '/marketplace.html', '/privacy.html', '/security.html'];
 async function collect(relative) {
   for (const entry of await readdir(path.join(destination, relative), { withFileTypes: true })) {
     const child = `${relative}/${entry.name}`;

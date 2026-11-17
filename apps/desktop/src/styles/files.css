@@ -169,6 +169,7 @@
   min-height: 96px;
   contain: size;
   overflow: auto;
+  overflow-anchor: none;
 }
 .file-list-loading {
   position: absolute;
@@ -261,6 +262,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.file-name-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+}
+.file-rename-input {
+  min-width: 0;
+  width: 100%;
+  padding: 1px 3px;
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  line-height: inherit;
+}
+.file-rename-input:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+.file-rename-input[readonly] {
+  opacity: 0.7;
+}
+.file-rename-error {
+  margin: 4px 0 0;
+  font-size: var(--font-size-caption);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .file-entry-icon {
   flex: none;

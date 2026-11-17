@@ -1,18 +1,17 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { zipSync } from 'fflate';
-import type { Plugin } from 'vite';
 
-const fileName = 'serverdeck-plugin-development-kit.zip';
-const repository = new URL('../../', import.meta.url);
+const repository = new URL('../', import.meta.url);
 const template = 'plugins/development-kit';
 
-function createArchive(): Uint8Array {
-  const files: Record<string, Uint8Array> = {};
-  function add(source: string, destination = source) {
+export function createArchive() {
+  const files = {};
+  function add(source, destination = source) {
     files[destination] = readFileSync(new URL(source, repository));
   }
-  function addDirectory(source: string, destination = source) {
+  function addDirectory(source, destination = source) {
     const entries = readdirSync(new URL(source, repository), { withFileTypes: true });
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const relative = `${source}/${entry.name}`;
@@ -66,18 +65,30 @@ function createArchive(): Uint8Array {
   return zipSync(files, { mtime: new Date(2020, 0, 1) });
 }
 
-export function pluginDevelopmentKit(): Plugin {
-  return {
-    name: 'serverdeck-plugin-development-kit',
-    configureServer({ config }) {
-      if (config.mode === 'test') return;
-      // In Tauri dev mode the native asset resolver reads frontendDist from disk.
-      const output = resolve(config.root, config.build.outDir);
-      mkdirSync(output, { recursive: true });
-      writeFileSync(resolve(output, fileName), createArchive());
-    },
-    generateBundle() {
-      this.emitFile({ type: 'asset', fileName, source: createArchive() });
-    },
-  };
+export function writeDevelopmentKit(
+  directory = fileURLToPath(new URL('.local/plugin-development-kit/', repository)),
+) {
+  const sdkVersion = JSON.parse(
+    readFileSync(new URL('packages/plugin-sdk/package.json', repository), 'utf8'),
+  ).version;
+  const fileName = `serverdeck-plugin-development-kit-${sdkVersion}.zip`;
+  const archive = createArchive();
+  mkdirSync(directory, { recursive: true });
+  const output = join(directory, fileName);
+  try {
+    writeFileSync(output, archive, { flag: 'wx' });
+  } catch (error) {
+    if (error.code !== 'EEXIST') throw error;
+    if (!readFileSync(output).equals(Buffer.from(archive)))
+      throw new Error(`同一 SDK 版本的开发包内容已变化，请核对版本并使用新的输出目录：${output}`, {
+        cause: error,
+      });
+  }
+  return { sdkVersion, output, bytes: archive.length };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  const [directory, ...extra] = process.argv.slice(2);
+  if (extra.length) throw new Error('用法：node tools/build-plugin-development-kit.mjs [输出目录]');
+  console.log(JSON.stringify(writeDevelopmentKit(directory && resolve(directory))));
 }

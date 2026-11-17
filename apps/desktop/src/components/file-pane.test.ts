@@ -32,24 +32,97 @@ function mountPane(
   directory: DirectoryListing | null = listing,
   loading = false,
   selected: string[] = [],
+  pendingPath?: string,
 ) {
   const select = vi.fn();
   const open = vi.fn();
   const remove = vi.fn();
+  const rename = vi.fn();
   root = document.createElement('div');
   document.body.append(root);
   app = createApp(FilePane, {
     side,
     listing: directory,
     loading,
+    pendingPath,
     selected,
     onSelect: select,
     onOpen: open,
     onRemove: remove,
+    onRename: rename,
   });
   app.mount(root);
-  return { select, open, remove };
+  return { select, open, remove, rename };
 }
+
+it.each(['local', 'remote'] as const)(
+  'uses F2 for exactly one selected %s item without requesting deletion',
+  (side) => {
+    const { rename, remove } = mountPane(side, listing, false, ['/srv/app']);
+    const key = new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true });
+    root.querySelector('.file-name')!.dispatchEvent(key);
+    expect(key.defaultPrevented).toBe(true);
+    expect(rename).toHaveBeenCalledExactlyOnceWith(listing.entries[0]);
+    expect(remove).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  { side: 'remote', loading: false, selected: [] },
+  { side: 'remote', loading: true, selected: ['/srv/app'] },
+  { side: 'remote', loading: false, selected: ['/srv/app', '/srv/unknown'] },
+  { side: 'remote', loading: false, selected: ['/srv/missing'] },
+] as const)(
+  'does not rename for F2 with $side loading=$loading selection=$selected',
+  ({ side, loading, selected }) => {
+    const { rename } = mountPane(side, listing, loading, [...selected]);
+    const key = new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true });
+    root.querySelector('.file-table')!.dispatchEvent(key);
+    expect(rename).not.toHaveBeenCalled();
+    expect(key.defaultPrevented).toBe(false);
+  },
+);
+
+it('ignores F2 modifiers, composition, repeats, text fields and modal dialogs', () => {
+  const { rename } = mountPane('remote', listing, false, ['/srv/app']);
+  const name = root.querySelector('.file-name')!;
+  for (const flag of ['ctrlKey', 'altKey', 'metaKey', 'shiftKey', 'isComposing', 'repeat']) {
+    name.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, [flag]: true }));
+  }
+  const input = document.createElement('input');
+  root.querySelector('.file-table')!.append(input);
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+  const dialog = document.createElement('dialog');
+  dialog.open = true;
+  document.body.append(dialog);
+  try {
+    name.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }));
+    expect(rename).not.toHaveBeenCalled();
+  } finally {
+    dialog.remove();
+  }
+});
+
+it.each(['local', 'remote'] as const)(
+  'retains rows and pagination while refreshing the same %s directory',
+  (side) => {
+    const entries = Array.from({ length: 201 }, (_, index) => ({
+      ...listing.entries[0]!,
+      name: `file-${index}`,
+      path: `/srv/file-${index}`,
+    }));
+    mountPane(side, { ...listing, entries }, true, [], '/srv');
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(200);
+    expect(root.querySelector('.file-pagination')).not.toBeNull();
+    expect(
+      [...root.querySelectorAll<HTMLButtonElement>('.file-pagination button')].every(
+        (button) => button.disabled,
+      ),
+    ).toBe(true);
+    expect(root.querySelector('.file-list-loading')).not.toBeNull();
+    expect(root.querySelector('.file-table')?.getAttribute('aria-busy')).toBe('true');
+  },
+);
 
 it.each(['local', 'remote'] as const)(
   'requests deletion from the focused %s list and focuses clicked rows',

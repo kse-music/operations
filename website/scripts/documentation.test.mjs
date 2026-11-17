@@ -7,7 +7,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { inspectHtml, checkLink, verifySnapshots } from './documentation.mjs';
+import { createMarkdownRenderer, disposeMdItInstance, resolveConfig } from 'vitepress';
+import {
+  inspectHtml,
+  checkLink,
+  verifySnapshots,
+  verifyDevelopmentKits,
+} from './documentation.mjs';
 
 const runFile = promisify(execFile);
 
@@ -51,6 +57,66 @@ test('已提交规范在独立项目内可验证，不需要宿主源码', async
   );
   assert.equal(manifest.documents.length, 9);
   assert.match(manifest.sdkVersion, /^\d+\.\d+\.\d+$/);
+});
+
+test('官网下载清单保留独立版本，拒绝丢包、摘要变化和遗漏当前 SDK', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'serverdeck-downloads-'));
+  const bytes = Buffer.from('versioned archive fixture');
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const kits = [
+    { sdkVersion: '5.6.0', sha256 },
+    { sdkVersion: '5.7.1', sha256 },
+  ];
+  try {
+    for (const kit of kits)
+      await writeFile(
+        path.join(directory, `serverdeck-plugin-development-kit-${kit.sdkVersion}.zip`),
+        bytes,
+      );
+    await assert.doesNotReject(verifyDevelopmentKits(directory, kits, '5.7.1'));
+    await assert.rejects(verifyDevelopmentKits(directory, kits, '5.8.0'), /缺少当前 SDK/);
+    await assert.rejects(verifyDevelopmentKits(directory, [...kits, kits[0]], '5.7.1'), /版本重复/);
+    await assert.rejects(
+      verifyDevelopmentKits(directory, [{ sdkVersion: '../escape', sha256 }], '5.7.1'),
+      /版本或 SHA-256 无效/,
+    );
+    await writeFile(path.join(directory, 'serverdeck-plugin-development-kit-5.6.0.zip'), 'changed');
+    await assert.rejects(verifyDevelopmentKits(directory, kits, '5.7.1'), /摘要不匹配/);
+    await rm(path.join(directory, 'serverdeck-plugin-development-kit-5.6.0.zip'));
+    await assert.rejects(verifyDevelopmentKits(directory, kits, '5.7.1'), { code: 'ENOENT' });
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+});
+
+test('规范标题锚点保留不可见标记，正文占位符仍按字面显示', async () => {
+  const root = fileURLToPath(new URL('../documentation/', import.meta.url));
+  const config = await resolveConfig(root, 'build');
+  disposeMdItInstance();
+  try {
+    const md = await createMarkdownRenderer(root, config.markdown);
+    const manifest = await verifySnapshots(root);
+    for (const entry of manifest.documents) {
+      const html = md.render(await readFile(path.join(root, entry.file), 'utf8'), {
+        relativePath: entry.file,
+      });
+      const anchors = [...html.matchAll(/<a\b[^>]*class="header-anchor"[^>]*>(.*?)<\/a>/g)];
+      assert.ok(anchors.length > 0, entry.file);
+      for (const anchor of anchors) assert.equal(anchor[1], '&ZeroWidthSpace;', entry.file);
+    }
+    const html = md.render('# 标题 <ID>\n\n正文 <plugin-id> 和 <owner>。\n', {
+      relativePath: 'developers/reference/sdk.md',
+    });
+    assert.match(html, /标题 &lt;ID&gt;/);
+    assert.match(html, /正文 &lt;plugin-id&gt; 和 &lt;owner&gt;。/);
+    const guide = md.render('## 正常标题\n\n正文 <span>强调</span>。\n', {
+      relativePath: 'docs/quickstart.md',
+    });
+    assert.match(guide, /正文 <span>强调<\/span>。/);
+    assert.match(guide, /class="header-anchor"[^>]*>&ZeroWidthSpace;<\/a>/);
+  } finally {
+    disposeMdItInstance();
+  }
 });
 
 test('规范正文被单独改写时拒绝构建，要求重新同步来源', async () => {

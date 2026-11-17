@@ -32,6 +32,23 @@ const host = {
   hostname: 'server.example',
   username: 'ops',
 } as Host;
+it('refreshes only an existing local browser still at the renamed parent', async () => {
+  const store = useFilesStore();
+  store.active = 'a';
+  store.local = { path: 'D:/a', parent: 'D:/', entries: [] };
+  store.active = 'b';
+  store.local = { path: 'E:/b', parent: 'E:/', entries: [] };
+  mocks.local.mockResolvedValue({ path: 'D:/a', parent: 'D:/', entries: [] });
+  await store.refreshLocal('missing', 'D:/a');
+  await store.refreshLocal('a', 'D:/old');
+  expect(mocks.local).not.toHaveBeenCalled();
+  await store.refreshLocal('a', 'D:/a');
+  expect(mocks.local).toHaveBeenCalledExactlyOnceWith('D:/a');
+  expect(store.active).toBe('b');
+  expect(store.local?.path).toBe('E:/b');
+  store.active = 'a';
+  expect(store.local?.path).toBe('D:/a');
+});
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.resetAllMocks();

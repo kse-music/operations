@@ -7,6 +7,7 @@ import { RefreshCw } from '@lucide/vue';
 import { computed } from 'vue';
 import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { useUpdatesStore } from '../stores/updates';
+import UpdateReleaseNotes from '../components/UpdateReleaseNotes.vue';
 const updates = useUpdatesStore();
 const checkedTime = computed(() => {
   const at = updates.state?.preferences.lastCheckedAt;
@@ -89,9 +90,9 @@ const releaseTime = computed(() =>
           <p class="subtle">{{ tr('启动后后台检查，每天最多一次；安装前由你确认。') }}</p>
           <div v-if="updates.state.release" class="update-release">
             <strong>{{ tr('发现新版本 v{0}', updates.state.release.version) }}</strong>
-            <p class="update-notes">
-              {{ updates.state.release.notes || tr('此版本未提供更新说明。') }}
-            </p>
+            <UpdateReleaseNotes
+              :content="updates.state.release.notes || tr('此版本未提供更新说明。')"
+            />
           </div>
           <p v-else-if="updates.state.phase === 'upToDate' && !updates.error" role="status">
             {{ tr('当前已是最新版本。') }}

@@ -176,6 +176,10 @@ fn editor_can_load_only_its_bound_document_and_cannot_use_main_commands() {
             json!({"input":{"token":"other-document","content":"replacement","confirmReplace":true}}),
         ),
         ("files_local", json!({"path":null})),
+        (
+            "files_local_rename",
+            json!({"input":{"parent":"C:\\","path":"C:\\source","name":"new"}}),
+        ),
         ("files_close", json!({"id":"bound-session","cancel":true})),
         ("app_exit_confirm", json!({"confirmed":true})),
         ("app_bootstrap", json!({})),

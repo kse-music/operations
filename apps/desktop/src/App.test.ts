@@ -705,33 +705,28 @@ it('keeps shared preferences and close protection when managing plugins', async 
   expect(workspace.tabs).toHaveLength(1);
 });
 
-it('shows the saved development kit path or save error and lets the user retry after cancellation', async () => {
-  const save = vi
-    .spyOn(pluginsApi, 'saveDevelopmentKit')
-    .mockResolvedValueOnce(null)
-    .mockRejectedValueOnce(new Error('目录不可写'))
-    .mockResolvedValueOnce('D:\\QA\\serverdeck-plugin-development-kit.zip');
+it('opens the official developer center from plugin management and reports browser failures', async () => {
+  const open = vi
+    .spyOn(terminalApi, 'openLink')
+    .mockRejectedValueOnce(new Error('默认浏览器不可用'))
+    .mockResolvedValueOnce();
   await openNavigation('插件管理');
-  const button = [
-    ...document.querySelectorAll<HTMLButtonElement>('.plugin-heading-actions button'),
-  ].find((item) => item.textContent?.trim() === '下载插件开发包')!;
+  const link = document.querySelector<HTMLAnchorElement>('.plugin-heading-actions a')!;
+  expect(link.textContent?.trim()).toBe('开发者中心');
+  expect(link.href).toBe('https://ops.hiboot.cn/developers/');
+  expect(document.querySelector('.plugin-heading-actions')?.textContent).not.toContain(
+    '下载插件开发包',
+  );
   const notices = () =>
-    useNotificationsStore().items.filter((item) => item.text.startsWith('插件开发包'));
-  button.click();
+    useNotificationsStore().items.filter((item) => item.text.startsWith('无法打开开发者中心'));
+  link.click();
   await flush();
-  expect(notices()).toEqual([]);
-  expect(button.disabled).toBe(false);
-  button.click();
+  expect(notices()).toMatchObject([{ text: '无法打开开发者中心：默认浏览器不可用', error: true }]);
+  link.click();
   await flush();
-  expect(notices()).toMatchObject([{ text: '插件开发包保存失败：目录不可写', error: true }]);
-  expect(button.disabled).toBe(false);
-  button.click();
-  await flush();
-  expect(save).toHaveBeenCalledTimes(3);
-  expect(notices().at(-1)).toMatchObject({
-    text: '插件开发包已保存到 D:\\QA\\serverdeck-plugin-development-kit.zip',
-    error: false,
-  });
+  expect(open).toHaveBeenCalledTimes(2);
+  expect(open).toHaveBeenLastCalledWith('https://ops.hiboot.cn/developers/');
+  expect(notices()).toHaveLength(1);
 });
 
 it('keeps the About page available before bootstrap and updates its real version state', async () => {

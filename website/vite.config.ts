@@ -8,6 +8,8 @@ export default defineConfig({
   base: '/',
   build: {
     sourcemap: false,
-    rollupOptions: { input: ['index.html', 'privacy.html', 'security.html', '404.html'] },
+    rollupOptions: {
+      input: ['index.html', 'marketplace.html', 'privacy.html', 'security.html', '404.html'],
+    },
   },
 });

@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
-import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import {
   ChevronDown,
-  Download,
+  ExternalLink,
   Puzzle,
   PackagePlus,
   RefreshCw,
@@ -18,13 +17,14 @@ import Modal from '../components/Modal.vue';
 import { usePluginsStore } from '../stores/plugins';
 import { useNotificationsStore } from '../stores/notifications';
 import { pluginsApi } from '../services/plugins';
+import { terminalApi } from '../services/terminal';
 import { togglePlugin } from '../services/plugin-lifecycle';
 import { errorMessage } from '../services/ipc';
 import type { InstalledPlugin, PluginPackagePreview, PluginProblem } from '../types/plugins';
 const emit = defineEmits<{ settings: [id: string] }>();
 const plugins = usePluginsStore();
 const notifications = useNotificationsStore();
-const savingDevelopmentKit = ref(false);
+const developerCenterUrl = 'https://ops.hiboot.cn/developers/';
 const path = ref(''),
   preview = ref<PluginPackagePreview | null>(null),
   ack = ref(false),
@@ -129,16 +129,11 @@ async function pick() {
     plugins.error = errorMessage(cause);
   }
 }
-async function saveDevelopmentKit() {
-  savingDevelopmentKit.value = true;
+async function openDeveloperCenter() {
   try {
-    const destination = await pluginsApi.saveDevelopmentKit();
-    if (destination)
-      notifications.push(tr('插件开发包已保存到 {0}', displayLocalPath(destination)));
+    await terminalApi.openLink(developerCenterUrl);
   } catch (cause) {
-    notifications.push(tr('插件开发包保存失败：{0}', errorMessage(cause)), true);
-  } finally {
-    savingDevelopmentKit.value = false;
+    notifications.push(tr('无法打开开发者中心：{0}', errorMessage(cause)), true);
   }
 }
 async function install() {
@@ -214,14 +209,9 @@ onBeforeUnmount(() => {
         >
           <RefreshCw :size="15" aria-hidden="true" />{{ tr('刷新 ') }}
         </button>
-        <button
-          class="button"
-          type="button"
-          :disabled="savingDevelopmentKit"
-          @click="saveDevelopmentKit"
-        >
-          <Download :size="16" aria-hidden="true" />{{ tr('下载插件开发包 ') }}
-        </button>
+        <a class="button" :href="developerCenterUrl" @click.prevent="openDeveloperCenter">
+          <ExternalLink :size="16" aria-hidden="true" />{{ tr('开发者中心') }}
+        </a>
         <button class="button primary" :disabled="plugins.busy || inspecting" @click="pick">
           <PackagePlus :size="16" aria-hidden="true" />{{ tr('安装插件 ') }}
         </button>

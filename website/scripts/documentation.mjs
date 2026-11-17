@@ -60,8 +60,29 @@ export async function verifySnapshots(documentationRoot) {
   return manifest;
 }
 
+export async function verifyDevelopmentKits(downloadsRoot, kits, currentSdkVersion) {
+  if (!Array.isArray(kits) || !kits.length) throw new Error('缺少插件开发包下载清单');
+  const versions = new Set();
+  for (const kit of kits) {
+    if (!/^\d+\.\d+\.\d+$/.test(kit.sdkVersion) || !/^[a-f0-9]{64}$/.test(kit.sha256))
+      throw new Error('插件开发包版本或 SHA-256 无效');
+    if (versions.has(kit.sdkVersion)) throw new Error(`插件开发包版本重复：${kit.sdkVersion}`);
+    versions.add(kit.sdkVersion);
+    const filename = `serverdeck-plugin-development-kit-${kit.sdkVersion}.zip`;
+    const bytes = await readFile(path.join(downloadsRoot, filename));
+    if (createHash('sha256').update(bytes).digest('hex') !== kit.sha256)
+      throw new Error(`插件开发包摘要不匹配：${filename}`);
+  }
+  if (!versions.has(currentSdkVersion))
+    throw new Error(`缺少当前 SDK ${currentSdkVersion} 的插件开发包`);
+}
+
 export async function verifySite(dist, documentationRoot, origin) {
   const manifest = await verifySnapshots(documentationRoot);
+  const kits = JSON.parse(
+    await readFile(path.join(documentationRoot, 'development-kits.json'), 'utf8'),
+  );
+  await verifyDevelopmentKits(path.join(dist, 'downloads'), kits, manifest.sdkVersion);
   const files = new Set(await collectFiles(dist));
   const pages = new Map();
   const errors = [];

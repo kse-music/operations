@@ -44,17 +44,19 @@ node tools/tauri.mjs build --bundles nsis
 node tools/tauri.mjs build --debug --no-bundle
 ```
 
-| 产物           | 本地路径                                                     |
-| -------------- | ------------------------------------------------------------ |
-| 调试 EXE       | `target/debug/serverdeck-desktop.exe`                        |
-| Release EXE    | `target/release/serverdeck-desktop.exe`                      |
-| Windows 安装器 | `target/release/bundle/nsis/ServerDeck_<版本>_x64-setup.exe` |
-| 插件包         | `plugins/system/packages/*.sdplugin`                         |
-| 独立开发包     | `apps/desktop/dist/serverdeck-plugin-development-kit.zip`    |
+| 产物           | 本地路径                                                                         |
+| -------------- | -------------------------------------------------------------------------------- |
+| 调试 EXE       | `target/debug/serverdeck-desktop.exe`                                            |
+| Release EXE    | `target/release/serverdeck-desktop.exe`                                          |
+| Windows 安装器 | `target/release/bundle/nsis/ServerDeck_<版本>_x64-setup.exe`                     |
+| 插件包         | `plugins/system/packages/*.sdplugin`                                             |
+| 独立开发包     | `.local/plugin-development-kit/serverdeck-plugin-development-kit-<SDK 版本>.zip` |
 
 指定 `--target` 时 Cargo 产物位于 `target/<目标三元组>/...`。已有相配的当前 Release EXE 时，`node tools/tauri.mjs bundle --bundles nsis` 可只打安装器。路径不是下载地址；更新签名和 Windows 发布者签名分别处理，见[更新分发](../release/UPDATES.md)。
 
-前端构建生成开发包，包含公开 SDK、锁文件、样例、工具和插件契约，README 只提供官网教程及包内规范入口，不复制教程。文档或 SDK 调整后同时检查包内副本和相对链接，在仓库外执行独立准备/构建；仅检查源码目录不能证明下载包可用。用户指南和第三方开发教程在官网独立项目维护，修改产品操作或接口时同步对应教程；公开契约先修改本仓库，再显式按 SDK 版本导入官网，不建立本地构建依赖。
+在仓库根目录执行 `npm run plugins:kit` 独立生成开发包，也可用 `node tools/build-plugin-development-kit.mjs <输出目录>` 指定交付目录。同版本同内容可重复生成；目标已有不同内容时拒绝覆盖。开发包包含公开 SDK、锁文件、样例、工具和插件契约，README 只提供官网教程及包内规范入口，不复制教程。开发包按 SDK 版本显式同步至官网，客户端构建不生成或内置 ZIP。
+
+文档或 SDK 调整后同时检查包内副本和相对链接，在仓库外执行独立准备/构建；仅检查源码目录不能证明下载包可用。用户指南和第三方开发教程在官网独立项目维护，修改产品操作或接口时同步对应教程；公开契约先修改本仓库，再显式按 SDK 版本导入官网，不建立本地构建依赖。
 
 ## 本地检查
 

@@ -67,6 +67,16 @@ pub async fn files_local(
     application.files_local(path).await.map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_local_rename(
+    application: tauri::State<'_, Application>,
+    input: LocalRename,
+) -> Result<String, IpcError> {
+    application
+        .files_local_rename(input)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn files_local_recycle(input: LocalRecycle) -> Result<(), IpcError> {
     #[cfg(windows)]
     {

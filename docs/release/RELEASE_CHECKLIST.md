@@ -9,7 +9,7 @@
 - [ ] 在 Windows x64 实装并验证主机 → SSH → SFTP → Docker/助手 → 关闭/重启，完成[模块原生验收](NATIVE_VALIDATION.md)。不能用浏览器或协议夹具替代实际 EXE。
 - [ ] 完成[数据库/配置升级](../architecture/DATA_MIGRATIONS.md)及数据目录迁移、失败保护；实测安装升级的数据和系统凭据引用保留。
 - [ ] 完成[更新分发](UPDATES.md)的清单、公钥、签名版本、网络与取消、旧版发现/下载/覆盖安装/重启；验收普通安装和更新的 Windows 图标刷新。
-- [ ] 从候选客户端重新下载独立开发包，在仓库外准备依赖、类型检查、测试、构建并上传，验证授权、启停、WASM 调用和卸载。
+- [ ] 验证候选客户端插件页的“开发者中心”打开官网，且客户端不含开发包 ZIP；从官网下载与候选支持 SDK 配套的独立开发包，核对版本及 SHA-256，在仓库外准备依赖、类型检查、测试、构建并上传，验证授权、启停、WASM 调用和卸载。
 - [ ] 运行 `npm audit --audit-level=moderate` 和 `cargo audit --deny unsound`，复核最终依赖链的 RSA、GLib、停止维护项及其他报告，不以 ignore 或旧结果代替处置。
 - [ ] 复核[依赖清单](DEPENDENCY_INVENTORY.md)、[许可原文](THIRD_PARTY_NOTICES.txt)、锁文件与实际安装资源；元数据存在不等于人工许可复核完成。
 - [ ] 落实最终安装器的 Windows 发布者签名、updater 签名和可信分发；三者分别检查，SHA-256 不能证明身份。

@@ -328,8 +328,15 @@ export const useFilesStore = defineStore('files', () => {
     const hostId = active.value;
     if (connection?.id && connection.state === 'connected' && !connection.loading)
       await navigate(connection.path, connection);
+    await refreshLocal(hostId);
+  }
+  async function refreshLocal(hostId: string, parent?: string): Promise<void> {
     const browser = localBrowsers.value[hostId];
-    if (browser?.listing && !browser.loading)
+    if (
+      browser?.listing &&
+      !browser.loading &&
+      (parent === undefined || browser.listing.path === parent)
+    )
       await localLoad(browser.listing.path, undefined, hostId);
   }
   async function edit(path: string, size: number | null = null): Promise<void> {
@@ -686,6 +693,7 @@ export const useFilesStore = defineStore('files', () => {
     navigate,
     stepHistory,
     localLoad,
+    refreshLocal,
     trust,
     refresh,
     edit,

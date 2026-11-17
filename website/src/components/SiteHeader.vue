@@ -6,23 +6,28 @@ import SiteControls from './SiteControls.vue';
 import { carryAppearance } from '../appearance';
 import '../appearance.css';
 
-const props = withDefaults(defineProps<{ section?: 'site' | 'docs' | 'developers' }>(), {
-  section: 'site',
-});
+const props = withDefaults(
+  defineProps<{ section?: 'site' | 'marketplace' | 'docs' | 'developers' }>(),
+  {
+    section: 'site',
+  },
+);
 const open = ref(false);
 const shell = ref<HTMLElement>();
 const toggle = ref<HTMLButtonElement>();
+const isDocumentation = computed(() => props.section === 'docs' || props.section === 'developers');
 const home = computed(() =>
-  import.meta.env.DEV && props.section !== 'site' ? 'http://127.0.0.1:4180' : '',
+  import.meta.env.DEV && isDocumentation.value ? 'http://127.0.0.1:4180' : '',
 );
 const documentation = computed(() =>
-  import.meta.env.DEV && props.section === 'site' ? 'http://127.0.0.1:4181' : '',
+  import.meta.env.DEV && !isDocumentation.value ? 'http://127.0.0.1:4181' : '',
 );
 const navigation = computed(() => [
   { text: '产品能力', href: `${home.value}/#capabilities` },
   { text: '工作台', href: `${home.value}/#workspace` },
   { text: '快速上手', href: `${home.value}/#start` },
   { text: '使用文档', href: `${documentation.value}/docs/`, section: 'docs' },
+  { text: '插件市场', href: `${home.value}/marketplace.html`, section: 'marketplace' },
   { text: '开发者中心', href: `${documentation.value}/developers/`, section: 'developers' },
 ]);
 function handleKey(event: KeyboardEvent) {
@@ -205,6 +210,8 @@ onUnmounted(() => {
 }
 .sd-site-nav a.active {
   color: var(--sd-accent);
+  text-decoration: underline;
+  text-underline-offset: 9px;
 }
 .sd-site-nav .sd-github-link {
   padding: 8px;

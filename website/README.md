@@ -1,12 +1,12 @@
 # ServerDeck 产品官网
 
-独立 npm 项目，产品首页使用 Vue 3 + Vite，用户文档和插件开发者中心使用 VitePress。三者沿用深色、薄荷绿与相同品牌标识，合并输出纯静态 `dist/`。正式域名为 `https://ops.hiboot.cn`。
+独立 npm 项目，产品首页与插件市场使用 Vue 3 + Vite，用户文档和插件开发者中心使用 VitePress。各入口共用深浅主题、薄荷绿与相同品牌标识，合并输出纯静态 `dist/`。正式域名为 `https://ops.hiboot.cn`。
 
 ## 项目边界
 
 `website/` 是独立 npm 项目，使用自己的 `package.json`、`package-lock.json`、TypeScript 和 Vite 配置，不属于仓库根目录的 npm workspace。源码、构建脚本和静态资源均在本目录内，可将整个目录复制到其他位置，安装自身依赖后单独开发、测试和构建。
 
-不调用桌面 IPC、主机、模型或业务数据库。首页工作台使用明确标注的演示数据。当前仅提供产品信息、站内文档与官方下载入口；没有插件市场、账户、付款或在线安装功能。
+不调用桌面 IPC、主机、模型或业务数据库。首页工作台使用明确标注的演示数据。官网提供产品信息、站内文档、官方下载入口和插件市场展示页；市场使用静态示例目录，下载按钮统一提示“建设中”，不提供插件包下载、账户、付款或在线安装功能。
 
 ## 开发与构建
 
@@ -40,6 +40,7 @@ VitePress 固定为稳定版 1.6.4，其嵌套 Vite 通过 `overrides` 固定为
 - `src/App.vue`：首页、导航、首屏下载入口及页脚；`components/WorkspacePreview.vue` 为可切换的界面演示，明确使用示例数据，不连接或操作服务器。
 - `src/components/InfoPage.vue`：隐私与安全正文。
 - `src/components/SiteHeader.vue`：官网与文档共用的单行页头、菜单和布局尺寸。`SiteControls.vue` 在同一行提供全文搜索、Ctrl / ⌘ K 和深浅主题，手机端收起文字；文档通过 `DocsHeader.vue` 接入，不设置第二行工具栏或另一套导航。
+- `marketplace.html`、`src/components/PluginMarketplace.vue`：插件市场独立入口，复用全站导航与主题，支持浏览器内搜索、分类、排序及空结果重置。`src/marketplace.ts` 维护静态示例目录，精选与列表不重复展示，数量按实际目录计算；所有下载按钮只弹出可关闭的“建设中”提示，不请求或生成插件包。
 - `src/content.ts`：固定的最新发布页、站内文档入口、功能介绍和常见问题。
 - `src/style.css`、`src/site.css`：A 方案基础样式及官网样式；不依赖外部字体、CDN、分析埋点、Cookie、账号或表单。
 - `scripts/prerender.mjs`：输出完整正文与页面元数据；分享图位于 `public/assets/social-card.png`。
@@ -66,11 +67,31 @@ npm test
 npm run build
 ```
 
-导入会覆盖九篇规范，改写规范之间的阅读链接，在 `documentation/reference-manifest.json` 记录 SDK / UI / ABI / 包版本、来源 SHA-256 与站内文件 SHA-256。代码与路径占位符按字面显示。不要单独修改快照正文；导入后审核差异、同步教程及适用版本，再一起提交。构建验证快照摘要，不联网、不隐式导入，也不把 SDK 版本等同于客户端产品版本。
+导入会覆盖九篇规范，改写规范之间的阅读链接，在 `documentation/reference-manifest.json` 记录 SDK / UI / ABI / 包版本、来源 SHA-256 与站内文件 SHA-256。代码与路径占位符按字面显示，标题锚点在悬停或键盘聚焦时显示，可用于分享具体章节。不要单独修改快照正文；导入后审核差异、同步教程及适用版本，再一起提交。构建验证快照摘要，不联网、不隐式导入，也不把 SDK 版本等同于客户端产品版本。
+
+### 同步插件开发包
+
+开发者中心首页和“第一个插件”教程提供当前 SDK 的直接下载入口，侧栏“开发包下载”进入 `/developers/downloads.html` 按 SDK 版本选择。文件位于 `public/downloads/serverdeck-plugin-development-kit-<SDK 版本>.zip`，保存时保留版本文件名。`documentation/development-kits.json` 维护实际提供的 SDK 版本及 SHA-256；完整构建校验所有列出的文件、摘要和当前规范版本是否齐全。
+
+在产品仓库根目录执行 `npm run plugins:kit`，由独立工具生成 `.local/plugin-development-kit/serverdeck-plugin-development-kit-<SDK 版本>.zip`；客户端前端构建不生成或嵌入开发包。同步时先核对包内两端 SDK、样例、锁文件和九篇公开规范与对应产品源码一致，再将审核后的 ZIP 显式复制到官网；不手工修改包内副本。以下命令在官网目录执行，源路径替换为实际独立构建产物：
+
+```powershell
+$websiteSdkVersion = (Get-Content -LiteralPath documentation/reference-manifest.json -Raw | ConvertFrom-Json).sdkVersion
+Copy-Item -LiteralPath "D:/path/to/product/.local/plugin-development-kit/serverdeck-plugin-development-kit-$websiteSdkVersion.zip" -Destination "public/downloads/serverdeck-plugin-development-kit-$websiteSdkVersion.zip"
+Get-FileHash -LiteralPath "public/downloads/serverdeck-plugin-development-kit-$websiteSdkVersion.zip" -Algorithm SHA256
+```
+
+复制后将 SDK 版本及实际 SHA-256 加入 `documentation/development-kits.json`，再运行完整构建。新增版本保留旧版本记录及 ZIP，不用新内容替换已发布版本；同版本内容变化时核对并按 SDK 版本规则发布修订。首次增加某版本时只登记真实审核过的包，不根据版本号生成虚假历史条目。
+
+```powershell
+npm run build
+```
+
+将下载清单、ZIP 与规范快照、教程一起提交和部署。官网独立构建只使用已提交的下载包，不读取产品构建目录；开发服务器和生产站点都通过同源 `/downloads/` 路径提供文件。客户端通过“开发者中心”打开官网，使用者须核对客户端与所选 SDK 的兼容范围。
 
 ## 静态部署
 
-部署完整 `dist/` 到静态托管根目录，包含 `docs/`、`developers/`、`docs-assets/`、`assets/`、许可文件和根目录 HTML。文档使用 `.html` 路径，服务须支持目录 `index.html`，例如 `/docs/`，以及深层 HTML 直达。
+部署完整 `dist/` 到静态托管根目录，包含 `docs/`、`developers/`、`downloads/`、`docs-assets/`、`assets/`、许可文件和根目录 HTML。文档使用 `.html` 路径，服务须支持目录 `index.html`，例如 `/docs/`，以及深层 HTML 直达。
 
 未知路径返回真正的 HTTP 404，可使用根目录 `404.html`。不要统一回退首页 `index.html`，否则文档链接故障会被伪装成成功。首页、HTML、`hashmap.json`、`search-index.json`、`appearance-init.js`、robots 和 sitemap 应重新验证；带哈希的 JS / CSS 可长期缓存。更新采用完整目录替换，避免旧 HTML 引用已删除的资源。修改域名解析或替换已有线上目录前，先确认目标服务与回退方式，保留现有数据及配置。
 
