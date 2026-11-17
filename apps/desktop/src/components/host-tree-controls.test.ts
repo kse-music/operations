@@ -161,7 +161,7 @@ it.each([
     expect(document.querySelector('dialog')).toBeNull();
     await openDelete();
     dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="确认删除主机"]')!;
-    button('确认删除主机', dialog).click();
+    button('删除', dialog).click();
     await vi.waitFor(() => expect(hosts.busy).toBe(false));
     await nextTick();
     expect(remove).toHaveBeenCalledExactlyOnceWith('b');

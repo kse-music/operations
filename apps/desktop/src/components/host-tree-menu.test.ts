@@ -130,6 +130,8 @@ it('focuses folder names, icons and counts without collapsing and supports F2 im
     expect(arrow.getAttribute('aria-expanded')).toBe('true');
     expect(root.querySelector('[data-host-id="h1"]')).toBe(host);
     expect(document.activeElement).toBe(row);
+    expect(row.classList.contains('selected')).toBe(true);
+    expect(row.getAttribute('aria-current')).toBe('true');
     row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true, cancelable: true }));
     await nextTick();
     expect(renameInput()!.value).toBe('上海');
@@ -138,6 +140,59 @@ it('focuses folder names, icons and counts without collapsing and supports F2 im
     await editKey('Escape');
     expect(arrow.disabled).toBe(false);
   }
+});
+
+it('keeps one highlighted tree row while folder selection preserves the current host target', async () => {
+  const { store, select } = await mount();
+  store.selectedId = 'h0';
+  await nextTick();
+  const host = root.querySelector<HTMLButtonElement>('[data-host-id="h0"]')!;
+  expect(host.classList.contains('selected')).toBe(true);
+  const child = folder('child');
+  child.querySelector<HTMLElement>('.group-name')!.click();
+  await nextTick();
+  expect(child.classList.contains('selected')).toBe(true);
+  expect(host.classList.contains('selected')).toBe(false);
+  expect(host.getAttribute('aria-current')).toBeNull();
+  expect(root.querySelectorAll('.selected')).toHaveLength(1);
+  expect(store.selectedId).toBe('h0');
+  expect(select).not.toHaveBeenCalled();
+  root.querySelector<HTMLInputElement>('#host-tree-search')!.focus();
+  await nextTick();
+  expect(child.classList.contains('selected')).toBe(true);
+  folder().querySelector<HTMLElement>('.group-name')!.click();
+  await nextTick();
+  expect(folder().classList.contains('selected')).toBe(true);
+  expect(child.classList.contains('selected')).toBe(false);
+  host.click();
+  await nextTick();
+  expect(host.classList.contains('selected')).toBe(true);
+  expect(host.getAttribute('aria-current')).toBe('true');
+  expect(folder().classList.contains('selected')).toBe(false);
+  expect(root.querySelectorAll('.selected')).toHaveLength(1);
+  expect(store.selectedId).toBe('h0');
+});
+
+it('clears folder highlighting after an external host selection or removal of the selected folder', async () => {
+  const { store } = await mount();
+  store.selectedId = 'h0';
+  folder('child').click();
+  await nextTick();
+  expect(folder('child').classList.contains('selected')).toBe(true);
+  store.selectedId = 'h1';
+  await nextTick();
+  expect(folder('child').classList.contains('selected')).toBe(false);
+  expect(root.querySelector('[data-host-id="h1"]')?.classList.contains('selected')).toBe(true);
+  folder('child').click();
+  await nextTick();
+  store.catalog = {
+    ...store.catalog!,
+    groups: store.catalog!.groups.filter((group) => group.id !== 'child'),
+  };
+  await nextTick();
+  expect(folder('child')).toBeNull();
+  expect(root.querySelectorAll('.group-toggle.selected')).toHaveLength(0);
+  expect(store.selectedId).toBe('h1');
 });
 
 it('toggles folders only from the arrow and permits F2 from both collapsed names and the arrow button', async () => {
@@ -402,7 +457,7 @@ it('creates hosts in the right-clicked folder while host menus exclude folder cr
   const { store, create, select } = await mount();
   store.selectedId = 'h0';
   await open(folder('child'));
-  expect(labels()).toEqual(['新建主机', '新建文件夹', '重命名', '删除文件夹']);
+  expect(labels()).toEqual(['新建主机', '新建文件夹', '重命名', '删除']);
   await action('新建主机');
   expect(create).toHaveBeenCalledExactlyOnceWith('child');
   await open(root.querySelector<HTMLElement>('[data-host-id="h1"]')!);
@@ -489,12 +544,13 @@ it('confirms folder deletion and disables context mutations while busy', async (
   const remove = vi.spyOn(hostsApi, 'groupRemove').mockResolvedValue();
   vi.spyOn(hostsApi, 'list').mockResolvedValue(store.catalog!);
   await open(folder('parent'));
-  await action('删除文件夹');
+  await action('删除');
   const dialog = document.querySelector<HTMLElement>('[aria-label="确认删除文件夹"]')!;
+  expect(dialog.querySelector('h2')?.textContent).toBe('确认删除文件夹');
   expect(dialog.textContent).toContain('主机和子文件夹会保留并移到父目录');
   expect(remove).not.toHaveBeenCalled();
   [...dialog.querySelectorAll('button')]
-    .find((button) => button.textContent?.trim() === '确认删除文件夹')!
+    .find((button) => button.textContent?.trim() === '删除')!
     .click();
   await vi.waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith('parent'));
   await vi.waitFor(() => expect(store.busy).toBe(false));
@@ -534,7 +590,7 @@ it.each([true, false])(
     await pressDelete(folder('parent'));
     dialog = document.querySelector<HTMLDialogElement>('[aria-label="确认删除文件夹"]')!;
     [...dialog.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === '确认删除文件夹')!
+      .find((button) => button.textContent?.trim() === '删除')!
       .click();
     await vi.waitFor(() => expect(store.busy).toBe(false));
     expect(remove).toHaveBeenCalledExactlyOnceWith('parent');

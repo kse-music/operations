@@ -88,6 +88,7 @@
   background: none;
   color: var(--muted);
   border: 0;
+  border-radius: 4px;
   padding: 1px 6px;
   font-size: var(--font-size-body);
   line-height: 1.2;
@@ -97,6 +98,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+:root:not([data-theme='light']) .group-toggle .group-name {
+  color: #aab6c8;
 }
 .group-toggle .group-count {
   margin-left: auto;
@@ -127,6 +131,7 @@
 .host-group-icon {
   color: #ffd36f;
   fill: #f3bd4f;
+  transform: scaleY(0.78);
 }
 :root[data-theme='light'] .host-group-icon {
   color: #c18b22;
@@ -148,19 +153,25 @@
   border: 0;
   border-radius: 4px;
   background: none;
-  padding: 1px 10px 1px 42px;
+  padding: 1px 10px 1px 48px;
   min-height: 20px;
   line-height: 1.2;
   text-align: left;
 }
+.group-toggle.selected,
 .tree-host.selected {
   background: var(--accent-bg);
 }
+.group-toggle:hover,
 .tree-host:hover {
   background: var(--hover);
 }
+.group-toggle.selected,
 .tree-host.selected {
   box-shadow: inset 2px 0 var(--accent);
+}
+.group-toggle.selected {
+  color: var(--text);
 }
 .group-toggle:focus-visible,
 .tree-host:focus-visible {

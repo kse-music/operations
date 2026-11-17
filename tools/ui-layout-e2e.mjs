@@ -228,7 +228,7 @@ try {
     await folderMenu.waitFor();
     assert.deepEqual(
       (await folderMenu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
-      ['新建主机', '新建文件夹', '重命名文件夹', '删除文件夹'],
+      ['新建主机', '新建文件夹', '重命名', '删除'],
     );
     await page.screenshot({ path: `${output}/${name}-folder-context-menu.png` });
     await folderMenu.getByRole('menuitem', { name: '新建文件夹', exact: true }).click();

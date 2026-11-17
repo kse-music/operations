@@ -57,7 +57,7 @@ defineExpose({ edit, confirmDelete });
         {{ tr('取消') }}
       </button>
       <button class="button danger" :disabled="store.busy" @click="remove">
-        {{ tr('确认删除主机') }}
+        {{ tr('删除') }}
       </button>
     </footer>
   </Modal>

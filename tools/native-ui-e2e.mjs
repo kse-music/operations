@@ -738,7 +738,7 @@ try {
   assert.equal((await rpc('host_list')).hosts.length, 2);
   await hoverHost('UI Host edited');
   await hostContextAction(page, hostRow.locator('.tree-host'), '删除');
-  await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
+  await deletion.getByRole('button', { name: '删除', exact: true }).click();
   await deletion.waitFor({ state: 'hidden' });
   assert(!(await rpc('host_list')).hosts.some((item) => item.id === host.id));
   assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '1');
@@ -771,7 +771,7 @@ try {
   for (const name of ['UI Created', 'tree-imported']) {
     await hoverHost(name);
     await hostContextAction(page, page.locator('.tree-host').filter({ hasText: name }), '删除');
-    await deletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
+    await deletion.getByRole('button', { name: '删除', exact: true }).click();
     await deletion.waitFor({ state: 'hidden' });
   }
   await page.getByText('尚未添加主机', { exact: true }).waitFor();
@@ -819,7 +819,7 @@ try {
     assert.equal(await page.locator(`[data-host-id="${id}"] .host-name`).textContent(), display);
     await hoverHost(display);
     await hostContextAction(page, page.locator('.tree-host').filter({ hasText: display }), '删除');
-    await unnamedDeletion.getByRole('button', { name: '确认删除主机', exact: true }).click();
+    await unnamedDeletion.getByRole('button', { name: '删除', exact: true }).click();
     await unnamedDeletion.waitFor({ state: 'hidden' });
   }
   assert.equal((await rpc('host_list')).hosts.length, 0);

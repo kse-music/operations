@@ -63,6 +63,20 @@ const emit = defineEmits<{
   plugin: [id: string, contribution: string, hostId: string];
 }>();
 const collapsed = ref<string[]>([]);
+const selectedFolder = ref<string | null>();
+watch(
+  () => store.selectedId,
+  () => (selectedFolder.value = undefined),
+  { flush: 'sync' },
+);
+function selectFolder(id: string | null, event: MouseEvent): void {
+  selectedFolder.value = id;
+  (event.currentTarget as HTMLElement).focus({ preventScroll: true });
+}
+function selectHost(host: Host): void {
+  selectedFolder.value = undefined;
+  store.selectedId = host.id;
+}
 const tree = ref<HTMLElement>();
 const dragged = ref<string | null>(null),
   dropTarget = ref<string | null>(null),
@@ -161,7 +175,7 @@ function ignoreDragClick(event: MouseEvent): void {
 }
 function openHost(host: Host): void {
   if (suppressClick || store.busy || renaming.value) return;
-  store.selectedId = host.id;
+  selectHost(host);
   emit('select', host);
 }
 onBeforeUnmount(() => {
@@ -369,7 +383,7 @@ const menuItems = computed<
           },
           {
             key: 'deleteFolder' as const,
-            label: tr('删除文件夹'),
+            label: tr('删除'),
             icon: Trash2,
             iconClass: 'menu-icon-red',
             danger: true,
@@ -501,7 +515,7 @@ async function runContext(action: MenuAction): Promise<void> {
     const [, id, contribution] = action.split(':');
     if (id && contribution) emit('plugin', id, contribution, host.id);
   } else if (action === 'connect') {
-    store.selectedId = host.id;
+    selectHost(host);
     emit('select', host);
   } else if (action === 'edit') controls.get(host.id)?.edit();
   else if (action === 'rename') beginRename(target);
@@ -526,7 +540,19 @@ async function removeFolder(): Promise<void> {
   if (result.ok) deletingFolder.value = undefined;
 }
 const closeContext = () => dismissContext();
-watch(() => store.catalog, closeContext);
+watch(
+  () => store.catalog,
+  (catalog) => {
+    closeContext();
+    if (
+      !catalog ||
+      (selectedFolder.value !== undefined &&
+        selectedFolder.value !== null &&
+        !catalog.groups.some((group) => group.id === selectedFolder.value))
+    )
+      selectedFolder.value = undefined;
+  },
+);
 watch(
   () => [store.catalog, store.search] as const,
   () => {
@@ -596,11 +622,13 @@ onBeforeUnmount(() => {
       >
         <div
           class="group-toggle"
+          :class="{ selected: selectedFolder === group.id }"
+          :aria-current="selectedFolder === group.id ? 'true' : undefined"
           tabindex="0"
           :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
           @contextmenu.prevent.stop="openContext({ kind: 'folder', id: group.id }, $event)"
           @keydown="rowKeys({ kind: 'folder', id: group.id }, $event)"
-          @click="($event.currentTarget as HTMLElement).focus({ preventScroll: true })"
+          @click="selectFolder(group.id, $event)"
         >
           <button
             type="button"
@@ -655,14 +683,16 @@ onBeforeUnmount(() => {
               :data-host-id="host.id"
               class="tree-host"
               :class="{
-                selected: store.selectedId === host.id,
+                selected: selectedFolder === undefined && store.selectedId === host.id,
                 'drag-ready': pendingDrag?.host.id === host.id,
               }"
-              :aria-current="store.selectedId === host.id ? 'true' : undefined"
+              :aria-current="
+                selectedFolder === undefined && store.selectedId === host.id ? 'true' : undefined
+              "
               :draggable="false"
               @pointerdown="beginDrag(host, $event)"
               @dragstart.prevent
-              @click="store.selectedId = host.id"
+              @click="selectHost(host)"
               @dblclick="openHost(host)"
               @keydown.enter.prevent="openHost(host)"
               @keydown.space.prevent="openHost(host)"
@@ -753,7 +783,7 @@ onBeforeUnmount(() => {
           {{ tr(' 取消 ') }}
         </button>
         <button class="button danger" :disabled="store.busy" @click="removeFolder">
-          {{ tr(' 确认删除文件夹 ') }}
+          {{ tr('删除') }}
         </button>
       </footer>
     </Modal>
