@@ -89,8 +89,10 @@ it('reads and edits the exact host while leaving the active host and terminal in
   await nextTick();
   button('测试连接', dialog).click();
   await vi.waitFor(() => expect(button('保存主机', dialog).disabled).toBe(false));
-  button('关闭', document.querySelector('dialog[aria-label="连接测试成功"]')!).click();
-  await nextTick();
+  expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
+  expect(dialog.querySelector('[role="status"]')?.textContent).toContain(
+    'SSH 连接和认证成功，可以保存主机。',
+  );
   button('保存主机', dialog).click();
   await vi.waitFor(() => expect(hosts.busy).toBe(false));
   await nextTick();

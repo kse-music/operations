@@ -225,7 +225,6 @@
   "保存文件夹": "Save folder",
   "私钥文件须为 1 字节至 1 MiB": "The private key file must be between 1 byte and 1 MiB",
   "SSH 连接和认证成功，可以保存主机。": "SSH connection and authentication succeeded. You can save this host.",
-  "连接测试成功": "Connection test succeeded",
   "连接测试失败": "Connection test failed",
   "测试结果已过期，请重新测试连接。": "The test result has expired. Test the connection again.",
   "主机已更新。": "Host updated.",

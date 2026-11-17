@@ -175,18 +175,20 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   expect(create).not.toHaveBeenCalled();
   button('测试连接').click();
   await vi.waitFor(() =>
-    expect(document.querySelector('dialog[aria-label="连接测试失败"]')).not.toBeNull(),
+    expect(form.querySelector('[role="alert"]')?.textContent).toContain('SSH 认证失败'),
   );
-  const failure = document.querySelector<HTMLDialogElement>('dialog[aria-label="连接测试失败"]')!;
-  expect(failure.open).toBe(true);
-  expect(failure.querySelector('[role="alert"]')?.textContent).toContain('SSH 认证失败');
-  expect(form.querySelector('[role="alert"]')).toBeNull();
+  const feedback = form.querySelector('[role="alert"]')!;
+  expect(feedback.classList.contains('error-text')).toBe(true);
+  expect(feedback.parentElement).toBe(form);
+  expect(feedback.nextElementSibling).toBe(form.querySelector('footer'));
+  expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
+  expect(document.querySelector('dialog[aria-label="连接测试失败"]')).toBeNull();
   expect(save.disabled).toBe(true);
-  failure.querySelector<HTMLButtonElement>('footer button')!.click();
-  await nextTick();
   expect(close).not.toHaveBeenCalled();
   expect(password.value).toBe('fixture-only-password');
   button('测试连接').click();
+  await nextTick();
+  expect(form.querySelector('[role="alert"]')).toBeNull();
   await vi.waitFor(() =>
     expect(document.querySelector('dialog[aria-label="核对 SSH 主机指纹"]')).not.toBeNull(),
   );
@@ -201,12 +203,14 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   expect(save.disabled).toBe(true);
   trust.querySelector<HTMLButtonElement>('footer .primary')!.click();
   await vi.waitFor(() => expect(save.disabled).toBe(false));
-  const success = document.querySelector<HTMLDialogElement>('dialog[aria-label="连接测试成功"]')!;
-  expect(success.open).toBe(true);
-  expect(success.textContent).toContain('SSH 连接和认证成功，可以保存主机。');
+  expect(document.querySelector('dialog[aria-label="连接测试成功"]')).toBeNull();
+  expect(form.querySelector('[role="status"]')?.textContent?.trim()).toBe(
+    'SSH 连接和认证成功，可以保存主机。',
+  );
+  expect(form.querySelector('[role="status"]')).toBe(feedback);
+  expect(feedback.classList.contains('error-text')).toBe(false);
+  expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
   expect(document.querySelector('dialog[aria-label="核对 SSH 主机指纹"]')).toBeNull();
-  success.querySelector<HTMLButtonElement>('footer button')!.click();
-  await nextTick();
   expect(save.disabled).toBe(false);
   expect(close).not.toHaveBeenCalled();
   expect(test).toHaveBeenLastCalledWith(
@@ -223,10 +227,7 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   password.dispatchEvent(new Event('input', { bubbles: true }));
   button('测试连接').click();
   await vi.waitFor(() => expect(save.disabled).toBe(false));
-  document
-    .querySelector<HTMLButtonElement>('dialog[aria-label="连接测试成功"] footer button')!
-    .click();
-  await nextTick();
+  expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
   save.click();
   await vi.waitFor(() => expect(store.busy).toBe(false));
   expect(create).toHaveBeenCalledExactlyOnceWith(
@@ -325,23 +326,19 @@ it.each(['agent', 'private_key'] as const)(
       .mockResolvedValue({ status: 'connected', testId: 'verified-edit', expiresInSeconds: 300 });
     testButton!.click();
     await vi.waitFor(() =>
-      expect(
-        document.querySelector('dialog[aria-label="连接测试失败"] [role="alert"]')?.textContent,
-      ).toContain('SSH 认证失败'),
+      expect(form.querySelector('[role="alert"]')?.textContent).toContain('SSH 认证失败'),
     );
     expect(saveButton?.disabled).toBe(true);
-    document
-      .querySelector<HTMLButtonElement>('dialog[aria-label="连接测试失败"] footer button')!
-      .click();
-    await nextTick();
+    expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
     testButton!.click();
-    await vi.waitFor(() => expect(saveButton?.disabled).toBe(false));
-    document
-      .querySelector<HTMLButtonElement>(
-        'dialog[aria-label="连接测试成功"] [aria-label="关闭对话框"]',
-      )!
-      .click();
     await nextTick();
+    expect(form.querySelector('[role="alert"]')).toBeNull();
+    await vi.waitFor(() => expect(saveButton?.disabled).toBe(false));
+    expect(document.querySelector('dialog[aria-label="连接测试成功"]')).toBeNull();
+    expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
+    expect(form.querySelector('[role="status"]')?.textContent).toContain(
+      'SSH 连接和认证成功，可以保存主机。',
+    );
     expect(saveButton?.disabled).toBe(false);
     expect(close).not.toHaveBeenCalled();
     const authentication =
@@ -367,10 +364,7 @@ it.each(['agent', 'private_key'] as const)(
     name.dispatchEvent(new Event('input', { bubbles: true }));
     testButton!.click();
     await vi.waitFor(() => expect(saveButton?.disabled).toBe(false));
-    document
-      .querySelector<HTMLDialogElement>('dialog[aria-label="连接测试成功"]')!
-      .dispatchEvent(new Event('cancel', { cancelable: true }));
-    await nextTick();
+    expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
     expect(close).not.toHaveBeenCalled();
     saveButton!.click();
     await vi.waitFor(() => expect(update).toHaveBeenCalledOnce());
@@ -407,6 +401,25 @@ function mountTestableDialog() {
   const [test, save] = form.querySelectorAll<HTMLButtonElement>('footer button');
   return { ...events, form, test: test!, save: save! };
 }
+
+it.each(['SSH TCP 或代理连接超时', ''])(
+  'shows a test failure inline without opening a result dialog: %s',
+  async (reason) => {
+    const { close, saved, form, test, save } = mountTestableDialog();
+    vi.spyOn(hostsApi, 'test').mockRejectedValueOnce(new Error(reason));
+    test.click();
+    await vi.waitFor(() =>
+      expect(form.querySelector('[role="alert"]')?.textContent?.trim()).toBe(
+        reason || '连接测试失败',
+      ),
+    );
+    expect(document.querySelectorAll('dialog[open]')).toHaveLength(1);
+    expect(save.disabled).toBe(true);
+    expect(test.disabled).toBe(false);
+    expect(close).not.toHaveBeenCalled();
+    expect(saved).not.toHaveBeenCalled();
+  },
+);
 
 it.each(['reject', 'close', 'cancel'] as const)(
   'dismisses fingerprint confirmation via %s without trusting or discarding the host draft',
@@ -448,7 +461,7 @@ it.each(['reject', 'close', 'cancel'] as const)(
   },
 );
 
-it('expires the test receipt and dismisses an open success result after five minutes', async () => {
+it('expires the test receipt and replaces the inline success status after five minutes', async () => {
   const { close, saved, form, test, save } = mountTestableDialog();
   vi.useFakeTimers();
   vi.spyOn(hostsApi, 'test').mockResolvedValue({
@@ -458,7 +471,10 @@ it('expires the test receipt and dismisses an open success result after five min
   });
   test.click();
   await vi.advanceTimersByTimeAsync(0);
-  expect(document.querySelector('dialog[aria-label="连接测试成功"]')).not.toBeNull();
+  expect(document.querySelector('dialog[aria-label="连接测试成功"]')).toBeNull();
+  expect(form.querySelector('[role="status"]')?.textContent).toContain(
+    'SSH 连接和认证成功，可以保存主机。',
+  );
   expect(save.disabled).toBe(false);
   await vi.advanceTimersByTimeAsync(300_000);
   expect(document.querySelector('dialog[aria-label="连接测试成功"]')).toBeNull();
