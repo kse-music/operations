@@ -1,6 +1,6 @@
 use super::*;
 use serverdeck_core::{
-    connection::{ForwardInfo, ForwardInput},
+    connection::{ForwardInfo, ForwardInput, LocalForwardInput},
     hosts::Host,
 };
 use serverdeck_core::{
@@ -275,6 +275,39 @@ impl Application {
         self.monitors.pause_all();
         self.files.reset_editors();
         self.terminals.close_views().await
+    }
+    pub async fn forward_open(
+        &self,
+        host_id: String,
+        sink: Sink,
+    ) -> Result<TerminalSession, Error> {
+        let secrets = self.secrets.clone();
+        let (host, plan) = self
+            .blocking(move |db| connection_plan(&db, secrets.as_ref(), &host_id))
+            .await?;
+        if self.shutting_down.load(Ordering::Acquire) {
+            return Err(Error::ShuttingDown);
+        }
+        self.terminals.open_forward_plan(host, plan, sink)
+    }
+    pub async fn forward_rules(&self, host_id: String) -> Result<Vec<LocalForwardInput>, Error> {
+        self.blocking(move |db| db.forward_rules(&host_id)).await
+    }
+    pub async fn forward_add_rule(
+        &self,
+        host_id: String,
+        rule: LocalForwardInput,
+    ) -> Result<LocalForwardInput, Error> {
+        self.blocking(move |db| db.add_forward_rule(&host_id, rule))
+            .await
+    }
+    pub async fn forward_remove_rule(
+        &self,
+        host_id: String,
+        listen_port: u16,
+    ) -> Result<(), Error> {
+        self.blocking(move |db| db.remove_forward_rule(&host_id, listen_port))
+            .await
     }
     pub async fn forward_start(&self, id: &str, input: ForwardInput) -> Result<ForwardInfo, Error> {
         if self.shutting_down.load(Ordering::Acquire) {

@@ -172,6 +172,115 @@ fn unsupported_directory_bookmarks_survive_attempted_edits() {
 }
 
 #[test]
+fn forward_rules_persist_by_host_and_are_removed_with_the_host() {
+    use serverdeck_core::connection::LocalForwardInput;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).unwrap();
+    let host = db.host_create(input()).unwrap();
+    let other = db.host_create(input()).unwrap();
+    let rule = LocalForwardInput {
+        listen_port: 12345,
+        target_host: "example.com".into(),
+        target_port: 9005,
+    };
+    let console = LocalForwardInput {
+        listen_port: 9001,
+        target_host: "127.0.0.1".into(),
+        target_port: 9001,
+    };
+    assert!(db.forward_rules(&host.id).unwrap().is_empty());
+    let written = db
+        .add_forward_rule(
+            &host.id,
+            LocalForwardInput {
+                target_host: " EXAMPLE.com. ".into(),
+                ..rule.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(written, rule);
+    assert!(db.add_forward_rule(&host.id, rule.clone()).is_err());
+    assert!(
+        db.add_forward_rule(
+            &host.id,
+            LocalForwardInput {
+                target_port: 0,
+                ..console.clone()
+            }
+        )
+        .is_err()
+    );
+    assert!(db.forward_rules(&other.id).unwrap().is_empty());
+    db.add_forward_rule(&other.id, rule.clone()).unwrap();
+    db.add_forward_rule(&host.id, console.clone()).unwrap();
+    drop(db);
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(
+        db.forward_rules(&host.id).unwrap(),
+        [rule.clone(), console.clone()]
+    );
+    db.remove_forward_rule(&host.id, rule.listen_port).unwrap();
+    db.remove_forward_rule(&host.id, rule.listen_port).unwrap();
+    drop(db);
+
+    let db = Database::open(&path).unwrap();
+    assert_eq!(
+        db.forward_rules(&host.id).unwrap().as_slice(),
+        std::slice::from_ref(&console)
+    );
+    db.host_delete(&host.id).unwrap();
+    assert!(db.forward_rules(&host.id).unwrap().is_empty());
+    assert!(matches!(
+        db.add_forward_rule(&host.id, console),
+        Err(Error::NotFound)
+    ));
+    assert_eq!(db.forward_rules(&other.id).unwrap(), [rule]);
+}
+
+#[test]
+fn damage_or_unknown_versions_in_forward_rules_are_preserved() {
+    use serverdeck_core::connection::LocalForwardInput;
+
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("hosts.sqlite3")).unwrap();
+    let host = db.host_create(input()).unwrap();
+    let key = crate::forward_rules::key(&host.id);
+    let connection = db.connect().unwrap();
+    let rule = LocalForwardInput {
+        listen_port: 12345,
+        target_host: "127.0.0.1".into(),
+        target_port: 9005,
+    };
+    for raw in [
+        r#"{"version":2,"rules":[]}"#,
+        r#"{"version":1,"rules":[{"listenPort":9001,"targetHost":"127.0.0.1","targetPort":9001,"autoStart":true}]}"#,
+        r#"{"version":1,"rules":[{"listenPort":0,"targetHost":"127.0.0.1","targetPort":9001}]}"#,
+    ] {
+        connection
+            .execute(
+                "INSERT OR REPLACE INTO application_settings(key,value) VALUES(?1,?2)",
+                params![key, raw],
+            )
+            .unwrap();
+        assert!(db.forward_rules(&host.id).is_err());
+        assert!(db.add_forward_rule(&host.id, rule.clone()).is_err());
+        assert!(db.remove_forward_rule(&host.id, 9001).is_err());
+        let saved: String = connection
+            .query_row(
+                "SELECT value FROM application_settings WHERE key=?1",
+                [&key],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, raw);
+        assert_eq!(db.host(&host.id).unwrap().config, host.config);
+    }
+}
+
+#[test]
 fn unknown_sftp_directory_format_is_preserved_and_does_not_block_catalog() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");

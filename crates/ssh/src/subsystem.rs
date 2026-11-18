@@ -62,7 +62,7 @@ impl Engine {
             .cloned()
             .ok_or_else(|| failure("SSH_INTERNAL", "SSH 连接初始化失败"))
     }
-    pub(crate) async fn run_file_lease(
+    pub(crate) async fn run_lease(
         &self,
         plan: ConnectionPlan,
         transport: &Transport,
@@ -77,7 +77,11 @@ impl Engine {
         state(sink, "connected", None);
         tokio::select! {
             _ = control.cancel.cancelled() => Ok(()),
-            _ = connection.alive.cancelled() => Err(failure("SSH_DISCONNECTED", "SSH 断线，文件会话已关闭")),
+            _ = connection.alive.cancelled() => Err(failure("SSH_DISCONNECTED", if control.kind == SessionKind::Forwarding {
+                "SSH 断线，转发监听已关闭"
+            } else {
+                "SSH 断线，文件会话已关闭"
+            })),
         }
     }
     pub fn session_info(&self, id: &str) -> Result<TerminalSession, Error> {
@@ -148,12 +152,15 @@ impl Engine {
             file_identity,
         ))
     }
-    // Reload closes view-owned terminals; independent, authenticated file leases keep tasks alive.
+    // Reload closes view-owned sessions; authenticated file leases keep background tasks alive.
     pub async fn close_views(&self) -> Result<(), Error> {
         let ids: Vec<_> = locked(&self.registry)?
             .sessions
             .values()
-            .filter(|c| c.kind == SessionKind::Terminal || !c.ready.load(Ordering::Acquire))
+            .filter(|c| {
+                matches!(c.kind, SessionKind::Terminal | SessionKind::Forwarding)
+                    || !c.ready.load(Ordering::Acquire)
+            })
             .map(|c| c.info.id.clone())
             .collect();
         for id in &ids {

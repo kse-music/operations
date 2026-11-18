@@ -1,13 +1,58 @@
 use serverdeck_application::Application;
-use serverdeck_core::connection::{ForwardInfo, ForwardInput};
+use serverdeck_core::connection::{ForwardInfo, LocalForwardInput};
+use serverdeck_core::terminal::{TerminalEvent, TerminalSession, TerminalSize};
+
+#[tauri::command]
+pub async fn forward_rules(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+) -> Result<Vec<LocalForwardInput>, IpcError> {
+    application.forward_rules(host_id).await.map_err(Into::into)
+}
+#[tauri::command]
+pub async fn forward_add_rule(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    rule: LocalForwardInput,
+) -> Result<LocalForwardInput, IpcError> {
+    application
+        .forward_add_rule(host_id, rule)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn forward_remove_rule(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    listen_port: u16,
+) -> Result<(), IpcError> {
+    application
+        .forward_remove_rule(host_id, listen_port)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn forward_open(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    events: tauri::ipc::Channel<TerminalEvent>,
+) -> Result<TerminalSession, IpcError> {
+    application
+        .forward_open(
+            host_id,
+            std::sync::Arc::new(move |event| events.send(event).is_ok()),
+        )
+        .await
+        .map_err(Into::into)
+}
 #[tauri::command]
 pub async fn forward_start(
     application: tauri::State<'_, Application>,
     id: String,
-    input: ForwardInput,
+    input: LocalForwardInput,
 ) -> Result<ForwardInfo, IpcError> {
     application
-        .forward_start(&id, input)
+        .forward_start(&id, input.try_into()?)
         .await
         .map_err(Into::into)
 }
@@ -25,7 +70,6 @@ pub async fn forward_stop(
 ) -> Result<(), IpcError> {
     application.forward_stop(&id).await.map_err(Into::into)
 }
-use serverdeck_core::terminal::{TerminalEvent, TerminalSession, TerminalSize};
 
 #[tauri::command]
 pub async fn terminal_local_saved_sessions(

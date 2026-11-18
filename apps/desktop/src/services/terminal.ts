@@ -12,7 +12,6 @@ import type {
   SavedLocalTerminal,
   SaveLocalTerminalInput,
 } from '../types/terminal';
-import type { ForwardInfo, ForwardInput } from '../types/connection';
 
 export const terminalApi = {
   savedLocalSessions: (): Promise<SavedLocalTerminal[]> => {
@@ -83,10 +82,6 @@ export const terminalApi = {
       events,
     });
   },
-  forwardStart: (id: string, input: ForwardInput): Promise<ForwardInfo> =>
-    invoke('forward_start', { id, input }),
-  forwardList: (id: string): Promise<ForwardInfo[]> => invoke('forward_list', { id }),
-  forwardStop: (id: string): Promise<void> => invoke('forward_stop', { id }),
   open(
     hostId: string,
     size: TerminalSize,

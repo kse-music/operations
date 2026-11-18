@@ -264,10 +264,11 @@ impl Database {
         tx.execute("DELETE FROM hosts WHERE id=?1", [id])
             .map_err(storage_error)?;
         tx.execute(
-            "DELETE FROM application_settings WHERE key IN (?1,?2)",
+            "DELETE FROM application_settings WHERE key IN (?1,?2,?3)",
             params![
                 super::sftp_directory::key(id),
-                super::sftp_bookmarks::key(id)
+                super::sftp_bookmarks::key(id),
+                super::forward_rules::key(id)
             ],
         )
         .map_err(storage_error)?;

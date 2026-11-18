@@ -34,6 +34,9 @@ export const viewLabels = {
   get files() {
     return tr('SFTP 文件');
   },
+  get forwarding() {
+    return tr('端口转发');
+  },
   get server() {
     return tr('服务器管理');
   },
@@ -79,7 +82,7 @@ export const settingsCategories = [
   },
 ] as const;
 export type SettingsCategory = (typeof settingsCategories)[number]['id'];
-export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'server']);
+export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'forwarding', 'server']);
 export function globalKey(event: KeyboardEvent): string | null {
   if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.isComposing || event.repeat)
     return null;
@@ -99,7 +102,7 @@ export interface ConnectionStatus {
   hostId: string;
   transportId: string;
   routeHostIds: string[];
-  kind: 'terminal' | 'files' | 'monitor' | 'operations';
+  kind: 'terminal' | 'files' | 'monitor' | 'operations' | 'forwarding';
   state: string;
 }
 export interface BackgroundSnapshot {

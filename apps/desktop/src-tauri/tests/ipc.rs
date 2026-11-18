@@ -199,6 +199,96 @@ fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
 }
 
 #[test]
+fn forwarding_ipc_is_local_only_and_limited_to_the_main_window() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .manage(
+            Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+                .unwrap(),
+        )
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let editor = tauri::WebviewWindowBuilder::new(&app, "remote-editor-test", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let open = json!({"hostId":"missing","events":"__CHANNEL__:1"});
+    let start = json!({"id":"missing","input":{"listenPort":18080,"targetHost":"127.0.0.1","targetPort":8080}});
+    for (command, body) in [("forward_open", open), ("forward_start", start.clone())] {
+        assert_eq!(
+            get_ipc_response(&main, request(command, body.clone(), origin)).unwrap_err()["code"],
+            "NOT_FOUND"
+        );
+        for (window, url) in [(&editor, origin), (&main, "https://untrusted.invalid")] {
+            let error = get_ipc_response(window, request(command, body.clone(), url)).unwrap_err();
+            assert!(error.to_string().contains("not allowed"));
+        }
+    }
+    for key in ["bindAddress", "kind", "confirmPublic"] {
+        let mut invalid = start.clone();
+        invalid["input"][key] = json!("invalid");
+        let error = get_ipc_response(&main, request("forward_start", invalid, origin)).unwrap_err();
+        assert!(error.to_string().contains("unknown field"));
+    }
+    let mut invalid = start;
+    invalid["input"]["listenPort"] = json!(0);
+    assert_eq!(
+        get_ipc_response(&main, request("forward_start", invalid, origin)).unwrap_err()["code"],
+        "VALIDATION"
+    );
+
+    let invoke = |command: &str, body: Value| {
+        get_ipc_response(&main, request(command, body, origin))
+            .unwrap()
+            .deserialize::<Value>()
+            .unwrap()
+    };
+    let host = invoke(
+        "host_create",
+        json!({"input":{
+            "name":"Forward fixture", "hostname":"example.com", "port":22, "username":"ops",
+            "authType":"agent", "credentialId":null, "groupId":null, "description":"",
+            "favorite":false, "connectTimeoutSecs":15
+        }}),
+    );
+    let read = json!({"hostId":host["id"]});
+    let rule = json!({"listenPort":18080,"targetHost":"127.0.0.1","targetPort":8080});
+    let add = json!({"hostId":host["id"],"rule":rule});
+    let remove = json!({"hostId":host["id"],"listenPort":18080});
+    for (command, body) in [
+        ("forward_rules", &read),
+        ("forward_add_rule", &add),
+        ("forward_remove_rule", &remove),
+    ] {
+        for (window, url) in [(&editor, origin), (&main, "https://untrusted.invalid")] {
+            let error = get_ipc_response(window, request(command, body.clone(), url)).unwrap_err();
+            assert!(error.to_string().contains("not allowed"));
+        }
+    }
+    let mut invalid = add.clone();
+    invalid["rule"]["autoStart"] = json!(true);
+    let error = get_ipc_response(&main, request("forward_add_rule", invalid, origin)).unwrap_err();
+    assert!(error.to_string().contains("unknown field"));
+    assert_eq!(invoke("forward_rules", read.clone()), json!([]));
+    assert_eq!(invoke("forward_add_rule", add), rule);
+    assert_eq!(invoke("forward_rules", read.clone()), json!([rule]));
+    assert_eq!(
+        invoke("background_tasks", json!({}))["connections"],
+        json!([])
+    );
+    invoke("forward_remove_rule", remove);
+    assert_eq!(invoke("forward_rules", read), json!([]));
+}
+
+#[test]
 fn administrator_terminal_requires_main_window_local_origin_and_valid_size_before_uac() {
     let directory = tempfile::tempdir().unwrap();
     let app = mock_builder()

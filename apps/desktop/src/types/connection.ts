@@ -27,11 +27,16 @@ export interface ForwardInput {
   targetPort: number | null;
   confirmPublic: boolean;
 }
+export interface LocalForwardInput {
+  listenPort: number;
+  targetHost: string;
+  targetPort: number;
+}
 export interface ForwardInfo {
   id: string;
   sessionId: string;
   input: ForwardInput;
-  state: string;
+  state: 'starting' | 'running' | 'stopped' | 'failed';
   message: string | null;
   activeConnections: number;
 }

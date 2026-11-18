@@ -40,7 +40,7 @@ it.each([false, true])('scopes secondary tools to the selected host (local=%s)',
     local,
     onNavigate: navigate,
   });
-  expect(root.querySelectorAll('button')).toHaveLength(local ? 1 : 2);
+  expect(root.querySelectorAll('button')).toHaveLength(local ? 1 : 3);
   expect(root.querySelector('[aria-current="page"]')?.textContent).toContain(
     local ? '本地终端' : 'SFTP 文件',
   );
@@ -48,7 +48,7 @@ it.each([false, true])('scopes secondary tools to the selected host (local=%s)',
   expect(navigate).toHaveBeenCalledWith(local ? 'terminals' : 'files');
   expect(root.querySelector('[aria-label="网络诊断"]')).toBeNull();
   expect([...root.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(
-    local ? ['本地终端'] : ['SSH 终端', 'SFTP 文件'],
+    local ? ['本地终端'] : ['SSH 终端', 'SFTP 文件', '端口转发'],
   );
 });
 it('shows enabled plugin functions beside SSH and SFTP without requiring host grants', async () => {
@@ -71,7 +71,7 @@ it('shows enabled plugin functions beside SSH and SFTP without requiring host gr
   ).not.toBeNull();
   expect(
     [...toolbar.querySelectorAll('button')].map((button) => button.textContent?.trim()),
-  ).toEqual(['SSH 终端', 'SFTP 文件', items[0]!.manifest.name]);
+  ).toEqual(['SSH 终端', 'SFTP 文件', '端口转发', items[0]!.manifest.name]);
   toolbar.querySelector<HTMLButtonElement>(`[data-plugin-id="${items[0]!.manifest.id}"]`)!.click();
   await nextTick();
   expect(select).toHaveBeenCalledWith(items[0]!.manifest.id, 'server');
@@ -83,7 +83,7 @@ it('shows enabled plugin functions beside SSH and SFTP without requiring host gr
   await nextTick();
   expect(
     [...toolbar.querySelectorAll('button')].map((button) => button.textContent?.trim()),
-  ).toEqual(['SSH 终端', 'SFTP 文件']);
+  ).toEqual(['SSH 终端', 'SFTP 文件', '端口转发']);
 });
 
 it('highlights the current plugin and hides remote plugins on the local device', async () => {

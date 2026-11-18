@@ -12,6 +12,7 @@
 | `application_settings.software_updates`             | 1        | 无历史版本；缺少记录时采用固定 v1 默认值 | 自动检查开关及尝试/成功时间独立保存；损坏或未来版本报错，不重置、不阻断主业务    |
 | `application_settings.sftp_last_directory:<HostId>` | 1        | 无历史版本；缺少记录时使用 SFTP 默认目录 | 保存最近的规范远程绝对路径；损坏或未来版本拒绝读取或覆盖，删除主机时移除对应记录 |
 | `application_settings.sftp_bookmarks:<HostId>`      | 1        | 无历史版本；缺少记录时列表为空           | 保存命名远程目录；损坏或未来版本拒绝读取或覆盖，删除主机时移除对应记录           |
+| `application_settings.ssh_forward_rules:<HostId>`   | 1        | 无历史版本；缺少记录时列表为空           | 仅保存端口转发配置，损坏或未来版本拒绝读取或覆盖，删除主机时移除对应记录         |
 
 窗口尺寸、本地模型授权、主机 SSH 选项、插件设置等当前未改变格式，原值保留。目录定位文件继续使用现有版本/状态机。插件 SDK/UI 和权限属于执行安全契约，不在本机制中转换或继承；旧身份目录及系统凭据服务也不自动搬迁。
 

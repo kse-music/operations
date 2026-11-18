@@ -4,7 +4,9 @@ use russh::{
     keys::{Algorithm, HashAlg, PrivateKey, PublicKey},
     server::{self, Auth, ChannelOpenHandle, Msg, Session},
 };
-use serverdeck_core::connection::{ForwardInput, ForwardKind, ProxyKind, ProxySettings};
+use serverdeck_core::connection::{
+    ForwardInput, ForwardKind, LocalForwardInput, ProxyKind, ProxySettings,
+};
 use serverdeck_core::{
     hosts::{AuthType, Host, HostInput},
     terminal::{TerminalEvent, TerminalSession, TerminalSize},
@@ -21,7 +23,10 @@ use std::{
     time::Duration,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::{net::TcpListener, sync::mpsc};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc,
+};
 use zeroize::Zeroizing;
 
 struct Echo {
@@ -390,6 +395,24 @@ fn open(engine: &Engine, host: Host, auth: Authentication) -> Shell {
             Arc::new(move |e| tx.try_send(e).is_ok()),
         )
         .expect("open");
+    Shell { info, events }
+}
+fn open_forwarding(engine: &Engine, host: Host, auth: Authentication) -> Shell {
+    let (tx, events) = mpsc::channel(16);
+    let info = engine
+        .open_forward_plan(
+            host.clone(),
+            ConnectionPlan {
+                hops: vec![Hop {
+                    host,
+                    revision: 1,
+                    auth,
+                }],
+                proxy: None,
+            },
+            Arc::new(move |event| tx.try_send(event).is_ok()),
+        )
+        .expect("open forwarding lease");
     Shell { info, events }
 }
 async fn event(shell: &mut Shell) -> TerminalEvent {
@@ -1109,10 +1132,15 @@ async fn transport_disconnect_closes_all_sessions_and_cancel_during_trust_releas
     let engine = Engine::new(db);
     let mut first = open(&engine, host.clone(), server.password());
     state(&mut first, "connected").await;
-    let mut second = open(&engine, host, server.password());
+    let mut second = open(&engine, host.clone(), server.password());
     state(&mut second, "connected").await;
+    let mut forwarding = open_forwarding(&engine, host, server.password());
+    state(&mut forwarding, "connected").await;
     let local = engine
-        .forward_start(&first.info.id, forward_input(ForwardKind::Local, 0, 22))
+        .forward_start(
+            &forwarding.info.id,
+            forward_input(ForwardKind::Local, 0, 22),
+        )
         .await
         .expect("local listener");
     let dynamic = engine
@@ -1124,6 +1152,10 @@ async fn transport_disconnect_closes_all_sessions_and_cancel_during_trust_releas
         .expect("disconnect");
     assert_eq!(state(&mut first, "failed").await, Some("SSH_DISCONNECTED"));
     assert_eq!(state(&mut second, "failed").await, Some("SSH_DISCONNECTED"));
+    assert_eq!(
+        state(&mut forwarding, "failed").await,
+        Some("SSH_DISCONNECTED")
+    );
     assert!(
         tokio::net::TcpStream::connect(("127.0.0.1", local.input.listen_port))
             .await
@@ -1157,6 +1189,73 @@ impl Drop for Fixture {
             worker.abort();
         }
     }
+}
+
+#[tokio::test]
+async fn workspace_local_forward_verifies_host_and_outlives_the_terminal() {
+    let server = Server::start().await;
+    let echo = echo_server().await;
+    let (_dir, db) = database();
+    let host = server.host(&db);
+    let engine = Engine::new(db);
+    let mut forwarding = open_forwarding(&engine, host.clone(), server.password());
+    let id = &forwarding.info.id.clone();
+    let port = free_port().await;
+    let input = || {
+        ForwardInput::try_from(LocalForwardInput {
+            listen_port: port,
+            target_host: "127.0.0.1".into(),
+            target_port: echo.port,
+        })
+        .expect("local request")
+    };
+    loop {
+        if let TerminalEvent::Trust { fingerprint, .. } = event(&mut forwarding).await {
+            assert_eq!(fingerprint, server.pin);
+            break;
+        }
+    }
+    assert_eq!(server.attempts.load(Ordering::SeqCst), 0);
+    assert!(engine.forward_start(id, input()).await.is_err());
+    engine.confirm(id, true).expect("verify fixture key");
+    state(&mut forwarding, "connected").await;
+    assert!(server.sizes.lock().expect("PTY sizes").is_empty());
+
+    let forward = engine.forward_start(id, input()).await.expect("start");
+    assert_eq!(forward.input.bind_address, std::net::Ipv4Addr::LOCALHOST);
+    assert_eq!(forward.state, "running");
+    let conflict = engine
+        .forward_start(id, input())
+        .await
+        .expect_err("occupied port");
+    assert_eq!(
+        serverdeck_core::IpcError::from(conflict).code,
+        "SSH_FORWARD_BIND"
+    );
+
+    let mut shell = open(&engine, host, server.password());
+    state(&mut shell, "connected").await;
+    assert_eq!(shell.info.transport_id, forwarding.info.transport_id);
+    engine.close(&shell.info.id).await.expect("close terminal");
+    exchange(
+        TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("forwarded TCP stream"),
+    )
+    .await;
+
+    engine.forward_stop(&forward.id).await.expect("stop");
+    assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
+    assert!(engine.forward_list(id).expect("status").iter().any(|info| {
+        info.id == forward.id && info.state == "stopped" && info.active_connections == 0
+    }));
+    engine.forward_start(id, input()).await.expect("restart");
+    engine.close_views().await.expect("close view-owned leases");
+    assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err());
+    assert_eq!(
+        engine.counts().expect("sessions and transports released"),
+        (0, 0)
+    );
 }
 
 #[tokio::test]

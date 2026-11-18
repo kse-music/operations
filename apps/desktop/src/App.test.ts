@@ -9,8 +9,10 @@ import { useHostsStore } from './stores/hosts';
 import { useTerminalsStore } from './stores/terminals';
 import { useWorkspaceStore } from './stores/workspace';
 import { useFilesStore } from './stores/files';
+import { useForwardingStore } from './stores/forwarding';
 import { useBackgroundStore } from './stores/background';
 import { terminalApi } from './services/terminal';
+import { forwardingApi } from './services/forwarding';
 import { hostsApi } from './services/hosts';
 import { filesApi } from './services/files';
 import { hostInput } from './types/hosts';
@@ -23,6 +25,8 @@ import { useNotificationsStore } from './stores/notifications';
 import { systemPluginFixtures, toolPluginState } from './services/system-plugins.fixture';
 import { aiApi } from './services/ai';
 import type { DirectoryListing, TransferInfo } from './types/files';
+import type { ForwardInfo, LocalForwardInput } from './types/connection';
+import type { TerminalEvent } from './types/terminal';
 
 // Exercise the shell, workspace tabs and session tabs without xterm's browser canvas or a remote connection.
 vi.mock('./components/TerminalPane.vue', () => ({ default: { render: () => null } }));
@@ -2335,6 +2339,201 @@ it('opens a fresh local terminal from welcome after the remote workspace and its
   expect(terminals.panes.filter((p) => p.host === null)).toHaveLength(1);
 });
 
+it('starts and stops loopback forwarding from the host toolbar and isolates workspaces', async () => {
+  const workspace = useWorkspaceStore();
+  const records = new Map<string, LocalForwardInput[]>();
+  vi.spyOn(forwardingApi, 'savedRules').mockImplementation(
+    async (hostId) => records.get(hostId) ?? [],
+  );
+  const add = vi.spyOn(forwardingApi, 'addRule').mockImplementation(async (hostId, rule) => {
+    records.set(hostId, [...(records.get(hostId) ?? []), rule]);
+    return rule;
+  });
+  const remove = vi.spyOn(forwardingApi, 'removeRule').mockImplementation(async (hostId, port) => {
+    records.set(
+      hostId,
+      (records.get(hostId) ?? []).filter((rule) => rule.listenPort !== port),
+    );
+  });
+  const listeners = new Map<string, (event: TerminalEvent) => void>();
+  const connected = { type: 'state', state: 'connected', code: null, message: null } as const;
+  const open = vi.spyOn(forwardingApi, 'open').mockImplementation(async (hostId, receive) => {
+    const id = `forwarding-${listeners.size + 1}`;
+    listeners.set(id, receive);
+    receive(
+      listeners.size === 1
+        ? {
+            type: 'trust',
+            hostname: 'a.example',
+            port: 22,
+            algorithm: 'ssh-ed25519',
+            fingerprint: 'SHA256:fixture',
+          }
+        : connected,
+    );
+    return { id, hostId, transportId: 'fixture-transport', routeHostIds: [hostId] };
+  });
+  const trust = vi.spyOn(terminalApi, 'trust').mockImplementation(async (id) => {
+    listeners.get(id)!(connected);
+  });
+  const close = vi.spyOn(terminalApi, 'close').mockImplementation(async (id) => {
+    listeners.get(id)?.({ ...connected, state: 'closed' });
+  });
+  let snapshot: ForwardInfo;
+  const start = vi.spyOn(forwardingApi, 'start').mockImplementation(async (sessionId, input) => {
+    snapshot = {
+      id: `rule-${sessionId}`,
+      sessionId,
+      input: { ...input, kind: 'local', bindAddress: '127.0.0.1', confirmPublic: false },
+      state: 'running',
+      message: null,
+      activeConnections: 0,
+    };
+    return snapshot;
+  });
+  start.mockRejectedValueOnce({ message: '本地监听失败，端口冲突或没有绑定权限' });
+  vi.spyOn(forwardingApi, 'list').mockImplementation(async () => [
+    { ...snapshot, activeConnections: 2 },
+  ]);
+  const stop = vi.spyOn(forwardingApi, 'stop').mockResolvedValue();
+  const click = (label: string, scope: ParentNode = root) =>
+    [...scope.querySelectorAll<HTMLButtonElement>('button')]
+      .find((item) => item.textContent?.trim() === label)!
+      .click();
+
+  workspace.navigate('terminals', 'a');
+  await flush();
+  root.querySelector<HTMLButtonElement>('.host-tools [aria-label="端口转发"]')!.click();
+  await flush();
+  const form = root.querySelector<HTMLFormElement>('.forwarding-form')!;
+  for (const [index, value] of ['18080', '127.0.0.1', '8080'].entries()) {
+    const field = form.querySelectorAll('input')[index]!;
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  click('添加', form);
+  await vi.waitFor(() => expect(root.textContent).toContain('已停止'));
+  expect(add).toHaveBeenCalledWith('a', {
+    listenPort: 18080,
+    targetHost: '127.0.0.1',
+    targetPort: 8080,
+  });
+  expect(open).not.toHaveBeenCalled();
+  click('启动');
+  await vi.waitFor(() =>
+    expect(document.querySelector('dialog[open]')?.textContent).toContain('SHA256:fixture'),
+  );
+  expect(start).not.toHaveBeenCalled();
+  click('已核对，信任并连接', document.querySelector('dialog[open]')!);
+  expect(trust).toHaveBeenCalledWith('forwarding-1', true);
+  await vi.waitFor(() => expect(root.textContent).toContain('端口冲突'));
+  expect(close).toHaveBeenCalledWith('forwarding-1');
+
+  click('启动');
+  await vi.waitFor(() => expect(root.textContent).toContain('2 个活动连接'));
+  expect(start).toHaveBeenLastCalledWith('forwarding-2', {
+    listenPort: 18080,
+    targetHost: '127.0.0.1',
+    targetPort: 8080,
+  });
+  workspace.navigate('forwarding', 'b');
+  await flush();
+  expect(root.textContent).toContain('暂无转发规则');
+  expect(root.textContent).not.toContain('127.0.0.1:18080');
+  expect(close).not.toHaveBeenCalledWith('forwarding-2');
+  workspace.activate('host:a');
+  await flush();
+  expect(root.textContent).toContain('正在监听');
+
+  click('停止');
+  await vi.waitFor(() => expect(root.textContent).toContain('已停止'));
+  expect(stop).toHaveBeenCalledWith('rule-forwarding-2');
+  expect(close).toHaveBeenCalledWith('forwarding-2');
+  click('启动');
+  await vi.waitFor(() => expect(root.textContent).toContain('正在监听'));
+  listeners.get('forwarding-3')!({
+    ...connected,
+    state: 'failed',
+    message: 'SSH 断线，转发监听已关闭',
+  });
+  await flush();
+  expect(root.textContent).toContain('SSH 断线，转发监听已关闭');
+  expect(root.textContent).not.toContain('正在监听');
+  click('启动');
+  await vi.waitFor(() => expect(root.textContent).toContain('正在监听'));
+  await workspace.close('host:a');
+  expect(close).toHaveBeenLastCalledWith('forwarding-4');
+  expect(workspace.homeTabs.map((tab) => tab.hostId)).toEqual(['b']);
+  const startsBeforeReopen = start.mock.calls.length;
+  workspace.navigate('forwarding', 'a');
+  await vi.waitFor(() => expect(root.textContent).toContain('已停止'));
+  expect(root.textContent).toContain('127.0.0.1:18080');
+  expect(root.textContent).not.toContain('正在监听');
+  expect(open).toHaveBeenCalledTimes(4);
+  expect(start).toHaveBeenCalledTimes(startsBeforeReopen);
+  root.querySelector<HTMLButtonElement>('[aria-label="移除本地端口 18080 的转发规则"]')!.click();
+  await vi.waitFor(() => expect(root.textContent).toContain('暂无转发规则'));
+  expect(remove).toHaveBeenCalledWith('a', 18080);
+  await workspace.close('host:a');
+  workspace.navigate('forwarding', 'a');
+  await flush();
+  expect(root.textContent).toContain('暂无转发规则');
+});
+
+it('keeps existing rules and the port draft when forwarding storage fails', async () => {
+  vi.spyOn(forwardingApi, 'savedRules')
+    .mockRejectedValueOnce({ message: 'read failed' })
+    .mockResolvedValue([{ listenPort: 18080, targetHost: '127.0.0.1', targetPort: 8080 }]);
+  vi.spyOn(forwardingApi, 'addRule').mockRejectedValue({ message: 'save failed' });
+  vi.spyOn(forwardingApi, 'removeRule').mockRejectedValue({ message: 'remove failed' });
+  useWorkspaceStore().navigate('forwarding', 'a');
+  await vi.waitFor(() => expect(root.textContent).toContain('无法读取转发规则：read failed'));
+  const form = root.querySelector<HTMLFormElement>('.forwarding-form')!;
+  const submit = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(submit.disabled).toBe(true);
+  expect(root.textContent).not.toContain('暂无转发规则');
+  root.querySelector<HTMLButtonElement>('.forwarding-rules-feedback button')!.click();
+  await vi.waitFor(() => expect(root.textContent).toContain('127.0.0.1:18080'));
+
+  const local = form.querySelector<HTMLInputElement>('#forwarding-local-port')!;
+  const target = form.querySelectorAll('input')[2]!;
+  for (const [field, value] of [
+    [local, '19001'],
+    [target, '9001'],
+  ] as const) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  submit.click();
+  await vi.waitFor(() => expect(root.textContent).toContain('无法保存转发规则：save failed'));
+  expect(local.value).toBe('19001');
+  expect(root.textContent).not.toContain('127.0.0.1:19001');
+  root.querySelector<HTMLButtonElement>('[aria-label="移除本地端口 18080 的转发规则"]')!.click();
+  await vi.waitFor(() => expect(root.textContent).toContain('无法移除转发规则：remove failed'));
+  expect(root.textContent).toContain('127.0.0.1:18080');
+});
+
+it('closes a forwarding lease even when the workspace closes during SSH authentication', async () => {
+  const workspace = useWorkspaceStore();
+  vi.spyOn(forwardingApi, 'savedRules').mockResolvedValue([
+    { listenPort: 18080, targetHost: '127.0.0.1', targetPort: 8080 },
+  ]);
+  workspace.navigate('forwarding', 'a');
+  await vi.waitFor(() => expect(root.textContent).toContain('已停止'));
+  const forwarding = useForwardingStore();
+  const host = forwarding.forHost('a');
+  const lease = { id: 'pending-lease', hostId: 'a', transportId: 'pending', routeHostIds: ['a'] };
+  vi.spyOn(forwardingApi, 'open').mockResolvedValue(lease);
+  const start = vi.spyOn(forwardingApi, 'start');
+  const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+  const pending = forwarding.start('a', host.rules[0]!);
+  await workspace.close('host:a');
+  await pending;
+  expect(close).toHaveBeenCalledWith(lease.id);
+  expect(start).not.toHaveBeenCalled();
+  expect(workspace.homeTabs).toEqual([]);
+});
+
 it('places session controls below the host toolbar and retains names within the current run', async () => {
   const terminals = useTerminalsStore();
   const host = useHostsStore().catalog!.hosts[0]!;
@@ -2350,7 +2549,7 @@ it('places session controls below the host toolbar and retains names within the 
     [...document.querySelectorAll('.workspace-header .host-tools button')].map((button) =>
       button.textContent?.trim(),
     ),
-  ).toEqual(['SSH 终端', 'SFTP 文件', 'AI 运维助手', 'Docker 管理']);
+  ).toEqual(['SSH 终端', 'SFTP 文件', '端口转发', 'AI 运维助手', 'Docker 管理']);
   expect(document.querySelector('.terminal-session-header .terminal-tabs')).not.toBeNull();
   expect(document.querySelector('.split-toolbar, [aria-label="会话操作"]')).toBeNull();
   expect(document.querySelector('#terminal-session-tools .terminal-session-header')).not.toBeNull();

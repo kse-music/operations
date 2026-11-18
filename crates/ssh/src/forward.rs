@@ -79,7 +79,7 @@ impl Engine {
         input.validate()?;
         let owner = self.control(session_id)?;
         if !owner.ready.load(Ordering::Acquire) || owner.cancel.is_cancelled() {
-            return Err(failure("SSH_NOT_CONNECTED", "请先连接终端再启动转发"));
+            return Err(failure("SSH_NOT_CONNECTED", "SSH 连接未就绪，无法启动转发"));
         }
         let transport = locked(&self.registry)?
             .transports
@@ -117,7 +117,7 @@ impl Engine {
             if forwards.len() >= 64 {
                 forwards.retain(|_, f| f.enabled.load(Ordering::Acquire));
             }
-            if owner.cancel.is_cancelled() {
+            if !owner.ready.load(Ordering::Acquire) || owner.cancel.is_cancelled() {
                 return Err(Error::NotFound);
             }
             forwards.insert(id, control.clone());
@@ -442,7 +442,11 @@ async fn direct(
         connection
             .channel_open_direct_tcpip(host, u32::from(port), "127.0.0.1", 0)
             .await
-            .map_err(network)
+            .map_err(|error| Error::Connection {
+                code: "SSH_FORWARD_TARGET",
+                message: "无法连接转发目标，请检查远端服务和 SSH 转发策略",
+                source: Some(Box::new(error)),
+            })
     })
     .await
     .map_err(|_| failure("SSH_FORWARD_TIMEOUT", "转发目标连接超时"))?

@@ -110,6 +110,7 @@ enum SessionKind {
     DedicatedFiles,
     Monitor,
     Operations,
+    Forwarding,
 }
 struct Control {
     kind: SessionKind,
@@ -167,6 +168,7 @@ impl Engine {
                         SessionKind::Files | SessionKind::DedicatedFiles => "files",
                         SessionKind::Monitor => "monitor",
                         SessionKind::Operations => "operations",
+                        SessionKind::Forwarding => "forwarding",
                     },
                     state: if c.ready.load(Ordering::Acquire) {
                         "connected"
@@ -281,6 +283,22 @@ impl Engine {
             TerminalSize { cols: 80, rows: 24 },
             sink,
             SessionKind::Operations,
+            None,
+            None,
+        )
+    }
+    pub fn open_forward_plan(
+        &self,
+        host: Host,
+        plan: ConnectionPlan,
+        sink: Sink,
+    ) -> Result<TerminalSession, Error> {
+        self.open_internal(
+            host,
+            plan,
+            TerminalSize { cols: 80, rows: 24 },
+            sink,
+            SessionKind::Forwarding,
             None,
             None,
         )
@@ -446,9 +464,7 @@ impl Engine {
         let task = tokio::spawn(async move {
             state(&sink, "connecting", None);
             let result = if kind != SessionKind::Terminal {
-                engine
-                    .run_file_lease(plan, &transport, &running, &sink)
-                    .await
+                engine.run_lease(plan, &transport, &running, &sink).await
             } else {
                 engine
                     .run(

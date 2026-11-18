@@ -5,6 +5,7 @@ import { hostViews, type WorkspaceView } from '../types/product';
 import { isSettingsView, type SettingsView } from '../types/navigation';
 import { useTerminalsStore } from './terminals';
 import { useFilesStore } from './files';
+import { useForwardingStore } from './forwarding';
 import type { ServerSection } from '../types/server';
 import { usePluginsStore } from './plugins';
 import { primaryPluginPage } from '../services/plugin-pages';
@@ -250,6 +251,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           }
         }
         if (isHostTab(tab) && tab.hostId && !(await files.clearHostTransfers(tab.hostId))) continue;
+        if (isHostTab(tab) && tab.hostId && !(await useForwardingStore().close(tab.hostId)))
+          continue;
         pluginPages.value = pluginPages.value.filter((page) => !pages.includes(page));
         for (const page of pages) plugins.setDraftDirty(page.key, page.pluginId!, false);
         removed.add(tab);

@@ -93,9 +93,9 @@ const currentHost = computed(() => {
         ? 'terminal'
         : module === 'files'
           ? 'files'
-          : module === 'server'
-            ? 'operations'
-            : module === 'extension'
+          : module === 'forwarding'
+            ? 'forwarding'
+            : module === 'server' || module === 'extension'
               ? 'operations'
               : '';
   const terminal = terminals.panes.find((p) => p.key === terminals.focused && p.host?.id === id);
@@ -433,6 +433,7 @@ function openServer(host: Host): void {
   navigate('server', host.id);
 }
 const FilesView = defineAsyncComponent(() => import('./views/FilesView.vue'));
+const ForwardingView = defineAsyncComponent(() => import('./views/ForwardingView.vue'));
 import { useTerminalsStore } from './stores/terminals';
 
 const application = useApplicationStore();
@@ -880,6 +881,12 @@ watch(
           :host-id="currentHostId"
           :inactive="workspace.area !== 'home'"
           @terminal="fileTerminal"
+        />
+        <ForwardingView
+          v-else-if="view === 'forwarding' && currentHostId"
+          :key="`forwarding:${currentHostId}`"
+          :host-id="currentHostId"
+          :inactive="settingsOpen || workspace.closing.includes(workspace.active)"
         />
       </div>
       <div

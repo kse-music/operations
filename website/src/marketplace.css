@@ -345,6 +345,7 @@
 .market-callout h2 {
   font-size: 15px;
   font-weight: 600;
+  letter-spacing: normal;
 }
 .market-callout p {
   margin-top: 5px;
@@ -504,18 +505,18 @@ html:not(.dark) .market-categories button[aria-pressed='true'] {
     min-height: 36px;
   }
   .market-callout {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     padding-inline: 16px;
     gap: 14px;
-  }
-  .market-callout > div {
-    flex: 1;
-    min-width: 0;
   }
   .market-callout h2 {
     font-size: 14px;
   }
   .market-callout a {
-    margin-left: 43px;
+    grid-column: 2;
+    justify-self: start;
+    margin-left: 0;
   }
   .market-notice {
     right: 16px;

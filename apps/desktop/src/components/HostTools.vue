@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
 
-import { FolderSync, SquareTerminal } from '@lucide/vue';
+import { ArrowRightLeft, FolderSync, SquareTerminal } from '@lucide/vue';
 import { computed } from 'vue';
 import { viewLabels, type WorkspaceView } from '../types/product';
 import { usePluginsStore } from '../stores/plugins';
@@ -28,6 +28,13 @@ const tools = [
       return tr('SFTP 文件');
     },
     icon: FolderSync,
+  },
+  {
+    view: 'forwarding',
+    get label() {
+      return viewLabels.forwarding;
+    },
+    icon: ArrowRightLeft,
   },
 ] as const;
 const enabled = computed(() =>

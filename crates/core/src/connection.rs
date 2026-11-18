@@ -95,6 +95,40 @@ pub enum ForwardKind {
     Remote,
     Dynamic,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalForwardInput {
+    pub listen_port: u16,
+    pub target_host: String,
+    pub target_port: u16,
+}
+impl LocalForwardInput {
+    pub fn normalize(mut self) -> Result<Self, Error> {
+        if self.listen_port == 0 {
+            return Err(Error::Validation("本地监听端口必须为 1–65535"));
+        }
+        self.target_host = normalize_hostname(&self.target_host)?;
+        if self.target_port == 0 {
+            return Err(Error::Validation("转发目标端口无效"));
+        }
+        Ok(self)
+    }
+}
+impl TryFrom<LocalForwardInput> for ForwardInput {
+    type Error = Error;
+
+    fn try_from(input: LocalForwardInput) -> Result<Self, Error> {
+        let input = input.normalize()?;
+        Ok(Self {
+            kind: ForwardKind::Local,
+            bind_address: std::net::Ipv4Addr::LOCALHOST.into(),
+            listen_port: input.listen_port,
+            target_host: Some(input.target_host),
+            target_port: Some(input.target_port),
+            confirm_public: false,
+        })
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ForwardInput {
