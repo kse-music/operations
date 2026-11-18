@@ -23,7 +23,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
-      - run: npm audit --package-lock-only --audit-level=moderate
+      - run: npm run audit:release
   windows-update:
     needs: npm-security
     runs-on: windows-latest
