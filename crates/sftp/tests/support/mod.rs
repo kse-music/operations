@@ -103,9 +103,11 @@ fn attrs(m: &std::fs::Metadata) -> FileAttributes {
 }
 #[derive(Default)]
 pub struct FileFaults {
+    pub written_bytes: std::sync::atomic::AtomicU64,
     pub wire_delay_ms: std::sync::atomic::AtomicU64,
     pub close_delay_ms: std::sync::atomic::AtomicU64,
     pub corrupt_reads: std::sync::atomic::AtomicBool,
+    pub reject_private_mkdir: std::sync::atomic::AtomicBool,
     pub reject_writes: std::sync::atomic::AtomicBool,
     pub ignore_times: std::sync::atomic::AtomicBool,
     pub open_handles: std::sync::atomic::AtomicUsize,
@@ -360,6 +362,9 @@ impl russh_sftp::server::Handler for Disk {
             .await
             .map_err(io)?;
         file.write_all(&data).await.map_err(io)?;
+        self.faults
+            .written_bytes
+            .fetch_add(data.len() as u64, std::sync::atomic::Ordering::Relaxed);
         Ok(status(id))
     }
     async fn fstat(&mut self, id: u32, handle: String) -> Result<Attrs, StatusCode> {
@@ -433,6 +438,14 @@ impl russh_sftp::server::Handler for Disk {
         path: String,
         attrs: FileAttributes,
     ) -> Result<Status, StatusCode> {
+        if attrs.permissions == Some(0o700)
+            && self
+                .faults
+                .reject_private_mkdir
+                .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(StatusCode::PermissionDenied);
+        }
         tokio::fs::create_dir(self.path(&path)?).await.map_err(io)?;
         self.faults
             .created_permissions
@@ -751,6 +764,10 @@ impl Server {
             task,
             _database: database,
         }
+    }
+    #[allow(dead_code)]
+    pub fn db_path(&self) -> PathBuf {
+        self._database.path().join("db")
     }
     pub async fn open(&self) -> TerminalSession {
         self.open_identity(None, false).await

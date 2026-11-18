@@ -446,8 +446,8 @@ async fn pipelined_relay_beats_serial_round_trips_without_changing_verified_byte
         .map(|n| (n % 251) as u8)
         .collect::<Vec<_>>();
     std::fs::write(source.root.path().join("image.tar"), &bytes).unwrap();
-    let input = source.engine.open_sftp_channel(&src.id).await.unwrap();
-    let output = source.engine.open_sftp_channel(&dst.id).await.unwrap();
+    let (input, _) = source.engine.open_sftp_channel(&src.id).await.unwrap();
+    let (output, _) = source.engine.open_sftp_channel(&dst.id).await.unwrap();
     let input = RawSftpSession::new(input.channel.into_stream());
     input.init().await.unwrap();
     let output = RawSftpSession::new(output.channel.into_stream());

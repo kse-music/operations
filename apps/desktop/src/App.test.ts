@@ -2110,6 +2110,10 @@ it('lets the user dismiss exit review and disables its controls during confirmed
       }),
   );
   const files = useFilesStore();
+  let finishDirectoryWrite!: () => void;
+  vi.spyOn(files, 'flushDirectoryWrites').mockImplementation(
+    () => new Promise<void>((resolve) => (finishDirectoryWrite = resolve)),
+  );
   const openReview = async () => {
     files.exitReview = true;
     await nextTick();
@@ -2138,8 +2142,10 @@ it('lets the user dismiss exit review and disables its controls during confirmed
   review = await openReview();
   review.querySelector<HTMLButtonElement>('button.danger')!.click();
   await nextTick();
-  expect(exit).toHaveBeenCalledExactlyOnceWith(true);
+  expect(exit).not.toHaveBeenCalled();
   expect([...review.querySelectorAll('button')].every((button) => button.disabled)).toBe(true);
+  finishDirectoryWrite();
+  await vi.waitFor(() => expect(exit).toHaveBeenCalledExactlyOnceWith(true));
   dismiss(review);
   expect(files.exitReview).toBe(true);
   finishExit?.();
@@ -2177,8 +2183,7 @@ it('routes a ready update through exit review and cancellation preserves running
   document
     .querySelector<HTMLButtonElement>('dialog[aria-label="确认安装更新并重启"] button.danger')!
     .click();
-  await nextTick();
-  expect(install).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(install).toHaveBeenCalledOnce());
   expect(exit).not.toHaveBeenCalled();
 });
 

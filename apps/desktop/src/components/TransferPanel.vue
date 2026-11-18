@@ -2,7 +2,9 @@
 import { tr } from '../i18n/messages';
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
-import { computed } from 'vue';
+import { filesApi } from '../services/files';
+import { errorMessage } from '../services/ipc';
+import { computed, ref } from 'vue';
 import { useFilesStore } from '../stores/files';
 import { useHostsStore } from '../stores/hosts';
 import { hostDisplayName } from '../types/hosts';
@@ -30,6 +32,23 @@ const tasks = computed(() =>
   ),
 );
 defineEmits<{ retry: [task: TransferInfo] }>();
+const decisions = ref(new Set<string>());
+const decisionErrors = ref<Record<string, string>>({});
+async function choose(task: TransferInfo, choice: 'restart' | 'cancel') {
+  const prompt = task.restartPrompt;
+  if (!prompt || decisions.value.has(prompt.token)) return;
+  decisions.value.add(prompt.token);
+  delete decisionErrors.value[prompt.token];
+  try {
+    if (choice === 'cancel') await filesApi.cancel(task.id);
+    else await filesApi.confirmRestart(task.id, prompt.token);
+    await store.poll();
+  } catch (error) {
+    decisionErrors.value[prompt.token] = errorMessage(error);
+  } finally {
+    decisions.value.delete(prompt.token);
+  }
+}
 function displayedSources(task: TransferInfo): string[] {
   return !task.remoteCopy && task.direction === 'upload'
     ? task.sources.map(displayLocalPath)
@@ -53,7 +72,7 @@ function displayedDestination(task: TransferInfo): string {
       <span>{{ tasks.length }}{{ tr(' 个未完成') }}</span>
     </div>
     <p v-else-if="history" class="subtle">
-      {{ tr('关闭此主机后清除记录。重试会从头传输。') }}
+      {{ tr('关闭此主机后清除任务记录。') }}
     </p>
     <div
       v-for="task in [...tasks].reverse()"
@@ -95,6 +114,41 @@ function displayedDestination(task: TransferInfo): string {
             </p>
           </div>
         </div>
+        <div v-if="task.state === 'awaitingRestart' && task.restartPrompt" class="upload-resume">
+          <p>
+            {{ tr('发现未完成的上传') }} · {{ task.restartPrompt.target }} ·
+            {{ bytes(task.restartPrompt.partialBytes) }}
+          </p>
+          <p>{{ tr('源文件、目标或断点大小已变化。要丢弃旧进度并从头上传吗？') }}</p>
+          <div class="dialog-actions">
+            <button
+              type="button"
+              class="button"
+              :disabled="decisions.has(task.restartPrompt.token)"
+              @click="choose(task, 'restart')"
+            >
+              {{ tr('从头上传') }}
+            </button>
+            <button
+              type="button"
+              class="button"
+              :disabled="decisions.has(task.restartPrompt.token)"
+              @click="choose(task, 'cancel')"
+            >
+              {{ tr('取消') }}
+            </button>
+          </div>
+          <p v-if="decisionErrors[task.restartPrompt.token]" class="error-text" role="alert">
+            {{ decisionErrors[task.restartPrompt.token] }}
+          </p>
+        </div>
+        <p v-if="task.message && unfinished(task)" class="subtle">{{ tr(task.message) }}</p>
+        <p v-if="task.resumedBytes" class="subtle">
+          {{ tr('已复用') }} · {{ bytes(task.resumedBytes) }}
+        </p>
+        <p v-if="task.recoveryPaths.length" class="error-text">
+          {{ tr('恢复路径') }} · {{ task.recoveryPaths.join('、') }}
+        </p>
         <progress
           :max="
             Math.max(

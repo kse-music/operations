@@ -71,7 +71,8 @@ impl Application {
         let files = serverdeck_sftp::Files::new(
             terminals.clone(),
             database.load_config()?.transfer_concurrency,
-        );
+        )
+        .with_upload_recovery(data_directory.join("upload-recovery"));
         let monitors = serverdeck_monitor::Monitors::new(terminals.clone());
         let operations_host = serverdeck_ops::Operations::new(terminals.clone());
         let tasks = serverdeck_tasks::Tasks::new(terminals.clone());

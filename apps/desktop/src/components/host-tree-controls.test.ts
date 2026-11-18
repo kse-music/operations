@@ -108,14 +108,15 @@ it('reads and edits the exact host while leaving the active host and terminal in
   expect(useTerminalsStore().focused).toBe(focused);
 });
 
-it('removes inline actions while retaining context menu operations without changing the workspace', async () => {
+it('shows only the star beside each host and keeps other actions in the context menu', async () => {
   const { saved } = await mount();
   expect(root.querySelector('.tree-host-actions')).toBeNull();
   expect(root.querySelector('[aria-label^="编辑主机 "], [aria-label^="删除主机 "]')).toBeNull();
   const host = root.querySelector<HTMLElement>('[data-host-id="b"]')!;
   host.focus();
   host.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-  expect(root.querySelectorAll('.tree-host-row button')).toHaveLength(2);
+  expect(root.querySelectorAll('.tree-host-row button.tree-host')).toHaveLength(2);
+  expect(root.querySelectorAll('.tree-host-row button.host-favorite-button')).toHaveLength(2);
   expect(root.querySelector('[aria-label^="复制主机 "]')).toBeNull();
   expect(saved).not.toHaveBeenCalled();
   expect(useWorkspaceStore().current?.hostId).toBe('a');

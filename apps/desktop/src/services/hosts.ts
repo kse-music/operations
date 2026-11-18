@@ -29,6 +29,7 @@ export const hostsApi = {
     call<Host>('host_create_tested', { input, authentication, testId }),
   update: (id: string, input: HostInput, authentication?: HostAuthenticationInput) =>
     call<Host>('host_update', { id, input, authentication }),
+  setFavorite: (id: string, favorite: boolean) => call<void>('host_set_favorite', { id, favorite }),
   updateTested: (
     id: string,
     input: HostInput,

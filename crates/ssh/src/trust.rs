@@ -23,6 +23,7 @@ pub(crate) struct Verifier {
     pub confirming: watch::Sender<bool>,
     pub alive: CancellationToken,
     pub remotes: forward::RemoteRoutes,
+    pub verified_key: watch::Sender<String>,
     pub cipher: watch::Sender<Option<String>>,
 }
 impl client::Handler for Verifier {
@@ -77,7 +78,15 @@ impl client::Handler for Verifier {
     ) -> Result<bool, Self::Error> {
         let result = self.check(presented).await;
         match result {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                self.verified_key.send_replace(
+                    presented
+                        .public_key()
+                        .fingerprint(HashAlg::Sha256)
+                        .to_string(),
+                );
+                Ok(true)
+            }
             Err(error) => {
                 let ipc = serverdeck_core::IpcError::from(error);
                 let message = match ipc.code {

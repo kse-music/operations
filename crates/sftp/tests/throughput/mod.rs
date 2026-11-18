@@ -31,7 +31,7 @@ async fn delayed_file_page_transfer(direction: Direction) {
     };
     // Measure actual serialized requests on the same connection. This avoids assuming
     // timer precision or ignoring debug-build CPU overhead in a wall-clock threshold.
-    let channel = server.engine.open_sftp_channel(&session.id).await.unwrap();
+    let (channel, _) = server.engine.open_sftp_channel(&session.id).await.unwrap();
     let raw = RawSftpSession::new(channel.channel.into_stream());
     raw.init().await.unwrap();
     let handle = if direction == Direction::Upload {

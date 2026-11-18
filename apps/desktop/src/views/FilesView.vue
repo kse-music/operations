@@ -5,8 +5,6 @@ import { tr } from '../i18n/messages';
 import { clipboardApi } from '../services/clipboard';
 import { computed, nextTick, onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import {
-  ArrowUp,
-  ArrowRight,
   AppWindow,
   Copy,
   Eye,
@@ -15,6 +13,7 @@ import {
   FilePlus,
   FolderOpen,
   FolderPlus,
+  FolderTree,
   FileUp,
   FolderUp,
   Info,
@@ -33,6 +32,8 @@ import { isTauri } from '@tauri-apps/api/core';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import FilePane from '../components/FilePane.vue';
 import FileLocationPicker from '../components/FileLocationPicker.vue';
+import DirectoryTree from '../components/DirectoryTree.vue';
+import FileNavigationButtons from '../components/FileNavigationButtons.vue';
 import TransferPanel from '../components/TransferPanel.vue';
 import Modal from '../components/Modal.vue';
 import FilePropertiesDialog from '../components/FilePropertiesDialog.vue';
@@ -49,6 +50,7 @@ import { errorMessage } from '../services/ipc';
 import {
   remoteJoin,
   remoteDirectoryLocations,
+  localDirectoryLocations,
   unfinished,
   transferUsesHost,
   type FileEntry,
@@ -75,6 +77,8 @@ const chosen = computed(() => props.hostId ?? hosts.selectedId ?? ''),
   localSelection = ref<string[]>([]),
   remoteSelection = ref<string[]>([]),
   showRemoteHidden = ref(false),
+  showRemoteTree = ref(false),
+  showLocalTree = ref(false),
   busy = ref(false),
   over = ref(false),
   overLocal = ref(false),
@@ -253,7 +257,10 @@ async function cancelTransfers(): Promise<void> {
   }
 }
 watch(
-  () => activeTransfers.value.map((task) => task.id),
+  () =>
+    activeTransfers.value.flatMap((task) =>
+      task.restartPrompt ? [task.id, task.restartPrompt.token] : [task.id],
+    ),
   (ids, previous = []) => {
     if (!ids.length) transferProgress.value = false;
     else if (ids.some((id) => !previous.includes(id))) {
@@ -431,12 +438,25 @@ async function loadLocalDrives(): Promise<void> {
 async function selectLocalDrive(path: string): Promise<void> {
   if (localDrives.value.some((drive) => drive.path === path)) await store.localLoad(path);
 }
+const localRoot = computed(() => localDirectoryLocations(store.local?.path ?? '')[0]?.path);
 const remoteFolders = computed(() => {
   const current = store.current;
   if (!current?.listing) return [];
   const pending = remoteDirectoryLocations(current.pendingPath ?? '');
   return pending.length ? pending : remoteDirectoryLocations(current.listing.path);
 });
+const remoteConnection = computed(() => {
+  const connection = store.current;
+  return connection?.state === 'connected' &&
+    connection.id &&
+    !connection.switchingUser &&
+    !store.closingHosts.includes(chosen.value)
+    ? connection
+    : null;
+});
+const treeConnection = computed(() =>
+  remoteConnection.value?.listing ? remoteConnection.value : null,
+);
 async function selectRemoteFolder(path: string): Promise<void> {
   if (store.current?.state !== 'connected' || store.closingHosts.includes(chosen.value)) return;
   if (remoteFolders.value.some((folder) => folder.path === path)) await store.navigate(path);
@@ -1096,16 +1116,13 @@ onBeforeUnmount(() => {
           {{ tr('本地文件 ') }}<span v-if="overLocal">{{ tr('松开后下载到当前目录') }}</span>
         </h2>
         <form class="path-bar" @submit.prevent="navigateLocal">
-          <button
-            class="tool-button"
-            :aria-label="tr('本地上级')"
-            :title="tr('本地上级')"
-            type="button"
-            :disabled="!store.local?.parent"
-            @click="store.local?.parent && store.localLoad(store.local.parent)"
-          >
-            <ArrowUp :size="15" aria-hidden="true" />
-          </button>
+          <FileNavigationButtons
+            :parent="store.local?.parent"
+            :root="localRoot === store.local?.path ? null : localRoot"
+            :disabled="store.localLoading"
+            @navigate="store.localLoad($event)"
+            @home="store.localLoad(null)"
+          />
           <FileLocationPicker
             :items="displayedDrives"
             :value="selectedDrive"
@@ -1124,13 +1141,7 @@ onBeforeUnmount(() => {
             @refresh="loadLocalDrives"
             @select="selectLocalDrive"
           />
-          <input v-model="localPath" :aria-label="tr('本地路径')" required /><button
-            class="tool-button"
-            :aria-label="tr('前往')"
-            :title="tr('前往本地路径')"
-          >
-            <ArrowRight :size="15" aria-hidden="true" />
-          </button>
+          <input v-model="localPath" :aria-label="tr('本地路径')" required />
         </form>
         <div class="toolbar">
           <button
@@ -1139,7 +1150,7 @@ onBeforeUnmount(() => {
             :title="tr('刷新本地')"
             @click="store.localLoad(store.local?.path ?? null)"
           >
-            <RefreshCw :size="14" aria-hidden="true" /></button
+            <RefreshCw class="menu-icon-green" :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button"
             :aria-label="tr('复制本地路径')"
@@ -1147,7 +1158,7 @@ onBeforeUnmount(() => {
             :disabled="!store.local"
             @click="store.local && copy(displayLocalPath(store.local.path))"
           >
-            <Copy :size="14" aria-hidden="true" /></button
+            <Copy class="menu-icon-blue" :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button"
             :aria-label="tr('上传选中')"
@@ -1155,7 +1166,7 @@ onBeforeUnmount(() => {
             :disabled="store.current?.state !== 'connected' || !localSelection.length"
             @click="prepareTransfer('upload', localSelection)"
           >
-            <Upload :size="14" aria-hidden="true" />
+            <Upload class="menu-icon-green" :size="14" aria-hidden="true" />
           </button>
           <button
             class="tool-button"
@@ -1164,7 +1175,7 @@ onBeforeUnmount(() => {
             :disabled="store.current?.state !== 'connected'"
             @click="picked()"
           >
-            <FileUp :size="15" aria-hidden="true" />
+            <FileUp class="menu-icon-green" :size="15" aria-hidden="true" />
           </button>
           <button
             class="tool-button"
@@ -1173,25 +1184,48 @@ onBeforeUnmount(() => {
             :disabled="store.current?.state !== 'connected'"
             @click="picked(true)"
           >
-            <FolderUp :size="15" aria-hidden="true" />
+            <FolderUp class="menu-icon-green" :size="15" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            type="button"
+            :aria-label="tr('显示本地目录树')"
+            :title="tr('显示本地目录树')"
+            :aria-pressed="showLocalTree && !!localRoot"
+            :disabled="!localRoot"
+            @click="showLocalTree = !showLocalTree"
+          >
+            <FolderTree class="menu-icon-gold" :size="16" aria-hidden="true" />
           </button>
         </div>
-        <FilePane
-          side="local"
-          :listing="store.local"
-          :loading="store.localLoading"
-          :pending-path="store.localPendingPath"
-          :renaming="operation?.side === 'local' ? renaming : undefined"
-          :selected="localSelection"
-          @select="localSelection = $event"
-          @open="openEntry('local', $event)"
-          @menu="(entry, event) => context('local', entry, event)"
-          @remove="mutate('delete', 'local')"
-          @rename="mutate('rename', 'local', $event)"
-          @rename-change="changeRename"
-          @rename-submit="submitOperation"
-          @rename-cancel="cancelRename"
-        />
+        <div class="file-browser" :class="{ 'with-tree': showLocalTree && localRoot }">
+          <DirectoryTree
+            v-if="showLocalTree && localRoot && store.local"
+            :key="store.active"
+            :source="{ side: 'local' }"
+            :selected="store.local.path"
+            :listing="store.local"
+            @select="store.localLoad($event)"
+          />
+          <div class="file-browser-list">
+            <FilePane
+              side="local"
+              :listing="store.local"
+              :loading="store.localLoading"
+              :pending-path="store.localPendingPath"
+              :renaming="operation?.side === 'local' ? renaming : undefined"
+              :selected="localSelection"
+              @select="localSelection = $event"
+              @open="openEntry('local', $event)"
+              @menu="(entry, event) => context('local', entry, event)"
+              @remove="mutate('delete', 'local')"
+              @rename="mutate('rename', 'local', $event)"
+              @rename-change="changeRename"
+              @rename-submit="submitOperation"
+              @rename-cancel="cancelRename"
+            />
+          </div>
+        </div>
       </section>
       <section
         ref="remoteArea"
@@ -1208,16 +1242,13 @@ onBeforeUnmount(() => {
           ><span v-if="over">{{ tr('松开后选择上传策略') }}</span>
         </h2>
         <form class="path-bar" @submit.prevent="store.navigate(remotePath)">
-          <button
-            class="tool-button"
-            :aria-label="tr('远程上级')"
-            :title="tr('远程上级')"
-            type="button"
-            :disabled="!store.current?.listing?.parent"
-            @click="store.current?.listing?.parent && store.navigate(store.current.listing.parent)"
-          >
-            <ArrowUp :size="15" aria-hidden="true" />
-          </button>
+          <FileNavigationButtons
+            :parent="remoteConnection?.listing?.parent"
+            :root="remoteConnection?.listing?.path === '/' ? null : '/'"
+            :disabled="!remoteConnection || remoteConnection.loading"
+            @navigate="remoteConnection && store.navigate($event, remoteConnection)"
+            @home="remoteConnection && store.navigate('.', remoteConnection)"
+          />
           <FileLocationPicker
             :key="`remote-${store.current?.id ?? chosen}`"
             :items="remoteFolders"
@@ -1240,14 +1271,7 @@ onBeforeUnmount(() => {
             :aria-label="tr('远程路径')"
             :disabled="store.current?.state !== 'connected'"
             required
-          /><button
-            class="tool-button"
-            :aria-label="tr('前往')"
-            :title="tr('前往远程路径')"
-            :disabled="store.current?.state !== 'connected'"
-          >
-            <ArrowRight :size="15" aria-hidden="true" />
-          </button>
+          />
         </form>
         <div class="toolbar">
           <button
@@ -1257,7 +1281,7 @@ onBeforeUnmount(() => {
             :disabled="store.current?.state !== 'connected'"
             @click="showUserForm"
           >
-            <UserRoundCog :size="14" aria-hidden="true" />
+            <UserRoundCog class="menu-icon-purple" :size="14" aria-hidden="true" />
           </button>
           <button
             class="tool-button"
@@ -1266,7 +1290,7 @@ onBeforeUnmount(() => {
             :disabled="store.current?.state !== 'connected'"
             @click="mutate('mkdir')"
           >
-            <FolderPlus :size="15" aria-hidden="true" /></button
+            <FolderPlus class="menu-icon-gold" :size="15" aria-hidden="true" /></button
           ><button
             class="tool-button"
             :aria-label="tr('新建文件')"
@@ -1283,7 +1307,7 @@ onBeforeUnmount(() => {
             "
             @click="mutate('newfile')"
           >
-            <FilePlus :size="15" aria-hidden="true" /></button
+            <FilePlus class="menu-icon-blue" :size="15" aria-hidden="true" /></button
           ><button
             class="tool-button"
             :aria-label="tr('刷新远程')"
@@ -1291,7 +1315,7 @@ onBeforeUnmount(() => {
             :disabled="!store.current?.id"
             @click="store.navigate(store.current.path)"
           >
-            <RefreshCw :size="14" aria-hidden="true" /></button
+            <RefreshCw class="menu-icon-green" :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button"
             :aria-label="tr('复制远程路径')"
@@ -1299,7 +1323,7 @@ onBeforeUnmount(() => {
             :disabled="!store.current?.listing"
             @click="store.current && copy(store.current.path)"
           >
-            <Copy :size="14" aria-hidden="true" /></button
+            <Copy class="menu-icon-blue" :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button"
             :aria-label="tr('下载选中')"
@@ -1307,7 +1331,7 @@ onBeforeUnmount(() => {
             :disabled="!remoteSelection.length"
             @click="prepareTransfer('download', remoteSelection)"
           >
-            <Download :size="14" aria-hidden="true" /></button
+            <Download class="menu-icon-green" :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button danger"
             :aria-label="tr('删除选中')"
@@ -1315,7 +1339,7 @@ onBeforeUnmount(() => {
             :disabled="!remoteSelection.length"
             @click="mutate('delete')"
           >
-            <Trash2 :size="14" aria-hidden="true" /></button
+            <Trash2 class="menu-icon-red" :size="14" aria-hidden="true" /></button
           ><button
             class="tool-button"
             type="button"
@@ -1327,7 +1351,12 @@ onBeforeUnmount(() => {
               menu = null;
             "
           >
-            <component :is="showRemoteHidden ? Eye : EyeOff" :size="14" aria-hidden="true" />
+            <component
+              :is="showRemoteHidden ? Eye : EyeOff"
+              class="menu-icon-purple"
+              :size="14"
+              aria-hidden="true"
+            />
           </button>
           <button
             class="tool-button file-search-open"
@@ -1342,28 +1371,52 @@ onBeforeUnmount(() => {
             "
             @click="openRemoteSearch"
           >
-            <Search :size="15" aria-hidden="true" />
+            <Search class="menu-icon-blue" :size="15" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            type="button"
+            :aria-label="tr('显示远程目录树')"
+            :title="tr('显示远程目录树')"
+            :aria-pressed="showRemoteTree && !!treeConnection"
+            :disabled="!treeConnection"
+            @click="showRemoteTree = !showRemoteTree"
+          >
+            <FolderTree class="menu-icon-gold" :size="16" aria-hidden="true" />
           </button>
         </div>
-        <FilePane
-          side="remote"
-          :listing="store.current?.listing ?? null"
-          :loading="store.current?.loading ?? false"
-          :pending-path="store.current?.pendingPath"
-          :selected="remoteSelection"
-          :hide-dotfiles="!showRemoteHidden"
-          :focus-path="remoteFocusPath"
-          :renaming="operation?.side === 'remote' ? renaming : undefined"
-          @select="remoteSelection = $event"
-          @open="openEntry('remote', $event)"
-          @menu="(entry, event) => context('remote', entry, event)"
-          @drag="beginDownloadDrag"
-          @remove="mutate('delete')"
-          @rename="mutate('rename', 'remote', $event)"
-          @rename-change="changeRename"
-          @rename-submit="submitOperation"
-          @rename-cancel="cancelRename"
-        />
+        <div class="file-browser" :class="{ 'with-tree': showRemoteTree && treeConnection }">
+          <DirectoryTree
+            v-if="showRemoteTree && treeConnection?.id && treeConnection.listing"
+            :key="treeConnection.id"
+            :source="{ side: 'remote', sessionId: treeConnection.id }"
+            :selected="treeConnection.listing.path"
+            :listing="treeConnection.listing"
+            :hide-dotfiles="!showRemoteHidden"
+            @select="store.navigate($event, treeConnection)"
+          />
+          <div class="file-browser-list">
+            <FilePane
+              side="remote"
+              :listing="store.current?.listing ?? null"
+              :loading="store.current?.loading ?? false"
+              :pending-path="store.current?.pendingPath"
+              :selected="remoteSelection"
+              :hide-dotfiles="!showRemoteHidden"
+              :focus-path="remoteFocusPath"
+              :renaming="operation?.side === 'remote' ? renaming : undefined"
+              @select="remoteSelection = $event"
+              @open="openEntry('remote', $event)"
+              @menu="(entry, event) => context('remote', entry, event)"
+              @drag="beginDownloadDrag"
+              @remove="mutate('delete')"
+              @rename="mutate('rename', 'remote', $event)"
+              @rename-change="changeRename"
+              @rename-submit="submitOperation"
+              @rename-cancel="cancelRename"
+            />
+          </div>
+        </div>
       </section>
     </div>
   </section>
@@ -1664,7 +1717,9 @@ onBeforeUnmount(() => {
             ? tr('直接选中的文件链接会下载目标内容。目录链接和递归扫描遇到的链接不跟随。')
             : tr('上传不跟随链接。')
         }}{{
-          tr(' 目录将合并；不支持断点续传，重试从头开始。任务在后台继续，取消保留已完成文件。 ')
+          transfer.direction === 'upload'
+            ? tr('目录将合并。再次上传时会自动续传匹配的断点。')
+            : tr('目录将合并。下载重试从头开始。')
         }}
       </p>
       <footer class="dialog-actions">

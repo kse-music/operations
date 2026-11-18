@@ -18,6 +18,108 @@ fn input() -> HostInput {
 }
 
 #[test]
+fn favorite_updates_only_the_requested_host_flag_and_survives_reopen() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).expect("db");
+    let mut config = input();
+    config.favorite = false;
+    let host = db.host_create(config.clone()).expect("first host");
+    let other = db.host_create(config.clone()).expect("other host");
+    db.host_set_favorite(&host.id, true).expect("favorite");
+    drop(db);
+
+    let db = Database::open(&path).expect("reopen");
+    let mut expected = host.config.clone();
+    expected.favorite = true;
+    let saved = db.host(&host.id).expect("saved host");
+    assert!(saved.config.favorite);
+    assert_eq!(saved.config, expected);
+    assert!(!db.host(&other.id).expect("other host").config.favorite);
+    db.host_set_favorite(&host.id, false).expect("unfavorite");
+    assert!(!db.host(&host.id).expect("saved host").config.favorite);
+    assert!(matches!(
+        db.host_set_favorite("missing", true),
+        Err(Error::NotFound)
+    ));
+}
+
+#[test]
+fn last_sftp_directory_is_host_scoped_persistent_and_removed_with_host() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).expect("db");
+    let host = db.host_create(input()).expect("first host");
+    let other = db.host_create(input()).expect("other host");
+    assert_eq!(db.sftp_last_directory(&host.id).unwrap(), None);
+    db.save_sftp_last_directory(&host.id, "/var/log/nginx".into())
+        .unwrap();
+    db.save_sftp_last_directory(&other.id, "/srv/app".into())
+        .unwrap();
+    assert!(
+        db.save_sftp_last_directory(&host.id, "../bad".into())
+            .is_err()
+    );
+    drop(db);
+
+    let db = Database::open(path).expect("reopen");
+    assert_eq!(
+        db.sftp_last_directory(&host.id).unwrap().as_deref(),
+        Some("/var/log/nginx")
+    );
+    assert_eq!(
+        db.sftp_last_directory(&other.id).unwrap().as_deref(),
+        Some("/srv/app")
+    );
+    db.host_delete(&host.id).unwrap();
+    db.save_sftp_last_directory(&host.id, "/late".into())
+        .unwrap();
+    assert_eq!(db.sftp_last_directory(&host.id).unwrap(), None);
+    assert_eq!(
+        db.sftp_last_directory(&other.id).unwrap().as_deref(),
+        Some("/srv/app")
+    );
+}
+
+#[test]
+fn unknown_sftp_directory_format_is_preserved_and_does_not_block_catalog() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).expect("db");
+    let host = db.host_create(input()).expect("host");
+    let key = crate::sftp_directory::key(&host.id);
+    let json = r#"{"version":2,"path":"/srv"}"#;
+    db.connect()
+        .unwrap()
+        .execute(
+            "INSERT INTO application_settings(key,value) VALUES(?1,?2)",
+            params![key, json],
+        )
+        .unwrap();
+
+    let db = Database::open(&path).expect("reopen");
+    assert_eq!(db.catalog().unwrap().hosts.len(), 1);
+    assert!(matches!(
+        db.sftp_last_directory(&host.id),
+        Err(Error::UnsupportedConfig(2))
+    ));
+    assert!(matches!(
+        db.save_sftp_last_directory(&host.id, "/tmp".into()),
+        Err(Error::UnsupportedConfig(2))
+    ));
+    let raw: String = db
+        .connect()
+        .unwrap()
+        .query_row(
+            "SELECT value FROM application_settings WHERE key=?1",
+            [key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, json);
+}
+
+#[test]
 fn hosts_with_unbound_proxy_passwords_remain_editable_until_credentials_are_restored() {
     use serverdeck_core::connection::{ProxyKind, ProxySettings};
 

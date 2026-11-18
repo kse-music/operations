@@ -273,6 +273,17 @@ pub async fn host_update(
         .map_err(Into::into)
 }
 #[tauri::command]
+pub async fn host_set_favorite(
+    application: tauri::State<'_, Application>,
+    id: String,
+    favorite: bool,
+) -> Result<(), IpcError> {
+    application
+        .host_set_favorite(id, favorite)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn host_delete(
     application: tauri::State<'_, Application>,
     id: String,

@@ -51,7 +51,7 @@ Use the [local checks](docs/guides/DEVELOPMENT.md#本地检查) and [native vali
 
 - Operations fail explicitly when the system credential store is unavailable, without falling back to plaintext storage. Ed25519/ECDSA and RSA private keys are supported; RSA authentication requires the server to advertise SHA-2 signature support and does not fall back to SHA-1.
 - Host keys must be verified. Changes require authorization under the host application's approval rules; privileges are not elevated automatically.
-- Failed file transfers restart from the beginning; resuming transfers or recovering them across application restarts is not supported. Desktop text editing is limited to 2 MiB, and assistant text editing to 32 KiB. Atomic replacement does not guarantee preservation of ACLs, extended attributes, or hard links.
+- SFTP file-page uploads can resume after disconnection or application restart. Select the same source and destination again to automatically resume a matching upload. Desktop text editing is limited to 2 MiB, and assistant text editing to 32 KiB. Atomic replacement does not guarantee preservation of ACLs, extended attributes, or hard links.
 - Assistant tasks and conversations are retained only during the current run. Remote operations may already have taken effect after a timeout, disconnection, or cancellation. Verify the actual result rather than automatically replaying changes.
 - In-app updates are available for stable Windows x64 NSIS installations, with signature and version verification. Plugin packages do not have cryptographic signature verification; file digests do not establish publisher identity.
 

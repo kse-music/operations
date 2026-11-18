@@ -58,12 +58,9 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     for (const name of names) await table(side).getByLabel(`选择 ${name}`, { exact: true }).check();
   }
   async function remotePath(value) {
-    await page.getByLabel('远程路径', { exact: true }).fill(value);
-    await page
-      .locator('.file-side')
-      .nth(1)
-      .getByRole('button', { name: '前往', exact: true })
-      .click();
+    const remoteAddress = page.getByLabel('远程路径', { exact: true });
+    await remoteAddress.fill(value);
+    await remoteAddress.press('Enter');
     await page.waitForFunction(
       (value) => document.querySelector('input[aria-label="远程路径"]')?.value === value,
       value,
@@ -156,12 +153,9 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     JSON.stringify({ root, session }, null, 2),
   );
   await button('remote', rootName).dblclick();
-  await page.getByLabel('本地路径', { exact: true }).fill(source);
-  await page
-    .locator('.file-side')
-    .nth(0)
-    .getByRole('button', { name: '前往', exact: true })
-    .click();
+  const localAddress = page.getByLabel('本地路径', { exact: true });
+  await localAddress.fill(source);
+  await localAddress.press('Enter');
   await button('local', textName).waitFor();
   await select('local', [textName, 'large.bin', '子目录']);
   await page.getByRole('button', { name: '上传选中', exact: true }).click();

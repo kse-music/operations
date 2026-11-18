@@ -7,6 +7,15 @@ import { hostInput } from '../types/hosts';
 import { useBackgroundStore } from '../stores/background';
 import { hostsApi } from '../services/hosts';
 let app: App, pinia: Pinia, root: HTMLDivElement;
+function mountSidebar(props: {
+  onSelect: ReturnType<typeof vi.fn>;
+  onCreate?: ReturnType<typeof vi.fn>;
+}) {
+  root = document.createElement('div');
+  document.body.append(root);
+  app = createApp(HostSidebar, props).use(pinia);
+  app.mount(root);
+}
 const pointerMethods = ['setPointerCapture', 'hasPointerCapture', 'releasePointerCapture'] as const;
 const originalPointerMethods = pointerMethods.map((name) =>
   Object.getOwnPropertyDescriptor(HTMLElement.prototype, name),
@@ -189,7 +198,7 @@ it('shows host counts in the root folder without duplicating them in the heading
   expect(root.querySelector('.host-count')).toBeNull();
 });
 
-it('keeps host tools outside the scrolling list and preserves selection and grouping without metadata controls', async () => {
+it('keeps host tools outside the scrolling list and keeps favorite shortcuts above folded groups', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const hosts = useHostsStore();
@@ -211,13 +220,7 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   };
   const select = vi.fn(),
     create = vi.fn();
-  root = document.createElement('div');
-  document.body.append(root);
-  app = createApp(HostSidebar, {
-    onSelect: select,
-    onCreate: create,
-  }).use(pinia);
-  app.mount(root);
+  mountSidebar({ onSelect: select, onCreate: create });
   await nextTick();
   const scroll = root.querySelector('.host-tree-scroll')!;
   expect(scroll.querySelector('input')).toBeNull();
@@ -267,21 +270,75 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(heading.previousElementSibling).toBeNull();
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
-  expect(root.querySelector('[aria-label="已收藏"]')).toBeNull();
   expect(heading.querySelectorAll('button')).toHaveLength(0);
   expect(heading.querySelector('[aria-label="新建主机"]')).toBeNull();
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',
   );
-  expect(root.textContent).not.toMatch(/收藏|标签|备注/);
-  expect(root.querySelectorAll('.tree-host')).toHaveLength(2);
+  expect(root.textContent).not.toMatch(/标签|备注/);
+  expect(scroll.firstElementChild?.classList.contains('host-favorites')).toBe(true);
+  expect(root.querySelectorAll('.tree-group .tree-host')).toHaveLength(2);
   const group = [...root.querySelectorAll<HTMLElement>('.group-toggle')].find((button) =>
     button.textContent?.includes('Servers'),
   )!;
   group.querySelector<HTMLButtonElement>('.group-expander')!.click();
   await nextTick();
-  expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
+  expect(root.querySelectorAll('.tree-group .tree-host')).toHaveLength(0);
+  expect(root.querySelector('.host-favorites .tree-host')?.textContent).toContain('Production');
   expect(group.querySelector('.group-expander')!.getAttribute('aria-expanded')).toBe('false');
+});
+
+it('adds and removes a favorite through its star without opening a connection or moving the host', async () => {
+  pinia = createPinia();
+  setActivePinia(pinia);
+  const store = useHostsStore();
+  const host = {
+    ...hostInput(),
+    id: 'staging',
+    name: 'Staging',
+    hostname: 'staging.example',
+    groupId: 'servers',
+    createdAt: '',
+    updatedAt: '',
+  };
+  store.catalog = {
+    hosts: [host],
+    groups: [{ id: 'servers', name: 'Servers', sortOrder: 0, parentId: null }],
+    credentials: [],
+    pendingSecretDeletions: 0,
+  };
+  const onSelect = vi.fn();
+  const save = vi.spyOn(hostsApi, 'setFavorite').mockResolvedValue();
+  mountSidebar({ onSelect });
+  try {
+    const original = root.querySelector<HTMLButtonElement>('.tree-group .host-favorite-button')!;
+    const shortcut = () =>
+      root.querySelector<HTMLButtonElement>('.host-favorites .host-favorite-button');
+    expect(shortcut()).toBeNull();
+    save.mockRejectedValueOnce(new Error('disk unavailable'));
+    original.click();
+    await vi.waitFor(() => expect(store.error).toContain('disk unavailable'));
+    expect(shortcut()).toBeNull();
+    expect(original.getAttribute('aria-pressed')).toBe('false');
+
+    original.click();
+    await vi.waitFor(() => expect(shortcut()?.getAttribute('aria-pressed')).toBe('true'));
+    expect(save).toHaveBeenLastCalledWith(host.id, true);
+    expect(original.getAttribute('aria-pressed')).toBe('true');
+    expect(store.catalog.hosts[0]?.groupId).toBe('servers');
+    store.search = 'staging';
+    await nextTick();
+    expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
+    store.search = '';
+    await nextTick();
+    shortcut()!.click();
+    await vi.waitFor(() => expect(shortcut()).toBeNull());
+    expect(save).toHaveBeenLastCalledWith(host.id, false);
+    expect(original.getAttribute('aria-pressed')).toBe('false');
+    expect(onSelect).not.toHaveBeenCalled();
+  } finally {
+    save.mockRestore();
+  }
 });
 
 it('shows loading, failure and per-host status with the total in the root folder', async () => {

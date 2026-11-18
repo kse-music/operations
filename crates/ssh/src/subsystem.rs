@@ -86,7 +86,7 @@ impl Engine {
     pub fn session_closed(&self, id: &str) -> Result<CancellationToken, Error> {
         Ok(self.control(id)?.cancel.clone())
     }
-    pub async fn open_sftp_channel(&self, id: &str) -> Result<SubsystemChannel, Error> {
+    pub async fn open_sftp_channel(&self, id: &str) -> Result<(SubsystemChannel, String), Error> {
         let owner = self.control(id)?;
         if !matches!(owner.kind, SessionKind::Files | SessionKind::DedicatedFiles)
             || !owner.ready.load(Ordering::Acquire)
@@ -94,11 +94,11 @@ impl Engine {
         {
             return Err(failure("SFTP_NOT_CONNECTED", "文件连接尚未就绪或已关闭"));
         }
-        let transport = locked(&self.registry)?
+        let (transport, route) = locked(&self.registry)?
             .transports
-            .values()
-            .find(|t| t.id == owner.info.transport_id)
-            .cloned()
+            .iter()
+            .find(|(_, t)| t.id == owner.info.transport_id)
+            .map(|(key, t)| (t.clone(), key.route_signature.clone()))
             .ok_or(Error::NotFound)?;
         let connection = transport
             .connection
@@ -129,11 +129,24 @@ impl Engine {
             let _ = tokio::time::timeout(Duration::from_secs(2), channel.close()).await;
             return Err(error);
         }
-        Ok(SubsystemChannel {
-            channel,
-            session_closed: owner.cancel.clone(),
-            transport_closed: connection.alive.clone(),
-        })
+        let file_identity = serde_json::to_string(&(
+            &owner.info.host_id,
+            route,
+            &connection.verified_key,
+            owner
+                .file_user
+                .as_ref()
+                .map(|u| (&u.username, &u.server_path)),
+        ))
+        .map_err(|_| failure("SSH_ROUTE", "无法确认文件连接身份"))?;
+        Ok((
+            SubsystemChannel {
+                channel,
+                session_closed: owner.cancel.clone(),
+                transport_closed: connection.alive.clone(),
+            },
+            file_identity,
+        ))
     }
     // Reload closes view-owned terminals; independent, authenticated file leases keep tasks alive.
     pub async fn close_views(&self) -> Result<(), Error> {

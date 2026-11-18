@@ -131,6 +131,10 @@ impl Application {
         })
         .await
     }
+    pub async fn host_set_favorite(&self, id: String, favorite: bool) -> Result<(), Error> {
+        self.blocking(move |db| db.host_set_favorite(&id, favorite))
+            .await
+    }
     pub async fn host_copy(&self, id: String) -> Result<Host, Error> {
         self.blocking(move |db| db.host_copy(&id)).await
     }

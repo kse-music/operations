@@ -350,7 +350,18 @@ impl TransferInput {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UploadRestartPrompt {
+    pub token: String,
+    pub target: String,
+    pub partial_bytes: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferInfo {
+    #[serde(default)]
+    pub restart_prompt: Option<UploadRestartPrompt>,
+    #[serde(default)]
+    pub resumed_bytes: u64,
     pub id: String,
     pub host_id: String,
     pub session_id: String,
@@ -385,7 +396,7 @@ impl TransferInfo {
     pub fn unfinished(&self) -> bool {
         matches!(
             self.state.as_str(),
-            "queued" | "scanning" | "running" | "verifying" | "cancelling"
+            "queued" | "scanning" | "running" | "verifying" | "awaitingRestart" | "cancelling"
         )
     }
 }

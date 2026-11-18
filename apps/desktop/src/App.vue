@@ -464,6 +464,7 @@ async function confirmExit(): Promise<void> {
   exitBusy.value = true;
   exitError.value = null;
   try {
+    await files.flushDirectoryWrites();
     if (updates.installRequested) await updates.install();
     else await filesApi.exit(true);
   } catch (cause) {

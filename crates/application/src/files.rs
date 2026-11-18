@@ -116,6 +116,18 @@ impl Application {
     pub async fn files_list(&self, id: &str, path: &str) -> Result<DirectoryListing, Error> {
         self.files.list(id, path).await
     }
+    pub async fn files_last_directory(&self, host_id: String) -> Result<Option<String>, Error> {
+        self.blocking(move |db| db.sftp_last_directory(&host_id))
+            .await
+    }
+    pub async fn files_remember_directory(
+        &self,
+        host_id: String,
+        path: String,
+    ) -> Result<(), Error> {
+        self.blocking(move |db| db.save_sftp_last_directory(&host_id, path))
+            .await
+    }
     pub fn files_search_start(
         &self,
         id: &str,
@@ -202,6 +214,9 @@ impl Application {
     }
     pub fn transfer_clear_host(&self, host_id: &str) -> Result<(), Error> {
         self.files.transfers.clear_host(host_id)
+    }
+    pub fn confirm_upload_restart(&self, id: &str, token: &str) -> Result<(), Error> {
+        self.files.transfers.confirm_upload_restart(id, token)
     }
     pub fn transfer_cancel(&self, id: &str) -> Result<(), Error> {
         self.files.transfers.cancel(id)

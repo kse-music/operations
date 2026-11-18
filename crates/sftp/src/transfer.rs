@@ -16,6 +16,7 @@ use tokio::{
 use uuid::Uuid;
 mod copy;
 mod remote_copy;
+pub(super) mod resume;
 pub use copy::{CopyGuard, CopyHandle, CopySource, PreparedCopy};
 
 struct Task {
@@ -30,6 +31,7 @@ struct Task {
     skipped_bytes: AtomicU64,
     committing: AtomicBool,
     temporary: Mutex<Option<(bool, String)>>,
+    restart_confirmation: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     done: Notify,
 }
 #[derive(Default)]
@@ -99,6 +101,7 @@ impl Task {
         info.remaining_bytes = info
             .total_bytes
             .saturating_sub(info.transferred_bytes)
+            .saturating_sub(info.resumed_bytes)
             .saturating_sub(self.skipped_bytes.load(Ordering::Relaxed));
         if info.unfinished() {
             info.elapsed_seconds = elapsed.as_secs();
@@ -159,7 +162,7 @@ impl Task {
         } else if self.owner_closed.is_cancelled() {
             Err(fail(
                 "SFTP_DISCONNECTED",
-                "文件连接已关闭，请重新连接后从头重试",
+                "文件连接已关闭，请重新连接后重试",
             ))
         } else if self
             .remote_copy
@@ -186,6 +189,7 @@ pub struct Transfers {
     queue: Arc<Mutex<Queue>>,
     concurrency: Arc<AtomicU8>,
     mutations: Mutations,
+    pub(super) recovery: Option<resume::Store>,
 }
 impl Transfers {
     pub(crate) fn new(
@@ -201,6 +205,7 @@ impl Transfers {
             })),
             concurrency: Arc::new(AtomicU8::new(concurrency.clamp(1, 6))),
             mutations,
+            recovery: None,
         }
     }
     pub fn configure(&self, count: u8) {
@@ -237,6 +242,8 @@ impl Transfers {
             None
         };
         let info = TransferInfo {
+            restart_prompt: None,
+            resumed_bytes: 0,
             id: Uuid::new_v4().to_string(),
             host_id: session.host_id,
             session_id: input.session_id.clone(),
@@ -272,6 +279,7 @@ impl Transfers {
             skipped_bytes: AtomicU64::new(0),
             committing: AtomicBool::new(false),
             temporary: Mutex::new(None),
+            restart_confirmation: Mutex::new(None),
             done: Notify::new(),
         });
         {
@@ -412,6 +420,31 @@ impl Transfers {
             }
         }
         Ok(count)
+    }
+    pub fn confirm_upload_restart(&self, id: &str, token: &str) -> Result<(), Error> {
+        let queue = locked(&self.queue)?;
+        let task = queue
+            .tasks
+            .iter()
+            .find(|t| t.info.lock().is_ok_and(|i| i.id == id))
+            .ok_or(Error::NotFound)?;
+        let mut info = locked(&task.info)?;
+        if info.state != "awaitingRestart"
+            || !info
+                .restart_prompt
+                .as_ref()
+                .is_some_and(|p| p.token == token)
+        {
+            return Err(Error::Conflict);
+        }
+        locked(&task.restart_confirmation)?
+            .take()
+            .ok_or(Error::Conflict)?
+            .send(())
+            .map_err(|_| Error::Conflict)?;
+        info.restart_prompt = None;
+        info.state = "scanning".into();
+        Ok(())
     }
     pub fn cancel(&self, id: &str) -> Result<(), Error> {
         let queue = locked(&self.queue)?;
@@ -565,7 +598,7 @@ impl Transfers {
                     _ = remote.owner_closed.cancelled() => {
                         if task.remote_copy.is_some() { operation.await } else { Err(fail("SFTP_DISCONNECTED", "文件连接已关闭，传输失败")) }
                     },
-                    _ = remote.transport_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "网络中断，传输失败；可重新连接后从头重试")),
+                    _ = remote.transport_closed.cancelled() => Err(fail("SFTP_DISCONNECTED", "网络中断，传输失败；可重新连接后重试")),
                 }
             }
             Err(error) => Err(error),
@@ -604,6 +637,7 @@ impl Transfers {
         if let Ok(mut info) = task.info.lock() {
             info.bytes_per_second = final_speed;
             info.elapsed_seconds = elapsed_seconds;
+            info.restart_prompt = None;
             match result {
                 Ok(()) => {
                     info.state = "completed".into();
@@ -761,7 +795,7 @@ impl Transfers {
                 continue;
             }
             if task.input.direction == Direction::Upload {
-                upload(task, remote, &mutation, item).await?;
+                upload(task, remote, &mutation, item, self.recovery.as_ref()).await?;
             } else {
                 download(task, remote, &mutation, item).await?;
             }
@@ -941,6 +975,7 @@ async fn upload(
     remote: &Remote,
     mutation: &tokio::sync::Mutex<()>,
     item: Item,
+    recovery: Option<&resume::Store>,
 ) -> Result<(), Error> {
     let mut target = item.remote;
     let expected = {
@@ -997,14 +1032,84 @@ async fn upload(
         .await
         .map_err(local::io)?;
     let mut file = tokio::io::BufReader::with_capacity(remote::IO_CHUNK * remote::IO_WINDOW, file);
-    let temp = remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?;
+    if !local::same(
+        &before,
+        &file.get_ref().metadata().await.map_err(local::io)?,
+    ) {
+        return Err(Error::Conflict);
+    }
+    let (checkpoint, partial) = if let Some(store) = recovery {
+        locked(&task.info)?.message = None;
+        task.state("scanning");
+        match store
+            .prepare(
+                task,
+                remote,
+                &target,
+                &item.local,
+                &before,
+                expected.as_ref(),
+            )
+            .await?
+        {
+            Some((checkpoint, attrs)) => (Some(checkpoint), attrs),
+            None => {
+                locked(&task.info)?.message =
+                    Some("服务器不支持私有上传暂存目录，此文件中断后需要从头上传".into());
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+    let temp = match &checkpoint {
+        Some(cp) => cp.partial.clone(),
+        None => remote_join(&parent, &format!(".serverdeck-{}.part", Uuid::new_v4()))?,
+    };
     let permissions = if expected.is_some() { 0o600 } else { 0o644 };
-    let handle = remote.stage(&temp, permissions).await?;
-    task.temp(true, temp.clone())?;
+    let handle = if partial.is_some() {
+        remote
+            .raw
+            .open(
+                &temp,
+                OpenFlags::READ | OpenFlags::WRITE,
+                FileAttributes::default(),
+            )
+            .await
+            .map_err(remote::map)?
+            .handle
+    } else {
+        remote.stage(&temp, permissions).await?
+    };
+    if checkpoint.is_none() {
+        task.temp(true, temp.clone())?;
+    }
     let copying = async {
-        let data = task.start_data()?;
+        if let (Some(cp), None) = (&checkpoint, &partial) {
+            cp.verify_new_handle(remote, &handle).await?;
+        }
         let mut digest = Sha256::new();
-        let mut offset = 0;
+        let mut offset = if let (Some(attrs), Some(cp)) = (&partial, &checkpoint) {
+            let opened = remote.raw.fstat(&handle).await.map_err(remote::map)?.attrs;
+            if !remote::same(attrs, &opened) {
+                return Err(Error::Conflict);
+            }
+            task.state("verifying");
+            let matched = resume::prefix(
+                task,
+                remote,
+                &handle,
+                attrs.size.ok_or(Error::Conflict)?,
+                &mut file,
+                &mut digest,
+            )
+            .await?;
+            cp.verify(remote, attrs).await?;
+            matched
+        } else {
+            0
+        };
+        let data = task.start_data()?;
         let mut pending = FuturesOrdered::new();
         let mut failure = None;
         loop {
@@ -1072,27 +1177,58 @@ async fn upload(
         }
     };
     task.check_cancel()?;
+    let staged = remote.attrs(&temp).await?;
+    if remote::kind(&staged) != EntryKind::File || staged.size != Some(item.size) {
+        return Err(Error::Conflict);
+    }
     let target_hash = remote.hash_cancellable(&temp, Some(&task.cancel)).await;
     task.check_cancel()?;
     if checksum != target_hash? {
         return Err(fail("TRANSFER_HASH", "上传 SHA-256 校验失败，未替换目标"));
     }
+    if let Some(cp) = &checkpoint {
+        cp.verify(remote, &staged).await?;
+    }
     if let Some(attrs) = &expected {
         remote.preserve(&temp, attrs).await?;
     }
     remote.preserve_modified(&temp, modified).await?;
+    let final_stage = if checkpoint.is_some() {
+        Some(remote.attrs(&temp).await?)
+    } else {
+        None
+    };
     task.check_cancel()?;
     let _mutation = mutation.lock().await;
+    if let (Some(cp), Some(attrs)) = (&checkpoint, &final_stage) {
+        if attrs.size != Some(item.size) || attrs.mtime != Some(modified) {
+            return Err(Error::Conflict);
+        }
+        cp.verify(remote, attrs).await?;
+    }
     let actual = remote.optional_attrs(&target).await?;
     if !same_optional(expected.as_ref(), actual.as_ref())
         || remote.canonical(&parent).await? != parent
     {
         return Err(Error::Conflict);
     }
+    if !local::same(
+        &before,
+        &tokio::fs::symlink_metadata(&item.local)
+            .await
+            .map_err(local::io)?,
+    ) {
+        return Err(Error::Conflict);
+    }
+    task.check_cancel()?;
     task.committing.store(true, Ordering::Release);
     remote.replace(&temp, &target, expected.is_some()).await?;
+    drop(_mutation);
     task.clear_temp()?;
     task.finished();
+    if let Some(cp) = checkpoint {
+        cp.committed(remote, task).await?;
+    }
     task.committing.store(false, Ordering::Release);
     Ok(())
 }

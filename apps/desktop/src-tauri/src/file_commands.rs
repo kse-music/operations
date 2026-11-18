@@ -60,6 +60,27 @@ pub async fn files_list(
     application.files_list(&id, &path).await.map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_last_directory(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+) -> Result<Option<String>, IpcError> {
+    application
+        .files_last_directory(host_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_remember_directory(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    path: String,
+) -> Result<(), IpcError> {
+    application
+        .files_remember_directory(host_id, path)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn files_search_start(
     application: tauri::State<'_, Application>,
     id: String,
@@ -320,6 +341,16 @@ pub fn transfer_list(
     application: tauri::State<'_, Application>,
 ) -> Result<Vec<TransferInfo>, IpcError> {
     application.transfer_list().map_err(Into::into)
+}
+#[tauri::command]
+pub fn confirm_upload_restart(
+    application: tauri::State<'_, Application>,
+    id: String,
+    token: String,
+) -> Result<(), IpcError> {
+    application
+        .confirm_upload_restart(&id, &token)
+        .map_err(Into::into)
 }
 #[tauri::command]
 pub fn transfer_cancel(

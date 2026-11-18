@@ -887,6 +887,38 @@ const progressTask = (id: string, hostId = 'a'): TransferInfo => ({
 });
 const progressDialog = () => document.querySelector<HTMLDialogElement>('.file-transfer-dialog');
 
+it('opens a background upload once when an incompatible checkpoint requires a restart decision', async () => {
+  const files = useFilesStore(pinia);
+  const upload = progressTask('upload');
+  const hide = async () => {
+    Array.from(progressDialog()!.querySelectorAll('button'))
+      .find((b) => b.textContent?.trim() === '后台传输')!
+      .click();
+    await nextTick();
+    expect(progressDialog()).toBeNull();
+  };
+  files.tasks = [upload];
+  await nextTick();
+  await hide();
+  files.tasks = [{ ...upload, state: 'verifying', resumedBytes: 1024 }];
+  await nextTick();
+  expect(progressDialog()).toBeNull();
+  const prompt = {
+    token: 'decision',
+    target: '/archive.iso',
+    partialBytes: 2048,
+  };
+  files.tasks = [{ ...upload, state: 'awaitingRestart', restartPrompt: prompt }];
+  await nextTick();
+  expect(progressDialog()?.textContent).toContain('从头上传');
+  await hide();
+  files.tasks = [{ ...upload, state: 'awaitingRestart', restartPrompt: { ...prompt } }];
+  await nextTick();
+  expect(progressDialog()).toBeNull();
+  files.tasks = [upload];
+  await nextTick();
+  expect(progressDialog()).toBeNull();
+});
 it('keeps background transfers running and makes the close button cancel until cleanup finishes', async () => {
   const files = useFilesStore(pinia);
   const cancel = vi.spyOn(filesApi, 'cancel').mockResolvedValue();
@@ -1273,13 +1305,18 @@ it('opens local ini files with the system application picker on double click and
   await vi.waitFor(() => expect(files.error).toBe('无法显示系统打开方式'));
 });
 
-it('replaces the folder browser with a drive selector immediately after the parent button', async () => {
+it('places the navigation buttons before the local drive selector and path input', async () => {
   await vi.waitFor(() => expect(filesApi.localDrives).toHaveBeenCalled());
-  const parent = root.querySelector('[aria-label="本地上级"]')!;
   const picker = drivePicker();
   expect(root.querySelector('[aria-label="选择本地目录"]')).toBeNull();
-  expect(parent.nextElementSibling).toBe(picker);
-  expect(picker.nextElementSibling?.getAttribute('aria-label')).toBe('本地路径');
+  const controls = Array.from(picker.closest('form')!.children);
+  expect(controls.map((control) => control.getAttribute('aria-label'))).toEqual([
+    '上一级',
+    '根目录',
+    '主目录',
+    '选择本地磁盘',
+    '本地路径',
+  ]);
   picker.click();
   await nextTick();
   expect(driveOptions().map((option) => option.textContent?.trim())).toEqual([
@@ -1289,6 +1326,124 @@ it('replaces the folder browser with a drive selector immediately after the pare
   expect(driveOptions().every((option) => option.firstElementChild?.tagName === 'svg')).toBe(true);
   expect(driveName()).toBe('D: 本地磁盘');
   expect(root.querySelector('[aria-label="选择上传文件夹…"]')).not.toBeNull();
+});
+
+it('uses local parent, share root and system home with SFTP disconnected', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.state = 'failed';
+  const share = '\\\\?\\UNC\\server\\projects\\';
+  const home = '\\\\?\\C:\\Users\\demo';
+  files.local = { path: share + 'one\\two', parent: share + 'one', entries: [] };
+  const read = vi.spyOn(filesApi, 'local').mockImplementation(async (path) => ({
+    path: path ?? home,
+    parent: path === share ? null : path === null ? '\\\\?\\C:\\Users' : share,
+    entries: [],
+  }));
+  const remote = vi.spyOn(filesApi, 'list');
+  await nextTick();
+  const addressBar = drivePicker().closest('form')!;
+  const [parent, rootDirectory, userHome] =
+    addressBar.querySelectorAll<HTMLButtonElement>('button');
+  parent!.click();
+  await vi.waitFor(() => expect(files.local?.path).toBe(share + 'one'));
+  rootDirectory!.click();
+  await vi.waitFor(() => expect(files.local?.path).toBe(share));
+  expect(parent!.disabled).toBe(true);
+  expect(rootDirectory!.disabled).toBe(true);
+  userHome!.click();
+  await vi.waitFor(() =>
+    expect(addressBar.querySelector<HTMLInputElement>('[aria-label="本地路径"]')?.value).toBe(
+      'C:\\Users\\demo',
+    ),
+  );
+  expect(read.mock.calls).toEqual([[share + 'one'], [share], [null]]);
+  expect(files.current!.path).toBe('/srv/api');
+  expect(remote).not.toHaveBeenCalled();
+});
+
+it('browses the local tree independently and discards pending branches when the drive changes', async () => {
+  const files = useFilesStore(pinia);
+  files.current!.state = 'failed';
+  const drive = '\\\\?\\D:\\';
+  const project = drive + 'project';
+  const docs = project + '\\docs';
+  const old = project + '\\old';
+  const listings = new Map<string, DirectoryListing>([
+    [drive, { path: drive, parent: null, entries: [{ ...entry, path: project, name: 'project' }] }],
+    [
+      project,
+      {
+        path: project,
+        parent: drive,
+        entries: [
+          { ...entry, path: docs, name: 'docs' },
+          { ...entry, path: old, name: 'old' },
+          { ...entry, path: project + '\\alias', name: 'alias', kind: 'symlink' },
+        ],
+      },
+    ],
+    [
+      docs,
+      {
+        path: docs,
+        parent: project,
+        entries: [{ ...entry, path: docs + '\\guide.txt', name: 'guide.txt', kind: 'file' }],
+      },
+    ],
+  ]);
+  files.local = listings.get(project)!;
+  let resolveOld!: (value: DirectoryListing) => void;
+  const read = vi.spyOn(filesApi, 'local').mockImplementation(async (path) => {
+    if (path === old)
+      return new Promise<DirectoryListing>((resolve) => {
+        resolveOld = resolve;
+      });
+    return listings.get(path!)!;
+  });
+  const pane = drivePicker().closest('.file-side')!;
+  const toggle = pane.querySelector<HTMLButtonElement>('[aria-label="显示本地目录树"]')!;
+  const row = (path: string) =>
+    [...pane.querySelectorAll<HTMLElement>('[role="treeitem"]')].find(
+      (el) => el.dataset.path === path,
+    );
+  const table = pane.querySelector('table')!;
+  expect(toggle.getAttribute('aria-pressed')).toBe('false');
+  toggle.click();
+  await vi.waitFor(() => expect(row(project)?.getAttribute('aria-selected')).toBe('true'));
+  expect(read).toHaveBeenCalledExactlyOnceWith(drive);
+  expect(row(drive)?.querySelector('.directory-entry')?.textContent).toBe('D:\\');
+  expect(row(project + '\\alias')).toBeUndefined();
+  expect(root.querySelector('[aria-label="显示远程目录树"]')?.getAttribute('aria-pressed')).toBe(
+    'false',
+  );
+  row(old)!.querySelector<HTMLButtonElement>('.directory-toggle')!.click();
+  await nextTick();
+  expect(row(old)?.getAttribute('aria-busy')).toBe('true');
+  expect(files.local?.path).toBe(project);
+  row(docs)!.querySelector<HTMLButtonElement>('.directory-entry')!.click();
+  await vi.waitFor(() => expect(row(docs)?.getAttribute('aria-selected')).toBe('true'));
+  expect(row(docs)?.textContent?.trim()).toBe('docs');
+  expect(table.textContent).toContain('guide.txt');
+  expect(row(docs + '\\guide.txt')).toBeUndefined();
+  expect(files.stepHistory('local', 'back')).toBe(true);
+  await vi.waitFor(() => expect(row(project)?.getAttribute('aria-selected')).toBe('true'));
+
+  const nextDrive = '\\\\?\\C:\\';
+  files.local = { path: nextDrive, parent: null, entries: [] };
+  await nextTick();
+  resolveOld({
+    path: old,
+    parent: project,
+    entries: [{ ...entry, name: 'late', path: old + '\\late' }],
+  });
+  await nextTick();
+  expect(row(nextDrive)?.getAttribute('aria-selected')).toBe('true');
+  expect(row(drive)).toBeUndefined();
+  expect(pane.textContent).not.toContain('late');
+  toggle.click();
+  await nextTick();
+  expect(pane.querySelector('[role="tree"]')).toBeNull();
+  expect(pane.querySelector('table')).toBe(table);
 });
 
 it('updates generated drive captions without reloading drives or translating file names', async () => {
@@ -1489,6 +1644,108 @@ it('removes the teleported drive menu when its view is unmounted', async () => {
 });
 
 const folderPicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择远程目录"]')!;
+const treeToggle = () => root.querySelector<HTMLButtonElement>('[aria-label="显示远程目录树"]')!;
+const treeRow = (path: string) =>
+  [...root.querySelectorAll<HTMLElement>('.directory-browser [role="treeitem"]')].find(
+    (element) => element.dataset.path === path,
+  );
+function directoryListing(path: string, names: string[]): DirectoryListing {
+  return {
+    path,
+    parent: path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/',
+    entries: names.map((name) => ({
+      ...entry,
+      name,
+      path: (path === '/' ? '' : path) + '/' + name,
+    })),
+  };
+}
+it('browses folders above the remote table and synchronizes navigation, hidden items and refresh', async () => {
+  const files = useFilesStore(pinia);
+  const current = directoryListing('/srv/api', ['config', '.cache']);
+  current.entries.push({ ...entry, name: 'app.log', path: '/srv/api/app.log', kind: 'file' });
+  files.current!.listing = current;
+  const folders: Record<string, string[]> = {
+    '/': ['srv'],
+    '/srv': ['api'],
+    '/srv/api/config': ['profiles'],
+    '/srv/api/config/profiles': [],
+  };
+  const read = vi
+    .spyOn(filesApi, 'list')
+    .mockImplementation(async (_id, path) => directoryListing(path, folders[path] ?? []));
+  vi.spyOn(filesApi, 'rememberDirectory').mockResolvedValue();
+  const table = root.querySelector('table[aria-label="远程文件"]')!;
+  const local = files.local;
+  expect(treeToggle().getAttribute('aria-pressed')).toBe('false');
+  expect(root.querySelector('[role="tree"]')).toBeNull();
+  treeToggle().click();
+  await vi.waitFor(() => expect(treeRow('/srv/api')?.getAttribute('aria-selected')).toBe('true'));
+  expect(read.mock.calls.map(([, path]) => path).sort()).toEqual(['/', '/srv']);
+  expect(treeRow('/srv/api/.cache')).toBeUndefined();
+  expect(treeRow('/srv/api/app.log')).toBeUndefined();
+  expect(table.textContent).toContain('app.log');
+  root.querySelector<HTMLButtonElement>('[aria-label="显示隐藏项"]')!.click();
+  await nextTick();
+  expect(treeRow('/srv/api/.cache')).toBeDefined();
+  expect(table.textContent).toContain('.cache');
+  treeRow(entry.path)!.querySelector<HTMLButtonElement>('.directory-toggle')!.click();
+  await vi.waitFor(() => expect(treeRow(entry.path + '/profiles')).toBeDefined());
+  expect(files.current!.path).toBe('/srv/api');
+  expect(filesApi.rememberDirectory).not.toHaveBeenCalled();
+  treeRow(entry.path)!.querySelector<HTMLButtonElement>('.directory-entry')!.click();
+  await vi.waitFor(() => expect(treeRow(entry.path)?.getAttribute('aria-selected')).toBe('true'));
+  expect(table.textContent).toContain('profiles');
+  expect(table.textContent).not.toContain('app.log');
+  expect(folderName()).toBe('config');
+  table.querySelector('tbody tr')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  const profiles = entry.path + '/profiles';
+  await vi.waitFor(() => expect(treeRow(profiles)?.getAttribute('aria-selected')).toBe('true'));
+  expect(treeRow(profiles)?.textContent?.trim()).toBe('profiles');
+  expect(treeRow(profiles)?.hasAttribute('aria-expanded')).toBe(false);
+  expect(files.stepHistory('remote', 'back')).toBe(true);
+  await vi.waitFor(() => expect(treeRow(entry.path)?.getAttribute('aria-selected')).toBe('true'));
+  folders[entry.path] = ['renamed'];
+  root.querySelector<HTMLButtonElement>('[aria-label="刷新远程"]')!.click();
+  await vi.waitFor(() => expect(treeRow(entry.path + '/renamed')).toBeDefined());
+  expect(treeRow(profiles)).toBeUndefined();
+  treeToggle().click();
+  await nextTick();
+  expect(root.querySelector('[role="tree"]')).toBeNull();
+  expect(root.querySelector('table[aria-label="远程文件"]')).toBe(table);
+  expect(table.textContent).toContain('renamed');
+  expect(files.local).toBe(local);
+});
+
+it('keeps a confirmed directory usable under an unreadable ancestor and isolates late branch reads by session', async () => {
+  const files = useFilesStore(pinia);
+  let finish!: (listing: DirectoryListing) => void;
+  vi.spyOn(filesApi, 'list').mockImplementation(async (_id, path) => {
+    if (path === '/srv') throw new Error('目录无读取权限');
+    if (path === entry.path)
+      return new Promise<DirectoryListing>((resolve) => {
+        finish = resolve;
+      });
+    return directoryListing(path, []);
+  });
+  treeToggle().click();
+  await vi.waitFor(() => expect(treeRow('/srv')?.textContent).toContain('目录无读取权限'));
+  expect(treeRow('/srv/api')?.getAttribute('aria-selected')).toBe('true');
+  treeRow(entry.path)!.querySelector<HTMLButtonElement>('.directory-toggle')!.click();
+  await nextTick();
+  expect(treeRow(entry.path)?.getAttribute('aria-busy')).toBe('true');
+  files.current!.id = 'other-identity';
+  files.current!.path = '/';
+  files.current!.listing = directoryListing('/', ['public']);
+  await nextTick();
+  finish(directoryListing(entry.path, ['old-private-directory']));
+  await nextTick();
+  expect(treeRow('/')?.getAttribute('aria-selected')).toBe('true');
+  expect(treeRow('/public')).toBeDefined();
+  expect(treeRow('/srv')).toBeUndefined();
+  expect(root.textContent).not.toContain('old-private-directory');
+});
+
 const folderOptions = () => [
   ...document.querySelectorAll<HTMLElement>('[aria-label="远程目录层级"] [role="option"]'),
 ];
@@ -1502,13 +1759,19 @@ async function chooseFolder(name: string): Promise<void> {
   await nextTick();
 }
 
-it('adds an indented ancestor folder menu immediately after the remote parent button', async () => {
+it('places the navigation buttons before the remote ancestor folder menu and path input', async () => {
   const files = useFilesStore(pinia);
   files.current!.listing = { path: '/home/dh', parent: '/home', entries: [] };
   files.current!.path = '/home/dh';
   await nextTick();
-  expect(root.querySelector('[aria-label="远程上级"]')?.nextElementSibling).toBe(folderPicker());
-  expect(folderPicker().nextElementSibling?.getAttribute('aria-label')).toBe('远程路径');
+  const controls = Array.from(folderPicker().closest('form')!.children);
+  expect(controls.map((control) => control.getAttribute('aria-label'))).toEqual([
+    '上一级',
+    '根目录',
+    '主目录',
+    '选择远程目录',
+    '远程路径',
+  ]);
   expect(folderName()).toBe('dh');
   folderPicker().click();
   await nextTick();
@@ -1529,6 +1792,51 @@ it('adds an indented ancestor folder menu immediately after the remote parent bu
     'false',
     'true',
   ]);
+});
+
+it('opens the parent, root and session home from the remote address bar and follows a switched identity', async () => {
+  const files = useFilesStore(pinia);
+  const addressBar = folderPicker().closest('form')!;
+  const [parent, rootDirectory, home] = addressBar.querySelectorAll<HTMLButtonElement>('button');
+  vi.spyOn(filesApi, 'rememberDirectory').mockResolvedValue();
+  const read = vi.spyOn(filesApi, 'list').mockImplementation(async (id, path) => {
+    const sessionHome = id === 'sudo-a' ? '/private/operator' : '/users/login';
+    return directoryListing(path === '.' ? sessionHome : path, []);
+  });
+  const saved = vi.spyOn(filesApi, 'lastDirectory');
+  parent!.click();
+  await vi.waitFor(() => expect(files.current?.path).toBe('/srv'));
+  rootDirectory!.click();
+  await vi.waitFor(() => expect(files.current?.path).toBe('/'));
+  expect(parent!.disabled).toBe(true);
+  expect(rootDirectory!.disabled).toBe(true);
+  read.mockRejectedValueOnce(new Error('目录无读取权限'));
+  home!.click();
+  await vi.waitFor(() => expect(files.current?.error).toBe('目录无读取权限'));
+  expect(files.current?.path).toBe('/');
+  home!.click();
+  await vi.waitFor(() => expect(folderName()).toBe('login'));
+  vi.spyOn(filesApi, 'switchUser').mockResolvedValue({
+    session: { id: 'sudo-a', hostId: 'a', transportId: 'transport', routeHostIds: [] },
+    listing: directoryListing('/private/operator', []),
+  });
+  await files.switchUser({ username: 'operator2', serverPath: '', password: null });
+  rootDirectory!.click();
+  await vi.waitFor(() => expect(files.current?.path).toBe('/'));
+  home!.click();
+  await vi.waitFor(() => expect(files.current?.path).toBe('/private/operator'));
+  expect(read.mock.calls).toEqual([
+    ['sftp-a', '/srv'],
+    ['sftp-a', '/'],
+    ['sftp-a', '.'],
+    ['sftp-a', '.'],
+    ['sudo-a', '/'],
+    ['sudo-a', '.'],
+  ]);
+  expect(saved).not.toHaveBeenCalled();
+  files.current!.state = 'failed';
+  await nextTick();
+  expect([parent, rootDirectory, home].every((button) => button!.disabled)).toBe(true);
 });
 
 it('navigates to a selected ancestor through the current SFTP connection and records remote history', async () => {
@@ -1591,7 +1899,23 @@ it('selects the remote root by keyboard and keeps a single root item at the root
   folderPicker().click();
   await nextTick();
   expect(folderOptions()).toHaveLength(1);
-  expect(root.querySelector<HTMLButtonElement>('[aria-label="远程上级"]')?.disabled).toBe(true);
+  expect(
+    folderPicker().closest('.file-side')!.querySelector<HTMLButtonElement>('[aria-label="上一级"]')
+      ?.disabled,
+  ).toBe(true);
+});
+
+it('keeps the folder menu open when scrolling its contents or the adjacent path field', async () => {
+  folderPicker().click();
+  await nextTick();
+  const menu = document.querySelector('[aria-label="远程目录层级"]')!;
+  menu.dispatchEvent(new Event('scroll'));
+  root.querySelector('[aria-label="远程路径"]')!.dispatchEvent(new Event('scroll'));
+  await nextTick();
+  expect(menu.isConnected).toBe(true);
+  folderPicker().closest('.file-side')!.dispatchEvent(new Event('scroll'));
+  await nextTick();
+  expect(menu.isConnected).toBe(false);
 });
 
 it('uses the verified folder chain while a relative path is unresolved and never follows unsubmitted text', async () => {

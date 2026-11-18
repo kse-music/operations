@@ -406,6 +406,41 @@ async function verifyDownloadDragAndDelete(page) {
   });
 }
 
+async function verifyRemoteFolderMenu(page) {
+  const address = page.getByRole('textbox', { name: '远程路径', exact: true });
+  const picker = page.getByRole('combobox', { name: '选择远程目录' });
+  const menu = page.getByRole('listbox', { name: '远程目录层级' });
+  const originalPath = await address.inputValue();
+  const originalWidth = (await picker.boundingBox()).width;
+  const path = originalPath + '/apps/web/src/features/admin-governance';
+  await address.fill(path);
+  await address.press('Enter');
+  await picker.getByText('admin-governance', { exact: true }).waitFor();
+  await picker.click();
+  const bounds = await menu.boundingBox();
+  assert.equal((await picker.boundingBox()).width, originalWidth);
+  assert(bounds.width > originalWidth);
+  assert(bounds.x >= 0 && bounds.x + bounds.width <= page.viewportSize().width);
+  assert(
+    await menu.evaluate((list) => {
+      const right = list.getBoundingClientRect().left + list.clientLeft + list.clientWidth;
+      return Array.from(list.querySelectorAll('[role="option"] > span')).every((label) => {
+        const text = document.createRange();
+        text.selectNodeContents(label);
+        return (
+          text.getClientRects().length === 1 && text.getBoundingClientRect().right <= right + 1
+        );
+      });
+    }),
+    'All folder names should fit on one line, including their indentation',
+  );
+  await menu.getByRole('option', { name: originalPath.split('/').at(-1), exact: true }).click();
+  await page.waitForFunction(
+    (value) => document.querySelector('input[aria-label="远程路径"]').value === value,
+    originalPath,
+  );
+}
+
 async function verifyMouseDirectoryHistory(page) {
   const local = page.getByRole('textbox', { name: '本地路径', exact: true });
   const remote = page.getByRole('textbox', { name: '远程路径', exact: true });
@@ -803,6 +838,7 @@ try {
           const { useNotificationsStore } = await import('/src/stores/notifications.ts');
           useNotificationsStore().items = [];
         });
+        await verifyRemoteFolderMenu(page);
         const columns = await page.locator('.file-columns').evaluate(
           (el) =>
             getComputedStyle(el)

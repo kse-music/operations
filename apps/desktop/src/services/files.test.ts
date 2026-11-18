@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
 import { filesApi } from './files';
 import { osc7Path } from './osc7';
-import { remoteDirectoryLocations, remoteJoin } from '../types/files';
+import { localDirectoryLocations, remoteDirectoryLocations, remoteJoin } from '../types/files';
 describe('trusted file navigation contracts', () => {
   it('creates an editor document on the original lease with an explicit create flag', async () => {
     Reflect.set(window, 'isTauri', true);
@@ -188,6 +188,29 @@ describe('trusted file navigation contracts', () => {
     ]);
     for (const path of ['', '.', '../tmp', '/srv/../tmp', '/srv/./tmp'])
       expect(remoteDirectoryLocations(path)).toEqual([]);
+  });
+  it.each([
+    ['D:/work/data', 'D:/', 'D:/work'],
+    ['C:\\Users\\测试', 'C:\\', 'C:\\Users'],
+    ['\\\\?\\C:\\Users\\name. ', '\\\\?\\C:\\', '\\\\?\\C:\\Users'],
+    ['\\\\server\\share\\中文\\test', '\\\\server\\share\\', '\\\\server\\share\\中文'],
+    [
+      '\\\\?\\UNC\\node\\shared\\one\\two',
+      '\\\\?\\UNC\\node\\shared\\',
+      '\\\\?\\UNC\\node\\shared\\one',
+    ],
+    ['\\\\?\\Volume{test}\\one\\two', '\\\\?\\Volume{test}\\', '\\\\?\\Volume{test}\\one'],
+    ['/opt/linux\\name', '/', '/opt'],
+  ])('keeps the operating path of every ancestor of %s', (path, root, parent) => {
+    expect(localDirectoryLocations(path).map((item) => item.path)).toEqual([root, parent, path]);
+    expect(localDirectoryLocations(root).map((item) => item.path)).toEqual([root]);
+  });
+  it('keeps UNC navigation within the share and does not interpret relative paths as disk roots', () => {
+    const share = '\\\\?\\UNC\\node\\shared';
+    expect(localDirectoryLocations(share)).toEqual([{ path: share, name: '\\\\node\\shared' }]);
+    for (const path of ['', 'notes', 'C:notes', '\\\\server', 'D:\\work\\..']) {
+      expect(localDirectoryLocations(path)).toEqual([]);
+    }
   });
   it('accepts only explicit OSC 7 file URIs and decodes Unicode/space without reading shell text', () => {
     expect(osc7Path('file://linux-host/home/user/%E4%B8%AD%E6%96%87%20path')).toBe(

@@ -48,6 +48,9 @@ export const filesApi = {
     return call('file_terminal', { hostId, size, action, events });
   },
   list: (id: string, path: string) => call<DirectoryListing>('files_list', { id, path }),
+  lastDirectory: (hostId: string) => call<string | null>('files_last_directory', { hostId }),
+  rememberDirectory: (hostId: string, path: string) =>
+    call<void>('files_remember_directory', { hostId, path }),
   search(
     id: string,
     input: FileSearchInput,
@@ -79,6 +82,8 @@ export const filesApi = {
   tasks: () => call<TransferInfo[]>('transfer_list'),
   clearTransfers: (hostId: string) => call<void>('transfer_clear_host', { hostId }),
   cancel: (id: string) => call<void>('transfer_cancel', { id }),
+  confirmRestart: (id: string, token: string) =>
+    call<void>('confirm_upload_restart', { id, token }),
   retry: (id: string, sessionId: string, conflict: ConflictPolicy, confirmed: boolean) =>
     call<TransferInfo>('transfer_retry', { id, sessionId, conflict, confirmed }),
   read: (id: string, path: string) => call<TextDocument>('text_read', { id, path }),

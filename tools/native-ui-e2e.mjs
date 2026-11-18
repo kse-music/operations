@@ -692,15 +692,19 @@ try {
     .locator('.tree-host-row')
     .filter({ has: page.locator(`.tree-host[data-host-id="${host.id}"]`) });
   assert.equal(await page.locator('.tree-host-actions').count(), 0);
-  assert.equal(await hostRow.getByRole('button').count(), 1);
+  assert.equal(await hostRow.getByRole('button').count(), 2);
+  assert.equal(
+    await hostRow.locator('.host-favorite-button').getAttribute('aria-pressed'),
+    'false',
+  );
   await hoverHost('UI Host');
-  assert.equal(await hostRow.getByRole('button').count(), 1);
+  assert.equal(await hostRow.getByRole('button').count(), 2);
   await hostRow.locator('.tree-host').focus();
   assert.equal(
     await page.locator('[aria-label^="编辑主机 "], [aria-label^="删除主机 "]').count(),
     0,
   );
-  await page.screenshot({ path: path.join(artifacts, 'host-row-no-icons.png') });
+  await page.screenshot({ path: path.join(artifacts, 'host-row-favorite.png') });
   await hostContextAction(page, hostRow.locator('.tree-host'), '编辑');
   const edit = page.getByRole('dialog', { name: '编辑主机', exact: true });
   assert.equal(

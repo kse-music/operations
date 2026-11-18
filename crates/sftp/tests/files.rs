@@ -1,6 +1,7 @@
 mod external;
 mod properties;
 mod remote_copy;
+mod resume;
 mod search;
 mod support;
 mod throughput;

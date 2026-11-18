@@ -56,6 +56,23 @@
 .file-side.dropping {
   outline: 3px solid var(--accent);
 }
+.file-browser {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.file-browser.with-tree {
+  grid-template-rows: minmax(7rem, 1fr) minmax(min-content, 2fr);
+  row-gap: 6px;
+}
+.file-browser-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.file-browser.with-tree .file-table th:nth-child(2) {
+  min-width: 9em;
+}
 .path-bar {
   display: flex;
   gap: 6px;
@@ -69,11 +86,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
-  width: 12em;
-  max-width: 42%;
-  padding: 7px;
+  width: 9em;
+  max-width: 31.5%;
+  padding: 7px 5px;
   border: 1px solid var(--border-strong);
   border-radius: 5px;
   background: var(--panel);
@@ -85,8 +102,10 @@
 .file-location-option {
   display: flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
+}
+.file-location-value {
+  gap: 4px;
 }
 .file-location-picker svg,
 .file-location-option svg {
@@ -100,6 +119,8 @@
 .file-location-menu {
   position: fixed;
   z-index: 60;
+  width: var(--location-trigger-width);
+  max-width: calc(100% - 16px);
   margin: 0;
   padding: 3px;
   list-style: none;
@@ -112,14 +133,23 @@
   font-size: var(--font-size-body);
   box-shadow: 0 6px 20px #0004;
 }
+.file-location-menu[data-kind='folder'] {
+  width: max-content;
+  min-width: min(var(--location-trigger-width), calc(100% - 16px));
+}
+.file-location-menu[data-kind='folder'] .file-location-option {
+  min-width: max-content;
+  padding-inline-start: min(calc(7px + var(--location-depth, 0) * 16px), 9em, 25vw);
+  white-space: nowrap;
+}
 .file-location-option,
 .file-location-status {
   padding: 6px 7px;
 }
 .file-location-option {
+  gap: 8px;
   cursor: pointer;
   border-radius: 3px;
-  padding-inline-start: min(calc(7px + var(--location-depth, 0) * 16px), 40%);
 }
 .file-location-option.active,
 .file-location-option[aria-selected='true'] {

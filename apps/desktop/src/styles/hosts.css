@@ -110,6 +110,9 @@
 .group-toggle > svg {
   flex-shrink: 0;
 }
+.group-toggle > .host-group-icon {
+  margin-inline-end: -3px;
+}
 .group-expander {
   display: inline-flex;
   align-items: center;
@@ -145,11 +148,57 @@
   display: flex;
   align-items: center;
 }
+.host-favorites {
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.host-favorites-heading {
+  padding: 4px 8px;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+  font-weight: 600;
+}
+.host-favorites .tree-host {
+  padding-left: 12px;
+}
+.host-favorite-button {
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  align-self: stretch;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+}
+@media (hover: hover) {
+  .tree-host-row:not(:hover) > .host-favorite-button:not(:focus-visible) {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+.host-favorite-button:hover,
+.host-favorite-button:focus-visible {
+  background: var(--accent-bg);
+  color: var(--text);
+}
+.host-favorite-button.starred {
+  color: #ffd36f;
+}
+:root[data-theme='light'] .host-favorite-button.starred {
+  color: #946000;
+}
+.host-favorite-button.starred svg {
+  fill: currentColor;
+}
 .tree-host {
   width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   border: 0;
   border-radius: 4px;
   background: none;

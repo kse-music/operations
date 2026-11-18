@@ -47,6 +47,7 @@ pub(crate) fn check_editor_cancel(cancel: Option<&CancellationToken>) -> Result<
     }
 }
 pub(crate) struct Remote {
+    pub file_identity: String,
     pub raw: RawSftpSession,
     pub atomic: bool,
     pub fsync: bool,
@@ -60,7 +61,7 @@ impl Drop for Remote {
 }
 impl Remote {
     pub async fn connect(engine: &serverdeck_ssh::Engine, id: &str) -> Result<Arc<Self>, Error> {
-        let channel = engine.open_sftp_channel(id).await?;
+        let (channel, file_identity) = engine.open_sftp_channel(id).await?;
         let raw = RawSftpSession::new_with_config(
             channel.channel.into_stream(),
             Config {
@@ -78,6 +79,7 @@ impl Remote {
         let atomic = version.extensions.contains_key("posix-rename@openssh.com");
         let fsync = version.extensions.contains_key("fsync@openssh.com");
         Ok(Arc::new(Self {
+            file_identity,
             raw,
             atomic,
             fsync,

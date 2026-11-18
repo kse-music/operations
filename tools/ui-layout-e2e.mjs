@@ -246,26 +246,40 @@ try {
     await page.screenshot({ path: `${output}/${name}-host-dialog.png` });
     await hostDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await hostDialog.waitFor({ state: 'hidden' });
-    const hostRow = page.locator('.tree-host-row').first();
+    const hostRow = page.locator('.host-favorites .tree-host-row').first();
     assert.equal(await page.locator('.tree-host-actions').count(), 0);
-    assert.equal(await hostRow.getByRole('button').count(), 1);
+    assert.equal(await hostRow.getByRole('button').count(), 2);
+    assert.equal(
+      await hostRow.locator('.host-favorite-button').getAttribute('aria-pressed'),
+      'true',
+    );
     assert.equal(
       await page.locator('[aria-label^="编辑主机 "], [aria-label^="删除主机 "]').count(),
       0,
     );
     await hostRow.scrollIntoViewIfNeeded();
     const labelBefore = await hostRow.locator('.host-label').boundingBox();
+    const favorite = hostRow.locator('.host-favorite-button');
+    const favoriteOpacity = () => favorite.evaluate((button) => getComputedStyle(button).opacity);
+    await page.mouse.move(0, 0);
+    assert.equal(await favoriteOpacity(), '0');
     await hostRow.hover();
-    assert.equal(await hostRow.getByRole('button').count(), 1);
+    assert.equal(await favoriteOpacity(), '1');
+    assert.equal(await hostRow.getByRole('button').count(), 2);
     assert.deepEqual(await hostRow.locator('.host-label').boundingBox(), labelBefore);
     const hostButton = hostRow.locator('.tree-host');
     assert.equal(
       await hostButton.evaluate((element) => getComputedStyle(element).paddingRight),
       '10px',
     );
+    await page.mouse.move(0, 0);
+    assert.equal(await favoriteOpacity(), '0');
+    await hostButton.press('Tab');
+    assert(await favorite.evaluate((button) => button.matches(':focus-visible')));
+    assert.equal(await favoriteOpacity(), '1');
+    assert.equal(await hostRow.getByRole('button').count(), 2);
+    await page.screenshot({ path: `${output}/${name}-host-row-favorite.png` });
     await hostButton.focus();
-    assert.equal(await hostRow.getByRole('button').count(), 1);
-    await page.screenshot({ path: `${output}/${name}-host-row-no-icons.png` });
     await hostButton.press('Shift+F10');
     const editMenu = page.getByRole('menu', { name: '主机树操作', exact: true });
     await editMenu.waitFor();

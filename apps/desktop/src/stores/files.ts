@@ -54,6 +54,15 @@ interface LocalFileBrowser {
 }
 const directoryHistoryLimit = 100;
 
+function unavailableDirectory(cause: unknown): boolean {
+  return (
+    typeof cause === 'object' &&
+    cause !== null &&
+    'code' in cause &&
+    ['SFTP_NOT_FOUND', 'SFTP_PERMISSION', 'SFTP_OPERATION'].includes(String(cause.code))
+  );
+}
+
 function recordDirectory(
   history: DirectoryHistory,
   previous: string | undefined,
@@ -108,6 +117,24 @@ export const useFilesStore = defineStore('files', () => {
   const searchStarts = new Map<string, Promise<void>>();
   const searchStops = new Map<string, Promise<boolean>>();
   const remoteHistories = new WeakMap<FileConnection, DirectoryHistory>();
+  const directoryWrites = new Map<string, Promise<void>>();
+  async function rememberDirectory(hostId: string, path: string): Promise<void> {
+    const write = async () => {
+      try {
+        await filesApi.rememberDirectory(hostId, path);
+      } catch (cause) {
+        error.value = tr('无法保存上次打开的远程目录：{0}', errorMessage(cause));
+      }
+    };
+    const previous = directoryWrites.get(hostId);
+    const saving = previous ? previous.then(write) : write();
+    directoryWrites.set(hostId, saving);
+    await saving;
+    if (directoryWrites.get(hostId) === saving) directoryWrites.delete(hostId);
+  }
+  async function flushDirectoryWrites(): Promise<void> {
+    await Promise.all(directoryWrites.values());
+  }
   function ensureSearch(connection = current.value): FileSearchState | undefined {
     if (!connection?.id || connection.state !== 'connected') return;
     if (connection.search?.sessionId !== connection.id) {
@@ -262,9 +289,10 @@ export const useFilesStore = defineStore('files', () => {
     }
   }
   async function navigate(
-    path: string,
+    path: string | null,
     connection = current.value,
     direction?: HistoryDirection,
+    remember = connection?.host.id === active.value,
   ): Promise<void> {
     if (!connection?.id || connection.switchingUser) return;
     const { id, host } = connection;
@@ -275,16 +303,39 @@ export const useFilesStore = defineStore('files', () => {
       connections.value[host.id] === connection &&
       connection.id === id;
     connection.loading = true;
-    connection.pendingPath = path;
+    connection.pendingPath = path ?? '.';
     connection.error = null;
     try {
-      const value = await filesApi.list(id, path);
+      let saved: string | null = null;
+      if (path === null) {
+        try {
+          await directoryWrites.get(host.id);
+          if (!isCurrentRequest()) return;
+          saved = await filesApi.lastDirectory(host.id);
+        } catch (cause) {
+          if (!isCurrentRequest()) return;
+          error.value = tr('无法读取上次打开的远程目录：{0}', errorMessage(cause));
+          remember = false;
+        }
+      }
+      if (!isCurrentRequest()) return;
+      let value: DirectoryListing;
+      try {
+        value = await filesApi.list(id, path ?? saved ?? '.');
+      } catch (cause) {
+        if (!saved || !unavailableDirectory(cause)) throw cause;
+        if (!isCurrentRequest()) return;
+        value = await filesApi.list(id, '.');
+      }
       if (!isCurrentRequest()) return;
       const history = remoteHistories.get(connection) ?? { back: [], forward: [] };
-      recordDirectory(history, connection.listing?.path, value.path, direction);
+      const previous = connection.listing?.path;
+      recordDirectory(history, previous, value.path, direction);
       remoteHistories.set(connection, history);
       connection.listing = value;
       connection.path = value.path;
+      if (remember && value.path !== (previous ?? saved))
+        await rememberDirectory(host.id, value.path);
     } catch (cause) {
       if (!isCurrentRequest()) return;
       connection.error = errorMessage(cause);
@@ -369,6 +420,8 @@ export const useFilesStore = defineStore('files', () => {
     };
     connection = connections.value[host.id]!;
     try {
+      const listInitialDirectory = () =>
+        navigate(path ?? null, connection, undefined, !options.background);
       let eventSession = '';
       const request = filesApi.open(host.id, (event) => {
         if (eventSession && connection.id !== eventSession) return;
@@ -376,8 +429,7 @@ export const useFilesStore = defineStore('files', () => {
           connection.state = event.state;
           if (event.message) connection.error = event.message;
           if (event.state !== 'awaiting_trust') connection.trust = null;
-          if (event.state === 'connected' && connection.id)
-            void navigate(connection.path, connection);
+          if (event.state === 'connected' && connection.id) void listInitialDirectory();
         } else if (event.type === 'trust') connection.trust = event;
       });
       opening.set(host.id, request);
@@ -385,7 +437,7 @@ export const useFilesStore = defineStore('files', () => {
       eventSession = value.id;
       connection.id = value.id;
       connection.routeHostIds = value.routeHostIds;
-      if (connection.state === 'connected') await navigate(connection.path, connection);
+      if (connection.state === 'connected') await listInitialDirectory();
     } catch (cause) {
       connection.state = 'failed';
       connection.error = errorMessage(cause);
@@ -441,6 +493,7 @@ export const useFilesStore = defineStore('files', () => {
         remoteHistories.delete(connection);
         connection.search = undefined;
         connection.newDirectorySettings = undefined;
+        await rememberDirectory(host.id, value.listing.path);
         return true;
       } catch (cause) {
         error.value = errorMessage(cause);
@@ -730,6 +783,7 @@ export const useFilesStore = defineStore('files', () => {
       }
       // Keep cancellation failures and recovery paths visible before clearing the records.
       tasks.value = await filesApi.tasks();
+      await directoryWrites.get(hostId);
       return true;
     } catch (cause) {
       error.value = errorMessage(cause);
@@ -901,6 +955,7 @@ export const useFilesStore = defineStore('files', () => {
     exitReview,
     closingHosts,
     prepareHostClose,
+    flushDirectoryWrites,
     clearHostTransfers,
     open,
     switchUser,

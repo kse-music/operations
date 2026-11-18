@@ -1,3 +1,4 @@
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 import { tr } from '../i18n/messages';
 export type EntryKind = 'file' | 'directory' | 'symlink' | 'other';
 export interface FileEntry {
@@ -143,6 +144,12 @@ export interface TransferInput {
   confirmOverwrite: boolean;
 }
 export interface TransferInfo {
+  restartPrompt?: {
+    token: string;
+    target: string;
+    partialBytes: number;
+  } | null;
+  resumedBytes?: number;
   id: string;
   hostId: string;
   sessionId: string;
@@ -193,12 +200,17 @@ export interface ExternalDocument {
 }
 export type FileTerminalAction = { kind: 'directory' | 'view' | 'tail'; path: string };
 export const unfinished = (task: TransferInfo): boolean =>
-  ['queued', 'scanning', 'running', 'verifying', 'cancelling'].includes(task.state);
+  ['queued', 'scanning', 'running', 'verifying', 'awaitingRestart', 'cancelling'].includes(
+    task.state,
+  );
 export const transferUsesHost = (task: TransferInfo, hostId: string): boolean =>
   task.hostId === hostId || task.remoteTargetHostId === hostId;
 export const taskLabels: Record<string, string> = {
   get queued() {
     return tr('排队中');
+  },
+  get awaitingRestart() {
+    return tr('等待确认重新上传');
   },
   get scanning() {
     return tr('扫描中');
@@ -282,4 +294,24 @@ export function remoteDirectoryLocations(path: string): FileLocation[] {
     items.push({ path: parent, name, depth: index + 1 });
   }
   return items;
+}
+
+/** Keep the native paths from a confirmed local listing, including Windows verbatim prefixes. */
+export function localDirectoryLocations(path: string): FileLocation[] {
+  if (path.startsWith('/')) return remoteDirectoryLocations(path);
+  const drive = /^(?:\\\\\?\\)?[a-z]:[\\/]/i;
+  const share = /^\\\\(?:\?\\UNC\\|(?![.?]\\))[^\\]+\\[^\\]+(?:\\|$)/i;
+  const volume = /^\\\\\?\\Volume\{[^}]+\}\\/i;
+  const root = drive.exec(path)?.[0] ?? share.exec(path)?.[0] ?? volume.exec(path)?.[0];
+  if (!root) return [];
+  const locations: FileLocation[] = [{ path: root, name: displayLocalPath(root) }];
+  const separator = root.includes('\\') ? '\\' : '/';
+  let offset = root.length;
+  for (const name of path.slice(offset).split(separator)) {
+    if (name === '.' || name === '..') return [];
+    offset += name.length;
+    if (name) locations.push({ path: path.slice(0, offset), name });
+    offset++;
+  }
+  return locations;
 }

@@ -56,6 +56,10 @@ impl Files {
             property_jobs: Arc::default(),
         }
     }
+    pub fn with_upload_recovery(mut self, directory: std::path::PathBuf) -> Self {
+        self.transfers.recovery = Some(transfer::resume::Store::new(directory));
+        self
+    }
     async fn slot(&self) -> Result<tokio::sync::OwnedSemaphorePermit, Error> {
         if self.stopping.load(std::sync::atomic::Ordering::Acquire) {
             return Err(Error::ShuttingDown);

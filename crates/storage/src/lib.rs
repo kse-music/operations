@@ -11,6 +11,7 @@ mod local_sessions;
 mod local_terminal;
 mod migrations;
 pub mod plugins;
+mod sftp_directory;
 pub mod trust;
 pub mod updates;
 use serverdeck_core::{AppConfig, Error, product::WindowGeometry};

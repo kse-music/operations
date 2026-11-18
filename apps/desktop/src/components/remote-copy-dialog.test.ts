@@ -43,7 +43,7 @@ const field = (text: string) =>
   [...dialog().querySelectorAll('label')].find(
     (label) => label.firstChild?.textContent?.trim() === text,
   )!.control as HTMLInputElement | HTMLButtonElement;
-const tree = () => dialog().querySelector<HTMLElement>('.remote-directory-tree')!;
+const tree = () => dialog().querySelector<HTMLElement>('.file-directory-tree')!;
 const treeRow = (path: string) =>
   [...tree().querySelectorAll<HTMLElement>('[role="treeitem"]')].find(
     (row) => row.dataset.path === path,

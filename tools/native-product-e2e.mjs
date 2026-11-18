@@ -288,12 +288,9 @@ export async function productChecks(context) {
   const home = (await rpc('files_list', { id: fileLease.id, path: '.' })).path;
   scope.remotePaths.push(home.replace(/\/$/, '') + '/' + fileName);
   await remember();
-  await page.getByLabel('本地路径', { exact: true }).fill(sourceDirectory);
-  await page
-    .locator('.file-side')
-    .nth(0)
-    .getByRole('button', { name: '前往', exact: true })
-    .click();
+  const localAddress = page.getByLabel('本地路径', { exact: true });
+  await localAddress.fill(sourceDirectory);
+  await localAddress.press('Enter');
   await page
     .getByRole('table', { name: '本地文件', exact: true })
     .getByLabel(`选择 ${fileName}`, { exact: true })

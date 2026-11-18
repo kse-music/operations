@@ -38,6 +38,7 @@ pub(crate) struct Connection {
     parents: Vec<client::Handle<trust::Verifier>>,
     pub alive: CancellationToken,
     pub remotes: forward::RemoteRoutes,
+    pub verified_key: String,
     pub cipher: watch::Receiver<Option<String>>,
 }
 impl Deref for Connection {
@@ -117,6 +118,7 @@ pub(crate) async fn establish(
     let alive = CancellationToken::new();
     let remotes = forward::RemoteRoutes::default();
     let count = plan.hops.len();
+    let mut verified_key = String::new();
     let mut target_cipher = None;
     for (index, hop) in plan.hops.into_iter().enumerate() {
         let deadline = Duration::from_secs(u64::from(hop.host.config.connect_timeout_secs));
@@ -150,6 +152,7 @@ pub(crate) async fn establish(
         let reason = Arc::new(Mutex::new(None));
         let (confirming, mut phase) = watch::channel(false);
         let (cipher, negotiated_cipher) = watch::channel(None);
+        let (key_sender, key_receiver) = watch::channel(String::new());
         let verifier = trust::Verifier {
             database: database.clone(),
             hostname: hop.host.config.hostname.clone(),
@@ -163,6 +166,7 @@ pub(crate) async fn establish(
             } else {
                 Default::default()
             },
+            verified_key: key_sender,
             cipher,
         };
         let config = client::Config {
@@ -216,6 +220,7 @@ pub(crate) async fn establish(
         )
         .await
         .map_err(|_| failure("SSH_AUTH_TIMEOUT", "SSH 认证超时"))??;
+        verified_key = key_receiver.borrow().clone();
         handles.push(handle);
         target_cipher = Some(negotiated_cipher);
     }
@@ -225,6 +230,7 @@ pub(crate) async fn establish(
     Ok(Connection {
         handle,
         parents: handles,
+        verified_key,
         alive,
         remotes,
         cipher: target_cipher.ok_or_else(|| failure("SSH_ROUTE", "连接路径为空"))?,

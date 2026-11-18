@@ -106,6 +106,13 @@ export const useHostsStore = defineStore('hosts', () => {
     notice.value = tr('主机已重命名。');
     return true;
   }
+  async function setFavorite(id: string, favorite: boolean): Promise<boolean> {
+    const host = catalog.value?.hosts.find((host) => host.id === id);
+    if (!host) return false;
+    const result = await run(() => hostsApi.setFavorite(id, favorite));
+    if (result.ok) host.favorite = favorite;
+    return result.ok;
+  }
   async function renameGroup(id: string, name: string): Promise<boolean> {
     const group = catalog.value?.groups.find((group) => group.id === id);
     if (!group) {
@@ -134,6 +141,7 @@ export const useHostsStore = defineStore('hosts', () => {
     load,
     run,
     move,
+    setFavorite,
     renameHost,
     renameGroup,
   };

@@ -18,31 +18,29 @@ const listId = useId();
 const trigger = ref<HTMLButtonElement>(),
   popup = ref<HTMLElement>(),
   open = ref(false),
-  active = ref(-1),
-  position = ref({ left: '0px', top: '0px', width: '0px', maxHeight: '260px' });
+  active = ref(-1);
 const current = computed(() => props.items.find((item) => item.path === props.value));
 const disabled = computed(() => props.disabled || (props.loading && !props.items.length));
 function close(): void {
   open.value = false;
 }
 function place(): void {
-  if (!open.value || !trigger.value || !popup.value) return;
+  const menu = popup.value;
+  if (!open.value || !trigger.value || !menu) return;
   const anchor = trigger.value.getBoundingClientRect();
+  const viewportWidth = document.documentElement.clientWidth;
+  menu.style.setProperty('--location-trigger-width', `${anchor.width}px`);
   const below = Math.max(0, window.innerHeight - anchor.bottom - 12),
     above = Math.max(0, anchor.top - 12),
-    height = Math.min(260, popup.value.scrollHeight),
+    height = Math.min(260, menu.scrollHeight + menu.offsetHeight - menu.clientHeight),
     useBelow = below >= height || below >= above;
-  position.value = {
-    left: `${Math.max(8, Math.min(anchor.left, window.innerWidth - anchor.width - 8))}px`,
-    top: `${useBelow ? anchor.bottom + 4 : Math.max(8, anchor.top - Math.min(height, above) - 4)}px`,
-    width: `${Math.min(anchor.width, window.innerWidth - 16)}px`,
-    maxHeight: `${Math.min(260, useBelow ? below : above)}px`,
-  };
+  menu.style.maxHeight = `${Math.min(260, useBelow ? below : above)}px`;
+  const bounds = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(anchor.left, viewportWidth - bounds.width - 8))}px`;
+  menu.style.top = `${useBelow ? anchor.bottom + 4 : Math.max(8, anchor.top - bounds.height - 4)}px`;
 }
 async function show(): Promise<void> {
   if (disabled.value) return;
-  if (trigger.value)
-    position.value.width = `${Math.min(trigger.value.getBoundingClientRect().width, window.innerWidth - 16)}px`;
   active.value = Math.max(
     0,
     props.items.findIndex((item) => item.path === props.value),
@@ -122,7 +120,7 @@ watch(open, (value, _previous, cleanup) => {
     if (target && !trigger.value?.contains(target) && !popup.value?.contains(target)) close();
   };
   const scroll = (event: Event) => {
-    if (!(event.target instanceof Node) || !popup.value?.contains(event.target)) close();
+    if (!(event.target instanceof Node) || event.target.contains(trigger.value ?? null)) close();
   };
   document.addEventListener('pointerdown', outside, true);
   document.addEventListener('focusin', outside);
@@ -176,9 +174,9 @@ watch(open, (value, _previous, cleanup) => {
       :id="listId"
       ref="popup"
       class="file-location-menu"
+      :data-kind="icon"
       role="listbox"
       :aria-label="listLabel"
-      :style="position"
       :aria-busy="loading"
     >
       <li

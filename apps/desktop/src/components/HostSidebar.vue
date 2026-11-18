@@ -15,6 +15,7 @@ import {
   Puzzle,
   Search,
   Server,
+  Star,
   TextCursorInput,
   Trash2,
 } from '@lucide/vue';
@@ -197,15 +198,28 @@ watch(
     if (index >= limit.value) limit.value = Math.ceil((index + 1) / 200) * 200;
   },
 );
-const nodes = computed(() =>
-  hostFolderRows(
+const sections = computed(() => {
+  const searching = !!store.search.trim();
+  const folders = hostFolderRows(
     store.catalog?.groups ?? [],
     store.visible,
     collapsed.value,
-    !!store.search.trim(),
+    searching,
     limit.value,
-  ),
-);
+  ).map((folder) => ({ ...folder, favorites: false }));
+  const favorites = searching ? [] : store.visible.filter((host) => host.favorite);
+  if (favorites.length) {
+    folders.unshift({
+      id: null,
+      name: tr('常用主机'),
+      depth: 0,
+      hosts: favorites.slice(0, limit.value),
+      count: favorites.length,
+      favorites: true,
+    });
+  }
+  return folders;
+});
 const isCollapsed = (id: string | null) =>
   !store.search.trim() && collapsed.value.includes(id ?? 'root');
 function keys(event: KeyboardEvent) {
@@ -233,7 +247,14 @@ function toggle(id: string): void {
     : [...collapsed.value, id];
 }
 
-type ContextTarget = { kind: 'folder'; id: string | null } | { kind: 'host'; id: string };
+type HostTarget = { kind: 'host'; id: string; favoriteRow: boolean };
+type ContextTarget = { kind: 'folder'; id: string | null } | HostTarget;
+function hostTarget(id: string, favoriteRow: boolean): HostTarget {
+  return { kind: 'host', id, favoriteRow };
+}
+function hostRowKey(id: string, favoriteRow: boolean): string {
+  return favoriteRow ? `favorite:${id}` : id;
+}
 const renaming = ref<{
   target: ContextTarget;
   name: string;
@@ -241,8 +262,24 @@ const renaming = ref<{
   busy: boolean;
   error: string | null;
 }>();
-function isRenaming(kind: ContextTarget['kind'], id: string | null): boolean {
-  return renaming.value?.target.kind === kind && renaming.value.target.id === id;
+function isRenaming(kind: ContextTarget['kind'], id: string | null, favoriteRow = false): boolean {
+  const target = renaming.value?.target;
+  return (
+    target?.kind === kind &&
+    target.id === id &&
+    (target.kind !== 'host' || target.favoriteRow === favoriteRow)
+  );
+}
+async function toggleFavorite(host: Host, event: MouseEvent): Promise<void> {
+  const trigger = event.currentTarget as HTMLButtonElement;
+  if (!(await store.setFavorite(host.id, !host.favorite))) return;
+  await nextTick();
+  if (!trigger.isConnected && document.activeElement === document.body) {
+    const row = [...(tree.value?.querySelectorAll<HTMLElement>('.tree-host') ?? [])].find(
+      (row) => row.dataset.hostId === host.id,
+    );
+    (row ?? tree.value?.querySelector<HTMLElement>('#host-tree-search'))?.focus();
+  }
 }
 function beginRename(target: ContextTarget): void {
   if (
@@ -271,7 +308,7 @@ async function finishRename(restoreFocus: boolean): Promise<void> {
   const row =
     target.kind === 'host'
       ? [...(tree.value?.querySelectorAll<HTMLElement>('.tree-host') ?? [])].find(
-          (row) => row.dataset.hostId === target.id,
+          (row) => row.dataset.hostRowKey === hostRowKey(target.id, target.favoriteRow),
         )
       : [...(tree.value?.querySelectorAll<HTMLElement>('.tree-group') ?? [])]
           .find((row) => row.dataset.groupId === target.id)
@@ -328,7 +365,8 @@ function setControls(id: string, component: unknown): void {
 const folderEditor = ref<{ parentId: string | null }>();
 const deletingFolder = ref<HostGroup>();
 function confirmDelete(target: ContextTarget): void {
-  if (target.kind === 'host') controls.get(target.id)?.confirmDelete();
+  if (target.kind === 'host')
+    controls.get(hostRowKey(target.id, target.favoriteRow))?.confirmDelete();
   else {
     const group = store.catalog?.groups.find((group) => group.id === target.id);
     if (group) deletingFolder.value = { ...group };
@@ -516,7 +554,7 @@ async function runContext(action: MenuAction): Promise<void> {
   } else if (action === 'connect') {
     selectHost(host);
     emit('select', host);
-  } else if (action === 'edit') controls.get(host.id)?.edit();
+  } else if (action === 'edit') controls.get(hostRowKey(host.id, target.favoriteRow))?.edit();
   else if (action === 'rename') beginRename(target);
   else if (action === 'deleteHost') confirmDelete(target);
   else if (action === 'copy') {
@@ -613,13 +651,17 @@ onBeforeUnmount(() => {
         {{ tr('未能读取主机，请刷新重试。') }}
       </p>
       <div
-        v-for="group in store.catalog ? nodes : []"
-        :key="group.id ?? 'root'"
-        class="tree-group"
-        :data-group-id="group.id ?? ''"
-        :class="{ 'drop-target': dropTarget === (group.id ?? 'root') }"
+        v-for="group in store.catalog ? sections : []"
+        :key="group.favorites ? 'favorites' : (group.id ?? 'root')"
+        :class="{
+          'host-favorites': group.favorites,
+          'tree-group': !group.favorites,
+          'drop-target': !group.favorites && dropTarget === (group.id ?? 'root'),
+        }"
+        :data-group-id="group.favorites ? undefined : (group.id ?? '')"
       >
         <div
+          v-if="!group.favorites"
           class="group-toggle"
           :class="{ selected: selectedFolder === group.id }"
           :aria-current="selectedFolder === group.id ? 'true' : undefined"
@@ -670,7 +712,8 @@ onBeforeUnmount(() => {
           <span v-else class="group-name">{{ group.name }}</span
           ><span class="group-count">{{ group.count }}</span>
         </div>
-        <template v-if="!isCollapsed(group.id)">
+        <div v-else class="host-favorites-heading">{{ group.name }}</div>
+        <template v-if="group.favorites || !isCollapsed(group.id)">
           <div
             v-for="host in group.hosts"
             :key="host.id"
@@ -678,8 +721,9 @@ onBeforeUnmount(() => {
             :style="{ paddingLeft: `${group.depth * 14}px` }"
           >
             <component
-              :is="isRenaming('host', host.id) ? 'div' : 'button'"
+              :is="isRenaming('host', host.id, group.favorites) ? 'div' : 'button'"
               :data-host-id="host.id"
+              :data-host-row-key="hostRowKey(host.id, group.favorites)"
               class="tree-host"
               :class="{
                 selected: selectedFolder === undefined && store.selectedId === host.id,
@@ -689,22 +733,25 @@ onBeforeUnmount(() => {
                 selectedFolder === undefined && store.selectedId === host.id ? 'true' : undefined
               "
               :draggable="false"
-              @pointerdown="beginDrag(host, $event)"
+              @pointerdown="!group.favorites && beginDrag(host, $event)"
               @dragstart.prevent
               @click="selectHost(host)"
               @dblclick="openHost(host)"
               @keydown.enter.prevent="openHost(host)"
               @keydown.space.prevent="openHost(host)"
-              @contextmenu.prevent.stop="openContext({ kind: 'host', id: host.id }, $event)"
-              @keydown="rowKeys({ kind: 'host', id: host.id }, $event)"
+              @contextmenu.prevent.stop="openContext(hostTarget(host.id, group.favorites), $event)"
+              @keydown="rowKeys(hostTarget(host.id, group.favorites), $event)"
             >
               <HostIcon
                 :connected="hostState(host.id) === tr('已连接')"
                 :label="hostState(host.id)"
               />
-              <span class="host-label" :class="{ renaming: isRenaming('host', host.id) }">
+              <span
+                class="host-label"
+                :class="{ renaming: isRenaming('host', host.id, group.favorites) }"
+              >
                 <TreeRenameInput
-                  v-if="isRenaming('host', host.id) && renaming"
+                  v-if="isRenaming('host', host.id, group.favorites) && renaming"
                   :name="renaming.name"
                   :label="tr('重命名 {0}', renaming.initialName)"
                   :required="false"
@@ -717,8 +764,20 @@ onBeforeUnmount(() => {
                 <span v-else class="host-name">{{ hostDisplayName(host) }}</span>
               </span>
             </component>
+            <button
+              type="button"
+              class="host-favorite-button"
+              :class="{ starred: host.favorite }"
+              :aria-pressed="host.favorite"
+              :aria-label="tr('收藏主机 {0}', hostDisplayName(host))"
+              :title="host.favorite ? tr('取消收藏') : tr('添加到常用主机')"
+              :disabled="!props.active || store.busy || !!renaming || !!dragged"
+              @click="toggleFavorite(host, $event)"
+            >
+              <Star :size="14" aria-hidden="true" />
+            </button>
             <HostTreeControls
-              :ref="(component) => setControls(host.id, component)"
+              :ref="(component) => setControls(hostRowKey(host.id, group.favorites), component)"
               :host="host"
               @saved="$emit('saved', $event)"
             />

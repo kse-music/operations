@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, ref, type App } from 'vue';
 import { createPinia, disposePinia, type Pinia } from 'pinia';
+import { filesApi } from '../services/files';
 import TransferPanel from './TransferPanel.vue';
 import { useFilesStore } from '../stores/files';
 import type { TransferInfo } from '../types/files';
@@ -50,6 +51,39 @@ afterEach(() => {
   root.remove();
   vi.restoreAllMocks();
   setLocale('zh-CN');
+});
+it('shows reused bytes during automatic upload recovery without asking for a decision', async () => {
+  const store = useFilesStore(pinia);
+  store.tasks = [{ ...task('upload', 'a', 'running'), resumedBytes: 4096 }];
+  await nextTick();
+  expect(root.textContent).toContain('已复用');
+  expect(root.textContent).toContain('4.0 KiB');
+  expect(root.querySelector('.transfer-row button')).toBeNull();
+});
+it.each(['从头上传', '取消'])('handles %s for an incompatible checkpoint', async (label) => {
+  const store = useFilesStore(pinia);
+  const restart = vi.spyOn(filesApi, 'confirmRestart').mockResolvedValue(undefined);
+  const cancel = vi.spyOn(filesApi, 'cancel').mockResolvedValue(undefined);
+  vi.spyOn(store, 'poll').mockResolvedValue(undefined);
+  store.tasks = [
+    {
+      ...task('changed', 'a', 'awaitingRestart'),
+      restartPrompt: { token: 'decision', target: '/images/linux.iso', partialBytes: 4096 },
+    },
+  ];
+  await nextTick();
+  const panel = root.querySelector('.upload-resume')!;
+  const buttons = Array.from(panel.querySelectorAll('button'));
+  expect(panel.textContent).toContain('/images/linux.iso');
+  expect(buttons.map((b) => b.textContent)).toEqual(['从头上传', '取消']);
+  buttons.find((b) => b.textContent === label)!.click();
+  if (label === '从头上传') {
+    expect(restart).toHaveBeenCalledExactlyOnceWith('changed', 'decision');
+    expect(cancel).not.toHaveBeenCalled();
+  } else {
+    expect(cancel).toHaveBeenCalledExactlyOnceWith('changed');
+    expect(restart).not.toHaveBeenCalled();
+  }
 });
 it('shows active transfers for the chosen host and keeps finished records in history', async () => {
   const files = useFilesStore(pinia);

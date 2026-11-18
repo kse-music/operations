@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, useId, watch } from 'vue';
 import { ChevronDown } from '@lucide/vue';
-import RemoteDirectoryTree from './RemoteDirectoryTree.vue';
+import DirectoryTree from './DirectoryTree.vue';
 import { tr } from '../i18n/messages';
 
 const props = defineProps<{ id: string; sessionId: string; disabled?: boolean }>();
@@ -95,9 +95,9 @@ onBeforeUnmount(() => popup.value?.hidePopover());
     @beforetoggle="open = $event.newState === 'open'"
     @keydown.esc.stop.prevent="close(true)"
   >
-    <RemoteDirectoryTree
+    <DirectoryTree
       v-if="open"
-      :session-id="sessionId"
+      :source="{ side: 'remote', sessionId }"
       :selected="value"
       :disabled="disabled"
       @select="select"
@@ -146,7 +146,7 @@ onBeforeUnmount(() => popup.value?.hidePopover());
   overscroll-behavior: contain;
   box-shadow: 0 6px 24px #0004;
 }
-.remote-directory-popup :deep(.remote-directory-tree) {
+.remote-directory-popup :deep(.file-directory-tree) {
   border: 0;
 }
 </style>

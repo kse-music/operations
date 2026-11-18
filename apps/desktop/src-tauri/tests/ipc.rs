@@ -1400,6 +1400,44 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
             .is_empty()
     );
     let host = invoke("host_create", json!({"input":input}));
+    invoke(
+        "host_set_favorite",
+        json!({"id":host["id"],"favorite":true}),
+    );
+    assert_eq!(invoke("host_list", json!({}))["hosts"][0]["favorite"], true);
+    assert!(invoke("files_last_directory", json!({"hostId":host["id"]})).is_null());
+    invoke(
+        "files_remember_directory",
+        json!({"hostId":host["id"],"path":"/srv/example"}),
+    );
+    assert_eq!(
+        invoke("files_last_directory", json!({"hostId":host["id"]})),
+        "/srv/example"
+    );
+    let other = tauri::WebviewWindowBuilder::new(&app, "untrusted", Default::default())
+        .build()
+        .expect("window");
+    for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+        for (command, body) in [
+            ("files_last_directory", json!({"hostId":host["id"]})),
+            (
+                "files_remember_directory",
+                json!({"hostId":host["id"],"path":"/srv"}),
+            ),
+            (
+                "host_set_favorite",
+                json!({"id":host["id"],"favorite":false}),
+            ),
+        ] {
+            let error = get_ipc_response(window, request(command, body, url))
+                .expect_err("host preferences are only available to the local main window");
+            assert!(
+                error
+                    .as_str()
+                    .is_some_and(|message| message.contains("not allowed"))
+            );
+        }
+    }
     input["description"] = json!("新备注");
     let error = get_ipc_response(
         &main,

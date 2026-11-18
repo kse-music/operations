@@ -3,6 +3,8 @@ import { createPinia, setActivePinia, getActivePinia, disposePinia } from 'pinia
 const mocks = vi.hoisted(() => ({
   open: vi.fn(),
   list: vi.fn(),
+  lastDirectory: vi.fn(),
+  rememberDirectory: vi.fn(),
   local: vi.fn(),
   tasks: vi.fn(),
   remoteCopy: vi.fn(),
@@ -197,6 +199,8 @@ it('refreshes only an existing local browser still at the renamed parent', async
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.resetAllMocks();
+  mocks.lastDirectory.mockResolvedValue(null);
+  mocks.rememberDirectory.mockResolvedValue(undefined);
   mocks.local.mockResolvedValue({ path: 'local', parent: null, entries: [] });
   mocks.connections.mockResolvedValue([]);
   mocks.tasks.mockResolvedValue([]);
@@ -921,9 +925,121 @@ describe('file workspace ownership', () => {
     finish({ path: '/old', parent: '/', entries: [] });
     await slow;
     expect(store.current?.path).toBe('/new');
+    expect(mocks.rememberDirectory).not.toHaveBeenCalledWith(host.id, '/old');
     expect(store.stepHistory('remote', 'back')).toBe(true);
     await vi.waitFor(() => expect(store.current?.path).toBe('/home'));
     expect(store.stepHistory('remote', 'back')).toBe(false);
+  });
+
+  it('restores the last successful remote directory separately for each host after recreating the store', async () => {
+    const saved = new Map<string, string>();
+    const other = { ...host, id: 'other' };
+    mocks.lastDirectory.mockImplementation(async (id: string) => saved.get(id) ?? null);
+    mocks.rememberDirectory.mockImplementation(async (id: string, path: string) => {
+      saved.set(id, path);
+    });
+    mocks.open.mockImplementation(async (id, receive) => {
+      receive({ type: 'state', state: 'connected' });
+      return { id: `session-${id}` };
+    });
+    mocks.list.mockImplementation(async (_id, path) => ({
+      path: path === '.' ? '/home/ops' : path,
+      parent: '/',
+      entries: [],
+    }));
+    let store = useFilesStore();
+    await store.open(host);
+    await store.navigate('/var/log/nginx');
+    mocks.list.mockRejectedValueOnce({ code: 'SFTP_PERMISSION', message: 'denied' });
+    await store.navigate('/denied');
+    await store.open(other);
+    await store.navigate('/srv/app');
+    expect([...saved]).toEqual([
+      [host.id, '/var/log/nginx'],
+      [other.id, '/srv/app'],
+    ]);
+
+    disposePinia(getActivePinia()!);
+    setActivePinia(createPinia());
+    store = useFilesStore();
+    mocks.list.mockClear();
+    await store.open(host);
+    expect(store.current?.path).toBe('/var/log/nginx');
+    expect(store.stepHistory('remote', 'back')).toBe(false);
+    await store.open(other);
+    expect(store.current?.path).toBe('/srv/app');
+    expect(mocks.list.mock.calls).toEqual([
+      [`session-${host.id}`, '/var/log/nginx'],
+      [`session-${other.id}`, '/srv/app'],
+    ]);
+  });
+
+  it.each(['SFTP_NOT_FOUND', 'SFTP_PERMISSION', 'SFTP_OPERATION'])(
+    'falls back to the default directory when restoring fails with %s',
+    async (code) => {
+      mocks.open.mockImplementation(async (_id, receive) => {
+        receive({ type: 'state', state: 'connected' });
+        return { id: 'session' };
+      });
+      mocks.lastDirectory.mockResolvedValue('/old/path');
+      mocks.list
+        .mockRejectedValueOnce({ code, message: 'unavailable' })
+        .mockResolvedValueOnce({ path: '/home/ops', parent: '/home', entries: [] });
+      const store = useFilesStore();
+      await store.open(host);
+      expect(mocks.list.mock.calls).toEqual([
+        ['session', '/old/path'],
+        ['session', '.'],
+      ]);
+      expect(store.current?.path).toBe('/home/ops');
+      expect(store.current?.error).toBeNull();
+      expect(mocks.rememberDirectory).toHaveBeenCalledExactlyOnceWith(host.id, '/home/ops');
+    },
+  );
+
+  it('keeps the saved directory on a connection error and surfaces the problem', async () => {
+    mocks.open.mockImplementation(async (_id, receive) => {
+      receive({ type: 'state', state: 'connected' });
+      return { id: 'session' };
+    });
+    mocks.lastDirectory.mockResolvedValue('/old/path');
+    mocks.list.mockRejectedValue({ code: 'SFTP_NETWORK', message: 'network failed' });
+    const store = useFilesStore();
+    await store.open(host);
+    expect(mocks.list).toHaveBeenCalledExactlyOnceWith('session', '/old/path');
+    expect(store.current?.state).toBe('failed');
+    expect(store.current?.error).toBe('network failed');
+    expect(mocks.rememberDirectory).not.toHaveBeenCalled();
+  });
+
+  it('finishes overlapping directory writes in navigation order before exit', async () => {
+    mocks.open.mockImplementation(async (_id, receive) => {
+      receive({ type: 'state', state: 'connected' });
+      return { id: 'session' };
+    });
+    mocks.list.mockImplementation(async (_id, path) => ({ path, parent: '/', entries: [] }));
+    const store = useFilesStore();
+    await store.open(host, '/home');
+    mocks.rememberDirectory.mockClear();
+    let completeFirst!: () => void;
+    mocks.rememberDirectory.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (completeFirst = resolve)),
+    );
+    const first = store.navigate('/first');
+    await vi.waitFor(() => expect(mocks.rememberDirectory).toHaveBeenCalledOnce());
+    const second = store.navigate('/second');
+    await vi.waitFor(() => expect(store.current?.path).toBe('/second'));
+    const flushed = vi.fn();
+    const exit = store.flushDirectoryWrites().then(flushed);
+    await Promise.resolve();
+    expect(flushed).not.toHaveBeenCalled();
+    completeFirst();
+    await Promise.all([first, second, exit]);
+    expect(mocks.rememberDirectory.mock.calls).toEqual([
+      [host.id, '/first'],
+      [host.id, '/second'],
+    ]);
+    expect(flushed).toHaveBeenCalledOnce();
   });
 
   it('keeps remote history on each connection and discards it when the connection is replaced', async () => {

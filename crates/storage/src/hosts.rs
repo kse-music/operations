@@ -205,6 +205,19 @@ impl Database {
     pub fn host_update(&self, id: &str, input: HostInput) -> Result<Host, Error> {
         self.host_save(Some(id), input, None)
     }
+    pub fn host_set_favorite(&self, id: &str, favorite: bool) -> Result<(), Error> {
+        let count = self
+            .connect()?
+            .execute(
+                "UPDATE hosts SET favorite=?2 WHERE id=?1",
+                params![id, favorite],
+            )
+            .map_err(storage_error)?;
+        if count == 0 {
+            return Err(Error::NotFound);
+        }
+        Ok(())
+    }
     pub fn host_save(
         &self,
         id: Option<&str>,
@@ -243,6 +256,11 @@ impl Database {
         let previous = one_host(&tx, id)?;
         tx.execute("DELETE FROM hosts WHERE id=?1", [id])
             .map_err(storage_error)?;
+        tx.execute(
+            "DELETE FROM application_settings WHERE key=?1",
+            [super::sftp_directory::key(id)],
+        )
+        .map_err(storage_error)?;
         retire_host_credential(&tx, previous.config.credential_id.as_deref())?;
         tx.commit().map_err(storage_error)?;
         Ok(())
