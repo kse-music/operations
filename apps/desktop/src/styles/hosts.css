@@ -43,6 +43,9 @@
   color: var(--accent);
   background: var(--accent-bg);
 }
+.host-list-heading .host-backup-trigger {
+  margin-left: auto;
+}
 .host-list-title {
   display: inline-flex;
   align-items: center;

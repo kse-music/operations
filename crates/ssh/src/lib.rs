@@ -1,5 +1,6 @@
 mod auth;
-pub use auth::import_private_key;
+pub use auth::{import_key_from_saved_path, import_private_key};
+pub use trust::validate_saved_host_key;
 mod connect;
 mod forward;
 mod monitor;

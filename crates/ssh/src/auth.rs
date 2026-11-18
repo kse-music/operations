@@ -34,6 +34,13 @@ pub fn import_private_key(
         })
 }
 
+pub fn import_key_from_saved_path(
+    path: &str,
+    passphrase: Option<&str>,
+) -> Result<Zeroizing<String>, Error> {
+    import_private_key(&read_legacy_key(path)?, passphrase)
+}
+
 fn read_legacy_key(path: &str) -> Result<Zeroizing<String>, Error> {
     let path = if let Some(suffix) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
         std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })

@@ -8,6 +8,12 @@
 
 `FilesView` 在两栏的 `FilePane` 上方分别按需挂载 `DirectoryTree`，远程复制的目标目录选择器也使用此组件。树从已确认的 `DirectoryListing` 展开当前路径，按层读取祖先和用户展开的分支，只列出目录。本地树通过 `files_local` 读取磁盘、UNC 共享或 Unix 路径，保留 Windows 扩展路径前缀；远程树通过当前 SFTP 会话的 `files_list` 读取。展开分支独立于导航，选择目录分别调用 Files Store 的 `localLoad` 或 `navigate`，沿用对应栏的地址、历史和错误处理。同目录刷新保留仍存在的展开分支，切换本地根、远程会话或关闭树会清除对应缓存并使在途结果失效。
 
+### 远程目录书签
+
+`RemoteDirectoryBookmarks` 按 HostId 按需读取本地书签。收藏使用当前连接已成功列出的规范目录，选择书签调用 Files Store 的 `navigate`，沿用当前 SFTP 身份、路径历史和错误处理。切换主机、连接身份或离开文件页时收起菜单。
+
+主窗口专用 `files_bookmarks` / `files_add_bookmark` / `files_remove_bookmark` 通过受限存储执行器读写 `application_settings.sftp_bookmarks:<HostId>`。写入事务复验主机存在及 v1 记录，按路径去重；删除主机时同事务清除其书签。存储只包含名称和路径。
+
 ### 新建文本文件
 
 远程工具栏的“新建文件”打开 `NewRemoteFileDialog`，输入仅限当前目录内的叶名称。`FilesView` 冻结 HostId、父目录和 SFTP 会话，提交前复验；`Files Store.createFile` 与既有编辑操作共用内置编辑器忙碌、文档状态及事件代号。成功或失败后刷新仅绑定原会话及原目录，不导航到用户已离开的路径；失败留在名称弹窗，不转入外部编辑流程。
@@ -78,7 +84,7 @@ SFTP 上传及单文件中转在校验后、提交前调用 `Remote::preserve_mo
 
 桌面传输快照 `TransferInfo.elapsedSeconds` 使用单调时钟累计每个文件的数据读写阶段；`bytesPerSecond` 以累计已传字节除以累计传输时间计算，不计排队、扫描、校验和提交。上传、下载和插件中转在有界请求排空后、EOF/属性复核及句柄关闭前切换为 verifying 并暂停时钟；下一文件开始数据读写时恢复累计。数据阶段作用域结束或取消请求会停止时钟，防止异常清理改变统计；校验期间及终态的传输用时、平均速度保持固定，前端随既有轮询更新，不按组件挂载时间另建计时器。剩余数据传输时间以 `remainingBytes / bytesPerSecond` 向上取整估算；未知速度、校验和终态分别展示估算中、校验中、零或不可用，不将其作为整体完成承诺。此字段属于桌面 IPC 快照，插件公开传输契约仍使用独立 DTO。
 
-`FilesView` 将当前 HostId 的未完成任务（含窗口外拖放的暂存下载）交给现有 `Modal` 和 `TransferPanel`，进度弹窗通过主窗口 DOM 渲染，不创建额外 Tauri 窗口或 IPC 权限。新增任务或需确认丢弃失效断点时打开弹窗，普通快照刷新保持用户的隐藏选择；当前主机任务排空后关闭，已结束的普通任务仍从记录弹窗查看。X/Esc 在点击时冻结弹窗内任务 ID，逐个请求取消并汇总失败，不影响其他主机或之后新增的任务；请求及清理期间禁用重复取消，失败显示安全原因并允许重试。“后台传输”仅隐藏弹窗。离开文件页卸载弹窗，任务和轮询继续由 Files Store 管理。
+`FilesView` 将当前 HostId 的未完成任务（含窗口外拖放的暂存下载）交给现有 `Modal` 和 `TransferPanel`，进度弹窗通过主窗口 DOM 渲染，不创建额外 Tauri 窗口或 IPC 权限。新增任务或需确认丢弃失效断点时打开弹窗，普通快照刷新保持用户的隐藏选择；当前主机任务排空后关闭，已结束的普通任务仍从记录弹窗查看。× 和 Esc 均只收起弹窗，取消清理期间也可收起。点击“取消传输”时冻结弹窗内任务 ID，逐个请求取消并汇总失败，作用范围仅限该快照；请求及清理期间禁用重复取消，失败显示安全原因并允许重试。离开文件页卸载弹窗，任务和轮询继续由 Files Store 管理。
 
 桌面快照 `TransferInfo.dragExport` 标记 Windows Shell 托管的暂存下载。`files_drag_download` 通过 OLE 的 FileGroupDescriptor/FileContents 交付虚拟文件，Shell 负责最终目标的复制；文件描述符不设置 `FD_PROGRESSUI`，由应用显示下载进度。活动拖放任务参与应用弹窗和取消，目标使用拖放文件夹提示，隐藏内部暂存目录；终态拖放任务仍不进入传输历史。该标记不改变队列、清理、未完成任务计数及退出/关闭/切换身份的保护。Windows 外拖须验证 Shell 最终字节交付，不能只以暂存下载成功作为完成。插件传输使用原独立 DTO，不继承此标记。
 

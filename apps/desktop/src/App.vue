@@ -878,6 +878,7 @@ watch(
           v-else-if="view === 'files'"
           :key="`files:${currentHostId}`"
           :host-id="currentHostId"
+          :inactive="workspace.area !== 'home'"
           @terminal="fileTerminal"
         />
       </div>

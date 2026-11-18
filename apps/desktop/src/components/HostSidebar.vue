@@ -6,7 +6,9 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  Ellipsis,
   FileInput,
+  FileOutput,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -249,6 +251,7 @@ function toggle(id: string): void {
 
 type HostTarget = { kind: 'host'; id: string; favoriteRow: boolean };
 type ContextTarget = { kind: 'folder'; id: string | null } | HostTarget;
+type MenuTarget = ContextTarget | { kind: 'backup' };
 function hostTarget(id: string, favoriteRow: boolean): HostTarget {
   return { kind: 'host', id, favoriteRow };
 }
@@ -343,6 +346,8 @@ async function saveRename(reason: 'enter' | 'blur'): Promise<void> {
   else edit.error = store.error ?? tr('操作未完成，请重试并检查本地应用日志。');
 }
 type MenuAction =
+  | 'export'
+  | 'import'
   | 'newHost'
   | 'newFolder'
   | 'importOpenssh'
@@ -353,7 +358,7 @@ type MenuAction =
   | 'copy'
   | 'deleteHost'
   | `plugin:${string}:${string}`;
-const context = ref<{ target: ContextTarget; x: number; y: number }>();
+const context = ref<{ target: MenuTarget; x: number; y: number }>();
 const menuElement = ref<HTMLElement>();
 let contextTrigger: HTMLElement | undefined;
 let contextScrollTop = 0;
@@ -377,6 +382,11 @@ const menuItems = computed<
 >(() => {
   const target = context.value?.target;
   if (!target) return [];
+  if (target.kind === 'backup')
+    return [
+      { key: 'export', label: tr('导出'), icon: FileOutput, iconClass: 'menu-icon-blue' },
+      { key: 'import', label: tr('导入'), icon: FileInput, iconClass: 'menu-icon-green' },
+    ];
   if (target.kind === 'host')
     return [
       { key: 'connect', label: tr('连接'), icon: Plug, iconClass: 'menu-icon-green' },
@@ -433,36 +443,43 @@ function dismissContext(restoreFocus = false): void {
   if (restoreFocus && contextTrigger?.isConnected) contextTrigger.focus({ preventScroll: true });
 }
 function outsideContext(event: PointerEvent): void {
+  if (context.value?.target.kind === 'backup' && contextTrigger?.contains(event.target as Node))
+    return;
   if (context.value && !menuElement.value?.contains(event.target as Node)) dismissContext();
 }
 function treeScrolled(event: Event): void {
   if (context.value && (event.currentTarget as HTMLElement).scrollTop !== contextScrollTop)
     dismissContext();
 }
-async function openContext(
-  target: ContextTarget,
-  event: MouseEvent | KeyboardEvent,
-): Promise<void> {
+async function openContext(target: MenuTarget, event: MouseEvent | KeyboardEvent): Promise<void> {
   if (
     props.active === false ||
-    !store.catalog ||
+    (!store.catalog && target.kind !== 'backup') ||
     document.querySelector('dialog[open]') ||
     dragged.value ||
     renaming.value
   )
     return;
+  if (target.kind === 'backup' && context.value?.target.kind === 'backup') {
+    dismissContext(true);
+    return;
+  }
   contextTrigger = event.currentTarget as HTMLElement;
   contextScrollTop = tree.value?.querySelector<HTMLElement>('.host-tree-scroll')?.scrollTop ?? 0;
   const anchor = contextTrigger.getBoundingClientRect();
-  const keyboard = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  const anchored =
+    target.kind === 'backup' ||
+    event instanceof KeyboardEvent ||
+    (!event.clientX && !event.clientY);
   context.value = {
     target,
-    x: keyboard ? anchor.left : event.clientX,
-    y: keyboard ? anchor.bottom : event.clientY,
+    x: anchored ? anchor.left : event.clientX,
+    y: anchored ? anchor.bottom : event.clientY,
   };
   await nextTick();
   if (!context.value || !menuElement.value) return;
   const bounds = menuElement.value.getBoundingClientRect();
+  if (target.kind === 'backup') context.value.x = anchor.right - bounds.width;
   context.value.x = Math.max(8, Math.min(context.value.x, window.innerWidth - bounds.width - 8));
   context.value.y = Math.max(8, Math.min(context.value.y, window.innerHeight - bounds.height - 8));
   menuElement.value
@@ -530,6 +547,10 @@ async function runContext(action: MenuAction): Promise<void> {
   const target = context.value?.target;
   if (!target || store.busy) return;
   dismissContext(true);
+  if (target.kind === 'backup') {
+    if (action === 'export' || action === 'import') await store.backup(action);
+    return;
+  }
   if (target.kind === 'folder') {
     const group = store.catalog?.groups.find((group) => group.id === target.id);
     if (target.id !== null && !group) {
@@ -629,6 +650,18 @@ onBeforeUnmount(() => {
   >
     <div class="host-list-heading">
       <span class="host-list-title">{{ tr(' 主机') }}</span>
+      <button
+        type="button"
+        class="shell-icon-button host-backup-trigger"
+        aria-haspopup="menu"
+        :aria-expanded="context?.target.kind === 'backup'"
+        :aria-label="tr('主机备份菜单')"
+        :title="tr('主机备份菜单')"
+        :disabled="store.busy"
+        @click="openContext({ kind: 'backup' }, $event)"
+      >
+        <Ellipsis :size="17" aria-hidden="true" />
+      </button>
       <slot name="heading-actions"></slot>
     </div>
     <div class="host-sidebar-controls">
@@ -848,7 +881,7 @@ onBeforeUnmount(() => {
           ref="menuElement"
           class="context-menu host-tree-menu"
           role="menu"
-          :aria-label="tr('主机树操作')"
+          :aria-label="context.target.kind === 'backup' ? tr('主机备份菜单') : tr('主机树操作')"
           :style="{ left: `${context.x}px`, top: `${context.y}px` }"
           @keydown="menuKeys"
           @contextmenu.prevent

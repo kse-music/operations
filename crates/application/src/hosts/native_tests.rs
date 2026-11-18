@@ -171,6 +171,35 @@ async fn native_rsa_4096_save_reopen_and_authenticate() {
         let restored =
             russh::keys::decode_secret_key(std::str::from_utf8(&stored).unwrap(), None).unwrap();
         assert_eq!(restored.public_key(), key.public_key());
+        if format == "openssh" {
+            let path = dir.path().join("host.sdhosts");
+            app.host_backup_export(path.clone()).await.unwrap();
+            let data = dir.path().join("new-computer");
+            let mut target = Application::initialize(data.clone(), data.join("logs")).unwrap();
+            target.secrets = entries.clone();
+            target.host_backup_import(path).await.unwrap();
+            target.shutdown().await;
+            drop(target);
+            let target = Application::initialize(data.clone(), data.join("logs")).unwrap();
+            let imported = target.catalog().await.unwrap().hosts.pop().unwrap();
+            let imported_ref = target
+                .database
+                .credential_record(imported.config.credential_id.as_ref().unwrap())
+                .unwrap()
+                .secret_ref
+                .unwrap();
+            assert_ne!(reference, imported_ref);
+            assert!(matches!(
+                target
+                    .host_test(Some(imported.id.clone()), imported.config, None, None)
+                    .await
+                    .unwrap(),
+                HostTestResult::Connected { .. }
+            ));
+            target.host_delete(imported.id).await.unwrap();
+            assert!(NativeStore.read(&imported_ref).unwrap().is_none());
+            target.shutdown().await;
+        }
         app.shutdown().await;
         drop(app);
 

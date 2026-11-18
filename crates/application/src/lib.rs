@@ -18,7 +18,7 @@ pub mod storage_location;
 mod terminal;
 mod terminal_upload;
 pub use bundled_plugins::PluginInventory;
-pub use hosts::{HostTestResult, SecureStatus};
+pub use hosts::{HostBackupResult, HostTestResult, SecureStatus};
 pub use plugins::{Approval as PluginApproval, Event as PluginEvent};
 
 use std::{

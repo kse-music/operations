@@ -240,7 +240,8 @@ it('keeps host tools outside the scrolling list and keeps favorite shortcuts abo
   row.dispatchEvent(context);
   await nextTick();
   expect(context.defaultPrevented).toBe(true);
-  expect(root.querySelector('[aria-haspopup="menu"]')).toBeNull();
+  expect(scroll.querySelector('[aria-haspopup="menu"]')).toBeNull();
+  expect(root.querySelectorAll('.host-list-heading [aria-haspopup="menu"]')).toHaveLength(1);
   expect(root.querySelector('.tree-host-more')).toBeNull();
   expect(select).toHaveBeenCalledOnce();
   expect(document.querySelector('[aria-label="主机树操作"]')).not.toBeNull();
@@ -270,7 +271,9 @@ it('keeps host tools outside the scrolling list and keeps favorite shortcuts abo
   expect(heading.previousElementSibling).toBeNull();
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
-  expect(heading.querySelectorAll('button')).toHaveLength(0);
+  expect(
+    [...heading.querySelectorAll(':scope > button')].map((b) => b.getAttribute('aria-label')),
+  ).toEqual(['主机备份菜单']);
   expect(heading.querySelector('[aria-label="新建主机"]')).toBeNull();
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',

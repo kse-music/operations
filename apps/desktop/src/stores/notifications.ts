@@ -10,7 +10,7 @@ export const useNotificationsStore = defineStore('notifications', () => {
     if (!text || items.value.some((t) => t.text === text)) return;
     const id = ++next;
     items.value = [...items.value, { id, text, error }].slice(-5);
-    if (!error) setTimeout(() => dismiss(id), 2000);
+    setTimeout(() => dismiss(id), error ? 5000 : 2000);
   }
   return { items, push, dismiss };
 });

@@ -82,6 +82,96 @@ fn last_sftp_directory_is_host_scoped_persistent_and_removed_with_host() {
 }
 
 #[test]
+fn directory_bookmarks_persist_by_host_and_are_removed_with_the_host() {
+    use serverdeck_core::files::DirectoryBookmark;
+
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).expect("db");
+    let host = db.host_create(input()).unwrap();
+    let other = db.host_create(input()).unwrap();
+    let bookmark = DirectoryBookmark {
+        name: "发布目录".into(),
+        path: "/srv/app/releases".into(),
+    };
+    let logs = DirectoryBookmark {
+        name: "Logs".into(),
+        path: "/var/log".into(),
+    };
+    db.add_sftp_bookmark(&host.id, bookmark.clone()).unwrap();
+    assert_eq!(
+        db.add_sftp_bookmark(&host.id, logs.clone()).unwrap(),
+        vec![bookmark.clone(), logs.clone()]
+    );
+    assert!(db.add_sftp_bookmark(&host.id, bookmark.clone()).is_err());
+    assert!(
+        db.add_sftp_bookmark(
+            &host.id,
+            DirectoryBookmark {
+                path: "../bad".into(),
+                ..bookmark.clone()
+            },
+        )
+        .is_err()
+    );
+    assert!(db.sftp_bookmarks(&other.id).unwrap().is_empty());
+    db.add_sftp_bookmark(&other.id, bookmark.clone()).unwrap();
+    let copy = db.host_copy(&host.id).unwrap();
+    drop(db);
+
+    let db = Database::open(path).unwrap();
+    assert_eq!(
+        db.sftp_bookmarks(&host.id).unwrap(),
+        [bookmark.clone(), logs.clone()]
+    );
+    assert!(db.sftp_bookmarks(&copy.id).unwrap().is_empty());
+    assert_eq!(
+        db.remove_sftp_bookmark(&host.id, &bookmark.path).unwrap(),
+        [logs]
+    );
+    db.host_delete(&host.id).unwrap();
+    assert!(db.sftp_bookmarks(&host.id).unwrap().is_empty());
+    assert!(matches!(
+        db.add_sftp_bookmark(&host.id, bookmark.clone()),
+        Err(Error::NotFound)
+    ));
+    assert_eq!(db.sftp_bookmarks(&other.id).unwrap(), [bookmark]);
+}
+
+#[test]
+fn unsupported_directory_bookmarks_survive_attempted_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("hosts.sqlite3")).unwrap();
+    let host = db.host_create(input()).unwrap();
+    let key = crate::sftp_bookmarks::key(&host.id);
+    let json = r#"{"version":2,"bookmarks":[{"name":"Logs","path":"/var/log"}]}"#;
+    let connection = db.connect().unwrap();
+    connection
+        .execute(
+            "INSERT INTO application_settings(key,value) VALUES(?1,?2)",
+            params![key, json],
+        )
+        .unwrap();
+    assert!(matches!(
+        db.sftp_bookmarks(&host.id),
+        Err(Error::UnsupportedConfig(2))
+    ));
+    assert!(matches!(
+        db.remove_sftp_bookmark(&host.id, "/var/log"),
+        Err(Error::UnsupportedConfig(2))
+    ));
+    let raw: String = connection
+        .query_row(
+            "SELECT value FROM application_settings WHERE key=?1",
+            [&key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, json);
+    assert_eq!(db.catalog().unwrap().hosts.len(), 1);
+}
+
+#[test]
 fn unknown_sftp_directory_format_is_preserved_and_does_not_block_catalog() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");

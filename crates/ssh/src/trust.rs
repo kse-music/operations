@@ -2,6 +2,17 @@ use super::*;
 use russh::keys::{HashAlg, PublicKeyOrCertificate};
 use serverdeck_core::hosts::HostKeyFingerprint;
 
+pub fn validate_saved_host_key(public_key: &str, fingerprint: &str) -> Result<(), Error> {
+    let key = russh::keys::PublicKey::from_openssh(public_key)
+        .map_err(|_| Error::Validation("备份中的服务器公钥无效"))?;
+    if key.fingerprint(HashAlg::Sha256).to_string() != fingerprint
+        || key.to_openssh().ok().as_deref() != Some(public_key)
+    {
+        return Err(Error::Validation("备份中的服务器公钥与指纹不匹配"));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub(crate) enum Trust {
     Interactive {

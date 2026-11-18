@@ -128,6 +128,25 @@ impl Application {
         self.blocking(move |db| db.save_sftp_last_directory(&host_id, path))
             .await
     }
+    pub async fn files_bookmarks(&self, host_id: String) -> Result<Vec<DirectoryBookmark>, Error> {
+        self.blocking(move |db| db.sftp_bookmarks(&host_id)).await
+    }
+    pub async fn files_add_bookmark(
+        &self,
+        host_id: String,
+        bookmark: DirectoryBookmark,
+    ) -> Result<Vec<DirectoryBookmark>, Error> {
+        self.blocking(move |db| db.add_sftp_bookmark(&host_id, bookmark))
+            .await
+    }
+    pub async fn files_remove_bookmark(
+        &self,
+        host_id: String,
+        path: String,
+    ) -> Result<Vec<DirectoryBookmark>, Error> {
+        self.blocking(move |db| db.remove_sftp_bookmark(&host_id, &path))
+            .await
+    }
     pub fn files_search_start(
         &self,
         id: &str,

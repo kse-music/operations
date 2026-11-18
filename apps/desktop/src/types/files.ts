@@ -43,6 +43,10 @@ export interface DirectoryListing {
   parent: string | null;
   entries: FileEntry[];
 }
+export interface DirectoryBookmark {
+  name: string;
+  path: string;
+}
 export interface FileSearchInput {
   requestId: string;
   path: string;

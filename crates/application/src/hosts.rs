@@ -9,6 +9,8 @@ use serverdeck_security::{SecretStore, new_secret_reference};
 use serverdeck_storage::Database;
 use uuid::Uuid;
 use zeroize::Zeroizing;
+mod backup;
+pub use backup::HostBackupResult;
 #[cfg(all(test, windows))]
 mod native_tests;
 mod test_connection;
@@ -29,13 +31,11 @@ pub(crate) fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<Str
     };
     let mut failed = 0;
     for reference in pending {
-        match secrets.delete(&reference) {
-            Ok(()) => {
-                if database.complete_secret_gc(&reference).is_err() {
-                    failed += 1;
-                }
-            }
-            Err(_) => failed += 1, // NativeStore already records the failure at its boundary.
+        if database
+            .collect_pending_secret(&reference, || secrets.delete(&reference))
+            .is_err()
+        {
+            failed += 1;
         }
     }
     if failed > 0 {
@@ -321,6 +321,7 @@ fn local_username() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod backup_tests;
     use std::{
         collections::HashMap,
         sync::{
@@ -682,6 +683,26 @@ mod tests {
             draft
         );
         assert_eq!(secrets.values.lock().unwrap().len(), 2);
+        let backup = dir.path().join("both-auth-methods.sdhosts");
+        app.host_backup_export(backup.clone()).await.unwrap();
+        let mut fresh =
+            Application::initialize(dir.path().join("fresh"), dir.path().join("fresh-logs"))
+                .unwrap();
+        fresh.secrets = Arc::new(TestStore::default());
+        let restored = fresh.host_backup_import(backup).await.unwrap();
+        assert_eq!(restored.hosts, 2);
+        for host in fresh.catalog().await.unwrap().hosts {
+            assert!(
+                matches!(
+                    fresh
+                        .host_test(Some(host.id), host.config, None, None)
+                        .await
+                        .unwrap(),
+                    HostTestResult::Connected { .. }
+                ),
+                "restored credentials and trust must authenticate without any input"
+            );
+        }
         sshd.abort();
     }
 

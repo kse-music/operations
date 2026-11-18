@@ -1414,15 +1414,46 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
         invoke("files_last_directory", json!({"hostId":host["id"]})),
         "/srv/example"
     );
+    let bookmark = json!({"name":"日志","path":"/var/log"});
+    let bookmarked = json!([bookmark]);
+    assert_eq!(
+        invoke(
+            "files_add_bookmark",
+            json!({"hostId":host["id"],"bookmark":bookmark}),
+        ),
+        bookmarked
+    );
+    assert_eq!(
+        invoke("files_bookmarks", json!({"hostId":host["id"]})),
+        bookmarked
+    );
+    assert_eq!(
+        invoke(
+            "files_remove_bookmark",
+            json!({"hostId":host["id"],"path":"/var/log"}),
+        ),
+        json!([])
+    );
     let other = tauri::WebviewWindowBuilder::new(&app, "untrusted", Default::default())
         .build()
         .expect("window");
     for (window, url) in [(&other, origin), (&main, "https://example.com")] {
         for (command, body) in [
             ("files_last_directory", json!({"hostId":host["id"]})),
+            ("host_backup", json!({"action":"export"})),
+            ("host_backup", json!({"action":"import"})),
             (
                 "files_remember_directory",
                 json!({"hostId":host["id"],"path":"/srv"}),
+            ),
+            ("files_bookmarks", json!({"hostId":host["id"]})),
+            (
+                "files_add_bookmark",
+                json!({"hostId":host["id"],"bookmark":bookmark}),
+            ),
+            (
+                "files_remove_bookmark",
+                json!({"hostId":host["id"],"path":"/var/log"}),
             ),
             (
                 "host_set_favorite",

@@ -124,6 +124,27 @@ pub struct DirectoryListing {
     pub parent: Option<String>,
     pub entries: Vec<FileEntry>,
 }
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryBookmark {
+    pub name: String,
+    pub path: String,
+}
+impl DirectoryBookmark {
+    pub fn validate(&self) -> Result<(), Error> {
+        remote_absolute(&self.path)?;
+        if self.name.is_empty()
+            || self.name.trim() != self.name
+            || self.name.chars().count() > 80
+            || self.name.chars().any(char::is_control)
+        {
+            return Err(Error::Validation(
+                "书签名称须为 1–80 个字符，不能含控制字符",
+            ));
+        }
+        Ok(())
+    }
+}
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FileSearchInput {

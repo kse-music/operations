@@ -97,6 +97,84 @@ afterEach(() => {
 });
 
 const drivePicker = () => root.querySelector<HTMLButtonElement>('[aria-label="选择本地磁盘"]')!;
+const bookmarkTrigger = () => root.querySelector<HTMLButtonElement>('[aria-label="目录书签"]')!;
+const bookmarkMenu = () => document.querySelector<HTMLElement>('.directory-bookmarks')!;
+
+it('stores the listed remote directory by host, uses the active SFTP session, and removes only the bookmark', async () => {
+  const bookmark = { name: '配置', path: '/srv/api' };
+  const saved = vi.spyOn(filesApi, 'bookmarks').mockResolvedValue([]);
+  const add = vi.spyOn(filesApi, 'addBookmark').mockResolvedValue([bookmark]);
+  const remove = vi.spyOn(filesApi, 'removeBookmark').mockResolvedValue([]);
+  const list = vi.spyOn(filesApi, 'list').mockResolvedValue({
+    path: bookmark.path,
+    parent: '/srv',
+    entries: [entry],
+  });
+  bookmarkTrigger().click();
+  await vi.waitFor(() => expect(bookmarkMenu().textContent).toContain('暂无目录书签'));
+  expect(saved).toHaveBeenCalledExactlyOnceWith('a');
+  bookmarkMenu().querySelector<HTMLButtonElement>('.bookmark-actions .bookmark-link')!.click();
+  await nextTick();
+  const input = bookmarkMenu().querySelector<HTMLInputElement>('.bookmark-form input')!;
+  expect(input.value).toBe('api');
+  input.value = bookmark.name;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  bookmarkMenu()
+    .querySelector('form')!
+    .dispatchEvent(new Event('submit', { cancelable: true }));
+  await vi.waitFor(() =>
+    expect(bookmarkMenu().querySelector('[aria-current="location"]')?.textContent).toContain(
+      bookmark.name,
+    ),
+  );
+  expect(bookmarkMenu().querySelector('.bookmark-actions')).toBeNull();
+  expect(add).toHaveBeenCalledExactlyOnceWith('a', bookmark);
+  expect(list).not.toHaveBeenCalled();
+
+  bookmarkMenu().querySelector<HTMLButtonElement>('.bookmark-list .bookmark-link')!.click();
+  expect(list).toHaveBeenCalledExactlyOnceWith('sftp-a', bookmark.path);
+  await vi.waitFor(() => expect(bookmarkTrigger().disabled).toBe(false));
+  expect(bookmarkTrigger().getAttribute('aria-expanded')).toBe('false');
+
+  saved.mockResolvedValue([bookmark]);
+  bookmarkTrigger().click();
+  await vi.waitFor(() =>
+    expect(bookmarkMenu().querySelector('[aria-label="移除书签：配置"]')).not.toBeNull(),
+  );
+  bookmarkMenu().querySelector<HTMLButtonElement>('[aria-label="移除书签：配置"]')!.click();
+  await vi.waitFor(() => expect(bookmarkMenu().textContent).toContain('暂无目录书签'));
+  expect(remove).toHaveBeenCalledExactlyOnceWith('a', bookmark.path);
+  expect(list).toHaveBeenCalledTimes(1);
+});
+
+it('retains unavailable bookmarks and closes the popover when the SFTP identity changes', async () => {
+  const bookmark = { name: '旧目录', path: '/srv/archived' };
+  const files = useFilesStore(pinia);
+  vi.spyOn(filesApi, 'bookmarks').mockResolvedValue([bookmark]);
+  const list = vi.spyOn(filesApi, 'list').mockRejectedValue({
+    code: 'SFTP_NOT_FOUND',
+    message: '目录已删除',
+  });
+  const remove = vi.spyOn(filesApi, 'removeBookmark');
+  bookmarkTrigger().click();
+  await vi.waitFor(() => expect(bookmarkMenu().textContent).toContain(bookmark.path));
+  bookmarkMenu().querySelector<HTMLButtonElement>('.bookmark-list .bookmark-link')!.click();
+  await vi.waitFor(() =>
+    expect(useNotificationsStore(pinia).items).toContainEqual(
+      expect.objectContaining({ text: '目录已删除', error: true }),
+    ),
+  );
+  expect(files.current?.listing?.path).toBe('/srv/api');
+  expect(list).toHaveBeenCalledExactlyOnceWith('sftp-a', bookmark.path);
+  expect(remove).not.toHaveBeenCalled();
+
+  bookmarkTrigger().click();
+  await vi.waitFor(() => expect(bookmarkMenu().textContent).toContain(bookmark.path));
+  files.current!.id = 'different-identity';
+  await nextTick();
+  expect(bookmarkTrigger().getAttribute('aria-expanded')).toBe('false');
+});
+
 async function newFile() {
   root.querySelector<HTMLButtonElement>('[aria-label="新建文件"]')!.click();
   await nextTick();
@@ -886,14 +964,22 @@ const progressTask = (id: string, hostId = 'a'): TransferInfo => ({
   recoveryPaths: [],
 });
 const progressDialog = () => document.querySelector<HTMLDialogElement>('.file-transfer-dialog');
+const cancelAllTransfersButton = () =>
+  [...progressDialog()!.querySelectorAll<HTMLButtonElement>('footer button')].find(
+    (button) => button.textContent?.trim() === '取消传输',
+  )!;
+const closeTransferProgress = () =>
+  progressDialog()!.querySelector<HTMLButtonElement>('.modal-heading button')!.click();
+const openTransferProgress = () =>
+  [...root.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.trim().startsWith('传输任务（'))!
+    .click();
 
 it('opens a background upload once when an incompatible checkpoint requires a restart decision', async () => {
   const files = useFilesStore(pinia);
   const upload = progressTask('upload');
   const hide = async () => {
-    Array.from(progressDialog()!.querySelectorAll('button'))
-      .find((b) => b.textContent?.trim() === '后台传输')!
-      .click();
+    closeTransferProgress();
     await nextTick();
     expect(progressDialog()).toBeNull();
   };
@@ -919,12 +1005,10 @@ it('opens a background upload once when an incompatible checkpoint requires a re
   await nextTick();
   expect(progressDialog()).toBeNull();
 });
-it('keeps background transfers running and makes the close button cancel until cleanup finishes', async () => {
+it.each(['×', 'Esc'])('keeps the transfer running when dismissed with %s', async (action) => {
   const files = useFilesStore(pinia);
   const cancel = vi.spyOn(filesApi, 'cancel').mockResolvedValue();
-  vi.spyOn(files, 'poll').mockImplementation(async () => {
-    files.tasks = files.tasks.map((task) => ({ ...task, state: 'cancelling' }));
-  });
+  vi.spyOn(files, 'poll').mockResolvedValue();
   files.tasks = [progressTask('upload')];
   await nextTick();
   expect(root.querySelector('.transfer-panel')).toBeNull();
@@ -939,35 +1023,28 @@ it('keeps background transfers running and makes the close button cancel until c
   );
   expect(progressDialog()?.textContent).not.toContain('重试会从头传输');
   expect(progressDialog()?.querySelector('.transfer-row button')).toBeNull();
-  [...progressDialog()!.querySelectorAll<HTMLButtonElement>('button')]
-    .find((button) => button.textContent?.trim() === '后台传输')!
-    .click();
+  expect(
+    [...progressDialog()!.querySelectorAll('footer button')].map((button) =>
+      button.textContent?.trim(),
+    ),
+  ).toEqual(['取消传输']);
+  if (action === '×') {
+    closeTransferProgress();
+  } else {
+    progressDialog()!.dispatchEvent(new Event('cancel', { cancelable: true }));
+  }
   await nextTick();
+  expect(cancel).not.toHaveBeenCalled();
   expect(progressDialog()).toBeNull();
   expect(files.tasks[0]?.state).toBe('running');
   files.tasks = [{ ...files.tasks[0]!, elapsedSeconds: 30 }];
   await nextTick();
   expect(progressDialog()).toBeNull();
-  [...root.querySelectorAll<HTMLButtonElement>('button')]
-    .find((button) => button.textContent?.trim() === '传输任务（1）')!
-    .click();
+  openTransferProgress();
   await nextTick();
   expect(progressDialog()?.querySelector('[data-time="elapsed"]')?.textContent?.trim()).toBe(
     '0:00:30',
   );
-  expect(cancel).not.toHaveBeenCalled();
-  progressDialog()!
-    .querySelector<HTMLButtonElement>('[aria-label="取消此主机的全部传输"]')!
-    .click();
-  await vi.waitFor(() => expect(files.tasks[0]?.state).toBe('cancelling'));
-  expect(
-    progressDialog()?.querySelector<HTMLButtonElement>('.modal-heading button')?.disabled,
-  ).toBe(true);
-  expect(progressDialog()?.textContent).toContain('正在取消并清理');
-  files.tasks = [{ ...files.tasks[0]!, state: 'cancelled' }];
-  await nextTick();
-  expect(progressDialog()).toBeNull();
-  expect(cancel).toHaveBeenCalledExactlyOnceWith('upload');
 });
 
 it('reopens for new tasks and closes only after every task on this host has finished', async () => {
@@ -976,9 +1053,7 @@ it('reopens for new tasks and closes only after every task on this host has fini
   await nextTick();
   expect(progressDialog()?.querySelectorAll('.transfer-row')).toHaveLength(1);
   expect(progressDialog()?.querySelector('[data-task-id="other-host"]')).toBeNull();
-  [...progressDialog()!.querySelectorAll<HTMLButtonElement>('button')]
-    .find((button) => button.textContent?.trim() === '后台传输')!
-    .click();
+  closeTransferProgress();
   await nextTick();
   files.tasks.push({ ...progressTask('second'), direction: 'download', state: 'queued' });
   await nextTick();
@@ -1007,7 +1082,7 @@ it('opens progress after transfer confirmation and keeps explicit cancellation b
   const start = vi.spyOn(filesApi, 'start').mockResolvedValue(snapshot);
   const cancel = vi.spyOn(filesApi, 'cancel').mockResolvedValue();
   vi.spyOn(files, 'poll').mockImplementation(async () => {
-    files.tasks = [{ ...snapshot, state: cancel.mock.calls.length ? 'cancelled' : 'running' }];
+    files.tasks = [{ ...snapshot, state: cancel.mock.calls.length ? 'cancelling' : 'running' }];
   });
   root.querySelector<HTMLButtonElement>('[aria-label="选择上传文件…"]')!.click();
   await vi.waitFor(() =>
@@ -1019,8 +1094,19 @@ it('opens progress after transfer confirmation and keeps explicit cancellation b
   await vi.waitFor(() => expect(progressDialog()?.open).toBe(true));
   expect(start).toHaveBeenCalledOnce();
   expect(document.querySelector('dialog[aria-label="确认文件传输"]')).toBeNull();
-  progressDialog()!.dispatchEvent(new Event('cancel', { cancelable: true }));
-  await vi.waitFor(() => expect(progressDialog()).toBeNull());
+  cancelAllTransfersButton().click();
+  await vi.waitFor(() => expect(files.tasks[0]?.state).toBe('cancelling'));
+  expect(cancelAllTransfersButton().disabled).toBe(true);
+  expect(progressDialog()?.textContent).toContain('正在取消并清理');
+  closeTransferProgress();
+  await nextTick();
+  expect(progressDialog()).toBeNull();
+  openTransferProgress();
+  await nextTick();
+  expect(cancelAllTransfersButton().disabled).toBe(true);
+  files.tasks = [{ ...snapshot, state: 'cancelled' }];
+  await nextTick();
+  expect(progressDialog()).toBeNull();
   expect(cancel).toHaveBeenCalledExactlyOnceWith('confirmed');
 });
 
@@ -1050,7 +1136,7 @@ it('shows Windows drag-export progress in the application and cancels only this 
   await nextTick();
   expect(progressDialog()?.getAttribute('aria-label')).toBe('传输任务（3）');
   expect(progressDialog()?.querySelector('[data-task-id="windows"]')).not.toBeNull();
-  progressDialog()!.querySelector<HTMLButtonElement>('.modal-heading button')!.click();
+  cancelAllTransfersButton().click();
   await vi.waitFor(() => expect(progressDialog()).toBeNull());
   expect(cancelled).toEqual(new Set(['windows', 'first', 'second']));
   expect(cancel).toHaveBeenCalledTimes(3);
@@ -1072,7 +1158,7 @@ it('attempts every cancellation and leaves failed requests visible for retry', a
     );
   });
   await nextTick();
-  progressDialog()!.querySelector<HTMLButtonElement>('.modal-heading button')!.click();
+  cancelAllTransfersButton().click();
   await vi.waitFor(() =>
     expect(progressDialog()?.querySelector('[role="alert"]')?.textContent).toContain(
       '取消请求失败',
@@ -1083,7 +1169,7 @@ it('attempts every cancellation and leaves failed requests visible for retry', a
   cancel.mockImplementation(async (id) => {
     cancelled.add(id);
   });
-  progressDialog()!.querySelector<HTMLButtonElement>('.modal-heading button')!.click();
+  cancelAllTransfersButton().click();
   await vi.waitFor(() => expect(progressDialog()).toBeNull());
   expect(cancel).toHaveBeenLastCalledWith('second');
 });
@@ -1771,6 +1857,7 @@ it('places the navigation buttons before the remote ancestor folder menu and pat
     '主目录',
     '选择远程目录',
     '远程路径',
+    '目录书签',
   ]);
   expect(folderName()).toBe('dh');
   folderPicker().click();

@@ -1388,14 +1388,15 @@ it('protects a hidden settings draft before confirming application exit', async 
   expect(exit).toHaveBeenCalledExactlyOnceWith(true);
 });
 
-it('keeps the root folder count and search without a duplicate heading count or JSON controls', () => {
+it('places the backup menu before the sidebar toggle and keeps the root count beside its folder', () => {
   const heading = document.querySelector('.host-list-heading')!;
   expect(heading.textContent).toContain('主机');
   expect(heading.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
   expect(heading.querySelector('.host-count')).toBeNull();
   expect(document.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('2');
-  expect(heading.querySelectorAll('button')).toHaveLength(1);
-  expect(heading.querySelector('[aria-label="收起主机栏"]')).not.toBeNull();
+  expect(
+    [...heading.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')),
+  ).toEqual(['主机备份菜单', '收起主机栏']);
   expect(document.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
   expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
 });

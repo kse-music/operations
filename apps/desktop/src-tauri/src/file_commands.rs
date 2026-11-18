@@ -81,6 +81,38 @@ pub async fn files_remember_directory(
         .map_err(Into::into)
 }
 #[tauri::command]
+pub async fn files_bookmarks(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+) -> Result<Vec<DirectoryBookmark>, IpcError> {
+    application
+        .files_bookmarks(host_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_add_bookmark(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    bookmark: DirectoryBookmark,
+) -> Result<Vec<DirectoryBookmark>, IpcError> {
+    application
+        .files_add_bookmark(host_id, bookmark)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn files_remove_bookmark(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    path: String,
+) -> Result<Vec<DirectoryBookmark>, IpcError> {
+    application
+        .files_remove_bookmark(host_id, path)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn files_search_start(
     application: tauri::State<'_, Application>,
     id: String,

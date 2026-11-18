@@ -3,6 +3,7 @@ import { ensureDesktop } from './ipc';
 import type { EditorDocument, EditorStatus } from './editor';
 import type { TerminalEvent, TerminalSession, TerminalSize } from '../types/terminal';
 import type {
+  DirectoryBookmark,
   DirectoryListing,
   LocalDrive,
   LocalRecycle,
@@ -51,6 +52,11 @@ export const filesApi = {
   lastDirectory: (hostId: string) => call<string | null>('files_last_directory', { hostId }),
   rememberDirectory: (hostId: string, path: string) =>
     call<void>('files_remember_directory', { hostId, path }),
+  bookmarks: (hostId: string) => call<DirectoryBookmark[]>('files_bookmarks', { hostId }),
+  addBookmark: (hostId: string, bookmark: DirectoryBookmark) =>
+    call<DirectoryBookmark[]>('files_add_bookmark', { hostId, bookmark }),
+  removeBookmark: (hostId: string, path: string) =>
+    call<DirectoryBookmark[]>('files_remove_bookmark', { hostId, path }),
   search(
     id: string,
     input: FileSearchInput,

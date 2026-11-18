@@ -32,6 +32,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import FilePane from '../components/FilePane.vue';
 import FileLocationPicker from '../components/FileLocationPicker.vue';
+import RemoteDirectoryBookmarks from '../components/RemoteDirectoryBookmarks.vue';
 import DirectoryTree from '../components/DirectoryTree.vue';
 import FileNavigationButtons from '../components/FileNavigationButtons.vue';
 import TransferPanel from '../components/TransferPanel.vue';
@@ -63,7 +64,7 @@ import {
   type NewDirectoryInput,
 } from '../types/files';
 import { hostDisplayName, type Host } from '../types/hosts';
-const props = defineProps<{ hostId?: string }>();
+const props = defineProps<{ hostId?: string; inactive?: boolean }>();
 const application = useApplicationStore();
 const emit = defineEmits<{
   terminal: [host: Host, action: FileTerminalAction];
@@ -460,6 +461,11 @@ const treeConnection = computed(() =>
 async function selectRemoteFolder(path: string): Promise<void> {
   if (store.current?.state !== 'connected' || store.closingHosts.includes(chosen.value)) return;
   if (remoteFolders.value.some((folder) => folder.path === path)) await store.navigate(path);
+}
+function selectBookmark(path: string): void {
+  const connection = remoteConnection.value;
+  if (connection?.host.id === chosen.value && !connection.loading)
+    void store.navigate(path, connection);
 }
 
 watch(
@@ -1272,6 +1278,18 @@ onBeforeUnmount(() => {
             :disabled="store.current?.state !== 'connected'"
             required
           />
+          <RemoteDirectoryBookmarks
+            :key="store.current?.id ?? chosen"
+            :host-id="chosen"
+            :path="remoteConnection?.listing?.path ?? ''"
+            :disabled="
+              props.inactive ||
+              !remoteConnection?.listing ||
+              remoteConnection.loading ||
+              remoteConnection.host.id !== chosen
+            "
+            @select="selectBookmark"
+          />
         </form>
         <div class="toolbar">
           <button
@@ -1435,10 +1453,9 @@ onBeforeUnmount(() => {
     v-if="transferProgress && activeTransfers.length && !transfer"
     :title="tr('传输任务（{0}）', activeTransfers.length)"
     panel-class="file-transfer-dialog"
-    :busy="transferCancellationPending"
-    :close-label="tr('取消此主机的全部传输')"
+    :close-label="tr('收起传输弹窗')"
     focus-heading
-    @close="cancelTransfers"
+    @close="transferProgress = false"
   >
     <TransferPanel :host-id="chosen" hide-heading />
     <p v-if="transferCancelError" class="error-text" role="alert">{{ transferCancelError }}</p>
@@ -1446,8 +1463,13 @@ onBeforeUnmount(() => {
       <span v-if="transferCancellationPending" class="subtle" role="status">{{
         tr('正在取消并清理…')
       }}</span>
-      <button class="button" type="button" @click="transferProgress = false">
-        {{ tr('后台传输') }}
+      <button
+        class="button danger"
+        type="button"
+        :disabled="transferCancellationPending"
+        @click="cancelTransfers"
+      >
+        {{ tr('取消传输') }}
       </button>
     </footer>
   </Modal>

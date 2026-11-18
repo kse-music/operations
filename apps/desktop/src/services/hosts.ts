@@ -5,6 +5,7 @@ import type {
   Credential,
   CredentialInput,
   Host,
+  HostBackupResult,
   HostAuthenticationInput,
   HostKeyFingerprint,
   HostTestResult,
@@ -18,6 +19,7 @@ function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(command, args);
 }
 export const hostsApi = {
+  backup: (action: 'import' | 'export') => call<HostBackupResult | null>('host_backup', { action }),
   list: () => call<Catalog>('host_list'),
   test: (
     input: HostInput,

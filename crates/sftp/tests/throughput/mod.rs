@@ -212,7 +212,8 @@ async fn rejected_writes_and_corrupt_readback_never_commit_or_leak_handles() {
 async fn large_file_throughput() {
     let server = Server::start(true, Duration::ZERO).await;
     let session = server.open().await;
-    let files = Files::new(server.engine.clone(), 1);
+    let records = tempfile::tempdir().unwrap();
+    let files = Files::new(server.engine.clone(), 1).with_upload_recovery(records.path().into());
     let source = tempfile::tempdir().unwrap();
     let destination = tempfile::tempdir().unwrap();
     let bytes: Vec<u8> = (0..128 * 1024 * 1024).map(|n| (n % 251) as u8).collect();
@@ -260,9 +261,9 @@ async fn large_file_throughput() {
         let total = started.elapsed();
         let data_phase = data_phase.unwrap();
         eprintln!(
-            "128 MiB loopback {direction:?}: data phase={data_phase:?} ({:.1} MB/s); including SHA-256 and commit={total:?} ({:.1} MB/s)",
-            bytes.len() as f64 / data_phase.as_secs_f64() / 1_000_000.0,
-            bytes.len() as f64 / total.as_secs_f64() / 1_000_000.0
+            "128 MiB loopback {direction:?}: panel={:.1} MiB/s; time to verification={data_phase:?}; including verification and commit={total:?} ({:.1} MiB/s)",
+            done.bytes_per_second as f64 / 1_048_576.0,
+            bytes.len() as f64 / total.as_secs_f64() / 1_048_576.0
         );
     }
     assert_eq!(

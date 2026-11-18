@@ -93,6 +93,29 @@ export const useHostsStore = defineStore('hosts', () => {
       return;
     await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), tr('主机分组已更新。'));
   }
+  async function backup(action: 'import' | 'export'): Promise<void> {
+    await run(async () => {
+      const result = await hostsApi.backup(action);
+      if (!result) return;
+      let message =
+        action === 'export'
+          ? tr('已导出 {0} 台主机、{1} 个文件夹。', result.hosts, result.groups)
+          : tr('已导入 {0} 台主机、{1} 个文件夹。', result.hosts, result.groups);
+      if (result.agentHosts)
+        message += ' ' + tr('{0} 台主机需要本机 SSH Agent 提供密钥。', result.agentHosts);
+      if (result.missingAuth)
+        message += ' ' + tr('{0} 台主机在备份时没有绑定登录凭据。', result.missingAuth);
+      notice.value = message;
+      if (action === 'import') {
+        search.value = '';
+        try {
+          await reload();
+        } catch {
+          error.value = tr('操作已完成，但列表刷新失败，请点击刷新。');
+        }
+      }
+    });
+  }
   async function renameHost(id: string, name: string): Promise<boolean> {
     const host = catalog.value?.hosts.find((host) => host.id === id);
     if (!host) {
@@ -140,6 +163,7 @@ export const useHostsStore = defineStore('hosts', () => {
     selected,
     load,
     run,
+    backup,
     move,
     setFavorite,
     renameHost,

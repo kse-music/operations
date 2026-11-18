@@ -57,6 +57,49 @@ async function mount(active = true) {
 }
 const folder = (id = '') =>
   root.querySelector<HTMLElement>(`[data-group-id="${id}"] > .group-toggle`)!;
+
+it('offers both backup operations in the heading and refreshes even an empty, filtered tree after import', async () => {
+  const { store } = await mount();
+  const restored = store.catalog!;
+  store.catalog = { ...restored, hosts: [], groups: [] };
+  store.search = 'hidden host';
+  await nextTick();
+  const trigger = root.querySelector<HTMLButtonElement>(
+    '.host-list-heading [aria-haspopup="menu"]',
+  )!;
+  expect(trigger.disabled).toBe(false);
+  async function actions() {
+    trigger.click();
+    await nextTick();
+    return document.querySelectorAll<HTMLButtonElement>(
+      '[role="menu"][aria-label="主机备份菜单"] button',
+    );
+  }
+  const backup = vi.spyOn(hostsApi, 'backup').mockResolvedValueOnce(null).mockResolvedValueOnce({
+    hosts: 2,
+    groups: 2,
+    agentHosts: 0,
+    missingAuth: 0,
+  });
+  const list = vi.spyOn(hostsApi, 'list').mockResolvedValue(restored);
+  try {
+    const items = await actions();
+    expect([...items].map((b) => b.textContent)).toEqual(['导出', '导入']);
+    items[0]!.click();
+    await vi.waitFor(() => expect(store.busy).toBe(false));
+    expect(store.notice).toBeNull();
+    expect(store.search).toBe('hidden host');
+    expect(list).not.toHaveBeenCalled();
+    (await actions())[1]!.click();
+    await vi.waitFor(() => expect(root.querySelector('[data-host-id="h1"]')).not.toBeNull());
+    expect(backup.mock.calls).toEqual([['export'], ['import']]);
+    expect(store.search).toBe('');
+    expect(store.notice).toContain('已导入 2 台主机');
+  } finally {
+    backup.mockRestore();
+    list.mockRestore();
+  }
+});
 const menu = () => document.querySelector<HTMLElement>('[aria-label="主机树操作"]')!;
 async function open(target: HTMLElement) {
   target.dispatchEvent(

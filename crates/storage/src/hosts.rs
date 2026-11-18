@@ -1,4 +1,5 @@
 use super::{Database, storage_error};
+pub mod backup;
 
 #[cfg(test)]
 mod tests;
@@ -148,13 +149,29 @@ fn validate_jump_chain(connection: &Connection, id: &str, input: &HostInput) -> 
 pub struct CredentialRecord {
     pub public: Credential,
     pub secret_ref: Option<String>,
+    pub host_managed: bool,
 }
 
 fn credential_record(connection: &Connection, id: &str) -> Result<CredentialRecord, Error> {
-    connection.query_row("SELECT id,name,kind,key_path,secret_ref,revision,(SELECT count(*) FROM hosts WHERE credential_id=credentials.id OR json_extract(ssh_options,'$.proxy.credentialId')=credentials.id) FROM credentials WHERE id=?1", [id], |row| {
+    connection.query_row("SELECT id,name,kind,key_path,secret_ref,revision,(SELECT count(*) FROM hosts WHERE credential_id=credentials.id OR json_extract(ssh_options,'$.proxy.credentialId')=credentials.id),host_managed FROM credentials WHERE id=?1", [id], |row| {
         let secret_ref: Option<String> = row.get(4)?;
-        Ok(CredentialRecord { public: Credential { id:row.get(0)?,name:row.get(1)?,kind:AuthType::parse(&row.get::<_,String>(2)?).map_err(decode_error)?,key_path:row.get(3)?,has_secret:secret_ref.is_some(),revision:row.get(5)?,host_count:row.get(6)? },secret_ref })
+        Ok(CredentialRecord { public: Credential { id:row.get(0)?,name:row.get(1)?,kind:AuthType::parse(&row.get::<_,String>(2)?).map_err(decode_error)?,key_path:row.get(3)?,has_secret:secret_ref.is_some(),revision:row.get(5)?,host_count:row.get(6)? },secret_ref,host_managed:row.get(7)? })
     }).optional().map_err(storage_error)?.ok_or(Error::NotFound)
+}
+
+fn directory_rows(tx: &Connection) -> Result<(Vec<Host>, Vec<HostGroup>), Error> {
+    let hosts = tx
+        .prepare(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts ORDER BY name COLLATE NOCASE,id"
+        ))
+        .map_err(storage_error)?
+        .query_map([], host_row)
+        .map_err(storage_error)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(storage_error)?;
+    let groups = tx.prepare("SELECT id,name,sort_order,parent_id FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id").map_err(storage_error)?
+            .query_map([], |r| Ok(HostGroup{id:r.get(0)?,name:r.get(1)?,sort_order:r.get(2)?,parent_id:r.get(3)?})).map_err(storage_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?;
+    Ok((hosts, groups))
 }
 
 impl Database {
@@ -164,17 +181,7 @@ impl Database {
     pub fn catalog(&self) -> Result<Catalog, Error> {
         let mut connection = self.connect()?;
         let tx = connection.transaction().map_err(storage_error)?;
-        let hosts = tx
-            .prepare(&format!(
-                "SELECT {HOST_COLUMNS} FROM hosts ORDER BY name COLLATE NOCASE,id"
-            ))
-            .map_err(storage_error)?
-            .query_map([], host_row)
-            .map_err(storage_error)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(storage_error)?;
-        let groups = tx.prepare("SELECT id,name,sort_order,parent_id FROM host_groups ORDER BY sort_order,name COLLATE NOCASE,id").map_err(storage_error)?
-            .query_map([], |r| Ok(HostGroup{id:r.get(0)?,name:r.get(1)?,sort_order:r.get(2)?,parent_id:r.get(3)?})).map_err(storage_error)?.collect::<rusqlite::Result<Vec<_>>>().map_err(storage_error)?;
+        let (hosts, groups) = directory_rows(&tx)?;
         let ids = tx
             .prepare(
                 "SELECT id FROM credentials WHERE host_managed=0 ORDER BY name COLLATE NOCASE,id",
@@ -257,8 +264,11 @@ impl Database {
         tx.execute("DELETE FROM hosts WHERE id=?1", [id])
             .map_err(storage_error)?;
         tx.execute(
-            "DELETE FROM application_settings WHERE key=?1",
-            [super::sftp_directory::key(id)],
+            "DELETE FROM application_settings WHERE key IN (?1,?2)",
+            params![
+                super::sftp_directory::key(id),
+                super::sftp_bookmarks::key(id)
+            ],
         )
         .map_err(storage_error)?;
         retire_host_credential(&tx, previous.config.credential_id.as_deref())?;
@@ -443,6 +453,24 @@ impl Database {
             .execute("DELETE FROM secret_gc WHERE reference=?1", [reference])
             .map_err(storage_error)?;
         Ok(())
+    }
+    pub fn collect_pending_secret(
+        &self,
+        reference: &str,
+        delete: impl FnOnce() -> Result<(), Error>,
+    ) -> Result<(), Error> {
+        let mut connection = self.connect()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage_error)?;
+        if tx
+            .execute("DELETE FROM secret_gc WHERE reference=?1", [reference])
+            .map_err(storage_error)?
+            == 1
+        {
+            delete()?;
+        }
+        tx.commit().map_err(storage_error)
     }
     pub fn annotate_duplicates(&self, preview: &mut ImportPreview) -> Result<(), Error> {
         let connection = self.connect()?;

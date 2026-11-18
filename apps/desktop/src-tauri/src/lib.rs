@@ -3,6 +3,7 @@ pub mod browser_commands;
 pub mod commands;
 pub mod editor_commands;
 pub mod file_commands;
+mod host_backup;
 mod monitor_commands;
 mod ops_commands;
 mod plugin_commands;
@@ -254,6 +255,9 @@ pub fn command_handler<R: tauri::Runtime>()
         file_commands::files_list,
         file_commands::files_last_directory,
         file_commands::files_remember_directory,
+        file_commands::files_bookmarks,
+        file_commands::files_add_bookmark,
+        file_commands::files_remove_bookmark,
         file_commands::files_search_start,
         file_commands::files_search_cancel,
         file_commands::files_local,
@@ -327,6 +331,7 @@ pub fn command_handler<R: tauri::Runtime>()
         commands::host_update_tested,
         commands::host_update,
         commands::host_set_favorite,
+        host_backup::host_backup,
         commands::host_delete,
         commands::host_copy,
         commands::group_save,

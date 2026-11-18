@@ -127,3 +127,9 @@ export interface HostKeyFingerprint {
 export type HostTestResult =
   | { status: 'trust_required'; key: HostKeyFingerprint }
   | { status: 'connected'; testId: string; expiresInSeconds: number };
+export interface HostBackupResult {
+  hosts: number;
+  groups: number;
+  agentHosts: number;
+  missingAuth: number;
+}
