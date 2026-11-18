@@ -4,6 +4,8 @@
 
 ServerDeck is a local-first server workbench for developers and operations teams, built with Rust, Tauri 2, Vue 3, and TypeScript. It brings terminals, files, Docker, and AI-assisted operations into a single host workspace over SSH/SFTP, without requiring a cloud account or a remote agent.
 
+![ServerDeck desktop workspace with host groups, a connected SSH terminal, and SFTP, Docker, and assistant tools](docs/screenshots/serverdeck-workspace.png)
+
 ## Features
 
 - **Host management**: Nested folders, search, drag and drop, duplication, connection tests, and preview-based import of a supported subset of OpenSSH Config. Passwords and private keys are stored in the system credential store.

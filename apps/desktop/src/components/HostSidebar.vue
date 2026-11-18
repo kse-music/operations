@@ -45,7 +45,6 @@ import { folderAncestors, hostFolderRows } from '../services/host-tree';
 const store = useHostsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
-const hostAddress = ({ hostname, port }: Host) => hostDisplayName({ name: '', hostname, port });
 const props = withDefaults(defineProps<{ active?: boolean }>(), {
   active: true,
 });
@@ -703,8 +702,8 @@ onBeforeUnmount(() => {
                 :connected="hostState(host.id) === tr('已连接')"
                 :label="hostState(host.id)"
               />
-              <span class="host-label" :class="{ renaming: isRenaming('host', host.id) }"
-                ><TreeRenameInput
+              <span class="host-label" :class="{ renaming: isRenaming('host', host.id) }">
+                <TreeRenameInput
                   v-if="isRenaming('host', host.id) && renaming"
                   :name="renaming.name"
                   :label="tr('重命名 {0}', renaming.initialName)"
@@ -715,11 +714,8 @@ onBeforeUnmount(() => {
                   @submit="saveRename"
                   @cancel="finishRename(true)"
                 />
-                <span v-else class="host-name">{{ hostDisplayName(host) }}</span
-                ><span v-if="hostDisplayName(host) !== hostAddress(host)" class="host-address">{{
-                  hostAddress(host)
-                }}</span></span
-              >
+                <span v-else class="host-name">{{ hostDisplayName(host) }}</span>
+              </span>
             </component>
             <HostTreeControls
               :ref="(component) => setControls(host.id, component)"

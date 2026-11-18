@@ -365,8 +365,7 @@ it('allows clearing a host name and keeps an unchanged unnamed host unnamed', as
   changeName('');
   await editKey('Enter');
   await vi.waitFor(() => expect(renameInput()).toBeNull());
-  expect(row().querySelector('.host-name')?.textContent).toBe(host.hostname);
-  expect(row().querySelector('.host-address')).toBeNull();
+  expect(row().textContent?.trim()).toBe(host.hostname);
   await pressF2(row());
   expect(renameInput()!.value).toBe(host.hostname);
   await editKey('Enter');

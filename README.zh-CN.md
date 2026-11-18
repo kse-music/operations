@@ -4,6 +4,8 @@
 
 ServerDeck 是面向开发者和运维人员的本地优先服务器工作台，基于 Rust、Tauri 2、Vue 3 和 TypeScript 构建。通过 SSH/SFTP 将终端、文件、Docker 和 AI 运维集中在同一主机工作区，无需云端账号或远端 Agent。
 
+![ServerDeck 桌面工作区，展示主机分组、已连接的 SSH 终端以及 SFTP、Docker 和 AI 助手入口](docs/screenshots/serverdeck-workspace.png)
+
 ## 功能
 
 - **主机管理**：多级文件夹、搜索、拖动、复制、连接测试、受限 OpenSSH Config 预览导入；密码和私钥交给系统凭据库。

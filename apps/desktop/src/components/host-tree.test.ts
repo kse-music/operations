@@ -98,7 +98,7 @@ it('bounds initial host DOM, exposes further rows, and supports arrow/Home/End k
   expect(root.textContent).toContain('Host 449');
 });
 
-it('shows an address only once when it already serves as the host name', async () => {
+it('shows one label per host and still finds named hosts by address', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const store = useHostsStore();
@@ -121,19 +121,23 @@ it('shows an address only once when it already serves as the host name', async (
   app = createApp(HostSidebar).use(pinia);
   app.mount(root);
   await nextTick();
-  for (const [id, name, address] of [
+  for (const [id, label] of [
     ['default', '192.0.2.10'],
     ['custom', '192.0.2.10:2222'],
-    ['named', '生产', '192.0.2.20:2222'],
+    ['named', '生产'],
     ['spaces', 'server.example'],
     ['ipv6', '[2001:db8::1]:2200'],
     ['duplicate', '192.0.2.30'],
-    ['named-ipv6', '实验室', '[2001:db8::2]:2200'],
+    ['named-ipv6', '实验室'],
   ]) {
     const row = root.querySelector(`[data-host-id="${id}"]`)!;
-    expect(row.querySelector('.host-name')?.textContent).toBe(name);
-    expect(row.querySelector('.host-address')?.textContent).toBe(address);
+    expect(row.textContent?.trim()).toBe(label);
   }
+  store.search = '192.0.2.20';
+  await nextTick();
+  expect([...root.querySelectorAll('.tree-host')].map((row) => row.textContent?.trim())).toEqual([
+    '生产',
+  ]);
 });
 
 it('shows host counts in the root folder without duplicating them in the heading and updates after changes', async () => {
@@ -220,7 +224,6 @@ it('keeps host tools outside the scrolling list and preserves selection and grou
   expect(scroll.querySelector('[aria-label="新建主机"]')).toBeNull();
   expect(scroll.querySelector('footer')).toBeNull();
   expect(root.querySelector('.host-search-field > svg')).not.toBeNull();
-  expect(root.querySelector('.host-address')?.textContent).toBe('prod.example');
   const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
   row.click();
   await nextTick();
