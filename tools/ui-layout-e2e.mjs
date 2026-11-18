@@ -112,7 +112,7 @@ try {
     assert.equal(await aboutPage.count(), 0);
     await showHostTree(page);
     assert.equal(await page.locator('.activity-rail button').count(), 3);
-    assert.equal(await page.locator('.host-list-heading button').count(), 0);
+    assert.equal(await page.locator('.host-views button').count(), 2);
     assert.equal(await page.locator('.sidebar').isVisible(), true);
     const geometry = await page.evaluate(() => {
       const box = (s) => document.querySelector(s).getBoundingClientRect().toJSON();
@@ -120,7 +120,7 @@ try {
       return {
         sidebar: box('.sidebar'),
         list: box('.host-tree-scroll'),
-        header: box('.host-list-heading'),
+        header: box('.host-library-heading'),
         main: box('main'),
         rail: box('.activity-rail'),
         modules: box('.app-header'),
@@ -140,7 +140,7 @@ try {
         `${name}: ${region} must start below the module header`,
       );
     assert.equal(await page.locator('.sidebar-app-actions button').count(), 1);
-    assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机');
+    assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机管理');
     await page.locator('.host-list-title').click();
     assert.equal(await page.locator('.workspace-tabs [role="tab"]').count(), 0);
     assert.equal(
@@ -152,7 +152,7 @@ try {
       0,
     );
     assert.equal(await page.locator('.host-count').count(), 0);
-    const total = page.locator('.tree-group[data-group-id=""] > .group-toggle .group-count');
+    const total = page.locator('[data-group-id="production"] > .group-toggle .group-count');
     assert.equal((await total.textContent()).trim(), '60');
     assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
     assert(
@@ -170,8 +170,9 @@ try {
     assert.equal(await page.getByRole('button', { name: '主机树工具', exact: true }).count(), 0);
     assert.equal(await page.getByLabel('主机排序', { exact: true }).count(), 0);
     assert.equal(await page.locator('#host-tree-tools').count(), 0);
-    const listHeading = page.locator('.host-list-heading');
-    assert.equal(await listHeading.getByRole('button').count(), 0);
+    const listHeading = page.locator('.host-library-heading');
+    const views = page.locator('.host-views');
+    assert.equal(await views.getByRole('button', { name: '全部', pressed: true }).count(), 1);
     assert.equal(
       await listHeading.getByRole('button', { name: '新建主机', exact: true }).count(),
       0,
@@ -181,11 +182,12 @@ try {
       .getByRole('button', { name: '本地终端', exact: true });
     assert.equal(await page.getByLabel('选择 ServerDeck 主机文件', { exact: true }).count(), 0);
     assert.equal(await page.getByLabel('按标签筛选主机', { exact: true }).count(), 0);
-    assert.equal(await page.getByRole('button', { name: '收藏', exact: true }).count(), 0);
+    assert.equal(await views.getByRole('button', { name: '收藏', pressed: false }).count(), 1);
     assert.equal(await page.getByLabel('已收藏', { exact: true }).count(), 0);
     assert.equal(
-      await listHeading.evaluate(
+      await views.evaluate(
         (element) =>
+          element.previousElementSibling?.classList.contains('host-library-heading') &&
           element.nextElementSibling?.classList.contains('host-sidebar-controls') &&
           element.nextElementSibling?.nextElementSibling?.classList.contains('host-tree-scroll'),
       ),
@@ -246,6 +248,7 @@ try {
     await page.screenshot({ path: `${output}/${name}-host-dialog.png` });
     await hostDialog.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await hostDialog.waitFor({ state: 'hidden' });
+    await views.getByRole('button', { name: '收藏', exact: true }).click();
     const hostRow = page.locator('.host-favorites .tree-host-row').first();
     assert.equal(await page.locator('.tree-host-actions').count(), 0);
     assert.equal(await hostRow.getByRole('button').count(), 2);
@@ -268,10 +271,7 @@ try {
     assert.equal(await hostRow.getByRole('button').count(), 2);
     assert.deepEqual(await hostRow.locator('.host-label').boundingBox(), labelBefore);
     const hostButton = hostRow.locator('.tree-host');
-    assert.equal(
-      await hostButton.evaluate((element) => getComputedStyle(element).paddingRight),
-      '10px',
-    );
+    assert.equal(await hostRow.locator('[aria-haspopup="menu"]').count(), 0);
     await page.mouse.move(0, 0);
     assert.equal(await favoriteOpacity(), '0');
     await hostButton.press('Tab');
@@ -302,11 +302,12 @@ try {
       `${name}: management opened a terminal`,
     );
     await edit.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await views.getByRole('button', { name: '全部', exact: true }).click();
     await page.screenshot({ path: `${output}/${name}-host-list.png` });
     await page.locator('.host-tree-scroll').evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
-    assert.deepEqual(await page.locator('.host-list-heading').boundingBox(), {
+    assert.deepEqual(await listHeading.boundingBox(), {
       x: geometry.header.x,
       y: geometry.header.y,
       width: geometry.header.width,
@@ -316,13 +317,13 @@ try {
     assert((await page.locator('.tree-host').count()) > 0);
     await page.getByLabel('搜索主机', { exact: true }).fill('no-matching-layout-host');
     await page.getByText('没有匹配的主机', { exact: true }).waitFor();
-    assert.equal((await total.textContent()).trim(), '60');
+    assert.equal(await total.count(), 0);
     await page.getByLabel('搜索主机', { exact: true }).fill('');
     await page.getByLabel('搜索主机', { exact: true }).fill('192.0.2.60');
     assert.equal(await page.locator('.tree-host').count(), 1);
     await page.getByLabel('搜索主机', { exact: true }).fill('short-list');
     assert.equal(await page.locator('.tree-host').count(), 3);
-    assert.equal((await total.textContent()).trim(), '60');
+    assert.equal((await total.textContent()).trim(), '3');
     if (height >= 800) {
       assert.equal(
         await page.locator('.host-tree-scroll').evaluate((el) => el.scrollHeight > el.clientHeight),
@@ -357,17 +358,14 @@ try {
     assert.equal(await hostMenu.count(), 1);
     assert.deepEqual(
       (await hostMenu.getByRole('menuitem').allTextContents()).map((text) => text.trim()),
-      ['连接', '编辑', '复制', '删除'],
+      ['连接', '编辑', '重命名', '复制', '删除'],
     );
     assert.equal(
       await hostMenu.getByRole('menuitem', { name: '新建文件夹', exact: true }).count(),
       0,
     );
     assert.equal(await page.getByRole('button', { name: '关闭操作菜单', exact: true }).count(), 0);
-    assert.equal(
-      await page.locator('.tree-host-more, .host-tree-scroll [aria-haspopup=menu]').count(),
-      0,
-    );
+    assert.equal(await page.locator('.host-tree-scroll [aria-haspopup=menu]').count(), 0);
     await page.screenshot({ path: `${output}/${name}-host-context-menu.png` });
     await page.keyboard.press('Escape');
     assert.equal(await hostMenu.count(), 0);
@@ -396,7 +394,7 @@ try {
     if (!(await page.locator('.host-tree-section').isVisible())) await showHostTree(page);
     await localTerminal.waitFor();
     const pinned = await localTerminal.boundingBox();
-    const heading = await page.locator('.host-list-heading').boundingBox();
+    const heading = await listHeading.boundingBox();
     const list = await page.locator('.host-tree-scroll').boundingBox();
     const sidebarBounds = await page.locator('.activity-rail').boundingBox();
     assert(

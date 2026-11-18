@@ -25,20 +25,23 @@ export async function showHostTree(page) {
   if (!(await page.locator('.host-tree-section').isVisible())) {
     await page.locator('.activity-rail').getByRole('button', { name: '首页', exact: true }).click();
   }
+  const expand = page.getByRole('button', { name: '展开主机列表', exact: true });
+  if (await expand.isVisible()) await expand.click();
+  const library = page.locator('.host-views').getByRole('button', { name: '全部', exact: true });
+  if ((await library.getAttribute('aria-pressed')) === 'false') await library.click();
 }
 
 export async function hostTreeAction(page, folderId, action) {
   await showHostTree(page);
-  // Expanding folders never opens a connection; reveal the context target explicitly.
-  for (;;) {
-    const collapsed = page.locator('.group-toggle[aria-expanded=false]');
-    if (!(await collapsed.count())) break;
-    await collapsed.first().click();
+  if (folderId === null) {
+    await page.locator('.host-tree-scroll').click({ button: 'right', position: { x: 2, y: 2 } });
+  } else {
+    const collapsed = page.locator('.group-expander[aria-expanded=false]:enabled');
+    while (await collapsed.count()) await collapsed.first().click();
+    await page
+      .locator(`.tree-group[data-group-id=${JSON.stringify(folderId)}] > .group-toggle`)
+      .click({ button: 'right' });
   }
-  const target = page.locator(
-    `.tree-group[data-group-id=${JSON.stringify(folderId ?? '')}] > .group-toggle`,
-  );
-  await target.click({ button: 'right' });
   await page
     .getByRole('menu', { name: '主机树操作', exact: true })
     .getByRole('menuitem', { name: action, exact: true })
@@ -249,8 +252,8 @@ export async function selectHostWorkspace(page, id) {
   } else {
     await showHostTree(page);
     await page.getByLabel('搜索主机', { exact: true }).fill('');
-    for (const group of await page.locator('.group-toggle[aria-expanded=false]').all())
-      await group.click();
+    const collapsed = page.locator('.group-expander[aria-expanded=false]:enabled');
+    while (await collapsed.count()) await collapsed.first().click();
     await page.locator(`.tree-host[data-host-id=${JSON.stringify(id)}]`).dblclick();
   }
 }

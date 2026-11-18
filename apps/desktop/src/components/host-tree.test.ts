@@ -149,7 +149,7 @@ it('shows one label per host and still finds named hosts by address', async () =
   ]);
 });
 
-it('shows host counts in the root folder without duplicating them in the heading and updates after changes', async () => {
+it('shows live counts on actual folders and omits the root row and heading total', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const store = useHostsStore();
@@ -157,13 +157,14 @@ it('shows host counts in the root folder without duplicating them in the heading
     ...hostInput(),
     id: 'first',
     name: 'First',
+    groupId: 'servers',
     hostname: 'first.example',
     createdAt: '',
     updatedAt: '',
   };
   store.catalog = {
     hosts: [host, { ...host, id: 'second', name: 'Second', favorite: true }],
-    groups: [],
+    groups: [{ id: 'servers', name: 'Servers', parentId: null, sortOrder: 0 }],
     credentials: [],
     pendingSecretDeletions: 0,
   };
@@ -172,14 +173,17 @@ it('shows host counts in the root folder without duplicating them in the heading
   app = createApp(HostSidebar).use(pinia);
   app.mount(root);
   const count = () =>
-    root.querySelector('[data-group-id=""] > .group-toggle .group-count')?.textContent?.trim();
-  expect(root.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
+    root
+      .querySelector('[data-group-id="servers"] > .group-toggle .group-count')
+      ?.textContent?.trim();
+  expect(root.querySelector('[data-group-id=""] .group-toggle')).toBeNull();
+  expect(root.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机管理');
   expect(root.querySelector('.host-count')).toBeNull();
   expect(count()).toBe('2');
   store.search = 'no-match';
   await nextTick();
   expect(root.querySelectorAll('.tree-host')).toHaveLength(0);
-  expect(count()).toBe('0');
+  expect(count()).toBeUndefined();
   store.search = '';
   await nextTick();
   expect(count()).toBe('2');
@@ -194,11 +198,11 @@ it('shows host counts in the root folder without duplicating them in the heading
   expect(count()).toBe('0');
   store.catalog = null;
   await nextTick();
-  expect(root.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
+  expect(root.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机管理');
   expect(root.querySelector('.host-count')).toBeNull();
 });
 
-it('keeps host tools outside the scrolling list and keeps favorite shortcuts above folded groups', async () => {
+it('keeps search above both views and preserves the folded tree when switching to favorites', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const hosts = useHostsStore();
@@ -241,16 +245,13 @@ it('keeps host tools outside the scrolling list and keeps favorite shortcuts abo
   await nextTick();
   expect(context.defaultPrevented).toBe(true);
   expect(scroll.querySelector('[aria-haspopup="menu"]')).toBeNull();
-  expect(root.querySelectorAll('.host-list-heading [aria-haspopup="menu"]')).toHaveLength(1);
-  expect(root.querySelector('.tree-host-more')).toBeNull();
   expect(select).toHaveBeenCalledOnce();
   expect(document.querySelector('[aria-label="主机树操作"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="主机树操作"]')?.textContent).not.toContain(
     '新建文件夹',
   );
   document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-  const rootFolder = root.querySelector<HTMLButtonElement>('[data-group-id=""] .group-toggle')!;
-  rootFolder.dispatchEvent(
+  scroll.dispatchEvent(
     new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }),
   );
   await nextTick();
@@ -266,20 +267,24 @@ it('keeps host tools outside the scrolling list and keeps favorite shortcuts abo
   expect(root.querySelector('#host-tree-tools')).toBeNull();
   expect(root.querySelector('[aria-label="主机排序"]')).toBeNull();
   const heading = root.querySelector('.host-list-heading')!;
-  expect(heading.nextElementSibling?.classList.contains('host-sidebar-controls')).toBe(true);
-  expect(heading.nextElementSibling?.nextElementSibling).toBe(scroll);
+  const views = root.querySelector('.host-views')!;
+  const [library, favorites] = views.querySelectorAll<HTMLButtonElement>('button');
+  expect(library!.textContent?.trim()).toBe('全部');
+  expect(library!.getAttribute('aria-pressed')).toBe('true');
+  expect(favorites!.textContent?.trim()).toBe('收藏');
+  expect(favorites!.getAttribute('aria-pressed')).toBe('false');
+  expect(heading.nextElementSibling).toBe(views);
+  expect(views.nextElementSibling?.classList.contains('host-sidebar-controls')).toBe(true);
+  expect(views.nextElementSibling?.nextElementSibling).toBe(scroll);
   expect(heading.previousElementSibling).toBeNull();
   expect(root.querySelector('[aria-label="按标签筛选主机"]')).toBeNull();
   expect(root.querySelector('[aria-label="主机筛选"]')).toBeNull();
-  expect(
-    [...heading.querySelectorAll(':scope > button')].map((b) => b.getAttribute('aria-label')),
-  ).toEqual(['主机备份菜单']);
-  expect(heading.querySelector('[aria-label="新建主机"]')).toBeNull();
+  expect(heading.querySelector('button')).toBeNull();
   expect(root.querySelector<HTMLInputElement>('[aria-label="搜索主机"]')!.placeholder).toBe(
     '搜索主机、地址、用户名…',
   );
   expect(root.textContent).not.toMatch(/标签|备注/);
-  expect(scroll.firstElementChild?.classList.contains('host-favorites')).toBe(true);
+  expect(scroll.firstElementChild?.getAttribute('data-group-id')).toBe('group');
   expect(root.querySelectorAll('.tree-group .tree-host')).toHaveLength(2);
   const group = [...root.querySelectorAll<HTMLElement>('.group-toggle')].find((button) =>
     button.textContent?.includes('Servers'),
@@ -287,8 +292,26 @@ it('keeps host tools outside the scrolling list and keeps favorite shortcuts abo
   group.querySelector<HTMLButtonElement>('.group-expander')!.click();
   await nextTick();
   expect(root.querySelectorAll('.tree-group .tree-host')).toHaveLength(0);
-  expect(root.querySelector('.host-favorites .tree-host')?.textContent).toContain('Production');
-  expect(group.querySelector('.group-expander')!.getAttribute('aria-expanded')).toBe('false');
+  favorites!.click();
+  await nextTick();
+  expect(favorites!.getAttribute('aria-pressed')).toBe('true');
+  expect(root.querySelector('.tree-group')).toBeNull();
+  expect([...root.querySelectorAll('.tree-host')].map((row) => row.textContent)).toEqual([
+    'Production',
+  ]);
+  hosts.search = 'Staging';
+  await nextTick();
+  expect(scroll.textContent).toContain('没有匹配的主机');
+  library!.click();
+  await nextTick();
+  expect([...root.querySelectorAll('.tree-host')].map((row) => row.textContent)).toEqual([
+    'Staging',
+  ]);
+  hosts.search = '';
+  await nextTick();
+  expect(
+    root.querySelector('[data-group-id="group"] .group-expander')?.getAttribute('aria-expanded'),
+  ).toBe('false');
 });
 
 it('adds and removes a favorite through its star without opening a connection or moving the host', async () => {
@@ -325,26 +348,32 @@ it('adds and removes a favorite through its star without opening a connection or
     expect(original.getAttribute('aria-pressed')).toBe('false');
 
     original.click();
-    await vi.waitFor(() => expect(shortcut()?.getAttribute('aria-pressed')).toBe('true'));
+    await vi.waitFor(() => expect(original.getAttribute('aria-pressed')).toBe('true'));
     expect(save).toHaveBeenLastCalledWith(host.id, true);
-    expect(original.getAttribute('aria-pressed')).toBe('true');
     expect(store.catalog.hosts[0]?.groupId).toBe('servers');
     store.search = 'staging';
     await nextTick();
     expect(root.querySelectorAll('.tree-host')).toHaveLength(1);
     store.search = '';
     await nextTick();
+    const [library, favorites] = root.querySelectorAll<HTMLButtonElement>('.host-views button');
+    favorites!.click();
+    await nextTick();
+    expect(shortcut()?.getAttribute('aria-pressed')).toBe('true');
     shortcut()!.click();
     await vi.waitFor(() => expect(shortcut()).toBeNull());
     expect(save).toHaveBeenLastCalledWith(host.id, false);
-    expect(original.getAttribute('aria-pressed')).toBe('false');
+    expect(root.querySelector('.host-empty')?.textContent).toContain('暂无收藏的主机');
+    library!.click();
+    await nextTick();
+    expect(root.querySelector('.host-favorite-button')?.getAttribute('aria-pressed')).toBe('false');
     expect(onSelect).not.toHaveBeenCalled();
   } finally {
     save.mockRestore();
   }
 });
 
-it('shows loading, failure and per-host status with the total in the root folder', async () => {
+it('shows loading, failure and ungrouped hosts without a root row', async () => {
   pinia = createPinia();
   setActivePinia(pinia);
   const hosts = useHostsStore();
@@ -360,7 +389,7 @@ it('shows loading, failure and per-host status with the total in the root folder
   hosts.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
   await nextTick();
   expect(root.textContent).toContain('尚未添加主机');
-  expect(root.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('0');
+  expect(root.querySelector('.group-toggle')).toBeNull();
   useBackgroundStore().connections = [];
   hosts.catalog.hosts.push({
     ...hostInput(),
@@ -407,7 +436,8 @@ it('shows loading, failure and per-host status with the total in the root folder
   await nextTick();
   expect(icon.getAttribute('aria-label')).toBe('未连接');
   expect(icon.classList.contains('connected')).toBe(false);
-  expect(root.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('1');
+  expect(root.querySelector('.group-toggle')).toBeNull();
+  expect(root.querySelector('.tree-host')?.textContent?.trim()).toBe('Offline');
   expect(root.querySelector('.host-sidebar-footer')).toBeNull();
 });
 
@@ -464,10 +494,11 @@ it('moves hosts with pointer dragging into empty, collapsed and ungrouped target
     const row = root.querySelector<HTMLButtonElement>('.tree-host')!;
     expect(row.draggable).toBe(false);
     pointer(row, 'pointerdown', 10, 10);
-    const group = [...root.querySelectorAll('.tree-group')].find(
-      (el) => el.querySelector('.group-name')?.textContent === (target === null ? '根目录' : 'B'),
-    )!;
-    hitTarget.mockReturnValue(group.querySelector('.group-name'));
+    const group =
+      target === null
+        ? root.querySelector('.host-tree-scroll')!
+        : root.querySelector('[data-group-id="b"]')!;
+    hitTarget.mockReturnValue(target === null ? group : group.querySelector('.group-name'));
     const move = pointer(window, 'pointermove', 50, 90);
     await nextTick();
     expect(move.defaultPrevented).toBe(true);

@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  Ellipsis,
   FileInput,
   FileOutput,
   Folder,
@@ -65,13 +64,13 @@ const emit = defineEmits<{
   plugin: [id: string, contribution: string, hostId: string];
 }>();
 const collapsed = ref<string[]>([]);
-const selectedFolder = ref<string | null>();
+const selectedFolder = ref<string>();
 watch(
   () => store.selectedId,
   () => (selectedFolder.value = undefined),
   { flush: 'sync' },
 );
-function selectFolder(id: string | null, event: MouseEvent): void {
+function selectFolder(id: string, event: MouseEvent): void {
   selectedFolder.value = id;
   (event.currentTarget as HTMLElement).focus({ preventScroll: true });
 }
@@ -80,6 +79,7 @@ function selectHost(host: Host): void {
   store.selectedId = host.id;
 }
 const tree = ref<HTMLElement>();
+const list = ref<HTMLElement>();
 const dragged = ref<string | null>(null),
   dropTarget = ref<string | null>(null),
   dragPosition = ref({ x: 0, y: 0 });
@@ -92,12 +92,15 @@ const pendingDrag = shallowRef<{
 }>();
 let suppressClick = false,
   clickTimer: ReturnType<typeof setTimeout> | undefined;
+function isListBackground(element: Element): boolean {
+  return element === list.value || !!element.closest('.host-empty');
+}
 function targetGroup(event: PointerEvent): string | null {
-  const group = document
-    .elementFromPoint(event.clientX, event.clientY)
-    ?.closest<HTMLElement>('.tree-group');
-  if (!group || !tree.value?.contains(group)) return null;
-  const id = group.dataset.groupId || null;
+  const hit = document.elementFromPoint(event.clientX, event.clientY);
+  if (!hit || !list.value?.contains(hit)) return null;
+  const group = hit.closest<HTMLElement>('.tree-group');
+  if (!group && !isListBackground(hit)) return null;
+  const id = group?.dataset.groupId || null;
   return id === pendingDrag.value?.host.groupId ? null : (id ?? 'root');
 }
 function beginDrag(host: Host, event: PointerEvent): void {
@@ -185,45 +188,64 @@ onBeforeUnmount(() => {
   clearTimeout(clickTimer);
 });
 const limit = ref(200);
+const favoritesOnly = ref(false);
+const visibleHosts = computed(() =>
+  favoritesOnly.value ? store.visible.filter((host) => host.favorite) : store.visible,
+);
+const emptyMessage = computed(() => {
+  if (!store.catalog || visibleHosts.value.length) return '';
+  if (store.search.trim()) return tr('没有匹配的主机');
+  if (favoritesOnly.value) return tr('暂无收藏的主机');
+  return store.catalog.groups.length ? '' : tr('尚未添加主机');
+});
+function showFavorites(onlyFavorites: boolean): void {
+  if (favoritesOnly.value === onlyFavorites) return;
+  favoritesOnly.value = onlyFavorites;
+  limit.value = 200;
+  dismissContext();
+  void finishRename(false);
+  if (list.value) list.value.scrollTop = 0;
+}
 watch(
   () => store.search,
   () => (limit.value = 200),
 );
 watch(
   () => [store.selectedId, store.catalog] as const,
-  ([id]) => {
+  ([id], [previousId]) => {
     const host = store.catalog?.hosts.find((item) => item.id === id);
     if (!host) return;
-    const ancestors = ['root', ...folderAncestors(store.catalog?.groups ?? [], host.groupId)];
+    if (id !== previousId && favoritesOnly.value && !host.favorite) showFavorites(false);
+    const ancestors = folderAncestors(store.catalog?.groups ?? [], host.groupId);
     collapsed.value = collapsed.value.filter((group) => !ancestors.includes(group));
-    const index = store.visible.findIndex((item) => item.id === id);
+    const index = visibleHosts.value.findIndex((item) => item.id === id);
     if (index >= limit.value) limit.value = Math.ceil((index + 1) / 200) * 200;
   },
 );
 const sections = computed(() => {
-  const searching = !!store.search.trim();
-  const folders = hostFolderRows(
+  if (favoritesOnly.value)
+    return [
+      {
+        id: null,
+        name: tr('收藏'),
+        depth: 0,
+        hosts: visibleHosts.value.slice(0, limit.value),
+        count: visibleHosts.value.length,
+        favorites: true,
+      },
+    ];
+  return hostFolderRows(
     store.catalog?.groups ?? [],
-    store.visible,
+    visibleHosts.value,
     collapsed.value,
-    searching,
+    !!store.search.trim(),
     limit.value,
-  ).map((folder) => ({ ...folder, favorites: false }));
-  const favorites = searching ? [] : store.visible.filter((host) => host.favorite);
-  if (favorites.length) {
-    folders.unshift({
-      id: null,
-      name: tr('常用主机'),
-      depth: 0,
-      hosts: favorites.slice(0, limit.value),
-      count: favorites.length,
-      favorites: true,
-    });
-  }
-  return folders;
+  )
+    .filter((folder) => folder.id !== null || folder.hosts.length > 0)
+    .map((folder) => ({ ...folder, depth: Math.max(0, folder.depth - 1), favorites: false }));
 });
 const isCollapsed = (id: string | null) =>
-  !store.search.trim() && collapsed.value.includes(id ?? 'root');
+  id !== null && !store.search.trim() && collapsed.value.includes(id);
 function keys(event: KeyboardEvent) {
   if (event.defaultPrevented) return;
   const target = event.target as HTMLElement;
@@ -251,7 +273,6 @@ function toggle(id: string): void {
 
 type HostTarget = { kind: 'host'; id: string; favoriteRow: boolean };
 type ContextTarget = { kind: 'folder'; id: string | null } | HostTarget;
-type MenuTarget = ContextTarget | { kind: 'backup' };
 function hostTarget(id: string, favoriteRow: boolean): HostTarget {
   return { kind: 'host', id, favoriteRow };
 }
@@ -358,7 +379,7 @@ type MenuAction =
   | 'copy'
   | 'deleteHost'
   | `plugin:${string}:${string}`;
-const context = ref<{ target: MenuTarget; x: number; y: number }>();
+const context = ref<{ target: ContextTarget; x: number; y: number }>();
 const menuElement = ref<HTMLElement>();
 let contextTrigger: HTMLElement | undefined;
 let contextScrollTop = 0;
@@ -377,16 +398,16 @@ function confirmDelete(target: ContextTarget): void {
     if (group) deletingFolder.value = { ...group };
   }
 }
-const menuItems = computed<
-  { key: MenuAction; label: string; icon: Component; iconClass: string; danger?: boolean }[]
->(() => {
+type MenuItem = {
+  key: MenuAction;
+  label: string;
+  icon: Component;
+  iconClass: string;
+  danger?: boolean;
+};
+const menuItems = computed<MenuItem[]>(() => {
   const target = context.value?.target;
   if (!target) return [];
-  if (target.kind === 'backup')
-    return [
-      { key: 'export', label: tr('导出'), icon: FileOutput, iconClass: 'menu-icon-blue' },
-      { key: 'import', label: tr('导入'), icon: FileInput, iconClass: 'menu-icon-green' },
-    ];
   if (target.kind === 'host')
     return [
       { key: 'connect', label: tr('连接'), icon: Plug, iconClass: 'menu-icon-green' },
@@ -409,33 +430,36 @@ const menuItems = computed<
         danger: true,
       },
     ];
-  return [
+  const createItems: MenuItem[] = [
     { key: 'newHost', label: tr('新建主机'), icon: Server, iconClass: 'menu-icon-blue' },
     { key: 'newFolder', label: tr('新建文件夹'), icon: FolderPlus, iconClass: 'menu-icon-gold' },
-    ...(target.id === null
-      ? [
-          {
-            key: 'importOpenssh' as const,
-            label: tr('导入 SSH 配置…'),
-            icon: FileInput,
-            iconClass: 'menu-icon-blue',
-          },
-        ]
-      : [
-          {
-            key: 'rename' as const,
-            label: tr('重命名'),
-            icon: TextCursorInput,
-            iconClass: 'menu-icon-gold',
-          },
-          {
-            key: 'deleteFolder' as const,
-            label: tr('删除'),
-            icon: Trash2,
-            iconClass: 'menu-icon-red',
-            danger: true,
-          },
-        ]),
+  ];
+  if (target.id !== null)
+    return [
+      ...createItems,
+      { key: 'rename', label: tr('重命名'), icon: TextCursorInput, iconClass: 'menu-icon-gold' },
+      {
+        key: 'deleteFolder',
+        label: tr('删除'),
+        icon: Trash2,
+        iconClass: 'menu-icon-red',
+        danger: true,
+      },
+    ];
+  const backupItems: MenuItem[] = [
+    { key: 'import', label: tr('导入主机备份…'), icon: FileInput, iconClass: 'menu-icon-green' },
+    { key: 'export', label: tr('导出主机备份…'), icon: FileOutput, iconClass: 'menu-icon-blue' },
+  ];
+  if (!store.catalog) return backupItems;
+  return [
+    ...createItems,
+    {
+      key: 'importOpenssh',
+      label: tr('导入 SSH 配置…'),
+      icon: FileInput,
+      iconClass: 'menu-icon-blue',
+    },
+    ...backupItems,
   ];
 });
 function dismissContext(restoreFocus = false): void {
@@ -443,43 +467,43 @@ function dismissContext(restoreFocus = false): void {
   if (restoreFocus && contextTrigger?.isConnected) contextTrigger.focus({ preventScroll: true });
 }
 function outsideContext(event: PointerEvent): void {
-  if (context.value?.target.kind === 'backup' && contextTrigger?.contains(event.target as Node))
-    return;
   if (context.value && !menuElement.value?.contains(event.target as Node)) dismissContext();
 }
 function treeScrolled(event: Event): void {
   if (context.value && (event.currentTarget as HTMLElement).scrollTop !== contextScrollTop)
     dismissContext();
 }
-async function openContext(target: MenuTarget, event: MouseEvent | KeyboardEvent): Promise<void> {
+function openBackgroundMenu(event: MouseEvent): void {
+  if (event.target instanceof Element && isListBackground(event.target)) {
+    event.preventDefault();
+    event.stopPropagation();
+    void openContext({ kind: 'folder', id: null }, event);
+  }
+}
+async function openContext(
+  target: ContextTarget,
+  event: MouseEvent | KeyboardEvent,
+): Promise<void> {
   if (
     props.active === false ||
-    (!store.catalog && target.kind !== 'backup') ||
+    (!store.catalog && target.id !== null) ||
     document.querySelector('dialog[open]') ||
     dragged.value ||
     renaming.value
   )
     return;
-  if (target.kind === 'backup' && context.value?.target.kind === 'backup') {
-    dismissContext(true);
-    return;
-  }
   contextTrigger = event.currentTarget as HTMLElement;
-  contextScrollTop = tree.value?.querySelector<HTMLElement>('.host-tree-scroll')?.scrollTop ?? 0;
+  contextScrollTop = list.value?.scrollTop ?? 0;
   const anchor = contextTrigger.getBoundingClientRect();
-  const anchored =
-    target.kind === 'backup' ||
-    event instanceof KeyboardEvent ||
-    (!event.clientX && !event.clientY);
+  const anchored = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
   context.value = {
     target,
     x: anchored ? anchor.left : event.clientX,
-    y: anchored ? anchor.bottom : event.clientY,
+    y: anchored ? (contextTrigger === list.value ? anchor.top : anchor.bottom) : event.clientY,
   };
   await nextTick();
   if (!context.value || !menuElement.value) return;
   const bounds = menuElement.value.getBoundingClientRect();
-  if (target.kind === 'backup') context.value.x = anchor.right - bounds.width;
   context.value.x = Math.max(8, Math.min(context.value.x, window.innerWidth - bounds.width - 8));
   context.value.y = Math.max(8, Math.min(context.value.y, window.innerHeight - bounds.height - 8));
   menuElement.value
@@ -547,11 +571,11 @@ async function runContext(action: MenuAction): Promise<void> {
   const target = context.value?.target;
   if (!target || store.busy) return;
   dismissContext(true);
-  if (target.kind === 'backup') {
-    if (action === 'export' || action === 'import') await store.backup(action);
-    return;
-  }
   if (target.kind === 'folder') {
+    if (target.id === null && (action === 'import' || action === 'export')) {
+      await store.backup(action);
+      return;
+    }
     const group = store.catalog?.groups.find((group) => group.id === target.id);
     if (target.id !== null && !group) {
       store.error = tr('目标文件夹已不存在，请刷新后重试。');
@@ -584,8 +608,9 @@ async function runContext(action: MenuAction): Promise<void> {
   }
 }
 function folderSaved(group: HostGroup): void {
+  showFavorites(false);
   store.search = '';
-  const ancestors = ['root', ...folderAncestors(store.catalog?.groups ?? [], group.id)];
+  const ancestors = folderAncestors(store.catalog?.groups ?? [], group.id);
   collapsed.value = collapsed.value.filter((id) => !ancestors.includes(id));
 }
 async function removeFolder(): Promise<void> {
@@ -601,11 +626,9 @@ const closeContext = () => dismissContext();
 watch(
   () => store.catalog,
   (catalog) => {
-    closeContext();
     if (
       !catalog ||
       (selectedFolder.value !== undefined &&
-        selectedFolder.value !== null &&
         !catalog.groups.some((group) => group.id === selectedFolder.value))
     )
       selectedFolder.value = undefined;
@@ -614,6 +637,7 @@ watch(
 watch(
   () => [store.catalog, store.search] as const,
   () => {
+    closeContext();
     if (!renaming.value?.busy) void finishRename(false);
   },
 );
@@ -648,25 +672,31 @@ onBeforeUnmount(() => {
     @keydown="keys"
     @click.capture="ignoreDragClick"
   >
-    <div class="host-list-heading">
-      <span class="host-list-title">{{ tr(' 主机') }}</span>
+    <div class="host-list-heading host-library-heading">
+      <h2 class="host-list-title">{{ tr('主机管理') }}</h2>
+      <slot name="heading-actions"></slot>
+    </div>
+    <div class="host-views" role="group" :aria-label="tr('主机列表')">
       <button
         type="button"
-        class="shell-icon-button host-backup-trigger"
-        aria-haspopup="menu"
-        :aria-expanded="context?.target.kind === 'backup'"
-        :aria-label="tr('主机备份菜单')"
-        :title="tr('主机备份菜单')"
-        :disabled="store.busy"
-        @click="openContext({ kind: 'backup' }, $event)"
+        :aria-pressed="!favoritesOnly"
+        :disabled="!!renaming || !!dragged"
+        @click="showFavorites(false)"
       >
-        <Ellipsis :size="17" aria-hidden="true" />
+        <Server :size="14" aria-hidden="true" /><span>{{ tr('全部') }}</span>
       </button>
-      <slot name="heading-actions"></slot>
+      <button
+        type="button"
+        :aria-pressed="favoritesOnly"
+        :disabled="!!renaming || !!dragged"
+        @click="showFavorites(true)"
+      >
+        <Star :size="14" aria-hidden="true" /><span>{{ tr('收藏') }}</span>
+      </button>
     </div>
     <div class="host-sidebar-controls">
       <label class="host-search-field">
-        <Search :size="14" aria-hidden="true" />
+        <Search :size="15" aria-hidden="true" />
         <input
           id="host-tree-search"
           v-model="store.search"
@@ -676,7 +706,18 @@ onBeforeUnmount(() => {
         />
       </label>
     </div>
-    <div class="host-tree-scroll" :aria-busy="store.busy" @scroll="treeScrolled">
+    <div
+      ref="list"
+      class="host-tree-scroll"
+      :class="{ 'drop-target': dropTarget === 'root' }"
+      tabindex="0"
+      role="region"
+      :aria-label="tr('主机列表')"
+      :aria-busy="store.busy"
+      @contextmenu="openBackgroundMenu"
+      @keydown.self="rowKeys({ kind: 'folder', id: null }, $event)"
+      @scroll="treeScrolled"
+    >
       <p v-if="store.busy && !store.catalog" class="host-empty" role="status">
         {{ tr('正在读取主机…') }}
       </p>
@@ -689,17 +730,17 @@ onBeforeUnmount(() => {
         :class="{
           'host-favorites': group.favorites,
           'tree-group': !group.favorites,
-          'drop-target': !group.favorites && dropTarget === (group.id ?? 'root'),
+          'drop-target': group.id !== null && dropTarget === group.id,
         }"
         :data-group-id="group.favorites ? undefined : (group.id ?? '')"
+        :style="{ '--folder-depth': group.depth }"
       >
         <div
-          v-if="!group.favorites"
+          v-if="group.id !== null"
           class="group-toggle"
           :class="{ selected: selectedFolder === group.id }"
           :aria-current="selectedFolder === group.id ? 'true' : undefined"
           tabindex="0"
-          :style="{ paddingLeft: `${6 + group.depth * 14}px` }"
           @contextmenu.prevent.stop="openContext({ kind: 'folder', id: group.id }, $event)"
           @keydown="rowKeys({ kind: 'folder', id: group.id }, $event)"
           @click="selectFolder(group.id, $event)"
@@ -711,21 +752,14 @@ onBeforeUnmount(() => {
             :aria-label="
               isCollapsed(group.id) ? tr('展开 {0}', group.name) : tr('收起 {0}', group.name)
             "
-            :disabled="!!renaming"
-            @click.stop="toggle(group.id ?? 'root')"
+            :disabled="!!renaming || !!store.search.trim()"
+            @click.stop="toggle(group.id)"
           >
             <ChevronRight v-if="isCollapsed(group.id)" :size="12" aria-hidden="true" />
             <ChevronDown v-else :size="12" aria-hidden="true" />
           </button>
-          <Folder
-            v-if="isCollapsed(group.id)"
-            class="host-group-icon"
-            :size="18"
-            :stroke-width="1.2"
-            aria-hidden="true"
-          />
-          <FolderOpen
-            v-else
+          <component
+            :is="isCollapsed(group.id) ? Folder : FolderOpen"
             class="host-group-icon"
             :size="18"
             :stroke-width="1.2"
@@ -742,17 +776,11 @@ onBeforeUnmount(() => {
             @submit="saveRename"
             @cancel="finishRename(true)"
           />
-          <span v-else class="group-name">{{ group.name }}</span
-          ><span class="group-count">{{ group.count }}</span>
+          <span v-else class="group-name">{{ group.name }}</span>
+          <span class="group-count">{{ group.count }}</span>
         </div>
-        <div v-else class="host-favorites-heading">{{ group.name }}</div>
-        <template v-if="group.favorites || !isCollapsed(group.id)">
-          <div
-            v-for="host in group.hosts"
-            :key="host.id"
-            class="tree-host-row"
-            :style="{ paddingLeft: `${group.depth * 14}px` }"
-          >
+        <template v-if="!isCollapsed(group.id)">
+          <div v-for="host in group.hosts" :key="host.id" class="tree-host-row">
             <component
               :is="isRenaming('host', host.id, group.favorites) ? 'div' : 'button'"
               :data-host-id="host.id"
@@ -803,7 +831,7 @@ onBeforeUnmount(() => {
               :class="{ starred: host.favorite }"
               :aria-pressed="host.favorite"
               :aria-label="tr('收藏主机 {0}', hostDisplayName(host))"
-              :title="host.favorite ? tr('取消收藏') : tr('添加到常用主机')"
+              :title="host.favorite ? tr('取消收藏') : tr('添加到收藏')"
               :disabled="!props.active || store.busy || !!renaming || !!dragged"
               @click="toggleFavorite(host, $event)"
             >
@@ -817,19 +845,24 @@ onBeforeUnmount(() => {
           </div>
         </template>
       </div>
-      <div v-if="store.catalog && !store.visible.length" class="host-empty">
-        <Server :size="26" :stroke-width="1.3" aria-hidden="true" />
-        <p>{{ store.catalog.hosts.length ? tr('没有匹配的主机') : tr('尚未添加主机') }}</p>
-        <p v-if="!store.catalog.hosts.length" class="subtle">
-          {{ tr('右键根目录新建主机或文件夹') }}
+      <div v-if="emptyMessage" class="host-empty" role="status">
+        <component
+          :is="favoritesOnly ? Star : Server"
+          :size="24"
+          :stroke-width="1.5"
+          aria-hidden="true"
+        />
+        <p>{{ emptyMessage }}</p>
+        <p v-if="!favoritesOnly && !store.search.trim()" class="subtle">
+          {{ tr('右键列表空白处可新建主机或文件夹') }}
         </p>
       </div>
       <button
-        v-if="store.visible.length > limit"
+        v-if="visibleHosts.length > limit"
         class="button host-load-more"
         @click="limit += 200"
       >
-        {{ tr(' 显示更多主机（') }}{{ limit }} / {{ store.visible.length }}）
+        {{ tr(' 显示更多主机（') }}{{ limit }} / {{ visibleHosts.length }}）
       </button>
     </div>
     <div
@@ -881,13 +914,16 @@ onBeforeUnmount(() => {
           ref="menuElement"
           class="context-menu host-tree-menu"
           role="menu"
-          :aria-label="context.target.kind === 'backup' ? tr('主机备份菜单') : tr('主机树操作')"
+          :aria-label="tr('主机树操作')"
           :style="{ left: `${context.x}px`, top: `${context.y}px` }"
           @keydown="menuKeys"
           @contextmenu.prevent
         >
           <template v-for="item in menuItems" :key="item.key">
-            <div v-if="item.key === 'importOpenssh'" role="separator"></div>
+            <div
+              v-if="item.key === 'importOpenssh' || (item.key === 'import' && store.catalog)"
+              role="separator"
+            ></div>
             <button
               role="menuitem"
               :class="{ danger: item.danger }"

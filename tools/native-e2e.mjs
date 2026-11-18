@@ -109,7 +109,7 @@ async function start() {
     'refusing to mutate a non-test data directory',
   );
   safeScope = true;
-  await page.locator('.tree-group[data-group-id=""] > .group-toggle').waitFor();
+  await page.locator('.host-tree-scroll[aria-busy="false"]').waitFor();
 }
 async function stop() {
   if (browser) {
@@ -323,9 +323,9 @@ try {
     results.push('native OpenSSH preview + duplicates + unsafe option blocking + selective import');
     assert.deepEqual(
       await page
-        .locator('.host-list-heading button')
+        .locator('.host-library-heading > button')
         .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
-      ['本地终端'],
+      ['收起主机栏'],
     );
     assert.equal(await page.getByLabel('选择 ServerDeck 主机文件', { exact: true }).count(), 0);
     for (const command of ['hosts_export', 'hosts_import_archive']) {

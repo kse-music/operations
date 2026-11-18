@@ -55,51 +55,55 @@ async function mount(active = true) {
   await nextTick();
   return { store, create, select, saved };
 }
-const folder = (id = '') =>
+const background = () => root.querySelector<HTMLElement>('.host-tree-scroll')!;
+const folder = (id: string) =>
   root.querySelector<HTMLElement>(`[data-group-id="${id}"] > .group-toggle`)!;
 
-it('offers both backup operations in the heading and refreshes even an empty, filtered tree after import', async () => {
-  const { store } = await mount();
-  const restored = store.catalog!;
-  store.catalog = { ...restored, hosts: [], groups: [] };
-  store.search = 'hidden host';
-  await nextTick();
-  const trigger = root.querySelector<HTMLButtonElement>(
-    '.host-list-heading [aria-haspopup="menu"]',
-  )!;
-  expect(trigger.disabled).toBe(false);
-  async function actions() {
-    trigger.click();
+const backgroundActions = [
+  '新建主机',
+  '新建文件夹',
+  '导入 SSH 配置…',
+  '导入主机备份…',
+  '导出主机备份…',
+];
+
+it.each(['empty', 'unavailable'])(
+  'runs backups from the %s list and refreshes it after import',
+  async (state) => {
+    const { store } = await mount();
+    const restored = store.catalog!;
+    store.catalog = state === 'empty' ? { ...restored, hosts: [], groups: [] } : null;
+    store.search = 'hidden host';
     await nextTick();
-    return document.querySelectorAll<HTMLButtonElement>(
-      '[role="menu"][aria-label="主机备份菜单"] button',
-    );
-  }
-  const backup = vi.spyOn(hostsApi, 'backup').mockResolvedValueOnce(null).mockResolvedValueOnce({
-    hosts: 2,
-    groups: 2,
-    agentHosts: 0,
-    missingAuth: 0,
-  });
-  const list = vi.spyOn(hostsApi, 'list').mockResolvedValue(restored);
-  try {
-    const items = await actions();
-    expect([...items].map((b) => b.textContent)).toEqual(['导出', '导入']);
-    items[0]!.click();
-    await vi.waitFor(() => expect(store.busy).toBe(false));
-    expect(store.notice).toBeNull();
-    expect(store.search).toBe('hidden host');
-    expect(list).not.toHaveBeenCalled();
-    (await actions())[1]!.click();
-    await vi.waitFor(() => expect(root.querySelector('[data-host-id="h1"]')).not.toBeNull());
-    expect(backup.mock.calls).toEqual([['export'], ['import']]);
-    expect(store.search).toBe('');
-    expect(store.notice).toContain('已导入 2 台主机');
-  } finally {
-    backup.mockRestore();
-    list.mockRestore();
-  }
-});
+    const backup = vi.spyOn(hostsApi, 'backup').mockResolvedValueOnce(null).mockResolvedValueOnce({
+      hosts: 2,
+      groups: 2,
+      agentHosts: 0,
+      missingAuth: 0,
+    });
+    const list = vi.spyOn(hostsApi, 'list').mockResolvedValue(restored);
+    try {
+      await open(background());
+      expect(labels()).toEqual(
+        state === 'empty' ? backgroundActions : ['导入主机备份…', '导出主机备份…'],
+      );
+      await action('导出主机备份…');
+      await vi.waitFor(() => expect(store.busy).toBe(false));
+      expect(store.notice).toBeNull();
+      expect(store.search).toBe('hidden host');
+      expect(list).not.toHaveBeenCalled();
+      await open(background());
+      await action('导入主机备份…');
+      await vi.waitFor(() => expect(root.querySelector('[data-host-id="h1"]')).not.toBeNull());
+      expect(backup.mock.calls).toEqual([['export'], ['import']]);
+      expect(store.search).toBe('');
+      expect(store.notice).toContain('已导入 2 台主机');
+    } finally {
+      backup.mockRestore();
+      list.mockRestore();
+    }
+  },
+);
 const menu = () => document.querySelector<HTMLElement>('[aria-label="主机树操作"]')!;
 async function open(target: HTMLElement) {
   target.dispatchEvent(
@@ -203,15 +207,15 @@ it('keeps one highlighted tree row while folder selection preserves the current 
   root.querySelector<HTMLInputElement>('#host-tree-search')!.focus();
   await nextTick();
   expect(child.classList.contains('selected')).toBe(true);
-  folder().querySelector<HTMLElement>('.group-name')!.click();
+  folder('parent').querySelector<HTMLElement>('.group-name')!.click();
   await nextTick();
-  expect(folder().classList.contains('selected')).toBe(true);
+  expect(folder('parent').classList.contains('selected')).toBe(true);
   expect(child.classList.contains('selected')).toBe(false);
   host.click();
   await nextTick();
   expect(host.classList.contains('selected')).toBe(true);
   expect(host.getAttribute('aria-current')).toBe('true');
-  expect(folder().classList.contains('selected')).toBe(false);
+  expect(folder('parent').classList.contains('selected')).toBe(false);
   expect(root.querySelectorAll('.selected')).toHaveLength(1);
   expect(store.selectedId).toBe('h0');
 });
@@ -478,18 +482,20 @@ it.each(['refresh', 'search'])(
   },
 );
 
-it('keeps a root, removes toolbar operations, and places search directly below All Hosts', async () => {
+it('opens the top-level creation and import menu on blank space without rendering a root row', async () => {
   await mount();
-  expect(folder().textContent).toContain('根目录');
+  expect(folder('')).toBeNull();
+  expect([...root.querySelectorAll('.group-name')].map((el) => el.textContent)).toEqual([
+    '生产',
+    '上海',
+  ]);
   expect(root.querySelector('.host-sidebar-heading')).toBeNull();
   expect(root.querySelector('[aria-label="刷新"], [aria-label="管理分组"]')).toBeNull();
   expect(
-    root
-      .querySelector('.host-list-heading')
-      ?.nextElementSibling?.querySelector('[aria-label="搜索主机"]'),
+    root.querySelector('.host-views + .host-sidebar-controls [aria-label="搜索主机"]'),
   ).not.toBeNull();
-  await open(folder());
-  expect(labels()).toEqual(['新建主机', '新建文件夹', '导入 SSH 配置…']);
+  await open(background());
+  expect(labels()).toEqual(backgroundActions);
   const bounds = menu().getBoundingClientRect();
   expect(Number.parseFloat(menu().style.left) + bounds.width).toBeLessThanOrEqual(innerWidth);
   expect(Number.parseFloat(menu().style.top) + bounds.height).toBeLessThanOrEqual(innerHeight);
@@ -509,6 +515,42 @@ it('creates hosts in the right-clicked folder while host menus exclude folder cr
   await action('编辑');
   expect(document.querySelector('[aria-label="编辑主机"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="分组"]')).toBeNull();
+});
+
+it.each(['empty', 'no matches', 'no favorites'])(
+  'offers top-level actions from the %s message',
+  async (state) => {
+    const { store, create } = await mount();
+    if (state === 'empty') store.catalog = { ...store.catalog!, hosts: [], groups: [] };
+    if (state === 'no matches') store.search = 'no matching host';
+    if (state === 'no favorites')
+      root.querySelector<HTMLButtonElement>('.host-views button:last-child')!.click();
+    await nextTick();
+    await open(background().querySelector<HTMLElement>('.host-empty p')!);
+    expect(labels()).toEqual(backgroundActions);
+    await action('新建主机');
+    expect(create).toHaveBeenCalledExactlyOnceWith(null);
+  },
+);
+
+it('keeps the count at the end of each folder row and uses the expander to change its icon', async () => {
+  await mount();
+  for (const row of [folder('parent'), folder('child')]) {
+    expect(row.lastElementChild).toBe(row.querySelector('.group-count'));
+    expect(row.querySelectorAll('button')).toHaveLength(1);
+    expect(row.querySelector('button')).toBe(row.querySelector('.group-expander'));
+    expect(row.querySelector('.host-group-icon')).not.toBeNull();
+  }
+  const row = folder('child');
+  const expandedIcon = row.querySelector('.host-group-icon')!.innerHTML;
+  const expander = row.querySelector<HTMLButtonElement>('.group-expander')!;
+  expander.click();
+  await nextTick();
+  expect(expander.getAttribute('aria-expanded')).toBe('false');
+  expect(row.querySelector('.host-group-icon')!.innerHTML).not.toBe(expandedIcon);
+  expander.click();
+  await nextTick();
+  expect(row.querySelector('.host-group-icon')!.innerHTML).toBe(expandedIcon);
 });
 
 it.each([true, false])(
@@ -597,7 +639,7 @@ it('confirms folder deletion and disables context mutations while busy', async (
   await vi.waitFor(() => expect(remove).toHaveBeenCalledExactlyOnceWith('parent'));
   await vi.waitFor(() => expect(store.busy).toBe(false));
   store.busy = true;
-  await open(folder());
+  await open(background());
   for (const button of menu().querySelectorAll<HTMLButtonElement>('button'))
     expect(button.disabled).toBe(true);
 });
@@ -656,9 +698,9 @@ it.each([true, false])(
   },
 );
 
-it('ignores Delete and F2 on the root and search field', async () => {
+it('ignores Delete and F2 on the list background and search field', async () => {
   const { store } = await mount();
-  await pressDelete(folder());
+  await pressDelete(background());
   const input = root.querySelector<HTMLInputElement>('#host-tree-search')!;
   store.search = 'Host';
   await nextTick();
@@ -666,7 +708,7 @@ it('ignores Delete and F2 on the root and search field', async () => {
   expect(event.defaultPrevented).toBe(false);
   expect(input.value).toBe('Host');
   expect(document.querySelector('dialog')).toBeNull();
-  await pressF2(folder());
+  await pressF2(background());
   const rename = await pressF2(input);
   expect(rename.defaultPrevented).toBe(false);
   expect(renameInput()).toBeNull();
@@ -702,7 +744,7 @@ it.each([
   }
 });
 
-it('supports keyboard menu navigation, restores focus and does not create folders on blank space', async () => {
+it('supports keyboard menu navigation and restores focus to the folder or list background', async () => {
   await mount();
   const trigger = folder('child');
   trigger.focus();
@@ -717,11 +759,15 @@ it('supports keyboard menu navigation, restores focus and does not create folder
   await nextTick();
   expect(menu()).toBeNull();
   expect(document.activeElement).toBe(trigger);
-  root
-    .querySelector('.host-tree-scroll')!
-    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  background().dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ContextMenu', bubbles: true, cancelable: true }),
+  );
+  await nextTick();
+  expect(labels()).toEqual(backgroundActions);
+  menu().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await nextTick();
   expect(menu()).toBeNull();
+  expect(document.activeElement).toBe(background());
 });
 
 it('keeps a keyboard menu open for an already queued scroll notification and closes on actual scrolling', async () => {
@@ -751,7 +797,7 @@ it.each(['host', 'folder'])(
       kind === 'host' ? root.querySelector<HTMLElement>('[data-host-id="h0"]')! : folder('parent');
     for (const outside of [
       root.querySelector<HTMLInputElement>('#host-tree-search')!,
-      root.querySelector('.host-tree-scroll')!,
+      root.querySelector('.host-views')!,
       document.body,
     ]) {
       await open(trigger);
@@ -786,7 +832,9 @@ it.each([
     const target = (kind: 'host' | 'folder' | 'root', initial: boolean) =>
       kind === 'host'
         ? root.querySelector<HTMLElement>(`[data-host-id="${initial ? 'h0' : 'h1'}"]`)!
-        : folder(kind === 'root' ? '' : initial ? 'parent' : 'child');
+        : kind === 'root'
+          ? background()
+          : folder(initial ? 'parent' : 'child');
     await open(target(from, true));
     target(to, false).dispatchEvent(
       new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 80, clientY: 90 }),
@@ -821,7 +869,7 @@ it('keeps menu actions usable, dismisses outside presses without stealing focus,
   await nextTick();
   expect(menu()).toBeNull();
   expect(document.activeElement).toBe(search);
-  await open(folder());
+  await open(background());
   menu().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await nextTick();
   expect(menu()).toBeNull();

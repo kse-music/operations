@@ -1,4 +1,5 @@
 .host-tree-section {
+  container: host-library / inline-size;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -6,23 +7,32 @@
   overflow: hidden;
 }
 .host-sidebar-controls {
-  padding: 4px 12px 8px;
+  padding: 12px 10px 6px;
   flex-shrink: 0;
 }
 .host-search-field {
   display: flex;
   align-items: center;
-  padding-left: 9px;
+  gap: 7px;
+  padding: 0 9px;
   color: var(--muted);
   border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: 4px;
+  background: var(--panel-soft);
+  border-radius: 7px;
+}
+.host-search-field:focus-within {
+  border-color: var(--border-strong);
+  background: var(--raised);
+}
+.host-search-field > svg,
+.host-views svg {
+  flex: none;
 }
 .sidebar-search {
   background: transparent;
   color: var(--text);
   border: 0;
-  padding: 8px;
+  padding: 7px 0;
   font-size: var(--font-size-body);
   min-width: 0;
   width: 100%;
@@ -39,21 +49,59 @@
   margin: 0 12px;
   padding: 4px 0;
 }
-.host-list-heading [aria-current='page'] {
-  color: var(--accent);
-  background: var(--accent-bg);
-}
-.host-list-heading .host-backup-trigger {
-  margin-left: auto;
-}
 .host-list-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  margin: 0;
   color: var(--text);
   font-size: var(--font-size-body);
   font-weight: 600;
+}
+.host-views {
+  display: flex;
+  flex-shrink: 0;
+  gap: 3px;
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.host-views button {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-size: var(--font-size-body);
+}
+.host-views span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.host-views button:hover,
+.host-views button:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+}
+.host-views button[aria-pressed='true'] {
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+.host-views button:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+@container host-library (max-width: 16em) {
+  .host-views svg {
+    display: none;
+  }
+  .host-views button {
+    padding-inline: 2px;
+  }
 }
 .host-tree-scroll {
   flex: 1;
@@ -61,7 +109,8 @@
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  padding: 4px 6px 12px;
+  padding: 0 6px 12px;
+  container-type: inline-size;
 }
 .host-load-more {
   width: 100%;
@@ -80,6 +129,7 @@
   margin: 5px 0;
 }
 .tree-group {
+  --indent: min(calc(var(--folder-depth) * 14px), max(0px, 100cqi - 140px));
   margin-top: 2px;
 }
 .group-toggle {
@@ -92,7 +142,7 @@
   color: var(--muted);
   border: 0;
   border-radius: 4px;
-  padding: 1px 6px;
+  padding: 1px 6px 1px calc(6px + var(--indent));
   font-size: var(--font-size-body);
   line-height: 1.2;
   text-align: left;
@@ -122,8 +172,9 @@
   justify-content: center;
   flex: 0 0 18px;
   height: 18px;
-  margin-inline: -3px;
+  margin-inline: 0 -6px;
   padding: 0;
+  padding-inline-start: 1px;
   border: 0;
   border-radius: 2px;
   background: transparent;
@@ -151,16 +202,11 @@
   display: flex;
   align-items: center;
 }
-.host-favorites {
-  margin-bottom: 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+.tree-group .tree-host-row {
+  padding-left: var(--indent);
 }
-.host-favorites-heading {
-  padding: 4px 8px;
-  color: var(--muted);
-  font-size: var(--font-size-caption);
-  font-weight: 600;
+.tree-group[data-group-id=''] .tree-host {
+  padding-left: 24px;
 }
 .host-favorites .tree-host {
   padding-left: 12px;
@@ -205,26 +251,20 @@
   border: 0;
   border-radius: 4px;
   background: none;
-  padding: 1px 10px 1px 48px;
+  padding: 1px 10px 1px 45px;
   min-height: 20px;
   line-height: 1.2;
   text-align: left;
-}
-.group-toggle.selected,
-.tree-host.selected {
-  background: var(--accent-bg);
 }
 .group-toggle:hover,
 .tree-host:hover {
   background: var(--hover);
 }
-.group-toggle.selected,
-.tree-host.selected {
-  box-shadow: inset 2px 0 var(--accent);
-}
 .group-toggle.selected {
   color: var(--text);
 }
+.group-toggle.selected,
+.tree-host.selected,
 .group-toggle:focus-visible,
 .tree-host:focus-visible {
   background: var(--accent-bg);
@@ -488,6 +528,11 @@
     gap: 7px;
   }
 }
+.host-tree-scroll:focus-visible {
+  outline: 1px solid var(--border-strong);
+  outline-offset: -1px;
+}
+.host-tree-scroll.drop-target,
 .tree-group.drop-target > .group-toggle {
   background: var(--accent-bg);
   outline: 1px dashed var(--accent);

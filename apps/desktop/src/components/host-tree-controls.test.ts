@@ -117,6 +117,7 @@ it('shows only the star beside each host and keeps other actions in the context 
   host.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
   expect(root.querySelectorAll('.tree-host-row button.tree-host')).toHaveLength(2);
   expect(root.querySelectorAll('.tree-host-row button.host-favorite-button')).toHaveLength(2);
+  expect(root.querySelector('.tree-host-row button[aria-haspopup="menu"]')).toBeNull();
   expect(root.querySelector('[aria-label^="复制主机 "]')).toBeNull();
   expect(saved).not.toHaveBeenCalled();
   expect(useWorkspaceStore().current?.hostId).toBe('a');

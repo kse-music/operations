@@ -117,7 +117,7 @@ async function start() {
 }
 const active = () => page.locator('.terminal-pane:visible');
 const hoverHost = async (name) => {
-  await page.locator('.host-list-heading').hover({ position: { x: 4, y: 4 } });
+  await page.locator('.host-library-heading').hover({ position: { x: 4, y: 4 } });
   await page
     .locator('.tree-host-row')
     .filter({ has: page.getByText(name, { exact: true }) })
@@ -165,7 +165,7 @@ try {
   await start();
   assert.equal(await page.locator('.activity-rail [aria-label="主机管理"] .nav-badge').count(), 0);
   assert.equal(await page.locator('.host-count').count(), 0);
-  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '0');
+  assert.equal(await page.locator('.tree-host').count(), 0);
   assert.equal(await page.locator('.topbar').count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开全局搜索', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '打开本地工作区', exact: true }).count(), 0);
@@ -197,7 +197,9 @@ try {
     1,
   );
   assert.equal(
-    await page.locator('.host-list-heading + .host-sidebar-controls + .host-tree-scroll').count(),
+    await page
+      .locator('.host-library-heading + .host-views + .host-sidebar-controls + .host-tree-scroll')
+      .count(),
     1,
   );
   assert.equal(await page.locator('.sidebar-app-actions button').count(), 1);
@@ -447,12 +449,12 @@ try {
     assert(from && to);
     await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
     await page.mouse.down();
-    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 });
+    const background = await target.evaluate((el) => el.classList.contains('host-tree-scroll'));
+    await page.mouse.move(to.x + (background ? 2 : to.width / 2), to.y + to.height / 2, {
+      steps: 8,
+    });
     await page.locator('.host-drag-preview').waitFor();
-    assert.equal(
-      await target.evaluate((el) => el.parentElement.classList.contains('drop-target')),
-      true,
-    );
+    assert.equal(await target.evaluate((el) => !!el.closest('.drop-target')), true);
     if (cancel) await page.keyboard.press('Escape');
     else await page.screenshot({ path: path.join(artifacts, 'host-drag.png') });
     await page.mouse.up();
@@ -462,8 +464,8 @@ try {
   }
   await dragHostTo(target, true);
   assert.equal((await rpc('host_list')).hosts.find((h) => h.id === host.id).groupId, groups[0].id);
-  await target.click();
-  assert.equal(await target.getAttribute('aria-expanded'), 'false');
+  await target.locator('.group-expander').click();
+  assert.equal(await target.locator('.group-expander').getAttribute('aria-expanded'), 'false');
   await dragHostTo(target);
   await page.waitForFunction(
     async ({ id, groupId }) =>
@@ -471,8 +473,8 @@ try {
         ?.groupId === groupId,
     { id: host.id, groupId: groups[1].id },
   );
-  await target.click();
-  await dragHostTo(page.locator('.group-toggle').filter({ hasText: '根目录' }));
+  await target.locator('.group-expander').click();
+  await dragHostTo(page.locator('.host-tree-scroll'));
   await page.waitForFunction(
     async (id) =>
       (await window.__TAURI_INTERNALS__.invoke('host_list')).hosts.find((h) => h.id === id)
@@ -485,10 +487,7 @@ try {
   await assertNativeMenuSuppressed(row);
   assert.equal(await page.getByRole('menu', { name: '主机树操作', exact: true }).count(), 1);
   await page.keyboard.press('Escape');
-  assert.equal(
-    await page.locator('.tree-host-more, .host-tree-scroll [aria-haspopup=menu]').count(),
-    0,
-  );
+  assert.equal(await page.locator('.host-tree-scroll [aria-haspopup=menu]').count(), 0);
   assert.equal(await page.getByRole('button', { name: '关闭操作菜单', exact: true }).count(), 0);
   await page.mouse.move(800, 24);
   await page.screenshot({ path: path.join(artifacts, 'host-no-menu.png') });
@@ -639,7 +638,7 @@ try {
     await page.locator('.sidebar').getByRole('button', { name: '主机管理', exact: true }).count(),
     0,
   );
-  assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机');
+  assert.equal((await page.locator('.host-list-title').textContent()).trim(), '主机管理');
   assert.equal(await page.locator('.workspace-group-tab').count(), 0);
   assert.equal(await page.getByRole('button', { name: '主机工作区', exact: true }).count(), 0);
   assert.equal(await page.locator('.hosts-view').count(), 0);
@@ -671,22 +670,20 @@ try {
   const created = (await rpc('host_list')).hosts.find((item) => item.name === 'UI Created');
   assert.equal(created.groupId, groups[1].id);
   assert.equal(created.hostname, '192.0.2.20');
-  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '2');
+  assert.equal(await page.locator('.tree-host').count(), 2);
   const currentTabs = await page.locator('.workspace-tab').count();
   for (const item of await page.locator('.tree-host').all()) {
     await assertNativeMenuSuppressed(item);
-    assert.equal(await page.getByRole('menu').count(), 0);
+    assert(await page.getByRole('menu', { name: '主机树操作', exact: true }).isVisible());
+    await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('button', { name: '关闭操作菜单', exact: true }).count(), 0);
   }
-  assert.equal(
-    await page.locator('.tree-host-more, .host-tree-scroll [aria-haspopup=menu]').count(),
-    0,
-  );
+  assert.equal(await page.locator('.host-tree-scroll [aria-haspopup=menu]').count(), 0);
   assert.equal(await page.locator('.workspace-tab').count(), currentTabs);
   assert.equal(await page.locator('.terminal-pane').count(), 0);
   assert.equal((await rpc('host_list')).hosts.length, 2);
   passed.push(
-    'sidebar creation persists through SQLite; right-click has no menu or session/navigation effects',
+    'sidebar creation persists through SQLite and row menus preserve the current workspace',
   );
   const hostRow = page
     .locator('.tree-host-row')
@@ -745,7 +742,7 @@ try {
   await deletion.getByRole('button', { name: '删除', exact: true }).click();
   await deletion.waitFor({ state: 'hidden' });
   assert(!(await rpc('host_list')).hosts.some((item) => item.id === host.id));
-  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '1');
+  assert.equal(await page.locator('.tree-host').count(), 1);
   passed.push(
     'host rows contain no inline action icons; untested context edits are blocked and confirmed deletion preserves sessions',
   );
@@ -763,12 +760,12 @@ try {
   await importHosts.waitFor({ state: 'hidden' });
   await page.locator('.tree-host').filter({ hasText: 'tree-imported' }).waitFor();
   assert.equal((await rpc('host_list')).hosts.length, 2);
-  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '2');
+  assert.equal(await page.locator('.tree-host').count(), 2);
   assert.deepEqual(
     await page
-      .locator('.host-list-heading button')
+      .locator('.host-library-heading > button')
       .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
-    [],
+    ['收起主机栏'],
   );
   assert.equal(await page.getByRole('dialog').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });
@@ -780,7 +777,7 @@ try {
   }
   await page.getByText('尚未添加主机', { exact: true }).waitFor();
   assert.equal((await rpc('host_list')).hosts.length, 0);
-  assert.equal((await page.locator('[data-group-id=""] .group-count').textContent()).trim(), '0');
+  assert.equal(await page.locator('.tree-host').count(), 0);
   passed.push(
     'host tree OpenSSH preview/import and host count work without JSON controls; isolated records cleaned via real IPC',
   );

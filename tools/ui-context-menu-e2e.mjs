@@ -183,7 +183,7 @@ try {
     }
     const atEdge = { clientX: width - 1, clientY: height - 1, bubbles: true, cancelable: true };
     for (const [kind, trigger, selector] of [
-      ['root', '.group-toggle', '.host-tree-menu'],
+      ['root', '.host-tree-scroll', '.host-tree-menu'],
       ['folder', '[data-group-id="folder"] .group-toggle', '.host-tree-menu'],
       ['host', '.tree-host', '.host-tree-menu'],
       ['workspace-tab', '.workspace-tab', '.workspace-tab-menu'],

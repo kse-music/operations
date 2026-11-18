@@ -993,7 +993,7 @@ it('removes the host management page and keeps creation available in the workspa
   expect(document.querySelector('.activity-rail [aria-label="主机工作区"]')).toBeNull();
   expect(document.querySelector('.hosts-view')).toBeNull();
   root
-    .querySelector<HTMLButtonElement>('[data-group-id=""] .group-toggle')!
+    .querySelector<HTMLElement>('.host-tree-scroll')!
     .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await nextTick();
   [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
@@ -1196,6 +1196,11 @@ it('collapses the host list and restores its width, search, scroll and keyboard 
   const tree = document.querySelector<HTMLElement>('#host-tree-panel')!;
   const scroll = tree.querySelector<HTMLElement>('.host-tree-scroll')!;
   const search = tree.querySelector<HTMLInputElement>('input')!;
+  const favorites = [...tree.querySelectorAll<HTMLButtonElement>('.host-views button')].find(
+    (button) => button.textContent?.trim() === '收藏',
+  )!;
+  favorites.click();
+  await flush();
   scroll.scrollTop = 64;
   const collapse = tree.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!;
   collapse.click();
@@ -1214,6 +1219,7 @@ it('collapses the host list and restores its width, search, scroll and keyboard 
   expect(tree.style.display).not.toBe('none');
   expect(tree.querySelector('input')).toBe(search);
   expect(search.value).toBe('Host a');
+  expect(favorites.getAttribute('aria-pressed')).toBe('true');
   expect(scroll.scrollTop).toBe(64);
   expect(hosts.selectedId).toBe(hosts.catalog!.hosts[0]!.id);
   expect(document.activeElement).toBe(collapse);
@@ -1392,17 +1398,19 @@ it('protects a hidden settings draft before confirming application exit', async 
   expect(exit).toHaveBeenCalledExactlyOnceWith(true);
 });
 
-it('places the backup menu before the sidebar toggle and keeps the root count beside its folder', () => {
+it('keeps only the sidebar toggle beside the host title and shows ungrouped hosts directly', () => {
   const heading = document.querySelector('.host-list-heading')!;
-  expect(heading.textContent).toContain('主机');
-  expect(heading.querySelector('.host-list-title')?.textContent?.trim()).toBe('主机');
+  expect(heading.querySelector('h2.host-list-title')?.textContent?.trim()).toBe('主机管理');
   expect(heading.querySelector('.host-count')).toBeNull();
-  expect(document.querySelector('[data-group-id=""] .group-count')?.textContent?.trim()).toBe('2');
+  expect(document.querySelector('[data-group-id=""] .group-toggle')).toBeNull();
+  expect(document.querySelectorAll('.tree-host')).toHaveLength(2);
   expect(
-    [...heading.querySelectorAll('button')].map((button) => button.getAttribute('aria-label')),
-  ).toEqual(['主机备份菜单', '收起主机栏']);
+    [...heading.querySelectorAll(':scope > button')].map((button) =>
+      button.getAttribute('aria-label'),
+    ),
+  ).toEqual(['收起主机栏']);
   expect(document.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
-  expect(heading.nextElementSibling?.querySelector('[aria-label="搜索主机"]')).not.toBeNull();
+  expect(heading.nextElementSibling?.matches('.host-views')).toBe(true);
 });
 
 it('uses the right-clicked folder when creating a host without a group selector', async () => {
