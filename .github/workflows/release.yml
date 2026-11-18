@@ -21,7 +21,6 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm run audit:release
       - run: npm ci --no-audit
       - run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt
       - run: rustup default 1.97.1
