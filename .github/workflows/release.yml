@@ -25,6 +25,7 @@ jobs:
       - run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt
       - run: rustup default 1.97.1
       - run: cargo fmt --all -- --check
+      - run: rustfmt --check --edition 2024 plugins/development-kit/example/backend/src/lib.rs
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck

@@ -108,6 +108,7 @@ try {
         terminalApi.close = async () => {
           closed += 1;
         };
+        terminalApi.savedLocalSessions = terminalApi.savedSshSessions = async () => [];
         terminalApi.input = terminalApi.resize = terminalApi.ack = async () => {};
         pluginsApi.inventory = async () => ({ installed: [], problems: [], availableBundled: [] });
         pluginsApi.list = pluginsApi.statuses = async () => [];
@@ -138,7 +139,7 @@ try {
     assert.equal(initial.overflow, false);
     assert(Math.abs(initial.rail.right - initial.sidebar.left) < 1);
     assert(Math.abs(initial.sidebar.right - initial.main.left) < 1);
-    assert.equal(await page.getByRole('button', { name: '收起主机栏', exact: true }).count(), 0);
+    assert(await page.getByRole('button', { name: '收起主机栏', exact: true }).isVisible());
     await page.screenshot({ path: path.join(output, `${name}-home.png`) });
     await page.locator('.tree-host').first().dblclick();
     await page.locator('.terminal-pane[data-state="connected"] .xterm-screen').waitFor();
@@ -167,37 +168,45 @@ try {
       Math.abs(localBounds.bottom - localBounds.mainBottom) <= 1,
       `${name}: local terminal fills the content area`,
     );
-    const newSession = async () => {
-      const trigger = page
-        .locator('.local-session-sidebar')
-        .getByRole('button', { name: '新建终端会话', exact: true });
-      const bounds = await trigger.boundingBox();
-      assert(bounds);
-      const position = { x: bounds.width * 0.75, y: bounds.height / 2 };
-      await trigger.click({ position });
-      const menu = page.getByRole('menu', { name: '新建终端会话', exact: true });
-      if (await menu.isVisible()) {
-        const menuBounds = await menu.boundingBox();
-        assert(menuBounds);
-        assert(
-          Math.abs(
-            menuBounds.x -
-              Math.max(8, Math.min(bounds.x + position.x, width - menuBounds.width - 8)),
-          ) <= 1,
-          `${name}: new session menu must follow the click horizontally`,
-        );
-        assert(
-          Math.abs(
-            menuBounds.y -
-              Math.max(8, Math.min(bounds.y + position.y, height - menuBounds.height - 8)),
-          ) <= 1,
-          `${name}: new session menu must follow the click vertically`,
-        );
-        await page.screenshot({ path: path.join(output, `${name}-new-session-menu.png`) });
-        await menu.getByRole('menuitem', { name: '新建普通会话', exact: true }).click();
-      }
-    };
-    await newSession();
+    const localSidebar = page.locator('.local-session-sidebar');
+    const localTabs = localSidebar.getByRole('tablist');
+    const menu = page.getByRole('menu', { name: '终端会话操作', exact: true });
+    const regular = menu.getByRole('menuitem', { name: '新建', exact: true });
+    const administrator = menu.getByRole('menuitem', { name: '新建(管理员)', exact: true });
+    assert.equal(
+      await localSidebar.getByRole('button', { name: '新建终端会话', exact: true }).count(),
+      0,
+    );
+    await localTabs.getByRole('tab').click({ button: 'right' });
+    await menu.waitFor();
+    assert.equal(await regular.count(), 0);
+    assert.equal(await administrator.count(), 0);
+    await page.keyboard.press('Escape');
+    const bounds = await localTabs.boundingBox();
+    assert(bounds);
+    const position = { x: bounds.width * 0.75, y: bounds.height - 4 };
+    await localTabs.click({ button: 'right', position });
+    await regular.waitFor();
+    const menuBounds = await menu.boundingBox();
+    assert(menuBounds);
+    assert(
+      Math.abs(
+        menuBounds.x - Math.max(8, Math.min(bounds.x + position.x, width - menuBounds.width - 8)),
+      ) <= 1,
+      `${name}: session menu must follow the right-click horizontally`,
+    );
+    assert(
+      Math.abs(
+        menuBounds.y - Math.max(8, Math.min(bounds.y + position.y, height - menuBounds.height - 8)),
+      ) <= 1,
+      `${name}: session menu must follow the right-click vertically`,
+    );
+    const windows = await page.evaluate(() => navigator.platform.startsWith('Win'));
+    assert.equal(await administrator.count(), windows ? 1 : 0);
+    assert(await menu.getByRole('menuitem', { name: '已保存会话', exact: true }).isVisible());
+    assert.equal(await localTabs.getByRole('tab').count(), 1);
+    await page.screenshot({ path: path.join(output, `${name}-new-session-menu.png`) });
+    await regular.click();
     await page.locator('.local-session-sidebar .terminal-tab').nth(1).waitFor();
     assert.equal(await page.locator('.local-session-sidebar .terminal-tab').count(), 2);
     await page.screenshot({ path: path.join(output, `${name}-local.png`) });

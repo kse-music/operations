@@ -78,16 +78,23 @@ async function openPluginModal(name: string): Promise<HTMLElement> {
   expect(document.querySelector(`[aria-label="${name} · 配置"]`)).not.toBeNull();
   return document.querySelector<HTMLDialogElement>('.settings-page')!;
 }
-async function newSession(): Promise<void> {
-  document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
+async function localSessionMenu(): Promise<Element> {
+  document
+    .querySelector('.local-session-sidebar .terminal-session-header')!
+    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await flush();
-  const menu = document.querySelector('[role="menu"][aria-label="新建终端会话"]');
-  if (menu) {
+  return document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
+}
+async function newSession(): Promise<void> {
+  if (document.querySelector('.local-session-sidebar .terminal-session-header')) {
+    const menu = await localSessionMenu();
     [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((item) => item.textContent?.trim() === '新建普通会话')!
+      .find((item) => item.textContent?.trim() === '新建')!
       .click();
-    await flush();
+  } else {
+    document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
   }
+  await flush();
 }
 async function closeSession(index: number): Promise<void> {
   root
@@ -1605,19 +1612,18 @@ it('uses the right-clicked folder when creating a host without a group selector'
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
 
-it('selects administrator mode from the session plus menu without replacing ordinary sessions', async () => {
+it('creates an administrator session from the local list background menu', async () => {
   const store = useTerminalsStore(),
     workspace = useWorkspaceStore();
   document.querySelector<HTMLButtonElement>('[aria-label="本地终端"]')!.click();
   await flush();
   const ordinary = store.panes[0]!;
   expect(document.querySelector('.sidebar [aria-label="本地终端（管理员）"]')).toBeNull();
-  document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
-  await flush();
+  expect(document.querySelector('.local-session-sidebar [aria-label="新建终端会话"]')).toBeNull();
+  const menu = await localSessionMenu();
   expect(store.hostTabs('')).toHaveLength(1);
-  const menu = document.querySelector('[role="menu"][aria-label="新建终端会话"]')!;
   [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-    .find((item) => item.textContent?.trim() === '以管理员身份运行')!
+    .find((item) => item.textContent?.trim() === '新建(管理员)')!
     .click();
   await flush();
   expect(workspace.current?.hostId).toBe('');
@@ -2753,7 +2759,7 @@ it.each(['remote', 'local'])(
 );
 
 it.each(['remote', 'local'])(
-  'opens a session menu without selecting its target and creates a fresh single-pane %s session from plus',
+  'opens a session menu without selecting its target and creates a fresh single-pane %s session',
   async (target) => {
     const terminals = useTerminalsStore();
     const host = target === 'remote' ? useHostsStore().catalog!.hosts[0]! : null;

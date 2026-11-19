@@ -66,6 +66,7 @@ node tools/tauri.mjs build --debug --no-bundle
 npm run plugins:fetch
 npm run plugins:build
 cargo fmt --all -- --check
+rustfmt --check --edition 2024 plugins/development-kit/example/backend/src/lib.rs
 cargo clippy --workspace --all-targets --locked -- -D warnings
 npm run test:build
 npm run format:check

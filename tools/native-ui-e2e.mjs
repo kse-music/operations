@@ -63,6 +63,14 @@ const passed = [];
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rpc = (name, args = {}) =>
   page.evaluate(({ name, args }) => window.__TAURI_INTERNALS__.invoke(name, args), { name, args });
+async function newLocalSession() {
+  const list = page.locator('.local-session-sidebar .terminal-session-header');
+  await list.press('Shift+F10');
+  await page
+    .getByRole('menu', { name: '终端会话操作', exact: true })
+    .getByRole('menuitem', { name: '新建', exact: true })
+    .click();
+}
 async function start() {
   const port = await new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -375,7 +383,7 @@ try {
   passed.push(
     'native OS clipboard handles Unicode, menu/right-click/shortcut paste and selection/shortcut copy with web clipboard disabled; large paste confirmation remains and the original clipboard is preserved',
   );
-  await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+  await newLocalSession();
   await active().locator('.xterm-container[data-state="connected"]').waitFor();
   assert.equal(await page.locator('.terminal-tab').count(), 2);
   await command("[Console]::WriteLine(('SD_FRESH_' + ($null -eq $sdValue)))", 'SD_FRESH_True');
@@ -383,7 +391,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 1);
   await command("[Console]::WriteLine(('SD_SURVIVED_' + $sdValue))", 'SD_SURVIVED_323');
   passed.push(
-    'the plus button creates an independent PowerShell; middle-click close preserves the original',
+    'the local list menu creates an independent PowerShell; middle-click close preserves the original',
   );
   const tabsBeforeSettings = await page.locator('.workspace-tab').count();
   for (const label of ['通用', '终端', '关于']) {
@@ -527,12 +535,12 @@ try {
   await command("[Console]::WriteLine(('SD_RETURN_' + $sdValue))", 'SD_RETURN_323');
   await page.screenshot({ path: path.join(artifacts, 'local-powershell.png') });
   for (let i = 0; i < 2; i++) {
-    await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+    await newLocalSession();
     await active().locator('.xterm-container[data-state="connected"]').waitFor();
   }
   await page.getByRole('button', { name: '关闭标签 会话 3', exact: true }).click();
   await page.waitForFunction(() => document.querySelectorAll('.terminal-tab').length === 2);
-  await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+  await newLocalSession();
   await active().locator('.xterm-container[data-state="connected"]').waitFor();
   assert.equal(await page.getByRole('tab', { name: /^会话 5/ }).count(), 1);
   const localSessions = await page.evaluate(() =>
@@ -586,7 +594,7 @@ try {
   await active().locator('.xterm-container[data-state="failed"]').waitFor();
   await selectHostWorkspace(page, '');
   for (let index = 0; index < 3; index++) {
-    await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
+    await newLocalSession();
     await active().locator('.xterm-container[data-state="connected"]').waitFor();
   }
   assert.equal(await page.locator('.terminal-tab').count(), 4);

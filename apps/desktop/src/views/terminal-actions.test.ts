@@ -125,20 +125,17 @@ async function tabMenu(index = 0) {
   await flush();
   return document.querySelector('[aria-label="终端会话操作"]')!;
 }
-async function savedMenu(parent?: Element) {
-  if (!parent) {
-    root.querySelector('.terminal-session-header')!.dispatchEvent(
-      new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX: 80,
-        clientY: 60,
-      }),
+async function backgroundMenu(x = 80, y = 60): Promise<HTMLElement> {
+  root
+    .querySelector('.terminal-session-header')!
+    .dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y }),
     );
-    await flush();
-    parent = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
-  }
-  button('已保存会话', parent).dispatchEvent(new Event('pointerenter'));
+  await flush();
+  return document.querySelector<HTMLElement>('[role="menu"][aria-label="终端会话操作"]')!;
+}
+async function savedMenu(parent?: Element) {
+  button('已保存会话', parent ?? (await backgroundMenu())).dispatchEvent(new Event('pointerenter'));
   await flush();
   return document.querySelector('[role="menu"][aria-label="已保存会话"]')!;
 }
@@ -243,7 +240,7 @@ afterEach(async () => {
 });
 
 it.each([false, true])(
-  'chooses local elevation=%s from the plus menu before opening a new session',
+  'chooses local elevation=%s from the background menu before opening a new session',
   async (elevated) => {
     const store = useTerminalsStore();
     hostId.value = '';
@@ -251,20 +248,16 @@ it.each([false, true])(
     await flush();
     const original = store.panes.at(-1)!;
     const count = store.panes.length;
-    const plus = button('新建终端会话');
-    plus.click();
-    await flush();
+    expect(root.querySelector('[aria-label="新建终端会话"]')).toBeNull();
+    const menu = await backgroundMenu();
     expect(store.panes).toHaveLength(count);
     expect(native.openLocal).toHaveBeenCalledTimes(1);
-    expect(plus.getAttribute('aria-haspopup')).toBe('menu');
-    expect(plus.getAttribute('aria-expanded')).toBe('true');
-    const menu = document.querySelector('[role="menu"][aria-label="新建终端会话"]')!;
     expect(
       [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
-    ).toEqual(['新建普通会话', '以管理员身份运行']);
-    button(elevated ? '以管理员身份运行' : '新建普通会话', menu).click();
+    ).toEqual(['新建', '新建(管理员)', '已保存会话', '关闭所有']);
+    button(elevated ? '新建(管理员)' : '新建', menu).click();
     await flush();
-    expect(document.querySelector('[role="menu"][aria-label="新建终端会话"]')).toBeNull();
+    expect(document.querySelector('[role="menu"][aria-label="终端会话操作"]')).toBeNull();
     expect(store.panes).toHaveLength(count + 1);
     expect(store.panes.at(-1)?.elevated).toBe(elevated);
     expect(native.openLocal).toHaveBeenCalledTimes(2);
@@ -283,83 +276,72 @@ it.each([
     left: window.innerWidth - 208,
     top: window.innerHeight - 88,
   },
-])('positions the local session menu at click $x,$y within the viewport', async (point) => {
+])('positions the local session menu at right-click $x,$y within the viewport', async (point) => {
   const store = useTerminalsStore();
   hostId.value = '';
   store.open(null);
   await flush();
-  const plus = button('新建终端会话');
   const bounds = HTMLElement.prototype.getBoundingClientRect;
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
     this: HTMLElement,
   ) {
-    if (this === plus) return new DOMRect(40, 60, 248, 36);
     return this.classList.contains('terminal-session-menu')
       ? new DOMRect(0, 0, 200, 80)
       : bounds.call(this);
   });
-  plus.dispatchEvent(
-    new MouseEvent('click', { bubbles: true, clientX: point.x, clientY: point.y }),
-  );
-  await flush();
-  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="新建终端会话"]')!;
+  const menu = await backgroundMenu(point.x, point.y);
   expect(menu.style.left).toBe(`${point.left}px`);
   expect(menu.style.top).toBe(`${point.top}px`);
   expect(native.openLocal).toHaveBeenCalledTimes(1);
 });
 
-it('anchors the local session menu below its button when activated without pointer coordinates', async () => {
+it('anchors the local session menu to the list when opened with Shift+F10', async () => {
   const store = useTerminalsStore();
   hostId.value = '';
   store.open(null);
   await flush();
-  const plus = button('新建终端会话');
-  vi.spyOn(plus, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 60, 248, 36));
-  plus.click();
+  const list = root.querySelector<HTMLElement>('.terminal-session-header')!;
+  vi.spyOn(list, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 60, 248, 36));
+  list.focus();
+  list.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true }));
   await flush();
-  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="新建终端会话"]')!;
+  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="终端会话操作"]')!;
   expect(menu.style.left).toBe('40px');
   expect(menu.style.top).toBe('96px');
   expect(document.activeElement).toBe(menu.querySelector('[role="menuitem"]'));
   expect(native.openLocal).toHaveBeenCalledTimes(1);
 });
 
-it('dismisses the plus menu with Escape or outside click, restores focus and never creates a session', async () => {
+it('dismisses the background menu with Escape or outside click and restores list focus', async () => {
   const store = useTerminalsStore();
   hostId.value = '';
   store.open(null);
   await flush();
   const count = store.panes.length;
-  const plus = button('新建终端会话');
-  plus.focus();
-  plus.click();
-  await flush();
-  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="新建终端会话"]')!;
+  const list = root.querySelector('.terminal-session-header');
+  const menu = await backgroundMenu();
   const items = [...menu.querySelectorAll('[role="menuitem"]')];
   expect(document.activeElement).toBe(items[0]);
   menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(document.activeElement).toBe(items[1]);
   menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   await flush();
-  expect(document.activeElement).toBe(plus);
-  expect(plus.getAttribute('aria-expanded')).toBe('false');
-  plus.click();
-  await flush();
-  button('关闭新建会话菜单').click();
+  expect(document.activeElement).toBe(list);
+  await backgroundMenu();
+  button('关闭会话菜单').click();
   await flush();
   expect(document.querySelector('[role="menu"]')).toBeNull();
   expect(store.panes).toHaveLength(count);
   expect(native.openLocal).toHaveBeenCalledTimes(1);
 });
 
-it('closes the plus menu when switching hosts without applying the old local action to the new host', async () => {
+it('closes the background menu when switching hosts without applying the old local action', async () => {
   const store = useTerminalsStore();
   hostId.value = '';
   store.open(null);
   await flush();
-  button('新建终端会话').click();
-  await flush();
-  const oldAction = button('以管理员身份运行');
+  const menu = await backgroundMenu();
+  const oldAction = button('新建(管理员)', menu);
   hostId.value = 'host';
   await flush();
   oldAction.click();
@@ -369,15 +351,32 @@ it('closes the plus menu when switching hosts without applying the old local act
   expect(native.openLocal).toHaveBeenCalledTimes(1);
 });
 
-it.each([
-  ['Win32', 'host'],
-  ['Linux x86_64', ''],
-  ['MacIntel', ''],
-])('opens directly from plus on platform=%s host=%s', async (platform, target) => {
-  vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+it.each(['Linux x86_64', 'MacIntel'])(
+  'creates a regular session from an empty local list on %s',
+  async (platform) => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    const store = useTerminalsStore();
+    hostId.value = '';
+    await flush();
+    expect(store.hostTabs('')).toHaveLength(0);
+    const menu = await backgroundMenu();
+    expect(
+      [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
+    ).toEqual(['新建', '已保存会话']);
+    button('新建', menu).click();
+    await flush();
+    expect(store.hostTabs('')).toHaveLength(1);
+    expect(store.panes.at(-1)?.elevated).toBe(false);
+  },
+);
+
+it('opens an SSH session directly from plus', async () => {
   const store = useTerminalsStore();
-  hostId.value = target!;
-  if (!target) store.open(null);
+  const menu = await backgroundMenu();
+  expect(
+    [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
+  ).toEqual(['已保存会话', '关闭所有']);
+  button('关闭会话菜单').click();
   await flush();
   const count = store.panes.length;
   button('新建终端会话').click();

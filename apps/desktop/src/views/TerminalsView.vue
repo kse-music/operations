@@ -80,18 +80,7 @@ const host = computed(
     null,
 );
 function newTerminal(): void {
-  if (!props.hostId || host.value) store.open(host.value);
-}
-const canChooseLocalMode = computed(() => !props.hostId && navigator.platform.startsWith('Win'));
-function addTerminal(event: MouseEvent): void {
-  if (!props.visible) return;
-  if (canChooseLocalMode.value) void openMenu(null, event);
-  else newTerminal();
-}
-function selectLocalMode(elevated: boolean): void {
-  if (!props.visible || !canChooseLocalMode.value || menu.value?.key !== null) return;
-  closeMenu();
-  store.open(null, undefined, undefined, elevated);
+  if (props.visible && (!props.hostId || host.value)) store.open(host.value);
 }
 function isDefaultSessionName(item: TerminalTab): boolean {
   const host = item.panes[0]?.host;
@@ -114,9 +103,13 @@ const area = ref<HTMLElement>();
 const renaming = ref<string | null>(null),
   title = ref('');
 const tab = computed(() => store.tabs.find((t) => t.key === store.active));
-const menu = ref<{ key: string | null | undefined; x: number; y: number } | null>(null);
+const menu = ref<{ key: string | undefined; x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuTarget = computed(() => store.tabs.find((item) => item.key === menu.value?.key));
+const localBackgroundMenu = computed(
+  () => !props.hostId && menu.value !== null && menu.value.key === undefined,
+);
+const canOpenElevated = computed(() => !props.hostId && navigator.platform.startsWith('Win'));
 const savedSessions = computed(() => store.savedSessions(props.hostId));
 const savedTrigger = ref<HTMLButtonElement>();
 const savedMenuElement = ref<HTMLElement>();
@@ -126,15 +119,18 @@ function closeMenu(): void {
   savedMenuPosition.value = null;
   menu.value = null;
   if (props.visible && menuTrigger?.isConnected) menuTrigger.focus({ preventScroll: true });
+  menuTrigger = null;
 }
-async function openMenu(
-  key: string | null | undefined,
-  event: MouseEvent | KeyboardEvent,
-): Promise<void> {
+function createLocalSession(elevated: boolean): void {
+  if (!props.visible || !localBackgroundMenu.value || (elevated && !canOpenElevated.value)) return;
+  closeMenu();
+  store.open(null, undefined, undefined, elevated);
+}
+async function openMenu(key: string | undefined, event: MouseEvent | KeyboardEvent): Promise<void> {
   if (!props.visible) return;
   savedMenuPosition.value = null;
   const target = event.currentTarget as HTMLElement;
-  menuTrigger = target.querySelector<HTMLElement>('[role=tab]') ?? target;
+  menuTrigger = key ? (target.querySelector<HTMLElement>('[role=tab]') ?? target) : target;
   const bounds = target.getBoundingClientRect();
   const anchored = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
   menu.value = {
@@ -471,6 +467,7 @@ watch(
   () => {
     savedMenuPosition.value = null;
     menu.value = null;
+    menuTrigger = null;
     renaming.value = null;
   },
 );
@@ -622,16 +619,13 @@ watch(
           </div>
         </div>
         <button
+          v-if="props.hostId"
           class="shell-icon-button"
           :aria-label="tr('新建终端会话')"
           :title="tr('新建终端会话')"
-          :aria-haspopup="canChooseLocalMode ? 'menu' : undefined"
-          :aria-expanded="canChooseLocalMode ? menu?.key === null : undefined"
-          @click="addTerminal"
+          @click="newTerminal"
         >
-          <SquareTerminal v-if="sidebarSessions" :size="16" aria-hidden="true" />
-          <Plus v-else :size="15" aria-hidden="true" />
-          <span v-if="sidebarSessions">{{ tr('新建会话') }}</span>
+          <Plus :size="15" aria-hidden="true" />
         </button>
       </div>
     </Teleport>
@@ -679,7 +673,7 @@ watch(
     <template v-if="menu">
       <button
         class="context-backdrop"
-        :aria-label="menu.key === null ? tr('关闭新建会话菜单') : tr('关闭会话菜单')"
+        :aria-label="tr('关闭会话菜单')"
         @click="closeMenu"
         @contextmenu.prevent="closeMenu"
         @wheel.prevent="closeMenu"
@@ -688,78 +682,73 @@ watch(
         ref="menuElement"
         class="context-menu terminal-session-menu"
         role="menu"
-        :aria-label="menu.key === null ? tr('新建终端会话') : tr('终端会话操作')"
+        :aria-label="tr('终端会话操作')"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         @keydown="menuKey"
         @pointerover="hoverMenu"
       >
-        <template v-if="menu.key === null">
-          <button role="menuitem" @click="selectLocalMode(false)">
-            <SquareTerminal class="menu-icon-purple" :size="14" aria-hidden="true" />{{
-              tr('新建普通会话')
-            }}
+        <template v-if="localBackgroundMenu">
+          <button role="menuitem" @click="createLocalSession(false)">
+            <SquareTerminal class="menu-icon-purple" aria-hidden="true" />{{ tr('新建') }}
           </button>
-          <button role="menuitem" @click="selectLocalMode(true)">
-            <Shield class="menu-icon-gold" :size="14" aria-hidden="true" />{{
-              tr('以管理员身份运行')
-            }}
+          <button v-if="canOpenElevated" role="menuitem" @click="createLocalSession(true)">
+            <Shield class="menu-icon-gold" aria-hidden="true" />{{ tr('新建(管理员)') }}
           </button>
+          <div role="separator"></div>
         </template>
-        <template v-else>
-          <template v-if="menuTarget">
-            <button role="menuitem" @click="runMenu('duplicate')">
-              <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
-            </button>
-            <button
-              role="menuitem"
-              :aria-label="tr('保存')"
-              aria-keyshortcuts="Control+S"
-              :disabled="!menuTarget || !store.canSave(menuTarget.key)"
-              @click="runMenu('save')"
-            >
-              <Save class="menu-icon-green" aria-hidden="true" />{{ tr('保存') }}<kbd>Ctrl+S</kbd>
-            </button>
-            <button
-              role="menuitem"
-              :aria-label="tr('重命名')"
-              aria-keyshortcuts="F2"
-              @click="runMenu('rename')"
-            >
-              <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名')
-              }}<kbd>F2</kbd>
-            </button>
-            <button
-              role="menuitem"
-              :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
-              @click="runMenu('reconnect')"
-            >
-              <RefreshCw class="menu-icon-green" aria-hidden="true" />{{ tr('重新连接') }}
-            </button>
-            <button
-              role="menuitem"
-              :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
-              @click="runMenu('disconnect')"
-            >
-              <Unplug class="menu-icon-red" aria-hidden="true" />{{ tr('断开连接') }}
-            </button>
-          </template>
+        <template v-if="menuTarget">
+          <button role="menuitem" @click="runMenu('duplicate')">
+            <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
+          </button>
           <button
-            ref="savedTrigger"
             role="menuitem"
-            aria-haspopup="menu"
-            aria-controls="terminal-saved-session-menu"
-            :aria-expanded="!!savedMenuPosition"
-            @pointerenter="openSavedMenu()"
-            @click="openSavedMenu(true)"
+            :aria-label="tr('保存')"
+            aria-keyshortcuts="Control+S"
+            :disabled="!menuTarget || !store.canSave(menuTarget.key)"
+            @click="runMenu('save')"
           >
-            <Save class="menu-icon-green" aria-hidden="true" />
-            <span>{{ tr('已保存会话') }}</span>
-            <ChevronRight class="terminal-saved-menu-arrow" aria-hidden="true" />
+            <Save class="menu-icon-green" aria-hidden="true" />{{ tr('保存') }}<kbd>Ctrl+S</kbd>
           </button>
-          <button v-if="tabs.length" role="menuitem" @click="runMenu('all')">
-            <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
+          <button
+            role="menuitem"
+            :aria-label="tr('重命名')"
+            aria-keyshortcuts="F2"
+            @click="runMenu('rename')"
+          >
+            <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名')
+            }}<kbd>F2</kbd>
+          </button>
+          <button
+            role="menuitem"
+            :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
+            @click="runMenu('reconnect')"
+          >
+            <RefreshCw class="menu-icon-green" aria-hidden="true" />{{ tr('重新连接') }}
+          </button>
+          <button
+            role="menuitem"
+            :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
+            @click="runMenu('disconnect')"
+          >
+            <Unplug class="menu-icon-red" aria-hidden="true" />{{ tr('断开连接') }}
           </button>
         </template>
+        <button
+          ref="savedTrigger"
+          role="menuitem"
+          aria-haspopup="menu"
+          aria-controls="terminal-saved-session-menu"
+          :aria-expanded="!!savedMenuPosition"
+          @pointerenter="openSavedMenu()"
+          @click="openSavedMenu(true)"
+        >
+          <Save class="menu-icon-green" aria-hidden="true" />
+          <span>{{ tr('已保存会话') }}</span>
+          <ChevronRight class="terminal-saved-menu-arrow" aria-hidden="true" />
+        </button>
+        <button v-if="tabs.length" role="menuitem" @click="runMenu('all')">
+          <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
+        </button>
       </div>
       <div
         v-if="savedMenuPosition"

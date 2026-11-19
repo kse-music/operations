@@ -43,15 +43,6 @@
   padding: 0 10px 12px;
   border: 0;
 }
-.local-session-sidebar .terminal-session-header > .shell-icon-button {
-  order: -1;
-  width: 100%;
-  min-height: 36px;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border);
-}
 .local-session-sidebar .terminal-tabs {
   flex: 1;
   flex-direction: column;
