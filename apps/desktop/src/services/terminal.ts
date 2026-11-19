@@ -10,15 +10,22 @@ import type {
   TerminalDropProgress,
   TerminalDropResult,
   SavedLocalTerminal,
-  SaveLocalTerminalInput,
+  SavedSshTerminal,
+  SaveTerminalInput,
 } from '../types/terminal';
 
 export const terminalApi = {
+  savedSshSessions: (hostId: string): Promise<SavedSshTerminal[]> =>
+    invoke('terminal_ssh_saved_sessions', { hostId }),
+  saveSshSession: (hostId: string, input: SaveTerminalInput): Promise<SavedSshTerminal> =>
+    invoke('terminal_ssh_save', { hostId, input }),
+  removeSavedSshSession: (hostId: string, id: string): Promise<void> =>
+    invoke('terminal_ssh_remove_saved', { hostId, id }),
   savedLocalSessions: (): Promise<SavedLocalTerminal[]> => {
     ensureDesktop();
     return invoke('terminal_local_saved_sessions');
   },
-  saveLocalSession: (input: SaveLocalTerminalInput): Promise<SavedLocalTerminal> =>
+  saveLocalSession: (input: SaveTerminalInput): Promise<SavedLocalTerminal> =>
     invoke('terminal_local_save', { input }),
   removeSavedLocalSession: (id: string): Promise<void> =>
     invoke('terminal_local_remove_saved', { id }),
@@ -86,6 +93,7 @@ export const terminalApi = {
     hostId: string,
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,
+    saved?: { id: string; pane: number },
   ): Promise<TerminalSession> {
     ensureDesktop();
     const open = async (): Promise<TerminalSession> => {
@@ -93,7 +101,12 @@ export const terminalApi = {
         const events = new Channel<TerminalEvent>();
         events.onmessage = receive;
         try {
-          return await invoke<TerminalSession>('terminal_open', { hostId, size, events });
+          return await invoke<TerminalSession>('terminal_open', {
+            hostId,
+            size,
+            events,
+            ...(saved && { saved }),
+          });
         } catch (error) {
           if (
             attempt >= 5 ||

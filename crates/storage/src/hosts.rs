@@ -261,6 +261,7 @@ impl Database {
             .map_err(storage_error)?;
         if tx.query_row("SELECT EXISTS(SELECT 1 FROM hosts WHERE json_extract(ssh_options,'$.jumpHostId')=?1)",[id],|r|r.get::<_,bool>(0)).map_err(storage_error)?{return Err(Error::Validation("此主机仍被用作跳板，请先修改关联主机的跳板设置"));}
         let previous = one_host(&tx, id)?;
+        super::ssh_sessions::remove_host(&tx, id)?;
         tx.execute("DELETE FROM hosts WHERE id=?1", [id])
             .map_err(storage_error)?;
         tx.execute(

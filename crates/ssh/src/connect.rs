@@ -39,6 +39,7 @@ pub(crate) struct Connection {
     pub alive: CancellationToken,
     pub remotes: forward::RemoteRoutes,
     pub verified_key: String,
+    pub bash_snapshot: tokio::sync::OnceCell<bool>,
     pub cipher: watch::Receiver<Option<String>>,
 }
 impl Deref for Connection {
@@ -231,6 +232,7 @@ pub(crate) async fn establish(
         handle,
         parents: handles,
         verified_key,
+        bash_snapshot: Default::default(),
         alive,
         remotes,
         cipher: target_cipher.ok_or_else(|| failure("SSH_ROUTE", "连接路径为空"))?,

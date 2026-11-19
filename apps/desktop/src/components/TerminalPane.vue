@@ -319,7 +319,13 @@ async function connect(): Promise<void> {
               size: import('../types/terminal').TerminalSize,
               receive: (event: TerminalEvent) => void,
             ) => filesApi.terminal(hostId, size, props.tab.fileAction!, receive)
-          : terminalApi.open;
+          : props.tab.savedSource
+            ? (
+                hostId: string,
+                size: import('../types/terminal').TerminalSize,
+                receive: (event: TerminalEvent) => void,
+              ) => terminalApi.open(hostId, size, receive, props.tab.savedSource)
+            : terminalApi.open;
     const ready = async () => {
       await Promise.resolve();
       const value = await opening;

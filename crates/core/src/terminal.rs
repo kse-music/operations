@@ -195,11 +195,11 @@ impl LocalTerminalLayout {
             }
         }
         if !(1..=8).contains(&panes) {
-            return Err(Error::Validation("保存的本地会话窗格数量无效"));
+            return Err(Error::Validation("保存的会话窗格数量无效"));
         }
         let mut seen = vec![false; panes];
         if !walk(self, &mut seen, 1) || seen.contains(&false) {
-            return Err(Error::Validation("保存的本地会话分屏布局无效"));
+            return Err(Error::Validation("保存的会话分屏布局无效"));
         }
         Ok(())
     }
@@ -209,6 +209,20 @@ impl LocalTerminalLayout {
 pub struct SavedLocalPane {
     pub directory: String,
     pub elevated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protected_command: Option<String>,
+}
+
+/// A Windows DPAPI blob transported as base64, never executable shell text.
+pub fn valid_protected_command(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 8192
+        && value.len().is_multiple_of(4)
+        && value.trim_end_matches('=').len() >= value.len().saturating_sub(2)
+        && value
+            .trim_end_matches('=')
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -218,7 +232,7 @@ pub struct SavedLocalTerminal {
     pub panes: Vec<SavedLocalPane>,
     pub layout: LocalTerminalLayout,
 }
-pub fn validate_local_terminal_title(title: &str) -> Result<(), Error> {
+pub fn validate_terminal_title(title: &str) -> Result<(), Error> {
     if title.trim().is_empty() || title.chars().count() > 128 || title.chars().any(char::is_control)
     {
         return Err(Error::Validation("会话名称须为 1–128 个字符且不含控制字符"));
@@ -230,7 +244,7 @@ impl SavedLocalTerminal {
         if uuid::Uuid::parse_str(&self.id).is_err() {
             return Err(Error::Validation("保存的本地会话标识无效"));
         }
-        validate_local_terminal_title(&self.title)?;
+        validate_terminal_title(&self.title)?;
         self.layout.validate(self.panes.len())?;
         for pane in &self.panes {
             if pane.directory.len() > 32768
@@ -239,17 +253,68 @@ impl SavedLocalTerminal {
             {
                 return Err(Error::Validation("保存的本地终端工作目录无效"));
             }
+            if pane
+                .protected_command
+                .as_deref()
+                .is_some_and(|v| !valid_protected_command(v))
+            {
+                return Err(Error::Validation("保存的本地终端命令格式无效"));
+            }
         }
         Ok(())
     }
 }
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SaveLocalTerminalInput {
+pub struct SaveTerminalInput {
     pub id: Option<String>,
     pub title: String,
     pub session_ids: Vec<String>,
     pub layout: Option<LocalTerminalLayout>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SshPaneState {
+    pub directory: String,
+    pub command: String,
+}
+impl SshPaneState {
+    pub fn validate(&self) -> Result<(), Error> {
+        if !self.directory.starts_with('/')
+            || self.directory.len() > 4096
+            || self.directory.chars().any(char::is_control)
+            || self.command.len() > 4096
+            || self
+                .command
+                .chars()
+                .any(|c| c.is_control() || matches!(c, '\u{2028}' | '\u{2029}'))
+        {
+            return Err(Error::Validation("远端目录或命令格式无效"));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SshPaneSnapshot {
+    pub identity: String,
+    pub state: Option<SshPaneState>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SshSavedSource {
+    pub id: uuid::Uuid,
+    pub pane: usize,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedSshTerminal {
+    pub id: uuid::Uuid,
+    pub title: String,
+    pub pane_count: usize,
+    pub layout_only_panes: usize,
+    pub layout: LocalTerminalLayout,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -166,6 +166,88 @@ pub(crate) fn plan_for_target(
 }
 
 impl Application {
+    pub async fn terminal_ssh_saved_sessions(
+        &self,
+        host_id: String,
+    ) -> Result<Vec<serverdeck_core::terminal::SavedSshTerminal>, Error> {
+        self.blocking(move |db| {
+            Ok(db
+                .ssh_terminal_sessions(&host_id)?
+                .into_iter()
+                .map(|r| r.session)
+                .collect())
+        })
+        .await
+    }
+    pub async fn terminal_ssh_save(
+        &self,
+        host_id: String,
+        input: serverdeck_core::terminal::SaveTerminalInput,
+    ) -> Result<serverdeck_core::terminal::SavedSshTerminal, Error> {
+        use serverdeck_core::terminal::{SavedSshTerminal, validate_terminal_title};
+        validate_terminal_title(&input.title)?;
+        let id = input
+            .id
+            .as_deref()
+            .map(uuid::Uuid::parse_str)
+            .transpose()
+            .map_err(|_| Error::Validation("SSH 会话标识无效"))?;
+        if input.session_ids.is_empty() && input.layout.is_none() {
+            let id = id.ok_or(Error::Validation("请先打开 SSH 会话再保存"))?;
+            return self
+                .blocking(move |db| db.rename_ssh_session(&host_id, id, input.title))
+                .await;
+        }
+        let layout = input
+            .layout
+            .ok_or(Error::Validation("缺少 SSH 会话分屏布局"))?;
+        layout.validate(input.session_ids.len())?;
+        let mut seen = std::collections::HashSet::new();
+        let mut panes = Vec::new();
+        for session in input.session_ids {
+            if !seen.insert(session.clone()) {
+                return Err(Error::Validation("SSH 会话窗格重复"));
+            }
+            panes.push(self.terminals.shell_snapshot(&host_id, &session)?);
+        }
+        let saved = SavedSshTerminal {
+            id: id.unwrap_or_else(uuid::Uuid::new_v4),
+            title: input.title,
+            pane_count: panes.len(),
+            layout_only_panes: panes.iter().filter(|p| p.state.is_none()).count(),
+            layout,
+        };
+        let secrets = self.secrets.clone();
+        self.blocking(move |db| {
+            let blob = zeroize::Zeroizing::new(
+                serde_json::to_vec(&panes)
+                    .map_err(|_| Error::Validation("SSH 会话快照内容无效"))?,
+            );
+            let record =
+                serverdeck_storage::ssh_sessions::SshSessionRecord::new(saved.clone(), blob.len());
+            let result = db.save_ssh_session(&host_id, record, id.is_some(), |reference| {
+                secrets.write(reference, &blob)
+            });
+            super::hosts::retry_session_secret_cleanup(&db, secrets.as_ref());
+            result.map(|()| saved)
+        })
+        .await
+    }
+    pub async fn terminal_ssh_remove_saved(
+        &self,
+        host_id: String,
+        id: String,
+    ) -> Result<(), Error> {
+        let secrets = self.secrets.clone();
+        self.blocking(move |db| {
+            let id =
+                uuid::Uuid::parse_str(&id).map_err(|_| Error::Validation("SSH 会话标识无效"))?;
+            db.remove_ssh_session(&host_id, id)?;
+            super::hosts::retry_session_secret_cleanup(&db, secrets.as_ref());
+            Ok(())
+        })
+        .await
+    }
     pub async fn terminal_local_saved_sessions(
         &self,
     ) -> Result<Vec<serverdeck_core::terminal::SavedLocalTerminal>, Error> {
@@ -173,15 +255,15 @@ impl Application {
     }
     pub async fn terminal_local_save(
         &self,
-        input: serverdeck_core::terminal::SaveLocalTerminalInput,
+        input: serverdeck_core::terminal::SaveTerminalInput,
     ) -> Result<serverdeck_core::terminal::SavedLocalTerminal, Error> {
-        use serverdeck_core::terminal::{SavedLocalTerminal, validate_local_terminal_title};
+        use serverdeck_core::terminal::{SavedLocalTerminal, validate_terminal_title};
         if !cfg!(windows) {
             return Err(Error::Validation(
                 "保存本地会话目前仅支持 Windows PowerShell",
             ));
         }
-        validate_local_terminal_title(&input.title)?;
+        validate_terminal_title(&input.title)?;
         if input.session_ids.is_empty() {
             let id = input
                 .id
@@ -190,16 +272,7 @@ impl Application {
                 return Err(Error::Validation("未运行的会话只能更新已保存名称"));
             }
             return self
-                .blocking(move |db| {
-                    let mut saved = db
-                        .local_terminal_sessions()?
-                        .into_iter()
-                        .find(|entry| entry.id == id)
-                        .ok_or(Error::NotFound)?;
-                    saved.title = input.title;
-                    db.save_local_terminal_session(saved.clone())?;
-                    Ok(saved)
-                })
+                .blocking(move |db| db.rename_local_terminal_session(&id, input.title))
                 .await;
         }
         let layout = input
@@ -326,16 +399,43 @@ impl Application {
         host_id: String,
         size: TerminalSize,
         sink: Sink,
+        saved: Option<serverdeck_core::terminal::SshSavedSource>,
     ) -> Result<TerminalSession, Error> {
         size.validate()?;
         let secrets = self.secrets.clone();
-        let (host, plan) = self
-            .blocking(move |db| connection_plan(&db, secrets.as_ref(), &host_id))
+        let (host, plan, restore) = self
+            .blocking(move |db| {
+                let (host, plan) = connection_plan(&db, secrets.as_ref(), &host_id)?;
+                let restore = saved
+                    .map(|source| {
+                        let record = db
+                            .ssh_terminal_sessions(&host_id)?
+                            .into_iter()
+                            .find(|r| r.session.id == source.id)
+                            .ok_or(Error::NotFound)?;
+                        let blob = secrets
+                            .read(&record.reference())?
+                            .ok_or(Error::Validation("系统凭据库中缺少 SSH 会话快照"))?;
+                        let panes: Vec<serverdeck_core::terminal::SshPaneSnapshot> =
+                            serde_json::from_slice(&blob)
+                                .map_err(|_| Error::Validation("SSH 会话快照内容无效"))?;
+                        if panes.len() != record.session.pane_count
+                            || panes.iter().filter(|p| p.state.is_none()).count()
+                                != record.session.layout_only_panes
+                        {
+                            return Err(Error::Validation("SSH 会话快照内容无效"));
+                        }
+                        panes.into_iter().nth(source.pane).ok_or(Error::NotFound)
+                    })
+                    .transpose()?;
+                Ok((host, plan, restore))
+            })
             .await?;
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
-        self.terminals.open_plan(host, plan, size, sink)
+        self.terminals
+            .open_interactive_plan(host, plan, size, sink, restore)
     }
     pub fn terminal_input(&self, id: &str, data: Vec<u8>) -> Result<(), Error> {
         if id.starts_with("local:") {

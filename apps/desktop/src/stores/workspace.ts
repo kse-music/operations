@@ -231,8 +231,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           const decision = terminals.confirmHostUploadClose(tab.hostId);
           if (decision !== true && !(await decision)) continue;
           if (tab.hostId && !(await files.prepareHostClose(tab.hostId))) continue;
-          const first = terminals.hostTabs(tab.hostId)[0];
-          if (first) await terminals.closeAll(first.key, true);
+          if (tab.hostId || terminals.hostTabs(tab.hostId).length)
+            await terminals.closeWorkspace(tab.hostId);
           if (terminals.hostTabs(tab.hostId).length) continue;
         }
         if (pages.length) {

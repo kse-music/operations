@@ -6,6 +6,8 @@ mod forward;
 mod monitor;
 mod ops;
 mod sftp_user;
+mod shell_snapshot;
+use shell_snapshot::ShellCommand;
 mod subsystem;
 pub use subsystem::SubsystemChannel;
 mod proxy;
@@ -115,6 +117,7 @@ enum SessionKind {
 struct Control {
     kind: SessionKind,
     file_user: Option<serverdeck_core::files::SftpUser>,
+    snapshot: Mutex<Option<shell_snapshot::Capture>>,
     info: TerminalSession,
     cancel: CancellationToken,
     input: mpsc::Sender<Vec<u8>>,
@@ -318,7 +321,7 @@ impl Engine {
             size,
             sink,
             SessionKind::Terminal,
-            Some(command),
+            Some(ShellCommand::Fixed(command)),
             None,
         )
     }
@@ -339,7 +342,7 @@ impl Engine {
             size,
             sink,
             SessionKind::Terminal,
-            Some(command),
+            Some(ShellCommand::Fixed(command)),
             None,
         )
     }
@@ -358,7 +361,7 @@ impl Engine {
             size,
             sink,
             SessionKind::Terminal,
-            Some(command),
+            Some(ShellCommand::Fixed(command)),
             None,
         )
     }
@@ -370,7 +373,7 @@ impl Engine {
         size: TerminalSize,
         sink: Sink,
         kind: SessionKind,
-        command: Option<String>,
+        command: Option<ShellCommand>,
         file_user: Option<serverdeck_core::files::SftpUser>,
     ) -> Result<TerminalSession, Error> {
         size.validate()?;
@@ -446,6 +449,7 @@ impl Engine {
         let control = Arc::new(Control {
             kind,
             file_user,
+            snapshot: Mutex::default(),
             info: info.clone(),
             cancel: CancellationToken::new(),
             input,
@@ -524,7 +528,7 @@ impl Engine {
         size: watch::Receiver<TerminalSize>,
         ack: watch::Receiver<u64>,
         sink: &Sink,
-        command: Option<String>,
+        command: Option<ShellCommand>,
     ) -> Result<(), Error> {
         let deadline = Duration::from_secs(u64::from(host.config.connect_timeout_secs));
         // This async lock serializes only handshake/authentication/channel creation on ONE transport.
@@ -533,13 +537,19 @@ impl Engine {
             let handle = self
                 .acquire_connection(plan, transport, control, sink)
                 .await?;
+            if matches!(command, Some(ShellCommand::Interactive(_))) {
+                handle
+                    .bash_snapshot
+                    .get_or_init(|| shell_snapshot::supports_snapshot(&handle))
+                    .await;
+            }
             let mut channel = tokio::time::timeout(deadline, handle.channel_open_session())
                 .await
                 .map_err(|_| failure("SSH_TIMEOUT", "创建 SSH Channel 超时"))?
                 .map_err(network)?;
             let alive = handle.alive.clone();
             let dimensions = *size.borrow();
-            tokio::time::timeout(deadline, async {
+            let startup = tokio::time::timeout(deadline, async {
                 channel
                     .request_pty(
                         true,
@@ -553,18 +563,26 @@ impl Engine {
                     .await
                     .map_err(network)?;
                 accepted(&mut channel).await?;
-                if let Some(command) = command {
-                    channel.exec(true, command).await.map_err(network)?;
-                } else {
-                    channel.request_shell(true).await.map_err(network)?;
+                match command {
+                    Some(ShellCommand::Interactive(restore)) => {
+                        shell_snapshot::start(&handle, &mut channel, control, host, restore).await
+                    }
+                    other => {
+                        if let Some(ShellCommand::Fixed(command)) = other {
+                            channel.exec(true, command).await.map_err(network)?;
+                        } else {
+                            channel.request_shell(true).await.map_err(network)?;
+                        }
+                        accepted(&mut channel).await?;
+                        Ok(Vec::new())
+                    }
                 }
-                accepted(&mut channel).await
             })
             .await
             .map_err(|_| failure("SSH_TIMEOUT", "PTY 或 Shell 请求超时"))??;
-            Ok::<_, Error>((channel, alive, handle.cipher.clone()))
+            Ok::<_, Error>((channel, alive, handle.cipher.clone(), startup))
         };
-        let (channel, alive, mut cipher) =
+        let (channel, alive, mut cipher, startup) =
             tokio::select! { result=setup => result?, _=control.cancel.cancelled()=>return Ok(()) };
         send_cipher(sink, &mut cipher)?;
         control.ready.store(true, Ordering::Release);
@@ -573,19 +591,28 @@ impl Engine {
         let reading = async {
             let mut sequence = 0;
             let mut ack = ack;
+            let tracked = matches!(
+                *locked(&control.snapshot)?,
+                Some(shell_snapshot::Capture::Bash(_))
+            );
+            let mut startup = Some(startup).filter(|data| !data.is_empty());
             let mut status = None;
             let mut exited_by_signal = false;
             let mut watching_cipher = true;
             loop {
-                let message = tokio::select! {
-                    message = reader.wait() => message,
-                    changed = cipher.changed(), if watching_cipher => {
-                        if changed.is_err() {
-                            watching_cipher = false;
-                        } else {
-                            send_cipher(sink, &mut cipher)?;
+                let message = if let Some(data) = startup.take() {
+                    Some(ChannelMsg::Data { data: data.into() })
+                } else {
+                    tokio::select! {
+                        message = reader.wait() => message,
+                        changed = cipher.changed(), if watching_cipher => {
+                            if changed.is_err() {
+                                watching_cipher = false;
+                            } else {
+                                send_cipher(sink, &mut cipher)?;
+                            }
+                            continue;
                         }
-                        continue;
                     }
                 };
                 match message {
@@ -607,6 +634,12 @@ impl Engine {
                             } else {
                                 normal
                             };
+                        if tracked
+                            && let Some(shell_snapshot::Capture::Bash(tracker)) =
+                                locked(&control.snapshot)?.as_mut()
+                        {
+                            tracker.feed(&normal);
+                        }
                         for chunk in normal.chunks(16 * 1024) {
                             sequence += 1;
                             control.awaiting.store(sequence, Ordering::Release);

@@ -71,6 +71,48 @@ pub async fn forward_stop(
     application.forward_stop(&id).await.map_err(Into::into)
 }
 
+// Opening a pane resolves its command at the storage boundary by id and index.
+// The sidebar and session menu only consume the original layout metadata.
+fn local_session_metadata(
+    mut saved: serverdeck_core::terminal::SavedLocalTerminal,
+) -> serverdeck_core::terminal::SavedLocalTerminal {
+    for pane in &mut saved.panes {
+        pane.protected_command = None;
+    }
+    saved
+}
+#[tauri::command]
+pub async fn terminal_ssh_saved_sessions(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+) -> Result<Vec<serverdeck_core::terminal::SavedSshTerminal>, IpcError> {
+    application
+        .terminal_ssh_saved_sessions(host_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn terminal_ssh_save(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    input: serverdeck_core::terminal::SaveTerminalInput,
+) -> Result<serverdeck_core::terminal::SavedSshTerminal, IpcError> {
+    application
+        .terminal_ssh_save(host_id, input)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn terminal_ssh_remove_saved(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    id: String,
+) -> Result<(), IpcError> {
+    application
+        .terminal_ssh_remove_saved(host_id, id)
+        .await
+        .map_err(Into::into)
+}
 #[tauri::command]
 pub async fn terminal_local_saved_sessions(
     application: tauri::State<'_, Application>,
@@ -78,16 +120,18 @@ pub async fn terminal_local_saved_sessions(
     application
         .terminal_local_saved_sessions()
         .await
+        .map(|saved| saved.into_iter().map(local_session_metadata).collect())
         .map_err(Into::into)
 }
 #[tauri::command]
 pub async fn terminal_local_save(
     application: tauri::State<'_, Application>,
-    input: serverdeck_core::terminal::SaveLocalTerminalInput,
+    input: serverdeck_core::terminal::SaveTerminalInput,
 ) -> Result<serverdeck_core::terminal::SavedLocalTerminal, IpcError> {
     application
         .terminal_local_save(input)
         .await
+        .map(local_session_metadata)
         .map_err(Into::into)
 }
 #[tauri::command]
@@ -153,6 +197,7 @@ pub async fn terminal_local_open_elevated(
 pub async fn terminal_open(
     application: tauri::State<'_, Application>,
     host_id: String,
+    saved: Option<serverdeck_core::terminal::SshSavedSource>,
     size: TerminalSize,
     events: tauri::ipc::Channel<TerminalEvent>,
 ) -> Result<TerminalSession, IpcError> {
@@ -161,6 +206,7 @@ pub async fn terminal_open(
             host_id,
             size,
             std::sync::Arc::new(move |event| events.send(event).is_ok()),
+            saved,
         )
         .await
         .map_err(Into::into)

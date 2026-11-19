@@ -553,7 +553,7 @@ describe('manually saved local sessions', () => {
       },
     };
     vi.mocked(terminalApi.saveLocalSession).mockResolvedValue(record);
-    expect(await store.saveLocal(tab.key, '项目')).toBe(true);
+    expect(await store.saveSession(tab.key, '项目')).toBe(true);
     expect(terminalApi.saveLocalSession).toHaveBeenCalledExactlyOnceWith({
       id: null,
       title: '项目',
@@ -566,7 +566,7 @@ describe('manually saved local sessions', () => {
     store.resize(tab.key, tab.layout.kind === 'split' ? tab.layout.id : '', 60);
     await nextTick();
     expect(terminalApi.saveLocalSession).toHaveBeenCalledTimes(1);
-    await store.saveLocal(tab.key, '更新');
+    await store.saveSession(tab.key, '更新');
     expect(vi.mocked(terminalApi.saveLocalSession).mock.calls[1]![0].id).toBe('one');
   });
   it('renames an idle saved record without launching or closing shells', async () => {
@@ -576,7 +576,7 @@ describe('manually saved local sessions', () => {
     await store.loadSaved();
     const tab = store.tabs[0]!;
     vi.mocked(terminalApi.saveLocalSession).mockResolvedValue({ ...record, title: '新名称' });
-    expect(await store.saveLocal(tab.key, '新名称')).toBe(true);
+    expect(await store.saveSession(tab.key, '新名称')).toBe(true);
     expect(terminalApi.saveLocalSession).toHaveBeenCalledExactlyOnceWith({
       id: 'one',
       title: '新名称',
@@ -685,7 +685,7 @@ describe('manually saved local sessions', () => {
     await store.close(tab.key);
     store.select(tab.key);
     store.split(pane.key, 'columns');
-    expect(store.canSaveLocal(tab.key)).toBe(false);
+    expect(store.canSave(tab.key)).toBe(false);
     expect(store.canReconnect(tab.key)).toBe(false);
     expect(tab.panes).toEqual([pane]);
     expect(pane.connectRequested).toBe(false);
@@ -720,7 +720,7 @@ describe('manually saved local sessions', () => {
     store.update(tab.panes[0]!.key, { state: 'connected', sessionId: 'local:one' });
     const title = tab.title;
     vi.mocked(terminalApi.saveLocalSession).mockRejectedValue({ message: '写入失败' });
-    expect(await store.saveLocal(tab.key, '不能保存')).toBe(false);
+    expect(await store.saveSession(tab.key, '不能保存')).toBe(false);
     expect(tab.title).toBe(title);
     expect(tab.savedId).toBeUndefined();
     expect(store.error).toBe('写入失败');

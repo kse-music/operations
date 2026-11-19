@@ -25,12 +25,19 @@ pub struct SecureStatus {
 }
 
 pub(crate) fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<String> {
+    cleanup_matching(database, secrets, |_| true)
+}
+fn cleanup_matching(
+    database: &Database,
+    secrets: &dyn SecretStore,
+    include: impl Fn(&str) -> bool,
+) -> Vec<String> {
     let pending = match database.pending_secret_gc() {
         Ok(pending) => pending,
         Err(_) => return vec!["无法读取旧秘密清理状态。后续凭据变更时将重试。".into()],
     };
     let mut failed = 0;
-    for reference in pending {
+    for reference in pending.into_iter().filter(|r| include(r)) {
         if database
             .collect_pending_secret(&reference, || secrets.delete(&reference))
             .is_err()
@@ -44,6 +51,19 @@ pub(crate) fn cleanup(database: &Database, secrets: &dyn SecretStore) -> Vec<Str
         )]
     } else {
         vec![]
+    }
+}
+
+pub(crate) fn retry_session_secret_cleanup(database: &Database, secrets: &dyn SecretStore) {
+    if !cleanup_matching(database, secrets, |reference| {
+        reference.starts_with("ssh-session:")
+    })
+    .is_empty()
+    {
+        tracing::warn!(
+            operation = "ssh_session_cleanup",
+            "snapshot cleanup needs a retry"
+        );
     }
 }
 

@@ -14,6 +14,7 @@ mod migrations;
 pub mod plugins;
 mod sftp_bookmarks;
 mod sftp_directory;
+pub mod ssh_sessions;
 pub mod trust;
 pub mod updates;
 use serverdeck_core::{AppConfig, Error, product::WindowGeometry};

@@ -140,14 +140,19 @@
   font-size: var(--font-size-caption);
   white-space: nowrap;
 }
-.terminal-tab .terminal-session-delete {
+.terminal-tab .terminal-session-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   align-self: stretch;
   flex-shrink: 0;
-  color: var(--error);
   border-radius: 4px;
+}
+.terminal-tab .terminal-session-close:hover {
+  background: var(--hover);
+}
+.terminal-tab .terminal-session-delete {
+  color: var(--error);
 }
 .terminal-tab .terminal-session-delete:hover {
   background: var(--error-bg);
@@ -160,30 +165,14 @@
   vertical-align: -2px;
   flex-shrink: 0;
 }
-.modal.terminal-rename-dialog {
-  width: min(420px, calc(100vw - 24px));
-  padding: 20px;
+.terminal-tab .tree-rename {
+  width: 12em;
+  padding: 3px;
 }
-.terminal-rename-dialog .modal-heading {
-  margin-bottom: 16px;
-}
-.terminal-rename-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: var(--font-size-body);
-  line-height: 1.5;
-}
-.terminal-rename-form .terminal-rename-input {
-  width: 100%;
-}
-.terminal-rename-form .dialog-actions {
-  margin-top: 20px;
-  padding-top: 0;
-  border-top: 0;
-}
-.terminal-rename-form .button {
-  min-width: 72px;
+.terminal-session-menu kbd {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--font-size-caption);
 }
 .terminal-pane {
   position: relative;

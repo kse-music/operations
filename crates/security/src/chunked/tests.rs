@@ -193,3 +193,22 @@ fn rejects_unknown_versions_invalid_lengths_and_mismatched_writes_before_storage
     assert!(new_secret_reference(&vec![0; SECRET_LIMIT + 1]).is_err());
     assert!(store.values.lock().unwrap().is_empty());
 }
+
+#[test]
+fn ssh_session_chunks_have_separate_names_and_roundtrip_small_and_large_snapshots() {
+    let store = Store::default();
+    let id = Uuid::new_v4();
+    store.write(&id.to_string(), b"host reference").unwrap();
+    for size in [32, CHUNK_SIZE + 1] {
+        let reference = format!("ssh-session:{id}:{size}");
+        let blob = vec![42; size];
+        write(&store, &reference, &blob).unwrap();
+        assert_eq!(read(&store, &reference).unwrap().unwrap().as_slice(), blob);
+        delete(&store, &reference).unwrap();
+        assert!(read(&store, &reference).unwrap().is_none());
+        assert_eq!(
+            store.read(&id.to_string()).unwrap().unwrap().as_slice(),
+            b"host reference"
+        );
+    }
+}

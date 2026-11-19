@@ -3,12 +3,13 @@ use std::path::Path;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct LaunchDirectory {
+pub(super) struct ShellLaunch {
     pub directory: Option<String>,
+    pub protected_command: Option<String>,
     pub token: uuid::Uuid,
 }
 
-impl LaunchDirectory {
+impl ShellLaunch {
     pub(super) fn configure(&self, command: &mut CommandBuilder) {
         if let Some(directory) = &self.directory
             && valid_path(directory)
@@ -26,22 +27,14 @@ impl LaunchDirectory {
             if let Some(directory) = command.get_cwd().cloned() {
                 command.env("SERVERDECK_START_DIRECTORY", directory);
             }
-            // PowerShell's provider location can differ from the process working directory.
-            // Report only filesystem locations, after the command has finished.
-            let script = format!(
-                r#"if ($env:SERVERDECK_START_DIRECTORY) {{
-    try {{ Set-Location -LiteralPath $env:SERVERDECK_START_DIRECTORY -ErrorAction Stop }}
-    catch {{ Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }}
-    Remove-Item Env:\SERVERDECK_START_DIRECTORY
-}}
-function global:prompt {{
-    $serverDeckDirectory = ''
-    if ($PWD.Provider.Name -eq 'FileSystem') {{ $serverDeckDirectory = $PWD.ProviderPath }}
-    [Console]::Write(([string][char]27 + ']777;serverdeck-cwd;{};' + $serverDeckDirectory + [char]7))
-    'PS ' + $executionContext.SessionState.Path.CurrentLocation + ('>' * ($nestedPromptLevel + 1)) + ' '
-}}"#,
-                self.token
-            );
+            command.env_remove("SERVERDECK_START_COMMAND");
+            if let Some(blob) = &self.protected_command
+                && command.get_cwd().and_then(|cwd| cwd.to_str()) == self.directory.as_deref()
+                && serverdeck_core::terminal::valid_protected_command(blob)
+            {
+                command.env("SERVERDECK_START_COMMAND", blob);
+            }
+            let script = include_str!("session.ps1").replace("__TOKEN__", &self.token.to_string());
             let bytes: Vec<_> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
             command.args([
                 "-NoExit",
@@ -66,23 +59,26 @@ enum ParseState {
     Discard,
     DiscardEscape,
 }
-pub(super) struct DirectoryTracker {
+pub(super) struct ShellTracker {
     prefix: String,
+    command_prefix: String,
     state: ParseState,
     bytes: Vec<u8>,
-    previous: Option<String>,
+    pub directory: Option<String>,
+    pub protected_command: Option<String>,
 }
-impl DirectoryTracker {
+impl ShellTracker {
     pub(super) fn new(token: uuid::Uuid) -> Self {
         Self {
             prefix: format!("777;serverdeck-cwd;{token};"),
+            command_prefix: format!("777;serverdeck-command;{token};"),
             state: ParseState::Text,
             bytes: Vec::new(),
-            previous: None,
+            directory: None,
+            protected_command: None,
         }
     }
-    pub(super) fn feed(&mut self, data: &[u8]) -> Option<String> {
-        let mut directory = None;
+    pub(super) fn feed(&mut self, data: &[u8]) {
         for &byte in data {
             self.state = match (&self.state, byte) {
                 (ParseState::Text, 27) => ParseState::Escape,
@@ -93,13 +89,18 @@ impl DirectoryTracker {
                 (ParseState::Escape, 27) => ParseState::Escape,
                 (ParseState::Text | ParseState::Escape, _) => ParseState::Text,
                 (ParseState::Osc, 7) | (ParseState::OscEscape, b'\\') => {
-                    if let Ok(value) = std::str::from_utf8(&self.bytes)
-                        && let Some(path) = value.strip_prefix(&self.prefix)
-                        && (path.is_empty() || valid_path(path))
-                        && self.previous.as_deref() != Some(path)
-                    {
-                        self.previous = Some(path.to_owned());
-                        directory = self.previous.clone();
+                    if let Ok(value) = std::str::from_utf8(&self.bytes) {
+                        if let Some(path) = value.strip_prefix(&self.prefix)
+                            && (path.is_empty() || valid_path(path))
+                            && self.directory.as_deref() != Some(path)
+                        {
+                            self.directory = (!path.is_empty()).then(|| path.to_owned());
+                        } else if let Some(blob) = value.strip_prefix(&self.command_prefix)
+                            && (blob.is_empty()
+                                || serverdeck_core::terminal::valid_protected_command(blob))
+                        {
+                            self.protected_command = (!blob.is_empty()).then(|| blob.to_owned());
+                        }
                     }
                     self.bytes.clear();
                     ParseState::Text
@@ -123,7 +124,6 @@ impl DirectoryTracker {
                 (ParseState::Discard | ParseState::DiscardEscape, _) => ParseState::Discard,
             };
         }
-        directory
     }
 }
 
@@ -147,28 +147,23 @@ mod tests {
             .to_owned();
         let bytes = marker(token, &path);
         for split in 0..=bytes.len() {
-            let mut tracker = DirectoryTracker::new(token);
-            let first = tracker.feed(&bytes[..split]);
-            let second = tracker.feed(&bytes[split..]);
-            assert_eq!(first.or(second), Some(path.clone()), "split at {split}");
-            assert_eq!(
-                tracker.feed(&bytes),
-                None,
-                "unchanged prompt needs no extra directory notification"
-            );
+            let mut tracker = ShellTracker::new(token);
+            tracker.feed(&bytes[..split]);
+            tracker.feed(&bytes[split..]);
+            assert_eq!(tracker.directory.as_ref(), Some(&path), "split at {split}");
         }
-        let mut tracker = DirectoryTracker::new(token);
-        let mut observed = None;
+        let mut tracker = ShellTracker::new(token);
         for byte in bytes {
-            observed = tracker.feed(&[byte]).or(observed);
+            tracker.feed(&[byte]);
         }
-        assert_eq!(observed, Some(path.clone()));
+        assert_eq!(tracker.directory, Some(path.clone()));
         let second = root.path().to_str().unwrap();
         let st = format!("\x1b]777;serverdeck-cwd;{token};{second}\x1b\\");
-        assert_eq!(tracker.feed(st.as_bytes()), Some(second.to_owned()));
+        tracker.feed(st.as_bytes());
+        assert_eq!(tracker.directory.as_deref(), Some(second));
+        tracker.feed(&marker(token, ""));
         assert_eq!(
-            tracker.feed(&marker(token, "")),
-            Some(String::new()),
+            tracker.directory, None,
             "non-filesystem prompts must invalidate the previous directory"
         );
     }
@@ -178,7 +173,7 @@ mod tests {
         let token = uuid::Uuid::new_v4();
         let root = tempfile::tempdir().unwrap();
         let path = root.path().to_str().unwrap();
-        let mut tracker = DirectoryTracker::new(token);
+        let mut tracker = ShellTracker::new(token);
         for bytes in [
             marker(uuid::Uuid::new_v4(), path),
             marker(token, "relative/path"),
@@ -187,10 +182,32 @@ mod tests {
             b"\x1b]0;title\x07ordinary output".to_vec(),
             b"\x1b]777;serverdeck-cwd;\xff\x07".to_vec(),
         ] {
-            assert_eq!(tracker.feed(&bytes), None);
+            tracker.feed(&bytes);
+            assert_eq!(tracker.directory, None);
             assert!(tracker.bytes.len() <= 32768 + tracker.prefix.len());
         }
-        assert_eq!(tracker.feed(&marker(token, path)), Some(path.to_owned()));
+        tracker.feed(&marker(token, path));
+        assert_eq!(tracker.directory.as_deref(), Some(path));
+    }
+
+    #[test]
+    fn command_markers_are_bounded_and_isolated_per_shell() {
+        let token = uuid::Uuid::new_v4();
+        let command = |id, blob: &str| format!("\x1b]777;serverdeck-command;{id};{blob}\x07");
+        let mut tracker = ShellTracker::new(token);
+        for byte in command(token, "AQID").bytes() {
+            tracker.feed(&[byte]);
+        }
+        for invalid in [
+            command(uuid::Uuid::new_v4(), ""),
+            command(token, "A\nBC"),
+            command(token, &"A".repeat(8196)),
+        ] {
+            tracker.feed(invalid.as_bytes());
+            assert_eq!(tracker.protected_command.as_deref(), Some("AQID"));
+        }
+        tracker.feed(command(token, "").as_bytes());
+        assert!(tracker.protected_command.is_none());
     }
 
     #[test]
@@ -198,8 +215,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let directory = root.path().join("中文 space '&;$[]");
         std::fs::create_dir(&directory).unwrap();
-        let launch = LaunchDirectory {
+        let launch = ShellLaunch {
             directory: Some(directory.to_str().unwrap().to_owned()),
+            protected_command: None,
             token: uuid::Uuid::new_v4(),
         };
         let (mut command, _) = shell().unwrap();

@@ -331,6 +331,15 @@ fn administrator_terminal_requires_main_window_local_origin_and_valid_size_befor
         );
     }
     for (command, input) in [
+        ("terminal_ssh_saved_sessions", json!({"hostId":"missing"})),
+        (
+            "terminal_ssh_save",
+            json!({"hostId":"missing","input":{"id":null,"title":"name","sessionIds":[],"layout":null}}),
+        ),
+        (
+            "terminal_ssh_remove_saved",
+            json!({"hostId":"missing","id":"invalid"}),
+        ),
         ("terminal_local_saved_sessions", json!({})),
         (
             "terminal_local_save",
@@ -343,7 +352,10 @@ fn administrator_terminal_requires_main_window_local_origin_and_valid_size_befor
         ),
     ] {
         let response = get_ipc_response(&main, request(command, input.clone(), origin));
-        if command == "terminal_local_saved_sessions" {
+        if matches!(
+            command,
+            "terminal_local_saved_sessions" | "terminal_ssh_saved_sessions"
+        ) {
             assert_eq!(response.unwrap().deserialize::<Value>().unwrap(), json!([]));
         } else {
             assert_eq!(response.unwrap_err()["code"], "VALIDATION");

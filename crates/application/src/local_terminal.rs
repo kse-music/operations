@@ -16,8 +16,8 @@ use std::{
 };
 use tokio::sync::{Semaphore, oneshot, watch};
 
-mod directory;
-use directory::{DirectoryTracker, LaunchDirectory};
+mod shell_state;
+use shell_state::{ShellLaunch, ShellTracker};
 
 #[cfg(windows)]
 pub(crate) mod elevated;
@@ -36,7 +36,7 @@ struct Control {
     parsed: Condvar,
     killer: Mutex<Option<Box<dyn ChildKiller + Send + Sync>>>,
     done: watch::Sender<bool>,
-    directory: Mutex<Option<String>>,
+    shell_state: Mutex<ShellTracker>,
     elevated: AtomicBool,
 }
 impl Control {
@@ -159,11 +159,13 @@ impl LocalTerminals {
         if control.cancelled.load(Ordering::Acquire) {
             return Err(Error::NotFound);
         }
-        let directory = lock(&control.directory)?.clone().ok_or(Error::Validation(
+        let state = lock(&control.shell_state)?;
+        let directory = state.directory.clone().ok_or(Error::Validation(
             "尚未获得本地终端的文件系统目录，请回到 PowerShell 提示符后保存",
         ))?;
         Ok(serverdeck_core::terminal::SavedLocalPane {
             directory,
+            protected_command: state.protected_command.clone(),
             elevated: control.elevated.load(Ordering::Acquire),
         })
     }
@@ -180,8 +182,9 @@ impl LocalTerminals {
             size,
             sink,
             pane.elevated,
-            Some(LaunchDirectory {
+            Some(ShellLaunch {
                 directory: Some(pane.directory),
+                protected_command: pane.protected_command,
                 token: uuid::Uuid::new_v4(),
             }),
         )
@@ -209,11 +212,12 @@ impl LocalTerminals {
         size: TerminalSize,
         sink: Sink,
         elevated: bool,
-        launch: Option<LaunchDirectory>,
+        launch: Option<ShellLaunch>,
     ) -> Result<LocalTerminalSession, Error> {
         size.validate()?;
-        let launch = launch.unwrap_or_else(|| LaunchDirectory {
+        let launch = launch.unwrap_or_else(|| ShellLaunch {
             directory: None,
+            protected_command: None,
             token: uuid::Uuid::new_v4(),
         });
         let permit = self
@@ -230,24 +234,17 @@ impl LocalTerminals {
             sequence: Mutex::new((0, 0)),
             parsed: Condvar::new(),
             killer: Mutex::new(None),
-            directory: Mutex::new(None),
+            shell_state: Mutex::new(ShellTracker::new(launch.token)),
             elevated: AtomicBool::new(elevated),
         });
-        let tracker = Mutex::new(DirectoryTracker::new(launch.token));
         let tracked_control = control.clone();
         let sink: Sink = Arc::new(move |event| {
-            if let TerminalEvent::Data { data, .. } = &event {
-                let result = (|| {
-                    if let Some(directory) = lock(&tracker)?.feed(data) {
-                        *lock(&tracked_control.directory)? =
-                            (!directory.is_empty()).then_some(directory);
-                    }
-                    Ok::<_, Error>(())
-                })();
-                if let Err(error) = result {
-                    tracing::error!(operation="local_terminal_directory", error=%error);
-                    return false;
-                }
+            if let TerminalEvent::Data { data, .. } = &event
+                && let Err(error) =
+                    lock(&tracked_control.shell_state).map(|mut state| state.feed(data))
+            {
+                tracing::error!(operation="local_terminal_snapshot", error=%error);
+                return false;
             }
             sink(event)
         });
@@ -452,7 +449,7 @@ fn run(
     sink: &Sink,
     receiver: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<LocalTerminalSession, Error>>,
-    launch: LaunchDirectory,
+    launch: ShellLaunch,
 ) -> Result<(), Error> {
     let startup = (|| {
         #[cfg(windows)]
@@ -919,7 +916,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test(flavor = "multi_thread")]
     async fn real_powershell_manual_sessions_are_independent_and_new_shells_start_at_home() {
-        use serverdeck_core::terminal::{LocalTerminalLayout, SaveLocalTerminalInput};
+        use serverdeck_core::terminal::{LocalTerminalLayout, SaveTerminalInput};
         let root = tempfile::tempdir().unwrap();
         let data = root.path().join("data");
         let logs = root.path().join("logs");
@@ -948,6 +945,13 @@ mod tests {
         let (sink, mut first_events) = events();
         let first = app.terminal_local_open(size, sink).await.unwrap();
         until_directory(&app.local_terminals, &first.id, &mut first_events, &home).await;
+        assert!(
+            app.local_terminals
+                .snapshot(&first.id)
+                .unwrap()
+                .protected_command
+                .is_none()
+        );
         let command = format!(
             "Set-Location -LiteralPath '{}'\r",
             first_dir.to_str().unwrap().replace('\'', "''")
@@ -968,7 +972,7 @@ mod tests {
             "changing directory must never save a session"
         );
         let mut saved_first = app
-            .terminal_local_save(SaveLocalTerminalInput {
+            .terminal_local_save(SaveTerminalInput {
                 id: None,
                 title: "第一会话".into(),
                 session_ids: vec![first.id.clone()],
@@ -997,7 +1001,7 @@ mod tests {
             first_dir.to_str().unwrap()
         );
         let saved_second = app
-            .terminal_local_save(SaveLocalTerminalInput {
+            .terminal_local_save(SaveTerminalInput {
                 id: None,
                 title: "第二会话".into(),
                 session_ids: vec![second.id.clone()],
@@ -1022,8 +1026,20 @@ mod tests {
             [saved_first.clone(), saved_second.clone()],
             "saved snapshots only change on explicit save"
         );
+        // Snapshot the accepted command while it is still running. The marker
+        // cannot be matched by the command line's own echo.
+        let running = "Add-Content -LiteralPath runs.txt -Value '中文'; [Console]::WriteLine(('SD_RUN' + '_ACTIVE')); Start-Sleep 45";
+        app.terminal_input(&first.id, format!("{running}\r").into_bytes())
+            .unwrap();
+        until(
+            &app.local_terminals,
+            &first.id,
+            &mut first_events,
+            "SD_RUN_ACTIVE",
+        )
+        .await;
         saved_first = app
-            .terminal_local_save(SaveLocalTerminalInput {
+            .terminal_local_save(SaveTerminalInput {
                 id: Some(saved_first.id.clone()),
                 title: "第一会话已更新".into(),
                 session_ids: vec![first.id.clone()],
@@ -1031,6 +1047,17 @@ mod tests {
             })
             .await
             .unwrap();
+        assert!(
+            saved_first.panes[0].protected_command.is_some(),
+            "running command captured"
+        );
+        assert!(
+            saved_second.panes[0].protected_command.is_some(),
+            "completed command captured"
+        );
+        let runs = changed_dir.join("runs.txt");
+        let first_run = std::fs::read(&runs).unwrap();
+        assert!(!first_run.is_empty());
         app.shutdown().await;
         let app = crate::Application::initialize(data, logs).unwrap();
         assert_eq!(
@@ -1043,7 +1070,7 @@ mod tests {
         );
         let prior_panes = saved_first.panes.clone();
         saved_first = app
-            .terminal_local_save(SaveLocalTerminalInput {
+            .terminal_local_save(SaveTerminalInput {
                 id: Some(saved_first.id.clone()),
                 title: "未启动时改名".into(),
                 session_ids: vec![],
@@ -1065,6 +1092,34 @@ mod tests {
                 .terminal_local_open_saved(saved.id.clone(), 0, size, sink)
                 .await
                 .unwrap();
+            if saved.id == saved_first.id {
+                until(&app.local_terminals, &session.id, &mut output, "runs.txt").await;
+                assert_eq!(
+                    std::fs::read(&runs).unwrap(),
+                    first_run,
+                    "opening must not execute the command"
+                );
+                app.terminal_input(&session.id, b"\r".to_vec()).unwrap();
+                until(
+                    &app.local_terminals,
+                    &session.id,
+                    &mut output,
+                    "SD_RUN_ACTIVE",
+                )
+                .await;
+                assert_eq!(std::fs::read(&runs).unwrap(), first_run.repeat(2));
+                app.terminal_close(&session.id).await.unwrap();
+                continue;
+            }
+            until(
+                &app.local_terminals,
+                &session.id,
+                &mut output,
+                "Set-Location",
+            )
+            .await;
+            // Discard the restored input before entering a different command.
+            app.terminal_input(&session.id, b"\x03".to_vec()).unwrap();
             until(&app.local_terminals, &session.id, &mut output, "PS ").await;
             app.terminal_input(
                 &session.id,
@@ -1078,6 +1133,41 @@ mod tests {
                 &format!("SD_DIRECTORY_{expected}"),
             )
             .await;
+            app.terminal_input(
+                &session.id,
+                b"$token = $null; [Console]::WriteLine(('FILTERED' + '_READY'))\r".to_vec(),
+            )
+            .unwrap();
+            until(
+                &app.local_terminals,
+                &session.id,
+                &mut output,
+                "FILTERED_READY",
+            )
+            .await;
+            assert!(
+                app.local_terminals
+                    .snapshot(&session.id)
+                    .unwrap()
+                    .protected_command
+                    .is_none(),
+                "filtered input clears the previous candidate"
+            );
+            app.terminal_input(&session.id, b"Set-PSReadLineOption -HistorySaveStyle SaveNothing\r[Console]::WriteLine(('NO_HISTORY' + '_READY'))\r".to_vec()).unwrap();
+            until(
+                &app.local_terminals,
+                &session.id,
+                &mut output,
+                "NO_HISTORY_READY",
+            )
+            .await;
+            assert!(
+                app.local_terminals
+                    .snapshot(&session.id)
+                    .unwrap()
+                    .protected_command
+                    .is_none()
+            );
             app.terminal_close(&session.id).await.unwrap();
         }
         let (sink, mut output) = events();
@@ -1091,6 +1181,13 @@ mod tests {
             .await
             .unwrap();
         until_directory(&app.local_terminals, &missing.id, &mut output, &home).await;
+        assert!(
+            app.local_terminals
+                .snapshot(&missing.id)
+                .unwrap()
+                .protected_command
+                .is_none()
+        );
         assert_eq!(
             app.terminal_local_saved_sessions().await.unwrap()[1],
             saved_second,

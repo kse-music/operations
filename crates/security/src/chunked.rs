@@ -23,6 +23,17 @@ pub fn new_secret_reference(secret: &[u8]) -> Result<String, Error> {
 }
 
 fn chunked_length(reference: &str) -> Result<Option<usize>, Error> {
+    if let Some(scoped) = reference.strip_prefix("ssh-session:") {
+        return scoped
+            .split_once(':')
+            .and_then(|(id, size)| {
+                let id = Uuid::parse_str(id).ok()?;
+                let size = size.parse::<usize>().ok()?;
+                (scoped == format!("{id}:{size}") && (1..=SECRET_LIMIT).contains(&size))
+                    .then_some(Some(size))
+            })
+            .ok_or(Error::Validation("SSH 会话快照引用无效"));
+    }
     if !reference.starts_with("chunked:") {
         return Ok(None);
     }

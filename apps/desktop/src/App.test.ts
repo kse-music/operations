@@ -234,6 +234,7 @@ it('keeps terminal status on the active host, session and focused split pane onl
 });
 beforeEach(async () => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+  vi.spyOn(terminalApi, 'savedSshSessions').mockResolvedValue([]);
   vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
     installed: await pluginsApi.list(),
     problems: [],
@@ -2031,7 +2032,7 @@ it.each(['button', 'middle', 'menu'])(
     } else {
       for (const tab of tabs) {
         if (action === 'button')
-          tab.querySelector<HTMLButtonElement>('[aria-label^="删除会话 "]')!.click();
+          tab.querySelector<HTMLButtonElement>('[aria-label^="关闭标签 "]')!.click();
         else tab.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
         await flush();
       }
@@ -2059,7 +2060,7 @@ it('keeps an empty local session list after the last close and opens a replaceme
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
   document
-    .querySelector<HTMLButtonElement>('.terminal-tab [aria-label="删除会话 会话 1"]')!
+    .querySelector<HTMLButtonElement>('.terminal-tab [aria-label="关闭标签 会话 1"]')!
     .click();
   await flush();
   expect(terminals.panes).toHaveLength(0);
@@ -2574,11 +2575,12 @@ it('places session controls below the host toolbar and retains names within the 
   expect(terminals.tabs[0]!.key).toBe(current);
   document.querySelector('.terminal-tab [role="tab"]')!.dispatchEvent(new MouseEvent('dblclick'));
   await flush();
-  const dialog = document.querySelector('dialog[aria-label="重命名标签"]')!;
-  const input = dialog.querySelector<HTMLInputElement>('input')!;
+  const input = document.querySelector<HTMLInputElement>(
+    '.terminal-tab input[aria-label="标签名称"]',
+  )!;
   input.value = '新会话';
   input.dispatchEvent(new Event('input', { bubbles: true }));
-  dialog.querySelector('form')!.dispatchEvent(new Event('submit', { cancelable: true }));
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   await flush();
   expect(terminals.tabs[0]!.title).toBe('新会话');
   expect(document.querySelector('dialog[aria-label="重命名标签"]')).toBeNull();
@@ -2598,9 +2600,7 @@ it.each(['remote', 'local'])(
         button.querySelector('.terminal-session-title')?.textContent?.trim(),
       );
     expect(names()).toEqual(['会话 1', '会话 2', '会话 3']);
-    document
-      .querySelector<HTMLButtonElement>(`[aria-label="${host ? '关闭标签' : '删除会话'} 会话 2"]`)!
-      .click();
+    document.querySelector<HTMLButtonElement>('[aria-label="关闭标签 会话 2"]')!.click();
     await flush();
     expect(names()).toEqual(['会话 1', '会话 3']);
     await newSession();
@@ -2656,7 +2656,7 @@ it.each(['remote', 'local'])(
     expect(terminals.active).toBe(previous);
     const menu = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(
-      ['复制', '重命名', '重新连接', '断开连接', '关闭所有', '关闭'],
+      ['复制', '保存Ctrl+S', '重命名F2', '重新连接', '断开连接', '关闭所有'],
     );
     expect(JSON.stringify(terminals.tabs)).toBe(original);
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

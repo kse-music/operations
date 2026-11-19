@@ -18,6 +18,9 @@ const native = vi.hoisted(() => ({
   openLocal: vi.fn(),
   openSavedLocal: vi.fn(),
   saveLocalSession: vi.fn(),
+  saveSshSession: vi.fn(),
+  savedSshSessions: vi.fn(),
+  removeSavedSshSession: vi.fn(),
   removeSavedLocalSession: vi.fn(),
   savedLocalSessions: vi.fn(),
   close: vi.fn(),
@@ -153,6 +156,13 @@ beforeEach(async () => {
     open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: !!elevated })),
   );
   native.savedLocalSessions.mockResolvedValue([]);
+  native.savedSshSessions.mockResolvedValue([]);
+  native.saveSshSession.mockImplementation(async (_host, input) => ({
+    id: input.id ?? 'saved-ssh',
+    title: input.title,
+    paneCount: input.sessionIds.length,
+    layout: input.layout,
+  }));
   native.removeSavedLocalSession.mockResolvedValue(undefined);
   native.openSavedLocal.mockImplementation((_id, _pane, size, receive) =>
     open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: false })),
@@ -452,11 +462,11 @@ it('duplicates the right-click target as an ordinary fresh shell and preserves t
   expect(store.active).toBe(active);
   expect([...menu.querySelectorAll('button')].map((item) => item.textContent)).toEqual([
     '复制',
-    '重命名',
+    '保存Ctrl+S',
+    '重命名F2',
     '重新连接',
     '断开连接',
     '关闭所有',
-    '关闭',
   ]);
   button('复制', menu).click();
   await flush();
@@ -752,72 +762,145 @@ it('provides keyboard session menus and leaves local shells without bottom actio
   expect(pane().querySelector('button')).toBeNull();
 });
 
-it('uses Ctrl+S and the rename Save button to explicitly save a local session', async () => {
-  expect(root.querySelector('.terminal-session-saved')).toBeNull();
-  const store = useTerminalsStore();
-  hostId.value = '';
-  store.open(null);
-  await flush();
-  const target = store.tabs.at(-1)!;
-  expect(root.querySelector('.terminal-session-saved')?.textContent?.trim()).toBe('未保存');
-  const menu = await tabMenu(0);
-  expect(
-    [...menu.querySelectorAll('[role=menuitem]')].map((item) => item.textContent?.trim()),
-  ).not.toContain('保存');
-  document.querySelector<HTMLElement>('.context-backdrop')!.click();
-  await flush();
-  const event = new KeyboardEvent('keydown', {
-    key: 's',
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
-  pane().querySelector('.xterm-container')!.dispatchEvent(event);
-  await flush();
-  expect(event.defaultPrevented).toBe(true);
-  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="重命名标签"]')!;
-  expect(dialog).toBeTruthy();
-  expect(native.saveLocalSession).not.toHaveBeenCalled();
-  const input = dialog.querySelector('input')!;
-  input.value = '项目 A';
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  button('保存', dialog).click();
-  await flush();
-  expect(native.saveLocalSession).toHaveBeenCalledWith(
-    expect.objectContaining({
+it.each(['local', 'ssh'])(
+  'renames %s inline and saves the targeted tab via menu and keyboard',
+  async (kind) => {
+    const store = useTerminalsStore();
+    const targetHost = kind === 'ssh' ? host : null;
+    hostId.value = targetHost?.id ?? '';
+    if (!targetHost) store.open(null);
+    await flush();
+    const target = store.tabs.at(-1)!;
+    store.open(targetHost);
+    await flush();
+    const activeKey = store.active;
+    const tabButton = () =>
+      root.querySelector<HTMLButtonElement>(`[data-session-key="${target.key}"] [role=tab]`)!;
+    expect(button('关闭标签 会话 1', root).querySelector('.lucide-x')).toBeTruthy();
+    const keyboard = (el: HTMLElement | Window, key: string, ctrlKey = false) => {
+      const event = new KeyboardEvent('keydown', { key, ctrlKey, bubbles: true, cancelable: true });
+      el.dispatchEvent(event);
+      return event;
+    };
+    expect(keyboard(tabButton(), 'F2').defaultPrevented).toBe(true);
+    await flush();
+    const edit = () => root.querySelector<HTMLInputElement>('.terminal-tab input')!;
+    expect(document.activeElement).toBe(edit());
+    expect(edit().value).toBe('会话 1');
+    edit().value = '项目 A';
+    edit().dispatchEvent(new Event('input', { bubbles: true }));
+    keyboard(edit(), 'Enter');
+    await flush();
+    expect(target.title).toBe('项目 A');
+    expect(native.saveLocalSession).not.toHaveBeenCalled();
+    expect(native.saveSshSession).not.toHaveBeenCalled();
+    const menu = await tabMenu(0);
+    expect(button('保存', menu).querySelector('kbd')?.textContent).toBe('Ctrl+S');
+    expect(button('重命名', menu).querySelector('kbd')?.textContent).toBe('F2');
+    expect([...menu.querySelectorAll('button')].some((b) => b.textContent === '关闭')).toBe(false);
+    button('保存', menu).click();
+    await flush();
+    const input = {
       id: null,
       title: '项目 A',
       sessionIds: [target.panes[0]!.sessionId],
-    }),
-  );
-  expect(target.savedId).toBe('saved-local');
-  expect(root.querySelector('.terminal-session-saved')?.textContent?.trim()).toBe('已保存');
-  expect(target.title).toBe('项目 A');
-  expect(document.querySelector('dialog')).toBeNull();
-});
+      layout: { kind: 'leaf', pane: 0 },
+    };
+    if (targetHost) expect(native.saveSshSession).toHaveBeenCalledExactlyOnceWith(host.id, input);
+    else expect(native.saveLocalSession).toHaveBeenCalledExactlyOnceWith(input);
+    expect(target.savedId).toBeTruthy();
+    expect(button('删除会话 项目 A', root).querySelector('.lucide-trash-2')).toBeTruthy();
+    expect(store.active).toBe(activeKey);
+    button('重命名', await tabMenu(0)).click();
+    await flush();
+    edit().value = '取消';
+    edit().dispatchEvent(new Event('input', { bubbles: true }));
+    keyboard(edit(), 'Escape');
+    await flush();
+    expect(target.title).toBe('项目 A');
+    expect(
+      keyboard(pane().querySelector<HTMLElement>('.xterm-container')!, 's', true).defaultPrevented,
+    ).toBe(true);
+    await flush();
+    const api = targetHost ? native.saveSshSession : native.saveLocalSession;
+    expect(api).toHaveBeenCalledTimes(2);
+    expect(api.mock.lastCall?.at(-1).sessionIds).toEqual([store.tabs.at(-1)!.panes[0]!.sessionId]);
+    expect(document.querySelector('dialog')).toBeNull();
+  },
+);
 
-it('keeps Ctrl+S in SSH and does not save when the local rename dialog is cancelled', async () => {
-  const ssh = new KeyboardEvent('keydown', {
-    key: 's',
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true,
+it('reopens the saved SSH split on the same host and preserves its snapshot when closing the workspace', async () => {
+  const store = useTerminalsStore();
+  await store.close(store.active);
+  native.savedSshSessions.mockResolvedValue([
+    {
+      id: 'saved',
+      title: '部署',
+      paneCount: 2,
+      layout: {
+        kind: 'split',
+        axis: 'rows',
+        ratio: 63,
+        first: { kind: 'leaf', pane: 1 },
+        second: { kind: 'leaf', pane: 0 },
+      },
+    },
+  ]);
+  await store.loadHostSessions(host);
+  store.select(store.hostTabs(host.id)[0]!.key);
+  await flush();
+  const restored = store.tabs[0]!;
+  expect(restored.layout).toMatchObject({
+    ratio: 63,
+    first: { pane: restored.panes[1]!.key },
+    second: { pane: restored.panes[0]!.key },
   });
-  window.dispatchEvent(ssh);
+  for (const index of [0, 1])
+    expect(native.open).toHaveBeenCalledWith(host.id, expect.anything(), expect.any(Function), {
+      id: 'saved',
+      pane: index,
+    });
+  await store.rename(restored.key, '新名称');
+  expect(native.saveSshSession).toHaveBeenLastCalledWith(host.id, {
+    id: 'saved',
+    title: '新名称',
+    layout: null,
+    sessionIds: [],
+  });
+  await store.closeWorkspace(host.id);
+  expect(store.tabs).toEqual([]);
+  expect(native.removeSavedSshSession).not.toHaveBeenCalled();
+  await store.loadHostSessions(host);
+  store.select(store.hostTabs(host.id)[0]!.key);
   await flush();
-  expect(ssh.defaultPrevented).toBe(false);
-  expect(document.querySelector('dialog')).toBeNull();
-  hostId.value = '';
-  useTerminalsStore().open(null);
+  button('删除会话 部署', root).click();
   await flush();
-  window.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true }),
+  expect(native.removeSavedSshSession).toHaveBeenCalledExactlyOnceWith(host.id, 'saved');
+});
+it('keeps an SSH rename draft after a write error and reports a layout-only save', async () => {
+  native.saveSshSession.mockResolvedValueOnce({
+    id: 'saved-ssh',
+    title: '会话 1',
+    paneCount: 1,
+    layoutOnlyPanes: 1,
+    layout: { kind: 'leaf', pane: 0 },
+  });
+  button('保存', await tabMenu()).click();
+  await flush();
+  expect(useNotificationsStore().items.some((n) => n.text.includes('仅支持恢复布局'))).toBe(true);
+  native.saveSshSession.mockRejectedValueOnce(new Error('写入失败'));
+  button('重命名', await tabMenu()).click();
+  await flush();
+  const input = root.querySelector<HTMLInputElement>('.terminal-tab input')!;
+  input.value = '新名称';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await vi.waitFor(() =>
+    expect(root.querySelector('.terminal-tab [role=alert]')?.textContent).toContain('写入失败'),
   );
-  await flush();
-  button('取消', document.querySelector('dialog')!).click();
-  await flush();
-  expect(native.saveLocalSession).not.toHaveBeenCalled();
-  expect(useTerminalsStore().tabs.at(-1)!.savedId).toBeUndefined();
+  expect(input.isConnected).toBe(true);
+  expect(input.value).toBe('新名称');
+  expect(useTerminalsStore().tabs[0]!.title).toBe('会话 1');
 });
 
 it('opens a saved local shell only after the saved row is selected', async () => {
@@ -908,7 +991,7 @@ it.each([false, true])(
     const menu = await tabMenu(0);
     expect(
       [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
-    ).toEqual(['复制', '重命名', '重新连接', '断开连接', '关闭所有', '关闭']);
+    ).toEqual(['复制', '保存Ctrl+S', '重命名F2', '重新连接', '断开连接', '关闭所有']);
     document.querySelector<HTMLElement>('.context-backdrop')!.click();
     await flush();
     button('删除会话 项目', root).click();

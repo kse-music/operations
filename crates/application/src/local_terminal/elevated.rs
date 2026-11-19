@@ -9,7 +9,7 @@ use tokio::{
 };
 
 const HELPER: &str = "--serverdeck-elevated-terminal";
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 const MAX_FRAME: usize = 128 * 1024;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -19,7 +19,7 @@ enum Frame {
     Start {
         version: u32,
         size: TerminalSize,
-        launch: LaunchDirectory,
+        launch: ShellLaunch,
     },
     Ready {},
     Input {
@@ -87,7 +87,7 @@ pub(super) async fn run(
     sink: &Sink,
     receiver: mpsc::Receiver<Command>,
     ready: oneshot::Sender<Result<LocalTerminalSession, Error>>,
-    launch: LaunchDirectory,
+    launch: ShellLaunch,
 ) -> Result<(), Error> {
     let startup = async {
         let nonce = uuid::Uuid::new_v4();
@@ -392,8 +392,9 @@ mod tests {
             &Frame::Start {
                 version: VERSION,
                 size: TerminalSize { cols: 90, rows: 25 },
-                launch: LaunchDirectory {
+                launch: ShellLaunch {
                     directory: Some(directory.clone()),
+                    protected_command: Some("AQID".into()),
                     token,
                 },
             },
@@ -403,7 +404,7 @@ mod tests {
         assert!(
             matches!(read_frame(&mut read).await.unwrap(), Frame::Start {
             version: VERSION, launch, ..
-        } if launch.token == token && launch.directory.as_ref() == Some(&directory))
+        } if launch.token == token && launch.directory.as_ref() == Some(&directory) && launch.protected_command.as_deref() == Some("AQID"))
         );
         let data = vec![255; 16384];
         write_frame(&mut write, &Frame::Input { data: data.clone() })

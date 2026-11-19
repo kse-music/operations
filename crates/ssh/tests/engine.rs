@@ -431,6 +431,55 @@ async fn state(shell: &mut Shell, expected: &str) -> Option<&'static str> {
         }
     }
 }
+#[tokio::test]
+async fn shell_only_ssh_server_can_restore_layout_without_sending_a_command() {
+    let server = Server::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("ssh.db")).unwrap();
+    server.trust(&db);
+    let host = server.host(&db);
+    let engine = Engine::new(db);
+    let open = |saved| {
+        let (tx, events) = mpsc::channel(16);
+        let plan = ConnectionPlan {
+            hops: vec![Hop {
+                host: host.clone(),
+                revision: 1,
+                auth: server.password(),
+            }],
+            proxy: None,
+        };
+        let info = engine
+            .open_interactive_plan(
+                host.clone(),
+                plan,
+                TerminalSize { cols: 80, rows: 24 },
+                Arc::new(move |e| tx.try_send(e).is_ok()),
+                saved,
+            )
+            .unwrap();
+        Shell { info, events }
+    };
+    let mut first = open(None);
+    state(&mut first, "connected").await;
+    let snapshot = engine.shell_snapshot(&host.id, &first.info.id).unwrap();
+    assert!(snapshot.state.is_none());
+    assert!(engine.shell_snapshot("other", &first.info.id).is_err());
+    engine.close(&first.info.id).await.unwrap();
+    let mut restored = open(Some(snapshot));
+    state(&mut restored, "connected").await;
+    engine
+        .input(&restored.info.id, b"manual input".to_vec())
+        .unwrap();
+    match event(&mut restored).await {
+        TerminalEvent::Data { sequence, data } => {
+            assert_eq!(data, b"manual input");
+            engine.acknowledge(&restored.info.id, sequence).unwrap();
+        }
+        _ => panic!("expected manually entered bytes"),
+    }
+    engine.close(&restored.info.id).await.unwrap();
+}
 async fn connected_cipher(shell: &mut Shell) -> String {
     let mut cipher = None;
     loop {

@@ -276,3 +276,114 @@ async fn real_linux_password_pty_multichannel_resize_interactive_reconnect_and_o
         "Real Linux: password, pinned TOFU, PTY/resize, shared transport, independent shells, vim, top, Ctrl+C, 2MiB output, normal exit, reconnect, resource release passed"
     );
 }
+
+/// localhost-only fixture with an isolated home, a pinned host key and a disposable client key.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires an isolated loopback OpenSSH Bash account and SERVERDECK_SNAPSHOT_* environment"]
+async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
+    use serverdeck_core::terminal::SshPaneSnapshot;
+    use serverdeck_ssh::{ConnectionPlan, Hop};
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("snapshot.db")).unwrap();
+    let host = db
+        .host_create(HostInput {
+            ssh: Default::default(),
+            name: "snapshot fixture".into(),
+            hostname: "127.0.0.1".into(),
+            port: std::env::var("SERVERDECK_SNAPSHOT_PORT")
+                .unwrap()
+                .parse()
+                .unwrap(),
+            username: std::env::var("SERVERDECK_SNAPSHOT_USER").unwrap(),
+            auth_type: AuthType::Agent,
+            credential_id: None,
+            group_id: None,
+            description: String::new(),
+            favorite: false,
+            connect_timeout_secs: 15,
+        })
+        .unwrap();
+    let pin = std::env::var("SERVERDECK_SNAPSHOT_PIN").unwrap();
+    let key = Zeroizing::new(std::env::var("SERVERDECK_SNAPSHOT_KEY").unwrap());
+    let engine = Engine::new(db);
+    let start = |saved: Option<SshPaneSnapshot>| {
+        let (tx, events) = mpsc::channel(16);
+        let plan = ConnectionPlan {
+            hops: vec![Hop {
+                host: host.clone(),
+                revision: 0,
+                auth: Authentication::ImportedKey(key.clone()),
+            }],
+            proxy: None,
+        };
+        let info = engine
+            .open_interactive_plan(
+                host.clone(),
+                plan,
+                TerminalSize {
+                    cols: 120,
+                    rows: 36,
+                },
+                Arc::new(move |event| tx.try_send(event).is_ok()),
+                saved,
+            )
+            .unwrap();
+        Shell {
+            info,
+            events,
+            text: String::new(),
+        }
+    };
+    let mut original = start(None);
+    connected(&engine, &mut original, &pin).await;
+    until(&engine, &mut original, ";cwd;").await;
+    let line = "printf 'verified-%s\\n' original";
+    original.text.clear();
+    engine
+        .input(&original.info.id, format!("cd /tmp\r{line}\r").into_bytes())
+        .unwrap();
+    until(&engine, &mut original, "verified-original").await;
+    let snapshot = engine.shell_snapshot(&host.id, &original.info.id).unwrap();
+    assert_eq!(snapshot.state.as_ref().unwrap().directory, "/tmp");
+    assert_eq!(snapshot.state.as_ref().unwrap().command, line);
+    engine.close(&original.info.id).await.unwrap();
+    let mut restored = start(Some(snapshot.clone()));
+    connected(&engine, &mut restored, &pin).await;
+    until(&engine, &mut restored, line).await;
+    assert!(!restored.text.contains("verified-original"));
+    restored.text.clear();
+    engine
+        .input(&restored.info.id, b"-edited\r".to_vec())
+        .unwrap();
+    until(&engine, &mut restored, "verified-original-edited").await;
+    assert_eq!(
+        engine
+            .shell_snapshot(&host.id, &restored.info.id)
+            .unwrap()
+            .state
+            .unwrap()
+            .directory,
+        "/tmp"
+    );
+    engine.close(&restored.info.id).await.unwrap();
+    let mut wrong = snapshot;
+    wrong.identity = "different peer".into();
+    let mut rejected = start(Some(wrong));
+    loop {
+        match receive(&engine, &mut rejected).await {
+            TerminalEvent::State {
+                state: "failed",
+                message,
+                ..
+            } => {
+                assert!(message.is_some_and(|m| m.contains("主机密钥")));
+                break;
+            }
+            TerminalEvent::State {
+                state: "connected", ..
+            } => panic!("wrong peer received snapshot"),
+            _ => {}
+        }
+    }
+    engine.close(&rejected.info.id).await.unwrap();
+}

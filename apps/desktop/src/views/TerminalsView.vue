@@ -7,6 +7,7 @@ import {
   ListX,
   Plus,
   RefreshCw,
+  Save,
   Shield,
   SquareTerminal,
   TextCursorInput,
@@ -22,8 +23,9 @@ import { hostDisplayName } from '../types/hosts';
 import { sameHostConnection } from '../services/product-links';
 import { geometry, type Divider } from '../services/layout';
 import TerminalPane from '../components/TerminalPane.vue';
-import Modal from '../components/Modal.vue';
+import TreeRenameInput from '../components/TreeRenameInput.vue';
 const emit = defineEmits<{
+  retryHost: [host: import('../types/hosts').Host];
   server: [host: import('../types/hosts').Host];
 }>();
 const store = useTerminalsStore(),
@@ -90,12 +92,14 @@ function selectLocalMode(elevated: boolean): void {
   closeMenu();
   store.open(null, undefined, undefined, elevated);
 }
-function sessionTitle(item: TerminalTab): string {
+function sessionName(item: TerminalTab): string {
   const host = item.panes[0]?.host;
-  const title =
-    !item.renamed && (!host || item.title === hostDisplayName(host))
-      ? tr('会话 {0}', item.sessionNumber)
-      : item.title;
+  return !item.renamed && (!host || item.title === hostDisplayName(host))
+    ? tr('会话 {0}', item.sessionNumber)
+    : item.title;
+}
+function sessionTitle(item: TerminalTab): string {
+  const title = sessionName(item);
   return item.panes.some((pane) => !pane.host && pane.elevated)
     ? tr('{0}（管理员）', title)
     : title;
@@ -152,7 +156,7 @@ function menuKey(event: KeyboardEvent): void {
   ]?.focus();
 }
 function runMenu(
-  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'close',
+  action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'save',
 ): void {
   const target = store.tabs.find((item) => item.key === menu.value?.key);
   closeMenu();
@@ -171,8 +175,8 @@ function runMenu(
     else void store.reconnect(target.key);
   } else if (action === 'rename') rename(target.key);
   else if (action === 'disconnect') void store.disconnect(target.key);
-  else if (action === 'all') void store.closeAll(target.key);
-  else void store.close(target.key);
+  else if (action === 'save') void store.saveSession(target.key, sessionName(target));
+  else void store.closeAll(target.key);
 }
 const paneViews = computed(() =>
   store.tabs.flatMap((t) => {
@@ -200,52 +204,69 @@ function paneStyle(
       }
     : { display: 'none' };
 }
+const renameError = ref<string | null>(null);
 function rename(key: string): void {
-  if (store.localSaving) return;
+  const item = tabs.value.find((item) => item.key === key);
+  if (!item || store.saving || !props.visible) return;
   renaming.value = key;
-  title.value = store.tabs.find((t) => t.key === key)?.title ?? '';
+  title.value = sessionName(item);
+  renameError.value = null;
 }
-const savingName = computed(() => !!renaming.value && store.localSaving === renaming.value);
-const savingLocalName = computed(
-  () =>
-    navigator.platform.startsWith('Win') &&
-    !!renaming.value &&
-    store.tabs.find((tab) => tab.key === renaming.value)?.panes.every((pane) => !pane.host),
-);
-async function submitRename(): Promise<void> {
+function finishRename(key: string, focus: boolean): void {
+  renaming.value = null;
+  if (focus)
+    void nextTick(() =>
+      document.querySelector<HTMLElement>(`[data-session-key="${key}"] [role=tab]`)?.focus(),
+    );
+}
+async function submitRename(reason: 'enter' | 'blur'): Promise<void> {
   const key = renaming.value;
-  if (!key || savingName.value) return;
-  const saved = savingLocalName.value
-    ? await store.saveLocal(key, title.value)
-    : store.rename(key, title.value);
-  if (saved && renaming.value === key) renaming.value = null;
+  const item = tabs.value.find((item) => item.key === key);
+  if (!key || !item || store.saving) return;
+  const ok = title.value.trim() === sessionName(item) || (await store.rename(key, title.value));
+  if (renaming.value !== key) return;
+  if (ok) finishRename(key, reason === 'enter');
+  else renameError.value = store.error;
 }
-function closeRename(): void {
-  if (!savingName.value) renaming.value = null;
-}
-function saveShortcut(event: KeyboardEvent): void {
+function sessionShortcut(event: KeyboardEvent): void {
   if (
     !props.visible ||
-    props.hostId ||
-    !event.ctrlKey ||
+    event.defaultPrevented ||
+    event.isComposing ||
+    event.keyCode === 229 ||
     event.metaKey ||
     event.altKey ||
     event.shiftKey ||
-    event.key.toLowerCase() !== 's'
+    renaming.value ||
+    document.querySelector('dialog[open]')
   )
     return;
-  if (document.querySelector('dialog[open]') && !renaming.value) return;
+  const saving = event.ctrlKey && event.key.toLowerCase() === 's';
+  if (!saving && (event.ctrlKey || event.key !== 'F2')) return;
+  const element = event.target instanceof HTMLElement ? event.target : null;
+  if (
+    element &&
+    element !== document.body &&
+    !element.closest('.terminal-tab, .terminal-session-menu, .xterm-container, .split-area')
+  )
+    return;
+  if (
+    element?.matches('input, textarea, [contenteditable=true]') &&
+    !element.closest('.xterm-container')
+  )
+    return;
+  const key =
+    menu.value?.key ??
+    element?.closest<HTMLElement>('[data-session-key]')?.dataset.sessionKey ??
+    store.active;
+  const item = tabs.value.find((item) => item.key === key);
+  if (!item || (saving && !props.hostId && !navigator.platform.startsWith('Win'))) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (
-    !event.repeat &&
-    !renaming.value &&
-    tab.value &&
-    tab.value.panes.every((pane) => !pane.host)
-  ) {
-    closeMenu();
-    rename(tab.value.key);
-  }
+  if (event.repeat) return;
+  if (menu.value) closeMenu();
+  if (saving) void store.saveSession(key, sessionName(item));
+  else rename(key);
 }
 function dragTab(event: DragEvent, key: string): void {
   closeMenu();
@@ -336,22 +357,24 @@ onBeforeUnmount(() => {
   finishDrag?.();
   window.removeEventListener('resize', closeMenu);
   window.removeEventListener('blur', closeMenu);
-  window.removeEventListener('keydown', saveShortcut, true);
+  window.removeEventListener('keydown', sessionShortcut, true);
 });
 onMounted(() => {
   window.addEventListener('resize', closeMenu);
   window.addEventListener('blur', closeMenu);
-  window.addEventListener('keydown', saveShortcut, true);
+  window.addEventListener('keydown', sessionShortcut, true);
 });
 watch(
   () => [props.visible, props.hostId],
   () => {
     menu.value = null;
+    renaming.value = null;
   },
 );
 watch(
   () => store.tabs.map((item) => item.key),
   (keys) => {
+    if (renaming.value && !keys.includes(renaming.value)) renaming.value = null;
     if (
       menu.value &&
       (menu.value.key === null ? !tabs.value.length : !keys.includes(menu.value.key))
@@ -368,7 +391,19 @@ watch(
         {{ tr('重试加载已保存会话') }}
       </button>
     </div>
-    <div v-if="!tabs.length" class="workspace-empty">
+    <div v-if="props.hostId && store.sshErrors[props.hostId]" class="workspace-empty" role="alert">
+      <p>{{ store.sshErrors[props.hostId] }}</p>
+      <button v-if="!tabs.length && host" class="button" @click="newTerminal">
+        {{ tr('新建终端') }}
+      </button>
+      <button class="button" @click="host && emit('retryHost', host)">
+        {{ tr('重试加载已保存会话') }}
+      </button>
+    </div>
+    <div v-else-if="store.sshLoading.has(props.hostId)" class="workspace-empty" role="status">
+      {{ tr('正在加载已保存会话…') }}
+    </div>
+    <div v-else-if="!tabs.length" class="workspace-empty">
       <h2>{{ tr('没有打开的终端') }}</h2>
       <p v-if="!props.hostId && store.savedLoading" role="status">
         {{ tr('正在加载已保存会话…') }}
@@ -399,7 +434,8 @@ watch(
             v-for="item in tabs"
             :key="item.key"
             :class="['terminal-tab', { active: store.active === item.key }]"
-            draggable="true"
+            :data-session-key="item.key"
+            :draggable="renaming !== item.key"
             @mousedown.middle.prevent
             @auxclick.middle.prevent="store.close(item.key)"
             @dragstart="dragTab($event, item.key)"
@@ -409,7 +445,24 @@ watch(
             @keydown.shift.f10.prevent.stop="openMenu(item.key, $event)"
             @keydown.context-menu.prevent.stop="openMenu(item.key, $event)"
           >
+            <TreeRenameInput
+              v-if="renaming === item.key"
+              :name="title"
+              :label="tr('标签名称')"
+              required
+              :busy="store.saving === item.key"
+              :error="renameError"
+              @change="
+                (value) => {
+                  title = value;
+                  renameError = null;
+                }
+              "
+              @submit="submitRename"
+              @cancel="finishRename(item.key, true)"
+            />
             <button
+              v-else
               role="tab"
               :title="sessionTitle(item)"
               :aria-selected="store.active === item.key"
@@ -435,7 +488,7 @@ watch(
                 </svg>
                 <span class="terminal-session-title">{{ sessionTitle(item) }}</span>
               </span>
-              <span v-if="!props.hostId" class="terminal-session-saved">
+              <span v-if="!props.hostId || item.savedId" class="terminal-session-saved">
                 {{ item.savedId ? tr('已保存') : tr('未保存') }}
               </span>
               <small>{{
@@ -444,16 +497,17 @@ watch(
                   : stateLabels[item.panes[0]?.state ?? 'idle']
               }}</small></button
             ><button
-              :class="{ 'terminal-session-delete': !props.hostId }"
+              class="terminal-session-close"
+              :class="{ 'terminal-session-delete': item.savedId }"
               :aria-label="
-                props.hostId
-                  ? tr('关闭标签 {0}', sessionTitle(item))
-                  : tr('删除会话 {0}', sessionTitle(item))
+                item.savedId
+                  ? tr('删除会话 {0}', sessionTitle(item))
+                  : tr('关闭标签 {0}', sessionTitle(item))
               "
-              :title="props.hostId ? tr('关闭标签') : tr('删除会话')"
+              :title="item.savedId ? tr('删除会话') : tr('关闭标签')"
               @click="store.close(item.key)"
             >
-              <Trash2 v-if="!props.hostId" :size="16" aria-hidden="true" />
+              <Trash2 v-if="item.savedId" :size="16" aria-hidden="true" />
               <X v-else :size="14" aria-hidden="true" />
             </button>
           </div>
@@ -545,8 +599,23 @@ watch(
           <button role="menuitem" @click="runMenu('duplicate')">
             <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
           </button>
-          <button role="menuitem" @click="runMenu('rename')">
-            <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名') }}
+          <button
+            role="menuitem"
+            :aria-label="tr('保存')"
+            aria-keyshortcuts="Control+S"
+            :disabled="!menuTarget || !store.canSave(menuTarget.key)"
+            @click="runMenu('save')"
+          >
+            <Save class="menu-icon-green" aria-hidden="true" />{{ tr('保存') }}<kbd>Ctrl+S</kbd>
+          </button>
+          <button
+            role="menuitem"
+            :aria-label="tr('重命名')"
+            aria-keyshortcuts="F2"
+            @click="runMenu('rename')"
+          >
+            <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名')
+            }}<kbd>F2</kbd>
           </button>
           <button
             role="menuitem"
@@ -565,42 +634,8 @@ watch(
           <button role="menuitem" @click="runMenu('all')">
             <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
           </button>
-          <button role="menuitem" @click="runMenu('close')">
-            <X class="menu-icon-muted" aria-hidden="true" />{{ tr('关闭') }}
-          </button>
         </template>
       </div>
     </template>
   </Teleport>
-  <Modal
-    v-if="renaming"
-    :title="tr('重命名标签')"
-    :busy="savingName"
-    panel-class="terminal-rename-dialog"
-    @close="closeRename"
-    ><form class="terminal-rename-form" @submit.prevent="submitRename">
-      <label
-        >{{ tr('标签名称')
-        }}<input
-          v-model="title"
-          class="terminal-rename-input"
-          maxlength="128"
-          required
-          :disabled="savingName"
-          autofocus
-          :aria-label="tr('标签名称')"
-      /></label>
-      <footer class="dialog-actions">
-        <button class="button" type="button" :disabled="savingName" @click="closeRename">
-          {{ tr('取消') }}</button
-        ><button
-          class="button primary"
-          type="submit"
-          :disabled="savingName || (savingLocalName && !!renaming && !store.canSaveLocal(renaming))"
-        >
-          {{ tr('保存') }}
-        </button>
-      </footer>
-    </form></Modal
-  >
 </template>

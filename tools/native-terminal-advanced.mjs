@@ -22,10 +22,10 @@ export async function advancedTerminalChecks({ page, artifacts, passed, openTerm
   }
   async function rename(title) {
     await page.locator('.terminal-tab.active [role=tab]').dblclick();
-    const dialog = page.getByRole('dialog', { name: '重命名标签', exact: true });
-    await dialog.getByLabel('标签名称').fill(title);
-    await dialog.getByRole('button', { name: '保存名称' }).click();
-    await dialog.waitFor({ state: 'hidden' });
+    const input = page.locator('.terminal-tab').getByRole('textbox', { name: '标签名称' });
+    await input.fill(title);
+    await input.press('Enter');
+    await input.waitFor({ state: 'hidden' });
   }
   await send(
     panes().nth(0),

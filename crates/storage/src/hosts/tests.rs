@@ -585,3 +585,80 @@ fn conflicting_existing_jump_alias_never_silently_changes_import_route() {
     );
     assert_eq!(db.catalog().expect("catalog").hosts.len(), 1);
 }
+
+#[test]
+fn ssh_session_snapshots_survive_reopen_failed_replacement_and_host_scoped_rename() {
+    use crate::ssh_sessions::SshSessionRecord;
+    use serverdeck_core::terminal::{LocalTerminalLayout, SavedSshTerminal};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sessions.db");
+    let db = Database::open(&path).unwrap();
+    let host = db.host_create(input()).unwrap().id;
+    let other = db.host_create(input()).unwrap().id;
+    let session = SavedSshTerminal {
+        id: uuid::Uuid::new_v4(),
+        title: "first".into(),
+        pane_count: 1,
+        layout_only_panes: 0,
+        layout: LocalTerminalLayout::Leaf { pane: 0 },
+    };
+    let original = SshSessionRecord::new(session.clone(), 40);
+    let reference = original.reference();
+    db.save_ssh_session(&host, original, false, |_| Ok(()))
+        .unwrap();
+    let failed = SshSessionRecord::new(session.clone(), 50);
+    let failed_reference = failed.reference();
+    assert!(
+        db.save_ssh_session(&host, failed, true, |_| Err(Error::Validation("injected")))
+            .is_err()
+    );
+    let db = Database::open(&path).unwrap();
+    assert_eq!(
+        db.ssh_terminal_sessions(&host).unwrap()[0].reference(),
+        reference
+    );
+    assert_eq!(db.pending_secret_gc().unwrap(), [failed_reference]);
+    assert!(db.ssh_terminal_sessions(&other).unwrap().is_empty());
+    assert!(
+        db.rename_ssh_session(&other, session.id, "wrong".into())
+            .is_err()
+    );
+    db.rename_ssh_session(&host, session.id, "renamed".into())
+        .unwrap();
+    let renamed = db.ssh_terminal_sessions(&host).unwrap().pop().unwrap();
+    assert_eq!(renamed.session.title, "renamed");
+    assert_eq!(renamed.reference(), reference);
+    db.host_delete(&host).unwrap();
+    assert!(db.ssh_terminal_sessions(&host).unwrap().is_empty());
+    assert!(db.pending_secret_gc().unwrap().contains(&reference));
+}
+
+#[test]
+fn unknown_ssh_snapshot_versions_are_never_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("sessions.db")).unwrap();
+    let host = db.host_create(input()).unwrap().id;
+    let key = format!("ssh_terminal_sessions:{host}");
+    let conn = db.connect().unwrap();
+    for raw in [
+        r#"{"version":2,"sessions":[]}"#,
+        r#"{"version":1,"sessions":[],"unknown":true}"#,
+    ] {
+        conn.execute(
+            "INSERT OR REPLACE INTO application_settings(key,value) VALUES(?1,?2)",
+            params![key, raw],
+        )
+        .unwrap();
+        assert!(db.ssh_terminal_sessions(&host).is_err());
+        assert!(db.remove_ssh_session(&host, uuid::Uuid::new_v4()).is_err());
+        assert_eq!(
+            conn.query_row(
+                "SELECT value FROM application_settings WHERE key=?1",
+                [&key],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            raw
+        );
+    }
+}

@@ -152,21 +152,38 @@ function navigate(
 ): void {
   if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
-  if (value === 'terminals' && (host || !hostId)) {
-    if (host) terminals.activateHost(host.id);
-    else terminals.activateLocal();
-    if (
-      !terminals.active &&
-      (hostId || !workspace.tabs.some((tab) => isHostTab(tab) && !tab.hostId))
-    )
-      terminals.open(host ?? null);
-    const pane = terminals.panes.find((p) => p.key === terminals.focused);
-    if (pane?.state === 'idle' && !pane.savedSource) pane.connectRequested = true;
+  if (value === 'terminals' && !hostId) {
+    terminals.activateLocal();
+    if (!terminals.active && !workspace.tabs.some((tab) => isHostTab(tab) && !tab.hostId))
+      terminals.open(null);
   }
   if (value === 'files') files.active = hostId;
   if (value === 'server') operations.active = hostId;
   workspace.navigate(value, hostId, section);
+  if (value === 'terminals' && host) void enterTerminalHost(host);
   if (hostViews.has(value)) store.selectedId = host?.id ?? null;
+}
+async function enterTerminalHost(host: Host) {
+  const loaded = await terminals.loadHostSessions(host);
+  const target = workspace.current;
+  if (
+    !loaded ||
+    workspace.area !== 'home' ||
+    target?.hostId !== host.id ||
+    target.view !== 'terminals' ||
+    workspace.closing.includes(target.key)
+  )
+    return;
+  terminals.activateHost(host.id);
+  if (!terminals.active) terminals.open(host);
+  else {
+    const tab = terminals.hostTabs(host.id).find((item) => item.key === terminals.active);
+    const pane = tab?.panes.find((pane) => pane.key === terminals.focused);
+    if (pane?.state === 'idle' && !pane.connectRequested) {
+      if (tab?.savedId) terminals.select(tab.key);
+      else pane.connectRequested = true;
+    }
+  }
 }
 function fromSearch(value: View, hostId = currentHostId.value) {
   navigate(value, hostId);
@@ -338,7 +355,7 @@ function workspaceKeys(event: KeyboardEvent) {
 const defaultShortcuts = defaultProductPreferences().shortcuts;
 function globalShortcut(event: KeyboardEvent) {
   if (
-    workspace.area === 'local' &&
+    workspace.area !== 'settings' &&
     view.value === 'terminals' &&
     event.ctrlKey &&
     !event.metaKey &&
@@ -908,6 +925,7 @@ watch(
             toolbar-target="#terminal-session-tools"
             local-session-target="#local-terminal-session-list"
             @server="openServer"
+            @retry-host="enterTerminalHost"
           />
         </div>
       </div>

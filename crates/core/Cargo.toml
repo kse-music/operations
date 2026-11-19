@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 serde_json.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, features = ["serde"] }
 serde.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
