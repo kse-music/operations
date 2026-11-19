@@ -306,7 +306,7 @@ async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
     let pin = std::env::var("SERVERDECK_SNAPSHOT_PIN").unwrap();
     let key = Zeroizing::new(std::env::var("SERVERDECK_SNAPSHOT_KEY").unwrap());
     let engine = Engine::new(db);
-    let start = |saved: Option<SshPaneSnapshot>| {
+    let start = |saved: Option<SshPaneSnapshot>, auto_run| {
         let (tx, events) = mpsc::channel(16);
         let plan = ConnectionPlan {
             hops: vec![Hop {
@@ -326,6 +326,7 @@ async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
                 },
                 Arc::new(move |event| tx.try_send(event).is_ok()),
                 saved,
+                auto_run,
             )
             .unwrap();
         Shell {
@@ -334,7 +335,7 @@ async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
             text: String::new(),
         }
     };
-    let mut original = start(None);
+    let mut original = start(None, false);
     connected(&engine, &mut original, &pin).await;
     until(&engine, &mut original, ";cwd;").await;
     let line = "printf 'verified-%s\\n' original";
@@ -347,7 +348,7 @@ async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
     assert_eq!(snapshot.state.as_ref().unwrap().directory, "/tmp");
     assert_eq!(snapshot.state.as_ref().unwrap().command, line);
     engine.close(&original.info.id).await.unwrap();
-    let mut restored = start(Some(snapshot.clone()));
+    let mut restored = start(Some(snapshot.clone()), false);
     connected(&engine, &mut restored, &pin).await;
     until(&engine, &mut restored, line).await;
     assert!(!restored.text.contains("verified-original"));
@@ -366,9 +367,13 @@ async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
         "/tmp"
     );
     engine.close(&restored.info.id).await.unwrap();
+    let mut automatic = start(Some(snapshot.clone()), true);
+    connected(&engine, &mut automatic, &pin).await;
+    until(&engine, &mut automatic, "verified-original").await;
+    engine.close(&automatic.info.id).await.unwrap();
     let mut wrong = snapshot;
     wrong.identity = "different peer".into();
-    let mut rejected = start(Some(wrong));
+    let mut rejected = start(Some(wrong), true);
     loop {
         match receive(&engine, &mut rejected).await {
             TerminalEvent::State {

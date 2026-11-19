@@ -34,10 +34,11 @@ describe('terminal IPC contract', () => {
       input: { id: 'saved', title: '只改名', sessionIds: [], layout: null },
     });
     const receive = vi.fn();
-    await terminalApi.openSavedLocal('saved', 0, { cols: 80, rows: 24 }, receive);
+    await terminalApi.openSavedLocal('saved', 0, { cols: 80, rows: 24 }, receive, true);
     expect(mocks.invoke).toHaveBeenLastCalledWith('terminal_local_open_saved', {
       id: 'saved',
       pane: 0,
+      explicitRestore: true,
       size: { cols: 80, rows: 24 },
       events: expect.objectContaining({ onmessage: receive }),
     });

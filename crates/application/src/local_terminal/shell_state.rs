@@ -6,6 +6,7 @@ use std::path::Path;
 pub(super) struct ShellLaunch {
     pub directory: Option<String>,
     pub protected_command: Option<String>,
+    pub auto_run: bool,
     pub token: uuid::Uuid,
 }
 
@@ -27,11 +28,15 @@ impl ShellLaunch {
                 command.env("SERVERDECK_START_DIRECTORY", directory);
             }
             command.env_remove("SERVERDECK_START_COMMAND");
+            command.env_remove("SERVERDECK_RUN_SAVED_COMMAND");
             if let Some(blob) = &self.protected_command
                 && command.get_cwd().and_then(|cwd| cwd.to_str()) == self.directory.as_deref()
                 && serverdeck_core::terminal::valid_protected_command(blob)
             {
                 command.env("SERVERDECK_START_COMMAND", blob);
+                if self.auto_run {
+                    command.env("SERVERDECK_RUN_SAVED_COMMAND", "1");
+                }
             }
             let script = include_str!("session.ps1").replace("__TOKEN__", &self.token.to_string());
             // Keep the command line short and read only the script supplied by this launcher.
@@ -221,6 +226,7 @@ mod tests {
         let launch = ShellLaunch {
             directory: Some(directory.to_str().unwrap().to_owned()),
             protected_command: None,
+            auto_run: false,
             token: uuid::Uuid::new_v4(),
         };
         let (mut command, _) = shell().unwrap();
@@ -249,6 +255,7 @@ mod tests {
         let launch = ShellLaunch {
             directory: None,
             protected_command: None,
+            auto_run: false,
             token,
         };
         let (mut command, _) = shell().unwrap();

@@ -62,9 +62,9 @@ try {
           dataDirectory: '',
           logDirectory: '',
           config: {
-            version: 2,
+            version: 5,
             theme,
-            interfaceFontSize: 'standard',
+            interfaceFontSize: 100,
             sidebarWidth: 248,
             terminalFontSize: 16,
             connectTimeoutSecs: 15,

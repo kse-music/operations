@@ -97,9 +97,9 @@ beforeEach(async () => {
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 2,
+      version: 5,
       theme: 'dark',
-      interfaceFontSize: 'standard',
+      interfaceFontSize: 100,
       sidebarWidth: 260,
       terminalFontSize: 14,
       connectTimeoutSecs: 10,
@@ -279,10 +279,10 @@ it('zooms all terminal fonts with Ctrl+wheel, saves the setting and refits the p
 
 it('keeps xterm content at the terminal font size during interface preview and save', async () => {
   const application = useApplicationStore();
-  application.interfaceFontSizePreview = 'ultraLarge';
+  application.interfaceFontSizePreview = 112;
   await nextTick();
   expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([14, 14]);
-  await application.save({ ...application.state!.config, interfaceFontSize: 'ultraLarge' });
+  await application.save({ ...application.state!.config, interfaceFontSize: 112 });
   application.interfaceFontSizePreview = undefined;
   await nextTick();
   expect(xterm.instances.map((terminal) => terminal.options.fontSize)).toEqual([14, 14]);

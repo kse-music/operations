@@ -127,8 +127,41 @@ pub(super) fn app_config(raw: &str) -> Result<AppConfig, Error> {
             }
             value["version"] = json!(2);
         }
-        CONFIG_VERSION => (),
+        2 | 3 | 4 | CONFIG_VERSION => (),
         other => return Err(Error::UnsupportedConfig(other)),
+    }
+    if value["version"] == 2 {
+        let terminal = value
+            .get_mut("terminal")
+            .and_then(Value::as_object_mut)
+            .ok_or(Error::Validation("应用配置缺少终端偏好"))?;
+        if terminal.contains_key("autoRunSavedCommand") {
+            return Err(Error::Validation("旧版应用配置包含未知终端偏好"));
+        }
+        terminal.insert("autoRunSavedCommand".into(), json!(false));
+        value["version"] = json!(3);
+    }
+    if value["version"] == 3 {
+        let terminal = value
+            .get_mut("terminal")
+            .and_then(Value::as_object_mut)
+            .ok_or(Error::Validation("应用配置缺少终端偏好"))?;
+        if !matches!(terminal.remove("cursorBlink"), Some(Value::Bool(_))) {
+            return Err(Error::Validation("旧版应用配置的光标闪烁偏好无效"));
+        }
+        value["version"] = json!(4);
+    }
+    if value["version"] == 4 {
+        let percent = match value.get("interfaceFontSize").and_then(Value::as_str) {
+            Some("small") => 95,
+            Some("standard") => 100,
+            Some("large") => 115,
+            Some("extraLarge") => 130,
+            Some("ultraLarge") => 145,
+            _ => return Err(Error::Validation("旧版应用配置的界面字号无效")),
+        };
+        value["interfaceFontSize"] = json!(percent);
+        value["version"] = json!(5);
     }
     let config: AppConfig = serde_json::from_value(value).map_err(storage_error)?;
     config.validate()?;

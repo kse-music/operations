@@ -1,7 +1,7 @@
 use super::*;
 use rusqlite::params;
 use serde_json::{Value, json};
-use serverdeck_core::{CONFIG_VERSION, InterfaceFontSize, Theme};
+use serverdeck_core::{CONFIG_VERSION, Theme};
 
 fn old_config() -> String {
     let mut config = serde_json::to_value(AppConfig::default()).unwrap();
@@ -16,7 +16,7 @@ fn old_config() -> String {
     config["terminal"]
         .as_object_mut()
         .unwrap()
-        .remove("cursorBlink");
+        .remove("autoRunSavedCommand");
     config.to_string()
 }
 
@@ -135,9 +135,8 @@ fn all_recorded_schema_versions_upgrade_with_data_references_and_durable_origina
         assert_eq!(config.theme, Theme::Light);
         assert_eq!(config.sidebar_width, 312);
         assert_eq!(config.terminal_font_size, 23);
-        assert_eq!(config.interface_font_size, InterfaceFontSize::Standard);
+        assert_eq!(config.interface_font_size, 100);
         assert!(config.terminal.quick_copy_paste);
-        assert!(config.terminal.cursor_blink);
         assert_eq!(config.product.ssh_defaults.keepalive_interval_secs, 42);
         assert!(!config.product.shortcuts.contains_key("tasks"));
         let connection = db.connect().unwrap();
@@ -349,10 +348,7 @@ fn config_upgrades_independently_and_current_corruption_is_never_filled_or_reset
         )
         .unwrap();
     let db = Database::open(&path).unwrap();
-    assert_eq!(
-        db.load_config().unwrap().interface_font_size,
-        InterfaceFontSize::Small
-    );
+    assert_eq!(db.load_config().unwrap().interface_font_size, 95);
     assert_eq!(backups(&path).len(), 1);
     for value in [
         {
@@ -386,6 +382,153 @@ fn config_upgrades_independently_and_current_corruption_is_never_filled_or_reset
         assert!(Database::open(&path).is_err());
         assert_eq!(super::tests::raw(&connection), raw);
         assert_eq!(backups(&path).len(), 1);
+    }
+}
+
+#[test]
+fn current_schema_upgrades_v2_config_once_and_keeps_session_auto_run_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let mut expected = db.load_config().unwrap();
+    assert!(!expected.terminal.auto_run_saved_command);
+    expected.terminal.quick_copy_paste = true;
+    expected.terminal.scrollback = 13200;
+    let mut historical = serde_json::to_value(&expected).unwrap();
+    historical["version"] = json!(2);
+    historical["interfaceFontSize"] = json!("standard");
+    historical["terminal"]["cursorBlink"] = json!(true);
+    historical["terminal"]
+        .as_object_mut()
+        .unwrap()
+        .remove("autoRunSavedCommand");
+    let original = historical.to_string();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "UPDATE application_settings SET value=?1 WHERE key='app_config'",
+            [&original],
+        )
+        .unwrap();
+    let upgraded = Database::open(&path).unwrap();
+    assert_eq!(upgraded.load_config().unwrap(), expected);
+    let backup_files = backups(&path);
+    assert_eq!(backup_files.len(), 1);
+    assert_eq!(raw(&Connection::open(&backup_files[0]).unwrap()), original);
+
+    expected.terminal.auto_run_saved_command = true;
+    upgraded.save_config(&expected).unwrap();
+    assert_eq!(
+        Database::open(&path).unwrap().load_config().unwrap(),
+        expected
+    );
+    assert_eq!(backups(&path), backup_files);
+
+    for version in [2, CONFIG_VERSION] {
+        let mut invalid = historical.clone();
+        invalid["version"] = json!(version);
+        if version == 2 {
+            invalid["terminal"]["autoRunSavedCommand"] = json!(true);
+        } else {
+            invalid["interfaceFontSize"] = json!(100);
+            invalid["terminal"]
+                .as_object_mut()
+                .unwrap()
+                .remove("cursorBlink");
+        }
+        assert!(config_migrations::app_config(&invalid.to_string()).is_err());
+    }
+}
+
+#[test]
+fn current_schema_retires_v3_cursor_blink_without_changing_other_preferences() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    let db = Database::open(&path).unwrap();
+    let mut expected = db.load_config().unwrap();
+    expected.terminal.auto_run_saved_command = true;
+    expected.terminal.cursor_style = serverdeck_core::terminal::CursorStyle::Underline;
+    let mut historical = serde_json::to_value(&expected).unwrap();
+    historical["version"] = json!(3);
+    historical["interfaceFontSize"] = json!("standard");
+    assert!(config_migrations::app_config(&historical.to_string()).is_err());
+    historical["terminal"]["cursorBlink"] = json!(null);
+    assert!(config_migrations::app_config(&historical.to_string()).is_err());
+    historical["terminal"]["cursorBlink"] = json!(false);
+    let original = historical.to_string();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "UPDATE application_settings SET value=?1 WHERE key='app_config'",
+            [&original],
+        )
+        .unwrap();
+
+    for _ in 0..2 {
+        assert_eq!(
+            Database::open(&path).unwrap().load_config().unwrap(),
+            expected
+        );
+    }
+    let current: Value = serde_json::from_str(&raw(&connection)).unwrap();
+    assert_eq!(current["version"], json!(CONFIG_VERSION));
+    assert!(current["terminal"].get("cursorBlink").is_none());
+    let backup_files = backups(&path);
+    assert_eq!(backup_files.len(), 1);
+    assert_eq!(raw(&Connection::open(&backup_files[0]).unwrap()), original);
+
+    let mut invalid = current;
+    invalid["terminal"]["cursorBlink"] = json!(false);
+    assert!(config_migrations::app_config(&invalid.to_string()).is_err());
+}
+
+#[test]
+fn current_schema_upgrades_v4_font_presets_to_percentages() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("db");
+    Database::open(&path).unwrap();
+    let mut expected = AppConfig {
+        theme: Theme::Light,
+        sidebar_width: 309,
+        ..Default::default()
+    };
+    let mut historical = serde_json::to_value(&expected).unwrap();
+    historical["version"] = json!(4);
+    for (preset, percent) in [
+        ("small", 95),
+        ("standard", 100),
+        ("large", 115),
+        ("extraLarge", 130),
+        ("ultraLarge", 145),
+    ] {
+        historical["interfaceFontSize"] = json!(preset);
+        expected.interface_font_size = percent;
+        assert_eq!(
+            config_migrations::app_config(&historical.to_string()).unwrap(),
+            expected
+        );
+    }
+    let original = historical.to_string();
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute(
+            "UPDATE application_settings SET value=?1 WHERE key='app_config'",
+            [&original],
+        )
+        .unwrap();
+    for _ in 0..2 {
+        assert_eq!(
+            Database::open(&path).unwrap().load_config().unwrap(),
+            expected
+        );
+    }
+    let backup_files = backups(&path);
+    assert_eq!(backup_files.len(), 1);
+    assert_eq!(raw(&Connection::open(&backup_files[0]).unwrap()), original);
+
+    for invalid in [json!(null), json!(112), json!("extraSmall"), json!("huge")] {
+        historical["interfaceFontSize"] = invalid;
+        assert!(config_migrations::app_config(&historical.to_string()).is_err());
     }
 }
 
@@ -583,7 +726,6 @@ fn old_optional_groups_get_defaults_while_required_fields_and_explicit_values_st
     assert_eq!(config.sidebar_width, 312);
     value["terminal"] = json!({"cursorBlink":false,"quickCopyPaste":false});
     let config = config_migrations::app_config(&value.to_string()).unwrap();
-    assert!(!config.terminal.cursor_blink);
     assert!(!config.terminal.quick_copy_paste);
     value["product"] = json!({"sshDefaults":{"keepaliveIntervalSecs":47}});
     let config = config_migrations::app_config(&value.to_string()).unwrap();

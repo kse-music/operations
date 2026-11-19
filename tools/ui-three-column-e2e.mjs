@@ -25,10 +25,10 @@ try {
     headless: true,
   });
   for (const [name, width, height, theme, size] of [
-    ['desktop-dark', 1280, 820, 'dark', 'standard'],
-    ['desktop-light', 1280, 820, 'light', 'standard'],
-    ['minimum-large', 960, 600, 'light', 'ultraLarge'],
-    ['narrow', 390, 844, 'dark', 'standard'],
+    ['desktop-dark', 1280, 820, 'dark', 100],
+    ['desktop-light', 1280, 820, 'light', 100],
+    ['minimum-large', 960, 600, 'light', 145],
+    ['narrow', 390, 844, 'dark', 100],
   ]) {
     const page = await browser.newPage({ viewport: { width, height } });
     const errors = [];
@@ -51,7 +51,7 @@ try {
           dataDirectory: '',
           logDirectory: '',
           config: {
-            version: 2,
+            version: 5,
             theme,
             interfaceFontSize: size,
             sidebarWidth: 248,

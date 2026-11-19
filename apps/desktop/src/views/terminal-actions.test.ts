@@ -206,9 +206,9 @@ beforeEach(async () => {
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 2,
+      version: 5,
       theme: 'dark',
-      interfaceFontSize: 'standard',
+      interfaceFontSize: 100,
       sidebarWidth: 248,
       terminalFontSize: 16,
       connectTimeoutSecs: 15,
@@ -749,26 +749,21 @@ it.each([
   expect(terminal.writes).toEqual(writes);
 });
 
-it.each([true, false])(
-  'keeps a disconnected cursor inactive after preferences change and restores blink=%s on reconnect',
-  async (blink) => {
-    const application = useApplicationStore();
-    const preferences = application.state!.config.terminal;
-    const options = terminals.instances[0]!.options;
-    button('断开连接', await tabMenu()).click();
-    await flush();
-    preferences.cursorBlink = blink;
-    preferences.theme = 'light';
-    await flush();
-    expect(options.cursorBlink).toBe(false);
-    expect(options.disableStdin).toBe(true);
-    button('重新连接', await tabMenu()).click();
-    await flush();
-    expect(options.cursorBlink).toBe(blink);
-    expect(options.disableStdin).toBe(false);
-    expect(preferences.cursorBlink).toBe(blink);
-  },
-);
+it('keeps a disconnected cursor inactive after preferences change and restarts blinking on reconnect', async () => {
+  const preferences = useApplicationStore().state!.config.terminal;
+  const options = terminals.instances[0]!.options;
+  expect(options.cursorBlink).toBe(true);
+  button('断开连接', await tabMenu()).click();
+  await flush();
+  preferences.theme = 'light';
+  await flush();
+  expect(options.cursorBlink).toBe(false);
+  expect(options.disableStdin).toBe(true);
+  button('重新连接', await tabMenu()).click();
+  await flush();
+  expect(options.cursorBlink).toBe(true);
+  expect(options.disableStdin).toBe(false);
+});
 
 it('closes only the menu target host and retains failed sessions and other hosts', async () => {
   const store = useTerminalsStore();
@@ -901,6 +896,7 @@ it('reopens the saved SSH split on the same host and preserves its snapshot when
     expect(native.open).toHaveBeenCalledWith(host.id, expect.anything(), expect.any(Function), {
       id: 'saved',
       pane: index,
+      explicitRestore: true,
     });
   native.saveSshSession.mockResolvedValueOnce({ ...record, title: '新名称' });
   await store.rename(restored.key, '新名称');
@@ -979,6 +975,7 @@ it('opens a saved local shell from the blank area menu and selects it without an
     0,
     expect.anything(),
     expect.any(Function),
+    true,
   );
   const saved = store.hostTabs('')[0]!;
   expect(saved.panes[0]!.sessionId).toBeTruthy();
@@ -990,6 +987,28 @@ it('opens a saved local shell from the blank area menu and selects it without an
   await flush();
   expect(store.active).toBe(saved.key);
   expect(native.openSavedLocal).toHaveBeenCalledTimes(1);
+
+  await store.disconnect(saved.key);
+  await store.reconnect(saved.key);
+  await flush();
+  expect(native.openSavedLocal).toHaveBeenLastCalledWith(
+    'saved-one',
+    0,
+    expect.anything(),
+    expect.any(Function),
+    false,
+  );
+  await store.disconnect(saved.key);
+  button('保存的目录', await savedMenu()).click();
+  await flush();
+  expect(native.openSavedLocal).toHaveBeenCalledTimes(3);
+  expect(native.openSavedLocal).toHaveBeenLastCalledWith(
+    'saved-one',
+    0,
+    expect.anything(),
+    expect.any(Function),
+    true,
+  );
 });
 it.each(['local', 'ssh'] as const)(
   'shows the saved command beside a generated %s name and lets an explicit rename replace it',
@@ -1063,6 +1082,7 @@ it('keeps an explicitly restored shell running on repeated local entry', async (
     0,
     expect.anything(),
     expect.any(Function),
+    true,
   );
   expect(native.openLocal).not.toHaveBeenCalled();
   expect(store.hostTabs('').map((tab) => tab.savedId)).toEqual(['first']);

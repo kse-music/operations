@@ -9,7 +9,6 @@ import NotificationToasts from './components/NotificationToasts.vue';
 import { editorApi, type EditorBootstrap } from './services/editor';
 import { errorMessage } from './services/ipc';
 import { useTheme } from './composables/theme';
-import { interfaceFontSizes } from './types/preferences';
 const data = ref<EditorBootstrap>(),
   error = ref<string | null>(null),
   loading = ref(false);
@@ -34,9 +33,10 @@ async function load(): Promise<void> {
     if (disposed) return;
     data.value = value;
     setLocale(value.language);
-    const scale =
-      interfaceFontSizes.find((size) => size.value === value.interfaceFontSize)?.scale ?? 1;
-    document.documentElement.style.setProperty('--interface-font-scale', String(scale));
+    document.documentElement.style.setProperty(
+      '--interface-font-scale',
+      String(value.interfaceFontSize / 100),
+    );
   } catch (cause) {
     error.value = errorMessage(cause);
   } finally {

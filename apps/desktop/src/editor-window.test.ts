@@ -40,7 +40,7 @@ const loaded: EditorBootstrap = {
     atomicSave: true,
   },
   theme: 'light',
-  interfaceFontSize: 'ultraLarge',
+  interfaceFontSize: 112,
   language: 'zh-CN',
 };
 beforeEach(() => {
@@ -73,7 +73,7 @@ it('routes native close requests to the editor draft review and applies saved th
   app.mount(root);
   await vi.waitFor(() => expect(root.querySelector('.fixture-editor')).not.toBeNull());
   expect(document.documentElement.dataset.theme).toBe('light');
-  expect(document.documentElement.style.getPropertyValue('--interface-font-scale')).toBe('1.45');
+  expect(document.documentElement.style.getPropertyValue('--interface-font-scale')).toBe('1.12');
   mock.listener!();
   expect(mock.close).toHaveBeenCalledOnce();
   expect(editorApi.close).not.toHaveBeenCalled();

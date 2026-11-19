@@ -2,6 +2,8 @@
 # is substituted into this script. Paths and encrypted command data travel separately.
 $global:serverDeckPending = $env:SERVERDECK_START_COMMAND
 if ($null -ne $global:serverDeckPending) { Remove-Item Env:\SERVERDECK_START_COMMAND }
+$global:serverDeckRunSavedCommand = $env:SERVERDECK_RUN_SAVED_COMMAND -eq '1'
+$env:SERVERDECK_RUN_SAVED_COMMAND = $null
 if ($env:SERVERDECK_START_DIRECTORY) {
     try { Set-Location -LiteralPath $env:SERVERDECK_START_DIRECTORY -ErrorAction Stop }
     catch {
@@ -30,7 +32,15 @@ try {
     $global:serverDeckReadLine = (Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction Stop).ScriptBlock
     $global:serverDeckDefaultHistory = (Get-PSReadLineOption).AddToHistoryHandler
     function global:PSConsoleHostReadLine {
-        $line = & $global:serverDeckReadLine
+        $submitSavedLine = $global:serverDeckRunSavedCommand -and $global:serverDeckPending
+        if ($submitSavedLine) {
+            # Return the validated line through the host's normal command-input path.
+            # PSReadLine's history initializes when the interactive editor first reads input.
+            $line = $global:serverDeckPending
+            [Console]::WriteLine($line)
+        } else {
+            $line = & $global:serverDeckReadLine
+        }
         $global:serverDeckPending = $null
         if (![string]::IsNullOrWhiteSpace($line)) {
             $blob = ''
@@ -56,16 +66,18 @@ try {
         $global:serverDeckPending = $line
         # The editor initializes its buffer on entry. Insert only inside its first
         # idle read, and give any input the user has already started precedence.
-        $null = Register-EngineEvent PowerShell.OnIdle -MaxTriggerCount 1 -Action {
-            if ($global:serverDeckPending) {
-                $buffer = ''; $cursor = 0
-                [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$buffer, [ref]$cursor)
-                if (!$buffer) {
-                    [Microsoft.PowerShell.PSConsoleReadLine]::Insert($global:serverDeckPending)
+        if (!$global:serverDeckRunSavedCommand) {
+            $null = Register-EngineEvent PowerShell.OnIdle -MaxTriggerCount 1 -Action {
+                if ($global:serverDeckPending) {
+                    $buffer = ''; $cursor = 0
+                    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$buffer, [ref]$cursor)
+                    if (!$buffer) {
+                        [Microsoft.PowerShell.PSConsoleReadLine]::Insert($global:serverDeckPending)
+                    }
+                    $global:serverDeckPending = $null
                 }
-                $global:serverDeckPending = $null
-            }
-        } -ErrorAction Stop
+            } -ErrorAction Stop
+        }
         Write-ServerDeckCommand $protected
         Remove-Variable line,bytes,protected
     }

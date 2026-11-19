@@ -68,9 +68,9 @@ async function fixtures(page, theme) {
       dataDirectory: '/ui-fixture/data',
       logDirectory: '/ui-fixture/logs',
       config: {
-        version: 2,
+        version: 5,
         theme,
-        interfaceFontSize: 'standard',
+        interfaceFontSize: 100,
         sidebarWidth: 248,
         terminalFontSize: 14,
         connectTimeoutSecs: 15,
@@ -541,21 +541,32 @@ async function verifyInterfaceFontSize(page, variant, width) {
   );
   await navigateWorkspace(page, '通用');
   const slider = page.getByRole('slider', { name: '界面字号', exact: true });
-  assert.equal(await slider.getAttribute('aria-valuetext'), '标准');
+  assert.equal(await slider.getAttribute('aria-valuetext'), '100%');
+  const presets = page.locator('.interface-font-ticks button');
   assert.deepEqual(
-    (await page.locator('.interface-font-ticks button').allTextContents()).map((text) =>
-      text.trim(),
-    ),
+    (await presets.allTextContents()).map((text) => text.trim()),
     ['小', '标准', '大', '特大', '超大'],
   );
-  for (const [label, scale] of [
+  const presetSizes = [
     ['小', 0.95],
     ['标准', 1],
     ['大', 1.15],
     ['特大', 1.3],
     ['超大', 1.45],
-  ]) {
-    await page.getByRole('button', { name: label, exact: true }).click();
+  ];
+  for (const [index, [label, scale]] of presetSizes.entries()) {
+    const preset = page.getByRole('button', { name: label, exact: true });
+    await preset.click();
+    const rail = await slider.boundingBox();
+    const labelBounds = await preset.boundingBox();
+    assert(rail && labelBounds);
+    assert.equal(await slider.inputValue(), String(index));
+    const position = index / (presetSizes.length - 1);
+    const thumbX = rail.x + 7.5 + (rail.width - 15) * position;
+    assert(
+      Math.abs(labelBounds.x + labelBounds.width / 2 - thumbX) < 1,
+      `${variant}/${label}: preset is centered below its slider position`,
+    );
     const typography = await page.evaluate(() => {
       const size = (selector) =>
         parseFloat(getComputedStyle(document.querySelector(selector)).fontSize);
@@ -563,7 +574,6 @@ async function verifyInterfaceFontSize(page, variant, width) {
         body: size('body'),
         field: size('#interface-font-size'),
         navigation: size('.nav-label'),
-        caption: size('#interface-font-size-help'),
         section: size('.settings-panel legend'),
         title: size('.settings-panel h1'),
       };
@@ -572,25 +582,32 @@ async function verifyInterfaceFontSize(page, variant, width) {
       body: 14,
       field: 14,
       navigation: 14,
-      caption: 12,
       section: 16,
       title: 24,
     }))
       assert(Math.abs(typography[key] - base * scale) < 0.01, `${variant}/${label}: ${key}`);
+    const previewSizes = await presets.evaluateAll((buttons) =>
+      buttons.map((button) => parseFloat(getComputedStyle(button).fontSize)),
+    );
+    for (const [index, scale] of [0.95, 1, 1.15, 1.3, 1.45].entries())
+      assert(Math.abs(previewSizes[index] - 14 * scale) < 0.01, `${variant}/${label}: preset size`);
     await inspect(page, `${variant}/settings-${label}`);
   }
   await page.getByRole('button', { name: '小', exact: true }).click();
   assert.equal(await slider.inputValue(), '0');
   await slider.press('ArrowRight');
-  assert.equal(await slider.getAttribute('aria-valuetext'), '标准');
+  assert.equal(await slider.getAttribute('aria-valuetext'), '96%');
   await slider.press('Home');
   const track = await slider.boundingBox();
   assert(track);
   const center = track.y + track.height / 2;
   await page.mouse.move(track.x + 7, center);
   await page.mouse.down();
+  await page.mouse.move(track.x + track.width / 3, center, { steps: 8 });
+  const intermediate = parseInt(await slider.getAttribute('aria-valuetext'), 10);
+  assert(intermediate > 100 && intermediate < 115, `${variant}: drag between presets`);
   await page.mouse.move(track.x + track.width - 7, center, { steps: 8 });
-  assert.equal(await slider.getAttribute('aria-valuetext'), '超大');
+  assert.equal(await slider.getAttribute('aria-valuetext'), '145%');
   assert.equal(
     await page.evaluate(() =>
       document.documentElement.style.getPropertyValue('--interface-font-scale'),

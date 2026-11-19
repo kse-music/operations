@@ -19,6 +19,7 @@ try {
     ['desktop-dark', 1440, 900, 'dark'],
     ['desktop-light', 1440, 900, 'light'],
     ['wide-window', 2400, 1000, 'dark'],
+    ['medium-window', 1110, 840, 'dark'],
     ['small-window', 960, 600, 'dark'],
     ['narrow-window', 390, 844, 'light'],
   ]) {
@@ -49,9 +50,9 @@ try {
           notice: null,
         },
         config: {
-          version: 2,
+          version: 5,
           theme,
-          interfaceFontSize: 'standard',
+          interfaceFontSize: 100,
           sidebarWidth: 260,
           terminalFontSize: 14,
           connectTimeoutSecs: 10,
@@ -147,6 +148,14 @@ try {
         };
       });
       assert(!layout.overflows, `${name}: ${categories[index]} overflows`);
+      if (index === 1) {
+        const display = settings.getByRole('group', { name: '终端显示', exact: true });
+        const columns = await display
+          .locator('.settings-fields')
+          .evaluate((grid) => getComputedStyle(grid).gridTemplateColumns.split(' ').length);
+        assert.equal(columns, width >= 1110 ? 2 : 1, `${name}: terminal display columns`);
+        assert.equal(await display.getByRole('checkbox').count(), 0);
+      }
       assert(
         layout.groupGaps.every((gap) => gap >= 19 && gap <= 21),
         `${name}: inconsistent group spacing ${JSON.stringify(layout)}`,
@@ -186,7 +195,20 @@ try {
     assert.equal(await page.getByLabel('应用菜单', { exact: true }).count(), 0);
     assert.equal(await page.locator('.sidebar-app-actions [aria-label="设置"]').count(), 1);
     await select(1);
-    const quickCopyPaste = settings.getByRole('checkbox', {
+    const behavior = settings.getByRole('group', { name: '终端行为', exact: true });
+    assert.equal(await behavior.getByRole('spinbutton').inputValue(), '4096');
+    const autoRun = behavior.getByRole('checkbox', { name: '打开已保存会话时自动执行命令' });
+    assert.equal(await autoRun.isChecked(), false, `${name}: session auto-run must default off`);
+    assert(
+      await autoRun.evaluate((checkbox) => {
+        const row = checkbox.closest('.settings-field');
+        return (
+          row.getBoundingClientRect().width === row.parentElement.getBoundingClientRect().width
+        );
+      }),
+      `${name}: session auto-run must span its row`,
+    );
+    const quickCopyPaste = behavior.getByRole('checkbox', {
       name: '选中即复制，右键即粘贴',
       exact: true,
     });

@@ -25,8 +25,8 @@ pub struct TerminalPreferences {
     pub scrollback: u32,
     pub theme: TerminalTheme,
     pub cursor_style: CursorStyle,
-    pub cursor_blink: bool,
     pub quick_copy_paste: bool,
+    pub auto_run_saved_command: bool,
     pub paste_confirm_chars: u32,
     pub shortcuts: BTreeMap<String, String>,
 }
@@ -38,8 +38,8 @@ impl Default for TerminalPreferences {
             scrollback: 5000,
             theme: TerminalTheme::Deck,
             cursor_style: CursorStyle::Block,
-            cursor_blink: true,
             quick_copy_paste: false,
+            auto_run_saved_command: false,
             paste_confirm_chars: 4096,
             shortcuts: default_shortcuts(),
         }
@@ -306,10 +306,11 @@ pub struct SshPaneSnapshot {
     pub state: Option<SshPaneState>,
 }
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SshSavedSource {
     pub id: uuid::Uuid,
     pub pane: usize,
+    pub explicit_restore: bool,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

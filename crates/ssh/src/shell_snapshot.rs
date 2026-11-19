@@ -4,7 +4,10 @@ use serverdeck_core::terminal::{SshPaneSnapshot, SshPaneState};
 
 pub(super) enum ShellCommand {
     Fixed(String),
-    Interactive(Option<SshPaneSnapshot>),
+    Interactive {
+        restore: Option<SshPaneSnapshot>,
+        auto_run: bool,
+    },
 }
 
 pub(super) enum Capture {
@@ -108,6 +111,7 @@ impl Engine {
         size: TerminalSize,
         sink: Sink,
         restore: Option<SshPaneSnapshot>,
+        auto_run: bool,
     ) -> Result<TerminalSession, Error> {
         if let Some(state) = restore.as_ref().and_then(|pane| pane.state.as_ref()) {
             state.validate()?;
@@ -118,7 +122,7 @@ impl Engine {
             size,
             sink,
             SessionKind::Terminal,
-            Some(ShellCommand::Interactive(restore)),
+            Some(ShellCommand::Interactive { restore, auto_run }),
             None,
         )
     }
@@ -225,6 +229,7 @@ pub(super) async fn start(
     control: &Control,
     host: &Host,
     restore: Option<SshPaneSnapshot>,
+    auto_run: bool,
 ) -> Result<Vec<u8>, Error> {
     let identity = serde_json::to_string(&(
         &host.id,
@@ -256,7 +261,14 @@ pub(super) async fn start(
     let script = include_str!("session.bash")
         .replace("\r\n", "\n")
         .replace("__TOKEN__", id)
-        .replace("__RESTORE__", if restore.is_some() { "yes" } else { "no" });
+        .replace(
+            "__RESTORE__",
+            match (restore.is_some(), auto_run) {
+                (true, true) => "run",
+                (true, false) => "yes",
+                (false, _) => "no",
+            },
+        );
     // Only bundled source and the generated UUID enter the exec request.
     let encoded = STANDARD.encode(script);
     let command = format!(r#"exec "$SHELL" --rcfile <(printf %s '{encoded}' | base64 -d) -i"#);

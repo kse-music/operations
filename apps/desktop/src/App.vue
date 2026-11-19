@@ -14,7 +14,7 @@ import {
 import { useApplicationStore } from './stores/application';
 import { useUpdatesStore } from './stores/updates';
 import { useTheme } from './composables/theme';
-import { interfaceFontSizes } from './types/preferences';
+import { defaultInterfaceFontSize } from './types/preferences';
 import SettingsView from './views/SettingsView.vue';
 import SettingsNavigation from './components/SettingsNavigation.vue';
 import TerminalStatus from './components/TerminalStatus.vue';
@@ -516,9 +516,8 @@ const theme = computed(() => application.state?.config.theme);
 useTheme(theme);
 watch(
   () => application.interfaceFontSizePreview ?? application.state?.config.interfaceFontSize,
-  (value) => {
-    const scale = interfaceFontSizes.find((size) => size.value === value)?.scale ?? 1;
-    document.documentElement.style.setProperty('--interface-font-scale', String(scale));
+  (value = defaultInterfaceFontSize) => {
+    document.documentElement.style.setProperty('--interface-font-scale', String(value / 100));
   },
   { immediate: true },
 );

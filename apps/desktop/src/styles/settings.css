@@ -80,17 +80,31 @@
   padding: 0;
   margin: 0;
 }
+.interface-font-size {
+  container: interface-font-size / inline-size;
+}
 .interface-font-ticks {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  /* The native thumb travels between its centers, inset from the rail edges. */
+  padding-inline: 7.5px;
+  align-items: baseline;
 }
 .interface-font-ticks > button {
+  grid-area: 1 / 1;
+  justify-self: start;
+  position: relative;
+  left: var(--font-size-stop);
+  translate: -50%;
   padding: 2px 0;
   border: 0;
   border-radius: var(--control-radius);
   background: transparent;
   color: var(--muted);
   white-space: nowrap;
+  font-size: calc(
+    var(--font-size-body) / var(--interface-font-scale, 1) * var(--font-size-preview-scale)
+  );
 }
 .interface-font-ticks > button:hover {
   background: var(--hover);
@@ -99,9 +113,12 @@
   color: var(--accent);
   font-weight: 600;
 }
+@container interface-font-size (max-width: 330px) {
+  .interface-font-ticks > button:nth-child(even) {
+    grid-row: 2;
+  }
+}
 .settings-panel .settings-form .interface-font-size input[type='range'] {
-  align-self: center;
-  width: calc(80% + 14px);
   height: 24px;
   accent-color: var(--accent);
 }

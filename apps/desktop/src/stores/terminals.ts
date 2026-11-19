@@ -29,6 +29,7 @@ export interface TerminalPaneModel {
   containerShell?: import('../types/ops').ContainerShell;
   pluginTerminal?: { pluginId: string; owner: string; ticket: string };
   savedSource?: { id: string; pane: number };
+  restoreFromSavedMenu?: boolean;
 }
 export interface TerminalTab {
   key: string;
@@ -41,6 +42,7 @@ export interface TerminalTab {
   savedId?: string;
 }
 type ConnectionAction = 'reconnect' | 'disconnect';
+type ChangeConnection = (action: ConnectionAction, explicitRestore: boolean) => Promise<void>;
 type SavedSession = SavedLocalTerminal | SavedSshTerminal;
 export const useTerminalsStore = defineStore('terminals', () => {
   const tabs = ref<TerminalTab[]>([]),
@@ -52,7 +54,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
   const lastHostTabs = new Map<string, string>();
   const sessionNumbers = new Map<string, number>();
   const uploads = new Map<string, { active: () => boolean; stop: () => Promise<void> }>();
-  const connections = new Map<string, (action: ConnectionAction) => Promise<void>>();
+  const connections = new Map<string, ChangeConnection>();
   const closingPanes = new Set<string>();
   const changingConnections = ref<string[]>([]);
   const savedLoading = ref(false),
@@ -96,6 +98,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       connectRequested: false,
       elevated: 'panes' in entry ? entry.panes[index]!.elevated : undefined,
       savedSource: { id: entry.id, pane: index },
+      restoreFromSavedMenu: true,
     }));
     const restoreLayout = (layout: SavedTerminalLayout): LayoutNode =>
       layout.kind === 'leaf'
@@ -181,7 +184,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
           error.value = tr('主机连接配置已变更，请从主机树重新打开后再重新连接会话。');
           return;
         }
-        void changeConnection(existing.key, 'reconnect');
+        void changeConnection(existing.key, 'reconnect', true);
       }
       return;
     }
@@ -340,10 +343,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       saving.value = '';
     }
   }
-  function registerConnection(
-    key: string,
-    change: (action: ConnectionAction) => Promise<void>,
-  ): () => void {
+  function registerConnection(key: string, change: ChangeConnection): () => void {
     connections.set(key, change);
     return () => {
       if (connections.get(key) === change) connections.delete(key);
@@ -380,7 +380,11 @@ export const useTerminalsStore = defineStore('terminals', () => {
       )
     );
   }
-  async function changeConnection(key: string, action: ConnectionAction): Promise<void> {
+  async function changeConnection(
+    key: string,
+    action: ConnectionAction,
+    explicitRestore = false,
+  ): Promise<void> {
     if (!(action === 'reconnect' ? canReconnect(key) : canDisconnect(key))) return;
     const tab = tabs.value.find((tab) => tab.key === key);
     if (!tab) return;
@@ -402,7 +406,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       for (const { pane } of uploading) await uploads.get(pane.key)?.stop();
       for (const { pane, change } of targets) {
         if (panes.value.includes(pane) && connections.get(pane.key) === change)
-          await change?.(action);
+          await change?.(action, explicitRestore);
       }
     } catch (cause) {
       error.value = errorMessage(cause);

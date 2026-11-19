@@ -163,6 +163,7 @@ pub async fn terminal_local_open_saved(
     application: tauri::State<'_, Application>,
     id: String,
     pane: usize,
+    explicit_restore: bool,
     size: TerminalSize,
     events: tauri::ipc::Channel<TerminalEvent>,
 ) -> Result<serverdeck_core::terminal::LocalTerminalSession, IpcError> {
@@ -170,6 +171,7 @@ pub async fn terminal_local_open_saved(
         .terminal_local_open_saved(
             id,
             pane,
+            explicit_restore,
             size,
             std::sync::Arc::new(move |event| events.send(event).is_ok()),
         )

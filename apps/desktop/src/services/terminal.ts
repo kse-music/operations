@@ -36,11 +36,12 @@ export const terminalApi = {
     pane: number,
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,
+    explicitRestore: boolean,
   ): Promise<LocalTerminalSession> {
     ensureDesktop();
     const events = new Channel<TerminalEvent>();
     events.onmessage = receive;
-    return invoke('terminal_local_open_saved', { id, pane, size, events });
+    return invoke('terminal_local_open_saved', { id, pane, size, events, explicitRestore });
   },
   openLink: (url: string): Promise<void> => {
     ensureDesktop();
@@ -95,7 +96,7 @@ export const terminalApi = {
     hostId: string,
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,
-    saved?: { id: string; pane: number },
+    saved?: { id: string; pane: number; explicitRestore: boolean },
   ): Promise<TerminalSession> {
     ensureDesktop();
     const open = async (): Promise<TerminalSession> => {

@@ -2,7 +2,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { ensureDesktop } from './ipc';
 import type { SaveResult, TextDocument } from '../types/files';
 import type { Theme } from '../types/ipc';
-import type { InterfaceFontSize } from '../types/preferences';
 
 export type EditorDocument = Pick<TextDocument, 'token' | 'sessionId' | 'path'>;
 export interface EditorStatus {
@@ -12,7 +11,7 @@ export interface EditorStatus {
 export interface EditorBootstrap {
   document: TextDocument;
   theme: Theme;
-  interfaceFontSize: InterfaceFontSize;
+  interfaceFontSize: number;
   language: 'zh-CN' | 'en-US';
 }
 function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {

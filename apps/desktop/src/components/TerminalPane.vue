@@ -258,9 +258,10 @@ function queueInput(data: Uint8Array): void {
   if (!inputQueue.enqueue(data, approvedPaste))
     message.value = tr('输入队列已满或已断线，本次输入未发送。');
 }
-async function connect(): Promise<void> {
+async function connect(explicitRestore = props.tab.restoreFromSavedMenu ?? false): Promise<void> {
   if (working.value) return;
   working.value = true;
+  if (props.tab.restoreFromSavedMenu) update({ restoreFromSavedMenu: undefined });
   const attempt = ++generation;
   dropUpload.value?.dispose();
   upload?.dispose();
@@ -324,7 +325,11 @@ async function connect(): Promise<void> {
                 hostId: string,
                 size: import('../types/terminal').TerminalSize,
                 receive: (event: TerminalEvent) => void,
-              ) => terminalApi.open(hostId, size, receive, props.tab.savedSource)
+              ) =>
+                terminalApi.open(hostId, size, receive, {
+                  ...props.tab.savedSource!,
+                  explicitRestore,
+                })
             : terminalApi.open;
     const ready = async () => {
       await Promise.resolve();
@@ -413,6 +418,7 @@ async function connect(): Promise<void> {
             props.tab.savedSource.pane,
             size,
             receive,
+            explicitRestore,
           )
         : props.tab.elevated
           ? terminalApi.openLocal(size, receive, true)
@@ -438,7 +444,10 @@ async function connect(): Promise<void> {
     working.value = false;
   }
 }
-async function changeConnection(action: 'reconnect' | 'disconnect'): Promise<void> {
+async function changeConnection(
+  action: 'reconnect' | 'disconnect',
+  explicitRestore: boolean,
+): Promise<void> {
   if (disposed || working.value) return;
   if (
     action === 'reconnect' &&
@@ -475,7 +484,7 @@ async function changeConnection(action: 'reconnect' | 'disconnect'): Promise<voi
   } finally {
     working.value = false;
   }
-  if (action === 'reconnect' && !disposed) await connect();
+  if (action === 'reconnect' && !disposed) await connect(explicitRestore);
 }
 async function confirm(accept: boolean): Promise<void> {
   if (!session) return;
@@ -652,7 +661,7 @@ function nativePaste(event: ClipboardEvent): void {
 function terminalInputOptions() {
   const connected = props.tab.state === 'connected';
   return {
-    cursorBlink: connected && preferences.value.cursorBlink,
+    cursorBlink: connected,
     disableStdin: !connected,
   };
 }

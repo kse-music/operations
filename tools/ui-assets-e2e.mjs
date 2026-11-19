@@ -36,7 +36,7 @@ async function fixtures(page, appearance) {
       dataDirectory: '',
       logDirectory: '',
       config: {
-        version: 2,
+        version: 5,
         theme,
         interfaceFontSize,
         sidebarWidth: 260,
@@ -185,12 +185,12 @@ async function openAsset(page, label, regionName = label) {
 const results = [];
 try {
   for (const [name, width, height, theme, interfaceFontSize] of [
-    ['desktop-dark', 1440, 900, 'dark', 'standard'],
-    ['desktop-light', 1440, 900, 'light', 'standard'],
-    ['wide', 2400, 1000, 'dark', 'standard'],
-    ['small', 900, 600, 'light', 'standard'],
-    ['small-large-font', 900, 600, 'light', 'ultraLarge'],
-    ['narrow', 390, 844, 'dark', 'standard'],
+    ['desktop-dark', 1440, 900, 'dark', 100],
+    ['desktop-light', 1440, 900, 'light', 100],
+    ['wide', 2400, 1000, 'dark', 100],
+    ['small', 900, 600, 'light', 100],
+    ['small-large-font', 900, 600, 'light', 145],
+    ['narrow', 390, 844, 'dark', 100],
   ]) {
     const page = await browser.newPage({ viewport: { width, height } });
     const errors = [];

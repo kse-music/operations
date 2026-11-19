@@ -45,9 +45,9 @@ beforeEach(() => {
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 2,
+      version: 5,
       theme: 'dark',
-      interfaceFontSize: 'standard',
+      interfaceFontSize: 100,
       sidebarWidth: 260,
       terminalFontSize: 14,
       connectTimeoutSecs: 10,
@@ -263,6 +263,27 @@ it('automatically saves quick copy and paste after enabling it', async () => {
   checkbox.click();
   await vi.waitFor(() =>
     expect(useApplicationStore().state!.config.terminal.quickCopyPaste).toBe(true),
+  );
+});
+
+it('saves the session restoration preference and restores the opt-in default', async () => {
+  vi.spyOn(ipc, 'saveConfig').mockImplementation(async (config) => config);
+  await select(1);
+  const checkbox = root.querySelector<HTMLInputElement>(
+    'input[aria-describedby="saved-command-help"]',
+  )!;
+  const behavior = checkbox.closest('fieldset')!;
+  expect(behavior.querySelector('legend')?.textContent).toBe('终端行为');
+  expect(behavior.querySelector('input[aria-describedby="quick-copy-paste-help"]')).not.toBeNull();
+  expect(behavior.querySelector<HTMLInputElement>('input[type="number"]')?.value).toBe('4096');
+  expect(checkbox.checked).toBe(false);
+  checkbox.click();
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.terminal.autoRunSavedCommand).toBe(true),
+  );
+  await restoreDefaults();
+  await vi.waitFor(() =>
+    expect(useApplicationStore().state!.config.terminal.autoRunSavedCommand).toBe(false),
   );
 });
 
@@ -685,7 +706,7 @@ it('requires explicit document discard and sends all preferences with confirmed 
   await vi.waitFor(() =>
     expect(migrate).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
-        version: 2,
+        version: 5,
         product: expect.any(Object),
         terminal: expect.any(Object),
       }),

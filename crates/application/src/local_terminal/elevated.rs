@@ -9,7 +9,7 @@ use tokio::{
 };
 
 const HELPER: &str = "--serverdeck-elevated-terminal";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 const MAX_FRAME: usize = 128 * 1024;
 const START_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -395,6 +395,7 @@ mod tests {
                 launch: ShellLaunch {
                     directory: Some(directory.clone()),
                     protected_command: Some("AQID".into()),
+                    auto_run: true,
                     token,
                 },
             },
@@ -404,7 +405,7 @@ mod tests {
         assert!(
             matches!(read_frame(&mut read).await.unwrap(), Frame::Start {
             version: VERSION, launch, ..
-        } if launch.token == token && launch.directory.as_ref() == Some(&directory) && launch.protected_command.as_deref() == Some("AQID"))
+        } if launch.token == token && launch.directory.as_ref() == Some(&directory) && launch.protected_command.as_deref() == Some("AQID") && launch.auto_run)
         );
         let data = vec![255; 16384];
         write_frame(&mut write, &Frame::Input { data: data.clone() })

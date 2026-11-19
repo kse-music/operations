@@ -109,9 +109,9 @@ function loadSidebarConfig(): void {
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 2,
+      version: 5,
       theme: 'dark',
-      interfaceFontSize: 'standard',
+      interfaceFontSize: 100,
       sidebarWidth: 248,
       terminalFontSize: 14,
       connectTimeoutSecs: 15,
@@ -1026,33 +1026,67 @@ it('previews interface size across settings categories and retains only the last
   const scale = () => document.documentElement.style.getPropertyValue('--interface-font-scale');
   await openNavigation('通用');
   const slider = document.querySelector<HTMLInputElement>('#interface-font-size')!;
-  const choose = async (step: string) => {
-    slider.value = step;
+  const ticks = document.querySelector('.interface-font-ticks')!;
+  expect(slider.nextElementSibling).toBe(ticks);
+  expect(
+    [...ticks.querySelectorAll('button')].map((button) =>
+      button.style.getPropertyValue('--font-size-stop'),
+    ),
+  ).toEqual(['0%', '25%', '50%', '75%', '100%']);
+  const previewScales = () =>
+    [...ticks.querySelectorAll('button')].map((button) =>
+      button.style.getPropertyValue('--font-size-preview-scale'),
+    );
+  const slideTo = async (position: number) => {
+    slider.valueAsNumber = position;
     slider.dispatchEvent(new Event('input', { bubbles: true }));
     await nextTick();
   };
 
-  expect(slider.getAttribute('aria-valuetext')).toBe('标准');
-  await choose('4');
-  expect(scale()).toBe('1.45');
+  expect([slider.min, slider.max, slider.step]).toEqual(['0', '4', 'any']);
+  expect(slider.valueAsNumber).toBe(1);
+  expect(slider.getAttribute('aria-valuetext')).toBe('100%');
+  expect(previewScales()).toEqual(['0.95', '1', '1.15', '1.3', '1.45']);
+  await slideTo(0.43);
+  expect(slider.getAttribute('aria-valuetext')).toBe('97%');
+  expect(slider.valueAsNumber).toBe(0.4);
+  slider.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
+  );
+  await nextTick();
+  expect(slider.getAttribute('aria-valuetext')).toBe('98%');
+  expect(slider.valueAsNumber).toBe(0.6);
+  await slideTo(1.81);
+  expect(slider.getAttribute('aria-valuetext')).toBe('112%');
+  expect(slider.valueAsNumber).toBe(1.8);
+  expect(slider.labels?.[0]?.querySelector('.subtle')?.textContent).toBe('112%');
+  expect(ticks.querySelector('[aria-pressed="true"]')).toBeNull();
+  expect(scale()).toBe('1.12');
+  expect(previewScales()).toEqual(['0.95', '1', '1.15', '1.3', '1.45']);
   expect(save).not.toHaveBeenCalled();
   await openNavigation('关于');
-  expect(scale()).toBe('1.45');
+  expect(scale()).toBe('1.12');
   await openNavigation('通用');
   await vi.waitFor(() => expect(application.error).toBe('无法保存设置'));
-  expect(application.state?.config.interfaceFontSize).toBe('standard');
-  expect(scale()).toBe('1.45');
+  expect(application.state?.config.interfaceFontSize).toBe(100);
+  expect(scale()).toBe('1.12');
 
   [...document.querySelectorAll<HTMLButtonElement>('.form-footer button')]
     .find((button) => button.textContent?.trim() === '重试')!
     .click();
-  await vi.waitFor(() => expect(application.state?.config.interfaceFontSize).toBe('ultraLarge'));
+  await vi.waitFor(() => expect(application.state?.config.interfaceFontSize).toBe(112));
   expect(save).toHaveBeenLastCalledWith(
-    expect.objectContaining({ interfaceFontSize: 'ultraLarge', terminalFontSize: 14 }),
+    expect.objectContaining({ interfaceFontSize: 112, terminalFontSize: 14 }),
   );
-  expect(application.state?.config.interfaceFontSize).toBe('ultraLarge');
+  expect(application.state?.config.interfaceFontSize).toBe(112);
   save.mockRejectedValue({ message: '无法保存设置' });
-  await choose('0');
+  [...ticks.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === '小')!
+    .click();
+  await nextTick();
+  expect(slider.getAttribute('aria-valuetext')).toBe('95%');
+  expect(slider.valueAsNumber).toBe(0);
+  expect(ticks.querySelector('[aria-pressed="true"]')?.textContent).toBe('小');
   expect(scale()).toBe('0.95');
   const closing = workspace.closeSettings();
   await flush();
@@ -1061,10 +1095,10 @@ it('previews interface size across settings categories and retains only the last
     .click();
   await closing;
   await flush();
-  expect(scale()).toBe('1.45');
+  expect(scale()).toBe('1.12');
   await openNavigation('通用');
   expect(document.querySelector('#interface-font-size')?.getAttribute('aria-valuetext')).toBe(
-    '超大',
+    '112%',
   );
 });
 

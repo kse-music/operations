@@ -81,7 +81,8 @@ describe('independent terminal tabs', () => {
     store.update(tab.panes[1]!.key, { state: 'closed' });
     expect(store.canReconnect(tab.key)).toBe(true);
     await store.reconnect(tab.key);
-    for (const change of changes) expect(change).toHaveBeenCalledExactlyOnceWith('reconnect');
+    for (const change of changes)
+      expect(change).toHaveBeenCalledExactlyOnceWith('reconnect', false);
   });
   it.each(['reconnect', 'disconnect'] as const)(
     'confirms uploads once before %s and protects against duplicate actions',
@@ -122,7 +123,7 @@ describe('independent terminal tabs', () => {
       finish();
       await changing;
       expect(ask).toHaveBeenCalledTimes(2);
-      for (const change of changes) expect(change).toHaveBeenCalledExactlyOnceWith(action);
+      for (const change of changes) expect(change).toHaveBeenCalledExactlyOnceWith(action, false);
       expect(store.changingConnections).toEqual([]);
     },
   );

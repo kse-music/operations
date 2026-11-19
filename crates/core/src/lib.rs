@@ -12,7 +12,7 @@ pub mod openssh;
 pub mod terminal;
 pub mod updates;
 
-pub const CONFIG_VERSION: u32 = 2;
+pub const CONFIG_VERSION: u32 = 5;
 pub const DATABASE_VERSION: u32 = 11;
 
 #[derive(Debug, thiserror::Error)]
@@ -82,24 +82,14 @@ impl LogLevel {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum InterfaceFontSize {
-    Small,
-    #[default]
-    Standard,
-    Large,
-    ExtraLarge,
-    UltraLarge,
-}
-
 /// Versioned, non-sensitive preferences. Never add credentials to this DTO.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppConfig {
     pub version: u32,
     pub theme: Theme,
-    pub interface_font_size: InterfaceFontSize,
+    /// Interface scale as a whole percentage of the standard font size.
+    pub interface_font_size: u8,
     pub sidebar_width: u16,
     pub terminal_font_size: u8,
     pub terminal: terminal::TerminalPreferences,
@@ -115,7 +105,7 @@ impl Default for AppConfig {
         Self {
             version: CONFIG_VERSION,
             theme: Theme::Dark,
-            interface_font_size: InterfaceFontSize::Standard,
+            interface_font_size: 100,
             sidebar_width: 248,
             terminal_font_size: 16,
             terminal: Default::default(),
@@ -137,6 +127,9 @@ impl AppConfig {
         }
         if self.version != CONFIG_VERSION {
             return Err(Error::UnsupportedConfig(self.version));
+        }
+        if !(95..=145).contains(&self.interface_font_size) {
+            return Err(Error::Validation("界面字号须为 95%–145%"));
         }
         if !(200..=400).contains(&self.sidebar_width) {
             return Err(Error::Validation("侧边栏宽度须为 200–400"));
@@ -264,23 +257,23 @@ mod tests {
     }
 
     #[test]
-    fn interface_font_size_accepts_current_values_and_rejects_removed_or_missing_values() {
+    fn interface_font_size_requires_a_whole_percentage_in_range() {
         let mut json = serde_json::to_value(AppConfig::default()).expect("serialize");
-        assert_eq!(json["interfaceFontSize"], "standard");
+        assert_eq!(json["interfaceFontSize"], 100);
         json.as_object_mut()
             .expect("config object")
             .remove("interfaceFontSize");
         assert!(serde_json::from_value::<AppConfig>(json.clone()).is_err());
-        json["interfaceFontSize"] = "extraSmall".into();
-        assert!(serde_json::from_value::<AppConfig>(json.clone()).is_err());
-        json["interfaceFontSize"] = "extraLarge".into();
-        let large: AppConfig = serde_json::from_value(json.clone()).expect("read extra large");
-        assert_eq!(large.interface_font_size, InterfaceFontSize::ExtraLarge);
-        json["interfaceFontSize"] = "ultraLarge".into();
-        let largest: AppConfig = serde_json::from_value(json.clone()).expect("read ultra large");
-        assert_eq!(largest.interface_font_size, InterfaceFontSize::UltraLarge);
-        json["interfaceFontSize"] = "huge".into();
-        assert!(serde_json::from_value::<AppConfig>(json).is_err());
+        for invalid in [serde_json::json!(112.5), "standard".into(), "112".into()] {
+            json["interfaceFontSize"] = invalid;
+            assert!(serde_json::from_value::<AppConfig>(json.clone()).is_err());
+        }
+        for percent in [94_u8, 95, 112, 145, 146] {
+            json["interfaceFontSize"] = percent.into();
+            let config: AppConfig = serde_json::from_value(json.clone()).expect("percentage");
+            assert_eq!(config.interface_font_size, percent);
+            assert_eq!(config.validate().is_ok(), (95..=145).contains(&percent));
+        }
     }
 
     #[test]

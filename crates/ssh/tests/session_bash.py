@@ -106,8 +106,8 @@ class SessionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / ".bash_profile").write_text("PS1='ready> '; set -o vi\n")
-            for target in [root, root / "missing"]:
-                shell = Shell(root, "yes")
+            for mode, target in [("yes", root), ("yes", root / "missing"), ("run", root / "missing")]:
+                shell = Shell(root, mode)
                 try:
                     shell.until(b"\x1b]777;sd-read;test-pane\x07")
                     shell.send(encoded(str(target)) + b"\n" + encoded("touch should-not-run") + b"\n")
@@ -125,6 +125,33 @@ class SessionTest(unittest.TestCase):
                     self.assertFalse((root / "should-not-run").exists())
                 finally:
                     shell.close()
+
+    def test_auto_run_submits_the_saved_line_once_in_the_restored_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root / "工程 '[test]"
+            work.mkdir()
+            runs = work / "runs"
+            line = r"printf '%s\n' confirmed >> runs"
+            for editing_mode in ("emacs", "vi"):
+                with self.subTest(editing_mode=editing_mode):
+                    if runs.exists():
+                        runs.unlink()
+                    (root / ".bash_profile").write_text(f"PS1='ready> '; set -o {editing_mode}\n")
+                    shell = Shell(root, "run")
+                    try:
+                        shell.until(b"\x1b]777;sd-read;test-pane\x07")
+                        shell.send(encoded(str(work)) + b"\n" + encoded(line) + b"\n")
+                        shell.until(b"\x1b]777;sd-edit;test-pane\x07")
+                        self.assertFalse(runs.exists())
+                        shell.send(b"\x1b[777~")
+                        shell.report(b"cmd", line)
+                        shell.report(b"cwd", str(work))
+                        shell.send(b":\n")
+                        shell.report(b"cwd", str(work))
+                        self.assertEqual(runs.read_text(), "confirmed\n")
+                    finally:
+                        shell.close()
 
     def test_prompt_hook_preserves_status_and_ignores_excluded_commands(self):
         with tempfile.TemporaryDirectory() as directory:

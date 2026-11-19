@@ -37,11 +37,11 @@ try {
     headless: true,
   });
   for (const [name, width, height, theme, font] of [
-    ['desktop-dark', 1440, 900, 'dark', 'standard'],
-    ['desktop-light', 1440, 900, 'light', 'standard'],
-    ['minimum-dark', 960, 600, 'dark', 'standard'],
-    ['minimum-large', 960, 600, 'light', 'ultraLarge'],
-    ['narrow', 390, 844, 'dark', 'standard'],
+    ['desktop-dark', 1440, 900, 'dark', 100],
+    ['desktop-light', 1440, 900, 'light', 100],
+    ['minimum-dark', 960, 600, 'dark', 100],
+    ['minimum-large', 960, 600, 'light', 145],
+    ['narrow', 390, 844, 'dark', 100],
   ]) {
     const page = await browser.newPage({ viewport: { width, height } });
     page.setDefaultTimeout(12000);
@@ -129,7 +129,7 @@ try {
           dataDirectory: '',
           logDirectory: '',
           config: {
-            version: 2,
+            version: 5,
             theme,
             interfaceFontSize: font,
             sidebarWidth: 260,
@@ -411,7 +411,7 @@ try {
     const docker = page.frameLocator('.plugin-frame-container:visible iframe');
     await docker.getByText('app-service-1', { exact: true }).waitFor();
     const dockerFrame = page.frames().find((frame) => frame.url().includes('/server/index.html'));
-    if (font === 'standard' && width >= 960) {
+    if (font === 100 && width >= 960) {
       const layout = await dockerFrame.evaluate(() => ({
         height: innerHeight,
         firstRow: document.querySelector('tbody tr').getBoundingClientRect().top,

@@ -140,9 +140,9 @@ beforeEach(async () => {
     dataDirectory: '',
     logDirectory: '',
     config: {
-      version: 2,
+      version: 5,
       theme: 'dark',
-      interfaceFontSize: 'standard',
+      interfaceFontSize: 100,
       sidebarWidth: 260,
       terminalFontSize: 14,
       connectTimeoutSecs: 10,

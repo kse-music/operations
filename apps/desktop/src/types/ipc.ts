@@ -5,9 +5,9 @@ export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
 export interface AppConfig {
   product: import('./product').ProductPreferences;
   terminal: import('./preferences').TerminalPreferences;
-  version: 2;
+  version: 5;
   theme: Theme;
-  interfaceFontSize: import('./preferences').InterfaceFontSize;
+  interfaceFontSize: number;
   sidebarWidth: number;
   terminalFontSize: number;
   connectTimeoutSecs: number;

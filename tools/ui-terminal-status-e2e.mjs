@@ -23,11 +23,11 @@ try {
     headless: true,
   });
   for (const [width, height, theme, font, language] of [
-    [1280, 820, 'dark', 'standard', 'zh-CN'],
-    [960, 600, 'light', 'standard', 'zh-CN'],
-    [960, 600, 'dark', 'ultraLarge', 'zh-CN'],
-    [1280, 820, 'light', 'standard', 'en-US'],
-    [960, 600, 'light', 'ultraLarge', 'en-US'],
+    [1280, 820, 'dark', 100, 'zh-CN'],
+    [960, 600, 'light', 100, 'zh-CN'],
+    [960, 600, 'dark', 145, 'zh-CN'],
+    [1280, 820, 'light', 100, 'en-US'],
+    [960, 600, 'light', 145, 'en-US'],
   ]) {
     const name = `${width}-${theme}-${font}-${language}`;
     const page = await browser.newPage({ viewport: { width, height } });
@@ -64,7 +64,7 @@ try {
           dataDirectory: '',
           logDirectory: '',
           config: {
-            version: 2,
+            version: 5,
             theme,
             interfaceFontSize: font,
             sidebarWidth: 248,

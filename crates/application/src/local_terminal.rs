@@ -172,6 +172,7 @@ impl LocalTerminals {
     pub(crate) async fn open_saved(
         &self,
         pane: serverdeck_core::terminal::SavedLocalPane,
+        auto_run: bool,
         size: TerminalSize,
         sink: Sink,
     ) -> Result<LocalTerminalSession, Error> {
@@ -185,6 +186,7 @@ impl LocalTerminals {
             Some(ShellLaunch {
                 directory: Some(pane.directory),
                 protected_command: pane.protected_command,
+                auto_run,
                 token: uuid::Uuid::new_v4(),
             }),
         )
@@ -218,6 +220,7 @@ impl LocalTerminals {
         let launch = launch.unwrap_or_else(|| ShellLaunch {
             directory: None,
             protected_command: None,
+            auto_run: false,
             token: uuid::Uuid::new_v4(),
         });
         let permit = self
@@ -1099,7 +1102,7 @@ mod tests {
         ] {
             let (sink, mut output) = events();
             let session = app
-                .terminal_local_open_saved(saved.id.clone(), 0, size, sink)
+                .terminal_local_open_saved(saved.id.clone(), 0, true, size, sink)
                 .await
                 .unwrap();
             if saved.id == saved_first.id {
@@ -1180,6 +1183,42 @@ mod tests {
             );
             app.terminal_close(&session.id).await.unwrap();
         }
+        let mut config = app.database.load_config().unwrap();
+        config.terminal.auto_run_saved_command = true;
+        app.save_config(config).await.unwrap();
+        for explicit_restore in [false, true] {
+            let (sink, mut output) = events();
+            let reopened = app
+                .terminal_local_open_saved(saved_first.id.clone(), 0, explicit_restore, size, sink)
+                .await
+                .unwrap();
+            if explicit_restore {
+                let startup_output = until(
+                    &app.local_terminals,
+                    &reopened.id,
+                    &mut output,
+                    "SD_RUN_ACTIVE",
+                )
+                .await;
+                assert_eq!(std::fs::read(&runs).unwrap(), first_run.repeat(3));
+                assert!(
+                    !startup_output.contains("ServerDeck could not capture this command"),
+                    "automatic execution must not emit a command capture warning"
+                );
+                assert!(
+                    app.local_terminals
+                        .snapshot(&reopened.id)
+                        .unwrap()
+                        .protected_command
+                        .is_some(),
+                    "the automatically submitted command remains available for saving"
+                );
+            } else {
+                until(&app.local_terminals, &reopened.id, &mut output, "runs.txt").await;
+                assert_eq!(std::fs::read(&runs).unwrap(), first_run.repeat(2));
+            }
+            app.terminal_close(&reopened.id).await.unwrap();
+        }
         let (sink, mut output) = events();
         let ordinary = app.terminal_local_open(size, sink).await.unwrap();
         until_directory(&app.local_terminals, &ordinary.id, &mut output, &home).await;
@@ -1200,7 +1239,7 @@ mod tests {
         std::fs::remove_dir(&second_dir).unwrap();
         let (sink, mut output) = events();
         let missing = app
-            .terminal_local_open_saved(saved_second.id.clone(), 0, size, sink)
+            .terminal_local_open_saved(saved_second.id.clone(), 0, true, size, sink)
             .await
             .unwrap();
         until_directory(&app.local_terminals, &missing.id, &mut output, &home).await;

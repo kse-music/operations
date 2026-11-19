@@ -18,6 +18,8 @@ import {
   defaultInterfaceFontSize,
   defaultTerminalPreferences,
   interfaceFontSizes,
+  maxInterfaceFontSize,
+  minInterfaceFontSize,
   shortcutKey,
   shortcutLabels,
 } from '../types/preferences';
@@ -52,16 +54,46 @@ const autosave = useSettingsAutosave(
 );
 const { draft, pending, failed } = autosave;
 
-const fontSizeStep = computed({
-  get: () =>
-    interfaceFontSizes.findIndex(
-      (size) => size.value === (draft.value?.interfaceFontSize ?? defaultInterfaceFontSize),
-    ),
-  set: (step: number) => {
-    const size = interfaceFontSizes[step];
-    if (draft.value && size) draft.value.interfaceFontSize = size.value;
-  },
+// Each slider interval spans one pair of presets. The draft stores whole percentages.
+const lastFontSizeStop = interfaceFontSizes.length - 1;
+const fontSizeSliderPosition = computed(() => {
+  const percent = draft.value?.interfaceFontSize ?? defaultInterfaceFontSize;
+  const upperIndex = interfaceFontSizes.findIndex((size) => size.percent >= percent);
+  if (upperIndex <= 0) return 0;
+  const lower = interfaceFontSizes[upperIndex - 1].percent;
+  const upper = interfaceFontSizes[upperIndex].percent;
+  return upperIndex - 1 + (percent - lower) / (upper - lower);
 });
+
+function slideInterfaceFontSize(event: Event): void {
+  if (!draft.value) return;
+  const slider = event.currentTarget as HTMLInputElement;
+  const position = slider.valueAsNumber;
+  const lowerIndex = Math.min(Math.floor(position), lastFontSizeStop - 1);
+  const lower = interfaceFontSizes[lowerIndex].percent;
+  const upper = interfaceFontSizes[lowerIndex + 1].percent;
+  draft.value.interfaceFontSize = lower + Math.round((position - lowerIndex) * (upper - lower));
+  slider.valueAsNumber = fontSizeSliderPosition.value;
+}
+
+const fontSizeKeySteps = new Map([
+  ['ArrowLeft', -1],
+  ['ArrowDown', -1],
+  ['ArrowRight', 1],
+  ['ArrowUp', 1],
+  ['PageDown', -5],
+  ['PageUp', 5],
+]);
+function stepInterfaceFontSize(event: KeyboardEvent): void {
+  const step = fontSizeKeySteps.get(event.key);
+  if (step === undefined || !draft.value) return;
+  event.preventDefault();
+  draft.value.interfaceFontSize = Math.min(
+    maxInterfaceFontSize,
+    Math.max(minInterfaceFontSize, draft.value.interfaceFontSize + step),
+  );
+}
+
 watch(
   () =>
     draft.value?.interfaceFontSize === application.state?.config.interfaceFontSize
@@ -196,29 +228,13 @@ function restoreDefaults(): void {
               <option value="system">{{ tr('跟随系统') }}</option>
             </select>
           </label>
-          <div class="settings-field interface-font-size">
-            <label for="interface-font-size">{{ tr('界面字号') }}</label>
-            <div class="interface-font-ticks">
-              <button
-                v-for="(size, step) in interfaceFontSizes"
-                :key="size.value"
-                type="button"
-                :aria-pressed="fontSizeStep === step"
-                @click="fontSizeStep = step"
-              >
-                {{ size.label }}
-              </button>
-            </div>
-            <input
-              id="interface-font-size"
-              v-model.number="fontSizeStep"
-              type="range"
-              min="0"
-              :max="interfaceFontSizes.length - 1"
-              step="1"
-              :aria-valuetext="interfaceFontSizes[fontSizeStep]?.label"
-            />
-          </div>
+          <label
+            >{{ tr('界面语言')
+            }}<select v-model="draft.product.language" :aria-label="tr('界面语言')">
+              <option value="zh-CN">{{ tr('简体中文') }}</option>
+              <option value="en-US">English</option>
+            </select></label
+          >
           <label
             ><span class="settings-label"
               >{{ tr('侧边栏宽度 ') }}<span class="subtle">{{ draft.sidebarWidth }} px</span></span
@@ -231,6 +247,40 @@ function restoreDefaults(): void {
               max="400"
             />
           </label>
+          <div class="settings-field interface-font-size">
+            <label for="interface-font-size">
+              <span class="settings-label">
+                {{ tr('界面字号') }}
+                <span class="subtle" aria-hidden="true">{{ draft.interfaceFontSize }}%</span>
+              </span>
+            </label>
+            <input
+              id="interface-font-size"
+              type="range"
+              min="0"
+              :max="lastFontSizeStop"
+              step="any"
+              :value="fontSizeSliderPosition"
+              :aria-valuetext="`${draft.interfaceFontSize}%`"
+              @input="slideInterfaceFontSize"
+              @keydown="stepInterfaceFontSize"
+            />
+            <div class="interface-font-ticks">
+              <button
+                v-for="(size, index) in interfaceFontSizes"
+                :key="size.percent"
+                type="button"
+                :aria-pressed="draft.interfaceFontSize === size.percent"
+                :style="{
+                  '--font-size-preview-scale': size.percent / 100,
+                  '--font-size-stop': `${(index / lastFontSizeStop) * 100}%`,
+                }"
+                @click="draft.interfaceFontSize = size.percent"
+              >
+                {{ size.label }}
+              </button>
+            </div>
+          </div>
         </ProductSettings>
       </div>
       <div v-show="category === 'terminal'" id="settings-panel-terminal" class="settings-category">
@@ -291,15 +341,10 @@ function restoreDefaults(): void {
                 <option value="underline">{{ tr('下划线') }}</option>
               </select></label
             >
-            <label class="checkbox-label"
-              ><input v-model="draft.terminal.cursorBlink" type="checkbox" />{{
-                tr('光标闪烁')
-              }}</label
-            >
           </div>
         </fieldset>
         <fieldset :disabled="reviewing || busy">
-          <legend>{{ tr('输入与粘贴') }}</legend>
+          <legend>{{ tr('终端行为') }}</legend>
           <div class="settings-fields">
             <label
               >{{ tr('大文本粘贴确认阈值（字符）')
@@ -320,6 +365,19 @@ function restoreDefaults(): void {
               >
               <p id="quick-copy-paste-help" class="subtle settings-help">
                 {{ tr(' 默认关闭，仅在终端内容区生效；大文本粘贴仍需确认。 ') }}
+              </p>
+            </div>
+            <div class="settings-field full-width">
+              <label class="checkbox-label">
+                <input
+                  v-model="draft.terminal.autoRunSavedCommand"
+                  type="checkbox"
+                  aria-describedby="saved-command-help"
+                />
+                {{ tr('打开已保存会话时自动执行命令') }}
+              </label>
+              <p id="saved-command-help" class="subtle settings-help">
+                {{ tr('关闭时，按回车执行预填命令。') }}
               </p>
             </div>
           </div>

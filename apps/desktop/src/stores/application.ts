@@ -5,7 +5,6 @@ import { computed, ref, watch } from 'vue';
 import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import * as ipc from '../services/ipc';
 import type { AppConfig, Bootstrap } from '../types/ipc';
-import type { InterfaceFontSize } from '../types/preferences';
 
 export const useApplicationStore = defineStore('application', () => {
   const state = ref<Bootstrap | null>(null);
@@ -14,7 +13,7 @@ export const useApplicationStore = defineStore('application', () => {
     (language) => setLocale(language ?? 'zh-CN'),
     { immediate: true, flush: 'sync' },
   );
-  const interfaceFontSizePreview = ref<InterfaceFontSize>();
+  const interfaceFontSizePreview = ref<number>();
   const loading = ref(false);
   const environmentError = ref<string | null>(null);
   const saving = ref(false);

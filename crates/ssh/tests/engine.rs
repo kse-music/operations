@@ -456,6 +456,7 @@ async fn shell_only_ssh_server_can_restore_layout_without_sending_a_command() {
                 TerminalSize { cols: 80, rows: 24 },
                 Arc::new(move |e| tx.try_send(e).is_ok()),
                 saved,
+                false,
             )
             .unwrap();
         Shell { info, events }

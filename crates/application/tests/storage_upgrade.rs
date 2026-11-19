@@ -21,6 +21,11 @@ async fn startup_upgrades_an_existing_profile_before_bootstrap_and_keeps_user_re
     })
     .unwrap();
     config["version"] = json!(1);
+    config["terminal"]["cursorBlink"] = json!(false);
+    config["terminal"]
+        .as_object_mut()
+        .unwrap()
+        .remove("autoRunSavedCommand");
     config.as_object_mut().unwrap().remove("interfaceFontSize");
     let original = config.to_string();
     connection.execute("INSERT INTO application_settings(key,value) VALUES('app_config',?1),('plugin:kept',?2)",params![original,r#"{"enabled":false,"custom":"kept"}"#]).unwrap();
@@ -32,6 +37,7 @@ async fn startup_upgrades_an_existing_profile_before_bootstrap_and_keeps_user_re
     assert_eq!(bootstrap.config.version, CONFIG_VERSION);
     assert_eq!(bootstrap.config.theme, Theme::Light);
     assert_eq!(bootstrap.config.sidebar_width, 301);
+    assert_eq!(bootstrap.config.interface_font_size, 100);
     let connection = Connection::open(&path).unwrap();
     assert_eq!(
         connection

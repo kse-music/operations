@@ -1,44 +1,41 @@
 import { tr } from '../i18n/messages';
+
+export const minInterfaceFontSize = 95;
+export const defaultInterfaceFontSize = 100;
+export const maxInterfaceFontSize = 145;
+
 export const interfaceFontSizes = [
   {
-    value: 'small',
+    percent: minInterfaceFontSize,
     get label() {
       return tr('小');
     },
-    scale: 0.95,
   },
   {
-    value: 'standard',
+    percent: defaultInterfaceFontSize,
     get label() {
       return tr('标准');
     },
-    scale: 1,
   },
   {
-    value: 'large',
+    percent: 115,
     get label() {
       return tr('大');
     },
-    scale: 1.15,
   },
   {
-    value: 'extraLarge',
+    percent: 130,
     get label() {
       return tr('特大');
     },
-    scale: 1.3,
   },
   {
-    value: 'ultraLarge',
+    percent: maxInterfaceFontSize,
     get label() {
       return tr('超大');
     },
-    scale: 1.45,
   },
 ] as const;
-
-export type InterfaceFontSize = (typeof interfaceFontSizes)[number]['value'];
-export const defaultInterfaceFontSize: InterfaceFontSize = 'standard';
 
 export interface TerminalPreferences {
   fontFamily: string;
@@ -46,8 +43,8 @@ export interface TerminalPreferences {
   scrollback: number;
   theme: 'deck' | 'light' | 'nord' | 'solarized';
   cursorStyle: 'block' | 'bar' | 'underline';
-  cursorBlink: boolean;
   quickCopyPaste: boolean;
+  autoRunSavedCommand: boolean;
   pasteConfirmChars: number;
   shortcuts: Record<string, string>;
 }
@@ -57,8 +54,8 @@ export const defaultTerminalPreferences = (): TerminalPreferences => ({
   scrollback: 5000,
   theme: 'deck',
   cursorStyle: 'block',
-  cursorBlink: true,
   quickCopyPaste: false,
+  autoRunSavedCommand: false,
   pasteConfirmChars: 4096,
   shortcuts: {
     copy: 'Ctrl+Shift+C',

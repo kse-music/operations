@@ -10,6 +10,15 @@ __sd_b64() { printf '%s' "$1" | command base64 | tr -d '\r\n'; }
 __sd_hist() { HISTTIMEFORMAT= builtin history 1; }
 __sd_previous=$(__sd_hist)
 __sd_prompt() {
+    if [[ -n ${__sd_run_keys-} ]]; then
+        local map
+        for map in emacs-standard vi-insert; do
+            bind -m "$map" -r '\e[777~'
+            bind -m "$map" -r '\e[778~'
+            bind -m "$map" -r "$__sd_run_keys"
+        done
+        unset __sd_run_keys __sd_insert_key
+    fi
     __sd_previous=$(__sd_hist)
     printf '\033]777;sd-ssh;%s;cwd;%s\007' "$__sd_token" "$(__sd_b64 "$PWD")"
 }
@@ -23,7 +32,7 @@ __sd_submit() {
     fi
     printf '\033]777;sd-ssh;%s;cmd;%s\007' "$__sd_token" "$(__sd_b64 "$line")"
 }
-if [[ '__RESTORE__' == yes ]]; then
+if [[ '__RESTORE__' != no ]]; then
     __sd_tty=$(stty -g) && stty -echo -icanon min 1 time 0 || exit 1
     printf '\033]777;sd-read;%s\007' "$__sd_token"
     IFS= read -r __sd_dir && IFS= read -r __sd_cmd || { stty "$__sd_tty"; exit 1; }
@@ -36,10 +45,27 @@ if [[ '__RESTORE__' == yes ]]; then
     fi
     unset __sd_dir __sd_tty
     if [[ -n $__sd_cmd ]]; then
-        # The client sends only a fixed editing key. The saved line is data,
-        # never a Readline macro, evaluated shell source or an Enter keystroke.
-        __sd_insert() { READLINE_LINE=$__sd_line; READLINE_POINT=${#READLINE_LINE}; unset __sd_line; }
-        if (( __sd_bash_version < 404 )); then
+        # The client sends only a fixed editing key. The saved line stays data.
+        __sd_insert() {
+            if [[ -n ${__sd_line-} ]]; then
+                READLINE_LINE=$__sd_line
+                READLINE_POINT=${#READLINE_LINE}
+                unset __sd_line
+            fi
+        }
+        if [[ '__RESTORE__' == run && -n $__sd_line ]]; then
+            __sd_insert_key='\e[779~'
+            if (( __sd_bash_version < 404 )); then __sd_insert_key='\C-^'; fi
+            __sd_insert_and_accept() {
+                __sd_insert
+                __sd_run_keys=$__sd_insert_key
+            }
+            for __sd_map in emacs-standard vi-insert; do
+                bind -m "$__sd_map" -x "\"$__sd_insert_key\":__sd_insert_and_accept" &&
+                    bind -m "$__sd_map" '"\e[778~":accept-line' &&
+                    bind -m "$__sd_map" "\"\e[777~\":\"${__sd_insert_key}\e[778~\"" || exit 1
+            done
+        elif (( __sd_bash_version < 404 )); then
             # Older Readline cannot invoke bind -x on this multi-byte sequence.
             __sd_legacy_insert() {
                 __sd_insert
@@ -84,7 +110,8 @@ elif [[ -z $(trap -p DEBUG) ]]; then
     PROMPT_COMMAND="__sd_prompt_begin${PROMPT_COMMAND:+$'\n'$PROMPT_COMMAND}"
     __sd_prompt_hook=__sd_prompt_end
     trap 'if [[ ${__sd_pending-} && $BASH_SUBSHELL == 0 && -z ${FUNCNAME[0]-} &&
-                $BASH_COMMAND != __sd_prompt_begin && $BASH_COMMAND != __sd_legacy_insert ]]; then
+                $BASH_COMMAND != __sd_prompt_begin && $BASH_COMMAND != __sd_legacy_insert &&
+                $BASH_COMMAND != __sd_insert_and_accept ]]; then
         __sd_pending=
         __sd_submit
     fi' DEBUG

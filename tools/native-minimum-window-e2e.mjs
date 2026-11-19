@@ -211,10 +211,10 @@ try {
   );
 
   for (const [theme, size, label] of [
-    ['dark', 'standard', '标准'],
-    ['light', 'standard', '标准'],
-    ['dark', 'ultraLarge', '超大'],
-    ['light', 'ultraLarge', '超大'],
+    ['dark', 100, '标准'],
+    ['light', 100, '标准'],
+    ['dark', 145, '超大'],
+    ['light', 145, '超大'],
   ]) {
     const name = `${theme}-${size}`;
     await navigateWorkspace(page, '通用');

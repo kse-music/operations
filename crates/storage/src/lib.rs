@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(database.version().expect("version"), DATABASE_VERSION);
         let mut config = AppConfig {
             theme: serverdeck_core::Theme::Light,
-            interface_font_size: serverdeck_core::InterfaceFontSize::UltraLarge,
+            interface_font_size: 112,
             ..Default::default()
         };
         config

@@ -79,15 +79,6 @@ useErrorNotifications(error);
     </legend>
     <div class="settings-fields">
       <slot />
-      <template v-if="section === 'general'">
-        <label
-          >{{ tr('界面语言')
-          }}<select v-model="model.language" :aria-label="tr('界面语言')">
-            <option value="zh-CN">{{ tr('简体中文') }}</option>
-            <option value="en-US">English</option>
-          </select></label
-        >
-      </template>
       <template v-if="section === 'storage'">
         <div class="full-width settings-field">
           <label for="default-download-directory">{{ tr('默认下载目录') }}</label>

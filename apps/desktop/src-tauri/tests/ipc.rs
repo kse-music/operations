@@ -348,7 +348,7 @@ fn administrator_terminal_requires_main_window_local_origin_and_valid_size_befor
         ("terminal_local_remove_saved", json!({"id":"invalid"})),
         (
             "terminal_local_open_saved",
-            json!({"id":"missing","pane":0,"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"}),
+            json!({"id":"missing","pane":0,"explicitRestore":true,"size":{"cols":0,"rows":24},"events":"__CHANNEL__:1"}),
         ),
     ] {
         let response = get_ipc_response(&main, request(command, input.clone(), origin));
@@ -1293,9 +1293,9 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
             .any(|entry| entry["name"] == "actual local.txt")
     );
     let mut config = response["config"].clone();
-    assert_eq!(config["interfaceFontSize"], "standard");
+    assert_eq!(config["interfaceFontSize"], 100);
     config["theme"] = json!("light");
-    config["interfaceFontSize"] = json!("ultraLarge");
+    config["interfaceFontSize"] = json!(112);
     let saved = get_ipc_response(
         &main,
         request("config_save", json!({ "config": config }), origin),
@@ -1304,19 +1304,21 @@ fn real_ipc_dispatcher_roundtrip_validation_and_window_acl() {
     .deserialize::<Value>()
     .expect("json");
     assert_eq!(saved["theme"], "light");
-    assert_eq!(saved["interfaceFontSize"], "ultraLarge");
+    assert_eq!(saved["interfaceFontSize"], 112);
     assert_eq!(
         saved["terminalFontSize"],
         response["config"]["terminalFontSize"]
     );
-    let mut invalid = saved.clone();
-    invalid["sidebarWidth"] = json!(0);
-    let error = get_ipc_response(
-        &main,
-        request("config_save", json!({ "config": invalid }), origin),
-    )
-    .expect_err("invalid rejected");
-    assert_eq!(error["code"], "VALIDATION");
+    for (field, value) in [("sidebarWidth", 0), ("interfaceFontSize", 146)] {
+        let mut invalid = saved.clone();
+        invalid[field] = json!(value);
+        let error = get_ipc_response(
+            &main,
+            request("config_save", json!({ "config": invalid }), origin),
+        )
+        .expect_err("invalid rejected");
+        assert_eq!(error["code"], "VALIDATION");
+    }
     let response = get_ipc_response(&main, request("app_bootstrap", json!({}), origin))
         .expect("read")
         .deserialize::<Value>()

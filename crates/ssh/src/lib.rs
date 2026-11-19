@@ -537,7 +537,7 @@ impl Engine {
             let handle = self
                 .acquire_connection(plan, transport, control, sink)
                 .await?;
-            if matches!(command, Some(ShellCommand::Interactive(_))) {
+            if matches!(command, Some(ShellCommand::Interactive { .. })) {
                 handle
                     .bash_snapshot
                     .get_or_init(|| shell_snapshot::supports_snapshot(&handle))
@@ -564,8 +564,16 @@ impl Engine {
                     .map_err(network)?;
                 accepted(&mut channel).await?;
                 match command {
-                    Some(ShellCommand::Interactive(restore)) => {
-                        shell_snapshot::start(&handle, &mut channel, control, host, restore).await
+                    Some(ShellCommand::Interactive { restore, auto_run }) => {
+                        shell_snapshot::start(
+                            &handle,
+                            &mut channel,
+                            control,
+                            host,
+                            restore,
+                            auto_run,
+                        )
+                        .await
                     }
                     other => {
                         if let Some(ShellCommand::Fixed(command)) = other {

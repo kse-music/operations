@@ -417,6 +417,11 @@ function displayHost(host: string): string {
   min-width: 0;
   overflow-wrap: anywhere;
 }
+.forwarding-endpoints code {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
 .forwarding-endpoints svg {
   margin-top: calc(4px + var(--font-size-caption) * 1.5);
   color: var(--muted);

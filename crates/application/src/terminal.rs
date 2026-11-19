@@ -544,23 +544,30 @@ impl Application {
         &self,
         id: String,
         pane: usize,
+        explicit_restore: bool,
         size: TerminalSize,
         sink: Sink,
     ) -> Result<serverdeck_core::terminal::LocalTerminalSession, Error> {
         size.validate()?;
-        let saved = self
+        let (saved, auto_run) = self
             .blocking(move |db| {
-                db.local_terminal_sessions()?
+                let saved = db
+                    .local_terminal_sessions()?
                     .into_iter()
                     .find(|entry| entry.id == id)
                     .and_then(|entry| entry.panes.get(pane).cloned())
-                    .ok_or(Error::NotFound)
+                    .ok_or(Error::NotFound)?;
+                let auto_run =
+                    explicit_restore && db.load_config()?.terminal.auto_run_saved_command;
+                Ok((saved, auto_run))
             })
             .await?;
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
-        self.local_terminals.open_saved(saved, size, sink).await
+        self.local_terminals
+            .open_saved(saved, auto_run, size, sink)
+            .await
     }
     pub async fn terminal_reset(&self) -> Result<(), Error> {
         self.terminal_uploads.clear()?;
@@ -624,9 +631,11 @@ impl Application {
     ) -> Result<TerminalSession, Error> {
         size.validate()?;
         let secrets = self.secrets.clone();
-        let (host, plan, restore) = self
+        let (host, plan, restore, auto_run) = self
             .blocking(move |db| {
                 let (host, plan) = connection_plan(&db, secrets.as_ref(), &host_id)?;
+                let auto_run = saved.as_ref().is_some_and(|source| source.explicit_restore)
+                    && db.load_config()?.terminal.auto_run_saved_command;
                 let restore = saved
                     .map(|source| {
                         let record = db
@@ -649,14 +658,14 @@ impl Application {
                         panes.into_iter().nth(source.pane).ok_or(Error::NotFound)
                     })
                     .transpose()?;
-                Ok((host, plan, restore))
+                Ok((host, plan, restore, auto_run))
             })
             .await?;
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
         self.terminals
-            .open_interactive_plan(host, plan, size, sink, restore)
+            .open_interactive_plan(host, plan, size, sink, restore, auto_run)
     }
     pub fn terminal_input(&self, id: &str, data: Vec<u8>) -> Result<(), Error> {
         if id.starts_with("local:") {

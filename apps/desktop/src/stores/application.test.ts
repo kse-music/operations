@@ -19,9 +19,9 @@ const bootstrap = (): Bootstrap => ({
   dataDirectory: 'D:\\Data',
   logDirectory: 'D:\\Data\\logs',
   config: {
-    version: 2,
+    version: 5,
     theme: 'dark',
-    interfaceFontSize: 'standard',
+    interfaceFontSize: 100,
     sidebarWidth: 248,
     terminalFontSize: 14,
     connectTimeoutSecs: 15,

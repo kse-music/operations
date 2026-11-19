@@ -134,7 +134,7 @@ async function appearance(theme, font = '标准') {
   );
   const saved = (await invoke('app_bootstrap')).config;
   assert.equal(saved.theme, theme);
-  assert.equal(saved.interfaceFontSize, font === '超大' ? 'ultraLarge' : 'standard');
+  assert.equal(saved.interfaceFontSize, font === '超大' ? 145 : 100);
   await closeApplicationSettings(page);
 }
 async function confirmClose() {
