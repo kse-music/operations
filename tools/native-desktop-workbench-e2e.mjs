@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { closeNativeWindow } from './native-window-close.mjs';
-import { navigateWorkspace, closeApplicationSettings } from './ui-navigation.mjs';
+import { navigateWorkspace, closeApplicationSettings, reloadHosts } from './ui-navigation.mjs';
 
 assert.equal(process.platform, 'win32');
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -162,6 +162,75 @@ try {
   await page.getByRole('region', { name: '欢迎页面', exact: true }).waitFor();
   assert.equal(await page.locator('.terminal-pane').count(), 0);
   results.push('closing the local terminal releases its real PTY and allows return to welcome');
+  const invoke = (command, args) =>
+    page.evaluate(({ command, args }) => window.__TAURI_INTERNALS__.invoke(command, args), {
+      command,
+      args,
+    });
+  const tagged = await invoke('host_create', {
+    input: {
+      name: '环境标签验收主机',
+      hostname: '127.0.0.1',
+      port: 22,
+      username: 'qa',
+      authType: 'agent',
+      credentialId: null,
+      groupId: null,
+      description: '',
+      favorite: false,
+      connectTimeoutSecs: 3,
+    },
+  });
+  await reloadHosts(page);
+  await page.evaluate((id) => {
+    // Open the local forwarding page without starting any remote connection.
+    const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
+    pinia._s.get('workspace').navigate('forwarding', id);
+  }, tagged.id);
+  await navigateWorkspace(page, '环境标签');
+  const tagSettings = page.getByRole('region', { name: '环境标签', exact: true });
+  await tagSettings.getByRole('button', { name: '新建标签', exact: true }).click();
+  const createTag = page.getByRole('dialog', { name: '新建标签', exact: true });
+  await createTag.getByLabel('环境标签名称').fill('验收灰度');
+  await createTag.getByRole('radio', { name: '紫色', exact: true }).check();
+  await createTag.getByRole('button', { name: '保存', exact: true }).click();
+  await createTag.waitFor({ state: 'hidden' });
+  const tagCatalog = (await invoke('host_list')).environmentTags;
+  const tag = tagCatalog.tags.find((entry) => entry.name === '验收灰度');
+  assert.equal(tag?.color, 'violet');
+  await closeApplicationSettings(page);
+  const taggedRow = page.locator(`.tree-host[data-host-id="${tagged.id}"]`);
+  const taggedTab = page.locator(`.workspace-tab[data-host-id="${tagged.id}"]`);
+  const hostMenu = page.getByRole('menu', { name: '主机树操作', exact: true });
+  const tagEntry = hostMenu.getByRole('menuitem', { name: '标签', exact: true });
+  const tagMenu = page.getByRole('menu', { name: '环境标签', exact: true });
+  await taggedRow.click({ button: 'right' });
+  assert.equal(await hostMenu.getByRole('menuitemradio').count(), 0);
+  await tagEntry.hover();
+  await tagMenu.getByRole('menuitemradio', { name: '验收灰度', exact: true }).click();
+  await taggedRow.getByText('验收灰度', { exact: true }).waitFor();
+  await taggedTab.getByText('验收灰度', { exact: true }).waitFor();
+  assert.equal((await invoke('host_list')).environmentTags.assignments[tagged.id], tag.id);
+  await taggedRow.click({ button: 'right' });
+  await hostMenu.getByRole('menuitem', { name: '删除', exact: true }).click();
+  const deleteHost = page.getByRole('dialog', { name: '确认删除主机', exact: true });
+  await deleteHost.getByText('验收灰度', { exact: true }).waitFor();
+  await deleteHost.getByRole('button', { name: '取消', exact: true }).click();
+  await taggedRow.click({ button: 'right' });
+  await tagEntry.press('ArrowRight');
+  await tagMenu
+    .getByRole('menuitemradio', { name: '验收灰度', exact: true, checked: true })
+    .waitFor();
+  await page.keyboard.press('Escape');
+  await tagMenu.waitFor({ state: 'hidden' });
+  assert.equal(await tagEntry.evaluate((element) => element === document.activeElement), true);
+  await tagEntry.press('ArrowRight');
+  await tagMenu.getByRole('menuitem', { name: '清除标签', exact: true }).click();
+  await taggedTab.locator('.environment-tag').waitFor({ state: 'hidden' });
+  assert.equal((await invoke('host_list')).environmentTags.assignments[tagged.id], undefined);
+  results.push(
+    'real environment tag creation, assignment, workbench tabs, host confirmation and clearing',
+  );
   await writeFile(
     path.join(artifacts, 'results.json'),
     JSON.stringify({ artifacts, results, passed: true }, null, 2),

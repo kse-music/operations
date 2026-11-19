@@ -5,7 +5,13 @@ import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import { hostsApi } from '../services/hosts';
 import { errorMessage } from '../services/ipc';
-import type { Catalog, Host } from '../types/hosts';
+import type {
+  Catalog,
+  EnvironmentTag,
+  EnvironmentTagInput,
+  EnvironmentTags,
+  Host,
+} from '../types/hosts';
 import { hostDisplayName, hostInput } from '../types/hosts';
 
 export function filterHosts(hosts: Host[], search: string): Host[] {
@@ -32,6 +38,13 @@ export const useHostsStore = defineStore('hosts', () => {
   const selectedId = ref<string | null>(null);
   const visible = computed(() => filterHosts(catalog.value?.hosts ?? [], search.value));
   const selected = computed(() => catalog.value?.hosts.find((h) => h.id === selectedId.value));
+  const tagsById = computed(
+    () => new Map(catalog.value?.environmentTags?.tags.map((tag) => [tag.id, tag])),
+  );
+  function environmentTag(hostId: string): EnvironmentTag | undefined {
+    const tagId = catalog.value?.environmentTags?.assignments[hostId];
+    return tagId ? tagsById.value.get(tagId) : undefined;
+  }
   async function reload(): Promise<void> {
     const data = await hostsApi.list();
     catalog.value = data;
@@ -140,6 +153,13 @@ export const useHostsStore = defineStore('hosts', () => {
     if (result.ok) host.favorite = favorite;
     return result.ok;
   }
+  async function updateEnvironmentTags(
+    operation: () => Promise<EnvironmentTags>,
+  ): Promise<boolean> {
+    const result = await run(operation);
+    if (result.ok && catalog.value) catalog.value.environmentTags = result.value;
+    return result.ok;
+  }
   async function renameGroup(id: string, name: string): Promise<boolean> {
     const group = catalog.value?.groups.find((group) => group.id === id);
     if (!group) {
@@ -170,6 +190,13 @@ export const useHostsStore = defineStore('hosts', () => {
     backup,
     move,
     setFavorite,
+    environmentTag,
+    saveEnvironmentTag: (id: string | null, input: EnvironmentTagInput) =>
+      updateEnvironmentTags(() => hostsApi.saveEnvironmentTag(id, input)),
+    deleteEnvironmentTag: (id: string) =>
+      updateEnvironmentTags(() => hostsApi.deleteEnvironmentTag(id)),
+    setEnvironmentTag: (hostId: string, tagId: string | null) =>
+      updateEnvironmentTags(() => hostsApi.setEnvironmentTag(hostId, tagId)),
     renameHost,
     renameGroup,
   };

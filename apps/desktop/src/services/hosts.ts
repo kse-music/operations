@@ -4,6 +4,8 @@ import type {
   Catalog,
   Credential,
   CredentialInput,
+  EnvironmentTagInput,
+  EnvironmentTags,
   Host,
   HostBackupResult,
   HostAuthenticationInput,
@@ -32,6 +34,11 @@ export const hostsApi = {
   update: (id: string, input: HostInput, authentication?: HostAuthenticationInput) =>
     call<Host>('host_update', { id, input, authentication }),
   setFavorite: (id: string, favorite: boolean) => call<void>('host_set_favorite', { id, favorite }),
+  saveEnvironmentTag: (id: string | null, input: EnvironmentTagInput) =>
+    call<EnvironmentTags>('environment_tag_save', { id, input }),
+  deleteEnvironmentTag: (id: string) => call<EnvironmentTags>('environment_tag_delete', { id }),
+  setEnvironmentTag: (hostId: string, tagId: string | null) =>
+    call<EnvironmentTags>('host_set_environment_tag', { hostId, tagId }),
   updateTested: (
     id: string,
     input: HostInput,

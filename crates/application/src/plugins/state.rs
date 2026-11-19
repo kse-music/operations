@@ -111,6 +111,8 @@ pub struct Approval {
     pub plugin_name: String,
     pub plugin_version: String,
     pub host_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_host_ids: Vec<String>,
     pub operation: String,
     pub description: String,
     pub target: Option<String>,

@@ -13,7 +13,7 @@ pub mod terminal;
 pub mod updates;
 
 pub const CONFIG_VERSION: u32 = 5;
-pub const DATABASE_VERSION: u32 = 11;
+pub const DATABASE_VERSION: u32 = 12;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

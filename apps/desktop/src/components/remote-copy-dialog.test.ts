@@ -161,6 +161,7 @@ beforeEach(() => {
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const files = useFilesStore(pinia);
   files.active = source.id;

@@ -40,6 +40,7 @@ defineExpose({ edit, confirmDelete });
   <Modal
     v-if="deleting"
     :title="tr('确认删除主机')"
+    :host-ids="[deleting.id]"
     :busy="store.busy"
     @close="deleting = undefined"
   >

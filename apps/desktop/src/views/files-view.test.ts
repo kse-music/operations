@@ -53,7 +53,13 @@ beforeEach(async () => {
   };
   const hosts = useHostsStore(pinia),
     files = useFilesStore(pinia);
-  hosts.catalog = { hosts: [host], groups: [], credentials: [], pendingSecretDeletions: 0 };
+  hosts.catalog = {
+    hosts: [host],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
+  };
   files.active = 'a';
   files.local = { path: 'D:/test', parent: null, entries: [] };
   files.connections.a = {

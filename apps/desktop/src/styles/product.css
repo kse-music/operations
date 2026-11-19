@@ -241,6 +241,15 @@ kbd {
 .workspace-tab button svg {
   flex-shrink: 0;
 }
+.workspace-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workspace-tab button .environment-tag {
+  flex-shrink: 0;
+  max-inline-size: 48%;
+}
 .global-workspace-tab {
   background: var(--panel-soft);
 }

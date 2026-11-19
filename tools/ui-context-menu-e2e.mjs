@@ -68,6 +68,14 @@ try {
           groups: [{ id: 'folder', name: 'Servers', sortOrder: 0, parentId: null }],
           credentials: [],
           pendingSecretDeletions: 0,
+          environmentTags: {
+            tags: Array.from({ length: 10 }, (_, index) => ({
+              id: `tag-${index}`,
+              name: `Tag ${index + 1}`,
+              color: 'blue',
+            })),
+            assignments: { a: 'tag-0' },
+          },
         };
         const entry = {
           name: 'folder',
@@ -83,8 +91,8 @@ try {
           entry,
           { ...entry, name: 'config.ini', path: '/srv/config.ini', kind: 'file', size: 20 },
         ];
-        files.local = { path: 'C:/', parent: null, entries };
         files.active = 'a';
+        files.local = { path: 'C:/', parent: null, entries };
         files.connections.a = {
           host: hosts.catalog.hosts[0],
           id: 'sftp-a',
@@ -197,6 +205,21 @@ try {
           element.dispatchEvent(new MouseEvent('contextmenu', event));
         }, atEdge);
       const menu = await checkMenu(kind, selector);
+      if (kind === 'host') {
+        const tagEntry = menu.locator('[aria-haspopup="menu"]');
+        const submenu = page.locator('.host-environment-menu');
+        assert.equal(await submenu.count(), 0);
+        await tagEntry.hover();
+        await checkMenu('host-tags', '.host-environment-menu');
+        const parent = await menu.boundingBox(),
+          child = await submenu.boundingBox();
+        assert(child.x + child.width <= parent.x + 1, 'submenu must flip at the right edge');
+        assert.equal(await submenu.getByRole('menuitemradio', { checked: true }).count(), 1);
+        await tagEntry.press('ArrowRight');
+        await page.keyboard.press('ArrowLeft');
+        await submenu.waitFor({ state: 'hidden' });
+        assert.equal(await tagEntry.evaluate((node) => node === document.activeElement), true);
+      }
       await menu.dispatchEvent('keydown', { key: 'Escape', bubbles: true });
       await menu.waitFor({ state: 'hidden' });
     }
@@ -232,7 +255,7 @@ try {
           );
           await page.screenshot({ path: `${output}/${name}-remote-file-scrolled.png` });
         }
-        await page.locator('.context-backdrop').click({ position: { x: 10, y: 10 }, force: true });
+        await page.mouse.click(10, 10);
         await menu.waitFor({ state: 'hidden' });
       }
     }
@@ -241,7 +264,7 @@ try {
     await page.close();
   }
   await writeFile(`${output}/results.json`, JSON.stringify(results, null, 2));
-  console.log(`PASS: ${results.length} viewport/theme/font/language groups, 10 menu variants each`);
+  console.log(`PASS: ${results.length} viewport/theme/font/language groups, 11 menu variants each`);
 } finally {
   await browser.close();
   await server?.close();

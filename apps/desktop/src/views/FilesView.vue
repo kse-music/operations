@@ -376,6 +376,7 @@ async function focusRenamedEntry(op: NonNullable<typeof operation.value>): Promi
 }
 const transfer = ref<{
   id: string;
+  hostId: string;
   host: string;
   direction: Direction;
   sources: string[];
@@ -548,6 +549,7 @@ function prepareTransfer(direction: Direction, sources: string[], destination?: 
   }
   transfer.value = {
     id: current.id,
+    hostId: current.host.id,
     host: hostDisplayName(current.host),
     direction,
     sources,
@@ -749,6 +751,7 @@ async function retry(task: TransferInfo): Promise<void> {
   }
   transfer.value = {
     id: store.current!.id!,
+    hostId: host.id,
     host: hostDisplayName(host),
     direction: task.direction,
     sources: task.sources,
@@ -1473,7 +1476,13 @@ onBeforeUnmount(() => {
       </button>
     </footer>
   </Modal>
-  <Modal v-if="userForm" :title="tr('切换 SFTP 用户')" :busy="switchingUser" @close="closeUserForm">
+  <Modal
+    v-if="userForm"
+    :title="tr('切换 SFTP 用户')"
+    :host-ids="[userForm.hostId]"
+    :busy="switchingUser"
+    @close="closeUserForm"
+  >
     <form class="editor-form" @submit.prevent="submitUser">
       <p class="subtle">
         {{ tr(' 当前用户：') }}{{ store.current?.username ?? store.current?.host.username
@@ -1632,6 +1641,7 @@ onBeforeUnmount(() => {
   <Modal
     v-if="operation?.kind === 'delete'"
     :title="operation.side === 'local' ? tr('确认移入回收站') : tr('确认删除远程项目')"
+    :host-ids="operation.side === 'remote' ? [operation.hostId] : undefined"
     :busy="busy"
     @close="operation = null"
   >
@@ -1690,6 +1700,7 @@ onBeforeUnmount(() => {
   <Modal
     v-if="transfer"
     :title="transfer.retry ? tr('重试传输') : tr('确认文件传输')"
+    :host-ids="[transfer.hostId]"
     :busy="busy"
     @close="transfer = null"
     ><p>
@@ -1772,11 +1783,16 @@ onBeforeUnmount(() => {
     v-if="properties && properties.id === store.current?.id && properties.hostId === chosen"
     :id="properties.id"
     :key="`${properties.id}:${properties.entry.path}`"
+    :host-id="properties.hostId"
     :entry="properties.entry"
     @close="properties = null"
     @changed="store.current?.id === properties?.id && store.refresh()"
   />
-  <Modal v-if="store.current?.trust" :title="tr('确认 SFTP 主机指纹')" @close="store.trust(false)"
+  <Modal
+    v-if="store.current?.trust"
+    :title="tr('确认 SFTP 主机指纹')"
+    :host-ids="[store.current.host.id]"
+    @close="store.trust(false)"
     ><p>
       {{ store.current.trust.hostname }}:{{ store.current.trust.port }} ·
       {{ store.current.trust.algorithm }}
@@ -1790,7 +1806,11 @@ onBeforeUnmount(() => {
       </button>
     </footer></Modal
   >
-  <Modal v-if="terminalAction" :title="tr('确认打开文件终端')" @close="terminalAction = null"
+  <Modal
+    v-if="terminalAction"
+    :title="tr('确认打开文件终端')"
+    :host-ids="store.current ? [store.current.host.id] : undefined"
+    @close="terminalAction = null"
     ><p>
       {{ hostDisplayName(store.current?.host) }} ·
       {{ terminalAction.kind === 'view' ? tr('运行 less') : tr('进入目录并打开交互式 Shell') }}

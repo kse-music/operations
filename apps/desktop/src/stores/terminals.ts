@@ -400,6 +400,9 @@ export const useTerminalsStore = defineStore('terminals', () => {
           tr(
             '目标会话还有待确认或进行中的拖放上传。继续将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
           ),
+          undefined,
+          undefined,
+          { hostIds: uploading.flatMap(({ pane }) => (pane.host ? [pane.host.id] : [])) },
         ))
       )
         return;
@@ -426,7 +429,8 @@ export const useTerminalsStore = defineStore('terminals', () => {
     };
   }
   function confirmUploadClose(targets: TerminalPaneModel[]): boolean | Promise<boolean> {
-    const count = targets.filter((pane) => uploads.get(pane.key)?.active()).length;
+    const uploading = targets.filter((pane) => uploads.get(pane.key)?.active());
+    const count = uploading.length;
     return (
       !count ||
       usePluginsStore().ask(
@@ -436,6 +440,9 @@ export const useTerminalsStore = defineStore('terminals', () => {
           tr(
             ' 个待确认或进行中的拖放上传。关闭将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
           ),
+        undefined,
+        undefined,
+        { hostIds: uploading.flatMap((pane) => (pane.host ? [pane.host.id] : [])) },
       )
     );
   }

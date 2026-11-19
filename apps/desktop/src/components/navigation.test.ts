@@ -46,12 +46,13 @@ it('disables navigation while settings are saving', () => {
   buttons[0]!.click();
   expect(home).not.toHaveBeenCalled();
 });
-it('routes all seven settings entries to the settings page while keeping host and plugin functions in the workspace', () => {
+it('routes settings entries to the settings page while keeping host and plugin functions in the workspace', () => {
   expect(settingsNavigation.map((item) => item.label)).toEqual([
     '通用',
     '终端',
     '快捷键',
     '数据与存储',
+    '环境标签',
     '模型',
     '插件',
     '关于',

@@ -60,6 +60,7 @@ it.each([true, false])(
     expect(ask.mock.calls[0]?.[1]).toContain('exact command');
     expect(ask).toHaveBeenCalledTimes(1);
     expect(ask.mock.calls[0]?.[2]).toBeUndefined();
+    expect(ask.mock.calls[0]?.[4]?.hostIds).toEqual(['host']);
     expect(pluginsApi.approve).toHaveBeenCalledWith('approval', accepted);
     expect(resume).toHaveBeenCalledExactlyOnceWith(
       'resume-' + accepted,
@@ -84,7 +85,12 @@ it.each([true, false])(
     const approval = review();
     const call = vi.spyOn(pluginsApi, 'call').mockResolvedValue({
       ...approval,
-      result: { ...approval.result, target: 'ops@actual-host:22' },
+      result: {
+        ...approval.result,
+        hostId: 'actual',
+        additionalHostIds: ['source'],
+        target: 'ops@actual-host:22',
+      },
     });
     const resume = vi.spyOn(pluginsApi, 'continue').mockResolvedValue(ok({ cancelled: !accepted }));
     const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(accepted);
@@ -110,7 +116,7 @@ it.each([true, false])(
       '主机：ops@actual-host:22\n\n容器：web\n服务将暂时不可用。',
       undefined,
       'owner',
-      { confirmLabel: '停止' },
+      { confirmLabel: '停止', hostIds: ['actual', 'source'] },
     );
     expect(JSON.stringify(ask.mock.calls)).not.toContain('exact command');
     expect(call).toHaveBeenCalledExactlyOnceWith(

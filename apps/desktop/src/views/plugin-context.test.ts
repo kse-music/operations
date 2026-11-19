@@ -64,6 +64,7 @@ beforeEach(() => {
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const plugins = usePluginsStore(),
     plugin = { ...systemPluginFixtures()[0]!, enabled: true };

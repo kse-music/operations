@@ -273,6 +273,21 @@
   display: flex;
   min-width: 0;
 }
+.tree-host .environment-tag {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  max-inline-size: 45%;
+}
+.host-tree-menu [aria-expanded='true'] {
+  background: var(--hover);
+}
+.host-menu-environment-arrow {
+  margin-inline-start: auto;
+}
+.host-menu-environment-check {
+  margin-inline-start: auto;
+  color: var(--accent);
+}
 .host-label.renaming,
 .tree-rename {
   flex: 1;

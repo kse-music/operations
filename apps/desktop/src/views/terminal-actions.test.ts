@@ -199,6 +199,7 @@ beforeEach(async () => {
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   useApplicationStore().state = {
     appVersion: 'test',

@@ -1565,6 +1565,38 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
         json!({"id":host["id"],"favorite":true}),
     );
     assert_eq!(invoke("host_list", json!({}))["hosts"][0]["favorite"], true);
+    let tagged_host_id = host["id"].as_str().unwrap();
+    let environment = invoke(
+        "environment_tag_save",
+        json!({"id":null,"input":{"name":"灰度","color":"violet"}}),
+    );
+    let environment_tag = environment["tags"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tag| tag["name"] == "灰度")
+        .unwrap()["id"]
+        .clone();
+    let environment = invoke(
+        "host_set_environment_tag",
+        json!({"hostId":host["id"],"tagId":environment_tag}),
+    );
+    assert_eq!(environment["assignments"][tagged_host_id], environment_tag);
+    assert_eq!(
+        invoke("host_list", json!({}))["environmentTags"],
+        environment
+    );
+    assert!(
+        get_ipc_response(
+            &main,
+            request(
+                "environment_tag_save",
+                json!({"id":null,"input":{"name":"坏的颜色","color":"arbitrary-css"}}),
+                origin
+            )
+        )
+        .is_err()
+    );
     assert!(invoke("files_last_directory", json!({"hostId":host["id"]})).is_null());
     invoke(
         "files_remember_directory",
@@ -1619,6 +1651,15 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
                 "host_set_favorite",
                 json!({"id":host["id"],"favorite":false}),
             ),
+            (
+                "environment_tag_save",
+                json!({"id":null,"input":{"name":"不能写入","color":"red"}}),
+            ),
+            ("environment_tag_delete", json!({"id":environment_tag})),
+            (
+                "host_set_environment_tag",
+                json!({"hostId":host["id"],"tagId":null}),
+            ),
         ] {
             let error = get_ipc_response(window, request(command, body, url))
                 .expect_err("host preferences are only available to the local main window");
@@ -1650,6 +1691,10 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
     assert_eq!(copy["groupId"], child["id"]);
     let catalog = invoke("host_list", json!({}));
     assert_eq!(catalog["hosts"].as_array().expect("hosts").len(), 2);
+    assert_eq!(
+        catalog["environmentTags"]["assignments"][copy["id"].as_str().unwrap()],
+        environment_tag
+    );
     for (command, body) in [
         ("hosts_export", json!({})),
         ("hosts_import_archive", json!({"text":"{}"})),
@@ -1661,6 +1706,17 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
         }));
     }
     assert_eq!(invoke("host_list", json!({})), catalog);
+    let cleared = invoke(
+        "host_set_environment_tag",
+        json!({"hostId":host["id"],"tagId":null}),
+    );
+    assert!(cleared["assignments"][tagged_host_id].is_null());
+    assert_eq!(
+        cleared["assignments"][copy["id"].as_str().unwrap()],
+        environment_tag
+    );
+    let removed = invoke("environment_tag_delete", json!({"id":environment_tag}));
+    assert_eq!(removed["assignments"], json!({}));
     let credential = invoke(
         "credential_save",
         json!({"id":null,"expectedRevision":null,"input":{"name":"IPC 私钥路径","kind":"private_key","keyPath":"~/.ssh/id_ed25519","secret":null,"clearSecret":false}}),

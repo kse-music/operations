@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { submenuPosition } from '../services/context-menu';
 import { tr } from '../i18n/messages';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -173,20 +174,10 @@ function positionSavedMenu(): void {
   if (!savedMenuElement.value || !menuElement.value || !savedTrigger.value) return;
   const parent = menuElement.value.getBoundingClientRect();
   const trigger = savedTrigger.value.getBoundingClientRect();
-  const { height } = savedMenuElement.value.getBoundingClientRect();
   const { width } = parent;
-  let x = parent.right,
-    y = trigger.top;
-  if (x + width > window.innerWidth - 8) {
-    x = parent.left - width;
-    if (x < 8) {
-      x = Math.min(parent.left, window.innerWidth - width - 8);
-      y = parent.bottom + height <= window.innerHeight - 8 ? parent.bottom : parent.top - height;
-    }
-  }
+  const { height } = savedMenuElement.value.getBoundingClientRect();
   savedMenuPosition.value = {
-    x: Math.max(8, x),
-    y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
+    ...submenuPosition(parent, trigger.top, { width, height }),
     width,
   };
 }

@@ -512,7 +512,13 @@ describe('host transfer lifetime', () => {
     mocks.tasks.mockResolvedValueOnce([task]).mockResolvedValue([{ ...task, state: 'cancelled' }]);
     const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
     expect(await store.prepareHostClose('target')).toBe(true);
-    expect(ask).toHaveBeenCalledWith('取消传输并关闭主机', expect.stringContaining('1 个未完成'));
+    expect(ask).toHaveBeenCalledWith(
+      '取消传输并关闭主机',
+      expect.stringContaining('1 个未完成'),
+      undefined,
+      undefined,
+      { hostIds: ['target'] },
+    );
     expect(mocks.close).toHaveBeenCalledExactlyOnceWith('target-session', true);
     expect(await store.clearHostTransfers('target')).toBe(true);
     expect(store.tasks).toEqual([]);
@@ -524,7 +530,13 @@ describe('host transfer lifetime', () => {
     mocks.connections.mockResolvedValue([{ id: 'session', hostId: 'host' }]);
     const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
     expect(await store.prepareHostClose('host')).toBe(false);
-    expect(ask).toHaveBeenCalledWith('取消传输并关闭主机', expect.stringContaining('1 个未完成'));
+    expect(ask).toHaveBeenCalledWith(
+      '取消传输并关闭主机',
+      expect.stringContaining('1 个未完成'),
+      undefined,
+      undefined,
+      { hostIds: ['host'] },
+    );
     expect(store.tasks).toEqual([task]);
     expect(mocks.close).not.toHaveBeenCalled();
     expect(mocks.clearTransfers).not.toHaveBeenCalled();

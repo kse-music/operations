@@ -110,7 +110,7 @@ mod tests {
         let path = directory.path().join("app.sqlite3");
         let db = Database::open(&path).unwrap();
         let config = db.load_config().unwrap();
-        assert!(db.update_preferences().unwrap().should_check(100_000));
+        assert!(db.update_preferences().unwrap().allows_check(true));
         let preferences = UpdatePreferences {
             auto_check: false,
             last_attempt_at: Some(100),

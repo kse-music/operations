@@ -31,6 +31,13 @@ export const settingsNavigation = [
     icon: 'storage',
   },
   {
+    view: 'settingsEnvironmentTags',
+    get label() {
+      return tr('环境标签');
+    },
+    icon: 'environmentTags',
+  },
+  {
     view: 'models',
     get label() {
       return tr('模型');

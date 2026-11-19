@@ -47,6 +47,20 @@ export interface Catalog {
   groups: HostGroup[];
   credentials: Credential[];
   pendingSecretDeletions: number;
+  environmentTags: EnvironmentTags;
+}
+export const environmentTagColors = ['red', 'amber', 'blue', 'green', 'violet', 'gray'] as const;
+export type EnvironmentTagColor = (typeof environmentTagColors)[number];
+export interface EnvironmentTagInput {
+  name: string;
+  color: EnvironmentTagColor;
+}
+export interface EnvironmentTag extends EnvironmentTagInput {
+  id: string;
+}
+export interface EnvironmentTags {
+  tags: EnvironmentTag[];
+  assignments: Record<string, string>;
 }
 export interface Mutation<T> {
   value: T;

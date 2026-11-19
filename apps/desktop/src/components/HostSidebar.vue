@@ -3,9 +3,11 @@ import { tr } from '../i18n/messages';
 
 import { useBackgroundStore } from '../stores/background';
 import {
+  Check,
   ChevronDown,
   ChevronRight,
   Copy,
+  Eraser,
   FileInput,
   FileOutput,
   Folder,
@@ -17,6 +19,7 @@ import {
   Search,
   Server,
   Star,
+  Tags,
   TextCursorInput,
   Trash2,
 } from '@lucide/vue';
@@ -39,11 +42,13 @@ import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
 import HostTreeControls from './HostTreeControls.vue';
 import HostIcon from './HostIcon.vue';
+import EnvironmentTagBadge from './EnvironmentTagBadge.vue';
 import TreeRenameInput from './TreeRenameInput.vue';
 import GroupManager from './GroupManager.vue';
 import Modal from './Modal.vue';
 import { hostsApi } from '../services/hosts';
 import { folderAncestors, hostFolderRows } from '../services/host-tree';
+import { submenuPosition } from '../services/context-menu';
 const store = useHostsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
@@ -62,6 +67,7 @@ const emit = defineEmits<{
   select: [host: Host];
   saved: [host: Host];
   plugin: [id: string, contribution: string, hostId: string];
+  manageEnvironmentTags: [];
 }>();
 const collapsed = ref<string[]>([]);
 const selectedFolder = ref<string>();
@@ -379,7 +385,16 @@ type MenuAction =
   | 'deleteHost'
   | `plugin:${string}:${string}`;
 const context = ref<{ target: ContextTarget; x: number; y: number }>();
+const contextHostId = computed(() =>
+  context.value?.target.kind === 'host' ? context.value.target.id : null,
+);
+const contextTagId = computed(() =>
+  contextHostId.value ? store.environmentTag(contextHostId.value)?.id : undefined,
+);
 const menuElement = ref<HTMLElement>();
+const tagMenuElement = ref<HTMLElement>();
+const tagMenuTrigger = ref<HTMLButtonElement>();
+const tagMenuPosition = ref<{ x: number; y: number }>();
 let contextTrigger: HTMLElement | undefined;
 let contextScrollTop = 0;
 const controls = new Map<string, InstanceType<typeof HostTreeControls>>();
@@ -453,11 +468,59 @@ const menuItems = computed<MenuItem[]>(() => {
   return [...createItems, ...transferItems];
 });
 function dismissContext(restoreFocus = false): void {
+  closeTagMenu();
   context.value = undefined;
   if (restoreFocus && contextTrigger?.isConnected) contextTrigger.focus({ preventScroll: true });
 }
+function closeTagMenu(restoreFocus = false): void {
+  tagMenuPosition.value = undefined;
+  if (restoreFocus) tagMenuTrigger.value?.focus({ preventScroll: true });
+}
+async function openTagMenu(focus = false): Promise<void> {
+  const target = context.value;
+  if (!target || !tagMenuTrigger.value || store.busy) return;
+  tagMenuPosition.value ??= { x: target.x, y: target.y };
+  await nextTick();
+  if (
+    context.value !== target ||
+    !tagMenuPosition.value ||
+    !menuElement.value ||
+    !tagMenuElement.value ||
+    !tagMenuTrigger.value
+  )
+    return;
+  tagMenuPosition.value = submenuPosition(
+    menuElement.value.getBoundingClientRect(),
+    tagMenuTrigger.value.getBoundingClientRect().top,
+    tagMenuElement.value.getBoundingClientRect(),
+  );
+  if (focus)
+    tagMenuElement.value.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+}
+function hoverMenu(event: PointerEvent): void {
+  const button = (event.target as HTMLElement).closest('button');
+  if (button && button !== tagMenuTrigger.value)
+    closeTagMenu(tagMenuElement.value?.contains(document.activeElement));
+}
+async function assignEnvironmentTag(tagId: string | null): Promise<void> {
+  const hostId = contextHostId.value;
+  if (!hostId || store.busy) return;
+  dismissContext(true);
+  if ((store.environmentTag(hostId)?.id ?? null) !== tagId)
+    await store.setEnvironmentTag(hostId, tagId);
+}
+function manageEnvironmentTags(): void {
+  dismissContext(true);
+  emit('manageEnvironmentTags');
+}
 function outsideContext(event: PointerEvent): void {
-  if (context.value && !menuElement.value?.contains(event.target as Node)) dismissContext();
+  const target = event.target as Node;
+  if (
+    context.value &&
+    !menuElement.value?.contains(target) &&
+    !tagMenuElement.value?.contains(target)
+  )
+    dismissContext();
 }
 function treeScrolled(event: Event): void {
   if (context.value && (event.currentTarget as HTMLElement).scrollTop !== contextScrollTop)
@@ -486,6 +549,7 @@ async function openContext(
   contextScrollTop = list.value?.scrollTop ?? 0;
   const anchor = contextTrigger.getBoundingClientRect();
   const anchored = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  closeTagMenu();
   context.value = {
     target,
     x: anchored ? anchor.left : event.clientX,
@@ -537,6 +601,17 @@ function rowKeys(target: ContextTarget, event: KeyboardEvent): void {
   void openContext(target, event);
 }
 function menuKeys(event: KeyboardEvent): void {
+  const element = event.currentTarget as HTMLElement;
+  if (element === tagMenuElement.value && ['Escape', 'ArrowLeft'].includes(event.key)) {
+    event.preventDefault();
+    closeTagMenu(true);
+    return;
+  }
+  if (event.key === 'ArrowRight' && document.activeElement === tagMenuTrigger.value) {
+    event.preventDefault();
+    void openTagMenu(true);
+    return;
+  }
   if (event.key === 'Escape' || event.key === 'Tab') {
     event.preventDefault();
     dismissContext(true);
@@ -544,18 +619,19 @@ function menuKeys(event: KeyboardEvent): void {
   }
   if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
   event.preventDefault();
-  const items = [
-    ...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
-  ];
+  const items = [...element.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
   if (!items.length) return;
   const index = items.indexOf(document.activeElement as HTMLButtonElement);
-  items[
-    event.key === 'Home'
-      ? 0
-      : event.key === 'End'
-        ? items.length - 1
-        : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
-  ]?.focus();
+  const next =
+    items[
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? items.length - 1
+          : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+    ];
+  if (element === menuElement.value && next !== tagMenuTrigger.value) closeTagMenu();
+  next?.focus();
 }
 async function runContext(action: MenuAction): Promise<void> {
   const target = context.value?.target;
@@ -817,6 +893,10 @@ onBeforeUnmount(() => {
                 />
                 <span v-else class="host-name">{{ hostDisplayName(host) }}</span>
               </span>
+              <EnvironmentTagBadge
+                v-if="!isRenaming('host', host.id, group.favorites)"
+                :tag="store.environmentTag(host.id)"
+              />
             </component>
             <button
               type="button"
@@ -910,6 +990,7 @@ onBeforeUnmount(() => {
           :aria-label="tr('主机树操作')"
           :style="{ left: `${context.x}px`, top: `${context.y}px` }"
           @keydown="menuKeys"
+          @pointerover="hoverMenu"
           @contextmenu.prevent
         >
           <template v-for="item in menuItems" :key="item.key">
@@ -925,6 +1006,64 @@ onBeforeUnmount(() => {
               }}
             </button>
           </template>
+          <template v-if="contextHostId && store.catalog?.environmentTags">
+            <div role="separator"></div>
+            <button
+              ref="tagMenuTrigger"
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-controls="host-environment-menu"
+              :aria-expanded="!!tagMenuPosition"
+              :disabled="store.busy"
+              @pointerenter="openTagMenu()"
+              @click="openTagMenu(true)"
+            >
+              <Tags class="menu-icon-purple" aria-hidden="true" />
+              <span>{{ tr('标签') }}</span>
+              <ChevronRight
+                class="host-menu-environment-arrow menu-icon-muted"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+        </div>
+        <div
+          v-if="tagMenuPosition && contextHostId && store.catalog?.environmentTags"
+          id="host-environment-menu"
+          ref="tagMenuElement"
+          class="context-menu host-environment-menu"
+          role="menu"
+          :aria-label="tr('环境标签')"
+          :style="{ left: `${tagMenuPosition.x}px`, top: `${tagMenuPosition.y}px` }"
+          @keydown="menuKeys"
+          @contextmenu.prevent
+        >
+          <button
+            v-for="tag in store.catalog.environmentTags.tags"
+            :key="tag.id"
+            role="menuitemradio"
+            :aria-checked="contextTagId === tag.id"
+            :disabled="store.busy"
+            @click="assignEnvironmentTag(tag.id)"
+          >
+            <EnvironmentTagBadge :tag="tag" />
+            <Check
+              v-if="contextTagId === tag.id"
+              class="host-menu-environment-check"
+              aria-hidden="true"
+            />
+          </button>
+          <div v-if="store.catalog.environmentTags.tags.length" role="separator"></div>
+          <button
+            role="menuitem"
+            :disabled="store.busy || !contextTagId"
+            @click="assignEnvironmentTag(null)"
+          >
+            <Eraser class="menu-icon-muted" aria-hidden="true" />{{ tr('清除标签') }}
+          </button>
+          <button role="menuitem" @click="manageEnvironmentTags">
+            <Tags class="menu-icon-muted" aria-hidden="true" />{{ tr('管理环境标签…') }}
+          </button>
         </div>
       </template>
     </Teleport>

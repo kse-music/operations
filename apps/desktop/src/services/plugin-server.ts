@@ -5,6 +5,12 @@ import { pluginsApi } from './plugins';
 import { actionPayload, safeConfirmation } from './plugin-ui';
 import type { PluginApproval, PluginUiPage } from '../types/plugins';
 
+// Native presentation data is consumed here, before a result reaches an iframe.
+type NativeApproval = PluginApproval & { additionalHostIds?: string[] };
+function approvalHostIds(approval: NativeApproval): string[] {
+  return [approval.hostId, ...(approval.additionalHostIds ?? [])].filter(Boolean);
+}
+
 interface Queue {
   tail: Promise<unknown>;
   count: number;
@@ -38,7 +44,7 @@ export async function pluginPlatformRequest<T>(
       );
     let reply = await run();
     if (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
-      const approval = (reply.result as { confirmationRequired: PluginApproval })
+      const approval = (reply.result as { confirmationRequired: NativeApproval })
         .confirmationRequired;
       if (!isActive() || plugins.contextVersion(id) !== version)
         throw { code: 'PLUGIN_CANCELLED', message: tr('页面已隐藏或上下文已变化') };
@@ -47,6 +53,7 @@ export async function pluginPlatformRequest<T>(
         `${approval.pluginName} ${approval.pluginVersion}\n${approval.description}`,
         undefined,
         owner,
+        { hostIds: approvalHostIds(approval) },
       );
       const confirmed = accepted && isActive() && plugins.contextVersion(id) === version;
       await pluginsApi.approve(approval.id, confirmed);
@@ -192,7 +199,7 @@ export async function pluginInvokeRequest<T>(
       throw { code: 'PLUGIN_CANCELLED', message: tr('插件页面已隐藏或关闭') };
     let reply = await pluginsApi.call(id, payload, owner);
     while (reply.error?.code === 'PLUGIN_CONFIRMATION_REQUIRED') {
-      const approval = reply.result as PluginApproval & { continuation: string };
+      const approval = reply.result as NativeApproval & { continuation: string };
       if (!isActive() || typeof approval.continuation !== 'string') {
         if (typeof approval.continuation !== 'string')
           throw { code: 'PLUGIN_CANCELLED', message: tr('审批续接无效') };
@@ -212,13 +219,14 @@ export async function pluginInvokeRequest<T>(
           : `${approval.pluginName} ${approval.pluginVersion}\n${approval.description}`,
         undefined,
         owner,
-        readable
-          ? {
-              confirmLabel: presentation.confirmLabel ?? tr('确认'),
-            }
-          : approval.operation === 'ui.contribute'
-            ? { confirmLabel: tr('确认执行') }
-            : undefined,
+        {
+          hostIds: approvalHostIds(approval),
+          confirmLabel: readable
+            ? (presentation.confirmLabel ?? tr('确认'))
+            : approval.operation === 'ui.contribute'
+              ? tr('确认执行')
+              : undefined,
+        },
       );
       const confirmed = accepted && isActive();
       await pluginsApi.approve(approval.id, confirmed);

@@ -52,6 +52,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     confirmationText?: string | null;
     owner?: string;
     confirmLabel?: string;
+    hostIds?: readonly string[];
     resolve: (accepted: boolean) => void;
   } | null>(null);
   const extensions = computed(() =>
@@ -243,7 +244,7 @@ export const usePluginsStore = defineStore('plugins', () => {
     message: string,
     confirmationText?: string | null,
     owner?: string,
-    presentation?: { confirmLabel?: string },
+    presentation?: { confirmLabel?: string; hostIds?: readonly string[] },
   ): Promise<boolean> {
     if (prompt.value) return Promise.resolve(false);
     return new Promise((resolve) => {

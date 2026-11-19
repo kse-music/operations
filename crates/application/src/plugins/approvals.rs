@@ -10,12 +10,13 @@ use serverdeck_plugin_sdk::{
     platform::{ApprovalMode, ApprovalOperation, Request},
 };
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
 
 pub(super) struct ConfirmationDetails {
     pub host_id: String,
+    pub additional_host_ids: Vec<String>,
     pub binding: Option<String>,
     pub target: Option<String>,
     pub description: String,
@@ -201,6 +202,7 @@ impl Application {
             plugin_name: plugin.manifest.name.clone(),
             plugin_version: plugin.manifest.version.clone(),
             host_id: details.host_id,
+            additional_host_ids: details.additional_host_ids,
             operation: operation.operation().into(),
             description: details.description,
             target: details.target,
@@ -274,6 +276,7 @@ impl Application {
         let mut hashes = BTreeMap::<String, u16>::new();
         let mut descriptions = Vec::new();
         let mut targets = Vec::new();
+        let mut host_ids = BTreeSet::new();
         for op in &operations {
             let capability = Capability::Platform {
                 request: *op.request.clone(),
@@ -290,6 +293,10 @@ impl Application {
             .await?;
             let approval: Approval = serde_json::from_value(value["confirmationRequired"].clone())
                 .map_err(|_| failure("PLUGIN_PLAN_INVALID", "计划预检未返回确认信息"))?;
+            host_ids.extend(approval.additional_host_ids);
+            if !approval.host_id.is_empty() {
+                host_ids.insert(approval.host_id);
+            }
             let count = hashes.entry(approval.id).or_default();
             *count = count
                 .checked_add(op.count)
@@ -361,6 +368,7 @@ impl Application {
                 &operation,
                 ConfirmationDetails {
                     host_id: String::new(),
+                    additional_host_ids: host_ids.into_iter().collect(),
                     binding: Some(binding),
                     target: Some(targets.join("\n")),
                     description,

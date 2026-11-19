@@ -55,7 +55,7 @@
 .context-menu .menu-icon-muted {
   color: var(--muted);
 }
-.context-menu [role='menuitem'] {
+.context-menu :is([role='menuitem'], [role='menuitemradio']) {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -70,11 +70,11 @@
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
-.context-menu [role='menuitem']:not(:disabled):hover,
-.context-menu [role='menuitem']:focus-visible {
+.context-menu :is([role='menuitem'], [role='menuitemradio']):not(:disabled):hover,
+.context-menu :is([role='menuitem'], [role='menuitemradio']):focus-visible {
   background: var(--hover);
 }
-.context-menu [role='menuitem'] > svg {
+.context-menu :is([role='menuitem'], [role='menuitemradio']) > svg {
   width: 1.15em;
   height: 1.15em;
   flex-shrink: 0;

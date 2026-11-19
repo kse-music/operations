@@ -82,7 +82,7 @@ fn raw(connection: &Connection) -> String {
 }
 
 #[test]
-fn opens_an_already_upgraded_schema_eleven_without_rewriting_data() {
+fn upgrades_a_historical_schema_eleven_and_then_reopens_without_rewriting_data() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("serverdeck.sqlite3");
     fixture(&path, 10);
@@ -113,13 +113,75 @@ fn opens_an_already_upgraded_schema_eleven_without_rewriting_data() {
             )
             .unwrap();
     }
-    let original = fs::read(&path).unwrap();
     let db = Database::open(&path).unwrap();
-    assert_eq!(db.version().unwrap(), 11);
+    assert_eq!(db.version().unwrap(), DATABASE_VERSION);
     assert_eq!(db.host("host").unwrap().config.port, 2222);
+    let environment = db.catalog().unwrap().environment_tags;
+    assert_eq!(environment.tags.len(), 3);
+    assert!(environment.assignments.is_empty());
+    let saved = backups(&path);
+    assert_eq!(saved.len(), 1);
+    let backup = Connection::open_with_flags(&saved[0], OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    assert_eq!(
+        backup
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        11
+    );
+    let upgraded = fs::read(&path).unwrap();
+    Database::open(&path).unwrap();
     Database::verify_file(&path).unwrap();
-    assert_eq!(fs::read(&path).unwrap(), original);
-    assert!(backups(&path).is_empty());
+    assert_eq!(fs::read(&path).unwrap(), upgraded);
+    assert_eq!(backups(&path), saved);
+}
+
+#[test]
+fn environment_schema_conflict_rolls_back_then_upgrades_on_retry() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("serverdeck.sqlite3");
+    let original = fixture(&path, 11);
+    let connection = Connection::open(&path).unwrap();
+    connection
+        .execute_batch("CREATE TABLE host_environment_assignments(keep TEXT); INSERT INTO host_environment_assignments VALUES('custom');")
+        .unwrap();
+    assert!(Database::open(&path).is_err());
+    assert_eq!(raw(&connection), original);
+    assert_eq!(
+        connection
+            .pragma_query_value(None, "user_version", |row| row.get::<_, u32>(0))
+            .unwrap(),
+        11
+    );
+    assert_eq!(
+        connection
+            .query_row("SELECT keep FROM host_environment_assignments", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+        "custom"
+    );
+    assert!(
+        !connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='host_environment_tags')",
+                [],
+                |row| row.get::<_, bool>(0)
+            )
+            .unwrap()
+    );
+    assert_eq!(backups(&path).len(), 1);
+    connection
+        .execute_batch("DROP TABLE host_environment_assignments")
+        .unwrap();
+    drop(connection);
+    let db = Database::open(&path).unwrap();
+    assert_eq!(db.version().unwrap(), DATABASE_VERSION);
+    assert_eq!(db.catalog().unwrap().environment_tags.tags.len(), 3);
+    assert_eq!(
+        db.host("host").unwrap().config.credential_id.as_deref(),
+        Some("credential")
+    );
+    assert_eq!(backups(&path).len(), 2);
 }
 
 #[test]
@@ -130,6 +192,9 @@ fn all_recorded_schema_versions_upgrade_with_data_references_and_durable_origina
         let original = fixture(&path, version);
         let db = Database::open(&path).unwrap();
         assert_eq!(db.version().unwrap(), DATABASE_VERSION);
+        let environment = db.catalog().unwrap().environment_tags;
+        assert_eq!(environment.tags.len(), 3);
+        assert!(environment.assignments.is_empty());
         let config = db.load_config().unwrap();
         assert_eq!(config.version, CONFIG_VERSION);
         assert_eq!(config.theme, Theme::Light);

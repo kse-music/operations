@@ -117,7 +117,13 @@ it.each([22, 2222])('submits a new host without a name on port %s', async (port)
   pinia = createPinia();
   setActivePinia(pinia);
   const store = useHostsStore();
-  store.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+  store.catalog = {
+    hosts: [],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
+  };
   const { saved, close } = mountDialog();
   await nextTick();
   const form = document.querySelector('dialog form') as HTMLFormElement;
@@ -274,6 +280,7 @@ it.each(['agent', 'private_key'] as const)(
       groups: [],
       credentials: [],
       pendingSecretDeletions: 0,
+      environmentTags: { tags: [], assignments: {} },
     };
     const { saved, close } = mountDialog(host);
     await nextTick();

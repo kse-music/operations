@@ -1,13 +1,47 @@
 <script setup lang="ts">
-import { tr } from '../i18n/messages';
-import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
-
-import { useApplicationStore } from '../stores/application';
-import { computed } from 'vue';
+import { ArrowUpRight, FolderOpen, Puzzle, Server, SquareTerminal } from '@lucide/vue';
 import { locale } from '@serverdeck/plugin-sdk/i18n';
-import { useUpdatesStore } from '../stores/updates';
-import UpdateReleaseNotes from '../components/UpdateReleaseNotes.vue';
+import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
+import { computed } from 'vue';
+import brandIcon from '../assets/serverdeck.svg';
 import UpdateDownloadProgress from '../components/UpdateDownloadProgress.vue';
+import UpdateReleaseNotes from '../components/UpdateReleaseNotes.vue';
+import { tr } from '../i18n/messages';
+import { errorMessage } from '../services/ipc';
+import { terminalApi } from '../services/terminal';
+import { useApplicationStore } from '../stores/application';
+import { useNotificationsStore } from '../stores/notifications';
+import { useUpdatesStore } from '../stores/updates';
+
+const capabilities = [
+  { icon: Server, name: '主机管理', description: '用目录、收藏和环境标签整理主机。' },
+  {
+    icon: SquareTerminal,
+    name: '本地与 SSH 终端',
+    description: '支持多会话、分屏和本地端口转发。',
+  },
+  { icon: FolderOpen, name: 'SFTP 文件', description: '双栏浏览、后台传输和编辑远程文件。' },
+  {
+    icon: Puzzle,
+    name: '插件扩展',
+    description: '内置 Docker 和 AI 运维助手，支持从本地安装插件。',
+  },
+];
+const resources = [
+  { name: '使用文档', url: 'https://ops.hiboot.cn/docs/' },
+  { name: '发布记录', url: 'https://github.com/kse-music/operations/releases' },
+  { name: '问题反馈', url: 'https://github.com/kse-music/operations/issues' },
+];
+
+const notifications = useNotificationsStore();
+async function openResource(url: string) {
+  try {
+    await terminalApi.openLink(url);
+  } catch (cause) {
+    notifications.push(tr('无法打开链接：{0}', errorMessage(cause)), true);
+  }
+}
+
 const updates = useUpdatesStore();
 const checkedTime = computed(() => {
   const at = updates.state?.preferences.lastCheckedAt;
@@ -19,26 +53,37 @@ const checkedTime = computed(() => {
 });
 
 const application = useApplicationStore();
-const releaseTimestamp = import.meta.env.APP_RELEASE_TIME;
-const releaseTime = computed(() =>
+const buildTimestamp = import.meta.env.APP_BUILD_TIME;
+const buildTime = computed(() =>
   new Intl.DateTimeFormat(locale.value, {
     timeZone: 'Asia/Shanghai',
     dateStyle: 'medium',
     timeStyle: 'medium',
     hourCycle: 'h23',
-  }).format(new Date(releaseTimestamp)),
+  }).format(new Date(buildTimestamp)),
 );
 </script>
 
 <template>
   <section class="about-view page-view" aria-labelledby="about-title">
     <header class="section-heading">
-      <h1 id="about-title">{{ tr('关于 ServerDeck') }}</h1>
+      <h1 id="about-title">{{ tr('关于') }}</h1>
     </header>
-    <section class="work-section" :aria-label="tr('产品信息')">
-      <h2>ServerDeck</h2>
-      <p>{{ tr('本地优先的服务器运维工作台，集成 SSH 终端、SFTP 文件管理和服务器监控。') }}</p>
-      <dl class="system-details">
+    <section class="work-section about-product" :aria-label="tr('产品信息')">
+      <header class="about-product-intro">
+        <img :src="brandIcon" width="48" height="48" alt="" draggable="false" />
+        <div>
+          <h2>ServerDeck</h2>
+          <p>
+            {{
+              tr(
+                '通过 SSH 管理服务器的桌面工作台。主机配置和应用偏好保存在本机，已保存的密码和私钥由系统凭据库保管。',
+              )
+            }}
+          </p>
+        </div>
+      </header>
+      <dl class="about-product-details">
         <div>
           <dt>{{ tr('应用版本') }}</dt>
           <dd v-if="application.state">v{{ application.state.appVersion }}</dd>
@@ -47,13 +92,35 @@ const releaseTime = computed(() =>
           </dd>
         </div>
         <div>
-          <dt>{{ tr('发布时间') }}</dt>
+          <dt>{{ tr('构建时间') }}</dt>
           <dd>
-            <time :datetime="releaseTimestamp">{{ releaseTime }}</time
-            >{{ tr('（北京时间） ') }}
+            <time :datetime="buildTimestamp">{{ buildTime }}</time>
+            <span>{{ tr('（北京时间）') }}</span>
           </dd>
         </div>
       </dl>
+      <ul class="about-product-capabilities" role="list" :aria-label="tr('主要功能')">
+        <li v-for="capability in capabilities" :key="capability.name">
+          <span class="about-capability-icon">
+            <component :is="capability.icon" :size="17" aria-hidden="true" />
+          </span>
+          <div>
+            <strong>{{ tr(capability.name) }}</strong>
+            <p>{{ tr(capability.description) }}</p>
+          </div>
+        </li>
+      </ul>
+      <div class="action-row about-product-links">
+        <a
+          v-for="resource in resources"
+          :key="resource.url"
+          class="button"
+          :href="resource.url"
+          @click.prevent="openResource(resource.url)"
+        >
+          {{ tr(resource.name) }}<ArrowUpRight :size="14" aria-hidden="true" />
+        </a>
+      </div>
     </section>
     <section class="work-section software-update" aria-labelledby="update-title">
       <h2 id="update-title">{{ tr('软件更新') }}</h2>
@@ -72,7 +139,7 @@ const releaseTime = computed(() =>
             />
             {{ tr('自动检查更新') }}
           </label>
-          <p class="subtle">{{ tr('启动后后台检查，每天最多一次；安装前由你确认。') }}</p>
+          <p class="subtle">{{ tr('每次启动时后台检查，安装前由你确认。') }}</p>
           <div v-if="updates.state.release" class="update-release">
             <strong>{{ tr('发现新版本 v{0}', updates.state.release.version) }}</strong>
             <UpdateReleaseNotes

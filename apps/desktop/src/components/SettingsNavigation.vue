@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { Boxes, Info, Keyboard, PanelsTopLeft, Puzzle, Settings2, Terminal } from '@lucide/vue';
+import {
+  Boxes,
+  Info,
+  Keyboard,
+  PanelsTopLeft,
+  Puzzle,
+  Settings2,
+  Tags,
+  Terminal,
+} from '@lucide/vue';
 import { tr } from '../i18n/messages';
 import { useWorkspaceStore } from '../stores/workspace';
 import { settingsNavigation } from '../types/navigation';
@@ -11,6 +20,7 @@ const icons = {
   terminal: Terminal,
   shortcuts: Keyboard,
   storage: PanelsTopLeft,
+  environmentTags: Tags,
   models: Boxes,
   plugins: Puzzle,
   about: Info,

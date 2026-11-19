@@ -82,6 +82,33 @@ it('opens a notice only for an eligible automatic check and keeps the release af
   expect(updatesApi.ignoreNotice).not.toHaveBeenCalled();
 });
 
+it('checks again on a consecutive startup and reminds about a postponed version', async () => {
+  const found = {
+    ...status('available'),
+    showNotice: true,
+    preferences: { ...status().preferences, lastAttemptAt: Math.floor(Date.now() / 1000) },
+  };
+  vi.mocked(updatesApi.check).mockResolvedValue(found);
+  const first = useUpdatesStore();
+  await first.initialize();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(first.noticeOpen).toBe(true);
+  first.closeNotice();
+  expect(first.noticeOpen).toBe(false);
+  expect(updatesApi.ignoreNotice).not.toHaveBeenCalled();
+
+  disposePinia(pinia);
+  pinia = createPinia();
+  setActivePinia(pinia);
+  vi.mocked(updatesApi.status).mockResolvedValue({ ...status(), preferences: found.preferences });
+  const second = useUpdatesStore();
+  await second.initialize();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(vi.mocked(updatesApi.check).mock.calls).toEqual([[true], [true]]);
+  expect(second.noticeOpen).toBe(true);
+  expect(second.state?.release?.version).toBe(found.release?.version);
+});
+
 it('keeps the notice open if saving the ignored version fails and closes it on retry', async () => {
   const store = useUpdatesStore();
   vi.mocked(updatesApi.check).mockResolvedValue({ ...status('available'), showNotice: true });

@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent } from 'vue';
 import { tr } from '../i18n/messages';
 import SettingsPanel from '../components/SettingsPanel.vue';
 import AboutView from './AboutView.vue';
+import EnvironmentTagsView from './EnvironmentTagsView.vue';
 import { useWorkspaceStore } from '../stores/workspace';
 import { settingsCategories } from '../types/product';
 const ModelsView = defineAsyncComponent(() => import('./ModelsView.vue'));
@@ -38,6 +39,7 @@ const category = computed(() =>
         :active="active"
       />
     </template>
+    <EnvironmentTagsView v-else-if="workspace.settingsView === 'settingsEnvironmentTags'" />
     <AboutView v-else-if="workspace.settingsView === 'about'" />
   </section>
 </template>

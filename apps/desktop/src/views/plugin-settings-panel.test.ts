@@ -63,7 +63,13 @@ it.each(['system', 'user'] as const)(
     const ui = vi.spyOn(pluginsApi, 'ui');
     const grant = vi.spyOn(pluginsApi, 'grant').mockResolvedValue({} as never);
     vi.spyOn(plugins, 'refresh').mockResolvedValue();
-    useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+    useHostsStore().catalog = {
+      hosts: [],
+      groups: [],
+      credentials: [],
+      pendingSecretDeletions: 0,
+      environmentTags: { tags: [], assignments: {} },
+    };
     await mount(plugin.manifest.id);
     expect(
       [...root.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent?.trim()),

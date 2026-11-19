@@ -390,6 +390,38 @@ pub async fn host_set_favorite(
         .map_err(Into::into)
 }
 #[tauri::command]
+pub async fn environment_tag_save(
+    application: tauri::State<'_, Application>,
+    id: Option<String>,
+    input: EnvironmentTagInput,
+) -> Result<EnvironmentTags, IpcError> {
+    application
+        .environment_tag_save(id, input)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn environment_tag_delete(
+    application: tauri::State<'_, Application>,
+    id: String,
+) -> Result<EnvironmentTags, IpcError> {
+    application
+        .environment_tag_delete(id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn host_set_environment_tag(
+    application: tauri::State<'_, Application>,
+    host_id: String,
+    tag_id: Option<String>,
+) -> Result<EnvironmentTags, IpcError> {
+    application
+        .host_set_environment_tag(host_id, tag_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn host_delete(
     application: tauri::State<'_, Application>,
     id: String,

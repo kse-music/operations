@@ -355,6 +355,22 @@ impl Application {
                 .unwrap_or_default(),
             _ => request.host().map(str::to_owned).unwrap_or_default(),
         };
+        let source = match request {
+            serverdeck_plugin_sdk::platform::Request::TransferPrepare { source, .. } => {
+                Some(source)
+            }
+            serverdeck_plugin_sdk::platform::Request::TransferStart { id } => {
+                data.copies.get(id).map(|copy| &copy.preview.source)
+            }
+            _ => None,
+        };
+        let additional_host_ids = match source {
+            Some(serverdeck_plugin_sdk::platform::TransferSource::Remote {
+                host_id: source_id,
+                ..
+            }) if source_id != &host_id => vec![source_id.clone()],
+            _ => vec![],
+        };
         let description = if let Some(target) = target {
             format!("目标：{target}\n{description}")
         } else {
@@ -367,6 +383,7 @@ impl Application {
             operation,
             super::approvals::ConfirmationDetails {
                 host_id,
+                additional_host_ids,
                 binding: binding.map(str::to_owned),
                 target: target.map(str::to_owned),
                 description,

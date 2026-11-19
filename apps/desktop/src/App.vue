@@ -19,6 +19,7 @@ import SettingsView from './views/SettingsView.vue';
 import SettingsNavigation from './components/SettingsNavigation.vue';
 import TerminalStatus from './components/TerminalStatus.vue';
 import HostSidebar from './components/HostSidebar.vue';
+import EnvironmentTagBadge from './components/EnvironmentTagBadge.vue';
 import SidebarToggle from './components/SidebarToggle.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
@@ -187,12 +188,11 @@ async function enterTerminalHost(host: Host) {
 function fromSearch(value: View, hostId = currentHostId.value) {
   navigate(value, hostId);
 }
-function setContext(hostId: string, connectShell = false) {
+function setContext(hostId: string) {
   const existing = workspace.tabs.some((tab) => isHostTab(tab) && tab.hostId === hostId);
   workspace.selectHost(hostId);
   const tab = workspace.current;
-  if (tab && (!existing || (connectShell && tab.view === 'terminals')))
-    navigate(tab.view, tab.hostId, tab.section);
+  if (tab && (!existing || tab.view === 'terminals')) navigate(tab.view, tab.hostId, tab.section);
 }
 function tabName(tab: WorkspaceTab) {
   if (isHostTab(tab))
@@ -706,9 +706,10 @@ watch(
         id="host-tree-panel"
         :active="workspace.area === 'home' && !sidebarCollapsed"
         @plugin="openPlugin"
+        @manage-environment-tags="navigate('settingsEnvironmentTags')"
         @create="openHost($event)"
         @import-hosts="hostImport = 'all'"
-        @select="setContext($event.id, true)"
+        @select="setContext($event.id)"
         @saved="revealHost"
       >
         <template #heading-actions>
@@ -793,7 +794,11 @@ watch(
             >
               <Server v-if="isHostTab(tab) && tab.hostId" :size="14" aria-hidden="true" />
               <Puzzle v-else-if="tab.view === 'plugins'" :size="14" aria-hidden="true" />
-              {{ tabName(tab) }}</button
+              <span class="workspace-tab-name">{{ tabName(tab) }}</span>
+              <EnvironmentTagBadge
+                v-if="isHostTab(tab)"
+                :tag="store.environmentTag(tab.hostId)"
+              /></button
             ><button
               class="tab-close"
               :disabled="workspace.closing.includes(tab.key)"
@@ -964,7 +969,6 @@ watch(
     v-if="searching"
     @close="searching = false"
     @navigate="fromSearch"
-    @select-host="setContext"
     @plugin="openPlugin"
   />
   <FileOpenDialogs />

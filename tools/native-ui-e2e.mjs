@@ -181,11 +181,11 @@ try {
   await navigateWorkspace(page, '通用');
   const about = page.getByRole('button', { name: '关于', exact: true });
   await about.click();
-  const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
+  const aboutPage = page.getByRole('region', { name: '关于', exact: true });
   await aboutPage.waitFor();
   const { appVersion } = await rpc('app_bootstrap');
   assert((await aboutPage.textContent()).includes(`v${appVersion}`));
-  assert.equal(await page.getByRole('dialog', { name: '关于 ServerDeck', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('dialog', { name: '关于', exact: true }).count(), 0);
   assert.equal(await about.getAttribute('aria-current'), 'page');
   await about.click();
   assert.equal(await page.locator('.workspace-tab[data-view="about"]').count(), 0);

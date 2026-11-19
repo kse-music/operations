@@ -104,60 +104,38 @@ it('highlights a result when it receives keyboard focus', async () => {
   expect(document.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
 });
 
-it.each(['主机 ·', '设置 · 通用', '设置 · 插件管理'])(
-  'distinguishes host selection from global asset navigation: %s',
-  async (label) => {
-    pinia = createPinia();
-    setActivePinia(pinia);
-    const hosts = useHostsStore();
-    hosts.catalog = {
-      hosts: [{ ...hostInput(), id: 'a', name: 'Server A', createdAt: '', updatedAt: '' }],
-      groups: [],
-      credentials: [],
-      pendingSecretDeletions: 0,
-    };
-    hosts.selectedId = 'a';
-    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-      configurable: true,
-      value: function (this: HTMLDialogElement) {
-        this.open = true;
-      },
-    });
-    const selectHost = vi.fn(),
-      navigate = vi.fn(),
-      close = vi.fn();
-    root = document.createElement('div');
-    document.body.append(root);
-    app = createApp(GlobalSearch, {
-      onSelectHost: selectHost,
-      onNavigate: navigate,
-      onClose: close,
-    }).use(pinia);
-    app.mount(root);
-    await nextTick();
-    expect(
-      [...document.querySelectorAll('.search-result')].some((button) =>
-        button.textContent?.includes('主机管理'),
-      ),
-    ).toBe(false);
-    const result = [...document.querySelectorAll<HTMLButtonElement>('.search-result')].find(
-      (button) => button.textContent?.trim().startsWith(label),
-    );
-    expect(result).toBeDefined();
-    result!.click();
-    if (label === '主机 ·') {
-      expect(selectHost).toHaveBeenCalledExactlyOnceWith('a');
-      expect(navigate).not.toHaveBeenCalled();
-    } else {
-      expect(navigate).toHaveBeenCalledExactlyOnceWith(
-        label.includes('插件管理') ? 'plugins' : 'settings',
-        'a',
-      );
-      expect(selectHost).not.toHaveBeenCalled();
-    }
-    expect(close).toHaveBeenCalledOnce();
-  },
-);
+it('excludes saved hosts from the initial results and matching queries', async () => {
+  const { input, options } = await mountSearch();
+  useHostsStore().catalog = {
+    hosts: [{ ...hostInput(), id: 'a', name: 'Server A', createdAt: '', updatedAt: '' }],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
+  };
+  await nextTick();
+  expect(document.querySelectorAll('.search-result')).toHaveLength(options.length);
+  input.value = 'Server A';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+  expect(document.querySelectorAll('.search-result')).toHaveLength(0);
+  expect(document.querySelector('dialog')?.textContent).toContain('没有匹配结果');
+});
+
+it.each([
+  ['设置 · 通用', 'settings'],
+  ['设置 · 插件管理', 'plugins'],
+])('opens the settings result %s', async (label, view) => {
+  const { options, navigate, close } = await mountSearch();
+  useHostsStore().selectedId = 'a';
+  await nextTick();
+  expect(options.some((button) => button.textContent?.includes('主机管理'))).toBe(false);
+  const result = options.find((button) => button.textContent?.trim() === label);
+  expect(result).toBeDefined();
+  result!.click();
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(view, 'a');
+  expect(close).toHaveBeenCalledOnce();
+});
 
 it.each([true, false])(
   'uses only the visible workspace host for plugin commands (host context=%s)',

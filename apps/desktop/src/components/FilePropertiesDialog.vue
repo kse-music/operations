@@ -9,7 +9,7 @@ import { errorMessage } from '../services/ipc';
 import { useNotificationsStore } from '../stores/notifications';
 import { bytes, type FileEntry, type PropertyOperation, type PropertyResult } from '../types/files';
 
-const props = defineProps<{ id: string; entry: FileEntry }>();
+const props = defineProps<{ id: string; hostId?: string; entry: FileEntry }>();
 const emit = defineEmits<{ close: []; changed: [] }>();
 const notifications = useNotificationsStore();
 const current = ref<FileEntry | null>(null);
@@ -181,6 +181,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Modal
+    :host-ids="hostId ? [hostId] : undefined"
     :title="`${entry.name} · ${tr('属性')}`"
     panel-class="file-properties-dialog"
     @close="close"

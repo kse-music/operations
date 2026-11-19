@@ -1,5 +1,6 @@
 use super::{Database, storage_error};
 pub mod backup;
+mod environment;
 
 #[cfg(test)]
 mod tests;
@@ -198,12 +199,14 @@ impl Database {
         let pending_secret_deletions = tx
             .query_row("SELECT count(*) FROM secret_gc", [], |r| r.get(0))
             .map_err(storage_error)?;
+        let environment_tags = environment::read(&tx)?;
         tx.commit().map_err(storage_error)?;
         Ok(Catalog {
             hosts,
             groups,
             credentials,
             pending_secret_deletions,
+            environment_tags,
         })
     }
     pub fn host_create(&self, input: HostInput) -> Result<Host, Error> {
@@ -278,12 +281,24 @@ impl Database {
         Ok(())
     }
     pub fn host_copy(&self, id: &str) -> Result<Host, Error> {
-        let mut input = one_host(&self.connect()?, id)?.config;
+        let mut connection = self.connect()?;
+        let tx = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(storage_error)?;
+        let mut input = one_host(&tx, id)?.config;
         input.name = format!(
             "{} 副本",
             input.display_name().chars().take(120).collect::<String>()
         );
-        self.host_create(input)
+        let copy = insert_host(&tx, &input.normalize()?)?;
+        tx.execute(
+            "INSERT INTO host_environment_assignments(host_id,tag_id)
+             SELECT ?2,tag_id FROM host_environment_assignments WHERE host_id=?1",
+            params![id, copy.id],
+        )
+        .map_err(storage_error)?;
+        tx.commit().map_err(storage_error)?;
+        Ok(copy)
     }
     pub fn group_save(&self, id: Option<&str>, input: GroupInput) -> Result<HostGroup, Error> {
         let name = input.name.trim();

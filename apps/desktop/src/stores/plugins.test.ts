@@ -4,7 +4,12 @@ import { usePluginsStore } from './plugins';
 import { pluginsApi } from '../services/plugins';
 import { filesApi } from '../services/files';
 import { useNotificationsStore } from './notifications';
-import type { InstalledPlugin, PluginGrant, PluginInventory } from '../types/plugins';
+import type {
+  InstalledPlugin,
+  PluginGrant,
+  PluginInventory,
+  PluginRuntimeStatus,
+} from '../types/plugins';
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.spyOn(pluginsApi, 'reset').mockResolvedValue();
@@ -97,17 +102,26 @@ it('preserves the loaded list and existing error when a background poll fails', 
   expect(p.loading).toBe(false);
   expect(p.error).toBe('Previous operation failed');
 });
-it('deduplicates runtime polls, preserves state on BUSY and reports other failures once', async () => {
+it('deduplicates runtime polls, keeps BUSY silent and reports persistent failures once', async () => {
   vi.useFakeTimers();
   const p = fixture();
+  const notifications = useNotificationsStore();
   p.loaded = true;
   p.error = 'Previous operation failed';
+  expect(notifications.items.map((item) => item.text)).toEqual(['Previous operation failed']);
   const inventory = vi.spyOn(pluginsApi, 'inventory');
+  const lastStatus: PluginRuntimeStatus = {
+    id: 'dev.example',
+    revision: 'r1',
+    state: 'active',
+    errorCode: null,
+    diagnostic: null,
+  };
   let finish!: () => void;
   const statuses = vi.spyOn(pluginsApi, 'statuses').mockImplementationOnce(
     () =>
       new Promise((resolve) => {
-        finish = () => resolve([]);
+        finish = () => resolve([lastStatus]);
       }),
   );
   p.start();
@@ -115,21 +129,27 @@ it('deduplicates runtime polls, preserves state on BUSY and reports other failur
   expect(statuses).toHaveBeenCalledTimes(1);
   expect(inventory).not.toHaveBeenCalled();
   expect(p.loading).toBe(false);
+  expect(notifications.items).toHaveLength(0);
   finish();
   await vi.advanceTimersByTimeAsync(0);
-  statuses.mockRejectedValueOnce({ code: 'BUSY' });
+  statuses.mockRejectedValueOnce({ code: 'BUSY', message: 'Runtime busy' });
   await vi.advanceTimersByTimeAsync(2000);
-  expect(p.statuses).toEqual([]);
-  expect(useNotificationsStore().items).toHaveLength(1);
+  expect(statuses).toHaveBeenCalledTimes(2);
+  expect(p.statuses).toEqual([lastStatus]);
+  expect(notifications.items).toHaveLength(0);
   statuses.mockRejectedValue({ message: 'Runtime unavailable' });
-  await vi.advanceTimersByTimeAsync(4000);
+  await vi.advanceTimersByTimeAsync(2000);
   expect(p.error).toBe('Previous operation failed');
-  expect(
-    useNotificationsStore().items.filter((item) => item.text === 'Runtime unavailable'),
-  ).toHaveLength(1);
+  expect(notifications.items).toMatchObject([{ text: 'Runtime unavailable', error: true }]);
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(notifications.items).toHaveLength(0);
   statuses.mockResolvedValue([]);
   await vi.advanceTimersByTimeAsync(2000);
+  expect(p.statuses).toEqual([]);
   expect(p.loading).toBe(false);
+  statuses.mockRejectedValueOnce({ message: 'Runtime unavailable' });
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(notifications.items).toMatchObject([{ text: 'Runtime unavailable', error: true }]);
   const reads = statuses.mock.calls.length;
   p.stop();
   await vi.advanceTimersByTimeAsync(4000);

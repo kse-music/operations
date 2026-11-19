@@ -1,3 +1,3 @@
 interface ImportMetaEnv {
-  readonly APP_RELEASE_TIME: string;
+  readonly APP_BUILD_TIME: string;
 }

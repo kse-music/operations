@@ -48,6 +48,7 @@ beforeEach(() => {
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   Object.assign(usePluginsStore(), toolPluginState());
   root = document.createElement('div');
@@ -96,7 +97,13 @@ it('distinguishes host loading and failure from the empty state and retries the 
   root.querySelector<HTMLButtonElement>('.welcome-state .text-button')!.click();
   expect(load).toHaveBeenCalledOnce();
   hosts.error = null;
-  hosts.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+  hosts.catalog = {
+    hosts: [],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
+  };
   await nextTick();
   expect(root.querySelector('.welcome-host-empty')).not.toBeNull();
 });

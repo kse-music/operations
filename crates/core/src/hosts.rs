@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::{collections::BTreeMap, net::IpAddr};
 
 use crate::Error;
 use serde::{Deserialize, Serialize};
@@ -276,6 +276,77 @@ pub struct Catalog {
     pub groups: Vec<HostGroup>,
     pub credentials: Vec<Credential>,
     pub pending_secret_deletions: u32,
+    pub environment_tags: EnvironmentTags,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnvironmentTagColor {
+    Red,
+    Amber,
+    Blue,
+    Green,
+    Violet,
+    Gray,
+}
+
+impl EnvironmentTagColor {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Red => "red",
+            Self::Amber => "amber",
+            Self::Blue => "blue",
+            Self::Green => "green",
+            Self::Violet => "violet",
+            Self::Gray => "gray",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, Error> {
+        match value {
+            "red" => Ok(Self::Red),
+            "amber" => Ok(Self::Amber),
+            "blue" => Ok(Self::Blue),
+            "green" => Ok(Self::Green),
+            "violet" => Ok(Self::Violet),
+            "gray" => Ok(Self::Gray),
+            _ => Err(Error::Validation("环境标签颜色无效")),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnvironmentTagInput {
+    pub name: String,
+    pub color: EnvironmentTagColor,
+}
+
+impl EnvironmentTagInput {
+    pub fn normalized_name(&self) -> Result<&str, Error> {
+        let name = self.name.trim();
+        if name.is_empty() || name.chars().count() > 10 || name.chars().any(char::is_control) {
+            return Err(Error::Validation(
+                "环境标签名称须为 1–10 个字符，且不含控制字符",
+            ));
+        }
+        Ok(name)
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentTag {
+    pub id: String,
+    pub name: String,
+    pub color: EnvironmentTagColor,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentTags {
+    pub tags: Vec<EnvironmentTag>,
+    pub assignments: BTreeMap<String, String>,
 }
 
 #[cfg(test)]

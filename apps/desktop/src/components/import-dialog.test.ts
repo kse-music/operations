@@ -65,7 +65,13 @@ beforeEach(() => {
   });
   pinia = createPinia();
   setActivePinia(pinia);
-  useHostsStore().catalog = { hosts: [], groups, credentials: [], pendingSecretDeletions: 0 };
+  useHostsStore().catalog = {
+    hosts: [],
+    groups,
+    credentials: [],
+    pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
+  };
   root = document.createElement('div');
   document.body.append(root);
   closed.mockClear();

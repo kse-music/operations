@@ -155,6 +155,26 @@ impl Application {
         self.blocking(move |db| db.host_set_favorite(&id, favorite))
             .await
     }
+    pub async fn environment_tag_save(
+        &self,
+        id: Option<String>,
+        input: EnvironmentTagInput,
+    ) -> Result<EnvironmentTags, Error> {
+        self.blocking(move |db| db.environment_tag_save(id.as_deref(), input))
+            .await
+    }
+    pub async fn environment_tag_delete(&self, id: String) -> Result<EnvironmentTags, Error> {
+        self.blocking(move |db| db.environment_tag_delete(&id))
+            .await
+    }
+    pub async fn host_set_environment_tag(
+        &self,
+        host_id: String,
+        tag_id: Option<String>,
+    ) -> Result<EnvironmentTags, Error> {
+        self.blocking(move |db| db.host_set_environment_tag(&host_id, tag_id.as_deref()))
+            .await
+    }
     pub async fn host_copy(&self, id: String) -> Result<Host, Error> {
         self.blocking(move |db| db.host_copy(&id)).await
     }

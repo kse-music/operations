@@ -164,6 +164,7 @@ onMounted(async () => {
 <template>
   <Modal
     :title="tr('远程复制')"
+    :host-ids="[sourceHostId, targetHostId]"
     panel-class="remote-copy-dialog"
     :busy="busy"
     @close="emit('close')"

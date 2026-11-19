@@ -28,6 +28,9 @@ export const viewLabels = {
   get settingsStorage() {
     return tr('数据与存储');
   },
+  get settingsEnvironmentTags() {
+    return tr('环境标签');
+  },
   get terminals() {
     return tr('SSH 终端');
   },

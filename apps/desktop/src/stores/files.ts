@@ -759,6 +759,9 @@ export const useFilesStore = defineStore('files', () => {
             '此主机还有 {0} 个未完成的传输。确认后取消传输并关闭主机，已完成文件保留，传输记录将清除。提交中的单个文件会等待结果。',
             count,
           ),
+          undefined,
+          undefined,
+          { hostIds: [hostId] },
         ))
       )
         return false;

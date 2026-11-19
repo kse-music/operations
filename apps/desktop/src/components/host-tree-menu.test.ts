@@ -42,6 +42,7 @@ async function mount(active = true) {
     ],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const create = vi.fn(),
     select = vi.fn(),
@@ -107,6 +108,67 @@ async function action(label: string) {
 }
 const labels = () =>
   [...menu().querySelectorAll('[role="menuitem"]')].map((button) => button.textContent);
+
+it('opens a target-specific tag submenu and returns focus level by level', async () => {
+  const { store } = await mount();
+  store.catalog!.environmentTags = {
+    tags: [
+      { id: 'prod', name: '生产', color: 'red' },
+      { id: 'test', name: '测试', color: 'blue' },
+    ],
+    assignments: { h0: 'prod', h1: 'test' },
+  };
+  store.selectedId = 'h0';
+  const host = (id: string) => root.querySelector<HTMLButtonElement>(`[data-host-id="${id}"]`)!;
+  const trigger = () => menu().querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+  const submenu = () => document.querySelector<HTMLElement>('.host-environment-menu');
+  const press = async (target: HTMLElement, key: string) => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    await nextTick();
+  };
+
+  await open(host('h1'));
+  expect(trigger().getAttribute('aria-expanded')).toBe('false');
+  expect(submenu()).toBeNull();
+  expect(menu().querySelector('[role="menuitemradio"]')).toBeNull();
+  trigger().focus();
+  await press(trigger(), 'ArrowRight');
+  expect(trigger().getAttribute('aria-expanded')).toBe('true');
+  const choices = () => submenu()!.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]');
+  expect(document.activeElement).toBe(choices()[0]);
+  await press(choices()[0]!, 'ArrowDown');
+  expect(document.activeElement).toBe(choices()[1]);
+  expect(choices()[1]?.getAttribute('aria-checked')).toBe('true');
+  await press(choices()[1]!, 'Escape');
+  expect(submenu()).toBeNull();
+  expect(document.activeElement).toBe(trigger());
+
+  trigger().dispatchEvent(new MouseEvent('pointerenter'));
+  await nextTick();
+  expect(submenu()).not.toBeNull();
+  choices()[0]?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+  expect(submenu()).not.toBeNull();
+  await open(host('h0'));
+  expect(submenu()).toBeNull();
+  trigger().click();
+  await nextTick();
+  expect(choices()[0]?.getAttribute('aria-checked')).toBe('true');
+  const assign = vi.spyOn(hostsApi, 'setEnvironmentTag').mockResolvedValue({
+    tags: store.catalog!.environmentTags.tags,
+    assignments: { h0: 'test', h1: 'test' },
+  });
+  try {
+    choices()[1]?.click();
+    await nextTick();
+    expect(assign).toHaveBeenCalledExactlyOnceWith('h0', 'test');
+    expect(submenu()).toBeNull();
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(host('h0'));
+  } finally {
+    assign.mockRestore();
+  }
+});
+
 async function pressDelete(target: HTMLElement, options: KeyboardEventInit = {}) {
   target.focus();
   const event = new KeyboardEvent('keydown', {
@@ -492,7 +554,7 @@ it('creates hosts in the right-clicked folder while host menus exclude folder cr
   await action('新建主机');
   expect(create).toHaveBeenCalledExactlyOnceWith('child');
   await open(root.querySelector<HTMLElement>('[data-host-id="h1"]')!);
-  expect(labels()).toEqual(['连接', '编辑', '重命名', '复制', '删除']);
+  expect(labels()).toEqual(['连接', '编辑', '重命名', '复制', '删除', '标签']);
   expect(store.selectedId).toBe('h0');
   expect(select).not.toHaveBeenCalled();
   await action('编辑');

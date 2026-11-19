@@ -13,6 +13,7 @@ import Modal from './Modal.vue';
 
 const props = defineProps<{
   sessionId: string;
+  hostId?: string;
   target: string;
   enabled: boolean;
   canReceive: () => boolean;
@@ -230,6 +231,7 @@ onBeforeUnmount(() => {
   <Modal
     v-if="dialogOpen"
     :title="confirmed ? tr('终端文件上传') : tr('确认终端拖放上传')"
+    :host-ids="hostId ? [hostId] : undefined"
     :busy="!!progress"
     @close="dismiss"
   >

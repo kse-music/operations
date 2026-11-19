@@ -76,6 +76,7 @@ it('bounds initial host DOM, exposes further rows, and supports arrow/Home/End k
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   root = document.createElement('div');
   document.body.append(root);
@@ -124,6 +125,7 @@ it('shows one label per host and still finds named hosts by address', async () =
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   root = document.createElement('div');
   document.body.append(root);
@@ -167,6 +169,7 @@ it('shows live counts on actual folders and omits the root row and heading total
     groups: [{ id: 'servers', name: 'Servers', parentId: null, sortOrder: 0 }],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   root = document.createElement('div');
   document.body.append(root);
@@ -221,6 +224,7 @@ it('keeps search above both views and preserves the folded tree when switching t
     groups: [{ id: 'group', name: 'Servers', sortOrder: 0, parentId: null }],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const select = vi.fn(),
     create = vi.fn();
@@ -332,6 +336,7 @@ it('adds and removes a favorite through its star without opening a connection or
     groups: [{ id: 'servers', name: 'Servers', sortOrder: 0, parentId: null }],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const onSelect = vi.fn();
   const save = vi.spyOn(hostsApi, 'setFavorite').mockResolvedValue();
@@ -386,7 +391,13 @@ it('shows loading, failure and ungrouped hosts without a root row', async () => 
   hosts.busy = false;
   await nextTick();
   expect(root.textContent).toContain('未能读取主机');
-  hosts.catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+  hosts.catalog = {
+    hosts: [],
+    groups: [],
+    credentials: [],
+    pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
+  };
   await nextTick();
   expect(root.textContent).toContain('尚未添加主机');
   expect(root.querySelector('.group-toggle')).toBeNull();
@@ -462,6 +473,7 @@ async function mountDragTree() {
     ],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const update = vi.spyOn(hostsApi, 'update').mockImplementation(async (_id, input) => {
     Object.assign(host, input);

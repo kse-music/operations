@@ -218,6 +218,91 @@
   font-size: var(--font-size-body);
   color: var(--muted);
 }
+.about-view > .about-product {
+  display: grid;
+  gap: 16px;
+}
+.about-product-intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.about-product-intro img {
+  flex: none;
+}
+.about-product-intro h2 {
+  margin: 0;
+  font-size: var(--font-size-title);
+}
+.about-product-intro p,
+.about-product-capabilities p {
+  margin: 2px 0 0;
+  color: var(--muted);
+}
+.about-product-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--panel);
+}
+.about-product-details > div {
+  min-width: 0;
+  padding: 10px 14px;
+}
+.about-product-details > div + div {
+  border-inline-start: 1px solid var(--border);
+}
+.about-product-details dt {
+  color: var(--muted);
+  font-size: var(--font-size-caption);
+}
+.about-product-details dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.about-product-details time + span {
+  margin-inline-start: 0.35em;
+  white-space: nowrap;
+}
+.about-product-capabilities {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.about-product-capabilities li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+.about-capability-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--control-radius);
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.about-product-links {
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.about-product-links > a.button {
+  color: inherit;
+  text-decoration: none;
+}
+.about-product-links svg {
+  color: var(--accent);
+}
 .about-view .status-dot {
   margin-block: 0;
   vertical-align: middle;
@@ -313,6 +398,14 @@
   }
 }
 @container workspace (max-width: 460px) {
+  .about-product-details,
+  .about-product-capabilities {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .about-product-details > div + div {
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+  }
   .settings-panel .input-action {
     flex-wrap: wrap;
   }

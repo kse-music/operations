@@ -36,6 +36,7 @@ async function mount() {
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   const saved = vi.fn();
   useWorkspaceStore().navigate('files', 'a');

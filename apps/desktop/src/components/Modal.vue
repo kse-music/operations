@@ -3,6 +3,7 @@ import { tr } from '../i18n/messages';
 
 import { onMounted, ref } from 'vue';
 import { X } from '@lucide/vue';
+import HostEnvironmentTargets from './HostEnvironmentTargets.vue';
 const props = defineProps<{
   title: string;
   busy?: boolean;
@@ -10,6 +11,7 @@ const props = defineProps<{
   focusHeading?: boolean;
   panelClass?: string;
   closeLabel?: string;
+  hostIds?: readonly string[];
 }>();
 const emit = defineEmits<{ close: [] }>();
 const dialog = ref<HTMLDialogElement | null>(null);
@@ -40,6 +42,7 @@ function close(): void {
             <X :size="16" aria-hidden="true" />
           </button></header
       ></slot>
+      <HostEnvironmentTargets v-if="hostIds?.some(Boolean)" :host-ids="hostIds" />
       <slot />
     </dialog>
   </Teleport>

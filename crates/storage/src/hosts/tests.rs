@@ -45,6 +45,76 @@ fn favorite_updates_only_the_requested_host_flag_and_survives_reopen() {
 }
 
 #[test]
+fn environment_tags_are_shared_persistent_and_bound_to_existing_hosts() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hosts.sqlite3");
+    let db = Database::open(&path).unwrap();
+    let first = db.host_create(input()).unwrap();
+    let second = db.host_create(input()).unwrap();
+    let tag = |name: &str, color| EnvironmentTagInput {
+        name: name.into(),
+        color,
+    };
+    let created = db
+        .environment_tag_save(None, tag(" Canary ", EnvironmentTagColor::Violet))
+        .unwrap();
+    let canary = created
+        .tags
+        .iter()
+        .find(|tag| tag.name == "Canary")
+        .unwrap();
+    assert!(
+        db.environment_tag_save(None, tag("canary", EnvironmentTagColor::Red))
+            .is_err()
+    );
+    assert!(
+        db.environment_tag_save(None, tag("not a short name", EnvironmentTagColor::Red))
+            .is_err()
+    );
+    db.host_set_environment_tag(&first.id, Some("production"))
+        .unwrap();
+    db.host_set_environment_tag(&first.id, Some(&canary.id))
+        .unwrap();
+    db.host_set_environment_tag(&second.id, Some(&canary.id))
+        .unwrap();
+    assert!(
+        db.host_set_environment_tag(&first.id, Some("missing-tag"))
+            .is_err()
+    );
+    assert!(db.host_set_environment_tag("missing-host", None).is_err());
+    let edited = db
+        .environment_tag_save(Some(&canary.id), tag("发布", EnvironmentTagColor::Green))
+        .unwrap();
+    assert_eq!(edited.assignments.len(), 2);
+    assert_eq!(edited.assignments[&first.id], canary.id);
+    assert_eq!(edited.assignments[&second.id], canary.id);
+    let unchanged = db.host(&first.id).unwrap();
+    assert_eq!(unchanged.config, first.config);
+    assert_eq!(unchanged.updated_at, first.updated_at);
+    let copy = db.host_copy(&first.id).unwrap();
+    let cleared = db.host_set_environment_tag(&first.id, None).unwrap();
+    assert!(!cleared.assignments.contains_key(&first.id));
+    assert_eq!(cleared.assignments[&copy.id], canary.id);
+    db.host_delete(&second.id).unwrap();
+    drop(db);
+
+    let db = Database::open(path).unwrap();
+    let saved = db.catalog().unwrap().environment_tags;
+    let tag = saved.tags.iter().find(|tag| tag.id == canary.id).unwrap();
+    assert_eq!(
+        (&*tag.name, tag.color),
+        ("发布", EnvironmentTagColor::Green)
+    );
+    assert_eq!(saved.assignments.len(), 1);
+    assert_eq!(saved.assignments[&copy.id], canary.id);
+    let deleted = db.environment_tag_delete(&canary.id).unwrap();
+    assert!(deleted.assignments.is_empty());
+    assert!(deleted.tags.iter().all(|tag| tag.id != canary.id));
+    assert!(db.host(&first.id).is_ok());
+    assert!(db.host(&copy.id).is_ok());
+}
+
+#[test]
 fn last_sftp_directory_is_host_scoped_persistent_and_removed_with_host() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");

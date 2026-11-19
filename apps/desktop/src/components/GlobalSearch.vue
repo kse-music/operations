@@ -5,7 +5,6 @@ import { computed, ref } from 'vue';
 import Modal from './Modal.vue';
 import { useHostsStore } from '../stores/hosts';
 import { viewLabels, type WorkspaceView } from '../types/product';
-import { hostDisplayName } from '../types/hosts';
 import { usePluginsStore } from '../stores/plugins';
 import { useWorkspaceStore } from '../stores/workspace';
 import { isSettingsView } from '../types/navigation';
@@ -13,7 +12,6 @@ const plugins = usePluginsStore();
 const workspace = useWorkspaceStore();
 const emit = defineEmits<{
   close: [];
-  selectHost: [hostId: string];
   plugin: [id: string, contribution: string, hostId: string];
   navigate: [view: WorkspaceView, hostId?: string];
 }>();
@@ -33,14 +31,6 @@ const results = computed(() => {
         hostId: hosts.selectedId ?? '',
         entryId: '',
       })),
-    ...(hosts.catalog?.hosts ?? []).map((h) => ({
-      key: h.id,
-      kind: 'host',
-      name: tr('主机 · {0} · {1}@{2}:{3}', hostDisplayName(h), h.username, h.hostname, h.port),
-      view: 'terminals' as WorkspaceView,
-      hostId: h.id,
-      entryId: '',
-    })),
     ...plugins.extensions
       .filter((e) => e.kind === 'command')
       .map((e) => ({
@@ -59,8 +49,7 @@ const results = computed(() => {
 function choose(n: number) {
   const r = results.value[n];
   if (r) {
-    if (r.kind === 'host') emit('selectHost', r.hostId);
-    else if (r.kind === 'plugin' && 'pluginId' in r)
+    if (r.kind === 'plugin' && 'pluginId' in r)
       emit('plugin', String(r.pluginId), r.entryId, r.hostId);
     else emit('navigate', r.view, r.hostId);
     emit('close');
@@ -86,7 +75,7 @@ function key(e: KeyboardEvent) {
       autofocus
       class="global-search-input"
       :aria-label="tr('全局搜索内容')"
-      :placeholder="tr('搜索主机、工作区和插件命令…')"
+      :placeholder="tr('搜索工作区、设置和插件命令…')"
       aria-controls="global-search-results"
       :aria-activedescendant="results[index] ? `result-${results[index]!.key}` : undefined"
       @input="index = -1"

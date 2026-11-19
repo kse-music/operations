@@ -14,7 +14,11 @@ watch(
 );
 </script>
 <template>
-  <Modal v-if="plugins.prompt" :title="plugins.prompt.title" @close="plugins.decide(false)"
+  <Modal
+    v-if="plugins.prompt"
+    :title="plugins.prompt.title"
+    :host-ids="plugins.prompt.hostIds"
+    @close="plugins.decide(false)"
     ><p class="plugin-prompt">{{ plugins.prompt.message }}</p>
     <label v-if="plugins.prompt.confirmationText"
       >{{ tr('请输入确认文字：') }}<code>{{ plugins.prompt.confirmationText }}</code

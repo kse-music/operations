@@ -224,6 +224,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           !(await plugins.ask(
             tr('插件配置尚未保存'),
             tr('关闭工作区会放弃插件中未保存的文本。是否继续关闭？'),
+            undefined,
+            undefined,
+            { hostIds: [tab.hostId] },
           ))
         )
           continue;

@@ -97,12 +97,9 @@ try {
     );
     const about = page.getByRole('button', { name: '关于', exact: true });
     await about.click();
-    const aboutPage = page.getByRole('region', { name: '关于 ServerDeck', exact: true });
+    const aboutPage = page.getByRole('region', { name: '关于', exact: true });
     await aboutPage.waitFor();
-    assert.equal(
-      await page.getByRole('dialog', { name: '关于 ServerDeck', exact: true }).count(),
-      0,
-    );
+    assert.equal(await page.getByRole('dialog', { name: '关于', exact: true }).count(), 0);
     assert.match(await aboutPage.textContent(), /暂不可用（本地后端未就绪）/);
     assert.equal(await about.getAttribute('aria-current'), 'page');
     await about.click();

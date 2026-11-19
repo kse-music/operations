@@ -934,6 +934,7 @@ defineExpose({
       v-if="tab.sessionId && tab.host"
       :key="tab.sessionId"
       ref="dropUpload"
+      :host-id="tab.host.id"
       :session-id="tab.sessionId"
       :target="name"
       :enabled="dropEnabled"
@@ -952,6 +953,7 @@ defineExpose({
     <Modal
       v-if="trust && active && (standalone || store.focused === tab.key)"
       :title="tr('确认 SSH 主机指纹')"
+      :host-ids="tab.host ? [tab.host.id] : undefined"
       @close="confirm(false)"
     >
       <p>
@@ -970,7 +972,11 @@ defineExpose({
         </button>
       </footer>
     </Modal>
-    <Modal v-if="pendingPaste !== null" :title="tr('确认大文本粘贴')" @close="pendingPaste = null"
+    <Modal
+      v-if="pendingPaste !== null"
+      :title="tr('确认大文本粘贴')"
+      :host-ids="tab.host ? [tab.host.id] : undefined"
+      @close="pendingPaste = null"
       ><p>
         {{ tr(' 将向 ') }}{{ name }}{{ tr(' 发送 ') }}{{ pendingPaste.length
         }}{{ tr(' 个字符、约 ') }}{{ pendingPaste.split(/\r?\n/).length

@@ -13,6 +13,12 @@ const confirmed = ref(false),
 const task = computed(() =>
   store.tasks.find((task) => task.id === store.externalDocument?.transferId),
 );
+function hostIds(sessionId: string): string[] {
+  const connection = Object.values(store.connections).find(
+    (connection) => connection.id === sessionId,
+  );
+  return connection ? [connection.host.id] : [];
+}
 watch(
   () => store.externalDocument?.token,
   () => {
@@ -33,6 +39,7 @@ async function save(): Promise<void> {
   <Modal
     v-if="store.openIssue"
     :title="tr('打开远程文件')"
+    :host-ids="hostIds(store.openIssue.sessionId)"
     :busy="store.externalBusy"
     @close="
       store.openIssue = null;
@@ -72,6 +79,7 @@ async function save(): Promise<void> {
   <Modal
     v-if="store.externalDocument"
     :title="tr('外部编辑远程文件')"
+    :host-ids="hostIds(store.externalDocument.sessionId)"
     :busy="store.externalBusy"
     @close="closing = true"
   >
@@ -139,6 +147,7 @@ async function save(): Promise<void> {
   <Modal
     v-if="closing && store.externalDocument"
     :title="tr('结束外部编辑')"
+    :host-ids="hostIds(store.externalDocument.sessionId)"
     :busy="store.externalBusy"
     @close="closing = false"
   >

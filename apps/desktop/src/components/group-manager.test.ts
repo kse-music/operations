@@ -26,7 +26,13 @@ it.each([true, false])(
     });
     pinia = createPinia();
     setActivePinia(pinia);
-    useHostsStore().catalog = { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+    useHostsStore().catalog = {
+      hosts: [],
+      groups: [],
+      credentials: [],
+      pendingSecretDeletions: 0,
+      environmentTags: { tags: [], assignments: {} },
+    };
     const group = { id: 'group', name: 'Production', sortOrder: 0, parentId: null };
     const save = vi.spyOn(hostsApi, 'groupSave');
     if (success) save.mockResolvedValue(group);

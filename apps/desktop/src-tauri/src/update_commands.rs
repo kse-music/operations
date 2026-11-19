@@ -231,9 +231,8 @@ pub async fn app_update_check<R: Runtime>(
     updates.ensure_open()?;
     let application = app.state::<Application>();
     let preferences = application.update_preferences().await?;
-    let at = now()?;
     let downloaded = updates.lock()?.bytes.is_some();
-    if !supported() || (automatic && !preferences.should_check(at)) || downloaded {
+    if !supported() || !preferences.allows_check(automatic) || downloaded {
         return updates.status(preferences).map_err(Into::into);
     }
     let ignored_version = if automatic {
@@ -241,7 +240,7 @@ pub async fn app_update_check<R: Runtime>(
     } else {
         None
     };
-    application.record_update_check(at, false).await?;
+    application.record_update_check(now()?, false).await?;
     let (cancel, mut cancelled) = watch::channel(false);
     {
         let mut inner = updates.lock()?;

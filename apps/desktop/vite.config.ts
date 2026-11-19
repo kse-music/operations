@@ -3,7 +3,7 @@ import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
   define: {
-    'import.meta.env.APP_RELEASE_TIME': JSON.stringify(new Date().toISOString()),
+    'import.meta.env.APP_BUILD_TIME': JSON.stringify(new Date().toISOString()),
   },
   resolve: {
     alias: {

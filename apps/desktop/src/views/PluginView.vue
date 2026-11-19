@@ -160,6 +160,9 @@ async function connect() {
             tr('旧运维/SFTP 租约将关闭，终端保持连接。'),
             'Closes old operations/SFTP leases; terminals remain connected.',
           ),
+          undefined,
+          undefined,
+          { hostIds: [host.value.id] },
         ))
       )
         return;
@@ -359,6 +362,7 @@ useErrorNotifications(error);
     <Modal
       v-if="active && trust"
       :title="plugins.t(tr('核验 SSH 主机指纹'), 'Verify SSH host key')"
+      :host-ids="[hostId]"
       @close="acceptTrust(false)"
       ><p>{{ trust.hostname }}:{{ trust.port }} · {{ trust.algorithm }}</p>
       <code class="fingerprint">{{ trust.fingerprint }}</code>

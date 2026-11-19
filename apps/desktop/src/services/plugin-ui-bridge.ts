@@ -177,6 +177,7 @@ export function createPluginUiBridge(input: {
                 tr('\n请通过可信渠道核对此真实指纹。'),
               undefined,
               owner,
+              { hostIds: [hostId] },
             );
             const id = file ? files.connections[hostId]?.id : ops.connections[hostId]?.session?.id;
             if (id) await terminalApi.trust(id, accepted && active());

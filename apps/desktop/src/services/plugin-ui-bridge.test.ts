@@ -36,6 +36,7 @@ it.each(['elevated', 'switchingUser'] as const)(
       groups: [],
       credentials: [],
       pendingSecretDeletions: 0,
+      environmentTags: { tags: [], assignments: {} },
     };
     const files = useFilesStore();
     files.connections.host = {
@@ -306,6 +307,7 @@ it('does not expose host inventory or lease metadata to a UI-only grant', async 
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   useOpsStore().connections.host = {
     host: useHostsStore().catalog!.hosts[0]!,
@@ -477,6 +479,7 @@ it('waits for late SSH fingerprint metadata and only the trusted parent can acce
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   grant('ui.contribute', 'ssh.execute');
   const ops = useOpsStore();
@@ -531,6 +534,7 @@ it('preserves connection failure diagnostics and stops waiting when its page hid
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   grant('ui.contribute', 'ssh.execute');
   const ops = useOpsStore();

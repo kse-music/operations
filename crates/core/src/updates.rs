@@ -38,11 +38,8 @@ impl UpdatePreferences {
         Ok(())
     }
 
-    pub fn should_check(&self, now: u64) -> bool {
-        self.auto_check
-            && self
-                .last_attempt_at
-                .is_none_or(|at| now.saturating_sub(at) >= 86_400)
+    pub fn allows_check(&self, automatic: bool) -> bool {
+        !automatic || self.auto_check
     }
 }
 
@@ -51,16 +48,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn automatic_checks_respect_opt_out_daily_limit_and_clock_changes() {
-        let mut preferences = UpdatePreferences::default();
-        assert!(preferences.should_check(200_000));
-        preferences.last_attempt_at = Some(200_000);
-        for now in [100_000, 200_000, 286_399] {
-            assert!(!preferences.should_check(now));
-        }
-        assert!(preferences.should_check(286_400));
+    fn automatic_checks_use_the_saved_toggle_even_after_a_previous_attempt() {
+        let mut preferences = UpdatePreferences {
+            last_attempt_at: Some(200_000),
+            last_checked_at: Some(200_000),
+            ..Default::default()
+        };
+        assert!(preferences.allows_check(true));
         preferences.auto_check = false;
-        assert!(!preferences.should_check(900_000));
+        assert!(!preferences.allows_check(true));
+        assert!(preferences.allows_check(false));
     }
 
     #[test]

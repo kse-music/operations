@@ -15,7 +15,7 @@ import { terminalApi } from './services/terminal';
 import { forwardingApi } from './services/forwarding';
 import { hostsApi } from './services/hosts';
 import { filesApi } from './services/files';
-import { hostInput } from './types/hosts';
+import { hostInput, type EnvironmentTags } from './types/hosts';
 import * as ipc from './services/ipc';
 import { defaultTerminalPreferences } from './types/preferences';
 import { defaultProductPreferences } from './types/product';
@@ -153,7 +153,16 @@ it('switches the shell and built-in plugin labels while preserving sessions and 
     [...document.querySelectorAll('.settings-navigation .nav-item')].map((item) =>
       item.textContent?.trim(),
     ),
-  ).toEqual(['General', 'Terminal', 'Shortcuts', 'Data and storage', 'Models', 'Plugins', 'About']);
+  ).toEqual([
+    'General',
+    'Terminal',
+    'Shortcuts',
+    'Data and storage',
+    'Environment tags',
+    'Models',
+    'Plugins',
+    'About',
+  ]);
   expect(document.querySelector('.host-tree-section')).toBe(tree);
   expect(document.querySelector('.host-tree-section')?.textContent).toContain('通用');
   expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
@@ -294,6 +303,7 @@ beforeEach(async () => {
     groups: [],
     credentials: [],
     pendingSecretDeletions: 0,
+    environmentTags: { tags: [], assignments: {} },
   };
   root = document.createElement('div');
   document.body.append(root);
@@ -314,6 +324,120 @@ afterEach(() => {
     Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShowModal);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
   vi.unstubAllGlobals();
+});
+
+it('manages shared environment tags and applies them to context-menu targets and confirmations', async () => {
+  const workspace = useWorkspaceStore();
+  const hosts = useHostsStore();
+  const plugins = usePluginsStore();
+  let environment: EnvironmentTags = { tags: [], assignments: {} };
+  const save = vi.spyOn(hostsApi, 'saveEnvironmentTag').mockImplementation(async (id, input) => {
+    environment = { ...environment, tags: [{ id: id ?? 'release', ...input }] };
+    return environment;
+  });
+  const assign = vi
+    .spyOn(hostsApi, 'setEnvironmentTag')
+    .mockImplementation(async (hostId, tagId) => {
+      const assignments = { ...environment.assignments };
+      if (tagId) assignments[hostId] = tagId;
+      else delete assignments[hostId];
+      environment = { ...environment, assignments };
+      return environment;
+    });
+  const remove = vi.spyOn(hostsApi, 'deleteEnvironmentTag').mockImplementation(async () => {
+    environment = { tags: [], assignments: {} };
+    return environment;
+  });
+  const hostRow = (id: string) =>
+    root.querySelector<HTMLButtonElement>(`.tree-host[data-host-id="${id}"]`)!;
+  const context = async (id: string) => {
+    hostRow(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await flush();
+    document.querySelector<HTMLButtonElement>('.host-tree-menu [aria-haspopup="menu"]')!.click();
+    await flush();
+    return document.querySelector('.host-environment-menu')!;
+  };
+  const menuAction = (menu: Element, text: string) =>
+    [...menu.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === text,
+    )!;
+  const editTag = async (dialogLabel: string, name: string, color: string) => {
+    const dialog = document.querySelector<HTMLDialogElement>(
+      `dialog[aria-label="${dialogLabel}"]`,
+    )!;
+    const text = dialog.querySelector<HTMLInputElement>('input:not([type])')!;
+    text.value = name;
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+    dialog.querySelector<HTMLInputElement>(`input[value="${color}"]`)!.click();
+    dialog
+      .querySelector('form')!
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flush();
+  };
+
+  workspace.navigate('terminals', 'b');
+  await flush();
+  const menu = await context('a');
+  menuAction(menu, '管理环境标签…').click();
+  await flush();
+  expect(workspace.settingsView).toBe('settingsEnvironmentTags');
+  const page = root.querySelector('.environment-settings')!;
+  expect(page.textContent).toContain('暂无环境标签');
+  menuAction(page, '新建标签').click();
+  await flush();
+  await editTag('新建标签', '灰度', 'violet');
+  expect(save).toHaveBeenLastCalledWith(null, { name: '灰度', color: 'violet' });
+  workspace.showHome();
+  await flush();
+  for (const id of ['a', 'b']) {
+    menuAction(await context(id), '灰度').click();
+    await flush();
+    expect(hostRow(id).querySelector('.environment-tag')?.textContent).toBe('灰度');
+  }
+  expect(workspace.current?.hostId).toBe('b');
+  expect(assign.mock.calls).toEqual([
+    ['a', 'release'],
+    ['b', 'release'],
+  ]);
+  const tabBadge = () => root.querySelector('.workspace-tab[data-host-id="b"] .environment-tag');
+  expect(tabBadge()?.textContent).toBe('灰度');
+
+  await openNavigation('环境标签');
+  expect(root.querySelector('.environment-settings table')?.textContent).toContain('2 台主机');
+  root.querySelector<HTMLButtonElement>('[aria-label="编辑标签 灰度"]')!.click();
+  await flush();
+  await editTag('编辑标签', '生产演练', 'green');
+  expect(save).toHaveBeenLastCalledWith('release', { name: '生产演练', color: 'green' });
+  workspace.showHome();
+  await flush();
+  expect(tabBadge()?.getAttribute('data-color')).toBe('green');
+  expect(hostRow('a').querySelector('.environment-tag')?.textContent).toBe('生产演练');
+  const decision = plugins.ask('确认重启', '操作说明', undefined, undefined, { hostIds: ['b'] });
+  await flush();
+  const review = document.querySelector('dialog[aria-label="确认重启"] .host-environment-targets')!;
+  expect(review.textContent).toContain('Host b');
+  expect(review.textContent).toContain('生产演练');
+  expect(review.textContent).not.toContain('Host a');
+  plugins.decide(false);
+  await decision;
+  const selected = await context('b');
+  expect(selected.querySelector('[role="menuitemradio"]')?.getAttribute('aria-checked')).toBe(
+    'true',
+  );
+  menuAction(selected, '清除标签').click();
+  await flush();
+  expect(tabBadge()).toBeNull();
+  expect(hosts.environmentTag('a')?.id).toBe('release');
+
+  await openNavigation('环境标签');
+  root.querySelector<HTMLButtonElement>('[aria-label="删除标签 生产演练"]')!.click();
+  await flush();
+  const deleting = document.querySelector('dialog[aria-label="删除环境标签？"]')!;
+  expect(deleting.textContent).toContain('1 台主机');
+  menuAction(deleting, '删除').click();
+  await flush();
+  expect(remove).toHaveBeenCalledExactlyOnceWith('release');
+  expect(hosts.environmentTag('a')).toBeUndefined();
 });
 
 it('opens the existing host and import dialogs from the welcome cards without starting a connection', async () => {
@@ -753,17 +877,18 @@ it('opens About inside the settings page and preserves the connected terminal', 
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
   await openNavigation('关于');
   const page = document.querySelector('.about-view')!;
-  expect(page.querySelector('h1')?.textContent).toBe('关于 ServerDeck');
+  expect(page.querySelector('h1')?.textContent).toBe('关于');
+  expect(page.querySelector('[aria-label="产品信息"] h2')?.textContent).toBe('ServerDeck');
   expect(page.textContent).toContain('v9.8.7-test.1');
   expect(
     [...page.querySelectorAll('[aria-label="产品信息"] dt')].map((label) => label.textContent),
-  ).toEqual(['应用版本', '发布时间']);
+  ).toEqual(['应用版本', '构建时间']);
   expect(page.textContent).not.toContain('Rust · Tauri 2 · Vue 3');
-  const releaseTime = page.querySelector('time')!;
-  expect(releaseTime.dateTime).toBe(import.meta.env.APP_RELEASE_TIME);
-  expect(Number.isFinite(Date.parse(releaseTime.dateTime))).toBe(true);
-  expect(releaseTime.textContent).toMatch(/^\d{4}年\d{1,2}月\d{1,2}日 \d{2}:\d{2}:\d{2}$/);
-  expect(releaseTime.parentElement?.textContent).toContain('北京时间');
+  const buildTime = page.querySelector('time')!;
+  expect(buildTime.dateTime).toBe(import.meta.env.APP_BUILD_TIME);
+  expect(Number.isFinite(Date.parse(buildTime.dateTime))).toBe(true);
+  expect(buildTime.textContent).toMatch(/^\d{4}年\d{1,2}月\d{1,2}日 \d{2}:\d{2}:\d{2}$/);
+  expect(buildTime.parentElement?.textContent).toContain('北京时间');
   expect(page.textContent).toContain('schema v10');
   expect(page.querySelector('[data-testid="backend-ready"]')).not.toBeNull();
   expect(workspace.current).toMatchObject({ key: 'host:a', view: 'terminals', hostId: 'a' });
@@ -774,6 +899,52 @@ it('opens About inside the settings page and preserves the connected terminal', 
   expect(document.querySelector('.about-view')).toBeNull();
   expect(JSON.stringify(terminals.tabs)).toBe(original);
   expect(close).not.toHaveBeenCalled();
+});
+
+it('shows localized About resources and reports failures to open them', async () => {
+  const open = vi.spyOn(terminalApi, 'openLink').mockResolvedValue();
+  await openNavigation('关于');
+  const product = document.querySelector('[aria-label="产品信息"]')!;
+  const featureNames = () =>
+    [...product.querySelectorAll('li strong')].map((label) => label.textContent?.trim());
+  expect(featureNames()).toEqual(['主机管理', '本地与 SSH 终端', 'SFTP 文件', '插件扩展']);
+  expect(product.querySelector('header p')?.textContent).toContain('系统凭据库');
+  const links = [...product.querySelectorAll('a')];
+  expect(links.map((link) => link.textContent?.trim())).toEqual([
+    '使用文档',
+    '发布记录',
+    '问题反馈',
+  ]);
+  open.mockRejectedValueOnce(new Error('默认浏览器不可用'));
+  for (const link of links) link.click();
+  await flush();
+  const urls = [
+    'https://ops.hiboot.cn/docs/',
+    'https://github.com/kse-music/operations/releases',
+    'https://github.com/kse-music/operations/issues',
+  ];
+  expect(links.map((link) => link.href)).toEqual(urls);
+  expect(open.mock.calls).toEqual(urls.map((url) => [url]));
+  expect(useNotificationsStore().items).toContainEqual(
+    expect.objectContaining({ text: '无法打开链接：默认浏览器不可用', error: true }),
+  );
+
+  loadSidebarConfig();
+  useApplicationStore().state!.config.product.language = 'en-US';
+  await flush();
+  expect(document.querySelector('.about-view h1')?.textContent).toBe('About');
+  expect(product.getAttribute('aria-label')).toBe('Product information');
+  expect(featureNames()).toEqual([
+    'Host management',
+    'Local and SSH terminals',
+    'SFTP files',
+    'Plugins',
+  ]);
+  expect(links.map((link) => link.textContent?.trim())).toEqual([
+    'User guide',
+    'Release history',
+    'Report an issue',
+  ]);
 });
 
 it('opens plugin management inside settings without adding a tab or changing the active host', async () => {
@@ -898,7 +1069,7 @@ it('keeps the About page available before bootstrap and updates its real version
   } finally {
     vi.useRealTimers();
   }
-  expect(document.querySelector('dialog[aria-label="关于 ServerDeck"]')).toBeNull();
+  expect(document.querySelector('dialog[aria-label="关于"]')).toBeNull();
 });
 
 it('preserves settings drafts across all categories and focuses invalid hidden fields', async () => {

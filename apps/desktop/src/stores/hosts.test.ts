@@ -69,7 +69,13 @@ describe('host search and mutation boundary', () => {
     setActivePinia(createPinia());
     mockIPC((command) => {
       if (command === 'host_list')
-        return { hosts: [], groups: [], credentials: [], pendingSecretDeletions: 0 };
+        return {
+          hosts: [],
+          groups: [],
+          credentials: [],
+          pendingSecretDeletions: 0,
+          environmentTags: { tags: [], assignments: {} },
+        };
       throw { code: 'VALIDATION', message: '地址无效' };
     });
     const store = useHostsStore();
@@ -90,7 +96,13 @@ describe('host search and mutation boundary', () => {
       authType: 'password' as const,
       credentialId: 'existing-ref',
     };
-    store.catalog = { hosts: [original], groups: [], credentials: [], pendingSecretDeletions: 0 };
+    store.catalog = {
+      hosts: [original],
+      groups: [],
+      credentials: [],
+      pendingSecretDeletions: 0,
+      environmentTags: { tags: [], assignments: {} },
+    };
     store.selectedId = original.id;
     store.search = 'prod';
     const invoke = vi.fn((command, args) => {
@@ -123,6 +135,7 @@ describe('host search and mutation boundary', () => {
       groups: [original],
       credentials: [],
       pendingSecretDeletions: 0,
+      environmentTags: { tags: [], assignments: {} },
     };
     const invoke = vi.fn((command, args) => {
       expect(command).toBe('group_save');
