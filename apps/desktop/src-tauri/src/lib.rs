@@ -315,6 +315,7 @@ pub fn command_handler<R: tauri::Runtime>()
         zmodem_commands::terminal_zmodem_write,
         commands::terminal_local_open,
         commands::terminal_ssh_saved_sessions,
+        commands::terminal_saved_title_commands,
         commands::terminal_ssh_save,
         commands::terminal_ssh_remove_saved,
         commands::terminal_local_saved_sessions,

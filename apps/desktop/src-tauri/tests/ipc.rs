@@ -366,6 +366,45 @@ fn administrator_terminal_requires_main_window_local_origin_and_valid_size_befor
 }
 
 #[test]
+fn saved_terminal_title_commands_are_available_only_to_the_local_main_window() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .manage(
+            Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+                .unwrap(),
+        )
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let editor = tauri::WebviewWindowBuilder::new(&app, "remote-editor-test", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let command = "terminal_saved_title_commands";
+    for host_id in ["", "unconfigured-host"] {
+        let input = json!({"hostId": host_id});
+        let response = get_ipc_response(&main, request(command, input.clone(), origin))
+            .expect("local main window can read saved terminal title commands");
+        assert_eq!(response.deserialize::<Value>().unwrap(), json!({}));
+        for (window, url) in [(&editor, origin), (&main, "https://untrusted.invalid")] {
+            let error = get_ipc_response(window, request(command, input.clone(), url)).unwrap_err();
+            assert!(
+                error
+                    .as_str()
+                    .is_some_and(|text| text.contains("not allowed"))
+            );
+        }
+    }
+}
+
+#[test]
 fn local_drives_use_real_system_roots_and_main_window_acl() {
     let directory = tempfile::tempdir().unwrap();
     let application =

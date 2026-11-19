@@ -1,6 +1,8 @@
 use super::*;
 use serde::{Deserialize, Serialize};
-use serverdeck_core::terminal::{SavedSshTerminal, validate_terminal_title};
+use serverdeck_core::terminal::{
+    SavedSshTerminal, validate_terminal_title, validate_title_command_pane,
+};
 use uuid::Uuid;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -24,6 +26,7 @@ impl SshSessionRecord {
     fn validate(&self) -> Result<(), Error> {
         validate_terminal_title(&self.session.title)?;
         self.session.layout.validate(self.session.pane_count)?;
+        validate_title_command_pane(self.session.title_command_pane, self.session.pane_count)?;
         if self.session.layout_only_panes > self.session.pane_count
             || !(1..=1024 * 1024).contains(&self.blob_size)
         {
@@ -41,7 +44,7 @@ struct Sessions {
 fn key(host: &str) -> String {
     format!("ssh_terminal_sessions:{host}")
 }
-fn read(conn: &Connection, host: &str) -> Result<Vec<SshSessionRecord>, Error> {
+fn read(conn: &Connection, host: &str) -> Result<Sessions, Error> {
     let raw: Option<String> = conn
         .query_row(
             "SELECT value FROM application_settings WHERE key=?1",
@@ -51,11 +54,22 @@ fn read(conn: &Connection, host: &str) -> Result<Vec<SshSessionRecord>, Error> {
         .optional()
         .map_err(storage_error)?;
     let Some(raw) = raw else {
-        return Ok(vec![]);
+        return Ok(Sessions {
+            version: 2,
+            sessions: vec![],
+        });
     };
-    let data: Sessions = serde_json::from_str(&raw).map_err(storage_error)?;
-    if data.version != 1 {
-        return Err(Error::UnsupportedConfig(data.version));
+    let json = super::config_migrations::json(&raw)?;
+    let data: Sessions = serde_json::from_value(json.clone()).map_err(storage_error)?;
+    match data.version {
+        1 if json["sessions"].as_array().is_some_and(|sessions| {
+            sessions
+                .iter()
+                .all(|record| record["session"].get("titleCommandPane").is_none())
+        }) => {}
+        2 => {}
+        1 => return Err(Error::Validation("SSH 会话快照格式无效")),
+        version => return Err(Error::UnsupportedConfig(version)),
     }
     let mut ids = std::collections::HashSet::new();
     if data.sessions.len() > 32 {
@@ -67,7 +81,7 @@ fn read(conn: &Connection, host: &str) -> Result<Vec<SshSessionRecord>, Error> {
             return Err(Error::Validation("SSH 会话标识重复"));
         }
     }
-    Ok(data.sessions)
+    Ok(data)
 }
 fn retire(tx: &Connection, record: &SshSessionRecord) -> Result<(), Error> {
     tx.execute(
@@ -78,7 +92,7 @@ fn retire(tx: &Connection, record: &SshSessionRecord) -> Result<(), Error> {
     Ok(())
 }
 pub(crate) fn remove_host(tx: &Connection, host: &str) -> Result<(), Error> {
-    for record in read(tx, host)? {
+    for record in read(tx, host)?.sessions {
         retire(tx, &record)?;
     }
     tx.execute("DELETE FROM application_settings WHERE key=?1", [key(host)])
@@ -87,7 +101,7 @@ pub(crate) fn remove_host(tx: &Connection, host: &str) -> Result<(), Error> {
 }
 impl Database {
     pub fn ssh_terminal_sessions(&self, host: &str) -> Result<Vec<SshSessionRecord>, Error> {
-        read(&self.connect()?, host)
+        Ok(read(&self.connect()?, host)?.sessions)
     }
     fn edit_ssh_sessions<T>(
         &self,
@@ -108,14 +122,20 @@ impl Database {
         if !exists {
             return Err(Error::NotFound);
         }
-        let mut sessions = read(&tx, host)?;
-        let result = edit(&tx, &mut sessions)?;
-        let raw = serde_json::to_string(&Sessions {
-            version: 1,
-            sessions,
-        })
-        .map_err(storage_error)?;
+        let mut stored = read(&tx, host)?;
+        let upgrading = stored.version == 1;
+        if upgrading {
+            super::migrations::backup(self, serverdeck_core::DATABASE_VERSION)
+                .map_err(|error| super::migrations::failure("SSH 会话备份", error))?;
+            // Existing titles carry no provenance and remain authoritative.
+            stored.version = 2;
+        }
+        let result = edit(&tx, &mut stored.sessions)?;
+        let raw = serde_json::to_string(&stored).map_err(storage_error)?;
         tx.execute("INSERT INTO application_settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key(host), raw]).map_err(storage_error)?;
+        if upgrading {
+            super::migrations::integrity(&tx)?;
+        }
         tx.commit().map_err(storage_error)?;
         Ok(result)
     }
@@ -170,6 +190,7 @@ impl Database {
         host: &str,
         id: Uuid,
         title: String,
+        title_command_pane: Option<usize>,
     ) -> Result<SavedSshTerminal, Error> {
         validate_terminal_title(&title)?;
         self.edit_ssh_sessions(host, |_, entries| {
@@ -177,7 +198,9 @@ impl Database {
                 .iter_mut()
                 .find(|r| r.session.id == id)
                 .ok_or(Error::NotFound)?;
+            validate_title_command_pane(title_command_pane, entry.session.pane_count)?;
             entry.session.title = title;
+            entry.session.title_command_pane = title_command_pane;
             Ok(entry.session.clone())
         })
     }

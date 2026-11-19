@@ -1,10 +1,11 @@
 import { tr } from '../i18n/messages';
 import { useErrorNotifications } from '../composables/error-notifications';
 import { defineStore } from 'pinia';
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { hostDisplayName, type Host } from '../types/hosts';
 import { terminalApi } from '../services/terminal';
 import { errorMessage } from '../services/ipc';
+import { sameHostConnection } from '../services/product-links';
 import type { LayoutNode, SplitAxis } from '../types/workspace';
 import { removeLeaf, replaceLeaf, resizeNode } from '../services/layout';
 import { usePluginsStore } from './plugins';
@@ -33,12 +34,14 @@ export interface TerminalTab {
   key: string;
   title: string;
   renamed?: boolean;
+  generatedTitle?: boolean;
   sessionNumber: number;
   panes: TerminalPaneModel[];
   layout: LayoutNode;
   savedId?: string;
 }
 type ConnectionAction = 'reconnect' | 'disconnect';
+type SavedSession = SavedLocalTerminal | SavedSshTerminal;
 export const useTerminalsStore = defineStore('terminals', () => {
   const tabs = ref<TerminalTab[]>([]),
     active = ref(''),
@@ -55,7 +58,30 @@ export const useTerminalsStore = defineStore('terminals', () => {
   const savedLoading = ref(false),
     savedError = ref<string | null>(null),
     saving = ref('');
-  let savedLoaded = false;
+  const savedRecords = ref(new Map<string, SavedSession[]>());
+  const savedCommands = reactive(new WeakMap<SavedSession, string>());
+  const deleting = ref<{ hostId: string; id: string } | null>(null);
+  let localLoad: Promise<void> | undefined;
+  function savedSessions(hostId: string): readonly SavedSession[] {
+    return savedRecords.value.get(hostId) ?? [];
+  }
+  function savedSessionTitle(entry: SavedSession): string {
+    const command = savedCommands.get(entry);
+    return command ? `${entry.title} · ${command}` : entry.title;
+  }
+  async function loadSavedTitleCommands(hostId: string): Promise<void> {
+    const entries = savedSessions(hostId).filter((entry) => entry.titleCommandPane !== undefined);
+    if (!entries.length) return;
+    try {
+      const commands = await terminalApi.savedTitleCommands(hostId);
+      for (const entry of entries) {
+        const preview = commands[entry.id];
+        if (preview) savedCommands.set(entry, preview);
+      }
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    }
+  }
   function runningPaneCount(): number {
     return panes.value.filter((pane) => pane.connectRequested || pane.state !== 'idle').length;
   }
@@ -84,6 +110,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       key: crypto.randomUUID(),
       title: entry.title,
       renamed: true,
+      generatedTitle: entry.titleCommandPane !== undefined,
       savedId: entry.id,
       sessionNumber: nextSessionNumber(host?.id ?? ''),
       panes: restored,
@@ -91,30 +118,32 @@ export const useTerminalsStore = defineStore('terminals', () => {
     };
   }
   async function loadSaved(): Promise<void> {
-    if (savedLoaded || savedLoading.value) return;
-    savedLoading.value = true;
-    savedError.value = null;
-    try {
-      const saved = await terminalApi.savedLocalSessions();
-      for (const entry of saved) {
-        if (tabs.value.some((tab) => tab.savedId === entry.id)) continue;
-        tabs.value.push(restoreSavedTab(entry));
-      }
-      savedLoaded = true;
-    } catch (cause) {
-      savedError.value = errorMessage(cause);
-      error.value = savedError.value;
-    } finally {
-      savedLoading.value = false;
+    if (savedRecords.value.has('')) return;
+    if (!localLoad) {
+      savedLoading.value = true;
+      savedError.value = null;
+      localLoad = Promise.resolve()
+        .then(() => terminalApi.savedLocalSessions())
+        .then((records) => {
+          savedRecords.value.set('', records);
+        })
+        .catch((cause: unknown) => {
+          savedError.value = errorMessage(cause);
+          error.value = savedError.value;
+        })
+        .finally(() => {
+          localLoad = undefined;
+          savedLoading.value = false;
+        });
     }
+    await localLoad;
   }
-  const sshLoaded = new Set<string>();
   const sshLoads = new Map<string, Promise<void>>();
   const sshLoading = ref(new Set<string>());
   const sshErrors = ref<Record<string, string>>({});
   async function loadHostSessions(host: Host): Promise<boolean> {
     const id = host.id;
-    if (!sshLoaded.has(id)) {
+    if (!savedRecords.value.has(id)) {
       let pending = sshLoads.get(id);
       if (!pending) {
         sshLoading.value.add(id);
@@ -122,11 +151,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
         pending = terminalApi
           .savedSshSessions(id)
           .then((records) => {
-            for (const entry of records) {
-              if (!hostTabs(id).some((t) => t.savedId === entry.id))
-                tabs.value.push(restoreSavedTab(entry, host));
-            }
-            sshLoaded.add(id);
+            savedRecords.value.set(id, records);
           })
           .catch((cause: unknown) => {
             sshErrors.value[id] = errorMessage(cause);
@@ -139,7 +164,73 @@ export const useTerminalsStore = defineStore('terminals', () => {
       }
       await pending;
     }
-    return sshLoaded.has(id);
+    return savedRecords.value.has(id);
+  }
+  function isDeletingSaved(hostId: string, id: string | undefined): boolean {
+    return deleting.value?.hostId === hostId && deleting.value.id === id;
+  }
+  function restoreSavedSession(host: Host | null, id: string): void {
+    const hostId = host?.id ?? '';
+    if (isDeletingSaved(hostId, id)) return;
+    const existing = hostTabs(hostId).find((tab) => tab.savedId === id);
+    if (existing) {
+      select(existing.key);
+      if (canReconnect(existing.key)) {
+        const snapshot = existing.panes[0]?.host;
+        if (host && snapshot && !sameHostConnection(snapshot, host)) {
+          error.value = tr('主机连接配置已变更，请从主机树重新打开后再重新连接会话。');
+          return;
+        }
+        void changeConnection(existing.key, 'reconnect');
+      }
+      return;
+    }
+    const record = savedSessions(hostId).find((entry) => entry.id === id);
+    if (!record) return;
+    if (runningPaneCount() + ('panes' in record ? record.panes.length : record.paneCount) > 32) {
+      error.value = tr('最多打开 32 个终端窗格。');
+      return;
+    }
+    const tab = restoreSavedTab(record, host);
+    tabs.value.push(tab);
+    select(tab.key);
+  }
+  function canDeleteSaved(hostId: string, id: string): boolean {
+    if (saving.value || deleting.value || !savedSessions(hostId).some((entry) => entry.id === id))
+      return false;
+    const tab = hostTabs(hostId).find((item) => item.savedId === id);
+    return (
+      !tab ||
+      (!changingConnections.value.includes(tab.key) &&
+        tab.panes.every(
+          (pane) =>
+            !pane.savedSource ||
+            (!pane.connectRequested &&
+              (['closed', 'failed', 'disconnected'].includes(pane.state) || !!pane.sessionId)),
+        ))
+    );
+  }
+  async function deleteSavedSession(hostId: string, id: string): Promise<void> {
+    if (!canDeleteSaved(hostId, id)) return;
+    deleting.value = { hostId, id };
+    error.value = null;
+    try {
+      if (hostId) await terminalApi.removeSavedSshSession(hostId, id);
+      else await terminalApi.removeSavedLocalSession(id);
+      savedRecords.value.set(
+        hostId,
+        savedSessions(hostId).filter((entry) => entry.id !== id),
+      );
+      const tab = hostTabs(hostId).find((item) => item.savedId === id);
+      if (tab) {
+        delete tab.savedId;
+        for (const pane of tab.panes) delete pane.savedSource;
+      }
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    } finally {
+      deleting.value = null;
+    }
   }
   function canSave(key: string): boolean {
     const tab = tabs.value.find((tab) => tab.key === key);
@@ -147,6 +238,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       !!tab &&
       (!!tab.panes[0]?.host || navigator.platform.startsWith('Win')) &&
       !saving.value &&
+      !deleting.value &&
       !changingConnections.value.includes(key) &&
       tab.panes.every((pane) => !pane.fileAction && !pane.containerShell && !pane.pluginTerminal) &&
       !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
@@ -157,13 +249,18 @@ export const useTerminalsStore = defineStore('terminals', () => {
           )))
     );
   }
-  async function saveSession(key: string, title: string, nameOnly = false): Promise<boolean> {
+  async function saveSession(
+    key: string,
+    title: string,
+    { nameOnly = false, defaultTitle = false } = {},
+  ): Promise<boolean> {
     title = title.trim();
     const tab = tabs.value.find((tab) => tab.key === key);
     if (
       !tab ||
       !validTitle(title) ||
       saving.value ||
+      deleting.value ||
       (nameOnly ? !tab.savedId || tab.panes.some((p) => closingPanes.has(p.key)) : !canSave(key))
     )
       return false;
@@ -184,18 +281,46 @@ export const useTerminalsStore = defineStore('terminals', () => {
       const connected =
         !nameOnly && tab.panes.every((pane) => pane.state === 'connected' && !!pane.sessionId);
       const host = tab.panes[0]?.host;
+      if (host) {
+        if (!(await loadHostSessions(host))) {
+          error.value = sshErrors.value[host.id] ?? null;
+          return false;
+        }
+      } else {
+        await loadSaved();
+        if (savedError.value) return false;
+      }
+      const hostId = host?.id ?? '';
+      const previous = savedSessions(hostId).find((entry) => entry.id === tab.savedId);
+      const previousTitlePane = previous?.titleCommandPane;
+      const titleCommandPane =
+        !nameOnly && (defaultTitle || tab.generatedTitle || previousTitlePane !== undefined)
+          ? connected
+            ? Math.max(
+                0,
+                tab.panes.findIndex((pane) => pane.key === focused.value),
+              )
+            : previousTitlePane
+          : undefined;
       const input = {
         id: tab.savedId ?? null,
         title,
+        ...(titleCommandPane === undefined ? {} : { titleCommandPane }),
         layout: connected ? saveLayout(tab.layout) : null,
         sessionIds: connected ? tab.panes.map((p) => p.sessionId!) : [],
       };
       const saved = host
         ? await terminalApi.saveSshSession(host.id, input)
         : await terminalApi.saveLocalSession(input);
+      const entries = [...savedSessions(hostId)];
+      const index = entries.findIndex((entry) => entry.id === saved.id);
+      if (index < 0) entries.push(saved);
+      else entries[index] = saved;
+      savedRecords.value.set(hostId, entries);
       tab.savedId = saved.id;
       tab.title = saved.title;
       tab.renamed = true;
+      tab.generatedTitle = saved.titleCommandPane !== undefined;
       if (connected)
         tab.panes.forEach((pane, index) => {
           pane.savedSource = { id: saved.id, pane: index };
@@ -206,6 +331,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
             ? tr('会话已保存。{0} 个窗格的远端 Shell 仅支持恢复布局。', saved.layoutOnlyPanes)
             : tr('会话已保存'),
         );
+      if (titleCommandPane !== undefined) void loadSavedTitleCommands(hostId);
       return true;
     } catch (cause) {
       error.value = errorMessage(cause);
@@ -228,6 +354,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     return (
       !!tab &&
       saving.value !== key &&
+      !isDeletingSaved(tab.panes[0]?.host?.id ?? '', tab.savedId) &&
       !changingConnections.value.includes(key) &&
       !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
       tab.panes.every(
@@ -327,23 +454,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
       available[0];
     if (tab?.key !== active.value) select(tab?.key ?? '', false);
   }
-  function activateLocal(): void {
-    const available = hostTabs('');
-    const opened = available.filter((tab) =>
-      tab.panes.some((pane) => pane.state !== 'idle' || pane.connectRequested),
-    );
-    if (opened.length) {
-      const tab =
-        opened.find((tab) => tab.key === active.value) ??
-        opened.find((tab) => tab.key === lastHostTabs.get('')) ??
-        opened[0]!;
-      if (tab.key !== active.value) select(tab.key, false);
-      return;
-    }
-    const saved = available.find((tab) => tab.savedId);
-    if (saved) select(saved.key);
-    else activateHost('');
-  }
   watch([active, focused], () => {
     const pane = panes.value.find((p) => p.key === focused.value);
     if (pane) lastHostTabs.set(pane.host?.id ?? '', active.value);
@@ -442,10 +552,11 @@ export const useTerminalsStore = defineStore('terminals', () => {
     title = title.trim();
     if (!validTitle(title)) return false;
     const tab = tabs.value.find((t) => t.key === key);
-    if (tab?.savedId) return saveSession(key, title, true);
+    if (tab?.savedId) return saveSession(key, title, { nameOnly: true });
     if (tab) {
       tab.title = title;
       tab.renamed = true;
+      tab.generatedTitle = false;
     }
     return !!tab;
   }
@@ -491,7 +602,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     if (active.value === key)
       select(hostTabs(hostId)[Math.min(position, available.length - 2)]?.key ?? '', false);
   }
-  async function closePane(key: string, approved = false, keepSaved = false): Promise<void> {
+  async function closePane(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
     const pane = tab?.panes.find((p) => p.key === key);
     if (
@@ -518,13 +629,8 @@ export const useTerminalsStore = defineStore('terminals', () => {
         pane.connectRequested = false;
       }
       const layout = removeLeaf(tab.layout, key);
-      if (!layout) {
-        if (tab.savedId && !keepSaved) {
-          if (pane.host) await terminalApi.removeSavedSshSession(pane.host.id, tab.savedId);
-          else await terminalApi.removeSavedLocalSession(tab.savedId);
-        }
-        removeTab(tab.key);
-      } else {
+      if (!layout) removeTab(tab.key);
+      else {
         tab.panes = tab.panes.filter((p) => p.key !== key);
         tab.layout = layout;
         if (focused.value === key) focused.value = tab.panes[0]?.key ?? '';
@@ -536,14 +642,14 @@ export const useTerminalsStore = defineStore('terminals', () => {
       closingPanes.delete(key);
     }
   }
-  async function close(key: string, approved = false, keepSaved = false): Promise<void> {
+  async function close(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab || changingConnections.value.includes(key)) return;
     const decision = approved || confirmUploadClose(tab.panes);
     if (decision !== true && !(await decision)) return;
-    for (const pane of [...tab.panes]) await closePane(pane.key, true, keepSaved);
+    for (const pane of [...tab.panes]) await closePane(pane.key, true);
   }
-  async function closeAll(key: string, approved = false, keepSaved = false): Promise<void> {
+  async function closeAll(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
     if (
@@ -555,15 +661,11 @@ export const useTerminalsStore = defineStore('terminals', () => {
     const decision = approved || confirmHostUploadClose(tab.panes[0]?.host?.id ?? '');
     if (decision !== true && !(await decision)) return;
     const targets = hostTabs(tab.panes[0]?.host?.id ?? '').map((t) => t.key);
-    for (const id of targets) await close(id, true, keepSaved);
+    for (const id of targets) await close(id, true);
   }
   async function closeWorkspace(hostId: string): Promise<void> {
-    // Wait for the host list before releasing its runtime tabs.
-    const loading = sshLoads.get(hostId);
-    if (loading) await loading;
     const first = hostTabs(hostId)[0];
-    if (first) await closeAll(first.key, true, !!hostId);
-    if (!hostTabs(hostId).length) sshLoaded.delete(hostId);
+    if (first) await closeAll(first.key, true);
   }
   async function closeHost(id: string): Promise<boolean> {
     try {
@@ -589,7 +691,6 @@ export const useTerminalsStore = defineStore('terminals', () => {
     sshLoading,
     closeWorkspace,
     activateHost,
-    activateLocal,
     update,
     open,
     duplicate,
@@ -617,5 +718,11 @@ export const useTerminalsStore = defineStore('terminals', () => {
     saving,
     canSave,
     saveSession,
+    savedSessions,
+    savedSessionTitle,
+    loadSavedTitleCommands,
+    restoreSavedSession,
+    canDeleteSaved,
+    deleteSavedSession,
   };
 });

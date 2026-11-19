@@ -58,18 +58,21 @@ export type SavedTerminalLayout =
 export interface SavedLocalTerminal {
   id: string;
   title: string;
+  titleCommandPane?: number;
   panes: { directory: string; elevated: boolean }[];
   layout: SavedTerminalLayout;
 }
 export interface SaveTerminalInput {
   id: string | null;
   title: string;
+  titleCommandPane?: number;
   sessionIds: string[];
   layout: SavedTerminalLayout | null;
 }
 export interface SavedSshTerminal {
   id: string;
   title: string;
+  titleCommandPane?: number;
   paneCount: number;
   layoutOnlyPanes: number;
   layout: SavedTerminalLayout;

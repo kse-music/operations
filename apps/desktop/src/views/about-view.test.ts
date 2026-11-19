@@ -1,11 +1,12 @@
-import { expect, it } from 'vitest';
-import { createApp } from 'vue';
+import { expect, it, vi } from 'vitest';
+import { createApp, nextTick } from 'vue';
 import { createPinia, disposePinia } from 'pinia';
 import AboutView from './AboutView.vue';
 import { useApplicationStore } from '../stores/application';
 import type { Bootstrap } from '../types/ipc';
 import { defaultProductPreferences } from '../types/product';
 import { useUpdatesStore } from '../stores/updates';
+import * as ipc from '../services/ipc';
 
 it('shows ordinary data and log paths without changing backend state', () => {
   const pinia = createPinia();
@@ -30,6 +31,53 @@ it('shows ordinary data and log paths without changing backend state', () => {
   } finally {
     app.unmount();
     disposePinia(pinia);
+  }
+});
+
+it('retries only a failed environment read and hides the action during and after recovery', async () => {
+  const pinia = createPinia();
+  const application = useApplicationStore(pinia);
+  const root = document.createElement('div');
+  const app = createApp(AboutView).use(pinia);
+  let finish!: (state: Bootstrap) => void;
+  const read = vi
+    .spyOn(ipc, 'bootstrap')
+    .mockRejectedValueOnce(new Error('本地数据库读取失败'))
+    .mockReturnValueOnce(
+      new Promise<Bootstrap>((resolve) => {
+        finish = resolve;
+      }),
+    );
+  try {
+    app.mount(root);
+    const environment = root.querySelector('[aria-labelledby="system-title"]')!;
+    const retry = () => environment.querySelector('button');
+    application.reportUnexpectedError();
+    await nextTick();
+    expect(retry()).toBeNull();
+    await application.initialize();
+    await nextTick();
+    expect(environment.querySelector('[role=alert]')?.textContent).toBe('本地数据库读取失败');
+    expect(retry()?.textContent).toBe('重试');
+    retry()!.click();
+    await nextTick();
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(environment.querySelector('[role=status]')?.textContent).toContain('正在通过 IPC 读取');
+    expect(retry()).toBeNull();
+    finish({
+      appVersion: 'test',
+      databaseVersion: 11,
+      dataDirectory: '/data',
+      logDirectory: '/data/logs',
+      config: { product: defaultProductPreferences() },
+    } as Bootstrap);
+    await vi.waitFor(() => expect(environment.textContent).toContain('schema v11'));
+    expect(environment.querySelector('[role=alert]')).toBeNull();
+    expect(retry()).toBeNull();
+  } finally {
+    app.unmount();
+    disposePinia(pinia);
+    read.mockRestore();
   }
 });
 
@@ -66,7 +114,6 @@ it('renders release Markdown and gates installation on a verified package', asyn
     expect(root.textContent).toContain('下载更新');
     expect(root.textContent).not.toContain('安装并重启');
     updates.state.phase = 'ready';
-    const { nextTick } = await import('vue');
     await nextTick();
     expect(root.textContent).toContain('安装并重启');
     expect(

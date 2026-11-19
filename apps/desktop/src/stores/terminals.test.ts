@@ -5,6 +5,7 @@ vi.mock('../services/terminal', () => ({
     close: vi.fn(),
     closeHost: vi.fn(),
     savedLocalSessions: vi.fn(),
+    savedSshSessions: vi.fn(),
     saveLocalSession: vi.fn(),
     removeSavedLocalSession: vi.fn(),
   },
@@ -18,6 +19,8 @@ const host = { id: 'host', name: 'Host' } as Host;
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([]);
+  vi.mocked(terminalApi.savedSshSessions).mockResolvedValue([]);
 });
 afterEach(() => {
   disposePinia(getActivePinia()!);
@@ -468,7 +471,7 @@ describe('manually saved local sessions', () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
-  it('starts only the first saved session and all its panes when entering local terminals without an opened session', async () => {
+  it('starts every pane of a saved split only after that snapshot is chosen', async () => {
     const first = {
       ...snapshot('one', 'one'),
       panes: [snapshot('one', 'one').panes[0]!, { directory: 'C:\\admin', elevated: true }],
@@ -484,11 +487,12 @@ describe('manually saved local sessions', () => {
     const store = useTerminalsStore();
     await store.loadSaved();
     store.activateHost('');
-    expect(store.panes.every((pane) => !pane.connectRequested)).toBe(true);
-    store.activateLocal();
+    expect(store.tabs).toEqual([]);
+    store.restoreSavedSession(null, 'one');
     expect(store.active).toBe(store.tabs[0]!.key);
     expect(store.tabs[0]!.panes.every((pane) => pane.connectRequested)).toBe(true);
-    expect(store.tabs[1]!.panes[0]!.connectRequested).toBe(false);
+    expect(store.tabs.map((tab) => tab.savedId)).toEqual(['one']);
+    expect(store.savedSessions('').map((entry) => entry.id)).toEqual(['one', 'two']);
     expect(store.tabs[0]!.panes[1]!.elevated).toBe(true);
     expect(terminalApi.saveLocalSession).not.toHaveBeenCalled();
   });
@@ -498,35 +502,32 @@ describe('manually saved local sessions', () => {
       vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([snapshot('one', 'one')]);
       const store = useTerminalsStore();
       await store.loadSaved();
-      const saved = store.tabs[0]!;
       store.open(null);
-      const opened = store.tabs[1]!;
+      const opened = store.tabs[0]!;
       store.update(opened.panes[0]!.key, { state, connectRequested: false });
-      store.select(saved.key, false);
-      store.activateLocal();
+      store.activateHost('');
       expect(store.active).toBe(opened.key);
-      expect(saved.panes[0]!.connectRequested).toBe(false);
+      expect(store.tabs).toEqual([opened]);
       expect(opened.panes[0]!.connectRequested).toBe(false);
       expect(opened.panes[0]!.state).toBe(state);
     },
   );
-  it('restores multiple idle records and only starts the selected record; new and duplicated sessions have no saved source', async () => {
+  it('loads saved records without creating tabs and opens only the selected record', async () => {
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([
       snapshot('one', 'one'),
       snapshot('two', 'two'),
     ]);
     const store = useTerminalsStore();
     await store.loadSaved();
-    expect(store.tabs).toHaveLength(2);
+    expect(store.savedSessions('').map((entry) => entry.id)).toEqual(['one', 'two']);
     expect(store.active).toBe('');
-    expect(store.panes.every((pane) => pane.state === 'idle' && !pane.connectRequested)).toBe(true);
     store.activateHost('');
-    expect(store.panes.every((pane) => !pane.connectRequested)).toBe(true);
-    const second = store.tabs[1]!;
-    store.select(second.key);
+    expect(store.tabs).toEqual([]);
+    store.restoreSavedSession(null, 'two');
+    const second = store.tabs[0]!;
     expect(second.panes[0]!.savedSource).toEqual({ id: 'two', pane: 0 });
     expect(second.panes[0]!.connectRequested).toBe(true);
-    expect(store.tabs[0]!.panes[0]!.connectRequested).toBe(false);
+    expect(store.tabs).toEqual([second]);
     store.open(null);
     expect(store.tabs.at(-1)!.panes[0]!.savedSource).toBeUndefined();
     store.duplicate(second.key);
@@ -569,14 +570,20 @@ describe('manually saved local sessions', () => {
     await store.saveSession(tab.key, '更新');
     expect(vi.mocked(terminalApi.saveLocalSession).mock.calls[1]![0].id).toBe('one');
   });
-  it('renames an idle saved record without launching or closing shells', async () => {
+  it('renames a saved record without overwriting its layout or closing its shell', async () => {
     const record = snapshot('one', '旧名称');
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([record]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    store.restoreSavedSession(null, 'one');
     const tab = store.tabs[0]!;
+    store.update(tab.panes[0]!.key, {
+      state: 'connected',
+      sessionId: 'local:one',
+      connectRequested: false,
+    });
     vi.mocked(terminalApi.saveLocalSession).mockResolvedValue({ ...record, title: '新名称' });
-    expect(await store.saveSession(tab.key, '新名称')).toBe(true);
+    expect(await store.rename(tab.key, '新名称')).toBe(true);
     expect(terminalApi.saveLocalSession).toHaveBeenCalledExactlyOnceWith({
       id: 'one',
       title: '新名称',
@@ -587,31 +594,32 @@ describe('manually saved local sessions', () => {
     expect(terminalApi.removeSavedLocalSession).not.toHaveBeenCalled();
     expect(store.tabs[0]!.savedId).toBe('one');
     expect(store.tabs[0]!.title).toBe('新名称');
+    expect(store.savedSessions('')).toEqual([{ ...record, title: '新名称' }]);
     expect(terminalApi.close).not.toHaveBeenCalled();
   });
-  it('removes a closed saved entry and its persistent record without starting a neighboring saved entry', async () => {
+  it('closes a saved tab, keeps both snapshots and leaves the workspace empty until asked to restore', async () => {
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([
       snapshot('one', 'one'),
       snapshot('two', 'two'),
     ]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    store.restoreSavedSession(null, 'one');
     const first = store.tabs[0]!;
-    store.select(first.key);
     store.update(first.panes[0]!.key, { state: 'connected', sessionId: 'local:one' });
     vi.mocked(terminalApi.close).mockResolvedValue(undefined);
-    vi.mocked(terminalApi.removeSavedLocalSession).mockImplementation(async (id) => {
-      expect(terminalApi.close).toHaveBeenCalledWith('local:one');
-      expect(first.panes[0]!.state).toBe('closed');
-      expect(id).toBe('one');
-    });
     await store.close(first.key);
-    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledExactlyOnceWith('one');
-    expect(store.tabs.map((tab) => tab.savedId)).toEqual(['two']);
-    expect(store.tabs[0]!.panes[0]!.connectRequested).toBe(false);
-    expect(store.tabs[0]!.panes[0]!.state).toBe('idle');
+    expect(terminalApi.close).toHaveBeenCalledExactlyOnceWith('local:one');
+    expect(terminalApi.removeSavedLocalSession).not.toHaveBeenCalled();
+    expect(store.savedSessions('').map((entry) => entry.id)).toEqual(['one', 'two']);
+    store.activateHost('');
+    expect(store.tabs).toEqual([]);
+    expect(store.active).toBe('');
+    store.restoreSavedSession(null, 'one');
+    expect(store.tabs[0]).toMatchObject({ savedId: 'one', panes: [{ connectRequested: true }] });
+    expect(store.tabs[0]!.key).not.toBe(first.key);
   });
-  it('closes idle saved entries permanently and leaves an empty list after closing the last entry', async () => {
+  it('removes an unopened saved entry directly', async () => {
     let saved = [snapshot('one', 'one')];
     vi.mocked(terminalApi.savedLocalSessions).mockImplementation(async () => saved);
     vi.mocked(terminalApi.removeSavedLocalSession).mockImplementation(async (id) => {
@@ -619,18 +627,22 @@ describe('manually saved local sessions', () => {
     });
     const store = useTerminalsStore();
     await store.loadSaved();
-    await store.close(store.tabs[0]!.key);
+    const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(false);
+    await store.deleteSavedSession('', 'one');
+    expect(ask).not.toHaveBeenCalled();
+    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledExactlyOnceWith('one');
     expect(store.tabs).toEqual([]);
     expect(store.active).toBe('');
     expect(terminalApi.close).not.toHaveBeenCalled();
     expect(await terminalApi.savedLocalSessions()).toEqual([]);
-    store.activateLocal();
+    store.activateHost('');
     expect(store.tabs).toEqual([]);
   });
   it('keeps a saved entry when closing its shell fails and never deletes its persistent record', async () => {
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([snapshot('one', 'one')]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    store.restoreSavedSession(null, 'one');
     const tab = store.tabs[0]!;
     const pane = tab.panes[0]!;
     store.update(pane.key, { state: 'connected', sessionId: 'local:one' });
@@ -642,37 +654,39 @@ describe('manually saved local sessions', () => {
     expect(terminalApi.removeSavedLocalSession).not.toHaveBeenCalled();
     expect(store.error).toBe('关闭失败');
   });
-  it('keeps the ended entry visible after a delete failure and allows retry without reopening its shell', async () => {
+  it('preserves the record and running shell on delete failure, then detaches the snapshot on retry', async () => {
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([snapshot('one', 'one')]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    store.restoreSavedSession(null, 'one');
     const tab = store.tabs[0]!;
     const pane = tab.panes[0]!;
-    store.select(tab.key);
-    store.update(pane.key, { state: 'connected', sessionId: 'local:one' });
+    store.update(pane.key, { state: 'connected', sessionId: 'local:one', connectRequested: false });
     vi.mocked(terminalApi.close).mockResolvedValue(undefined);
     vi.mocked(terminalApi.removeSavedLocalSession).mockRejectedValueOnce({ message: '删除失败' });
-    await store.close(tab.key);
+    await store.deleteSavedSession('', 'one');
     expect(store.tabs[0]).toBe(tab);
-    expect(pane.state).toBe('closed');
-    expect(pane.sessionId).toBeUndefined();
-    expect(pane.connectRequested).toBe(false);
+    expect(pane.state).toBe('connected');
+    expect(pane.sessionId).toBe('local:one');
     expect(tab.savedId).toBe('one');
+    expect(store.savedSessions('')).toHaveLength(1);
     expect(store.error).toBe('删除失败');
-    store.activateLocal();
-    expect(pane.connectRequested).toBe(false);
-    await store.close(tab.key);
-    expect(store.tabs).toEqual([]);
-    expect(terminalApi.close).toHaveBeenCalledOnce();
+    await store.deleteSavedSession('', 'one');
+    expect(store.tabs).toEqual([tab]);
+    expect(tab.savedId).toBeUndefined();
+    expect(pane.savedSource).toBeUndefined();
+    expect(store.savedSessions('')).toEqual([]);
+    expect(terminalApi.close).not.toHaveBeenCalled();
     expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledTimes(2);
   });
-  it('does not duplicate closes or reopen a session while its saved record is being deleted', async () => {
+  it('does not reopen or overwrite a snapshot while its deletion is in progress', async () => {
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([snapshot('one', 'one')]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    store.restoreSavedSession(null, 'one');
     const tab = store.tabs[0]!;
     const pane = tab.panes[0]!;
-    store.update(pane.key, { state: 'connected', sessionId: 'local:one' });
+    store.update(pane.key, { state: 'connected', sessionId: 'local:one', connectRequested: false });
     vi.mocked(terminalApi.close).mockResolvedValue(undefined);
     let finish!: () => void;
     vi.mocked(terminalApi.removeSavedLocalSession).mockReturnValue(
@@ -680,27 +694,26 @@ describe('manually saved local sessions', () => {
         finish = resolve;
       }),
     );
-    const closing = store.close(tab.key);
-    await vi.waitFor(() => expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledOnce());
+    const deletion = store.deleteSavedSession('', 'one');
+    await store.deleteSavedSession('', 'one');
+    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledExactlyOnceWith('one');
     await store.close(tab.key);
-    store.select(tab.key);
-    store.split(pane.key, 'columns');
-    expect(store.canSave(tab.key)).toBe(false);
-    expect(store.canReconnect(tab.key)).toBe(false);
-    expect(tab.panes).toEqual([pane]);
-    expect(pane.connectRequested).toBe(false);
+    store.restoreSavedSession(null, 'one');
+    expect(store.tabs).toEqual([]);
     expect(terminalApi.close).toHaveBeenCalledOnce();
     finish();
-    await closing;
+    await deletion;
     expect(store.tabs).toEqual([]);
+    expect(store.savedSessions('')).toEqual([]);
   });
-  it('retains a saved split snapshot until its final pane closes and removes saved entries on close all', async () => {
+  it('retains all saved records after split close and close all for the local workspace', async () => {
     vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([
       snapshot('one', 'one'),
       snapshot('two', 'two'),
     ]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    store.restoreSavedSession(null, 'one');
     const tab = store.tabs[0]!;
     store.split(tab.panes[0]!.key, 'columns');
     await store.closePane(tab.panes[1]!.key);
@@ -708,9 +721,8 @@ describe('manually saved local sessions', () => {
     store.open(host);
     const remote = store.tabs.at(-1)!;
     await store.closeAll(tab.key);
-    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledTimes(2);
-    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledWith('one');
-    expect(terminalApi.removeSavedLocalSession).toHaveBeenCalledWith('two');
+    expect(terminalApi.removeSavedLocalSession).not.toHaveBeenCalled();
+    expect(store.savedSessions('').map((entry) => entry.id)).toEqual(['one', 'two']);
     expect(store.tabs).toEqual([remote]);
   });
   it('preserves the name and saved status when persistence fails', async () => {

@@ -15,6 +15,8 @@ import type {
 } from '../types/terminal';
 
 export const terminalApi = {
+  savedTitleCommands: (hostId: string): Promise<Record<string, string>> =>
+    invoke('terminal_saved_title_commands', { hostId }),
   savedSshSessions: (hostId: string): Promise<SavedSshTerminal[]> =>
     invoke('terminal_ssh_saved_sessions', { hostId }),
   saveSshSession: (hostId: string, input: SaveTerminalInput): Promise<SavedSshTerminal> =>

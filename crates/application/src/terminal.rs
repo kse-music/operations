@@ -11,6 +11,147 @@ use serverdeck_ssh::{Authentication, Sink};
 use serverdeck_ssh::{ConnectionPlan, Hop, ProxyConnection};
 use zeroize::Zeroizing;
 
+fn title_command(command: &str) -> Option<String> {
+    if command.len() > 4096
+        || command.chars().any(|ch| {
+            ch.is_control() || matches!(ch, '\u{2028}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+    {
+        return None;
+    }
+    let mut chars = command.trim().chars();
+    let mut preview: String = chars.by_ref().take(80).collect();
+    if preview.is_empty() {
+        return None;
+    }
+    if chars.next().is_some() {
+        preview.push('…');
+    }
+    Some(preview)
+}
+
+#[cfg(test)]
+mod saved_title_tests {
+    use super::*;
+    use serverdeck_core::terminal::{
+        LocalSplitAxis, LocalTerminalLayout, SavedSshTerminal, SshPaneSnapshot, SshPaneState,
+    };
+    use serverdeck_storage::ssh_sessions::SshSessionRecord;
+
+    struct TestSnapshot(String, Vec<u8>);
+
+    impl SecretStore for TestSnapshot {
+        fn read(&self, id: &str) -> Result<Option<Zeroizing<Vec<u8>>>, Error> {
+            assert_eq!(id, self.0);
+            Ok(Some(Zeroizing::new(self.1.clone())))
+        }
+
+        fn write(&self, _: &str, _: &[u8]) -> Result<(), Error> {
+            Err(Error::Validation("preview must not write secrets"))
+        }
+
+        fn delete(&self, _: &str) -> Result<(), Error> {
+            Err(Error::Validation("preview must not delete secrets"))
+        }
+    }
+
+    #[tokio::test]
+    async fn ssh_saved_title_reads_only_the_designated_pane_from_the_protected_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app =
+            Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap();
+        let host = app
+            .database
+            .host_create(serverdeck_core::hosts::HostInput {
+                ssh: Default::default(),
+                name: "QA".into(),
+                hostname: "example.test".into(),
+                port: 22,
+                username: "qa".into(),
+                auth_type: AuthType::Agent,
+                credential_id: None,
+                group_id: None,
+                description: String::new(),
+                favorite: false,
+                connect_timeout_secs: 10,
+            })
+            .unwrap()
+            .id;
+        let id = uuid::Uuid::new_v4();
+        let bytes =
+            serde_json::to_vec(
+                &["echo first", "npm run dev"].map(|command| SshPaneSnapshot {
+                    identity: "qa".into(),
+                    state: Some(SshPaneState {
+                        directory: "/tmp".into(),
+                        command: command.into(),
+                    }),
+                }),
+            )
+            .unwrap();
+        let record = SshSessionRecord::new(
+            SavedSshTerminal {
+                id,
+                title: "会话 1".into(),
+                title_command_pane: Some(1),
+                pane_count: 2,
+                layout_only_panes: 0,
+                layout: LocalTerminalLayout::Split {
+                    axis: LocalSplitAxis::Rows,
+                    ratio: 50,
+                    first: Box::new(LocalTerminalLayout::Leaf { pane: 0 }),
+                    second: Box::new(LocalTerminalLayout::Leaf { pane: 1 }),
+                },
+            },
+            bytes.len(),
+        );
+        app.secrets = std::sync::Arc::new(TestSnapshot(record.reference(), bytes));
+        app.database
+            .save_ssh_session(&host, record, false, |_| Ok(()))
+            .unwrap();
+        assert_eq!(
+            app.terminal_saved_title_commands(host.clone())
+                .await
+                .unwrap(),
+            [(id.to_string(), "npm run dev".to_owned())].into()
+        );
+        assert_eq!(
+            app.terminal_ssh_saved_sessions(host.clone()).await.unwrap()[0].title,
+            "会话 1"
+        );
+        app.database
+            .rename_ssh_session(&host, id, "会话 1".into(), None)
+            .unwrap();
+        assert!(
+            app.terminal_saved_title_commands(host)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn command_preview_is_bounded_and_single_line() {
+        assert!(title_command("echo\nnext").is_none());
+        assert!(title_command("echo \u{202e}next").is_none());
+        assert_eq!(
+            title_command(&"中".repeat(81)).unwrap(),
+            format!("{}…", "中".repeat(80))
+        );
+    }
+}
+
+#[cfg(windows)]
+fn local_title_command(ciphertext: &str) -> Result<Option<String>, ()> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    let bytes = STANDARD.decode(ciphertext).map_err(|_| ())?;
+    let command =
+        serverdeck_windows_terminal::unprotect_terminal_command(&bytes).map_err(|_| ())?;
+    Ok(title_command(
+        std::str::from_utf8(&command).map_err(|_| ())?,
+    ))
+}
+
 fn secret(
     db: &Database,
     secrets: &dyn SecretStore,
@@ -166,6 +307,77 @@ pub(crate) fn plan_for_target(
 }
 
 impl Application {
+    pub async fn terminal_saved_title_commands(
+        &self,
+        host_id: String,
+    ) -> Result<std::collections::BTreeMap<String, String>, Error> {
+        let secrets = self.secrets.clone();
+        self.blocking(move |db| {
+            let mut commands = std::collections::BTreeMap::new();
+            if host_id.is_empty() {
+                #[cfg(windows)]
+                for saved in db.local_terminal_sessions()? {
+                    let Some(ciphertext) = saved
+                        .title_command_pane
+                        .and_then(|index| saved.panes.get(index))
+                        .and_then(|pane| pane.protected_command.as_deref())
+                    else {
+                        continue;
+                    };
+                    match local_title_command(ciphertext) {
+                        Ok(Some(command)) => {
+                            commands.insert(saved.id, command);
+                        }
+                        Ok(None) => {}
+                        Err(()) => tracing::warn!(
+                            operation = "local_saved_title",
+                            "could not read terminal title command"
+                        ),
+                    }
+                }
+            } else {
+                for record in db.ssh_terminal_sessions(&host_id)? {
+                    let Some(index) = record.session.title_command_pane else {
+                        continue;
+                    };
+                    let preview = (|| {
+                        let blob = secrets
+                            .read(&record.reference())?
+                            .ok_or(Error::Validation("系统凭据库中缺少 SSH 会话快照"))?;
+                        let panes: Vec<serverdeck_core::terminal::SshPaneSnapshot> =
+                            serde_json::from_slice(&blob)
+                                .map_err(|_| Error::Validation("SSH 会话快照内容无效"))?;
+                        if panes.len() != record.session.pane_count {
+                            return Err(Error::Validation("保存的会话窗格数量无效"));
+                        }
+                        let mut selected = None;
+                        for (pane_index, pane) in panes.into_iter().enumerate() {
+                            if let Some(state) = pane.state {
+                                let command = Zeroizing::new(state.command);
+                                if pane_index == index {
+                                    selected = title_command(&command);
+                                }
+                            }
+                        }
+                        Ok::<_, Error>(selected)
+                    })();
+                    match preview {
+                        Ok(Some(command)) => {
+                            commands.insert(record.session.id.to_string(), command);
+                        }
+                        Ok(None) => {}
+                        Err(_) => tracing::warn!(
+                            operation = "ssh_saved_title",
+                            "could not read terminal title command"
+                        ),
+                    }
+                }
+            }
+            Ok(commands)
+        })
+        .await
+    }
+
     pub async fn terminal_ssh_saved_sessions(
         &self,
         host_id: String,
@@ -184,7 +396,9 @@ impl Application {
         host_id: String,
         input: serverdeck_core::terminal::SaveTerminalInput,
     ) -> Result<serverdeck_core::terminal::SavedSshTerminal, Error> {
-        use serverdeck_core::terminal::{SavedSshTerminal, validate_terminal_title};
+        use serverdeck_core::terminal::{
+            SavedSshTerminal, validate_terminal_title, validate_title_command_pane,
+        };
         validate_terminal_title(&input.title)?;
         let id = input
             .id
@@ -195,9 +409,12 @@ impl Application {
         if input.session_ids.is_empty() && input.layout.is_none() {
             let id = id.ok_or(Error::Validation("请先打开 SSH 会话再保存"))?;
             return self
-                .blocking(move |db| db.rename_ssh_session(&host_id, id, input.title))
+                .blocking(move |db| {
+                    db.rename_ssh_session(&host_id, id, input.title, input.title_command_pane)
+                })
                 .await;
         }
+        validate_title_command_pane(input.title_command_pane, input.session_ids.len())?;
         let layout = input
             .layout
             .ok_or(Error::Validation("缺少 SSH 会话分屏布局"))?;
@@ -213,6 +430,7 @@ impl Application {
         let saved = SavedSshTerminal {
             id: id.unwrap_or_else(uuid::Uuid::new_v4),
             title: input.title,
+            title_command_pane: input.title_command_pane,
             pane_count: panes.len(),
             layout_only_panes: panes.iter().filter(|p| p.state.is_none()).count(),
             layout,
@@ -272,7 +490,9 @@ impl Application {
                 return Err(Error::Validation("未运行的会话只能更新已保存名称"));
             }
             return self
-                .blocking(move |db| db.rename_local_terminal_session(&id, input.title))
+                .blocking(move |db| {
+                    db.rename_local_terminal_session(&id, input.title, input.title_command_pane)
+                })
                 .await;
         }
         let layout = input
@@ -294,6 +514,7 @@ impl Application {
         let saved = SavedLocalTerminal {
             id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             title: input.title,
+            title_command_pane: input.title_command_pane,
             panes,
             layout,
         };

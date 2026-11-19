@@ -3,6 +3,8 @@ import { tr } from '../i18n/messages';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
+  Check,
+  ChevronRight,
   Copy,
   ListX,
   Plus,
@@ -11,7 +13,6 @@ import {
   Shield,
   SquareTerminal,
   TextCursorInput,
-  Trash2,
   Unplug,
   X,
 } from '@lucide/vue';
@@ -92,32 +93,46 @@ function selectLocalMode(elevated: boolean): void {
   closeMenu();
   store.open(null, undefined, undefined, elevated);
 }
-function sessionName(item: TerminalTab): string {
+function isDefaultSessionName(item: TerminalTab): boolean {
   const host = item.panes[0]?.host;
-  return !item.renamed && (!host || item.title === hostDisplayName(host))
-    ? tr('会话 {0}', item.sessionNumber)
-    : item.title;
+  return !item.renamed && (!host || item.title === hostDisplayName(host));
+}
+function sessionName(item: TerminalTab): string {
+  return isDefaultSessionName(item) ? tr('会话 {0}', item.sessionNumber) : item.title;
 }
 function sessionTitle(item: TerminalTab): string {
-  const title = sessionName(item);
+  const saved = store.savedSessions(props.hostId).find((entry) => entry.id === item.savedId);
+  const title = saved ? store.savedSessionTitle(saved) : sessionName(item);
   return item.panes.some((pane) => !pane.host && pane.elevated)
     ? tr('{0}（管理员）', title)
     : title;
+}
+function isLocalSessionIdle(item: TerminalTab): boolean {
+  return !props.hostId && item.panes.every((pane) => pane.state === 'idle');
 }
 const area = ref<HTMLElement>();
 const renaming = ref<string | null>(null),
   title = ref('');
 const tab = computed(() => store.tabs.find((t) => t.key === store.active));
-const menu = ref<{ key: string | null; x: number; y: number } | null>(null);
+const menu = ref<{ key: string | null | undefined; x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuTarget = computed(() => store.tabs.find((item) => item.key === menu.value?.key));
+const savedSessions = computed(() => store.savedSessions(props.hostId));
+const savedTrigger = ref<HTMLButtonElement>();
+const savedMenuElement = ref<HTMLElement>();
+const savedMenuPosition = ref<{ x: number; y: number; width: number } | null>(null);
 let menuTrigger: HTMLElement | null = null;
 function closeMenu(): void {
+  savedMenuPosition.value = null;
   menu.value = null;
   if (props.visible && menuTrigger?.isConnected) menuTrigger.focus({ preventScroll: true });
 }
-async function openMenu(key: string | null, event: MouseEvent | KeyboardEvent): Promise<void> {
+async function openMenu(
+  key: string | null | undefined,
+  event: MouseEvent | KeyboardEvent,
+): Promise<void> {
   if (!props.visible) return;
+  savedMenuPosition.value = null;
   const target = event.currentTarget as HTMLElement;
   menuTrigger = target.querySelector<HTMLElement>('[role=tab]') ?? target;
   const bounds = target.getBoundingClientRect();
@@ -135,15 +150,100 @@ async function openMenu(key: string | null, event: MouseEvent | KeyboardEvent): 
   await nextTick();
   menuElement.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 }
+async function openSavedMenu(focus = false): Promise<void> {
+  if (!savedTrigger.value || !menuElement.value) return;
+  if (!savedMenuPosition.value) {
+    savedMenuPosition.value = {
+      x: 8,
+      y: 8,
+      width: menuElement.value.getBoundingClientRect().width,
+    };
+    const currentHost = host.value;
+    if (props.hostId && currentHost)
+      void store
+        .loadHostSessions(currentHost)
+        .then(() => store.loadSavedTitleCommands(currentHost.id));
+    else if (!props.hostId) void store.loadSaved().then(() => store.loadSavedTitleCommands(''));
+  }
+  await nextTick();
+  positionSavedMenu();
+  if (focus && savedMenuElement.value)
+    (
+      savedMenuElement.value.querySelector<HTMLButtonElement>('button:not(:disabled)') ??
+      savedMenuElement.value
+    ).focus();
+}
+function positionSavedMenu(): void {
+  if (!savedMenuElement.value || !menuElement.value || !savedTrigger.value) return;
+  const parent = menuElement.value.getBoundingClientRect();
+  const trigger = savedTrigger.value.getBoundingClientRect();
+  const { height } = savedMenuElement.value.getBoundingClientRect();
+  const { width } = parent;
+  let x = parent.right,
+    y = trigger.top;
+  if (x + width > window.innerWidth - 8) {
+    x = parent.left - width;
+    if (x < 8) {
+      x = Math.min(parent.left, window.innerWidth - width - 8);
+      y = parent.bottom + height <= window.innerHeight - 8 ? parent.bottom : parent.top - height;
+    }
+  }
+  savedMenuPosition.value = {
+    x: Math.max(8, x),
+    y: Math.max(8, Math.min(y, window.innerHeight - height - 8)),
+    width,
+  };
+}
+watch(
+  () => [savedSessions.value, props.hostId ? store.sshErrors[props.hostId] : store.savedError],
+  positionSavedMenu,
+  { flush: 'post' },
+);
+function hoverMenu(event: PointerEvent): void {
+  const button = (event.target as HTMLElement).closest('button');
+  if (button && button !== savedTrigger.value) savedMenuPosition.value = null;
+}
+function restoreSaved(id: string): void {
+  closeMenu();
+  if (!props.hostId || host.value) store.restoreSavedSession(host.value, id);
+}
+async function deleteSaved(id: string, event: MouseEvent): Promise<void> {
+  const button = event.currentTarget as HTMLButtonElement;
+  const menu = savedMenuElement.value;
+  const index = savedSessions.value.findIndex((entry) => entry.id === id);
+  await store.deleteSavedSession(props.hostId, id);
+  await nextTick();
+  if (
+    button.isConnected ||
+    !menu ||
+    savedMenuElement.value !== menu ||
+    document.activeElement !== document.body
+  )
+    return;
+  const remaining = menu.querySelectorAll<HTMLButtonElement>(
+    '.terminal-saved-session-remove:not(:disabled)',
+  );
+  (remaining[Math.min(index, remaining.length - 1)] ?? menu).focus();
+}
 function menuKey(event: KeyboardEvent): void {
+  const element = event.currentTarget as HTMLElement;
+  if (element === savedMenuElement.value && ['Escape', 'ArrowLeft'].includes(event.key)) {
+    event.preventDefault();
+    savedMenuPosition.value = null;
+    savedTrigger.value?.focus();
+    return;
+  }
+  if (event.key === 'ArrowRight' && document.activeElement === savedTrigger.value) {
+    event.preventDefault();
+    void openSavedMenu(true);
+    return;
+  }
   if (['Escape', 'Tab'].includes(event.key)) {
     event.preventDefault();
     closeMenu();
     return;
   }
-  const buttons = [
-    ...(menuElement.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
-  ];
+  const buttons = [...element.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
   if (!buttons.length || !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
   event.preventDefault();
   const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
@@ -158,8 +258,13 @@ function menuKey(event: KeyboardEvent): void {
 function runMenu(
   action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'save',
 ): void {
-  const target = store.tabs.find((item) => item.key === menu.value?.key);
+  const target = menuTarget.value;
+  const closeTarget = target ?? tabs.value[0];
   closeMenu();
+  if (action === 'all') {
+    if (closeTarget) void store.closeAll(closeTarget.key);
+    return;
+  }
   if (!target) return;
   if (action === 'duplicate' || action === 'reconnect') {
     const snapshot = target.panes[0]?.host;
@@ -175,17 +280,13 @@ function runMenu(
     else void store.reconnect(target.key);
   } else if (action === 'rename') rename(target.key);
   else if (action === 'disconnect') void store.disconnect(target.key);
-  else if (action === 'save') void store.saveSession(target.key, sessionName(target));
-  else void store.closeAll(target.key);
+  else if (action === 'save')
+    void store.saveSession(target.key, sessionName(target), {
+      defaultTitle: isDefaultSessionName(target),
+    });
 }
 const paneViews = computed(() =>
   store.tabs.flatMap((t) => {
-    if (
-      t.savedId &&
-      t.key !== store.active &&
-      t.panes.every((pane) => pane.state === 'idle' && !pane.connectRequested)
-    )
-      return [];
     const layout = geometry(t.layout);
     return t.panes.map((pane) => ({ pane, tab: t.key, rect: layout.panes[pane.key] }));
   }),
@@ -265,7 +366,8 @@ function sessionShortcut(event: KeyboardEvent): void {
   event.stopImmediatePropagation();
   if (event.repeat) return;
   if (menu.value) closeMenu();
-  if (saving) void store.saveSession(key, sessionName(item));
+  if (saving)
+    void store.saveSession(key, sessionName(item), { defaultTitle: isDefaultSessionName(item) });
   else rename(key);
 }
 function dragTab(event: DragEvent, key: string): void {
@@ -367,6 +469,7 @@ onMounted(() => {
 watch(
   () => [props.visible, props.hostId],
   () => {
+    savedMenuPosition.value = null;
     menu.value = null;
     renaming.value = null;
   },
@@ -375,10 +478,7 @@ watch(
   () => store.tabs.map((item) => item.key),
   (keys) => {
     if (renaming.value && !keys.includes(renaming.value)) renaming.value = null;
-    if (
-      menu.value &&
-      (menu.value.key === null ? !tabs.value.length : !keys.includes(menu.value.key))
-    )
+    if (menu.value && typeof menu.value.key === 'string' && !keys.includes(menu.value.key))
       closeMenu();
   },
 );
@@ -413,17 +513,21 @@ watch(
         {{ props.hostId ? tr('新建终端') : tr('打开本地终端') }}
       </button>
     </div>
-    <Teleport
-      v-if="tabs.length || sidebarSessions"
-      :to="sessionTarget || 'body'"
-      :disabled="!sessionTarget"
-    >
-      <div class="terminal-session-header">
-        <p v-if="!tabs.length" class="local-session-empty" role="status">
+    <Teleport :to="sessionTarget || 'body'" :disabled="!sessionTarget">
+      <div
+        class="terminal-session-header"
+        role="group"
+        :aria-label="tr('终端会话栏')"
+        tabindex="0"
+        @contextmenu.prevent.stop="openMenu(undefined, $event)"
+        @keydown.self.shift.f10.prevent.stop="openMenu(undefined, $event)"
+        @keydown.self.context-menu.prevent.stop="openMenu(undefined, $event)"
+      >
+        <p v-if="!tabs.length && sidebarSessions" class="local-session-empty" role="status">
           {{ tr('没有打开的终端') }}
         </p>
         <div
-          v-else
+          v-else-if="tabs.length"
           class="terminal-tabs"
           role="tablist"
           :aria-label="sidebarSessions ? tr('本地终端会话') : tr('终端标签')"
@@ -473,6 +577,7 @@ watch(
               <span class="terminal-session-name">
                 <svg
                   v-if="
+                    isLocalSessionIdle(item) ||
                     item.panes.some((pane) =>
                       ['closed', 'failed', 'disconnected'].includes(pane.state),
                     )
@@ -480,35 +585,39 @@ watch(
                   class="terminal-disconnected-icon"
                   viewBox="0 0 16 16"
                   role="img"
-                  :aria-label="tr('已断开连接')"
+                  :aria-label="isLocalSessionIdle(item) ? tr('未连接') : tr('已断开连接')"
                 >
-                  <title>{{ tr('已断开连接') }}</title>
                   <circle cx="8" cy="8" r="7" fill="currentColor" />
                   <path d="M4 8h8" stroke="white" stroke-width="2" />
                 </svg>
+                <Check
+                  v-else-if="item.panes.every((pane) => pane.state === 'connected')"
+                  class="terminal-connected-icon"
+                  :size="14"
+                  :stroke-width="3.5"
+                  role="img"
+                  :aria-label="tr('已连接')"
+                />
                 <span class="terminal-session-title">{{ sessionTitle(item) }}</span>
               </span>
               <span v-if="!props.hostId || item.savedId" class="terminal-session-saved">
                 {{ item.savedId ? tr('已保存') : tr('未保存') }}
               </span>
-              <small>{{
-                item.panes.length > 1
-                  ? tr('{0} 个窗格', item.panes.length)
-                  : stateLabels[item.panes[0]?.state ?? 'idle']
-              }}</small></button
+              <small v-if="item.panes.length > 1">{{ tr('{0} 个窗格', item.panes.length) }}</small>
+              <small
+                v-else-if="
+                  !['connected', 'disconnected'].includes(item.panes[0]?.state ?? 'idle') &&
+                  !isLocalSessionIdle(item)
+                "
+                >{{ stateLabels[item.panes[0]?.state ?? 'idle'] }}</small
+              ></button
             ><button
               class="terminal-session-close"
-              :class="{ 'terminal-session-delete': item.savedId }"
-              :aria-label="
-                item.savedId
-                  ? tr('删除会话 {0}', sessionTitle(item))
-                  : tr('关闭标签 {0}', sessionTitle(item))
-              "
-              :title="item.savedId ? tr('删除会话') : tr('关闭标签')"
+              :aria-label="tr('关闭标签 {0}', sessionTitle(item))"
+              :title="tr('关闭标签')"
               @click="store.close(item.key)"
             >
-              <Trash2 v-if="item.savedId" :size="16" aria-hidden="true" />
-              <X v-else :size="14" aria-hidden="true" />
+              <X :size="14" aria-hidden="true" />
             </button>
           </div>
         </div>
@@ -582,6 +691,7 @@ watch(
         :aria-label="menu.key === null ? tr('新建终端会话') : tr('终端会话操作')"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         @keydown="menuKey"
+        @pointerover="hoverMenu"
       >
         <template v-if="menu.key === null">
           <button role="menuitem" @click="selectLocalMode(false)">
@@ -596,45 +706,108 @@ watch(
           </button>
         </template>
         <template v-else>
-          <button role="menuitem" @click="runMenu('duplicate')">
-            <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
-          </button>
+          <template v-if="menuTarget">
+            <button role="menuitem" @click="runMenu('duplicate')">
+              <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
+            </button>
+            <button
+              role="menuitem"
+              :aria-label="tr('保存')"
+              aria-keyshortcuts="Control+S"
+              :disabled="!menuTarget || !store.canSave(menuTarget.key)"
+              @click="runMenu('save')"
+            >
+              <Save class="menu-icon-green" aria-hidden="true" />{{ tr('保存') }}<kbd>Ctrl+S</kbd>
+            </button>
+            <button
+              role="menuitem"
+              :aria-label="tr('重命名')"
+              aria-keyshortcuts="F2"
+              @click="runMenu('rename')"
+            >
+              <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名')
+              }}<kbd>F2</kbd>
+            </button>
+            <button
+              role="menuitem"
+              :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
+              @click="runMenu('reconnect')"
+            >
+              <RefreshCw class="menu-icon-green" aria-hidden="true" />{{ tr('重新连接') }}
+            </button>
+            <button
+              role="menuitem"
+              :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
+              @click="runMenu('disconnect')"
+            >
+              <Unplug class="menu-icon-red" aria-hidden="true" />{{ tr('断开连接') }}
+            </button>
+          </template>
           <button
+            ref="savedTrigger"
             role="menuitem"
-            :aria-label="tr('保存')"
-            aria-keyshortcuts="Control+S"
-            :disabled="!menuTarget || !store.canSave(menuTarget.key)"
-            @click="runMenu('save')"
+            aria-haspopup="menu"
+            aria-controls="terminal-saved-session-menu"
+            :aria-expanded="!!savedMenuPosition"
+            @pointerenter="openSavedMenu()"
+            @click="openSavedMenu(true)"
           >
-            <Save class="menu-icon-green" aria-hidden="true" />{{ tr('保存') }}<kbd>Ctrl+S</kbd>
+            <Save class="menu-icon-green" aria-hidden="true" />
+            <span>{{ tr('已保存会话') }}</span>
+            <ChevronRight class="terminal-saved-menu-arrow" aria-hidden="true" />
           </button>
-          <button
-            role="menuitem"
-            :aria-label="tr('重命名')"
-            aria-keyshortcuts="F2"
-            @click="runMenu('rename')"
-          >
-            <TextCursorInput class="menu-icon-gold" aria-hidden="true" />{{ tr('重命名')
-            }}<kbd>F2</kbd>
-          </button>
-          <button
-            role="menuitem"
-            :disabled="!menuTarget || !store.canReconnect(menuTarget.key)"
-            @click="runMenu('reconnect')"
-          >
-            <RefreshCw class="menu-icon-green" aria-hidden="true" />{{ tr('重新连接') }}
-          </button>
-          <button
-            role="menuitem"
-            :disabled="!menuTarget || !store.canDisconnect(menuTarget.key)"
-            @click="runMenu('disconnect')"
-          >
-            <Unplug class="menu-icon-red" aria-hidden="true" />{{ tr('断开连接') }}
-          </button>
-          <button role="menuitem" @click="runMenu('all')">
+          <button v-if="tabs.length" role="menuitem" @click="runMenu('all')">
             <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
           </button>
         </template>
+      </div>
+      <div
+        v-if="savedMenuPosition"
+        id="terminal-saved-session-menu"
+        ref="savedMenuElement"
+        class="context-menu terminal-session-menu terminal-saved-session-menu"
+        role="menu"
+        :aria-label="tr('已保存会话')"
+        tabindex="-1"
+        :style="{
+          left: `${savedMenuPosition.x}px`,
+          top: `${savedMenuPosition.y}px`,
+          width: `${savedMenuPosition.width}px`,
+        }"
+        @keydown="menuKey"
+      >
+        <div
+          v-for="entry in savedSessions"
+          :key="entry.id"
+          class="terminal-saved-session-row"
+          role="group"
+        >
+          <button
+            role="menuitem"
+            :title="store.savedSessionTitle(entry)"
+            @click="restoreSaved(entry.id)"
+          >
+            <span>{{ store.savedSessionTitle(entry) }}</span>
+          </button>
+          <button
+            role="menuitem"
+            class="terminal-saved-session-remove"
+            :aria-label="tr('删除“{0}”的保存记录', entry.title)"
+            :title="tr('删除保存记录')"
+            :disabled="!store.canDeleteSaved(props.hostId, entry.id)"
+            @click="deleteSaved(entry.id, $event)"
+          >
+            <X class="menu-icon-red" aria-hidden="true" />
+          </button>
+        </div>
+        <p v-if="!savedSessions.length" class="terminal-saved-session-empty" role="status">
+          {{
+            (props.hostId ? store.sshErrors[props.hostId] : store.savedError) ||
+            (store.savedLoading || store.sshLoading.has(props.hostId)
+              ? tr('正在加载已保存会话…')
+              : tr('没有已保存的会话'))
+          }}
+        </p>
       </div>
     </template>
   </Teleport>

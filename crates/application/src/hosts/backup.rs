@@ -24,6 +24,8 @@ struct Backup {
 pub struct HostBackupResult {
     pub hosts: usize,
     pub groups: usize,
+    pub skipped_hosts: usize,
+    pub reused_groups: usize,
     pub agent_hosts: usize,
     pub missing_auth: usize,
 }
@@ -33,6 +35,8 @@ impl Backup {
         HostBackupResult {
             hosts: self.directory.hosts.len(),
             groups: self.directory.groups.len(),
+            skipped_hosts: 0,
+            reused_groups: 0,
             agent_hosts: self
                 .directory
                 .hosts
@@ -159,24 +163,36 @@ fn import(db: &Database, store: &dyn SecretStore, path: &Path) -> Result<HostBac
         }
         references.push(new_secret_reference(credential.value.as_bytes())?);
     }
-    let result = db.import_host_directory(&backup.directory, &references, |reference, value| {
-        store.write(reference, value.as_bytes())
-    });
-    if let Err(error) = result {
-        for reference in &references {
-            if db
-                .collect_pending_secret(reference, || store.delete(reference))
-                .is_err()
-            {
-                tracing::warn!(
-                    operation = "host_backup_cleanup",
-                    "pending credential cleanup will be retried"
-                );
+    let result = match db.import_host_directory(
+        &backup.directory,
+        &references,
+        |reference| store.read(reference),
+        |reference, value| store.write(reference, value.as_bytes()),
+    ) {
+        Ok(result) => result,
+        Err(error) => {
+            for reference in &references {
+                if db
+                    .collect_pending_secret(reference, || store.delete(reference))
+                    .is_err()
+                {
+                    tracing::warn!(
+                        operation = "host_backup_cleanup",
+                        "pending credential cleanup will be retried"
+                    );
+                }
             }
+            return Err(error);
         }
-        return Err(error);
-    }
-    Ok(backup.summary())
+    };
+    Ok(HostBackupResult {
+        hosts: result.hosts,
+        groups: result.groups,
+        skipped_hosts: result.skipped_hosts,
+        reused_groups: result.reused_groups,
+        agent_hosts: result.agent_hosts,
+        missing_auth: result.missing_auth,
+    })
 }
 
 impl Application {

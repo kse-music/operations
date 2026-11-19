@@ -2,15 +2,20 @@
 import { tr } from '../i18n/messages';
 
 import { useErrorNotifications } from '../composables/error-notifications';
-import { nextTick, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { Eye, FileText, ShieldCheck } from '@lucide/vue';
 import Modal from './Modal.vue';
 import HostFolderPicker from './HostFolderPicker.vue';
 import { useHostsStore } from '../stores/hosts';
 import { hostsApi } from '../services/hosts';
 import { authLabels, type ImportPreview } from '../types/hosts';
+const props = defineProps<{ allowBackup?: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const store = useHostsStore();
+const source = ref<'ssh' | 'backup'>('backup');
+const backupMode = computed(
+  () => props.allowBackup && (source.value === 'backup' || !store.catalog),
+);
 const text = ref('');
 const preview = ref<ImportPreview | null>(null);
 const selected = ref<string[]>([]);
@@ -66,11 +71,48 @@ async function submit(): Promise<void> {
     emit('close');
   }
 }
+async function restoreBackup(): Promise<void> {
+  if (await store.backup('import')) emit('close');
+}
 useErrorNotifications(fileError);
 </script>
 <template>
-  <Modal :title="tr('导入 OpenSSH Config')" :busy="store.busy" @close="emit('close')">
-    <div class="import-body">
+  <Modal
+    :title="allowBackup ? tr('导入主机') : tr('导入 OpenSSH Config')"
+    :busy="store.busy"
+    @close="emit('close')"
+  >
+    <div
+      v-if="allowBackup && store.catalog"
+      class="import-sources"
+      role="group"
+      :aria-label="tr('导入来源')"
+    >
+      <button
+        class="button"
+        type="button"
+        :aria-pressed="!backupMode"
+        :disabled="store.busy"
+        @click="source = 'ssh'"
+      >
+        {{ tr('SSH 配置') }}
+      </button>
+      <button
+        class="button"
+        type="button"
+        :aria-pressed="backupMode"
+        :disabled="store.busy"
+        @click="source = 'backup'"
+      >
+        {{ tr('主机备份') }}
+      </button>
+    </div>
+    <div v-if="backupMode" class="import-body">
+      <p class="import-intro subtle">
+        {{ tr('选择 .sdhosts 文件，恢复其中的主机、文件夹和已保存的登录凭据。') }}
+      </p>
+    </div>
+    <div v-else class="import-body">
       <p class="import-intro subtle">
         {{ tr('选择本机文件或粘贴配置，生成预览后勾选要导入的主机。') }}
       </p>
@@ -185,6 +227,15 @@ useErrorNotifications(fileError);
     <footer class="dialog-actions import-footer">
       <button class="button" :disabled="store.busy" @click="emit('close')">{{ tr('取消') }}</button>
       <button
+        v-if="backupMode"
+        class="button primary"
+        :disabled="store.busy"
+        @click="restoreBackup"
+      >
+        {{ tr('选择备份文件…') }}
+      </button>
+      <button
+        v-else
         class="button"
         :class="{ primary: preview }"
         :disabled="!preview || !selected.length || !acknowledged || store.busy"

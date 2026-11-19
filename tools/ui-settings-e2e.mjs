@@ -265,7 +265,14 @@ try {
     assert.match(await about.textContent(), /本地环境/);
     assert.match(await about.textContent(), /vui-test/);
     assert.match(await about.textContent(), /schema v10/);
-    assert.equal(await about.getByRole('button', { name: '重新检查', exact: true }).count(), 1);
+    assert.equal(await about.locator('header button').count(), 0);
+    assert.equal(
+      await about
+        .getByRole('region', { name: '本地环境' })
+        .getByRole('button', { name: '重试' })
+        .count(),
+      0,
+    );
     assert.equal(await about.evaluate((el) => el.scrollWidth > el.clientWidth), false);
     assert.equal(await page.locator('.settings-navigation [aria-label="本地环境"]').count(), 0);
     await navigateWorkspace(page, '关于');

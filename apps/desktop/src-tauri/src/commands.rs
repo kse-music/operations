@@ -82,6 +82,20 @@ fn local_session_metadata(
     saved
 }
 #[tauri::command]
+pub async fn terminal_saved_title_commands<R: tauri::Runtime>(
+    window: tauri::WebviewWindow<R>,
+    application: tauri::State<'_, Application>,
+    host_id: String,
+) -> Result<std::collections::BTreeMap<String, String>, IpcError> {
+    if window.label() != "main" {
+        return Err(serverdeck_core::Error::Validation("终端会话操作仅支持主窗口").into());
+    }
+    application
+        .terminal_saved_title_commands(host_id)
+        .await
+        .map_err(Into::into)
+}
+#[tauri::command]
 pub async fn terminal_ssh_saved_sessions(
     application: tauri::State<'_, Application>,
     host_id: String,

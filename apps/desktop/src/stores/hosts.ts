@@ -93,14 +93,16 @@ export const useHostsStore = defineStore('hosts', () => {
       return;
     await run(() => hostsApi.update(id, { ...hostInput(host), groupId }), tr('主机分组已更新。'));
   }
-  async function backup(action: 'import' | 'export'): Promise<void> {
-    await run(async () => {
+  async function backup(action: 'import' | 'export'): Promise<boolean> {
+    const operation = await run(async () => {
       const result = await hostsApi.backup(action);
-      if (!result) return;
+      if (!result) return false;
       let message =
         action === 'export'
           ? tr('已导出 {0} 台主机、{1} 个文件夹。', result.hosts, result.groups)
           : tr('已导入 {0} 台主机、{1} 个文件夹。', result.hosts, result.groups);
+      if (result.reusedGroups) message += ' ' + tr('已复用 {0} 个文件夹。', result.reusedGroups);
+      if (result.skippedHosts) message += ' ' + tr('已跳过 {0} 台重复主机。', result.skippedHosts);
       if (result.agentHosts)
         message += ' ' + tr('{0} 台主机需要本机 SSH Agent 提供密钥。', result.agentHosts);
       if (result.missingAuth)
@@ -114,7 +116,9 @@ export const useHostsStore = defineStore('hosts', () => {
           error.value = tr('操作已完成，但列表刷新失败，请点击刷新。');
         }
       }
+      return true;
     });
+    return operation.ok && operation.value;
   }
   async function renameHost(id: string, name: string): Promise<boolean> {
     const host = catalog.value?.hosts.find((host) => host.id === id);

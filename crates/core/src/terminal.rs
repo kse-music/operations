@@ -229,6 +229,8 @@ pub fn valid_protected_command(value: &str) -> bool {
 pub struct SavedLocalTerminal {
     pub id: String,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_command_pane: Option<usize>,
     pub panes: Vec<SavedLocalPane>,
     pub layout: LocalTerminalLayout,
 }
@@ -246,6 +248,7 @@ impl SavedLocalTerminal {
         }
         validate_terminal_title(&self.title)?;
         self.layout.validate(self.panes.len())?;
+        validate_title_command_pane(self.title_command_pane, self.panes.len())?;
         for pane in &self.panes {
             if pane.directory.len() > 32768
                 || !std::path::Path::new(&pane.directory).is_absolute()
@@ -269,6 +272,7 @@ impl SavedLocalTerminal {
 pub struct SaveTerminalInput {
     pub id: Option<String>,
     pub title: String,
+    pub title_command_pane: Option<usize>,
     pub session_ids: Vec<String>,
     pub layout: Option<LocalTerminalLayout>,
 }
@@ -312,9 +316,18 @@ pub struct SshSavedSource {
 pub struct SavedSshTerminal {
     pub id: uuid::Uuid,
     pub title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_command_pane: Option<usize>,
     pub pane_count: usize,
     pub layout_only_panes: usize,
     pub layout: LocalTerminalLayout,
+}
+
+pub fn validate_title_command_pane(pane: Option<usize>, count: usize) -> Result<(), Error> {
+    if pane.is_some_and(|pane| pane >= count) {
+        return Err(Error::Validation("会话名称引用的窗格无效"));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]

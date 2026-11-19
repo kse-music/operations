@@ -27,8 +27,17 @@ fn decode(raw: &str) -> Result<LocalSessions, Error> {
                 }
             }
         }
-        Some(2) => {}
+        Some(2 | 3) => {}
         _ => return Err(invalid()),
+    }
+    if json["version"].as_u64() != Some(3)
+        && json["sessions"]
+            .as_array()
+            .ok_or_else(invalid)?
+            .iter()
+            .any(|session| session.get("titleCommandPane").is_some())
+    {
+        return Err(invalid());
     }
     let stored: LocalSessions = serde_json::from_value(json).map_err(storage_error)?;
     if stored.sessions.len() > 32 {
@@ -54,16 +63,22 @@ fn read(db: &Database, connection: &rusqlite::Transaction<'_>) -> Result<LocalSe
         .map_err(storage_error)?;
     let Some(json) = json else {
         return Ok(LocalSessions {
-            version: 2,
+            version: 3,
             sessions: vec![],
         });
     };
     let mut stored = decode(&json)?;
-    if stored.version == 1 {
-        // v1 had no command. All pane and layout data has been strictly validated.
+    if stored.version < 3 {
         super::migrations::backup(db, serverdeck_core::DATABASE_VERSION)
             .map_err(|error| super::migrations::failure("本地会话备份", error))?;
-        stored.version = 2;
+        if stored.version == 1 {
+            // V1 had no command. V2 preserves those panes with no command snapshot.
+            stored.version = 2;
+        }
+        if stored.version == 2 {
+            // V2 titles carry no provenance. Keep them as authoritative names.
+            stored.version = 3;
+        }
         write(connection, &stored)?;
         super::migrations::integrity(connection)?;
     }
@@ -103,6 +118,7 @@ impl Database {
         &self,
         id: &str,
         title: String,
+        title_command_pane: Option<usize>,
     ) -> Result<SavedLocalTerminal, Error> {
         serverdeck_core::terminal::validate_terminal_title(&title)?;
         self.edit_local_terminal_sessions(|sessions| {
@@ -110,7 +126,12 @@ impl Database {
                 .iter_mut()
                 .find(|saved| saved.id == id)
                 .ok_or(Error::NotFound)?;
+            serverdeck_core::terminal::validate_title_command_pane(
+                title_command_pane,
+                saved.panes.len(),
+            )?;
             saved.title = title;
+            saved.title_command_pane = title_command_pane;
             Ok(saved.clone())
         })
     }
@@ -144,6 +165,7 @@ mod tests {
         SavedLocalTerminal {
             id: uuid::Uuid::new_v4().to_string(),
             title: title.into(),
+            title_command_pane: None,
             panes: vec![SavedLocalPane {
                 directory: directory.to_str().unwrap().into(),
                 elevated: false,
@@ -151,6 +173,45 @@ mod tests {
             }],
             layout: LocalTerminalLayout::Leaf { pane: 0 },
         }
+    }
+
+    #[test]
+    fn upgrades_v2_titles_without_exposing_or_losing_their_command_snapshots() {
+        let root = tempfile::tempdir().unwrap();
+        let db = Database::open(root.path().join("app.sqlite3")).unwrap();
+        let conn = db.connect().unwrap();
+        let mut saved = session(root.path(), "会话 1");
+        saved.panes[0].protected_command = Some("AQID".into());
+        let old = serde_json::json!({ "version": 2, "sessions": [&saved] }).to_string();
+        let select = "SELECT value FROM application_settings WHERE key='local_terminal_sessions'";
+        conn.execute(
+            "INSERT INTO application_settings(key,value) VALUES('local_terminal_sessions',?1)",
+            [&old],
+        )
+        .unwrap();
+        assert_eq!(db.local_terminal_sessions().unwrap(), [saved.clone()]);
+        let backup = std::fs::read_dir(root.path().join("migration-backups"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            Connection::open(backup.path())
+                .unwrap()
+                .query_row(select, [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            old
+        );
+
+        saved.title_command_pane = Some(0);
+        db.save_local_terminal_session(saved.clone()).unwrap();
+        let reopened = Database::open(&db.path).unwrap();
+        assert_eq!(reopened.local_terminal_sessions().unwrap(), [saved.clone()]);
+        let renamed = reopened
+            .rename_local_terminal_session(&saved.id, "会话 1".into(), None)
+            .unwrap();
+        assert_eq!(renamed.title_command_pane, None);
+        assert_eq!(renamed.panes, saved.panes);
     }
     #[test]
     fn saves_multiple_independent_snapshots_and_preserves_legacy_data() {
@@ -253,7 +314,7 @@ mod tests {
         let reopened = Database::open(&db.path).unwrap();
         assert_eq!(reopened.local_terminal_sessions().unwrap(), [saved]);
         let raw: String = connection.query_row(select, [], |r| r.get(0)).unwrap();
-        assert_eq!(decode(&raw).unwrap().version, 2);
+        assert_eq!(decode(&raw).unwrap().version, 3);
         let copies = std::fs::read_dir(backups)
             .unwrap()
             .collect::<Result<Vec<_>, _>>()

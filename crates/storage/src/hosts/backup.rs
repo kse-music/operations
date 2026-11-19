@@ -39,6 +39,16 @@ pub struct TrustedKey {
     pub trusted_at: String,
 }
 
+#[derive(Default)]
+pub struct DirectoryImportResult {
+    pub hosts: usize,
+    pub groups: usize,
+    pub skipped_hosts: usize,
+    pub reused_groups: usize,
+    pub agent_hosts: usize,
+    pub missing_auth: usize,
+}
+
 fn credential_ids(hosts: &[DirectoryHost]) -> BTreeSet<&str> {
     hosts
         .iter()
@@ -99,6 +109,47 @@ fn remap(map: &HashMap<&str, String>, id: &mut Option<String>) -> Result<(), Err
     Ok(())
 }
 
+fn matching_host(
+    connection: &Connection,
+    input: &HostInput,
+    mut credentials_match: impl FnMut(Option<&str>, Option<&str>) -> Result<bool, Error>,
+) -> Result<Option<String>, Error> {
+    let mut statement = connection
+        .prepare_cached(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts WHERE hostname=?1 AND port=?2 AND username=?3 ORDER BY id"
+        ))
+        .map_err(storage_error)?;
+    let candidates = statement
+        .query_map(
+            params![input.hostname, input.port, input.username],
+            host_row,
+        )
+        .map_err(storage_error)?;
+    let proxy_credential = input
+        .ssh
+        .proxy
+        .as_ref()
+        .and_then(|p| p.credential_id.as_deref());
+    for candidate in candidates {
+        let Host { id, mut config, .. } = candidate.map_err(storage_error)?;
+        // Match the configuration independently of the local IDs assigned to its credentials.
+        let login = std::mem::replace(&mut config.credential_id, input.credential_id.clone());
+        let proxy = config.ssh.proxy.as_mut().and_then(|proxy| {
+            std::mem::replace(
+                &mut proxy.credential_id,
+                proxy_credential.map(str::to_owned),
+            )
+        });
+        if config == *input
+            && credentials_match(input.credential_id.as_deref(), login.as_deref())?
+            && credentials_match(proxy_credential, proxy.as_deref())?
+        {
+            return Ok(Some(id));
+        }
+    }
+    Ok(None)
+}
+
 impl Database {
     pub fn export_host_directory<T>(
         &self,
@@ -141,12 +192,13 @@ impl Database {
         })
     }
 
-    pub fn import_host_directory<T>(
+    pub fn import_host_directory<T: AsRef<[u8]>, R: AsRef<[u8]>>(
         &self,
         directory: &Directory<T>,
         references: &[String],
+        mut read: impl FnMut(&str) -> Result<Option<R>, Error>,
         mut write: impl FnMut(&str, &T) -> Result<(), Error>,
-    ) -> Result<(), Error> {
+    ) -> Result<DirectoryImportResult, Error> {
         let group_order = dependency_order(
             directory
                 .groups
@@ -186,59 +238,44 @@ impl Database {
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(storage_error)?;
+        let mut result = DirectoryImportResult::default();
         let mut groups = HashMap::new();
         for index in group_order {
             let group = &directory.groups[index];
             validate_name(&group.name)?;
             let mut parent = group.parent_id.clone();
             remap(&groups, &mut parent)?;
-            let id = Uuid::new_v4().to_string();
-            if tx.execute("INSERT INTO host_groups(id,name,sort_order,parent_id) VALUES(?1,?2,?3,?4) ON CONFLICT(name) DO NOTHING",
-                params![id,group.name,group.sort_order,parent]).map_err(storage_error)? == 0 {
-                return Err(Error::Validation("文件夹名称冲突，未导入主机备份"));
-            }
+            let existing: Option<(String, Option<String>)> = tx
+                .query_row(
+                    "SELECT id,parent_id FROM host_groups WHERE name=?1",
+                    [&group.name],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(storage_error)?;
+            let id = if let Some((id, existing_parent)) = existing {
+                if parent != existing_parent {
+                    return Err(Error::Validation("同名文件夹位于不同路径，未导入主机备份"));
+                }
+                result.reused_groups += 1;
+                id
+            } else {
+                let id = Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO host_groups(id,name,sort_order,parent_id) VALUES(?1,?2,?3,?4)",
+                    params![id, group.name, group.sort_order, parent],
+                )
+                .map_err(storage_error)?;
+                result.groups += 1;
+                id
+            };
             groups.insert(group.id.as_str(), id);
         }
-        let mut credentials = HashMap::new();
-        for (credential, reference) in directory.credentials.iter().zip(references) {
-            validate_name(&credential.name)?;
-            if Uuid::parse_str(&credential.id).is_err() || credential.kind == AuthType::Agent {
-                return Err(Error::Validation("备份凭据无效"));
-            }
-            let id = Uuid::new_v4().to_string();
-            tx.execute("INSERT INTO credentials(id,name,kind,host_managed,secret_ref) VALUES(?1,?2,?3,?4,?5)",
-                params![id,credential.name,credential.kind.as_str(),credential.host_managed,reference]).map_err(storage_error)?;
-            credentials.insert(credential.id.as_str(), id);
-        }
-        let mut endpoints = HashSet::new();
-        for host in &directory.hosts {
-            let addr = normalize_hostname(&host.config.hostname)?;
-            if endpoints.insert((addr.clone(), host.config.port))
-                && tx
-                    .query_row(
-                        "SELECT EXISTS(SELECT 1 FROM hosts WHERE hostname=?1 AND port=?2)",
-                        params![addr, host.config.port],
-                        |row| row.get::<_, bool>(0),
-                    )
-                    .map_err(storage_error)?
-            {
-                return Err(Error::Validation(
-                    "主机地址和端口与现有记录冲突，未导入主机备份",
-                ));
-            }
-        }
-        let mut hosts = HashMap::new();
-        for index in host_order {
-            let host = &directory.hosts[index];
-            let mut input = host.config.clone().normalize()?;
-            remap(&groups, &mut input.group_id)?;
-            remap(&hosts, &mut input.ssh.jump_host_id)?;
-            remap(&credentials, &mut input.credential_id)?;
-            if let Some(proxy) = &mut input.ssh.proxy {
-                remap(&credentials, &mut proxy.credential_id)?;
-            }
-            hosts.insert(host.id.as_str(), insert_host(&tx, &input)?.id);
-        }
+        let mut endpoints = directory
+            .hosts
+            .iter()
+            .map(|host| Ok((normalize_hostname(&host.config.hostname)?, host.config.port)))
+            .collect::<Result<HashSet<_>, Error>>()?;
         for key in &directory.trusted_keys {
             if !endpoints.remove(&(key.hostname.clone(), key.port)) {
                 return Err(Error::Validation("备份的主机指纹与导入主机不匹配或重复"));
@@ -263,7 +300,81 @@ impl Database {
                 ));
             }
         }
+
+        let mut credentials = HashMap::new();
+        let mut imported_credentials = HashMap::new();
         for (credential, reference) in directory.credentials.iter().zip(references) {
+            validate_name(&credential.name)?;
+            if Uuid::parse_str(&credential.id).is_err() || credential.kind == AuthType::Agent {
+                return Err(Error::Validation("备份凭据无效"));
+            }
+            let id = Uuid::new_v4().to_string();
+            tx.execute("INSERT INTO credentials(id,name,kind,host_managed,secret_ref) VALUES(?1,?2,?3,?4,?5)",
+                params![id,credential.name,credential.kind.as_str(),credential.host_managed,reference]).map_err(storage_error)?;
+            credentials.insert(credential.id.as_str(), id.clone());
+            imported_credentials.insert(id, (credential, reference));
+        }
+        let mut compared_credentials = HashMap::new();
+        let mut credentials_match = |incoming: Option<&str>, local: Option<&str>| {
+            if incoming == local {
+                return Ok(true);
+            }
+            let (Some(incoming), Some(local)) = (incoming, local) else {
+                return Ok(false);
+            };
+            let key = (incoming.to_owned(), local.to_owned());
+            if let Some(&matches) = compared_credentials.get(&key) {
+                return Ok(matches);
+            }
+            let (incoming, _) = imported_credentials
+                .get(incoming)
+                .ok_or(Error::Validation("备份中的关联记录缺失"))?;
+            let matches = if let Some((other, _)) = imported_credentials.get(local) {
+                incoming.kind == other.kind && incoming.value.as_ref() == other.value.as_ref()
+            } else {
+                let other = credential_record(&tx, local)?;
+                if other.public.kind == incoming.kind
+                    && other.public.key_path.is_none()
+                    && let Some(reference) = other.secret_ref
+                {
+                    read(&reference)?
+                        .is_some_and(|secret| secret.as_ref() == incoming.value.as_ref())
+                } else {
+                    false
+                }
+            };
+            compared_credentials.insert(key, matches);
+            Ok(matches)
+        };
+
+        let mut hosts = HashMap::new();
+        let mut installed_credentials = HashSet::new();
+        for index in host_order {
+            let host = &directory.hosts[index];
+            let mut input = host.config.clone().normalize()?;
+            remap(&groups, &mut input.group_id)?;
+            remap(&hosts, &mut input.ssh.jump_host_id)?;
+            remap(&credentials, &mut input.credential_id)?;
+            if let Some(proxy) = &mut input.ssh.proxy {
+                remap(&credentials, &mut proxy.credential_id)?;
+            }
+            let id = if let Some(id) = matching_host(&tx, &input, &mut credentials_match)? {
+                result.skipped_hosts += 1;
+                id
+            } else {
+                let id = insert_host(&tx, &input)?.id;
+                result.hosts += 1;
+                result.agent_hosts += usize::from(input.auth_type == AuthType::Agent);
+                result.missing_auth += usize::from(
+                    input.auth_type != AuthType::Agent && input.credential_id.is_none(),
+                );
+                installed_credentials.extend(input.credential_id);
+                installed_credentials.extend(input.ssh.proxy.and_then(|proxy| proxy.credential_id));
+                id
+            };
+            hosts.insert(host.id.as_str(), id);
+        }
+        for (id, (credential, reference)) in imported_credentials {
             if tx
                 .execute("DELETE FROM secret_gc WHERE reference=?1", [reference])
                 .map_err(storage_error)?
@@ -271,8 +382,14 @@ impl Database {
             {
                 return Err(Error::Conflict);
             }
-            write(reference, &credential.value)?;
+            if installed_credentials.contains(&id) {
+                write(reference, &credential.value)?;
+            } else {
+                tx.execute("DELETE FROM credentials WHERE id=?1", [&id])
+                    .map_err(storage_error)?;
+            }
         }
-        tx.commit().map_err(storage_error)
+        tx.commit().map_err(storage_error)?;
+        Ok(result)
     }
 }

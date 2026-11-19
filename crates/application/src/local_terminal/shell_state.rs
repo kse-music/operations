@@ -20,7 +20,6 @@ impl ShellLaunch {
         }
         #[cfg(windows)]
         {
-            use base64::Engine;
             // PowerShell can reset a native cwd containing wildcard characters during startup.
             // Restore its provider location with LiteralPath, passing the value only as data.
             command.env_remove("SERVERDECK_START_DIRECTORY");
@@ -35,11 +34,15 @@ impl ShellLaunch {
                 command.env("SERVERDECK_START_COMMAND", blob);
             }
             let script = include_str!("session.ps1").replace("__TOKEN__", &self.token.to_string());
-            let bytes: Vec<_> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            // Keep the command line short and read only the script supplied by this launcher.
+            command.env("SERVERDECK_START_SCRIPT", script);
             command.args([
                 "-NoExit",
-                "-EncodedCommand",
-                &base64::engine::general_purpose::STANDARD.encode(bytes),
+                "-Command",
+                "$serverDeckStartup = $env:SERVERDECK_START_SCRIPT; \
+                 $env:SERVERDECK_START_SCRIPT = $null; \
+                 . ([scriptblock]::Create($serverDeckStartup)); \
+                 Remove-Variable serverDeckStartup",
             ]);
         }
     }
@@ -237,5 +240,29 @@ mod tests {
         let home = command.get_cwd().map(ToOwned::to_owned);
         launch.configure(&mut command);
         assert_eq!(command.get_cwd(), home.as_ref());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_startup_keeps_the_pty_script_out_of_the_command_line() {
+        let token = uuid::Uuid::new_v4();
+        let launch = ShellLaunch {
+            directory: None,
+            protected_command: None,
+            token,
+        };
+        let (mut command, _) = shell().unwrap();
+        command.env("SERVERDECK_START_SCRIPT", "inherited value");
+        launch.configure(&mut command);
+
+        let startup_command = command.get_argv().last().unwrap().to_str().unwrap();
+        assert!(startup_command.len() < 512);
+        assert!(!startup_command.contains(&token.to_string()));
+        assert_eq!(
+            command.get_env("SERVERDECK_START_SCRIPT").unwrap(),
+            std::ffi::OsStr::new(
+                &include_str!("session.ps1").replace("__TOKEN__", &token.to_string())
+            )
+        );
     }
 }

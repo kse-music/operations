@@ -16,6 +16,7 @@ export const useApplicationStore = defineStore('application', () => {
   );
   const interfaceFontSizePreview = ref<InterfaceFontSize>();
   const loading = ref(false);
+  const environmentError = ref<string | null>(null);
   const saving = ref(false);
   const error = ref<string | null>(null);
   const notice = ref<string | null>(null);
@@ -24,6 +25,7 @@ export const useApplicationStore = defineStore('application', () => {
   async function initialize(): Promise<void> {
     if (loading.value || saving.value) return;
     loading.value = true;
+    environmentError.value = null;
     error.value = null;
     notice.value = null;
     try {
@@ -37,7 +39,8 @@ export const useApplicationStore = defineStore('application', () => {
       state.value = nextState;
     } catch (cause) {
       state.value = null;
-      error.value = ipc.errorMessage(cause);
+      environmentError.value = ipc.errorMessage(cause);
+      error.value = environmentError.value;
     } finally {
       loading.value = false;
     }
@@ -68,6 +71,7 @@ export const useApplicationStore = defineStore('application', () => {
     state,
     interfaceFontSizePreview,
     loading,
+    environmentError,
     saving,
     error,
     notice,

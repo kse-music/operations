@@ -305,8 +305,9 @@ try {
     );
     results.push('native process restart restores SQLite data');
     await showHostTree(page);
-    await hostTreeAction(page, null, '导入 SSH 配置…');
-    form = dialog('导入 OpenSSH Config');
+    await hostTreeAction(page, null, '导入…');
+    form = dialog('导入主机');
+    await form.getByRole('button', { name: 'SSH 配置', exact: true }).click();
     await form
       .getByLabel('OpenSSH Config 内容', { exact: true })
       .fill(

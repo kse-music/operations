@@ -193,8 +193,16 @@ try {
       ),
       true,
     );
-    await hostTreeAction(page, null, '导入 SSH 配置…');
-    const importDialog = page.getByRole('dialog', { name: '导入 OpenSSH Config', exact: true });
+    await hostTreeAction(page, null, '导入…');
+    const importDialog = page.getByRole('dialog', { name: '导入主机', exact: true });
+    await importDialog.getByRole('button', { name: '选择备份文件…', exact: true }).waitFor();
+    assert.equal(
+      await importDialog
+        .getByRole('button', { name: '主机备份', exact: true })
+        .getAttribute('aria-pressed'),
+      'true',
+    );
+    await importDialog.getByRole('button', { name: 'SSH 配置', exact: true }).click();
     await importDialog.waitFor();
     const importLayout = await importDialog.evaluate((dialog) => {
       const box = dialog.getBoundingClientRect();

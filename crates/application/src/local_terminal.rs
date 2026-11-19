@@ -973,6 +973,7 @@ mod tests {
         );
         let mut saved_first = app
             .terminal_local_save(SaveTerminalInput {
+                title_command_pane: Some(0),
                 id: None,
                 title: "第一会话".into(),
                 session_ids: vec![first.id.clone()],
@@ -1002,6 +1003,7 @@ mod tests {
         );
         let saved_second = app
             .terminal_local_save(SaveTerminalInput {
+                title_command_pane: None,
                 id: None,
                 title: "第二会话".into(),
                 session_ids: vec![second.id.clone()],
@@ -1009,6 +1011,12 @@ mod tests {
             })
             .await
             .unwrap();
+        let title_commands = app
+            .terminal_saved_title_commands(String::new())
+            .await
+            .unwrap();
+        assert_eq!(title_commands.len(), 1);
+        assert!(title_commands[&saved_first.id].starts_with("Set-Location -LiteralPath"));
         let command = format!(
             "Set-Location -LiteralPath '{}'\r",
             changed_dir.to_str().unwrap().replace('\'', "''")
@@ -1040,6 +1048,7 @@ mod tests {
         .await;
         saved_first = app
             .terminal_local_save(SaveTerminalInput {
+                title_command_pane: Some(0),
                 id: Some(saved_first.id.clone()),
                 title: "第一会话已更新".into(),
                 session_ids: vec![first.id.clone()],
@@ -1071,6 +1080,7 @@ mod tests {
         let prior_panes = saved_first.panes.clone();
         saved_first = app
             .terminal_local_save(SaveTerminalInput {
+                title_command_pane: None,
                 id: Some(saved_first.id.clone()),
                 title: "未启动时改名".into(),
                 session_ids: vec![],
@@ -1173,6 +1183,19 @@ mod tests {
         let (sink, mut output) = events();
         let ordinary = app.terminal_local_open(size, sink).await.unwrap();
         until_directory(&app.local_terminals, &ordinary.id, &mut output, &home).await;
+        app.terminal_input(
+            &ordinary.id,
+            b"[Console]::WriteLine(('SD_STARTUP_ENV_' + ($null -eq $env:SERVERDECK_START_SCRIPT)))\r"
+                .to_vec(),
+        )
+        .unwrap();
+        until(
+            &app.local_terminals,
+            &ordinary.id,
+            &mut output,
+            "SD_STARTUP_ENV_True",
+        )
+        .await;
         app.terminal_close(&ordinary.id).await.unwrap();
         std::fs::remove_dir(&second_dir).unwrap();
         let (sink, mut output) = events();

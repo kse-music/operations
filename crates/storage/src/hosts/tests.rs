@@ -596,6 +596,7 @@ fn ssh_session_snapshots_survive_reopen_failed_replacement_and_host_scoped_renam
     let host = db.host_create(input()).unwrap().id;
     let other = db.host_create(input()).unwrap().id;
     let session = SavedSshTerminal {
+        title_command_pane: None,
         id: uuid::Uuid::new_v4(),
         title: "first".into(),
         pane_count: 1,
@@ -620,10 +621,10 @@ fn ssh_session_snapshots_survive_reopen_failed_replacement_and_host_scoped_renam
     assert_eq!(db.pending_secret_gc().unwrap(), [failed_reference]);
     assert!(db.ssh_terminal_sessions(&other).unwrap().is_empty());
     assert!(
-        db.rename_ssh_session(&other, session.id, "wrong".into())
+        db.rename_ssh_session(&other, session.id, "wrong".into(), None)
             .is_err()
     );
-    db.rename_ssh_session(&host, session.id, "renamed".into())
+    db.rename_ssh_session(&host, session.id, "renamed".into(), None)
         .unwrap();
     let renamed = db.ssh_terminal_sessions(&host).unwrap().pop().unwrap();
     assert_eq!(renamed.session.title, "renamed");
@@ -634,6 +635,61 @@ fn ssh_session_snapshots_survive_reopen_failed_replacement_and_host_scoped_renam
 }
 
 #[test]
+fn upgrades_ssh_title_metadata_and_keeps_existing_secret_references() {
+    use crate::ssh_sessions::SshSessionRecord;
+    use serverdeck_core::terminal::{LocalTerminalLayout, SavedSshTerminal};
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(dir.path().join("sessions.db")).unwrap();
+    let host = db.host_create(input()).unwrap().id;
+    let session = SavedSshTerminal {
+        id: uuid::Uuid::new_v4(),
+        title: "会话 1".into(),
+        title_command_pane: None,
+        pane_count: 1,
+        layout_only_panes: 0,
+        layout: LocalTerminalLayout::Leaf { pane: 0 },
+    };
+    let record = SshSessionRecord::new(session.clone(), 40);
+    let reference = record.reference();
+    let key = format!("ssh_terminal_sessions:{host}");
+    let old = serde_json::json!({ "version": 1, "sessions": [record] }).to_string();
+    let conn = db.connect().unwrap();
+    let query = "SELECT value FROM application_settings WHERE key=?1";
+    conn.execute(
+        "INSERT INTO application_settings(key,value) VALUES(?1,?2)",
+        [&key, &old],
+    )
+    .unwrap();
+    let backups = dir.path().join("migration-backups");
+    std::fs::write(&backups, b"blocked").unwrap();
+    assert!(
+        db.rename_ssh_session(&host, session.id, session.title.clone(), Some(0))
+            .is_err()
+    );
+    assert_eq!(
+        conn.query_row(query, [&key], |row| row.get::<_, String>(0))
+            .unwrap(),
+        old
+    );
+    std::fs::remove_file(&backups).unwrap();
+    db.rename_ssh_session(&host, session.id, session.title, Some(0))
+        .unwrap();
+    let reopened = Database::open(&db.path).unwrap();
+    let entries = reopened.ssh_terminal_sessions(&host).unwrap();
+    assert_eq!(entries[0].session.title_command_pane, Some(0));
+    assert_eq!(entries[0].reference(), reference);
+    assert!(reopened.pending_secret_gc().unwrap().is_empty());
+    let backup = std::fs::read_dir(backups).unwrap().next().unwrap().unwrap();
+    assert_eq!(
+        Connection::open(backup.path())
+            .unwrap()
+            .query_row(query, [&key], |row| row.get::<_, String>(0))
+            .unwrap(),
+        old
+    );
+}
+
+#[test]
 fn unknown_ssh_snapshot_versions_are_never_overwritten() {
     let dir = tempfile::tempdir().unwrap();
     let db = Database::open(dir.path().join("sessions.db")).unwrap();
@@ -641,7 +697,7 @@ fn unknown_ssh_snapshot_versions_are_never_overwritten() {
     let key = format!("ssh_terminal_sessions:{host}");
     let conn = db.connect().unwrap();
     for raw in [
-        r#"{"version":2,"sessions":[]}"#,
+        r#"{"version":3,"sessions":[]}"#,
         r#"{"version":1,"sessions":[],"unknown":true}"#,
     ] {
         conn.execute(

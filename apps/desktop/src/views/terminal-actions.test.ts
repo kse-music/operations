@@ -9,6 +9,7 @@ import { defaultProductPreferences } from '../types/product';
 import { useApplicationStore } from '../stores/application';
 import { useHostsStore } from '../stores/hosts';
 import { useNotificationsStore } from '../stores/notifications';
+import { usePluginsStore } from '../stores/plugins';
 import { useTerminalsStore } from '../stores/terminals';
 import TerminalsView from './TerminalsView.vue';
 import type { ITerminalOptions } from '@xterm/xterm';
@@ -23,6 +24,7 @@ const native = vi.hoisted(() => ({
   removeSavedSshSession: vi.fn(),
   removeSavedLocalSession: vi.fn(),
   savedLocalSessions: vi.fn(),
+  savedTitleCommands: vi.fn(),
   close: vi.fn(),
   input: vi.fn(),
   ack: vi.fn(),
@@ -123,6 +125,23 @@ async function tabMenu(index = 0) {
   await flush();
   return document.querySelector('[aria-label="终端会话操作"]')!;
 }
+async function savedMenu(parent?: Element) {
+  if (!parent) {
+    root.querySelector('.terminal-session-header')!.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 80,
+        clientY: 60,
+      }),
+    );
+    await flush();
+    parent = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
+  }
+  button('已保存会话', parent).dispatchEvent(new Event('pointerenter'));
+  await flush();
+  return document.querySelector('[role="menu"][aria-label="已保存会话"]')!;
+}
 beforeEach(async () => {
   vi.clearAllMocks();
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
@@ -156,6 +175,7 @@ beforeEach(async () => {
     open(null, size, receive).then(({ id }) => ({ id, shell: 'PowerShell', elevated: !!elevated })),
   );
   native.savedLocalSessions.mockResolvedValue([]);
+  native.savedTitleCommands.mockResolvedValue({});
   native.savedSshSessions.mockResolvedValue([]);
   native.saveSshSession.mockImplementation(async (_host, input) => ({
     id: input.id ?? 'saved-ssh',
@@ -466,6 +486,7 @@ it('duplicates the right-click target as an ordinary fresh shell and preserves t
     '重命名F2',
     '重新连接',
     '断开连接',
+    '已保存会话',
     '关闭所有',
   ]);
   button('复制', menu).click();
@@ -490,6 +511,12 @@ it.each(['ssh', 'local'])(
     }
     const target = store.tabs.at(-1)!;
     const pane = target.panes[0]!;
+    const tab = root.querySelector('.terminal-tab.active [role=tab]')!;
+    const connectedIcon = () =>
+      tab.querySelector('.terminal-session-name > .terminal-connected-icon');
+    expect(connectedIcon()?.getAttribute('aria-label')).toBe('已连接');
+    expect(connectedIcon()?.nextElementSibling?.textContent).toBe('会话 1');
+    expect(tab.textContent).not.toContain('已连接');
     const oldSession = pane.sessionId;
     const original = native.receivers.at(-1)!;
     const xterm = terminals.instances.at(-1)!;
@@ -509,11 +536,11 @@ it.each(['ssh', 'local'])(
     expect(store.tabs).toContainEqual(target);
     expect(JSON.stringify(target.layout)).toBe(layout);
     expect(xterm.writes).toHaveLength(writes);
-    const icon = root.querySelector(
-      '.terminal-tab.active [role=tab] .terminal-session-name > .terminal-disconnected-icon',
-    );
+    const icon = tab.querySelector('.terminal-session-name > .terminal-disconnected-icon');
     expect(icon?.getAttribute('aria-label')).toBe('已断开连接');
     expect(icon?.nextElementSibling?.textContent).toContain('会话');
+    expect(connectedIcon()).toBeNull();
+    expect(tab.textContent).not.toContain('已断开连接');
     original({ type: 'state', state: 'connected', code: null, message: null });
     original({ type: 'data', sequence: 2, data: [88] });
     expect(pane.state).toBe('disconnected');
@@ -531,10 +558,28 @@ it.each(['ssh', 'local'])(
     expect(xterm.writes).toHaveLength(writes + 1);
     native.receivers.at(-1)!({ type: 'data', sequence: 1, data: [78, 69, 87] });
     expect(xterm.writes.at(-2)).toEqual(new Uint8Array([78, 69, 87]));
-    expect(root.querySelector('.terminal-tab.active .terminal-disconnected-icon')).toBeNull();
+    expect(tab.querySelector('.terminal-disconnected-icon')).toBeNull();
+    expect(connectedIcon()).not.toBeNull();
+    expect(tab.textContent).not.toContain('已连接');
     expect(native.input).not.toHaveBeenCalled();
   },
 );
+
+it('marks a split session as connected only when all panes are connected', async () => {
+  const store = useTerminalsStore();
+  store.split(store.focused, 'rows');
+  await flush();
+  const tab = root.querySelector('.terminal-tab.active [role=tab]')!;
+  expect(tab.querySelector('.terminal-connected-icon')).not.toBeNull();
+  expect(tab.querySelector('small')?.textContent).toBe('2 个窗格');
+
+  native.receivers[1]!({ type: 'state', state: 'disconnected', code: null, message: null });
+  await flush();
+  expect(store.tabs[0]?.panes[0]?.state).toBe('connected');
+  expect(tab.querySelector('.terminal-connected-icon')).toBeNull();
+  expect(tab.querySelector('.terminal-disconnected-icon')).not.toBeNull();
+  expect(tab.querySelector('small')?.textContent).toBe('2 个窗格');
+});
 
 it('reconnects every pane of the right-click target without changing other tabs or focus', async () => {
   const store = useTerminalsStore();
@@ -799,7 +844,7 @@ it.each(['local', 'ssh'])(
     expect(button('重命名', menu).querySelector('kbd')?.textContent).toBe('F2');
     expect([...menu.querySelectorAll('button')].some((b) => b.textContent === '关闭')).toBe(false);
     button('保存', menu).click();
-    await flush();
+    await vi.waitFor(() => expect(target.savedId).toBeTruthy());
     const input = {
       id: null,
       title: '项目 A',
@@ -808,8 +853,7 @@ it.each(['local', 'ssh'])(
     };
     if (targetHost) expect(native.saveSshSession).toHaveBeenCalledExactlyOnceWith(host.id, input);
     else expect(native.saveLocalSession).toHaveBeenCalledExactlyOnceWith(input);
-    expect(target.savedId).toBeTruthy();
-    expect(button('删除会话 项目 A', root).querySelector('.lucide-trash-2')).toBeTruthy();
+    expect(button('关闭标签 项目 A', root).querySelector('.lucide-x')).toBeTruthy();
     expect(store.active).toBe(activeKey);
     button('重命名', await tabMenu(0)).click();
     await flush();
@@ -832,22 +876,21 @@ it.each(['local', 'ssh'])(
 it('reopens the saved SSH split on the same host and preserves its snapshot when closing the workspace', async () => {
   const store = useTerminalsStore();
   await store.close(store.active);
-  native.savedSshSessions.mockResolvedValue([
-    {
-      id: 'saved',
-      title: '部署',
-      paneCount: 2,
-      layout: {
-        kind: 'split',
-        axis: 'rows',
-        ratio: 63,
-        first: { kind: 'leaf', pane: 1 },
-        second: { kind: 'leaf', pane: 0 },
-      },
+  const record = {
+    id: 'saved',
+    title: '部署',
+    paneCount: 2,
+    layout: {
+      kind: 'split',
+      axis: 'rows',
+      ratio: 63,
+      first: { kind: 'leaf', pane: 1 },
+      second: { kind: 'leaf', pane: 0 },
     },
-  ]);
+  };
+  native.savedSshSessions.mockResolvedValue([record]);
   await store.loadHostSessions(host);
-  store.select(store.hostTabs(host.id)[0]!.key);
+  button('部署', await savedMenu()).click();
   await flush();
   const restored = store.tabs[0]!;
   expect(restored.layout).toMatchObject({
@@ -860,6 +903,7 @@ it('reopens the saved SSH split on the same host and preserves its snapshot when
       id: 'saved',
       pane: index,
     });
+  native.saveSshSession.mockResolvedValueOnce({ ...record, title: '新名称' });
   await store.rename(restored.key, '新名称');
   expect(native.saveSshSession).toHaveBeenLastCalledWith(host.id, {
     id: 'saved',
@@ -870,12 +914,19 @@ it('reopens the saved SSH split on the same host and preserves its snapshot when
   await store.closeWorkspace(host.id);
   expect(store.tabs).toEqual([]);
   expect(native.removeSavedSshSession).not.toHaveBeenCalled();
-  await store.loadHostSessions(host);
-  store.select(store.hostTabs(host.id)[0]!.key);
+  button('新名称', await savedMenu()).click();
   await flush();
-  button('删除会话 部署', root).click();
+  const running = store.tabs[0]!;
+  const sessions = running.panes.map((pane) => pane.sessionId);
+  native.close.mockClear();
+  button('删除“新名称”的保存记录', await savedMenu(await tabMenu())).click();
+  expect(usePluginsStore().prompt).toBeNull();
   await flush();
   expect(native.removeSavedSshSession).toHaveBeenCalledExactlyOnceWith(host.id, 'saved');
+  expect(native.close).not.toHaveBeenCalled();
+  expect(store.tabs).toEqual([running]);
+  expect(running.savedId).toBeUndefined();
+  expect(running.panes.map((pane) => pane.sessionId)).toEqual(sessions);
 });
 it('keeps an SSH rename draft after a write error and reports a layout-only save', async () => {
   native.saveSshSession.mockResolvedValueOnce({
@@ -886,8 +937,9 @@ it('keeps an SSH rename draft after a write error and reports a layout-only save
     layout: { kind: 'leaf', pane: 0 },
   });
   button('保存', await tabMenu()).click();
-  await flush();
-  expect(useNotificationsStore().items.some((n) => n.text.includes('仅支持恢复布局'))).toBe(true);
+  await vi.waitFor(() =>
+    expect(useNotificationsStore().items.some((n) => n.text.includes('仅支持恢复布局'))).toBe(true),
+  );
   native.saveSshSession.mockRejectedValueOnce(new Error('写入失败'));
   button('重命名', await tabMenu()).click();
   await flush();
@@ -903,7 +955,7 @@ it('keeps an SSH rename draft after a write error and reports a layout-only save
   expect(useTerminalsStore().tabs[0]!.title).toBe('会话 1');
 });
 
-it('opens a saved local shell only after the saved row is selected', async () => {
+it('opens a saved local shell from the blank area menu and selects it without another open', async () => {
   hostId.value = '';
   native.savedLocalSessions.mockResolvedValue([
     {
@@ -916,14 +968,12 @@ it('opens a saved local shell only after the saved row is selected', async () =>
   const store = useTerminalsStore();
   await store.loadSaved();
   await flush();
-  const saved = store.tabs.find((tab) => tab.savedId === 'saved-one')!;
+  expect(store.hostTabs('')).toEqual([]);
   expect(native.openSavedLocal).not.toHaveBeenCalled();
   store.activateHost('');
   await flush();
   expect(native.openSavedLocal).not.toHaveBeenCalled();
-  [...root.querySelectorAll<HTMLButtonElement>('[role=tab]')]
-    .find((item) => item.textContent?.includes('保存的目录'))!
-    .click();
+  button('保存的目录', await savedMenu()).click();
   await flush();
   expect(native.openSavedLocal).toHaveBeenCalledWith(
     'saved-one',
@@ -931,9 +981,60 @@ it('opens a saved local shell only after the saved row is selected', async () =>
     expect.anything(),
     expect.any(Function),
   );
+  const saved = store.hostTabs('')[0]!;
   expect(saved.panes[0]!.sessionId).toBeTruthy();
+  expect(root.querySelector('[role=tab] .terminal-connected-icon')).not.toBeNull();
+  expect(root.querySelector('[role=tab]')?.textContent).toContain('已保存');
+  store.open(null);
+  await flush();
+  button('保存的目录', await savedMenu(await tabMenu(1))).click();
+  await flush();
+  expect(store.active).toBe(saved.key);
+  expect(native.openSavedLocal).toHaveBeenCalledTimes(1);
 });
-it('starts the first saved shell on local entry and keeps it running on repeated entry', async () => {
+it.each(['local', 'ssh'] as const)(
+  'shows the saved command beside a generated %s name and lets an explicit rename replace it',
+  async (kind) => {
+    const store = useTerminalsStore();
+    const base = {
+      id: 'generated',
+      title: '会话 1',
+      titleCommandPane: 0,
+      layout: { kind: 'leaf', pane: 0 },
+    };
+    if (kind === 'local') {
+      hostId.value = '';
+      store.open(null);
+      native.saveLocalSession.mockResolvedValueOnce({
+        ...base,
+        panes: [{ directory: 'C:\\one', elevated: false }],
+      });
+      await flush();
+    } else {
+      native.saveSshSession.mockResolvedValueOnce({ ...base, paneCount: 1, layoutOnlyPanes: 0 });
+    }
+    native.savedTitleCommands.mockResolvedValue({ generated: 'npm run dev' });
+    const activeKey = store.active;
+    const save = kind === 'local' ? native.saveLocalSession : native.saveSshSession;
+    button('保存', await tabMenu()).click();
+    await vi.waitFor(() =>
+      expect(root.querySelector('.terminal-session-title')?.textContent).toBe(
+        '会话 1 · npm run dev',
+      ),
+    );
+    expect(save.mock.lastCall?.at(-1)).toMatchObject({ title: '会话 1', titleCommandPane: 0 });
+    const submenu = await savedMenu(await tabMenu());
+    expect(button('会话 1 · npm run dev', submenu)).toBeTruthy();
+
+    // Custom names can exactly match a default label and still take precedence.
+    expect(await store.rename(activeKey, '会话 1')).toBe(true);
+    await flush();
+    expect(save.mock.lastCall?.at(-1)).not.toHaveProperty('titleCommandPane');
+    expect(root.querySelector('.terminal-session-title')?.textContent).toBe('会话 1');
+    expect(button('会话 1', submenu)).toBeTruthy();
+  },
+);
+it('keeps an explicitly restored shell running on repeated local entry', async () => {
   hostId.value = '';
   native.savedLocalSessions.mockResolvedValue([
     {
@@ -953,7 +1054,10 @@ it('starts the first saved shell on local entry and keeps it running on repeated
   await store.loadSaved();
   await flush();
   expect(native.openSavedLocal).not.toHaveBeenCalled();
-  store.activateLocal();
+  store.activateHost('');
+  await flush();
+  expect(native.openSavedLocal).not.toHaveBeenCalled();
+  button('第一个', await savedMenu()).click();
   await flush();
   expect(native.openSavedLocal).toHaveBeenCalledExactlyOnceWith(
     'first',
@@ -962,17 +1066,16 @@ it('starts the first saved shell on local entry and keeps it running on repeated
     expect.any(Function),
   );
   expect(native.openLocal).not.toHaveBeenCalled();
-  expect(store.tabs.find((tab) => tab.savedId === 'second')!.panes[0]!.connectRequested).toBe(
-    false,
-  );
-  store.activateLocal();
+  expect(store.hostTabs('').map((tab) => tab.savedId)).toEqual(['first']);
+  expect(store.savedSessions('').map((entry) => entry.id)).toEqual(['first', 'second']);
+  store.activateHost('');
   await flush();
   expect(native.openSavedLocal).toHaveBeenCalledTimes(1);
   expect(native.close).not.toHaveBeenCalled();
 });
-it.each([false, true])(
-  'removes a saved session through its close button without recreating it (running=%s)',
-  async (running) => {
+it.each(['button', 'all'])(
+  'keeps saved records after the %s close action and deletes them directly from the empty bar',
+  async (action) => {
     hostId.value = '';
     native.savedLocalSessions.mockResolvedValue([
       {
@@ -981,29 +1084,44 @@ it.each([false, true])(
         panes: [{ directory: 'C:\\project', elevated: false }],
         layout: { kind: 'leaf', pane: 0 },
       },
+      {
+        id: 'saved-two',
+        title: '第二项',
+        panes: [{ directory: 'C:\\two', elevated: false }],
+        layout: { kind: 'leaf', pane: 0 },
+      },
     ]);
     const store = useTerminalsStore();
     await store.loadSaved();
+    button('项目', await savedMenu()).click();
     const saved = store.tabs.find((tab) => tab.savedId === 'saved-one')!;
-    store.select(saved.key, running);
     await flush();
     const sessionId = saved.panes[0]!.sessionId;
-    const menu = await tabMenu(0);
-    expect(
-      [...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent?.trim()),
-    ).toEqual(['复制', '保存Ctrl+S', '重命名F2', '重新连接', '断开连接', '关闭所有']);
-    document.querySelector<HTMLElement>('.context-backdrop')!.click();
+    if (action === 'all') button('关闭所有', await tabMenu()).click();
+    else button('关闭标签 项目', root).click();
     await flush();
-    button('删除会话 项目', root).click();
+    expect(native.close).toHaveBeenCalledWith(sessionId);
+    expect(native.removeSavedLocalSession).not.toHaveBeenCalled();
+    expect(store.hostTabs('')).toEqual([]);
+    const submenu = await savedMenu();
+    expect(button('项目', submenu)).toBeTruthy();
+    const remove = button('删除“项目”的保存记录', submenu);
+    remove.focus();
+    remove.click();
+    expect(usePluginsStore().prompt).toBeNull();
     await flush();
     expect(native.removeSavedLocalSession).toHaveBeenCalledExactlyOnceWith('saved-one');
-    expect(store.hostTabs('')).toEqual([]);
-    expect(root.querySelector('[aria-label="删除会话 项目"]')).toBeNull();
-    if (running) expect(native.close).toHaveBeenCalledWith(sessionId);
-    else expect(native.close).not.toHaveBeenCalled();
-    store.activateLocal();
+    expect(submenu.isConnected).toBe(true);
+    expect(submenu.textContent).not.toContain('项目');
+    const next = button('删除“第二项”的保存记录', submenu);
+    expect(document.activeElement).toBe(next);
+    next.click();
     await flush();
-    expect(native.openSavedLocal).toHaveBeenCalledTimes(running ? 1 : 0);
+    expect(native.removeSavedLocalSession.mock.calls).toEqual([['saved-one'], ['saved-two']]);
+    expect(submenu.textContent).toContain('没有已保存的会话');
+    store.activateHost('');
+    await flush();
+    expect(native.openSavedLocal).toHaveBeenCalledTimes(1);
     expect(native.openLocal).not.toHaveBeenCalled();
   },
 );
@@ -1019,7 +1137,7 @@ it('keeps saved records when the terminal view unmounts on application exit', as
   ]);
   const store = useTerminalsStore();
   await store.loadSaved();
-  store.select(store.tabs.find((tab) => tab.savedId === 'saved-one')!.key);
+  store.restoreSavedSession(null, 'saved-one');
   await flush();
   app!.unmount();
   app = undefined;

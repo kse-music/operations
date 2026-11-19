@@ -59,45 +59,28 @@ const background = () => root.querySelector<HTMLElement>('.host-tree-scroll')!;
 const folder = (id: string) =>
   root.querySelector<HTMLElement>(`[data-group-id="${id}"] > .group-toggle`)!;
 
-const backgroundActions = [
-  '新建主机',
-  '新建文件夹',
-  '导入 SSH 配置…',
-  '导入主机备份…',
-  '导出主机备份…',
-];
+const transferActions = ['导入…', '导出…'];
+const backgroundActions = ['新建主机', '新建文件夹', ...transferActions];
 
 it.each(['empty', 'unavailable'])(
-  'runs backups from the %s list and refreshes it after import',
+  'offers one import and one export from the %s list and preserves search if export is cancelled',
   async (state) => {
     const { store } = await mount();
     const restored = store.catalog!;
     store.catalog = state === 'empty' ? { ...restored, hosts: [], groups: [] } : null;
     store.search = 'hidden host';
     await nextTick();
-    const backup = vi.spyOn(hostsApi, 'backup').mockResolvedValueOnce(null).mockResolvedValueOnce({
-      hosts: 2,
-      groups: 2,
-      agentHosts: 0,
-      missingAuth: 0,
-    });
+    const backup = vi.spyOn(hostsApi, 'backup').mockResolvedValueOnce(null);
     const list = vi.spyOn(hostsApi, 'list').mockResolvedValue(restored);
     try {
       await open(background());
-      expect(labels()).toEqual(
-        state === 'empty' ? backgroundActions : ['导入主机备份…', '导出主机备份…'],
-      );
-      await action('导出主机备份…');
+      expect(labels()).toEqual(state === 'empty' ? backgroundActions : transferActions);
+      await action('导出…');
       await vi.waitFor(() => expect(store.busy).toBe(false));
+      expect(backup).toHaveBeenCalledExactlyOnceWith('export');
       expect(store.notice).toBeNull();
       expect(store.search).toBe('hidden host');
       expect(list).not.toHaveBeenCalled();
-      await open(background());
-      await action('导入主机备份…');
-      await vi.waitFor(() => expect(root.querySelector('[data-host-id="h1"]')).not.toBeNull());
-      expect(backup.mock.calls).toEqual([['export'], ['import']]);
-      expect(store.search).toBe('');
-      expect(store.notice).toContain('已导入 2 台主机');
     } finally {
       backup.mockRestore();
       list.mockRestore();

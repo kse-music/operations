@@ -598,10 +598,11 @@ async function paste(): Promise<void> {
     const text = await clipboardApi.readText();
     if (!disposed && attempt === generation) requestPaste(text);
   } catch {
-    message.value = tr('无法读取剪贴板，请检查系统权限。');
+    if (!disposed && attempt === generation) message.value = tr('无法读取剪贴板。');
   }
 }
 function requestPaste(text: string): void {
+  if (!text) return;
   if (upload?.busy) {
     message.value = tr('ZMODEM 上传期间无法粘贴，请先完成或取消上传。');
     return;

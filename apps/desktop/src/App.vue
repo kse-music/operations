@@ -153,7 +153,7 @@ function navigate(
   if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
   if (value === 'terminals' && !hostId) {
-    terminals.activateLocal();
+    terminals.activateHost('');
     if (!terminals.active && !workspace.tabs.some((tab) => isHostTab(tab) && !tab.hostId))
       terminals.open(null);
   }
@@ -179,10 +179,8 @@ async function enterTerminalHost(host: Host) {
   else {
     const tab = terminals.hostTabs(host.id).find((item) => item.key === terminals.active);
     const pane = tab?.panes.find((pane) => pane.key === terminals.focused);
-    if (pane?.state === 'idle' && !pane.connectRequested) {
-      if (tab?.savedId) terminals.select(tab.key);
-      else pane.connectRequested = true;
-    }
+    if (pane?.state === 'idle' && !pane.connectRequested && !pane.savedSource)
+      pane.connectRequested = true;
   }
 }
 function fromSearch(value: View, hostId = currentHostId.value) {
@@ -498,7 +496,7 @@ function fileTerminal(host: Host, action: import('./types/files').FileTerminalAc
 
 const hostDialog = ref(false);
 const hostFolderId = ref<string | null>(null);
-const importingOpenSsh = ref(false);
+const hostImport = ref<'ssh' | 'all'>();
 function openHost(groupId: string | null = null): void {
   store.error = null;
   hostFolderId.value = groupId;
@@ -714,7 +712,7 @@ watch(
         :active="workspace.area === 'home' && !sidebarCollapsed"
         @plugin="openPlugin"
         @create="openHost($event)"
-        @import-openssh="importingOpenSsh = true"
+        @import-hosts="hostImport = 'all'"
         @select="setContext($event.id, true)"
         @saved="revealHost"
       >
@@ -852,7 +850,7 @@ watch(
           "
           @local-terminal="navigate('terminals', '')"
           @create-host="openHost()"
-          @import-openssh="importingOpenSsh = true"
+          @import-openssh="hostImport = 'ssh'"
           @files="navigate('files', $event)"
           @plugin="openPlugin"
           @plugin-settings="workspace.openPluginSettings"
@@ -1024,7 +1022,11 @@ watch(
     @saved="revealHost"
     @close="hostDialog = false"
   />
-  <ImportDialog v-if="importingOpenSsh" @close="importingOpenSsh = false" />
+  <ImportDialog
+    v-if="hostImport"
+    :allow-backup="hostImport === 'all'"
+    @close="hostImport = undefined"
+  />
   <Teleport to="body">
     <div
       v-if="tabMenu && tabMenuIndex >= 0"

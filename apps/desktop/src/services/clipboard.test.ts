@@ -30,10 +30,18 @@ it('refuses browser preview instead of falling back to the web clipboard', () =>
   expect(native.writeText).not.toHaveBeenCalled();
 });
 
+it('treats the native no-text error as an empty clipboard', async () => {
+  native.readText.mockRejectedValueOnce(
+    'The clipboard contents were not available in the requested format or the clipboard is empty.',
+  );
+  await expect(clipboardApi.readText()).resolves.toBe('');
+});
+
 it('propagates native clipboard failures to the caller', async () => {
   const failure = new Error('Clipboard unavailable');
-  native.readText.mockRejectedValueOnce(failure);
+  const readFailure = 'The native clipboard is not accessible due to being held by another party.';
+  native.readText.mockRejectedValueOnce(readFailure);
   native.writeText.mockRejectedValueOnce(failure);
-  await expect(clipboardApi.readText()).rejects.toBe(failure);
+  await expect(clipboardApi.readText()).rejects.toBe(readFailure);
   await expect(clipboardApi.writeText('text')).rejects.toBe(failure);
 });

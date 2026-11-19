@@ -1,4 +1,4 @@
-"""Run on Linux with Python 3 and Bash to exercise the production Readline hook."""
+"""Run on Linux, optionally setting SERVERDECK_TEST_BASH to an older Bash executable."""
 
 import base64
 import os
@@ -13,6 +13,7 @@ import unittest
 
 SOURCE = Path(__file__).resolve().parents[1] / "src/session.bash"
 TOKEN = "test-pane"
+BASH = os.environ.get("SERVERDECK_TEST_BASH", "/bin/bash")
 
 
 def encoded(value):
@@ -26,9 +27,10 @@ class Shell:
         self.pid, self.pty = pty.fork()
         if self.pid == 0:
             os.chdir(root)
-            os.execve("/bin/bash", ["bash", "-c", launch], {
-                "HOME": str(root), "PATH": "/usr/bin:/bin", "SHELL": "/bin/bash",
+            os.execve(BASH, ["bash", "-c", launch], {
+                "HOME": str(root), "PATH": "/usr/bin:/bin", "SHELL": BASH,
                 "TERM": "xterm-256color", "LC_ALL": "C.UTF-8",
+                "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH", ""),
             })
         self.buffer = b""
 
@@ -103,7 +105,7 @@ class SessionTest(unittest.TestCase):
     def test_cancel_and_missing_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / ".bash_profile").write_text("PS1='ready> '\n")
+            (root / ".bash_profile").write_text("PS1='ready> '; set -o vi\n")
             for target in [root, root / "missing"]:
                 shell = Shell(root, "yes")
                 try:
@@ -116,11 +118,58 @@ class SessionTest(unittest.TestCase):
                         shell.until(b"touch should-not-run")
                         shell.send(b"\x03")
                     else:
-                        shell.send(b"\n")
+                        shell.send(b"echo fallback\n")
+                        shell.report(b"cmd", "echo fallback")
+                        shell.until(b"fallback\r\n")
                     shell.report(b"cwd", str(root))
                     self.assertFalse((root / "should-not-run").exists())
                 finally:
                     shell.close()
+
+    def test_prompt_hook_preserves_status_and_ignores_excluded_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".bash_profile").write_text(
+                "PS1='ready> '; HISTIGNORE='echo private'; set -T\n"
+                "PROMPT_COMMAND='printf \"status=%s\\n\" \"$?\"'\n"
+            )
+            shell = Shell(root, "no")
+            try:
+                shell.report(b"cwd", str(root))
+                shell.send(b"false\n")
+                shell.report(b"cmd", "false")
+                shell.until(b"status=1")
+                shell.report(b"cwd", str(root))
+                shell.send(b"printf '%s' pipe | cat\n")
+                shell.report(b"cmd", "printf '%s' pipe | cat")
+                shell.report(b"cwd", str(root))
+                shell.send(b"(printf '%s' subshell)\n")
+                shell.report(b"cmd", "(printf '%s' subshell)")
+                shell.report(b"cwd", str(root))
+                shell.send(b"fixture() { :; }\n")
+                shell.report(b"cmd", "fixture() { :; }")
+                shell.report(b"cwd", str(root))
+                shell.send(b"echo private\n")
+                shell.report(b"cmd", "")
+                shell.report(b"cwd", str(root))
+            finally:
+                shell.close()
+
+    def test_existing_debug_trap_still_runs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".bash_profile").write_text(
+                "PS1='ready> '\n"
+                "trap 'if [[ $BASH_COMMAND == \"echo ordinary\" ]]; then printf \"profile-hook\\n\"; fi' DEBUG\n"
+            )
+            shell = Shell(root, "no")
+            try:
+                shell.report(b"cwd", str(root))
+                shell.send(b"echo ordinary\n")
+                shell.until(b"profile-hook\r\nordinary\r\n")
+                shell.report(b"cwd", str(root))
+            finally:
+                shell.close()
 
 
 if __name__ == "__main__":

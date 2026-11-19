@@ -130,6 +130,8 @@ export type HostTestResult =
 export interface HostBackupResult {
   hosts: number;
   groups: number;
+  skippedHosts: number;
+  reusedGroups: number;
   agentHosts: number;
   missingAuth: number;
 }

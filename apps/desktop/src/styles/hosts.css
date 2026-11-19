@@ -362,6 +362,16 @@
   margin: 0;
   padding: 16px var(--import-inset) 8px;
 }
+.import-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 var(--import-inset) 16px;
+}
+.import-sources [aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .import-body {
   display: grid;
   min-height: 0;

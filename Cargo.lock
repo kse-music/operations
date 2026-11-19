@@ -5233,6 +5233,7 @@ version = "0.9.9"
 dependencies = [
  "tokio",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

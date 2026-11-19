@@ -661,7 +661,28 @@ it('rejects oversize or disconnected pastes and does not act behind an open dial
   expect(readText).toHaveBeenCalledOnce();
 });
 
-it('reports clipboard permission errors without sending terminal input', async () => {
+it.each([
+  [
+    'quick right-click',
+    () => {
+      enable();
+      rightClick();
+    },
+  ],
+  ['the context menu', () => menuAction('粘贴')],
+  ['the paste shortcut', () => xterm.keyHandler(clipboardKey('V'))],
+] as const)('ignores an empty clipboard when pasting with %s', async (_mode, paste) => {
+  readText.mockResolvedValueOnce('');
+  await paste();
+  await nextTick();
+  expect(readText).toHaveBeenCalledOnce();
+  expect(xterm.pasted).not.toHaveBeenCalled();
+  expect(terminalApi.input).not.toHaveBeenCalled();
+  expect(useNotificationsStore().items).toEqual([]);
+  expect(document.querySelector('dialog[open]')).toBeNull();
+});
+
+it('reports clipboard failures without sending terminal input or guessing read permissions', async () => {
   enable();
   writeText.mockRejectedValue(new Error('private failure details'));
   readText.mockRejectedValue(new Error('private failure details'));
@@ -674,7 +695,7 @@ it('reports clipboard permission errors without sending terminal input', async (
   );
   rightClick();
   await vi.waitFor(() =>
-    expect(useNotificationsStore().items.some((item) => item.text.includes('无法读取剪贴板'))).toBe(
+    expect(useNotificationsStore().items.some((item) => item.text === '无法读取剪贴板。')).toBe(
       true,
     ),
   );

@@ -145,7 +145,7 @@ impl Engine {
                 state: Some(t.state.clone()),
             }),
             _ => Err(Error::Validation(
-                "当前 SSH Shell 未提供会话目录和命令。请在 Bash 4.4 或更高版本的提示符出现后保存。",
+                "当前 SSH Shell 未提供会话目录和命令。请在 Bash 4.2 或更高版本的提示符出现后保存。",
             )),
         }
     }
@@ -161,7 +161,7 @@ pub(super) async fn supports_snapshot(handle: &connect::Connection) -> bool {
         return false;
     };
     let check = async {
-        let probe = r#"[[ -n $BASH_VERSION && ${SHELL##*/} == bash ]] && ! shopt -q restricted_shell && (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 404 )) && command -v base64 >/dev/null && printf sd-bash-1"#;
+        let probe = r#"[[ -n $BASH_VERSION && ${SHELL##*/} == bash ]] && ! shopt -q restricted_shell && (( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] >= 402 )) && command -v base64 >/dev/null && printf sd-bash-1"#;
         channel.exec(true, probe).await.ok()?;
         let mut output = Vec::new();
         while let Some(msg) = channel.wait().await {

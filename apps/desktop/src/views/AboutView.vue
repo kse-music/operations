@@ -3,7 +3,6 @@ import { tr } from '../i18n/messages';
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
 
 import { useApplicationStore } from '../stores/application';
-import { RefreshCw } from '@lucide/vue';
 import { computed } from 'vue';
 import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { useUpdatesStore } from '../stores/updates';
@@ -40,15 +39,6 @@ const releaseTime = computed(() =>
   <section class="about-view page-view" aria-labelledby="about-title">
     <header class="section-heading">
       <h1 id="about-title">{{ tr('关于 ServerDeck') }}</h1>
-      <button
-        class="button"
-        :disabled="application.loading || application.saving"
-        @click="application.initialize"
-      >
-        <RefreshCw :size="14" aria-hidden="true" />{{
-          application.loading ? tr('读取中…') : tr('刷新本地环境')
-        }}
-      </button>
     </header>
     <section class="work-section" :aria-label="tr('产品信息')">
       <h2>ServerDeck</h2>
@@ -170,13 +160,14 @@ const releaseTime = computed(() =>
           <dd class="path">{{ displayLocalPath(application.state.logDirectory) }}</dd>
         </div>
       </dl>
-      <p v-else class="subtle">
-        {{
-          application.loading
-            ? tr('正在通过 IPC 读取本地后端状态…')
-            : tr('后端尚未就绪，暂无运行状态。')
-        }}
+      <p v-else-if="application.loading" class="subtle" role="status">
+        {{ tr('正在通过 IPC 读取本地后端状态…') }}
       </p>
+      <template v-else-if="application.environmentError !== null">
+        <p class="error-text" role="alert">{{ application.environmentError }}</p>
+        <button class="button" @click="application.initialize">{{ tr('重试') }}</button>
+      </template>
+      <p v-else class="subtle">{{ tr('后端尚未就绪，暂无运行状态。') }}</p>
     </section>
   </section>
 </template>

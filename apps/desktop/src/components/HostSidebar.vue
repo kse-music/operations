@@ -58,7 +58,7 @@ const hostState = (id: string) =>
       : files.hostState(id);
 const emit = defineEmits<{
   create: [groupId: string | null];
-  importOpenssh: [];
+  importHosts: [];
   select: [host: Host];
   saved: [host: Host];
   plugin: [id: string, contribution: string, hostId: string];
@@ -371,7 +371,6 @@ type MenuAction =
   | 'import'
   | 'newHost'
   | 'newFolder'
-  | 'importOpenssh'
   | 'rename'
   | 'deleteFolder'
   | 'connect'
@@ -446,21 +445,12 @@ const menuItems = computed<MenuItem[]>(() => {
         danger: true,
       },
     ];
-  const backupItems: MenuItem[] = [
-    { key: 'import', label: tr('导入主机备份…'), icon: FileInput, iconClass: 'menu-icon-green' },
-    { key: 'export', label: tr('导出主机备份…'), icon: FileOutput, iconClass: 'menu-icon-blue' },
+  const transferItems: MenuItem[] = [
+    { key: 'import', label: tr('导入…'), icon: FileInput, iconClass: 'menu-icon-green' },
+    { key: 'export', label: tr('导出…'), icon: FileOutput, iconClass: 'menu-icon-blue' },
   ];
-  if (!store.catalog) return backupItems;
-  return [
-    ...createItems,
-    {
-      key: 'importOpenssh',
-      label: tr('导入 SSH 配置…'),
-      icon: FileInput,
-      iconClass: 'menu-icon-blue',
-    },
-    ...backupItems,
-  ];
+  if (!store.catalog) return transferItems;
+  return [...createItems, ...transferItems];
 });
 function dismissContext(restoreFocus = false): void {
   context.value = undefined;
@@ -572,8 +562,12 @@ async function runContext(action: MenuAction): Promise<void> {
   if (!target || store.busy) return;
   dismissContext(true);
   if (target.kind === 'folder') {
-    if (target.id === null && (action === 'import' || action === 'export')) {
-      await store.backup(action);
+    if (target.id === null && action === 'import') {
+      emit('importHosts');
+      return;
+    }
+    if (target.id === null && action === 'export') {
+      await store.backup('export');
       return;
     }
     const group = store.catalog?.groups.find((group) => group.id === target.id);
@@ -583,7 +577,6 @@ async function runContext(action: MenuAction): Promise<void> {
     }
     if (action === 'newHost') emit('create', target.id);
     else if (action === 'newFolder') folderEditor.value = { parentId: target.id };
-    else if (action === 'importOpenssh') emit('importOpenssh');
     else if (action === 'rename' && group) beginRename(target);
     else if (action === 'deleteFolder' && group) confirmDelete(target);
     return;
@@ -920,10 +913,7 @@ onBeforeUnmount(() => {
           @contextmenu.prevent
         >
           <template v-for="item in menuItems" :key="item.key">
-            <div
-              v-if="item.key === 'importOpenssh' || (item.key === 'import' && store.catalog)"
-              role="separator"
-            ></div>
+            <div v-if="item.key === 'import' && store.catalog" role="separator"></div>
             <button
               role="menuitem"
               :class="{ danger: item.danger }"

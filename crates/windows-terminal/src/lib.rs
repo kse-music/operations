@@ -48,6 +48,46 @@ fn os_error(error: windows::core::Error) -> io::Error {
     io::Error::from_raw_os_error(error.code().0 & 0xffff)
 }
 
+pub fn unprotect_terminal_command(ciphertext: &[u8]) -> io::Result<zeroize::Zeroizing<Vec<u8>>> {
+    use windows::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
+    };
+    use zeroize::{Zeroize, Zeroizing};
+    let purpose = b"ServerDeck.LocalTerminal.Command.v1";
+    let source = CRYPT_INTEGER_BLOB {
+        cbData: ciphertext.len().try_into().map_err(io::Error::other)?,
+        pbData: ciphertext.as_ptr().cast_mut(),
+    };
+    let entropy = CRYPT_INTEGER_BLOB {
+        cbData: purpose.len() as u32,
+        pbData: purpose.as_ptr().cast_mut(),
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    // DPAPI reads the input blobs and owns the returned allocation until LocalFree.
+    unsafe {
+        CryptUnprotectData(
+            &source,
+            None,
+            Some(&entropy),
+            None,
+            None,
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &mut output,
+        )
+    }
+    .map_err(os_error)?;
+    if output.pbData.is_null() {
+        return Ok(Zeroizing::new(Vec::new()));
+    }
+    unsafe {
+        let bytes = std::slice::from_raw_parts_mut(output.pbData, output.cbData as usize);
+        let result = Zeroizing::new(bytes.to_vec());
+        bytes.zeroize();
+        LocalFree(Some(HLOCAL(output.pbData.cast())));
+        Ok(result)
+    }
+}
+
 pub struct Process(std::os::windows::io::OwnedHandle);
 impl Process {
     fn handle(&self) -> HANDLE {

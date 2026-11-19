@@ -1,5 +1,5 @@
-# Embedded in the Windows PowerShell startup command. Only the per-PTY UUID is
-# substituted into this script. Paths and encrypted command data travel separately.
+# Passed to Windows PowerShell in its process environment. Only the per-PTY UUID
+# is substituted into this script. Paths and encrypted command data travel separately.
 $global:serverDeckPending = $env:SERVERDECK_START_COMMAND
 if ($null -ne $global:serverDeckPending) { Remove-Item Env:\SERVERDECK_START_COMMAND }
 if ($env:SERVERDECK_START_DIRECTORY) {
