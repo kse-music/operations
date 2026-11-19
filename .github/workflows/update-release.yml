@@ -104,7 +104,8 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Linux prerequisites
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev patchelf
+        timeout-minutes: 5
+        run: bash .github/scripts/install-linux-prerequisites.sh
       - name: Prepare Rust and WASM toolchain
         run: |
           rustup toolchain install 1.97.1 --profile minimal --target wasm32-unknown-unknown

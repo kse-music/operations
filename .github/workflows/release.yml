@@ -61,7 +61,8 @@ jobs:
           cache: npm
       - name: Linux prerequisites
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev patchelf xvfb
+        timeout-minutes: 5
+        run: bash .github/scripts/install-linux-prerequisites.sh xvfb
       - name: Rust stable used by local validation
         run: rustup toolchain install 1.97.1 --profile minimal --component clippy --target wasm32-unknown-unknown
       - run: rustup default 1.97.1

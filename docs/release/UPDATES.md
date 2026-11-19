@@ -39,6 +39,8 @@ Windows 安装包在文件替换后通过 NSIS 安装完成钩子通知系统刷
 
 发布流程复用 npm 下载缓存，并按运行平台、架构、Rust 版本及 Cargo 配置/锁文件隔离 Rust 下载和编译缓存：Windows 复用根 `target/release` 的编译依赖，Linux 和 macOS 复用根 `target/<目标三元组>/release` 的编译依赖，各任务缓存自身现有生产插件 `.local/plugin-build/assistant`、`.local/plugin-build/docker` 编译目录。macOS 缓存键同时包含 runner 和目标架构，两个架构的中间 Artifact 独立命名，汇总后使用带架构后缀的文件名。生产插件的预取不限制 `--target`，按各自锁文件下载完整依赖，覆盖离线解析可能读取的其他目标依赖清单；实际编译仍限定 `wasm32-unknown-unknown`。缓存不包含签名密钥、应用数据、测试目录或安装包；首次运行或缓存失效时仍须完整编译，命中缓存时也保留锁定依赖准备与编译校验，不通过去掉 `--offline` 或 `--locked` 绕过依赖准备。供汇总任务使用的 Actions Artifact 保留 14 天，仅用于任务间交付，不是用户下载渠道。
 
+发布与候选构建的 Linux 任务通过 Ubuntu 22.04 官方 HTTPS 软件源安装系统依赖，使用 Ubuntu 归档密钥验证索引。APT 跳过翻译和桌面应用目录索引。依赖步骤限时 5 分钟，索引更新失败时终止该 Linux 任务。
+
 **Candidate builds (unsigned, no publish)**（`.github/workflows/release.yml`）集中执行格式、lint、类型、前端单元测试和构建工具测试，另行执行 Rust 依赖审计。源码检查通过后，四个目标各自在对应原生 runner 上构建内置插件和测试夹具，运行 Clippy 和 Rust 测试，并上传内置插件包。手动勾选 `Build and upload unsigned installers` 才会额外构建无签名安装包和上传产物，该选项关闭 updater artifacts。正式公开前应检查同一提交的候选验证结果，并验收签名草稿中的实际产物。如果进行 Authenticode 签名，须先完成安装包签名，再生成 updater `.sig` 和清单；修改 `.exe` 后必须重新生成 updater 签名。
 
 ## 发布验收与限制
