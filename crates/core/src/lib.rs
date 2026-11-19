@@ -179,6 +179,13 @@ pub struct StorageInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StorageReady {
+    pub storage: StorageInfo,
+    pub startup_notice: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StoragePreview {
     pub target_directory: String,
     pub bytes: u64,

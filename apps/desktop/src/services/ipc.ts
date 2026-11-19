@@ -1,6 +1,6 @@
 import { tr } from '../i18n/messages';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import type { AppConfig, Bootstrap, StorageInfo, StoragePreview } from '../types/ipc';
+import type { AppConfig, Bootstrap, StoragePreview, StorageReady } from '../types/ipc';
 
 export function errorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
@@ -47,8 +47,7 @@ export function storageMigrate(
   });
 }
 
-// Only notice from this response is a new startup outcome; bootstrap retains migration history.
-export function storageReady(): Promise<StorageInfo> {
+export function storageReady(): Promise<StorageReady> {
   ensureDesktop();
   return invoke('app_storage_ready');
 }

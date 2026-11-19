@@ -99,23 +99,43 @@ fn migration_preserves_preferences_plugins_logs_webview_and_empty_directories_un
 }
 
 #[test]
-fn completion_notice_is_not_replayed_by_ready_or_later_launches() {
+fn completion_is_not_saved_or_replayed() {
     let fixture = Fixture::new();
     let mut profile = fixture.copied();
-    let completion = profile.ready().unwrap().notice.unwrap();
-    assert!(completion.contains("迁移完成"));
+    let ready = profile.ready().unwrap();
+    assert_eq!(ready.startup_notice.as_deref(), Some(MIGRATION_COMPLETED));
+    assert!(ready.storage.notice.is_none());
     let locator = fs::read(&fixture.locator).unwrap();
-    assert!(profile.ready().unwrap().notice.is_none());
-    assert_eq!(profile.info().notice.as_deref(), Some(completion.as_str()));
+    let persisted: State = serde_json::from_slice(&locator).unwrap();
+    assert!(persisted.notice.is_none());
+    assert!(profile.ready().unwrap().startup_notice.is_none());
     for _ in 0..2 {
         let mut reopened = fixture.open();
         assert_eq!(reopened.locations().data, fixture.target);
         assert!(reopened.state.migration.is_none());
-        assert_eq!(reopened.info().notice.as_deref(), Some(completion.as_str()));
-        assert!(reopened.ready().unwrap().notice.is_none());
+        assert!(reopened.info().notice.is_none());
+        assert!(reopened.ready().unwrap().startup_notice.is_none());
         assert_eq!(fs::read(&fixture.locator).unwrap(), locator);
         assert!(fixture.target.join("serverdeck.sqlite3").is_file());
     }
+}
+
+#[test]
+fn legacy_completion_is_ignored_without_changing_the_active_directory() {
+    let fixture = Fixture::new();
+    let mut profile = fixture.copied();
+    profile.ready().unwrap();
+    profile.state.notice = Some("数据迁移完成，旧副本已清理。".into());
+    profile.persist().unwrap();
+
+    let mut reopened = fixture.open();
+    assert_eq!(reopened.locations().data, fixture.target);
+    assert!(reopened.info().notice.is_none());
+    assert!(reopened.ready().unwrap().startup_notice.is_none());
+    reopened.record_initialized().unwrap();
+    let persisted: State = serde_json::from_slice(&fs::read(&fixture.locator).unwrap()).unwrap();
+    assert!(persisted.notice.is_none());
+    assert!(fixture.target.join("serverdeck.sqlite3").is_file());
 }
 
 #[test]
@@ -123,12 +143,14 @@ fn startup_rollback_notice_is_reported_once_and_retained_as_history() {
     let fixture = Fixture::new();
     fixture.copied();
     let mut profile = fixture.open();
-    let notice = profile.ready().unwrap().notice.unwrap();
+    let ready = profile.ready().unwrap();
+    let notice = ready.startup_notice.unwrap();
     assert!(notice.contains("恢复旧目录"));
-    assert!(profile.ready().unwrap().notice.is_none());
+    assert_eq!(ready.storage.notice.as_deref(), Some(notice.as_str()));
+    assert!(profile.ready().unwrap().startup_notice.is_none());
     let mut reopened = fixture.open();
     assert_eq!(reopened.info().notice.as_deref(), Some(notice.as_str()));
-    assert!(reopened.ready().unwrap().notice.is_none());
+    assert!(reopened.ready().unwrap().startup_notice.is_none());
     assert!(fixture.target.join("serverdeck.sqlite3").is_file());
     assert!(fixture.defaults.data.join("serverdeck.sqlite3").is_file());
 }
@@ -140,10 +162,12 @@ fn startup_copy_failure_notice_is_reported_once_without_losing_the_reason() {
     fs::create_dir(&fixture.target).unwrap();
     fs::write(fixture.target.join("keep"), b"unrelated").unwrap();
     let mut profile = fixture.open();
-    let notice = profile.ready().unwrap().notice.unwrap();
+    let ready = profile.ready().unwrap();
+    let notice = ready.startup_notice.unwrap();
     assert!(notice.contains("数据迁移未完成"));
     assert!(notice.contains("旧数据未删除"));
-    assert!(profile.ready().unwrap().notice.is_none());
+    assert_eq!(ready.storage.notice.as_deref(), Some(notice.as_str()));
+    assert!(profile.ready().unwrap().startup_notice.is_none());
     assert_eq!(
         fixture.open().info().notice.as_deref(),
         Some(notice.as_str())
@@ -197,21 +221,18 @@ fn modified_source_is_retained_and_committed_target_stays_active() {
         b"changed after copying",
     )
     .unwrap();
+    let failed = profile.ready().unwrap();
+    let notice = failed.startup_notice.unwrap();
+    assert!(notice.contains("清理未完成"));
+    assert_eq!(failed.storage.notice.as_deref(), Some(notice.as_str()));
+    let mut reopened = fixture.open();
+    assert_eq!(reopened.locations().data, fixture.target);
+    assert_eq!(reopened.info().notice.as_deref(), Some(notice.as_str()));
     assert!(
-        profile
+        reopened
             .ready()
             .unwrap()
-            .notice
-            .unwrap()
-            .contains("清理未完成")
-    );
-    assert_eq!(fixture.open().locations().data, fixture.target);
-    assert!(
-        fixture
-            .open()
-            .ready()
-            .unwrap()
-            .notice
+            .startup_notice
             .unwrap()
             .contains("清理未完成")
     );
@@ -225,7 +246,10 @@ fn modified_source_is_retained_and_committed_target_stays_active() {
         b"plugin settings",
     )
     .unwrap();
-    profile.ready().unwrap();
+    let ready = profile.ready().unwrap();
+    assert_eq!(ready.startup_notice.as_deref(), Some(MIGRATION_COMPLETED));
+    assert!(ready.storage.notice.is_none());
+    assert!(fixture.open().info().notice.is_none());
     assert!(!fixture.defaults.data.join("plugins/settings.json").exists());
 }
 

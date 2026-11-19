@@ -32,9 +32,9 @@ export const useApplicationStore = defineStore('application', () => {
       const nextState = await ipc.bootstrap();
       if (nextState.storage) {
         // A failed commit must not expose an uncommitted candidate for new writes.
-        const storage = await ipc.storageReady();
-        notice.value = storage.notice;
-        nextState.storage = { ...storage, notice: storage.notice ?? nextState.storage.notice };
+        const { storage, startupNotice } = await ipc.storageReady();
+        nextState.storage = storage;
+        notice.value = startupNotice;
       }
       state.value = nextState;
     } catch (cause) {

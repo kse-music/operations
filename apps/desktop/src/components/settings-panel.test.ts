@@ -458,7 +458,7 @@ async function reviewMigration() {
   await nextTick();
 }
 
-async function storageDraft() {
+async function storageDraft(target = 'D:\\ServerDeck') {
   useApplicationStore().state!.storage = {
     rootDirectory: 'C:\\ServerDeck',
     databasePath: 'C:\\ServerDeck\\serverdeck.sqlite3',
@@ -468,7 +468,7 @@ async function storageDraft() {
     notice: null,
   };
   await select(3);
-  await input('[aria-label="数据根目录"]', 'D:\\ServerDeck');
+  await input('[aria-label="数据根目录"]', target);
 }
 
 it('formats storage and download directories without changing saved paths or scheduling migration', async () => {
@@ -624,6 +624,14 @@ it('shows storage settings without a credential maintenance section', async () =
   ).toEqual(['应用数据位置', '下载与传输', '传输与日志']);
 });
 
+it('shows a saved migration warning in storage settings', async () => {
+  await storageDraft('C:\\ServerDeck');
+  const warning = '数据迁移未完成：目标目录必须为空。继续使用旧目录，旧数据未删除。';
+  useApplicationStore().state!.storage!.notice = warning;
+  await nextTick();
+  expect(root.querySelector('#settings-panel-storage')?.textContent).toContain(warning);
+});
+
 it('previews migration without saving and cancellation preserves all drafts', async () => {
   const save = vi.spyOn(ipc, 'saveConfig');
   const migrate = vi.spyOn(ipc, 'storageMigrate');
@@ -714,8 +722,9 @@ it('keeps migration visible and locked after restart is scheduled until the proc
     .mockImplementation(() => new Promise((resolve) => (scheduleRestart = resolve)));
   await storageDraft();
   const application = useApplicationStore();
-  application.state!.storage!.notice = '数据迁移完成，旧副本已清理。';
-  application.notice = '上次迁移完成';
+  const warning = '数据迁移未完成：目标目录必须为空。';
+  application.state!.storage!.notice = warning;
+  application.notice = warning;
   await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
@@ -730,7 +739,7 @@ it('keeps migration visible and locked after restart is scheduled until the proc
   expect(dialog.querySelector('[role="status"]')?.textContent).toContain('正在保存设置');
   expect(discard.disabled).toBe(true);
   expect(application.notice).toBeNull();
-  expect(root.querySelector('#settings-panel-storage')?.textContent).not.toContain('旧副本已清理');
+  expect(root.querySelector('#settings-panel-storage')?.textContent).not.toContain(warning);
 
   scheduleRestart(true);
   await vi.waitFor(() => expect(application.notice).toContain('正在安全结束任务并重启'));

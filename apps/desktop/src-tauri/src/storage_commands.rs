@@ -1,5 +1,5 @@
 use serverdeck_application::{Application, storage_location::Profile};
-use serverdeck_core::{AppConfig, Error, IpcError, StorageInfo, StoragePreview};
+use serverdeck_core::{AppConfig, Error, IpcError, StorageInfo, StoragePreview, StorageReady};
 use std::{
     path::PathBuf,
     sync::{
@@ -134,7 +134,7 @@ pub async fn app_storage_migrate<R: Runtime>(
 #[tauri::command]
 pub async fn app_storage_ready<R: Runtime>(
     app: tauri::AppHandle<R>,
-) -> Result<StorageInfo, IpcError> {
+) -> Result<StorageReady, IpcError> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<StorageState>()
             .profile

@@ -7,11 +7,12 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use serverdeck_core::{Error, StorageInfo, StoragePreview};
+use serverdeck_core::{Error, StorageInfo, StoragePreview, StorageReady};
 use sha2::{Digest, Sha256};
 
 pub const LOCATOR: &str = "storage-location.json";
 const RESERVE: u64 = 16 * 1024 * 1024;
+const MIGRATION_COMPLETED: &str = "数据迁移完成，旧副本已清理。";
 
 fn io(error: impl std::error::Error + Send + Sync + 'static) -> Error {
     Error::Storage(Box::new(error))
@@ -208,7 +209,7 @@ fn hash_file(file: &mut File) -> Result<(u64, String), Error> {
 impl Profile {
     pub fn open(locator: PathBuf, defaults: Locations) -> Result<Self, Error> {
         check_path(&locator)?;
-        let state = if locator.try_exists().map_err(io)? {
+        let mut state = if locator.try_exists().map_err(io)? {
             let size = fs::metadata(&locator).map_err(io)?.len();
             if size > 32 * 1024 * 1024 {
                 return Err(Error::Validation("目录迁移状态文件过大"));
@@ -227,6 +228,10 @@ impl Profile {
                 notice: None,
             }
         };
+        // Older locators kept the success message in the same field as warnings.
+        if state.notice.as_deref() == Some(MIGRATION_COMPLETED) {
+            state.notice = None;
+        }
         let mut profile = Self {
             locator,
             state,
@@ -719,17 +724,17 @@ impl Profile {
             fs::rename(&staging, &job.target.data).map_err(io)?;
         }
         self.state.active = job.target;
-        self.state.notice = Some("数据已迁入新目录；启动确认完成后自动清理旧副本。".into());
         self.persist()
     }
 
     /// Called only after Rust initialization and the main UI bootstrap both succeed.
-    /// Reports new startup outcomes once; `info` retains the persisted migration history.
-    pub fn ready(&mut self) -> Result<StorageInfo, Error> {
+    /// Reports the startup outcome separately from the warning kept in settings.
+    pub fn ready(&mut self) -> Result<StorageReady, Error> {
         let Some(mut job) = self.state.migration.clone() else {
-            let mut info = self.info();
-            info.notice = self.startup_notice.take();
-            return Ok(info);
+            return Ok(StorageReady {
+                storage: self.info(),
+                startup_notice: self.startup_notice.take(),
+            });
         };
         if job.phase == Phase::Pending {
             return Err(Error::Busy);
@@ -744,21 +749,29 @@ impl Profile {
             }
             // Once committed, never roll back to a partially cleaned source.
         }
-        match self.cleanup(&job) {
+        let previous_notice = self.state.notice.take();
+        let startup_notice = match self.cleanup(&job) {
             Ok(()) => {
                 self.state.migration = None;
-                self.state.notice = Some("数据迁移完成，旧副本已清理。".into());
+                MIGRATION_COMPLETED.into()
             }
             Err(error) => {
                 tracing::warn!(operation="storage_cleanup", error=%error, "source cleanup pending");
-                self.state.notice = Some(format!(
-                    "新目录已启用，旧副本清理未完成：{error}。下次启动重试。"
-                ));
+                let notice = format!("新目录已启用，旧副本清理未完成：{error}。下次启动重试。");
+                self.state.notice = Some(notice.clone());
+                notice
             }
+        };
+        if let Err(error) = self.persist() {
+            self.state.migration = Some(job);
+            self.state.notice = previous_notice;
+            return Err(error);
         }
-        self.persist()?;
         self.startup_notice = None;
-        Ok(self.info())
+        Ok(StorageReady {
+            storage: self.info(),
+            startup_notice: Some(startup_notice),
+        })
     }
 
     fn cleanup(&self, job: &Migration) -> Result<(), Error> {

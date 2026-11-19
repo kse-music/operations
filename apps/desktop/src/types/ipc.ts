@@ -34,6 +34,11 @@ export interface StorageInfo {
   notice: string | null;
 }
 
+export interface StorageReady {
+  storage: StorageInfo;
+  startupNotice: string | null;
+}
+
 export interface StoragePreview {
   targetDirectory: string;
   bytes: number;

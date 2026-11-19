@@ -689,7 +689,12 @@ fn storage_preview_confirmation_and_main_window_acl() {
         .unwrap()
         .deserialize()
         .unwrap();
-    assert_eq!(ready["rootDirectory"], data.to_string_lossy().as_ref());
+    assert_eq!(
+        ready["storage"]["rootDirectory"],
+        data.to_string_lossy().as_ref()
+    );
+    assert_eq!(ready.get("startupNotice"), Some(&Value::Null));
+    assert_eq!(ready["storage"].get("notice"), Some(&Value::Null));
 }
 
 #[test]

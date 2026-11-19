@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { useApplicationStore } from './application';
 import * as ipc from '../services/ipc';
-import type { Bootstrap } from '../types/ipc';
+import type { Bootstrap, StorageReady } from '../types/ipc';
 import { defaultProductPreferences } from '../types/product';
 import { defaultTerminalPreferences } from '../types/preferences';
 
@@ -44,7 +44,7 @@ const bootstrap = (): Bootstrap => ({
 it('keeps the candidate unavailable until storage commit acknowledges startup', async () => {
   const value = bootstrap();
   vi.spyOn(ipc, 'bootstrap').mockResolvedValue(value);
-  let finish!: (value: NonNullable<Bootstrap['storage']>) => void;
+  let finish!: (value: StorageReady) => void;
   vi.spyOn(ipc, 'storageReady').mockImplementation(
     () =>
       new Promise((resolve) => {
@@ -55,10 +55,10 @@ it('keeps the candidate unavailable until storage commit acknowledges startup', 
   const pending = application.initialize();
   await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
   expect(application.ready).toBe(false);
-  finish({ ...value.storage!, notice: '数据迁移完成，旧副本已清理。' });
+  finish({ storage: value.storage!, startupNotice: null });
   await pending;
   expect(application.ready).toBe(true);
-  expect(application.notice).toContain('旧副本已清理');
+  expect(application.state?.storage).toEqual(value.storage);
 });
 
 it('exposes a startup error instead of enabling an uncommitted candidate', async () => {
@@ -70,11 +70,11 @@ it('exposes a startup error instead of enabling an uncommitted candidate', async
   expect(application.error).toBe('无法提交存储目录');
 });
 
-it('keeps migration history in settings without replaying a startup notification', async () => {
+it('keeps a previous migration warning in settings without replaying it', async () => {
   const value = bootstrap();
-  value.storage!.notice = '数据迁移完成，旧副本已清理。';
+  value.storage!.notice = '数据迁移未完成：目标目录必须为空。继续使用旧目录，旧数据未删除。';
   vi.spyOn(ipc, 'bootstrap').mockImplementation(async () => structuredClone(value));
-  vi.spyOn(ipc, 'storageReady').mockResolvedValue({ ...value.storage!, notice: null });
+  vi.spyOn(ipc, 'storageReady').mockResolvedValue({ storage: value.storage!, startupNotice: null });
   const application = useApplicationStore();
   application.notice = '上次提示';
   await application.initialize();
@@ -86,20 +86,23 @@ it('keeps migration history in settings without replaying a startup notification
   expect(application.state?.storage?.notice).toBe(value.storage!.notice);
 });
 
-it('shows a current migration result once while retaining its history on reinitialize', async () => {
+it('notifies once on successful cleanup and removes the previous warning from settings', async () => {
   const value = bootstrap();
+  const storage = { ...value.storage! };
+  value.storage!.notice = '新目录已启用，旧副本清理未完成：旧目录文件已变化。下次启动重试。';
   vi.spyOn(ipc, 'bootstrap').mockImplementation(async () => structuredClone(value));
-  const notice = '数据迁移完成，旧副本已清理。';
+  const startupNotice = '数据迁移完成，旧副本已清理。';
   vi.spyOn(ipc, 'storageReady')
-    .mockResolvedValueOnce({ ...value.storage!, notice })
-    .mockResolvedValue({ ...value.storage!, notice: null });
+    .mockResolvedValueOnce({ storage, startupNotice })
+    .mockResolvedValue({ storage, startupNotice: null });
   const application = useApplicationStore();
   await application.initialize();
-  expect(application.notice).toBe(notice);
-  value.storage!.notice = notice;
+  expect(application.notice).toBe(startupNotice);
+  expect(application.state?.storage?.notice).toBeNull();
+  value.storage!.notice = null;
   await application.initialize();
   expect(application.notice).toBeNull();
-  expect(application.state?.storage?.notice).toBe(notice);
+  expect(application.state?.storage?.notice).toBeNull();
 });
 
 it.each([
@@ -108,8 +111,10 @@ it.each([
 ])('still reports current startup warnings: %s', async (notice) => {
   const value = bootstrap();
   vi.spyOn(ipc, 'bootstrap').mockResolvedValue(value);
-  value.storage!.notice = notice;
-  vi.spyOn(ipc, 'storageReady').mockResolvedValue({ ...value.storage!, notice });
+  vi.spyOn(ipc, 'storageReady').mockResolvedValue({
+    storage: { ...value.storage!, notice },
+    startupNotice: notice,
+  });
   const application = useApplicationStore();
   await application.initialize();
   expect(application.notice).toBe(notice);

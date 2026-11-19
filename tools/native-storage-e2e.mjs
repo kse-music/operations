@@ -78,6 +78,8 @@ let browser,
   credentialId,
   currentRoot = source;
 const results = [];
+const migrationCompleted = '数据迁移完成，旧副本已清理。';
+const storagePanel = () => page.locator('#settings-panel-storage');
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function connect() {
   const deadline = Date.now() + 120000;
@@ -128,6 +130,7 @@ async function confirmAndRestart(dialog) {
     }),
   ]);
   await connect();
+  await page.locator('.toast').getByText(migrationCompleted, { exact: true }).waitFor();
 }
 try {
   await connect();
@@ -136,14 +139,14 @@ try {
     assert.equal(path.resolve(initial.dataDirectory), defaultSource, 'refusing a non-QA profile');
     await navigateWorkspace(page, '数据与存储');
     await page.getByLabel('数据根目录', { exact: true }).fill(firstLaunchTarget);
-    await page.getByRole('button', { name: '保存、迁移并重启', exact: true }).click();
+    await page.getByRole('button', { name: '迁移并重启', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: '迁移数据并重启', exact: true });
     await dialog.waitFor();
     await confirmAndRestart(dialog);
     const relocated = await invoke('app_bootstrap');
     currentRoot = relocated.dataDirectory;
     assert.equal(path.resolve(currentRoot), firstLaunchTarget, JSON.stringify(relocated.storage));
-    assert.equal(relocated.storage.notice, '数据迁移完成，旧副本已清理。');
+    assert.equal(relocated.storage.notice, null);
     assert.equal(await absent(path.join(defaultSource, 'serverdeck.sqlite3')), true);
     const locator = JSON.parse(await readFile(path.join(defaultSource, 'storage-location.json')));
     assert.equal(path.resolve(locator.active.data), firstLaunchTarget);
@@ -151,6 +154,7 @@ try {
     source = firstLaunchTarget;
     await navigateWorkspace(page, '数据与存储');
     assert.equal(await page.getByLabel('数据根目录', { exact: true }).inputValue(), source);
+    assert.equal(await storagePanel().getByText(migrationCompleted, { exact: true }).count(), 0);
     await page.screenshot({ path: path.join(run, 'first-launch-migrated.png') });
     results.push(
       'first launch immediately migrates, restarts, reports completion and commits the new actual path',
@@ -193,15 +197,20 @@ try {
   await page.getByLabel('数据根目录', { exact: true }).fill(destination);
   await navigateWorkspace(page, '通用');
   await page.getByTestId('theme-select').selectOption('light');
-  await page.getByRole('button', { name: '保存、迁移并重启', exact: true }).click();
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  await navigateWorkspace(page, '数据与存储');
+  await page.getByRole('button', { name: '迁移并重启', exact: true }).click();
   let dialog = page.getByRole('dialog', { name: '迁移数据并重启', exact: true });
   await dialog.waitFor();
   assert((await dialog.textContent()).includes(destination));
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
-  assert.equal((await invoke('app_bootstrap')).config.theme, original.config.theme);
+  const cancelled = await invoke('app_bootstrap');
+  assert.equal(path.resolve(cancelled.dataDirectory), source);
+  assert.equal(cancelled.config.theme, 'light');
+  assert.equal(await page.getByLabel('数据根目录', { exact: true }).inputValue(), destination);
   assert.equal(await absent(destination), true);
-  results.push('native cancellation preserves drafts and does not save, migrate or restart');
-  await page.getByRole('button', { name: '保存、迁移并重启', exact: true }).click();
+  results.push('native cancellation preserves the directory draft and does not migrate or restart');
+  await page.getByRole('button', { name: '迁移并重启', exact: true }).click();
   dialog = page.getByRole('dialog', { name: '迁移数据并重启', exact: true });
   await dialog.waitFor();
   await page.screenshot({ path: path.join(run, 'migration-confirm.png') });
@@ -235,7 +244,8 @@ try {
   const locator = JSON.parse(await readFile(path.join(defaultSource, 'storage-location.json')));
   assert.equal(path.resolve(locator.active.data), destination);
   assert.equal(locator.migration, null);
-  assert.equal(migrated.storage.notice, '数据迁移完成，旧副本已清理。');
+  assert.equal(locator.notice, null);
+  assert.equal(migrated.storage.notice, null);
   assert(
     !(await readFile(path.join(destination, 'serverdeck.sqlite3'))).includes(Buffer.from(secret)),
   );
@@ -243,6 +253,7 @@ try {
     'real automatic restart preserves SQLite hosts, credential references, plugin revision/enabled choice, logs and WebView localStorage; old copies cleaned',
   );
   await navigateWorkspace(page, '数据与存储');
+  assert.equal(await storagePanel().getByText(migrationCompleted, { exact: true }).count(), 0);
   await page.screenshot({ path: path.join(run, 'migrated-storage.png') });
   await writeFile(
     path.join(run, 'results.json'),
