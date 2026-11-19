@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue';
 import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import * as ipc from '../services/ipc';
 import type { AppConfig, Bootstrap } from '../types/ipc';
+import { useNotificationsStore } from './notifications';
 
 export const useApplicationStore = defineStore('application', () => {
   const state = ref<Bootstrap | null>(null);
@@ -18,22 +19,21 @@ export const useApplicationStore = defineStore('application', () => {
   const environmentError = ref<string | null>(null);
   const saving = ref(false);
   const error = ref<string | null>(null);
-  const notice = ref<string | null>(null);
   const ready = computed(() => state.value !== null);
+  const notifications = useNotificationsStore();
 
   async function initialize(): Promise<void> {
     if (loading.value || saving.value) return;
     loading.value = true;
     environmentError.value = null;
     error.value = null;
-    notice.value = null;
     try {
       const nextState = await ipc.bootstrap();
       if (nextState.storage) {
         // A failed commit must not expose an uncommitted candidate for new writes.
         const { storage, startupNotice } = await ipc.storageReady();
         nextState.storage = storage;
-        notice.value = startupNotice;
+        notifications.push(startupNotice);
       }
       state.value = nextState;
     } catch (cause) {
@@ -49,10 +49,8 @@ export const useApplicationStore = defineStore('application', () => {
     if (!state.value || saving.value || loading.value) return;
     saving.value = true;
     error.value = null;
-    notice.value = null;
     try {
       state.value.config = await ipc.saveConfig({ ...config });
-      notice.value = tr('设置已保存。日志级别在下次启动时生效。');
     } catch (cause) {
       error.value = ipc.errorMessage(cause);
     } finally {
@@ -73,7 +71,6 @@ export const useApplicationStore = defineStore('application', () => {
     environmentError,
     saving,
     error,
-    notice,
     ready,
     initialize,
     save,

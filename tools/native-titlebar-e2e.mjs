@@ -125,16 +125,11 @@ async function appearance(theme, font = '标准') {
     .locator('.interface-font-ticks')
     .getByRole('button', { name: font, exact: true })
     .click();
-  await settings.getByRole('button', { name: '保存设置', exact: true }).click();
-  await page.getByText('设置已保存', { exact: false }).first().waitFor();
-  await page.waitForFunction(
-    () =>
-      !document.querySelector('#app').__vue_app__.config.globalProperties.$pinia.state.value
-        .application.saving,
-  );
+  await settings.getByText('更改会自动保存到此设备。', { exact: true }).waitFor();
   const saved = (await invoke('app_bootstrap')).config;
   assert.equal(saved.theme, theme);
   assert.equal(saved.interfaceFontSize, font === '超大' ? 145 : 100);
+  assert.equal(await page.locator('.toast[role="status"]').count(), 0);
   await closeApplicationSettings(page);
 }
 async function confirmClose() {

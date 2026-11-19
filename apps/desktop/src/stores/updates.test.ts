@@ -10,6 +10,7 @@ vi.mock('../services/updates', () => ({
     status: vi.fn(),
     check: vi.fn(),
     autoCheck: vi.fn(),
+    ignoreNotice: vi.fn(),
     download: vi.fn(),
     cancel: vi.fn(),
     install: vi.fn(),
@@ -24,6 +25,7 @@ const status = (phase: UpdateStatus['phase'] = 'idle'): UpdateStatus => ({
   downloadedBytes: 0,
   totalBytes: null,
   error: null,
+  showNotice: false,
   preferences: { version: 1, autoCheck: true, lastAttemptAt: null, lastCheckedAt: null },
 });
 beforeEach(() => {
@@ -58,6 +60,43 @@ it('disabling auto checks cancels the scheduled startup check and stores the ret
   await vi.advanceTimersByTimeAsync(5000);
   expect(updatesApi.check).not.toHaveBeenCalled();
   expect(store.state?.preferences.autoCheck).toBe(false);
+});
+
+it('opens a notice only for an eligible automatic check and keeps the release after dismissing it', async () => {
+  const store = useUpdatesStore();
+  vi.mocked(updatesApi.status).mockResolvedValue(status('available'));
+  await store.initialize();
+  expect(store.noticeOpen).toBe(false);
+  vi.mocked(updatesApi.check).mockResolvedValue(status('available'));
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(store.noticeOpen).toBe(false);
+
+  vi.mocked(updatesApi.check).mockResolvedValue({ ...status('available'), showNotice: true });
+  await store.check();
+  expect(store.noticeOpen).toBe(false);
+  await store.check(true);
+  expect(store.noticeOpen).toBe(true);
+  store.closeNotice();
+  expect(store.noticeOpen).toBe(false);
+  expect(store.state?.release?.version).toBe('1.0.0');
+  expect(updatesApi.ignoreNotice).not.toHaveBeenCalled();
+});
+
+it('keeps the notice open if saving the ignored version fails and closes it on retry', async () => {
+  const store = useUpdatesStore();
+  vi.mocked(updatesApi.check).mockResolvedValue({ ...status('available'), showNotice: true });
+  await store.check(true);
+  vi.mocked(updatesApi.ignoreNotice).mockRejectedValueOnce(new Error('保存失败'));
+  await store.ignoreNotice();
+  expect(store.noticeOpen).toBe(true);
+  expect(store.error).toBe('保存失败');
+
+  vi.mocked(updatesApi.ignoreNotice).mockResolvedValue();
+  await store.ignoreNotice();
+  expect(vi.mocked(updatesApi.ignoreNotice).mock.calls).toEqual([['1.0.0'], ['1.0.0']]);
+  expect(store.noticeOpen).toBe(false);
+  expect(store.available).toBe(true);
+  expect(store.error).toBeNull();
 });
 it('automatic check failure never reports the app as current and manual failures notify', async () => {
   const store = useUpdatesStore();

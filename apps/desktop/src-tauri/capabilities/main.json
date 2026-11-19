@@ -7,6 +7,7 @@
     "allow-app-update-status",
     "allow-app-update-check",
     "allow-app-update-auto-check",
+    "allow-app-update-ignore-notice",
     "allow-app-update-download",
     "allow-app-update-cancel",
     "allow-app-update-install",

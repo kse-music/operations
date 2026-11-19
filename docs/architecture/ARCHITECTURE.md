@@ -87,13 +87,13 @@ system 来源由宿主从发行内置包写入，仅影响分发和预置授权�
 
 `.github/workflows/update-release.yml` 从 `main` 手动触发，固定该次运行的提交 SHA，分别构建 Windows updater 产物、Linux 安装包，以及 macOS Intel/Apple Silicon 的 DMG 和应用归档。macOS 使用对应架构的原生 runner，读取应用 Info.plist 定位可执行文件并用 `lipo` 验证架构，再由 `ditto` 将 `.app` 归档为保留权限和符号链接的 ZIP。各架构缓存和中间 Artifact 独立命名；汇总任务依赖所有构建成功，先校验当前版本所需附件、Windows 更新清单及说明的一致性，再创建或复用指向该提交的版本标签，并上传同一个 Release 草稿。任一构建或附件校验失败不新建标签，不自动公开草稿。Linux、macOS 安装包仅用于手动分发，不进入 Windows 更新清单；macOS 未接入开发者证书签名及公证。操作和文件契约见[更新分发](../release/UPDATES.md)。
 
-桌面组合根注册 Tauri 官方 updater，`update_commands` 持有有界单操作状态、取消信号、已核验的候选更新及内存安装包。前端更新 Store 在 bootstrap 就绪后延迟发起自动检查，关于页展示状态，导航显示更新提示；页面切换不释放下载。仅主窗口获得本应用的窄更新 IPC，不向任何窗口授予 updater 原生安装权限，插件和独立编辑器不能绕过退出协调直接安装。
+桌面组合根注册 Tauri 官方 updater，`update_commands` 持有有界单操作状态、取消信号、已核验的候选更新及内存安装包。前端更新 Store 在 bootstrap 就绪后延迟发起自动检查。只有实际完成的自动检查发现可用版本且版本号未被忽略时，原生层才在该次响应中给出弹窗标记。弹窗和关于页共用更新说明渲染、下载进度及安装确认，状态查询只供展示。页面切换不释放下载。仅主窗口获得本应用的窄更新 IPC，不向任何窗口授予 updater 原生安装权限，插件和独立编辑器不能绕过退出协调直接安装。
 
 更新源为 `kse-music/operations` GitHub Releases 的固定 `latest.json`，只接受更高正式版本，安装包 URL 必须精确对应同仓库、同版本的 NSIS 文件。运行期同时检查 Windows x64 和 NSIS 安装标记，开发版、独立 EXE 与其他平台不执行应用内更新，避免覆盖构建目录或错误改变安装范围。请求与重定向限定 HTTPS；更新器强制验证编译内置公钥及签名中的版本。更新说明限 64 KiB，由 `UpdateReleaseNotes` 使用 marked 渲染 Markdown，再经 DOMPurify 标签、属性和 HTTP/HTTPS URL 白名单净化；原始 HTML 转义、图片仅显示替代文本，不执行嵌入内容或加载远程图片。链接点击阻止 WebView 导航，复用现有浏览器 IPC 在 Native 复验协议后打开默认浏览器，失败进入通知；渲染失败记录安全类别并提示原文回退。安装包限 512 MiB；检查与下载分别有超时及可取消生命周期，普通退出先取消并排空更新请求。下载完成事件不代表校验完成，只有签名校验成功才进入可安装状态。安装包不持久化，进程退出后重新下载。
 
 Windows NSIS 通过 `windows/installer-hooks.nsh` 的 `NSIS_HOOK_POSTINSTALL` 在 EXE 替换和快捷方式处理之后，以 `SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, ...)` 通知 Shell 使图标缓存失效，再以 `SHCNE_UPDATEITEM`、`SHCNF_PATHW | SHCNF_FLUSH` 刷新 EXE、已有开始菜单和桌面快捷方式。仅发送文件变化通知不能可靠清除旧图标。普通安装、静默安装及 updater 的被动安装共用该钩子；路径使用安装器变量和 Unicode 参数。缓存失效通知可使其他图标重新加载，但不删除缓存文件、不重启 Explorer、不修改任务栏固定项；通知返回仅代表已投递，最终呈现仍须在目标 Windows 环境验收。
 
-更新偏好以独立 `software_updates` 设置项保存，格式 v1，字段为自动检查开关、最近尝试与最近成功检查时间。不存在时使用固定 v1 默认值，未知字段及未来版本按需拒绝，不重置原值或阻断主业务启动。所有读写沿用 Application 的有界存储执行器，避免偏好保存与检查记录相互覆盖；失败尝试也计入自动检查的每日限制。
+更新偏好以独立 `software_updates` 设置项保存，格式 v1，字段为自动检查开关、最近尝试与最近成功检查时间。失败尝试也计入自动检查的每日限制。已忽略的版本号另存为 `software_update_notice` v1，缺少记录时没有忽略版本。忽略 IPC 复验请求版本与本次检查候选一致，按版本号触发提示。两项设置均使用 Application 的有界存储执行器，按需校验并拒绝未知字段、未来版本或损坏数据，启动主业务不依赖它们。
 
 “安装并重启”先由前端复用设置草稿守卫和退出确认，再由 Native 核对已校验包、编辑器操作及目录迁移状态。安装标记不能与目录迁移并发；普通退出处理器先刷新窗口状态、取消更新网络请求、排空 Application，再在阻塞工作中调用官方安装器。Windows updater 成功启动安装器后会直接结束进程，因此提前完成资源排空并在 before-exit 钩子刷新日志；若启动失败，通过原生提示后正常重启当前应用，不把已排空的实例继续当作可用工作台。安装器接管后的失败结果需用户核对，不能宣称安装成功或自动恢复数据库。发布步骤与密钥管理见[更新分发](../release/UPDATES.md)。
 

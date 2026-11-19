@@ -17,6 +17,7 @@ export interface UpdateStatus extends UpdateProgress {
     | 'installing'
     | 'error';
   release: { version: string; notes: string } | null;
+  showNotice: boolean;
   error: string | null;
   preferences: {
     version: 1;
@@ -33,6 +34,7 @@ export const updatesApi = {
   status: () => call<UpdateStatus>('app_update_status'),
   check: (automatic: boolean) => call<UpdateStatus>('app_update_check', { automatic }),
   autoCheck: (enabled: boolean) => call<UpdateStatus>('app_update_auto_check', { enabled }),
+  ignoreNotice: (version: string) => call<void>('app_update_ignore_notice', { version }),
   download(receive: (progress: UpdateProgress) => void): Promise<UpdateStatus> {
     const events = new Channel<UpdateProgress>();
     events.onmessage = receive;

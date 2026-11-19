@@ -452,6 +452,22 @@ it('reports interface font scale and bounded notifications', async () => {
   expect(push).toHaveBeenCalledWith('Done', false);
   await expect(ui.call('ui.notify', { message: 'x'.repeat(2049) })).rejects.toThrow('通知超过');
 });
+it('suppresses regular notifications from settings pages and delivers their errors', async () => {
+  const ui = createPluginUiBridge({
+    id,
+    revision: 'revision',
+    page,
+    hostId: '',
+    settingsAction: vi.fn(),
+  });
+  const notifications = useNotificationsStore();
+  await expect(ui.call('ui.notify', { message: 'Settings saved' })).resolves.toBeNull();
+  expect(notifications.items).toHaveLength(0);
+  await ui.call('ui.notify', { message: 'Save failed', error: true });
+  expect(notifications.items).toEqual([
+    expect.objectContaining({ text: 'Save failed', error: true }),
+  ]);
+});
 it('waits for late SSH fingerprint metadata and only the trusted parent can accept it', async () => {
   const { useHostsStore } = await import('../stores/hosts');
   const { terminalApi } = await import('./terminal');

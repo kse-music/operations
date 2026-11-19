@@ -226,21 +226,19 @@ try {
       .click();
     for (const notice of await page.getByRole('button', { name: '关闭通知', exact: true }).all())
       await notice.click();
-    const save = settings.getByRole('button', { name: '保存设置', exact: true });
-    await reachable(save, `${name}: save`);
-    await save.click();
-    await page.getByText('设置已保存', { exact: false }).first().waitFor();
+    await settings.getByText('更改会自动保存到此设备。', { exact: true }).waitFor();
     const saved = (await invoke('app_bootstrap')).config;
     assert.equal(saved.theme, theme);
     assert.equal(saved.interfaceFontSize, size);
+    assert.equal(await page.locator('.toast[role="status"]').count(), 0);
 
     for (const category of ['通用', '终端', '快捷键', '数据与存储', '模型', '插件', '关于']) {
       await navigateWorkspace(page, category === '插件' ? '插件管理' : category);
       await reachable(
-        settings
-          .locator(':scope > .modal-heading')
-          .getByRole('button', { name: '关闭对话框', exact: true }),
-        `${name}/${category}: close`,
+        page
+          .getByRole('navigation', { name: '应用导航', exact: true })
+          .getByRole('button', { name: '首页', exact: true }),
+        `${name}/${category}: leave settings`,
       );
       assert(
         await settings.evaluate((dialog) => {
@@ -258,56 +256,43 @@ try {
         `${name}/${category}: overflow`,
       );
       if (['通用', '终端', '快捷键', '数据与存储'].includes(category))
-        await reachable(save, `${name}/${category}: save`);
+        await reachable(
+          settings.getByRole('button', { name: '恢复默认', exact: true }),
+          `${name}/${category}: restore defaults`,
+        );
     }
     await navigateWorkspace(page, '插件管理');
     await settings.getByRole('button', { name: '配置 AI 运维助手', exact: true }).click();
-    const cancel = settings
-      .frameLocator('.plugin-configuration iframe')
-      .getByRole('button', { name: '取消', exact: true });
-    await reachable(cancel, `${name}: plugin cancel`);
+    const back = settings.getByRole('button', { name: '返回插件列表', exact: true });
+    await reachable(back, `${name}: back to plugin list`);
     await page.screenshot({ path: path.join(artifacts, `${name}-plugin-settings.png`) });
-    await cancel.click();
+    await back.click();
     await settings.locator('.plugin-manager').waitFor();
     assert.equal(await settings.locator('.plugin-configuration').count(), 0);
-    await page.evaluate(() => {
-      void document
-        .querySelector('#app')
-        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
-        .closeSettings();
-    });
-    await settings.waitFor({ state: 'detached' });
+    await closeApplicationSettings(page);
 
     await navigateWorkspace(page, '通用');
     await page.screenshot({ path: path.join(artifacts, `${name}-general.png`) });
-    const selectTheme = settings.getByTestId('theme-select');
-    const draftTheme = theme === 'dark' ? 'light' : 'dark';
-    await selectTheme.selectOption(draftTheme);
-    const close = settings
-      .locator(':scope > .modal-heading')
-      .getByRole('button', { name: '关闭对话框', exact: true });
-    await close.click();
+    await navigateWorkspace(page, '数据与存储');
+    const directory = settings.getByLabel('数据根目录', { exact: true });
+    const originalDirectory = await directory.inputValue();
+    await directory.fill('');
+    const closing = closeApplicationSettings(page);
     const prompt = page.getByRole('dialog', { name: '设置尚未保存', exact: true });
     const continueEditing = prompt.getByRole('button', { name: '继续编辑', exact: true });
     await reachable(continueEditing, `${name}: cancel close`);
     await continueEditing.click();
     await prompt.waitFor({ state: 'detached' });
-    assert.equal(await selectTheme.inputValue(), draftTheme);
-    assert.equal((await invoke('app_bootstrap')).config.theme, theme);
-    await close.click();
+    assert.equal(await directory.inputValue(), '');
+    assert.equal((await invoke('app_bootstrap')).storage.rootDirectory, originalDirectory);
+    const discarding = closeApplicationSettings(page);
     const discard = prompt.getByRole('button', { name: '放弃更改并关闭', exact: true });
     await reachable(discard, `${name}: discard close`);
     await discard.click();
-    await settings.waitFor({ state: 'detached' });
-    await navigateWorkspace(page, '通用');
-    assert.equal(await selectTheme.inputValue(), theme);
-    await page.evaluate(() => {
-      void document
-        .querySelector('#app')
-        .__vue_app__.config.globalProperties.$pinia._s.get('workspace')
-        .closeSettings();
-    });
-    await settings.waitFor({ state: 'detached' });
+    await Promise.all([closing, discarding]);
+    await navigateWorkspace(page, '数据与存储');
+    assert.equal(await directory.inputValue(), originalDirectory);
+    await closeApplicationSettings(page);
     results.push({
       name,
       width: 960,

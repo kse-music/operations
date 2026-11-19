@@ -99,6 +99,7 @@ it('renders release Markdown and gates installation on a verified package', asyn
     downloadedBytes: 0,
     totalBytes: null,
     error: null,
+    showNotice: false,
     preferences: { version: 1, autoCheck: true, lastAttemptAt: null, lastCheckedAt: null },
   };
   const root = document.createElement('div');

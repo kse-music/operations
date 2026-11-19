@@ -25,8 +25,8 @@
     {
       "source": "PLUGIN_UI_EXTENSION.md",
       "file": "developers/reference/ui.md",
-      "sourceSha256": "6f5d9b4d21b08c8eb3f8a2929b3892324ccb297ba615c8e2b8dd312a4005a734",
-      "contentSha256": "70b1f241db7d545fd11214773e8221049f481e669965eda8db227c04a68e248b"
+      "sourceSha256": "a7d5afe4f1629cefd858b2636ab5dbd73e0add3a5f5fa14ff5e8179473fe1978",
+      "contentSha256": "789ac09aab8fdfde73a40cf557b53f990bc30633ee487229f9849332ae0cf9a0"
     },
     {
       "source": "PLUGIN_PACKAGE_FORMAT.md",

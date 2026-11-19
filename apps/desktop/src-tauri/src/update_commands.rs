@@ -49,6 +49,7 @@ pub struct Status {
     supported: bool,
     phase: Phase,
     release: Option<Release>,
+    show_notice: bool,
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
     error: Option<String>,
@@ -135,6 +136,7 @@ impl Updates {
                 version: update.version.clone(),
                 notes: update.body.clone().unwrap_or_default(),
             }),
+            show_notice: false,
             downloaded_bytes: inner.downloaded_bytes,
             total_bytes: inner.total_bytes,
             error: inner.error.clone(),
@@ -234,6 +236,11 @@ pub async fn app_update_check<R: Runtime>(
     if !supported() || (automatic && !preferences.should_check(at)) || downloaded {
         return updates.status(preferences).map_err(Into::into);
     }
+    let ignored_version = if automatic {
+        application.ignored_update_version().await?
+    } else {
+        None
+    };
     application.record_update_check(at, false).await?;
     let (cancel, mut cancelled) = watch::channel(false);
     {
@@ -273,8 +280,34 @@ pub async fn app_update_check<R: Runtime>(
         updates.finish_error(&error)?;
         return Err(error.into());
     }
-    updates
-        .status(application.update_preferences().await?)
+    let mut status = updates.status(application.update_preferences().await?)?;
+    status.show_notice = automatic
+        && status
+            .release
+            .as_ref()
+            .is_some_and(|release| Some(release.version.as_str()) != ignored_version.as_deref());
+    Ok(status)
+}
+
+#[tauri::command]
+pub async fn app_update_ignore_notice<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    version: String,
+) -> Result<(), IpcError> {
+    let updates = app.state::<Updates>();
+    let _operation = updates.operation.try_lock().map_err(|_| Error::Busy)?;
+    updates.ensure_open()?;
+    if updates
+        .lock()?
+        .update
+        .as_ref()
+        .is_none_or(|update| update.version != version)
+    {
+        return Err(Error::Validation("仅能忽略本次检查发现的版本").into());
+    }
+    app.state::<Application>()
+        .ignore_update_version(version)
+        .await
         .map_err(Into::into)
 }
 

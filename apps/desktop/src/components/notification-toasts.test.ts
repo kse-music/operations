@@ -30,10 +30,10 @@ afterEach(() => {
 it('automatically dismisses regular notifications after two seconds and errors after five', async () => {
   vi.useFakeTimers();
   const notifications = useNotificationsStore();
-  notifications.push('设置已保存。日志级别在下次启动时生效。');
+  notifications.push('数据迁移完成，旧副本已清理。');
   notifications.push('保存设置失败', true);
   await flush();
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('设置已保存');
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('数据迁移完成');
 
   await vi.advanceTimersByTimeAsync(1999);
   expect(document.querySelector('[role="status"]')).not.toBeNull();
@@ -49,17 +49,17 @@ it('automatically dismisses regular notifications after two seconds and errors a
 it('allows early dismissal without shortening the lifetime of a repeated non-error toast', async () => {
   vi.useFakeTimers();
   const notifications = useNotificationsStore();
-  notifications.push('设置已保存');
+  notifications.push('绝对路径已复制。');
   await flush();
   await vi.advanceTimersByTimeAsync(1000);
   document.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!.click();
   await flush();
   expect(document.querySelector('.toast')).toBeNull();
 
-  notifications.push('设置已保存');
+  notifications.push('绝对路径已复制。');
   await flush();
   await vi.advanceTimersByTimeAsync(1999);
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('设置已保存');
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('绝对路径已复制');
   await vi.advanceTimersByTimeAsync(1);
   expect(document.querySelector('.toast')).toBeNull();
 });

@@ -325,7 +325,8 @@ export function createPluginUiBridge(input: {
       case 'ui.notify':
         if (typeof args.message !== 'string' || args.message.length > 2048)
           throw new Error(tr('通知超过限制'));
-        notifications.push(args.message, args.error === true);
+        if (!input.settingsAction || args.error === true)
+          notifications.push(args.message, args.error === true);
         return null;
       case 'ui.export':
         if (typeof args.name !== 'string' || !/^[\w.-]{1,120}$/.test(args.name))

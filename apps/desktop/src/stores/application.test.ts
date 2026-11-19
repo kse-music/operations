@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import { useApplicationStore } from './application';
+import { useNotificationsStore } from './notifications';
 import * as ipc from '../services/ipc';
 import type { Bootstrap, StorageReady } from '../types/ipc';
 import { defaultProductPreferences } from '../types/product';
@@ -76,13 +77,13 @@ it('keeps a previous migration warning in settings without replaying it', async 
   vi.spyOn(ipc, 'bootstrap').mockImplementation(async () => structuredClone(value));
   vi.spyOn(ipc, 'storageReady').mockResolvedValue({ storage: value.storage!, startupNotice: null });
   const application = useApplicationStore();
-  application.notice = '上次提示';
+  const notifications = useNotificationsStore();
   await application.initialize();
   expect(application.ready).toBe(true);
-  expect(application.notice).toBeNull();
+  expect(notifications.items).toHaveLength(0);
   expect(application.state?.storage?.notice).toBe(value.storage!.notice);
   await application.initialize();
-  expect(application.notice).toBeNull();
+  expect(notifications.items).toHaveLength(0);
   expect(application.state?.storage?.notice).toBe(value.storage!.notice);
 });
 
@@ -96,12 +97,16 @@ it('notifies once on successful cleanup and removes the previous warning from se
     .mockResolvedValueOnce({ storage, startupNotice })
     .mockResolvedValue({ storage, startupNotice: null });
   const application = useApplicationStore();
+  const notifications = useNotificationsStore();
   await application.initialize();
-  expect(application.notice).toBe(startupNotice);
+  expect(notifications.items).toEqual([
+    { id: expect.any(Number), text: startupNotice, error: false },
+  ]);
   expect(application.state?.storage?.notice).toBeNull();
+  notifications.dismiss(notifications.items[0]!.id);
   value.storage!.notice = null;
   await application.initialize();
-  expect(application.notice).toBeNull();
+  expect(notifications.items).toHaveLength(0);
   expect(application.state?.storage?.notice).toBeNull();
 });
 
@@ -117,6 +122,6 @@ it.each([
   });
   const application = useApplicationStore();
   await application.initialize();
-  expect(application.notice).toBe(notice);
+  expect(useNotificationsStore().items).toEqual([expect.objectContaining({ text: notice })]);
   expect(application.state?.storage?.notice).toBe(notice);
 });

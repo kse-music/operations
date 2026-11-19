@@ -7,6 +7,7 @@ import { computed } from 'vue';
 import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { useUpdatesStore } from '../stores/updates';
 import UpdateReleaseNotes from '../components/UpdateReleaseNotes.vue';
+import UpdateDownloadProgress from '../components/UpdateDownloadProgress.vue';
 const updates = useUpdatesStore();
 const checkedTime = computed(() => {
   const at = updates.state?.preferences.lastCheckedAt;
@@ -15,12 +16,6 @@ const checkedTime = computed(() => {
         new Date(at * 1000),
       )
     : tr('尚未检查');
-});
-const downloadPercent = computed(() => {
-  const total = updates.state?.totalBytes;
-  return total
-    ? Math.min(100, Math.floor((updates.state!.downloadedBytes / total) * 100))
-    : undefined;
 });
 
 const application = useApplicationStore();
@@ -87,15 +82,7 @@ const releaseTime = computed(() =>
           <p v-else-if="updates.state.phase === 'upToDate' && !updates.error" role="status">
             {{ tr('当前已是最新版本。') }}
           </p>
-          <div v-if="updates.downloading" class="update-progress" role="status">
-            <progress :value="downloadPercent" max="100" :aria-label="tr('更新下载进度')" />
-            <span>{{
-              downloadPercent === undefined
-                ? tr('正在下载更新…')
-                : tr('已下载 {0}%', downloadPercent)
-            }}</span>
-            <span v-if="downloadPercent === 100">{{ tr('正在验证更新包签名…') }}</span>
-          </div>
+          <UpdateDownloadProgress v-if="updates.downloading" />
           <p v-if="updates.state.phase === 'ready'" role="status">
             {{ tr('更新包已验证，可安装并重启；当前连接和任务将结束。') }}
           </p>

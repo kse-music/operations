@@ -13,6 +13,7 @@ fn main() {
             "app_update_status",
             "app_update_check",
             "app_update_auto_check",
+            "app_update_ignore_notice",
             "app_update_download",
             "app_update_cancel",
             "app_update_install",

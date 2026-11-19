@@ -656,6 +656,7 @@ it('offers a missing bundled plugin for explicit restore and keeps it disabled a
   expect(root.textContent).not.toContain('恢复内置插件');
   expect(source.value).toBe('all');
   expect(enable).not.toHaveBeenCalled();
+  expect(useNotificationsStore(pinia).items).toHaveLength(0);
 });
 
 it('keeps a failed bundled restore open for retry with its error visible', async () => {
@@ -734,6 +735,7 @@ it('shows invalid plugin records beside healthy plugins and requires explicit re
   expect(reinstall).toHaveBeenCalledExactlyOnceWith(problem.id, 'frozen-digest', true);
   expect(document.querySelector('dialog')).toBeNull();
   expect(root.querySelector('[aria-label="未加载的插件"]')).toBeNull();
+  expect(useNotificationsStore(pinia).items).toHaveLength(0);
 });
 it('keeps a failed reinstall visible for retry and offers no bundled replacement for arbitrary uploads', async () => {
   const problem = {

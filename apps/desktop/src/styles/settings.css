@@ -303,14 +303,6 @@
   background: var(--accent);
   margin-left: auto;
 }
-.activity-rail .sidebar-app-actions .nav-item {
-  position: relative;
-}
-.activity-rail .update-badge {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-}
 @container workspace (max-width: 700px) {
   .settings-fields {
     grid-template-columns: minmax(0, 1fr);

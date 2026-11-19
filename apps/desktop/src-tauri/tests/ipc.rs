@@ -58,6 +58,7 @@ fn updater_preferences_and_installation_are_limited_to_the_main_local_window() {
         .deserialize::<Value>()
         .unwrap();
     assert_eq!(state["phase"], "idle");
+    assert_eq!(state["showNotice"], false);
     assert_eq!(state["preferences"]["autoCheck"], true);
     assert!(
         get_ipc_response(
@@ -70,6 +71,7 @@ fn updater_preferences_and_installation_are_limited_to_the_main_local_window() {
         for (command, body) in [
             ("app_update_status", json!({})),
             ("app_update_auto_check", json!({"enabled":false})),
+            ("app_update_ignore_notice", json!({"version":"1.2.3"})),
             ("app_update_install", json!({"confirmed":true})),
             ("plugin:updater|install", json!({"rid":0})),
         ] {
@@ -92,7 +94,17 @@ fn updater_preferences_and_installation_are_limited_to_the_main_local_window() {
     .deserialize::<Value>()
     .unwrap();
     assert_eq!(unchecked["phase"], "idle");
+    assert_eq!(unchecked["showNotice"], false);
     assert!(unchecked["preferences"]["lastAttemptAt"].is_null());
+    let ignored = get_ipc_response(
+        &main,
+        request(
+            "app_update_ignore_notice",
+            json!({"version":"1.2.3"}),
+            origin,
+        ),
+    );
+    assert_eq!(ignored.unwrap_err()["code"], "VALIDATION");
     // Both paths fail before any exit state, installer, or process action is accessed.
     for confirmed in [false, true] {
         let result = get_ipc_response(

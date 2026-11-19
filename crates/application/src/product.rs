@@ -32,6 +32,15 @@ impl Application {
         })
         .await
     }
+
+    pub async fn ignored_update_version(&self) -> Result<Option<String>, Error> {
+        self.blocking(|db| db.ignored_update_version()).await
+    }
+
+    pub async fn ignore_update_version(&self, version: String) -> Result<(), Error> {
+        self.blocking(move |db| db.ignore_update_version(version))
+            .await
+    }
     pub fn background_tasks(&self) -> Result<BackgroundSnapshot, Error> {
         Ok(BackgroundSnapshot {
             connections: self.terminals.connection_status()?,

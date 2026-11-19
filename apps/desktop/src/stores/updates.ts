@@ -24,6 +24,7 @@ export const useUpdatesStore = defineStore('updates', () => {
   const downloading = ref(false);
   const installing = ref(false);
   const installRequested = ref(false);
+  const noticeOpen = ref(false);
   const available = computed(() => !!state.value?.release);
   const busy = computed(
     () => loading.value || checking.value || downloading.value || installing.value,
@@ -58,7 +59,9 @@ export const useUpdatesStore = defineStore('updates', () => {
     checking.value = true;
     error.value = null;
     try {
-      applyStatus(await updatesApi.check(automatic));
+      const next = await updatesApi.check(automatic);
+      applyStatus(next);
+      if (automatic && next.showNotice) noticeOpen.value = true;
     } catch (cause) {
       if (!cancelled(cause)) {
         error.value = errorMessage(cause);
@@ -80,6 +83,25 @@ export const useUpdatesStore = defineStore('updates', () => {
         error.value = errorMessage(cause);
         useNotificationsStore().push(error.value, true);
       }
+    } finally {
+      saving.value = false;
+    }
+  }
+
+  function closeNotice(): void {
+    noticeOpen.value = false;
+  }
+
+  async function ignoreNotice(): Promise<void> {
+    const version = state.value?.release?.version;
+    if (!noticeOpen.value || !version || busy.value || saving.value) return;
+    saving.value = true;
+    error.value = null;
+    try {
+      await updatesApi.ignoreNotice(version);
+      closeNotice();
+    } catch (cause) {
+      error.value = errorMessage(cause);
     } finally {
       saving.value = false;
     }
@@ -140,11 +162,14 @@ export const useUpdatesStore = defineStore('updates', () => {
     downloading,
     installing,
     installRequested,
+    noticeOpen,
     available,
     busy,
     initialize,
     check,
     setAutoCheck,
+    closeNotice,
+    ignoreNotice,
     download,
     cancel,
     requestInstall,

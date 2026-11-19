@@ -95,13 +95,11 @@ try {
   safe = true;
   await page.getByRole('button', { name: '本地终端', exact: true }).click();
   const terminal = page.locator('.terminal-pane:visible');
+  const sessions = page.locator('#local-terminal-session-list .terminal-tab');
   await terminal.locator('.xterm-container[data-state="connected"]').waitFor();
-  assert.deepEqual(
-    (await page.locator('.workspace-tabs [role="tab"]').allTextContents()).map((text) =>
-      text.trim(),
-    ),
-    ['本地终端'],
-  );
+  assert.equal(await sessions.count(), 1);
+  const sessionKey = await sessions.getAttribute('data-session-key');
+  assert(sessionKey);
   assert.equal(await page.locator('.module-navigation, .workspace-group-tab').count(), 0);
   const command = async (text, marker) => {
     await terminal.locator('.xterm-helper-textarea').focus();
@@ -114,31 +112,33 @@ try {
     'SD_LAYOUT_52',
   );
   await navigateWorkspace(page, '插件管理');
-  assert.equal(await page.locator('.workspace-tab').count(), 1);
-  assert(await page.locator('.host-tree-section').isVisible());
+  assert(await page.getByRole('navigation', { name: '设置分类', exact: true }).isVisible());
   await navigateWorkspace(page, '通用');
   const settings = page.locator('.settings-page:visible');
   const theme = settings.getByTestId('theme-select');
   const originalTheme = await theme.inputValue();
   const nextTheme = originalTheme === 'dark' ? 'light' : 'dark';
   await theme.selectOption(nextTheme);
+  await settings.getByText('更改会自动保存到此设备。', { exact: true }).waitFor();
+  assert.equal((await bootstrap()).config.theme, nextTheme);
+  assert.equal(await page.locator('.toast[role="status"]').count(), 0);
   await navigateWorkspace(page, '关于');
   await navigateWorkspace(page, '模型');
   await navigateWorkspace(page, '通用');
   assert.equal(await theme.inputValue(), nextTheme);
-  assert.equal(await page.locator('.workspace-tab.active').getAttribute('data-view'), 'terminals');
-  assert.equal(await page.locator('.workspace-tab').count(), 1);
-  await settings
-    .locator(':scope > .modal-heading')
-    .getByRole('button', { name: '关闭对话框', exact: true })
-    .click();
+  assert.equal(await sessions.count(), 1);
+  assert.equal(await sessions.getAttribute('data-session-key'), sessionKey);
+  await navigateWorkspace(page, '数据与存储');
+  const directory = settings.getByLabel('数据根目录', { exact: true });
+  const originalDirectory = await directory.inputValue();
+  await directory.fill('');
+  const closing = closeApplicationSettings(page);
   const prompt = page.getByRole('dialog', { name: '设置尚未保存', exact: true });
   await prompt.getByRole('button', { name: '继续编辑', exact: true }).click();
-  assert.equal(await theme.inputValue(), nextTheme);
-  await settings.getByRole('button', { name: '保存设置', exact: true }).click();
-  await page.getByText('设置已保存', { exact: false }).first().waitFor();
-  assert.equal((await bootstrap()).config.theme, nextTheme);
+  assert.equal(await directory.inputValue(), '');
+  await directory.fill(originalDirectory);
   await closeApplicationSettings(page);
+  await closing;
   await command("[Console]::WriteLine(('SD_RETAINED_' + $sdLayoutValue))", 'SD_RETAINED_52');
   await navigateWorkspace(page, '插件管理');
   await closeApplicationSettings(page);
@@ -153,10 +153,15 @@ try {
   await navigateWorkspace(page, '通用');
   await page.screenshot({ path: path.join(artifacts, 'native-settings.png') });
   await closeApplicationSettings(page);
-  await page.locator('.workspace-tab[data-host-id=""] .tab-close').click();
-  await page.getByRole('heading', { name: '欢迎使用 ServerDeck', exact: true }).waitFor();
+  await sessions.locator('.terminal-session-close').click();
+  await terminal.waitFor({ state: 'detached' });
+  await page
+    .getByRole('navigation', { name: '应用导航', exact: true })
+    .getByRole('button', { name: '首页', exact: true })
+    .click();
+  await page.getByRole('region', { name: '欢迎页面', exact: true }).waitFor();
   assert.equal(await page.locator('.terminal-pane').count(), 0);
-  results.push('closing the local workspace releases its real PTY and restores welcome');
+  results.push('closing the local terminal releases its real PTY and allows return to welcome');
   await writeFile(
     path.join(artifacts, 'results.json'),
     JSON.stringify({ artifacts, results, passed: true }, null, 2),

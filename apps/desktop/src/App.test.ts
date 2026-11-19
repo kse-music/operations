@@ -2333,33 +2333,55 @@ it('lets the user dismiss exit review and disables its controls during confirmed
   await nextTick();
 });
 
-it('routes a ready update through exit review and cancellation preserves running sessions', async () => {
+it('opens an automatic update notice, downloads on request and reuses exit review', async () => {
+  loadSidebarConfig();
   const updates = useUpdatesStore();
-  updates.state = {
+  const found = {
     supported: true,
-    phase: 'ready',
+    phase: 'available',
     release: { version: '1.0.0', notes: '修复连接' },
-    downloadedBytes: 100,
-    totalBytes: 100,
+    downloadedBytes: 0,
+    totalBytes: null,
     error: null,
+    showNotice: true,
     preferences: { version: 1, autoCheck: true, lastAttemptAt: null, lastCheckedAt: null },
   } satisfies UpdateStatus;
+  vi.spyOn(updatesApi, 'check').mockResolvedValue(found);
+  const download = vi.spyOn(updatesApi, 'download').mockResolvedValue({
+    ...found,
+    phase: 'ready',
+    downloadedBytes: 100,
+    totalBytes: 100,
+    showNotice: false,
+  });
   const install = vi.spyOn(updatesApi, 'install').mockResolvedValue();
   const exit = vi.spyOn(filesApi, 'exit');
   const tabs = useTerminalsStore().tabs.map((tab) => tab.key);
-  updates.requestInstall();
+  await updates.check(true);
+  await nextTick();
+  const notice = () => document.querySelector<HTMLDialogElement>('dialog[aria-label="发现新版本"]');
+  expect(notice()?.textContent).toContain('新版本 v1.0.0');
+  expect(notice()?.querySelector('.update-notes')?.textContent).toContain('修复连接');
+  expect(root.querySelector('.sidebar-app-actions .update-badge')).toBeNull();
+  expect(download).not.toHaveBeenCalled();
+  notice()!.querySelector<HTMLButtonElement>('button.primary')!.click();
+  await vi.waitFor(() => expect(notice()?.textContent).toContain('更新包已验证，可以安装。'));
+  expect(download).toHaveBeenCalledOnce();
+  notice()!.querySelector<HTMLButtonElement>('button.primary')!.click();
   await nextTick();
   const dialog = document.querySelector<HTMLDialogElement>(
     'dialog[aria-label="确认安装更新并重启"]',
   )!;
   expect(dialog).not.toBeNull();
+  expect(notice()).toBeNull();
   expect(install).not.toHaveBeenCalled();
   dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
   await nextTick();
   expect(updates.installRequested).toBe(false);
   expect(useTerminalsStore().tabs.map((tab) => tab.key)).toEqual(tabs);
   expect(exit).not.toHaveBeenCalled();
-  updates.requestInstall();
+  expect(notice()).not.toBeNull();
+  notice()!.querySelector<HTMLButtonElement>('button.primary')!.click();
   await nextTick();
   document
     .querySelector<HTMLButtonElement>('dialog[aria-label="确认安装更新并重启"] button.danger')!

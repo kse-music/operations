@@ -39,6 +39,7 @@ import {
 import HostDialog from './components/HostDialog.vue';
 import ImportDialog from './components/ImportDialog.vue';
 import Modal from './components/Modal.vue';
+import UpdateNotice from './components/UpdateNotice.vue';
 import FileOpenDialogs from './components/FileOpenDialogs.vue';
 import { useHostsStore } from './stores/hosts';
 import { hostDisplayName, type Host } from './types/hosts';
@@ -671,10 +672,6 @@ watch(
   { immediate: true },
 );
 watch(
-  () => application.notice,
-  (v) => notifications.push(v),
-);
-watch(
   () => store.notice,
   (v) => notifications.push(v),
 );
@@ -691,10 +688,9 @@ watch(
     <AppNavigation
       :area="workspace.area"
       :disabled="workspace.navigationBlocked"
-      :update-available="updates.available"
       @home="workspace.showHome()"
       @local="navigate('terminals', '')"
-      @settings="updates.available ? workspace.navigate('about') : workspace.showSettings()"
+      @settings="workspace.showSettings()"
     />
     <aside id="host-sidebar" ref="sidebarElement" class="sidebar" :aria-label="tr('侧栏菜单')">
       <SidebarToggle
@@ -972,6 +968,11 @@ watch(
     @plugin="openPlugin"
   />
   <FileOpenDialogs />
+  <UpdateNotice
+    v-if="updates.noticeOpen && updates.state?.release && application.state && !files.exitReview"
+    :current-version="application.state.appVersion"
+    :release="updates.state.release"
+  />
   <Modal
     v-if="files.exitReview"
     :title="updates.installRequested ? tr('确认安装更新并重启') : tr('确认退出 ServerDeck')"

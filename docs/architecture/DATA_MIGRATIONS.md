@@ -10,6 +10,7 @@
 | `application_settings.local_terminal_directory`       | 1        | 不再作为当前终端启动来源                 | 旧自动目录记录原样保留，不转为用户手动保存的会话                                 |
 | `application_settings.local_terminal_sessions`        | 3        | 1–2，v1 窗格无命令，旧名称按既有名称保留 | 按需备份升级，保留布局、目录、提权模式、名称及已有命令密文                       |
 | `application_settings.software_updates`               | 1        | 无历史版本；缺少记录时采用固定 v1 默认值 | 自动检查开关及尝试/成功时间独立保存；损坏或未来版本报错，不重置、不阻断主业务    |
+| `application_settings.software_update_notice`         | 1        | 无历史版本；缺少记录时没有忽略版本       | 只记录已忽略的版本号，损坏或未来版本按需拒绝读取和覆盖                           |
 | `application_settings.sftp_last_directory:<HostId>`   | 1        | 无历史版本；缺少记录时使用 SFTP 默认目录 | 保存最近的规范远程绝对路径；损坏或未来版本拒绝读取或覆盖，删除主机时移除对应记录 |
 | `application_settings.sftp_bookmarks:<HostId>`        | 1        | 无历史版本；缺少记录时列表为空           | 保存命名远程目录；损坏或未来版本拒绝读取或覆盖，删除主机时移除对应记录           |
 | `application_settings.ssh_terminal_sessions:<HostId>` | 2        | 1，旧名称按既有名称保留                  | 按主机首次写入时备份升级，原快照引用完整保留，无需读取凭据库内容                 |

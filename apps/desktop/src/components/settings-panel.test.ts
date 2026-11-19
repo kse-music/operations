@@ -3,6 +3,7 @@ import { createApp, h, nextTick, ref, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import SettingsPanel from './SettingsPanel.vue';
 import { useApplicationStore } from '../stores/application';
+import { useNotificationsStore } from '../stores/notifications';
 import { useWorkspaceStore } from '../stores/workspace';
 import * as ipc from '../services/ipc';
 import { filesApi } from '../services/files';
@@ -120,6 +121,7 @@ it('automatically saves language, restores it on reopen and automatically restor
     expect.objectContaining({ product: expect.objectContaining({ language: 'en-US' }) }),
   );
   expect(document.documentElement.lang).toBe('en-US');
+  expect(useNotificationsStore().items).toHaveLength(0);
   app.unmount();
   app = createApp(SettingsPanel).use(pinia);
   app.mount(root);
@@ -141,6 +143,9 @@ it('retains a failed automatic edit and saved language, then allows retry withou
   expect(useApplicationStore().state!.config.product.language).toBe('zh-CN');
   expect(root.querySelector<HTMLSelectElement>('[aria-label="界面语言"]')!.value).toBe('en-US');
   expect(root.querySelector('[role="status"]')?.textContent).toContain('自动保存失败');
+  expect(useNotificationsStore().items).toEqual([
+    expect.objectContaining({ text: 'disk failure', error: true }),
+  ]);
   expect(root.querySelector('[type="submit"]')).toBeNull();
   [...root.querySelectorAll<HTMLButtonElement>('button')]
     .find((button) => button.textContent?.trim() === '重试')!
@@ -745,7 +750,6 @@ it('keeps migration visible and locked after restart is scheduled until the proc
   const application = useApplicationStore();
   const warning = '数据迁移未完成：目标目录必须为空。';
   application.state!.storage!.notice = warning;
-  application.notice = warning;
   await reviewMigration();
   await vi.waitFor(() => expect(document.querySelector('dialog')).not.toBeNull());
   const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
@@ -759,14 +763,18 @@ it('keeps migration visible and locked after restart is scheduled until the proc
   await nextTick();
   expect(dialog.querySelector('[role="status"]')?.textContent).toContain('正在保存设置');
   expect(discard.disabled).toBe(true);
-  expect(application.notice).toBeNull();
+  expect(useNotificationsStore().items).toHaveLength(0);
   expect(root.querySelector('#settings-panel-storage')?.textContent).not.toContain(warning);
 
   scheduleRestart(true);
-  await vi.waitFor(() => expect(application.notice).toContain('正在安全结束任务并重启'));
+  await vi.waitFor(() =>
+    expect(dialog.querySelector('[role="status"]')?.textContent).toContain(
+      '请等待应用自动重新打开',
+    ),
+  );
   expect(document.querySelector('dialog')).toBe(dialog);
   expect(dialog.open).toBe(true);
-  expect(dialog.querySelector('[role="status"]')?.textContent).toContain('请等待应用自动重新打开');
+  expect(useNotificationsStore().items).toHaveLength(0);
   expect(dialog.textContent).toContain('窗口关闭不代表迁移完成');
   expect(application.saving).toBe(true);
   expect([...dialog.querySelectorAll<HTMLButtonElement>('button')].every((b) => b.disabled)).toBe(
@@ -847,7 +855,10 @@ it('applies saved preferences immediately when a path alias requires no restart'
     .find((b) => b.textContent?.trim() === '确认迁移并重启')!
     .click();
   await vi.waitFor(() => expect(useApplicationStore().state!.config.theme).toBe('light'));
-  expect(useApplicationStore().notice).toContain('无需重启');
+  expect(root.querySelector('#settings-panel-storage [role="status"]')?.textContent).toContain(
+    '数据目录未变化，无需重启',
+  );
+  expect(useNotificationsStore().items).toHaveLength(0);
   expect(document.querySelector('dialog')).toBeNull();
   expect(useApplicationStore().saving).toBe(false);
   expect(await useWorkspaceStore().settingsCloseGuard!()).toBe(true);

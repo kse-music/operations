@@ -38,7 +38,6 @@ async function restoreBundled(id: string) {
     plugins.clearPlugin(id);
     resetFilters();
     choosingBundled.value = false;
-    notifications.push(tr('已恢复内置插件，请检查配置后启用。'));
   }
 }
 async function reinstall() {
@@ -49,7 +48,6 @@ async function reinstall() {
   ) {
     plugins.clearPlugin(problem.id);
     recovering.value = null;
-    notifications.push(tr('已备份原安装记录并重新安装，插件保持禁用；请检查配置后启用。'));
   }
 }
 const existing = computed(() =>

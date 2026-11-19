@@ -27,7 +27,7 @@ import {
 const application = useApplicationStore();
 const workspace = useWorkspaceStore();
 const migration = useStorageMigration();
-const { target, preview, discardDocuments, busy, restarting, changed } = migration;
+const { target, preview, discardDocuments, busy, restarting, sameDirectory, changed } = migration;
 const displayedTarget = computed({
   get: () => displayLocalPath(target.value),
   set: (value: string) => {
@@ -475,6 +475,9 @@ function restoreDefaults(): void {
                   ' 选择空的专用目录。确认后将关闭窗口，在重启期间迁移并校验数据；新目录启动成功后清理旧副本。系统凭据和已下载文件保留原位置。 ',
                 )
               }}
+            </p>
+            <p v-if="sameDirectory && !changed && !busy" class="subtle full-width" role="status">
+              {{ tr('数据目录未变化，无需重启。') }}
             </p>
             <p
               v-if="application.state.storage.notice && !changed && !busy"

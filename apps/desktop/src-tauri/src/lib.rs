@@ -190,6 +190,7 @@ pub fn command_handler<R: tauri::Runtime>()
         update_commands::app_update_status,
         update_commands::app_update_check,
         update_commands::app_update_auto_check,
+        update_commands::app_update_ignore_notice,
         update_commands::app_update_download,
         update_commands::app_update_cancel,
         update_commands::app_update_install,
