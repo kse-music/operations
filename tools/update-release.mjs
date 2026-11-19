@@ -39,7 +39,7 @@ export function prepareReleaseNotes({ version, sha, repo, notes = '' }, run = ex
   return notes;
 }
 
-export function releaseAssets({ version, cwd = repository }) {
+export function releaseAssets({ version, includeMacos = true, cwd = repository }) {
   releaseTag(version);
   const bundle = path.join(cwd, 'target/release/bundle');
   const installer = path.join(bundle, 'nsis', `ServerDeck_${version}_x64-setup.exe`);
@@ -50,11 +50,13 @@ export function releaseAssets({ version, cwd = repository }) {
     path.join(bundle, 'deb', `ServerDeck_${version}_amd64.deb`),
     path.join(bundle, 'appimage', `ServerDeck_${version}_amd64.AppImage`),
   ];
-  for (const arch of ['x64', 'aarch64']) {
-    assets.push(
-      path.join(bundle, `macos-${arch}`, `ServerDeck_${version}_${arch}.dmg`),
-      path.join(bundle, `macos-${arch}`, `ServerDeck_${version}_${arch}.app.zip`),
-    );
+  if (includeMacos) {
+    for (const arch of ['x64', 'aarch64']) {
+      assets.push(
+        path.join(bundle, `macos-${arch}`, `ServerDeck_${version}_${arch}.dmg`),
+        path.join(bundle, `macos-${arch}`, `ServerDeck_${version}_${arch}.app.zip`),
+      );
+    }
   }
   for (const file of assets) {
     const info = lstatSync(file);
@@ -127,7 +129,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     writeFileSync(path.join(directory, 'notes.txt'), notes);
     appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\ntag=${releaseTag(version)}\n`);
   } else if (command === '--artifacts') {
-    console.log(JSON.stringify(releaseAssets({ version })));
+    const buildMacos = process.env.BUILD_MACOS ?? 'true';
+    assert(['true', 'false'].includes(buildMacos), 'BUILD_MACOS must be true or false');
+    console.log(JSON.stringify(releaseAssets({ version, includeMacos: buildMacos === 'true' })));
   } else {
     const result = ensureReleaseTag({ version, sha });
     console.log(`${result.created ? 'Created' : 'Reused'} ${result.tag} at ${sha}`);

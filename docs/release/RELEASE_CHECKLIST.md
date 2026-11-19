@@ -23,7 +23,7 @@
 
 只修改根 [Cargo.toml](../../Cargo.toml) 的工作区版本，桌面 dev/build 自动检查来源并同步工作区锁记录，提交配套 `Cargo.lock`。SDK、插件及持久格式独立管理，具体准备见[构建指南](../guides/DEVELOPMENT.md#应用版本与构建)。关于页时间是本次前端构建时间，不等同于正式 Release 发布时刻。
 
-同一提交应先通过 [Candidate builds (unsigned, no publish)](../../.github/workflows/release.yml) 的源码检查和平台测试，再按 [Windows, Linux and macOS release draft](../../.github/workflows/update-release.yml) 生成包含 Windows updater 产物、Linux deb/AppImage 和 macOS Intel/Apple Silicon DMG、应用 ZIP 的完整草稿。候选流程默认上传内置插件包，按需勾选 `Build and upload unsigned installers` 生成无签名安装包。发布前验收草稿中实际待分发的安装包，核对附件齐全及发布说明一致，分别完成各平台原生验收，另行验证 macOS 开发者签名、公证及 Gatekeeper 行为。发布顺序、密钥与 Authenticode 签名后重签规则见[更新分发](UPDATES.md#发布流程)。
+同一提交应先通过 [Candidate builds (unsigned, no publish)](../../.github/workflows/release.yml) 的源码检查和平台测试，再按 [Windows, Linux and macOS release draft](../../.github/workflows/update-release.yml) 生成发布草稿。候选流程默认上传内置插件包，按需勾选 `Build and upload unsigned installers` 生成无签名安装包。发布草稿默认包含 Windows updater 产物和 Linux deb/AppImage，勾选 `Build macOS installers (Intel and Apple Silicon)` 时加入两种 Mac 架构的 DMG 和应用 ZIP。发布前核对草稿附件符合本次分发计划、发布说明一致并完成各平台原生验收。分发 macOS 时另行验证开发者签名、公证及 Gatekeeper 行为。发布顺序、密钥与 Authenticode 签名后重签规则见[更新分发](UPDATES.md#发布流程)。
 
 ## 构建和产物
 

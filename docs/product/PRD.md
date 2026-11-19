@@ -17,7 +17,7 @@ ServerDeck 面向个人开发者、DevOps 和小型团队，是通过 SSH/SFTP �
 
 Windows x64 是首要发布验收平台。macOS、Linux 和其他架构须分别完成原生验收；构建配置和单项测试不构成完整平台支持承诺。界面支持简体中文和 English。应用版本以根 [Cargo.toml](../../Cargo.toml) 的工作区版本为准；SDK、插件包和持久格式独立管理版本。
 
-发布流程为同一版本构建 Windows x64 安装包、Linux x86_64 的 deb/AppImage，以及 macOS Intel、Apple Silicon（M 系列）的 DMG 和应用 ZIP，收集完整附件后上传到同一个 Release 草稿，经过验收再手动公开。Linux、macOS 使用手动下载安装升级，应用内自动更新仍仅面向 Windows x64 正式 NSIS 安装版。macOS 尚未接入 Apple 开发者证书签名和公证，打包与上传成功不代表已通过系统信任或安装运行验收。
+发布流程默认构建同一版本的 Windows x64 安装包和 Linux x86_64 的 deb/AppImage。手动触发时可勾选 macOS 打包，同时构建 Intel 和 Apple Silicon（M 系列）的 DMG 和应用 ZIP。所选平台的附件齐全后上传到同一个 Release 草稿，经过验收再手动公开。Linux、macOS 使用手动下载安装升级，应用内自动更新仍仅面向 Windows x64 正式 NSIS 安装版。macOS 尚未接入 Apple 开发者证书签名和公证，打包与上传成功不代表已通过系统信任或安装运行验收。
 
 当前不提供云同步、团队权限、插件在线下载安装、独立监控/系统服务页面、集中式时序或日志平台。官网的插件市场为静态展示页，支持搜索、分类与排序，下载统一提示“建设中”，不向客户端安装插件。宿主内部的监控、运维和执行能力不代表存在相应产品入口或插件领域 API。
 

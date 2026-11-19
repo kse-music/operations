@@ -1,16 +1,19 @@
 # 软件更新分发
 
-ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github.com/kse-music/operations/releases) 分发 Windows x64 安装版、Linux x86_64 的 deb/AppImage，以及 macOS Intel、Apple Silicon（M 系列）的 DMG 和应用 ZIP。应用内更新仅面向 Windows，Linux、macOS 包供手动下载安装升级。客户端行为见[使用说明](https://ops.hiboot.cn/docs/installation.html)，运行期与信任边界见[架构](../architecture/ARCHITECTURE.md#软件更新)。无需独立更新业务服务器。安装包不提交进 Git，也不使用有保留期限的 Actions Artifact 作为用户下载源。
+ServerDeck 使用公开仓库 [kse-music/operations 的 Releases](https://github.com/kse-music/operations/releases) 分发 Windows x64 安装版和 Linux x86_64 的 deb/AppImage，按版本选发 macOS Intel、Apple Silicon（M 系列）的 DMG 和应用 ZIP。应用内更新仅面向 Windows，Linux、macOS 包供手动下载安装升级。客户端行为见[使用说明](https://ops.hiboot.cn/docs/installation.html)，运行期与信任边界见[架构](../architecture/ARCHITECTURE.md#软件更新)。无需独立更新业务服务器。安装包不提交进 Git，也不使用有保留期限的 Actions Artifact 作为用户下载源。
 
 ## 发布文件
 
-每个正式 Release 同时包含：
+每个正式 Release 包含以下 Windows 和 Linux 附件。
 
 - `ServerDeck_<版本>_x64-setup.exe`：NSIS 当前用户安装包，保留 `cn.hiboot.desktop` 身份及现有数据。
 - 同名 `.exe.sig`：官方 Tauri CLI 生成的安装包签名，可信注释必须绑定当前应用版本。
 - `latest.json`：由 `tools/update-manifest.mjs` 生成，包含工作区版本、更新说明、发布时间、精确版本的下载 URL 与完整签名内容。
 - `ServerDeck_<版本>_amd64.deb`：Linux x86_64 Debian 安装包。
 - `ServerDeck_<版本>_amd64.AppImage`：Linux x86_64 AppImage。
+
+勾选 macOS 打包时同时加入以下两种架构的附件。
+
 - `ServerDeck_<版本>_x64.dmg`、`ServerDeck_<版本>_x64.app.zip`：Intel Mac 磁盘映像与应用归档。
 - `ServerDeck_<版本>_aarch64.dmg`、`ServerDeck_<版本>_aarch64.app.zip`：Apple Silicon Mac 磁盘映像与应用归档。
 
@@ -31,10 +34,10 @@ Windows 安装包在文件替换后通过 NSIS 安装完成钩子通知系统刷
 ## 发布流程
 
 1. 只修改根 `Cargo.toml` 的工作区版本，运行既有准备入口并提交配套锁文件，将准备发布的完整代码推送到 `main`。无需手动创建或推送标签。GitHub 的 `release` Environment 允许 `main` 分支部署。
-2. 在 Actions 中手动运行 **Windows, Linux and macOS release draft**（`.github/workflows/update-release.yml`），分支选择 `main`。更新说明可留空，由 GitHub 根据本次版本标签和固定提交 SHA 自动生成，上一版本由 GitHub 自动选择；填写时使用原样的自定义说明。自动内容通常包含合并的 PR、贡献者和完整变更链接，不会自动改写成中文产品摘要；主要直接提交代码、较少使用 PR 时，说明可能只有变更链接，发布前须复核。生成失败、内容为空或超过客户端的 64 KiB 限制时停止，不静默替换或截断。推送代码不会自动触发发布。
-3. Windows、Linux 和两个 macOS 架构任务分别检出同一提交，安装工具链、系统及 npm 依赖，通过 `cargo fetch --locked --target <目标三元组>` 和 `node tools/build-system-plugins.mjs --fetch-only` 联网准备工作区与生产插件依赖。Windows 使用 `release` Environment 的既有密钥构建 NSIS 签名安装包和更新清单，并暂存同一份说明；Linux 在 Ubuntu 22.04 上构建 x86_64 deb、AppImage；macOS Intel 使用 `macos-15-intel`、Apple Silicon 使用 `macos-15`，分别构建对应目标的 DMG、`.app`，校验可执行文件架构并归档应用。Linux、macOS 显式关闭 updater artifacts，不读取 Windows 签名密钥。各目标构建包含生产 WASM 插件的离线编译、前端类型检查及打包。
-4. 全部构建成功后，汇总任务下载本次运行的中间产物，确认当前版本的九项发布附件为非空文件，并检查 Windows 更新清单与版本、签名和说明一致；随后通过 `tools/update-release.mjs` 为固定提交自动创建 `v<版本>` 标签，再一起上传到同一个 **Release 草稿**。草稿正文与 `latest.json` 使用同一份说明，说明文件自身不作为附件上传。已有标签只有指向同一提交时才允许复用，包括已存在的附注标签；指向其他提交时明确失败，须提高工作区版本，不能移动或强制覆盖标签。已公开的 Release 不允许覆盖。同一提交的草稿运行失败后，重跑完整流程，同步更新说明并替换尚未发布的文件。任一构建或附件校验失败不创建标签；标签创建后若草稿上传失败，标签保留用于同一提交重试。若验收时需要修改说明，应以自定义说明重跑同一提交，使草稿与清单一致。
-5. 依据[发布检查表](RELEASE_CHECKLIST.md)分别验收 Windows、Linux 和两种架构的 macOS 候选安装包，落实 Windows 发布者签名及 Apple 开发者签名、公证，核对安装包、公钥、签名版本、平台及清单内容。更新签名与平台发布者签名分别管理；现有流程不自动提供 Windows 发布者证书或 Apple 开发者证书。
+2. 在 Actions 中手动运行 **Windows, Linux and macOS release draft**（`.github/workflows/update-release.yml`），分支选择 `main`。默认构建 Windows 和 Linux。需要 macOS 包时勾选 **Build macOS installers (Intel and Apple Silicon)**。更新说明可留空，由 GitHub 根据本次版本标签和固定提交 SHA 自动生成，上一版本由 GitHub 自动选择；填写时使用原样的自定义说明。自动内容通常包含合并的 PR、贡献者和完整变更链接，不会自动改写成中文产品摘要；主要直接提交代码、较少使用 PR 时，说明可能只有变更链接，发布前须复核。生成失败、内容为空或超过客户端的 64 KiB 限制时停止，不静默替换或截断。推送代码不会自动触发发布。
+3. 启用的打包任务分别检出同一提交，安装工具链、系统及 npm 依赖，通过 `cargo fetch --locked --target <目标三元组>` 和 `node tools/build-system-plugins.mjs --fetch-only` 联网准备工作区与生产插件依赖。Windows 使用 `release` Environment 的既有密钥构建 NSIS 签名安装包和更新清单，并暂存同一份说明。Linux 在 Ubuntu 22.04 上构建 x86_64 deb、AppImage。勾选 macOS 时，Intel 使用 `macos-15-intel`，Apple Silicon 使用 `macos-15`，分别构建对应目标的 DMG、`.app`，校验可执行文件架构并归档应用。Linux、macOS 显式关闭 updater artifacts，不读取 Windows 签名密钥。各目标构建包含生产 WASM 插件的离线编译、前端类型检查及打包。
+4. 所选构建全部成功后，汇总任务下载、校验本次运行所需的非空附件。Windows 和 Linux 共五项，启用 macOS 时追加两种架构的四项附件。汇总还检查 Windows 更新清单与版本、签名和说明一致，随后通过 `tools/update-release.mjs` 为固定提交创建或复用 `v<版本>` 标签，再一起上传到同一个 **Release 草稿**。草稿正文与 `latest.json` 使用同一份说明，说明文件自身不作为附件上传。已有标签只有指向同一提交时才允许复用，包括已存在的附注标签；指向其他提交时明确失败，须提高工作区版本，不能移动或强制覆盖标签。已公开的 Release 不允许覆盖。需要为现有草稿补充 macOS 包时，从同一提交重新触发并勾选 macOS。通过工作流更新草稿时，仅替换本次上传的同名附件，已有其他附件保留。所选构建或附件校验失败不创建标签；标签创建后若草稿上传失败，标签保留用于同一提交重试。若验收时需要修改说明，应以自定义说明重跑同一提交，使草稿与清单一致。
+5. 依据[发布检查表](RELEASE_CHECKLIST.md)验收草稿中各平台、架构的候选安装包，核对安装包、公钥、签名版本、平台及清单内容。落实 Windows 发布者签名，分发 macOS 时另行完成 Apple 开发者签名和公证。更新签名与平台发布者签名分别管理；现有流程不自动提供 Windows 发布者证书或 Apple 开发者证书。
 6. 确认文件完整且验收满足后，手动将草稿正式发布并设为 Latest。草稿与预发布版本不作为正式更新渠道。所有附件应在对用户可见前上传完成，不能先公开清单再补包。
 
 发布流程复用 npm 下载缓存，并按运行平台、架构、Rust 版本及 Cargo 配置/锁文件隔离 Rust 下载和编译缓存：Windows 复用根 `target/release` 的编译依赖，Linux 和 macOS 复用根 `target/<目标三元组>/release` 的编译依赖，各任务缓存自身现有生产插件 `.local/plugin-build/assistant`、`.local/plugin-build/docker` 编译目录。macOS 缓存键同时包含 runner 和目标架构，两个架构的中间 Artifact 独立命名，汇总后使用带架构后缀的文件名。生产插件的预取不限制 `--target`，按各自锁文件下载完整依赖，覆盖离线解析可能读取的其他目标依赖清单；实际编译仍限定 `wasm32-unknown-unknown`。缓存不包含签名密钥、应用数据、测试目录或安装包；首次运行或缓存失效时仍须完整编译，命中缓存时也保留锁定依赖准备与编译校验，不通过去掉 `--offline` 或 `--locked` 绕过依赖准备。供汇总任务使用的 Actions Artifact 保留 14 天，仅用于任务间交付，不是用户下载渠道。

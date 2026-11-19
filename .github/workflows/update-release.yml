@@ -6,6 +6,10 @@ on:
         description: Release notes (optional; leave blank to generate automatically)
         required: false
         type: string
+      build_macos:
+        description: Build macOS installers (Intel and Apple Silicon)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -144,7 +148,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   macos-packages:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.build_macos
     strategy:
       fail-fast: false
       matrix:
@@ -222,6 +226,11 @@ jobs:
           retention-days: 14
   publish-draft:
     needs: [windows-update, linux-packages, macos-packages]
+    if: >-
+      ${{ !cancelled()
+        && needs.windows-update.result == 'success'
+        && needs.linux-packages.result == 'success'
+        && (!inputs.build_macos || needs.macos-packages.result == 'success') }}
     runs-on: windows-latest
     timeout-minutes: 15
     environment: release
@@ -252,19 +261,22 @@ jobs:
           name: release-linux
           path: target/release/bundle
       - name: Download Intel macOS artifacts
+        if: inputs.build_macos
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-macos-x64
           path: target/release/bundle/macos-x64
       - name: Download Apple Silicon macOS artifacts
+        if: inputs.build_macos
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-macos-aarch64
           path: target/release/bundle/macos-aarch64
-      - name: Verify all artifacts, create version tag and upload complete draft
+      - name: Verify required artifacts, create version tag and upload draft
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.windows-update.outputs.tag }}
+          BUILD_MACOS: ${{ inputs.build_macos }}
         run: |
           $assetsJson = node tools/update-release.mjs --artifacts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

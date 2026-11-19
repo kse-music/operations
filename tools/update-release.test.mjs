@@ -154,8 +154,20 @@ async function builtRelease(t) {
 test('collects Windows, Linux and both macOS architectures without uploading notes or stale files', async (t) => {
   const { cwd, version, files } = await builtRelease(t);
   await writeFile(path.join(cwd, 'target/release/bundle/deb/ServerDeck_0.9.2_amd64.deb'), 'stale');
-  assert.deepEqual(releaseAssets({ version, cwd }), files);
+  assert.deepEqual(releaseAssets({ version, cwd, includeMacos: true }), files);
   assert.equal(new Set(files.map((file) => path.basename(file))).size, 9);
+});
+
+test('collects only Windows and Linux when macOS is disabled, even if macOS files are present', async (t) => {
+  const { cwd, version, files } = await builtRelease(t);
+  const options = { version, cwd, includeMacos: false };
+  assert.deepEqual(releaseAssets(options), files.slice(0, 5));
+  for (const file of files.slice(5)) {
+    await rm(file);
+  }
+  assert.deepEqual(releaseAssets(options), files.slice(0, 5));
+  await rm(files[4]);
+  assert.throws(() => releaseAssets(options), { code: 'ENOENT', path: files[4] });
 });
 
 for (const [index, name] of [
