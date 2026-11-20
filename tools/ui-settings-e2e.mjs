@@ -82,18 +82,27 @@ try {
       (await page.locator('.settings-navigation .nav-item').allTextContents()).map((text) =>
         text.trim(),
       ),
-      [...categories, '模型', '插件', '关于'],
+      [...categories, '标签', '模型', '插件', '关于'],
     );
     for (let index = 0; index < categories.length; index++) {
       await select(index);
       assert.equal(await settings.locator('.settings-category:visible').count(), 1);
       assert.equal(await activeMenu().getAttribute('aria-label'), categories[index]);
       assert.equal(await settings.locator('h1').textContent(), categories[index]);
-      const restore = settings.getByRole('button', { name: '恢复默认', exact: true });
+      const heading = settings.locator('.section-heading');
+      const restore = heading.getByRole('button', { name: '恢复默认', exact: true });
       const save = settings.getByRole('button', { name: '保存设置', exact: true });
       assert(await restore.isVisible(), `${name}: restore defaults is missing`);
+      const headingBox = await heading.boundingBox();
+      const restoreBox = await restore.boundingBox();
+      assert(
+        Math.abs(restoreBox.x + restoreBox.width - headingBox.x - headingBox.width) <= 1 &&
+          Math.abs(restoreBox.y - headingBox.y) <= 1,
+        `${name}: ${categories[index]} must place restore defaults at the top right`,
+      );
       assert.equal(await save.count(), 0, `${name}: ${categories[index]} must save automatically`);
-      assert(await settings.getByRole('status').isVisible());
+      assert.equal(await settings.getByText('仅保存在此设备', { exact: true }).count(), 0);
+      assert.equal(await settings.locator('.form-footer').count(), 0);
       assert.equal(
         await settings.getByRole('button', { name: '迁移并重启', exact: true }).count(),
         0,

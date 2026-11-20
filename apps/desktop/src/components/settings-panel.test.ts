@@ -95,19 +95,20 @@ async function submit() {
 }
 
 async function restoreDefaults() {
-  const button = root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!;
-  expect(button.textContent?.trim()).toBe('恢复默认');
+  const button = root.querySelector<HTMLButtonElement>('.section-heading button[type="button"]')!;
   button.click();
   await nextTick();
 }
 
-it('removes save buttons from all four automatic categories', async () => {
+it('shows restore defaults in the heading and hides idle save notices in all four categories', async () => {
   for (let index = 0; index < settingsCategories.length; index++) {
     await select(index);
     expect(visiblePanels()).toHaveLength(1);
     expect(root.querySelector('h1')?.textContent).toBe(settingsCategories[index]!.label);
+    expect(root.querySelector('.section-heading button')?.textContent?.trim()).toBe('恢复默认');
+    expect(root.textContent).not.toContain('仅保存在此设备');
     expect(root.querySelector('[type="submit"]')).toBeNull();
-    expect(root.querySelector('.form-footer .primary')).toBeNull();
+    expect(root.querySelector('.form-footer')).toBeNull();
   }
 });
 
@@ -128,7 +129,7 @@ it('automatically saves language, restores it on reopen and automatically restor
   expect(root.querySelector<HTMLSelectElement>('[aria-label="Interface language"]')!.value).toBe(
     'en-US',
   );
-  root.querySelector<HTMLButtonElement>('.form-footer button[type="button"]')!.click();
+  await restoreDefaults();
   await vi.waitFor(() => expect(root.querySelector('h1')?.textContent).toBe('通用'));
   expect(document.documentElement.lang).toBe('zh-CN');
 });

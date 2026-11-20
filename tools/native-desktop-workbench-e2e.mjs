@@ -119,7 +119,7 @@ try {
   const originalTheme = await theme.inputValue();
   const nextTheme = originalTheme === 'dark' ? 'light' : 'dark';
   await theme.selectOption(nextTheme);
-  await settings.getByText('更改会自动保存到此设备。', { exact: true }).waitFor();
+  await settings.locator('.settings-panel .form-footer').waitFor({ state: 'hidden' });
   assert.equal((await bootstrap()).config.theme, nextTheme);
   assert.equal(await page.locator('.toast[role="status"]').count(), 0);
   await navigateWorkspace(page, '关于');

@@ -205,17 +205,23 @@ function restoreDefaults(): void {
 <template>
   <section class="settings-panel page-view" aria-labelledby="settings-title">
     <div class="section-heading">
-      <div>
-        <h1 id="settings-title">{{ categoryLabel }}</h1>
-        <p class="section-description">
-          {{
-            category === 'storage'
-              ? tr('设置修改后自动保存；更改数据根目录需确认迁移并重启。')
-              : tr('设置修改后自动保存，连接参数在新建连接时生效。')
-          }}
-        </p>
-      </div>
-      <span class="subtle">{{ tr('仅保存在此设备') }}</span>
+      <h1 id="settings-title">{{ categoryLabel }}</h1>
+      <button
+        v-if="draft"
+        class="button"
+        type="button"
+        :disabled="reviewing || busy"
+        @click="restoreDefaults"
+      >
+        {{ tr(' 恢复默认 ') }}
+      </button>
+      <p class="section-description">
+        {{
+          category === 'storage'
+            ? tr('设置修改后自动保存；更改数据根目录需确认迁移并重启。')
+            : tr('设置修改后自动保存，连接参数在新建连接时生效。')
+        }}
+      </p>
     </div>
     <form v-if="draft" ref="form" class="settings-form" novalidate @submit.prevent="submit">
       <div v-show="category === 'general'" id="settings-panel-general" class="settings-category">
@@ -514,27 +520,20 @@ function restoreDefaults(): void {
           </div>
         </fieldset>
       </div>
-      <div class="form-footer">
-        <p class="subtle" role="status" aria-live="polite">
+      <div
+        v-if="application.saving || pending || (category === 'storage' && changed)"
+        class="form-footer"
+      >
+        <p v-if="application.saving || pending" class="subtle" role="status" aria-live="polite">
           {{
             application.saving
               ? tr('正在自动保存…')
               : failed && pending
                 ? tr('自动保存失败，修改已保留，请重试。')
-                : pending
-                  ? tr('等待自动保存，请确保填写完整且数值有效。')
-                  : tr('更改会自动保存到此设备。')
+                : tr('等待自动保存，请确保填写完整且数值有效。')
           }}
         </p>
-        <div class="action-row">
-          <button
-            class="button"
-            type="button"
-            :disabled="reviewing || busy"
-            @click="restoreDefaults"
-          >
-            {{ tr(' 恢复默认 ') }}
-          </button>
+        <div v-if="(category === 'storage' && changed) || (failed && pending)" class="action-row">
           <button
             v-if="category === 'storage' && changed"
             class="button primary"

@@ -226,7 +226,7 @@ try {
       .click();
     for (const notice of await page.getByRole('button', { name: '关闭通知', exact: true }).all())
       await notice.click();
-    await settings.getByText('更改会自动保存到此设备。', { exact: true }).waitFor();
+    await settings.locator('.settings-panel .form-footer').waitFor({ state: 'hidden' });
     const saved = (await invoke('app_bootstrap')).config;
     assert.equal(saved.theme, theme);
     assert.equal(saved.interfaceFontSize, size);
