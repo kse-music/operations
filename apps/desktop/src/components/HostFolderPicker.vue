@@ -9,6 +9,7 @@ const props = defineProps<{
   label: string;
   groups: HostGroup[];
   disabled?: boolean;
+  rootLabel?: string;
 }>();
 const value = defineModel<string | null>({ required: true });
 const treeId = useId();
@@ -20,11 +21,13 @@ const trigger = ref<HTMLButtonElement>(),
   position = ref({ left: '0px', top: '0px', width: '0px', maxHeight: '280px' });
 const rows = computed(() => hostFolderRows(props.groups, [], collapsed.value, false, 0));
 const parents = computed(() => new Set(props.groups.map((group) => group.parentId)));
-const currentPath = computed(() => folderPath(props.groups, value.value));
+const displayPath = (id: string | null) =>
+  id === null && props.rootLabel ? props.rootLabel : folderPath(props.groups, id);
+const currentPath = computed(() => displayPath(value.value));
 const isExpanded = (id: string | null) => !collapsed.value.includes(id ?? 'root');
 
 function close(): void {
-  popup.value?.hidePopover();
+  if (open.value) popup.value?.hidePopover();
   open.value = false;
 }
 function revealActive(): void {
@@ -177,12 +180,12 @@ watch(open, (visible, _previous, cleanup) => {
       class="host-folder-option"
       :class="{ active: index === active }"
       role="treeitem"
-      :aria-label="row.name"
+      :aria-label="row.id === null ? (rootLabel ?? row.name) : row.name"
       :aria-level="row.depth + 1"
       :aria-selected="row.id === value"
       :aria-expanded="parents.has(row.id) ? isExpanded(row.id) : undefined"
       :style="{ '--folder-depth': row.depth }"
-      :title="folderPath(groups, row.id)"
+      :title="displayPath(row.id)"
       @pointerdown.prevent
       @pointermove="active = index"
       @click="choose(index)"
@@ -200,7 +203,9 @@ watch(open, (visible, _previous, cleanup) => {
         :size="17"
         aria-hidden="true"
       />
-      <span class="host-folder-name">{{ row.name }}</span>
+      <span class="host-folder-name">{{
+        row.id === null ? (rootLabel ?? row.name) : row.name
+      }}</span>
     </div>
   </div>
 </template>

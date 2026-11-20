@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { ListTodo, Pencil, Plus, Server, Square, Terminal, Trash2 } from '@lucide/vue';
+import { ListTodo, Play, Plus, Server, Square, Terminal, Trash2 } from '@lucide/vue';
 import { tr } from '../i18n/messages';
 import { useBatchCommands } from '../composables/useBatchCommands';
 import { useApplicationStore } from '../stores/application';
 import { filterHosts, useHostsStore } from '../stores/hosts';
-import { folderAncestors, folderPath } from '../services/host-tree';
+import { folderAncestors } from '../services/host-tree';
 import { hostDisplayName } from '../types/hosts';
 import { batchTargetLimit, type BatchCommand, type BatchStatus } from '../types/batch';
 import { defaultTerminalPreferences, terminalThemes } from '../types/preferences';
 import EnvironmentTagBadge from '../components/EnvironmentTagBadge.vue';
+import HostFolderPicker from '../components/HostFolderPicker.vue';
 import Modal from '../components/Modal.vue';
 
 const props = defineProps<{ active: boolean }>();
@@ -19,12 +20,13 @@ const app = useApplicationStore();
 const {
   commands,
   current,
-  selection,
-  selections,
   editor,
+  editorDirty,
   preview,
+  productionCount,
+  result,
   visibleResult,
-  showingTargets,
+  showingResult,
   running,
   dirty,
   loading,
@@ -35,34 +37,32 @@ const {
   statusError,
   load,
   activate,
-  edit,
+  create,
+  resetEditor,
+  showEditor,
+  hasChanges,
+  isRunning,
   save,
   remove,
   prepare,
+  runSaved,
   start,
   stop,
   refreshStatus,
 } = useBatchCommands();
 const deletion = ref<BatchCommand | null>(null);
-const commandControlsDisabled = computed(
-  () =>
-    loading.value ||
-    busy.value ||
-    !!editor.value ||
-    !!preview.value ||
-    Boolean(visibleResult.value && !visibleResult.value.finished),
-);
 const productionConfirmed = ref(false);
 const inspected = ref('');
 const nameField = ref<HTMLInputElement>();
 const reviewHeading = ref<HTMLElement>();
 const groups = computed(() => hosts.catalog?.groups ?? []);
 const environments = computed(() => hosts.catalog?.environmentTags.tags ?? []);
-const directoryOptions = computed(() =>
-  groups.value.map((folder) => ({ id: folder.id, label: folderPath(groups.value, folder.id) })),
+const knownHosts = computed(() =>
+  hosts.catalog ? new Set(hosts.catalog.hosts.map(({ id }) => id)) : null,
 );
+const missingCount = computed(() => editor.value?.hostIds.filter(isMissing).length ?? 0);
 const visibleHosts = computed(() => {
-  const selected = selection.value;
+  const selected = editor.value;
   if (!selected) return [];
   return filterHosts(hosts.catalog?.hosts ?? [], '').filter(
     (host) =>
@@ -71,30 +71,30 @@ const visibleHosts = computed(() => {
   );
 });
 const visibleSelected = computed(
-  () => visibleHosts.value.filter((host) => selection.value?.hostIds.includes(host.id)).length,
+  () => visibleHosts.value.filter((host) => editor.value?.hostIds.includes(host.id)).length,
 );
 const allVisibleSelected = computed(
   () => visibleHosts.value.length !== 0 && visibleSelected.value === visibleHosts.value.length,
 );
-const elsewhere = computed(() => (selection.value?.hostIds.length ?? 0) - visibleSelected.value);
-const exceedsLimit = computed(() => elsewhere.value + visibleHosts.value.length > batchTargetLimit);
+const elsewhere = computed(
+  () => (editor.value?.hostIds.length ?? 0) - visibleSelected.value - missingCount.value,
+);
+const exceedsLimit = computed(
+  () => elsewhere.value + missingCount.value + visibleHosts.value.length > batchTargetLimit,
+);
 const output = computed(
   () =>
     visibleResult.value?.results.find((row) => row.target.id === inspected.value) ??
     visibleResult.value?.results[0],
 );
-const failedToConnect = computed(
-  () =>
-    visibleResult.value?.results
-      .filter((row) => row.status === 'connectionFailed')
-      .map((row) => row.target.id) ?? [],
-);
-const productionCount = computed(
-  () =>
-    preview.value?.targets.filter(({ environment }) =>
-      ['生产', 'production'].includes(environment?.name.toLowerCase() ?? ''),
-    ).length ?? 0,
-);
+const canRetry = computed(() => {
+  const run = visibleResult.value;
+  return (
+    run &&
+    current.value?.revision === run.command.revision &&
+    run.results.some((row) => row.status === 'connectionFailed')
+  );
+});
 const runSummary = computed(() => {
   const rows = visibleResult.value?.results ?? [];
   const count = (status: BatchStatus) => rows.filter((row) => row.status === status).length;
@@ -128,38 +128,59 @@ const validDraft = computed(() => {
   return Boolean(
     draft?.name.trim() &&
     draft.command.trim() &&
+    !missingCount.value &&
     new TextEncoder().encode(draft.command).length <= 8192,
   );
 });
 
 watch(dirty, (value) => emit('dirty', value));
-watch(editor, async (value) => {
-  if (!value || !props.active) return;
-  await nextTick();
-  nameField.value?.focus();
-});
 watch(preview, async (value) => {
   productionConfirmed.value = false;
   if (!value || !props.active) return;
   await nextTick();
   reviewHeading.value?.focus();
 });
-watch(
-  () => hosts.catalog,
-  (catalog) => {
-    if (!catalog) return;
-    const ids = new Set(catalog.hosts.map((host) => host.id));
-    for (const selected of selections.values()) {
-      selected.hostIds = selected.hostIds.filter((id) => ids.has(id));
-      if (!catalog.groups.some((group) => group.id === selected.folder)) selected.folder = '';
-      if (!environments.value.some((tag) => tag.id === selected.environment))
-        selected.environment = '';
-    }
-  },
-);
+watch([() => hosts.catalog, editor], ([catalog, draft]) => {
+  if (!catalog || !draft) return;
+  if (draft.folder && !catalog.groups.some((group) => group.id === draft.folder))
+    draft.folder = null;
+  if (!environments.value.some((tag) => tag.id === draft.environment)) draft.environment = '';
+});
+
+function isMissing(id: string): boolean {
+  return knownHosts.value?.has(id) === false;
+}
+
+function runHint(entry: BatchCommand): string {
+  if (hasChanges(entry.id)) return tr('保存修改后运行');
+  if (!entry.hostIds.length) return tr('请先为命令保存目标主机');
+  if (entry.hostIds.some(isMissing)) return tr('部分目标主机已删除，请修改命令的目标主机');
+  if (running.value) return tr('另有批次正在执行。');
+  return tr('运行 {0}', entry.name);
+}
+
+function runDisabled(entry: BatchCommand): boolean {
+  return (
+    busy.value ||
+    running.value ||
+    hasChanges(entry.id) ||
+    !entry.hostIds.length ||
+    entry.hostIds.some(isMissing)
+  );
+}
+
+async function createCommand(): Promise<void> {
+  create();
+  await nextTick();
+  nameField.value?.focus();
+}
+
+function removeMissing(): void {
+  if (editor.value) editor.value.hostIds = editor.value.hostIds.filter((id) => !isMissing(id));
+}
 
 function setTarget(id: string, checked: boolean): void {
-  const selected = selection.value;
+  const selected = editor.value;
   if (!selected) return;
   if (checked && !selected.hostIds.includes(id) && selected.hostIds.length < batchTargetLimit) {
     selected.hostIds.push(id);
@@ -215,8 +236,8 @@ async function confirmDeletion(): Promise<void> {
           <button
             class="button"
             type="button"
-            :disabled="loading || busy || !!editor || !commands"
-            @click="edit(null)"
+            :disabled="loading || busy || !commands"
+            @click="createCommand"
           >
             <Plus :size="15" aria-hidden="true" />{{ tr('新建') }}
           </button>
@@ -226,43 +247,52 @@ async function confirmDeletion(): Promise<void> {
           {{ tr('暂无已保存的命令') }}
         </p>
         <div class="batch-command-list">
-          <button
+          <div
             v-for="entry in commands"
             :key="entry.id"
-            type="button"
-            class="batch-command-item"
-            :aria-pressed="current?.id === entry.id"
-            :title="entry.name"
-            :disabled="busy || !!editor"
-            @click="activate(entry.id)"
+            class="batch-command-row"
+            :class="{ selected: current?.id === entry.id }"
           >
-            <Terminal :size="16" aria-hidden="true" />
-            <span class="batch-command-label">{{ entry.name }}</span>
-            <code dir="ltr">{{ entry.command.split('\n', 1)[0] }}</code>
-          </button>
-        </div>
-        <div v-if="current" class="batch-library-actions">
-          <button
-            class="button"
-            type="button"
-            :disabled="commandControlsDisabled"
-            @click="edit(current)"
-          >
-            <Pencil :size="15" aria-hidden="true" />{{ tr('编辑命令') }}
-          </button>
-          <button
-            class="icon-button"
-            type="button"
-            :title="tr('删除命令')"
-            :aria-label="tr('删除命令')"
-            :disabled="commandControlsDisabled"
-            @click="
-              deletion = current;
-              actionError = null;
-            "
-          >
-            <Trash2 :size="16" aria-hidden="true" />
-          </button>
+            <button
+              type="button"
+              class="batch-command-item"
+              :aria-pressed="current?.id === entry.id"
+              :title="entry.name"
+              :disabled="busy"
+              @click="activate(entry.id)"
+            >
+              <Terminal :size="16" aria-hidden="true" />
+              <span class="batch-command-label">{{ entry.name }}</span>
+              <span class="batch-command-meta">{{
+                tr('{0} 台目标主机', entry.hostIds.length)
+              }}</span>
+            </button>
+            <div class="batch-command-actions">
+              <button
+                class="icon-button batch-run"
+                type="button"
+                :title="runHint(entry)"
+                :aria-label="tr('运行 {0}', entry.name)"
+                :disabled="runDisabled(entry)"
+                @click="runSaved(entry)"
+              >
+                <Play :size="15" aria-hidden="true" />
+              </button>
+              <button
+                class="icon-button"
+                type="button"
+                :title="tr('删除命令')"
+                :aria-label="tr('删除命令 {0}', entry.name)"
+                :disabled="busy || isRunning(entry.id)"
+                @click="
+                  deletion = entry;
+                  actionError = null;
+                "
+              >
+                <Trash2 :size="15" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         </div>
       </section>
     </Teleport>
@@ -273,7 +303,11 @@ async function confirmDeletion(): Promise<void> {
         >
       </div>
     </div>
-    <div class="content-scroll batch-content" :aria-busy="busy">
+    <div
+      class="content-scroll batch-content"
+      :class="{ 'batch-content-results': !!visibleResult && !preview }"
+      :aria-busy="busy"
+    >
       <div v-if="listError" class="banner batch-alert" role="alert">
         <span>{{ listError }}</span>
         <button class="button" type="button" @click="load">{{ tr('重新加载') }}</button>
@@ -286,49 +320,7 @@ async function confirmDeletion(): Promise<void> {
       </div>
       <p v-if="actionError && !deletion" class="error-text" role="alert">{{ actionError }}</p>
 
-      <form v-if="editor" class="batch-flow batch-edit" @submit.prevent="save">
-        <h2>{{ editor.previous ? tr('编辑命令') : tr('新建命令') }}</h2>
-        <label class="batch-field">
-          <span>{{ tr('命令名称') }}</span>
-          <input ref="nameField" v-model="editor.name" maxlength="128" :disabled="busy" required />
-        </label>
-        <label class="batch-field">
-          <span>{{ tr('SSH 命令') }}</span>
-          <span class="batch-shell batch-shell-editor">
-            <span aria-hidden="true" class="batch-prompt">$</span>
-            <textarea
-              v-model="editor.command"
-              rows="10"
-              dir="ltr"
-              autocapitalize="off"
-              autocomplete="off"
-              spellcheck="false"
-              :disabled="busy"
-              :placeholder="tr('例如 df -h /')"
-              required
-            ></textarea>
-          </span>
-        </label>
-        <p class="muted">{{ tr('命令文本保存在本机，请勿在其中填写密码、密钥或令牌。') }}</p>
-        <div class="dialog-actions">
-          <button
-            class="button"
-            type="button"
-            :disabled="busy"
-            @click="
-              editor = null;
-              actionError = null;
-            "
-          >
-            {{ tr('取消') }}
-          </button>
-          <button class="button primary" type="submit" :disabled="busy || !validDraft">
-            {{ tr('保存命令') }}
-          </button>
-        </div>
-      </form>
-
-      <section v-else-if="preview" class="batch-flow">
+      <section v-if="preview" class="batch-flow">
         <h2 ref="reviewHeading" tabindex="-1">{{ tr('确认发送') }}</h2>
         <div class="batch-command-preview">
           <div class="batch-row">
@@ -377,7 +369,7 @@ async function confirmDeletion(): Promise<void> {
         </div>
       </section>
 
-      <section v-else-if="visibleResult" class="batch-flow">
+      <section v-else-if="visibleResult" class="batch-flow batch-result-view">
         <div class="batch-row">
           <h2>{{ tr('执行结果') }}</h2>
           <div class="action-row">
@@ -393,36 +385,34 @@ async function confirmDeletion(): Promise<void> {
               }}
             </button>
             <template v-else>
-              <button class="button" type="button" :disabled="busy" @click="showingTargets = true">
-                {{ tr('重新选择目标') }}
+              <button class="button" type="button" :disabled="busy" @click="showEditor">
+                {{ tr('返回命令') }}
               </button>
               <button
-                v-if="
-                  failedToConnect.length && current?.revision === visibleResult.command.revision
-                "
+                v-if="canRetry && current"
                 class="button"
                 type="button"
-                :disabled="busy || running"
-                @click="prepare(failedToConnect, visibleResult)"
+                :disabled="runDisabled(current)"
+                @click="prepare(current, visibleResult)"
               >
                 {{ tr('重试连接失败') }}
               </button>
             </template>
           </div>
         </div>
-        <div class="batch-command-preview batch-flow">
-          <div class="batch-row" role="status">
+        <div class="batch-row batch-run-summary">
+          <div class="batch-run-command">
             <strong>{{ visibleResult.command.name }}</strong>
-            <span>{{
-              visibleResult.finished
-                ? runSummary
-                : tr('已处理 {0} / {1} 台', completed, visibleResult.results.length)
-            }}</span>
+            <pre class="batch-shell" dir="ltr">{{ visibleResult.command.command }}</pre>
           </div>
-          <pre class="batch-shell" dir="ltr">{{ visibleResult.command.command }}</pre>
+          <span role="status" class="muted">{{
+            visibleResult.finished
+              ? runSummary
+              : tr('已处理 {0} / {1} 台', completed, visibleResult.results.length)
+          }}</span>
         </div>
         <div class="batch-results">
-          <div class="batch-table-scroll">
+          <div class="batch-result-hosts">
             <table class="batch-table" :aria-label="tr('逐台执行结果')">
               <thead>
                 <tr>
@@ -457,160 +447,241 @@ async function confirmDeletion(): Promise<void> {
               </tbody>
             </table>
           </div>
-          <section v-if="output" class="batch-output" :aria-label="tr('主机命令输出')">
-            <div class="batch-row">
-              <h3>{{ output.target.name }}</h3>
-              <EnvironmentTagBadge :tag="output.target.environment ?? undefined" />
+          <section v-if="output" class="batch-output">
+            <header class="batch-output-header">
+              <div class="batch-row">
+                <h3>{{ output.target.name }}</h3>
+                <EnvironmentTagBadge :tag="output.target.environment ?? undefined" />
+              </div>
+              <code class="muted" dir="ltr">{{ login(output.target) }}</code>
+            </header>
+            <div
+              :key="`${visibleResult.id}:${output.target.id}`"
+              class="batch-output-scroll"
+              tabindex="0"
+              role="region"
+              :aria-label="tr('主机命令输出')"
+            >
+              <p v-if="output.message" class="muted">{{ tr(output.message) }}</p>
+              <section v-if="output.stdout" class="batch-output-stream">
+                <h4>{{ tr('标准输出') }}</h4>
+                <pre dir="ltr">{{ output.stdout }}</pre>
+              </section>
+              <section v-if="output.stderr" class="batch-output-stream batch-output-error">
+                <h4>{{ tr('错误输出') }}</h4>
+                <pre dir="ltr">{{ output.stderr }}</pre>
+              </section>
+              <p v-if="output.truncated" class="muted">
+                {{ tr('输出超过 16 KiB，已截断显示。') }}
+              </p>
+              <p v-if="!output.stdout && !output.stderr && !output.message" class="muted">
+                {{ tr('暂无输出') }}
+              </p>
             </div>
-            <code class="muted" dir="ltr">{{ login(output.target) }}</code>
-            <p v-if="output.message" class="muted">{{ tr(output.message) }}</p>
-            <template v-if="output.stdout"
-              ><strong>{{ tr('标准输出') }}</strong>
-              <pre class="batch-shell" dir="ltr">{{ output.stdout }}</pre>
-            </template>
-            <template v-if="output.stderr"
-              ><strong>{{ tr('错误输出') }}</strong>
-              <pre class="batch-shell" dir="ltr">{{ output.stderr }}</pre>
-            </template>
-            <p v-if="output.truncated" class="muted">{{ tr('输出超过 16 KiB，已截断显示。') }}</p>
-            <p v-if="!output.stdout && !output.stderr && !output.message" class="muted">
-              {{ tr('暂无输出') }}
-            </p>
           </section>
         </div>
       </section>
 
-      <section v-else-if="current && selection" class="batch-flow">
-        <h2>{{ current.name }}</h2>
-        <pre
-          class="batch-shell batch-command-text"
-          dir="ltr"
-        ><span class="batch-prompt" aria-hidden="true">$ </span>{{ current.command }}</pre>
+      <form v-else-if="editor" class="batch-flow batch-edit" @submit.prevent="save">
         <div class="batch-row">
-          <h3>{{ tr('目标主机') }}</h3>
-          <span class="muted" role="status"
-            >{{ tr('已选 {0} 台', selection.hostIds.length)
-            }}<template v-if="elsewhere">
-              · {{ tr('其中 {0} 台在当前筛选范围外', elsewhere) }}</template
-            ></span
-          >
-        </div>
-        <div v-if="hosts.catalog?.hosts.length" class="batch-filters">
-          <label class="batch-filter"
-            ><span>{{ tr('目录') }}</span
-            ><select v-model="selection.folder" :disabled="busy">
-              <option value="">{{ tr('全部目录') }}</option>
-              <option v-for="folder in directoryOptions" :key="folder.id" :value="folder.id">
-                {{ folder.label }}
-              </option>
-            </select></label
-          >
-          <label class="batch-filter"
-            ><span>{{ tr('环境标签') }}</span
-            ><select v-model="selection.environment" :disabled="busy">
-              <option value="">{{ tr('全部环境') }}</option>
-              <option v-for="tag in environments" :key="tag.id" :value="tag.id">
-                {{ tag.name }}
-              </option>
-            </select></label
-          >
-          <button
-            v-if="selection.hostIds.length"
-            class="button"
-            type="button"
-            :disabled="busy"
-            @click="selection.hostIds = []"
-          >
-            {{ tr('清空选择') }}
+          <h2>{{ editor.previous ? tr('命令配置') : tr('新建命令') }}</h2>
+          <button v-if="result" class="button" type="button" @click="showingResult = true">
+            {{ tr('查看执行结果') }}
           </button>
         </div>
-        <div v-if="!hosts.catalog && hosts.error" class="banner batch-alert" role="alert">
-          <span>{{ hosts.error }}</span>
-          <button class="button" type="button" :disabled="hosts.busy" @click="hosts.load">
-            {{ tr('重新加载主机') }}
-          </button>
+        <div class="batch-editor-grid">
+          <section class="batch-fields" :aria-label="tr('命令配置')">
+            <label class="batch-field">
+              <span>{{ tr('命令名称') }}</span>
+              <input
+                ref="nameField"
+                v-model="editor.name"
+                maxlength="128"
+                :disabled="busy"
+                required
+              />
+            </label>
+            <label class="batch-field">
+              <span>{{ tr('SSH 命令') }}</span>
+              <span class="batch-shell batch-shell-editor">
+                <span aria-hidden="true" class="batch-prompt">$</span>
+                <textarea
+                  v-model="editor.command"
+                  rows="10"
+                  dir="ltr"
+                  autocapitalize="off"
+                  autocomplete="off"
+                  spellcheck="false"
+                  :disabled="busy"
+                  :placeholder="tr('例如 df -h /')"
+                  required
+                ></textarea>
+              </span>
+            </label>
+            <p class="muted">{{ tr('命令文本保存在本机，请勿在其中填写密码、密钥或令牌。') }}</p>
+          </section>
+          <section class="batch-fields batch-target-fields" :aria-label="tr('目标主机')">
+            <div class="batch-row">
+              <h3>{{ tr('目标主机') }}</h3>
+              <span class="muted" role="status"
+                >{{ tr('已选 {0} 台', editor.hostIds.length)
+                }}<template v-if="elsewhere">
+                  · {{ tr('其中 {0} 台在当前筛选范围外', elsewhere) }}</template
+                ></span
+              >
+            </div>
+            <div v-if="hosts.catalog?.hosts.length" class="batch-filters">
+              <div class="batch-filter batch-folder-filter">
+                <label for="batch-folder-filter">{{ tr('目录') }}</label>
+                <HostFolderPicker
+                  id="batch-folder-filter"
+                  v-model="editor.folder"
+                  :label="tr('目录')"
+                  :root-label="tr('全部目录')"
+                  :groups="groups"
+                  :disabled="busy || !active"
+                />
+              </div>
+              <label class="batch-filter"
+                ><span>{{ tr('环境标签') }}</span
+                ><select v-model="editor.environment" :disabled="busy">
+                  <option value="">{{ tr('全部环境') }}</option>
+                  <option v-for="tag in environments" :key="tag.id" :value="tag.id">
+                    {{ tag.name }}
+                  </option>
+                </select></label
+              >
+              <button
+                v-if="editor.hostIds.length"
+                class="button"
+                type="button"
+                :disabled="busy"
+                @click="editor.hostIds = []"
+              >
+                {{ tr('清空选择') }}
+              </button>
+            </div>
+            <div v-if="missingCount" class="banner batch-alert" role="status">
+              <span>{{ tr('{0} 台已保存的目标主机已删除', missingCount) }}</span>
+              <button class="button" type="button" :disabled="busy" @click="removeMissing">
+                {{ tr('移除失效主机') }}
+              </button>
+            </div>
+            <div v-if="!hosts.catalog && hosts.error" class="banner batch-alert" role="alert">
+              <span>{{ hosts.error }}</span>
+              <button class="button" type="button" :disabled="hosts.busy" @click="hosts.load">
+                {{ tr('重新加载主机') }}
+              </button>
+            </div>
+            <p v-else-if="!hosts.catalog" class="muted" role="status">
+              {{ tr('正在读取主机目录…') }}
+            </p>
+            <p v-else-if="!hosts.catalog.hosts.length" class="muted">
+              {{ tr('暂无主机，请先在主机管理中添加。') }}
+            </p>
+            <p v-else-if="!visibleHosts.length" class="muted">{{ tr('当前筛选范围内没有主机') }}</p>
+            <div
+              v-else
+              class="batch-table-scroll batch-picker-scroll"
+              tabindex="0"
+              :aria-label="tr('选择目标主机')"
+            >
+              <table class="batch-table" :aria-label="tr('选择目标主机')">
+                <thead>
+                  <tr>
+                    <th scope="col" class="batch-check">
+                      <input
+                        type="checkbox"
+                        :aria-label="tr('全选当前筛选范围的主机')"
+                        :checked="allVisibleSelected"
+                        :indeterminate="visibleSelected > 0 && !allVisibleSelected"
+                        :disabled="busy || (exceedsLimit && !allVisibleSelected)"
+                        @change="toggleVisible(($event.target as HTMLInputElement).checked)"
+                      />
+                    </th>
+                    <th scope="col">{{ tr('主机') }}</th>
+                    <th scope="col">{{ tr('SSH 登录') }}</th>
+                    <th scope="col">{{ tr('环境标签') }}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="host in visibleHosts" :key="host.id">
+                    <td class="batch-check">
+                      <input
+                        type="checkbox"
+                        :aria-label="tr('选择主机 {0}', hostDisplayName(host))"
+                        :checked="editor.hostIds.includes(host.id)"
+                        :disabled="
+                          busy ||
+                          (editor.hostIds.length >= batchTargetLimit &&
+                            !editor.hostIds.includes(host.id))
+                        "
+                        @change="setTarget(host.id, ($event.target as HTMLInputElement).checked)"
+                      />
+                    </td>
+                    <td><Server :size="14" aria-hidden="true" /> {{ hostDisplayName(host) }}</td>
+                    <td>
+                      <code dir="ltr">{{ login(host) }}</code>
+                    </td>
+                    <td><EnvironmentTagBadge :tag="hosts.environmentTag(host.id)" /></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-if="exceedsLimit || editor.hostIds.length >= batchTargetLimit" class="muted">
+              {{ tr('每批最多选择 32 台主机。') }}
+            </p>
+          </section>
         </div>
-        <p v-else-if="!hosts.catalog" class="muted" role="status">{{ tr('正在读取主机目录…') }}</p>
-        <p v-else-if="!hosts.catalog.hosts.length" class="muted">
-          {{ tr('暂无主机，请先在主机管理中添加。') }}
-        </p>
-        <p v-else-if="!visibleHosts.length" class="muted">{{ tr('当前筛选范围内没有主机') }}</p>
-        <div v-else class="batch-table-scroll">
-          <table class="batch-table" :aria-label="tr('选择目标主机')">
-            <thead>
-              <tr>
-                <th scope="col" class="batch-check">
-                  <input
-                    type="checkbox"
-                    :aria-label="tr('全选当前筛选范围的主机')"
-                    :checked="allVisibleSelected"
-                    :indeterminate="visibleSelected > 0 && !allVisibleSelected"
-                    :disabled="busy || (exceedsLimit && !allVisibleSelected)"
-                    @change="toggleVisible(($event.target as HTMLInputElement).checked)"
-                  />
-                </th>
-                <th scope="col">{{ tr('主机') }}</th>
-                <th scope="col">{{ tr('SSH 登录') }}</th>
-                <th scope="col">{{ tr('环境标签') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="host in visibleHosts" :key="host.id">
-                <td class="batch-check">
-                  <input
-                    type="checkbox"
-                    :aria-label="tr('选择主机 {0}', hostDisplayName(host))"
-                    :checked="selection.hostIds.includes(host.id)"
-                    :disabled="
-                      busy ||
-                      (selection.hostIds.length >= batchTargetLimit &&
-                        !selection.hostIds.includes(host.id))
-                    "
-                    @change="setTarget(host.id, ($event.target as HTMLInputElement).checked)"
-                  />
-                </td>
-                <td><Server :size="14" aria-hidden="true" /> {{ hostDisplayName(host) }}</td>
-                <td>
-                  <code dir="ltr">{{ login(host) }}</code>
-                </td>
-                <td><EnvironmentTagBadge :tag="hosts.environmentTag(host.id)" /></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p v-if="exceedsLimit || selection.hostIds.length >= batchTargetLimit" class="muted">
-          {{ tr('每批最多选择 32 台主机。') }}
-        </p>
-        <div class="batch-row">
-          <label class="batch-filter"
-            ><span>{{ tr('并发上限') }}</span
-            ><select v-model.number="selection.concurrency" :disabled="busy">
+        <footer class="batch-row batch-editor-actions">
+          <label class="batch-filter">
+            <span>{{ tr('并发上限') }}</span>
+            <select v-model.number="editor.concurrency" :disabled="busy">
               <option v-for="limit in [1, 3, 5]" :key="limit" :value="limit">
                 {{ tr('{0} 台', limit) }}
               </option>
-            </select></label
-          >
-          <span v-if="running" class="muted">{{ tr('另有批次正在执行。') }}</span>
-          <button
-            class="button primary"
-            type="button"
-            :disabled="busy || running || !selection.hostIds.length"
-            @click="prepare(selection.hostIds)"
-          >
-            {{ tr('预览发送') }}
-          </button>
-        </div>
-      </section>
+            </select>
+          </label>
+          <div class="action-row">
+            <button
+              v-if="!editor.previous || editorDirty"
+              class="button"
+              type="button"
+              :disabled="busy"
+              @click="resetEditor"
+            >
+              {{ editor.previous ? tr('还原修改') : tr('取消') }}
+            </button>
+            <button
+              v-if="current"
+              class="button"
+              type="button"
+              :title="runHint(current)"
+              :disabled="runDisabled(current)"
+              @click="prepare(current)"
+            >
+              <Play :size="15" aria-hidden="true" />{{ tr('预览发送') }}
+            </button>
+            <button
+              class="button primary"
+              type="submit"
+              :disabled="busy || !validDraft || !editorDirty"
+            >
+              {{ tr('保存命令') }}
+            </button>
+          </div>
+        </footer>
+      </form>
 
       <section v-else-if="commands && !listError" class="batch-empty">
         <Terminal :size="26" aria-hidden="true" />
         <h2>{{ tr('新建批量命令') }}</h2>
-        <p class="muted">{{ tr('保存一条 SSH 命令，再选择要发送到的主机。') }}</p>
+        <p class="muted">{{ tr('保存命令和目标主机，下次可从列表直接运行。') }}</p>
         <button
           class="button primary"
           type="button"
           :disabled="busy || loading"
-          @click="edit(null)"
+          @click="createCommand"
         >
           <Plus :size="16" aria-hidden="true" />{{ tr('新建命令') }}
         </button>
@@ -682,14 +753,31 @@ async function confirmDeletion(): Promise<void> {
   color: var(--muted);
   padding: 4px 12px;
 }
-.batch-library-actions {
-  display: flex;
-  flex-wrap: wrap;
+.batch-command-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--border);
+  min-width: 0;
+  padding-right: 4px;
+  border-radius: 5px;
+}
+.batch-command-row:hover {
+  background: var(--hover);
+}
+.batch-command-row.selected {
+  background: var(--accent-bg);
+}
+.batch-command-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.batch-command-actions .icon-button {
+  width: var(--compact-height);
+  height: var(--compact-height);
+}
+.batch-run {
+  color: var(--accent);
 }
 .batch-command-item {
   display: grid;
@@ -703,20 +791,16 @@ async function confirmDeletion(): Promise<void> {
   color: var(--text);
   text-align: left;
 }
-.batch-command-item:hover {
-  background: var(--hover);
-}
 .batch-command-item[aria-pressed='true'] {
   color: var(--accent);
-  background: var(--accent-bg);
 }
-.batch-command-item code {
+.batch-command-meta {
   grid-column: 2;
   color: var(--muted);
   font-size: var(--font-size-caption);
 }
 .batch-command-label,
-.batch-command-item code {
+.batch-command-meta {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -725,13 +809,13 @@ async function confirmDeletion(): Promise<void> {
   width: 100%;
   min-height: 0;
   overflow: auto;
+  container-type: inline-size;
 }
 .batch-content > .banner,
 .batch-content > .error-text {
   margin-bottom: 10px;
 }
-.batch-flow,
-.batch-output {
+.batch-flow {
   display: grid;
   align-content: start;
   gap: 12px;
@@ -767,14 +851,74 @@ async function confirmDeletion(): Promise<void> {
   gap: 6px;
 }
 .batch-field > span,
-.batch-filter > span {
+.batch-filter > :is(span, label) {
   font-weight: 600;
 }
 .batch-filter select {
   max-width: min(20rem, 100%);
 }
+.batch-folder-filter {
+  min-width: 0;
+  max-width: 100%;
+}
+.batch-folder-filter :deep(.host-folder-picker) {
+  width: clamp(132px, 16vw, 205px);
+  max-width: 100%;
+  min-height: var(--control-height);
+}
 .batch-edit {
-  max-width: 850px;
+  max-width: 1440px;
+}
+.batch-editor-grid,
+.batch-fields {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 12px;
+}
+.batch-editor-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+.batch-target-fields {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.batch-picker-scroll {
+  max-height: min(42vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.batch-picker-scroll th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+.batch-picker-scroll td {
+  padding-block: 6px;
+}
+.batch-picker-scroll td:nth-child(2) svg {
+  vertical-align: middle;
+}
+.batch-editor-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding-block: 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.batch-editor-actions .action-row {
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+@container (min-width: 880px) {
+  .batch-editor-grid {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 18px;
+  }
 }
 .batch-shell {
   background: var(--batch-shell-bg);
@@ -790,11 +934,6 @@ pre.batch-shell {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   unicode-bidi: plaintext;
-}
-.batch-command-text {
-  min-height: 70px;
-  max-height: 160px;
-  overflow: auto;
 }
 .batch-shell-editor {
   display: grid;
@@ -830,8 +969,7 @@ pre.batch-shell {
   font-weight: 600;
   user-select: none;
 }
-.batch-command-preview,
-.batch-output {
+.batch-command-preview {
   padding: 11px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -870,18 +1008,91 @@ pre.batch-shell {
 .batch-confirm {
   justify-content: flex-start;
 }
+.batch-content-results,
+.batch-result-view {
+  display: flex;
+  flex-direction: column;
+}
+.batch-result-view {
+  flex: 1;
+  min-height: 0;
+}
+.batch-result-view > .batch-row {
+  flex: none;
+}
+.batch-run-summary {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-variant-numeric: tabular-nums;
+}
+.batch-run-command {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 6px 10px;
+  overflow-wrap: anywhere;
+}
+.batch-run-command > .batch-shell {
+  max-width: 100%;
+  max-height: 4em;
+  padding: 3px 8px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
 .batch-results {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-items: start;
+  grid-template-columns: clamp(230px, 28%, 340px) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1;
+  min-block-size: 240px;
   gap: 12px;
+}
+.batch-result-hosts,
+.batch-output {
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.batch-result-hosts,
+.batch-output-scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+  overscroll-behavior: contain;
+}
+.batch-result-hosts {
+  align-self: start;
+  max-height: 100%;
+}
+.batch-result-hosts th {
+  position: sticky;
+  top: 0;
+  white-space: nowrap;
+}
+.batch-result-hosts :is(th, td) {
+  padding-block: 6px;
+}
+.batch-result-hosts :is(th, td):not(:first-child) {
+  width: 1%;
+  font-variant-numeric: tabular-nums;
+}
+.batch-result-hosts tr:last-child td {
+  border-bottom: 0;
 }
 .batch-inspect {
   border: 0;
   background: transparent;
   padding: 4px 0;
+  min-height: var(--compact-height);
   color: inherit;
   text-align: left;
+  overflow-wrap: anywhere;
 }
 .batch-inspected {
   background: var(--accent-bg);
@@ -901,12 +1112,57 @@ pre.batch-shell {
 .batch-state[data-state='unknown'] {
   color: light-dark(#805716, #e8c17b);
 }
-.batch-output pre {
-  max-height: 260px;
-  overflow: auto;
+.batch-output {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-.batch-output > code {
+.batch-output-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  flex: none;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.batch-output-header > .batch-row {
+  justify-content: flex-start;
+}
+.batch-output-header code {
+  min-width: 0;
   overflow-wrap: anywhere;
+}
+.batch-output-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
+  background: var(--batch-shell-bg);
+  color: var(--batch-shell-text);
+}
+.batch-output-scroll .muted,
+.batch-output-stream h4 {
+  color: color-mix(in srgb, var(--batch-shell-text) 80%, var(--batch-shell-bg));
+}
+.batch-output-scroll > * + * {
+  margin-top: 12px;
+}
+.batch-output-stream h4 {
+  margin: 0 0 6px;
+  font-size: var(--font-size-caption);
+}
+.batch-output-stream pre {
+  margin: 0;
+  color: inherit;
+  font-family: var(--batch-shell-font);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  unicode-bidi: plaintext;
+}
+.batch-output-error {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--batch-shell-text) 18%, transparent);
 }
 .batch-empty {
   display: grid;
@@ -920,9 +1176,24 @@ pre.batch-shell {
 .batch-empty svg {
   color: var(--muted);
 }
-@media (max-width: 1050px) {
+@container (max-width: 660px) {
+  .batch-result-view,
+  .batch-results {
+    gap: 8px;
+  }
+  .batch-run-summary {
+    padding-block: 4px;
+  }
   .batch-results {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    min-block-size: 330px;
+  }
+  .batch-result-hosts {
+    max-height: 136px;
+  }
+  .batch-result-hosts :is(th, td) {
+    padding-block: 4px;
   }
 }
 </style>

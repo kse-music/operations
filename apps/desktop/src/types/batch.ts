@@ -5,6 +5,8 @@ export const batchTargetLimit = 32;
 export interface BatchCommandInput {
   name: string;
   command: string;
+  hostIds: string[];
+  concurrency: number;
 }
 
 export interface BatchCommand extends BatchCommandInput {
@@ -15,8 +17,7 @@ export interface BatchCommand extends BatchCommandInput {
 export interface BatchRequest {
   commandId: string;
   revision: number;
-  hostIds: string[];
-  concurrency: number;
+  retryHostIds?: string[];
 }
 
 export interface BatchTarget {

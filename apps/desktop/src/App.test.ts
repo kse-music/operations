@@ -127,98 +127,138 @@ function loadSidebarConfig(): void {
   };
 }
 
-it('opens the independent batch workspace, saves multiline text and sends only after confirming targets', async () => {
-  const saved = { id: 'command-a', revision: 1, name: '检查', command: 'hostname\nuptime' };
-  const host = useHostsStore().catalog!.hosts[0]!;
-  const target = {
-    id: host.id,
-    name: host.name,
-    hostname: host.hostname,
-    username: host.username,
-    port: host.port,
-    environment: { id: 'production', name: '生产', color: 'red' as const },
-  };
-  vi.spyOn(batchApi, 'list').mockResolvedValue([]);
-  vi.spyOn(batchApi, 'status').mockResolvedValue(null);
-  const save = vi.spyOn(batchApi, 'save').mockResolvedValue(saved);
-  const prepare = vi.spyOn(batchApi, 'prepare').mockResolvedValue({
-    token: 'preview-token',
-    command: saved,
-    concurrency: 3,
-    targets: [target],
-  });
-  const send = vi.spyOn(batchApi, 'start').mockResolvedValue({
-    id: 'batch-a',
-    revision: 1,
-    command: saved,
-    finished: true,
-    stopping: false,
-    results: [
-      {
-        target,
-        status: 'succeeded',
-        exitCode: 0,
-        stdout: 'output from host',
-        stderr: '',
-        truncated: false,
-        message: null,
-      },
-    ],
-  });
-  const nav = root.querySelector<HTMLButtonElement>('button[aria-label="批量命令"]')!;
-  expect(nav.previousElementSibling?.getAttribute('aria-label')).toBe('本地终端');
-  nav.click();
-  await flush();
-  expect(useWorkspaceStore().area).toBe('batch');
-  expect(root.querySelector<HTMLElement>('#host-tree-panel')?.style.display).toBe('none');
-  const library = root.querySelector('#batch-command-list')!;
-  library.querySelector<HTMLButtonElement>('button')!.click();
-  await flush();
-  const editor = root.querySelector<HTMLFormElement>('.batch-edit')!;
-  const name = editor.querySelector<HTMLInputElement>('input')!;
-  const command = editor.querySelector<HTMLTextAreaElement>('.batch-shell-editor textarea')!;
-  expect(command.rows).toBeGreaterThanOrEqual(8);
-  for (const [field, value] of [
-    [name, saved.name],
-    [command, saved.command],
-  ] as const) {
-    field.value = value;
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  }
-  editor.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  await flush();
-  expect(save).toHaveBeenCalledWith({ name: saved.name, command: saved.command }, null);
-  expect(library.textContent).toContain(saved.name);
-  const byText = (label: string) =>
-    [...root.querySelectorAll<HTMLButtonElement>('.batch-workspace button')].find(
-      (button) => button.textContent?.trim() === label,
-    )!;
-  expect(byText('预览发送').disabled).toBe(true);
-  root.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!.click();
-  await flush();
-  byText('预览发送').click();
-  await flush();
-  expect(prepare).toHaveBeenCalledWith({
-    commandId: saved.id,
-    revision: 1,
-    hostIds: [host.id],
-    concurrency: 3,
-  });
-  expect(send).not.toHaveBeenCalled();
-  expect(byText('发送到 1 台主机').disabled).toBe(true);
-  root.querySelector<HTMLInputElement>('.batch-confirm input')!.click();
-  await flush();
-  byText('发送到 1 台主机').click();
-  await flush();
-  expect(send).toHaveBeenCalledWith('preview-token', true);
-  expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
-  useWorkspaceStore().showHome();
-  await flush();
-  expect(root.querySelector<HTMLElement>('#batch-command-list')?.style.display).toBe('none');
-  nav.click();
-  await flush();
-  expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
-});
+it.each([null, '生产', 'pRoDuCtIoN'])(
+  'runs the saved batch from the list (%s)',
+  async (productionTag) => {
+    const host = useHostsStore().catalog!.hosts[0]!;
+    const saved = {
+      id: 'command-a',
+      revision: 1,
+      name: '检查',
+      command: 'hostname\nuptime',
+      hostIds: [host.id],
+      concurrency: 3,
+    };
+    const target = {
+      id: host.id,
+      name: host.name,
+      hostname: host.hostname,
+      username: host.username,
+      port: host.port,
+      environment: productionTag
+        ? { id: 'production', name: productionTag, color: 'red' as const }
+        : null,
+    };
+    vi.spyOn(batchApi, 'list').mockResolvedValue([]);
+    vi.spyOn(batchApi, 'status').mockResolvedValue(null);
+    const save = vi.spyOn(batchApi, 'save').mockResolvedValue(saved);
+    const prepare = vi.spyOn(batchApi, 'prepare').mockResolvedValue({
+      token: 'preview-token',
+      command: saved,
+      concurrency: 3,
+      targets: [target],
+    });
+    const send = vi.spyOn(batchApi, 'start').mockResolvedValue({
+      id: 'batch-a',
+      revision: 1,
+      command: saved,
+      finished: true,
+      stopping: false,
+      results: [
+        {
+          target,
+          status: 'succeeded',
+          exitCode: 0,
+          stdout: 'output from host',
+          stderr: '',
+          truncated: false,
+          message: null,
+        },
+      ],
+    });
+    const nav = root.querySelector<HTMLButtonElement>('button[aria-label="批量命令"]')!;
+    expect(nav.previousElementSibling?.getAttribute('aria-label')).toBe('本地终端');
+    nav.click();
+    await flush();
+    expect(useWorkspaceStore().area).toBe('batch');
+    expect(root.querySelector<HTMLElement>('#host-tree-panel')?.style.display).toBe('none');
+    const library = root.querySelector('#batch-command-list')!;
+    library.querySelector<HTMLButtonElement>('button')!.click();
+    await flush();
+    const editor = root.querySelector<HTMLFormElement>('.batch-edit')!;
+    const name = editor.querySelector<HTMLInputElement>('input')!;
+    const command = editor.querySelector<HTMLTextAreaElement>('.batch-shell-editor textarea')!;
+    expect(command.rows).toBeGreaterThanOrEqual(8);
+    for (const [field, value] of [
+      [name, saved.name],
+      [command, saved.command],
+    ] as const) {
+      field.value = value;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    editor.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!.click();
+    await flush();
+    editor.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await flush();
+    expect(save).toHaveBeenCalledWith(
+      { name: saved.name, command: saved.command, hostIds: [host.id], concurrency: 3 },
+      null,
+    );
+    expect(library.textContent).toContain(saved.name);
+    const byText = (label: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>('.batch-workspace button')].find(
+        (button) => button.textContent?.trim() === label,
+      )!;
+    const targetCheckbox = () =>
+      root.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!;
+    const runFromList = () =>
+      library.querySelector<HTMLButtonElement>('button[aria-label="运行 检查"]')!;
+    expect(targetCheckbox().checked).toBe(true);
+    targetCheckbox().click();
+    await flush();
+    expect(runFromList().disabled).toBe(true);
+    byText('还原修改').click();
+    await flush();
+    expect(targetCheckbox().checked).toBe(true);
+    byText('预览发送').click();
+    await flush();
+    expect(byText('发送到 1 台主机')).toBeDefined();
+    expect(send).not.toHaveBeenCalled();
+    byText('返回修改').click();
+    await flush();
+
+    runFromList().click();
+    runFromList().click();
+    await flush();
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(prepare).toHaveBeenLastCalledWith({
+      commandId: saved.id,
+      revision: 1,
+    });
+    if (productionTag) {
+      expect(send).not.toHaveBeenCalled();
+      expect(byText('发送到 1 台主机').disabled).toBe(true);
+      root.querySelector<HTMLInputElement>('.batch-confirm input')!.click();
+      await flush();
+      byText('发送到 1 台主机').click();
+      await flush();
+    } else {
+      expect(byText('发送到 1 台主机')).toBeUndefined();
+    }
+    expect(send).toHaveBeenCalledExactlyOnceWith('preview-token', Boolean(productionTag));
+    expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
+    useWorkspaceStore().showHome();
+    await flush();
+    expect(root.querySelector<HTMLElement>('#batch-command-list')?.style.display).toBe('none');
+    nav.click();
+    await flush();
+    expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
+    runFromList().click();
+    await flush();
+    expect(prepare).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenCalledTimes(productionTag ? 1 : 2);
+  },
+);
 
 it('switches the shell and built-in plugin labels while preserving sessions and user names', async () => {
   loadSidebarConfig();
@@ -712,7 +752,12 @@ it('opens the homepage file tool for its selected host without creating a termin
   expect(open).not.toHaveBeenCalled();
 });
 
-function sampledHost(hostId: string, revision: number, usage: number): MonitorSnapshot {
+function sampledHost(
+  hostId: string,
+  revision: number,
+  usage: number,
+  cpuUsage: number | null = null,
+): MonitorSnapshot {
   const mount = '/var/lib/应用 数据';
   const disk: Disk = {
     mount,
@@ -741,7 +786,7 @@ function sampledHost(hostId: string, revision: number, usage: number): MonitorSn
       sampledAt: 1_790_000_000_000 + revision * 1000,
       uptime: 12 * 86400,
       load: [0.72, 0.64, 0.59],
-      cpus: [{ name: 'cpu', usage: null, iowait: null }],
+      cpus: [{ name: 'cpu', usage: cpuUsage, iowait: null }],
       memory: null,
       disks: [disk, { ...disk, mount: '/', usage: 35 }, { ...disk, mount: '/proc', pseudo: true }],
       network: [],
@@ -773,6 +818,7 @@ it('refreshes the selected host and opens its exact sampled mount path in SFTP',
   const refresh = vi.spyOn(monitorApi, 'refresh').mockImplementation(async () => {
     snapshot = sampledHost('b', 2, 40);
   });
+  const visible = vi.spyOn(monitorApi, 'visible').mockResolvedValue();
   const stop = vi.spyOn(monitorApi, 'stop').mockResolvedValue();
   const sftp = vi.spyOn(filesApi, 'open').mockImplementation(async (id, emit) => {
     emit({ type: 'state', state: 'connected', code: null, message: null });
@@ -794,7 +840,8 @@ it('refreshes the selected host and opens its exact sampled mount path in SFTP',
     expect(overview().querySelector('.overview-warning')?.textContent).toContain('92.0%'),
   );
   expect(open).toHaveBeenCalledExactlyOnceWith('b', expect.any(Function));
-  expect(overview().textContent).toContain('待计算');
+  expect(overview().querySelector('.overview-metric strong')?.textContent?.trim()).toBe('—');
+  expect(overview().textContent).not.toContain('待计算');
   expect(overview().textContent).not.toContain('/proc');
   expect(overview().querySelector('tbody tr th')?.textContent).toBe('/var/lib/应用 数据');
   overview().querySelector<HTMLButtonElement>('.overview-controls button')!.click();
@@ -813,7 +860,10 @@ it('refreshes the selected host and opens its exact sampled mount path in SFTP',
     expect(useFilesStore().connections.b?.listing?.path).toBe('/var/lib/应用 数据'),
   );
   expect(list).toHaveBeenCalledExactlyOnceWith('sftp-b', '/var/lib/应用 数据');
-  expect(stop).toHaveBeenCalledExactlyOnceWith('b');
+  expect(visible).toHaveBeenCalledExactlyOnceWith('b', false);
+  expect(stop).not.toHaveBeenCalled();
+  await workspace.close('host:b');
+  await vi.waitFor(() => expect(stop).toHaveBeenCalledExactlyOnceWith('b'));
 });
 
 it('stops a late overview lease before opening another host and ignores obsolete events', async () => {
@@ -833,6 +883,7 @@ it('stops a late overview lease before opening another host and ignores obsolete
     .spyOn(monitorApi, 'snapshot')
     .mockImplementation(async (id) => sampledHost(id, 1, 35));
   const stop = vi.spyOn(monitorApi, 'stop').mockResolvedValue();
+  const visible = vi.spyOn(monitorApi, 'visible').mockResolvedValue();
   const workspace = useWorkspaceStore();
   workspace.navigate('overview', 'a');
   await flush();
@@ -858,8 +909,80 @@ it('stops a late overview lease before opening another host and ignores obsolete
   expect(root.querySelector('.host-overview h1')?.textContent).toBe('Host b');
   expect(document.querySelector('[aria-label="确认 SSH 主机指纹"]')).toBeNull();
   workspace.showSettings();
+  await vi.waitFor(() => expect(visible).toHaveBeenCalledWith('b', false));
+  expect(stop).not.toHaveBeenCalledWith('b');
+  await workspace.close('host:b');
   await vi.waitFor(() => expect(stop).toHaveBeenCalledWith('b'));
   expect(root.querySelector('.host-overview')).toBeNull();
+});
+
+it('restores the last sample for an open workspace and resumes sampling without reopening on ordinary navigation', async () => {
+  const open = vi.spyOn(monitorApi, 'open').mockImplementation(async (id, emit) => {
+    emit({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: `monitor-${id}`, hostId: id, transportId: id, routeHostIds: [id] };
+  });
+  let holdA = false;
+  let sampleA = sampledHost('a', 1, 92, 24);
+  const sampleB = sampledHost('b', 1, 20);
+  const read = vi.spyOn(monitorApi, 'snapshot').mockImplementation(async (id, after) => {
+    const sample = id === 'a' ? sampleA : sampleB;
+    return after === sample.revision || (holdA && id === 'a') ? null : sample;
+  });
+  const stop = vi.spyOn(monitorApi, 'stop').mockResolvedValue();
+  const visible = vi.spyOn(monitorApi, 'visible').mockResolvedValue();
+  const workspace = useWorkspaceStore();
+  const overview = () => root.querySelector('.host-overview');
+  const cpu = () => overview()?.querySelector('.overview-metric strong');
+  workspace.navigate('overview', 'a');
+  await vi.waitFor(() => expect(overview()?.textContent).toContain('92.0%'));
+  expect(cpu()?.textContent?.trim()).toBe('24.0%');
+
+  workspace.showSettings();
+  await vi.waitFor(() => expect(visible).toHaveBeenLastCalledWith('a', false));
+  expect(overview()).toBeNull();
+  sampleA = sampledHost('a', 2, 92);
+  await workspace.closeSettings();
+  await nextTick();
+  expect(overview()?.textContent).toContain('92.0%');
+  await vi.waitFor(() => {
+    expect(visible).toHaveBeenLastCalledWith('a', true);
+    expect(read).toHaveBeenCalledWith('a', 1);
+    expect(cpu()?.getAttribute('title')).toContain('上次采样于');
+  });
+  expect(cpu()?.textContent?.trim()).toBe('24.0%');
+  expect(
+    overview()?.querySelector('progress[aria-label="CPU 使用率"]')?.getAttribute('value'),
+  ).toBe('24');
+
+  workspace.navigate('forwarding', 'b');
+  await vi.waitFor(() => expect(visible).toHaveBeenLastCalledWith('a', false));
+  workspace.activate('host:a');
+  await nextTick();
+  expect(overview()?.textContent).toContain('92.0%');
+  await vi.waitFor(() => expect(visible).toHaveBeenLastCalledWith('a', true));
+  expect(open).toHaveBeenCalledExactlyOnceWith('a', expect.any(Function));
+  expect(stop).not.toHaveBeenCalled();
+
+  sampleA = sampledHost('a', 3, 92, 0);
+  await vi.waitFor(() => expect(cpu()?.textContent?.trim()).toBe('0.0%'), { timeout: 2000 });
+  expect(cpu()?.hasAttribute('title')).toBe(false);
+
+  workspace.navigate('overview', 'b');
+  await vi.waitFor(() => expect(overview()?.textContent).toContain('20.0%'));
+  expect(overview()?.textContent).not.toContain('92.0%');
+  expect(cpu()?.textContent?.trim()).toBe('—');
+  holdA = true;
+  workspace.activate('host:a');
+  await nextTick();
+  expect(overview()?.textContent).toContain('92.0%');
+  expect(cpu()?.textContent?.trim()).toBe('0.0%');
+  expect(overview()?.textContent).toContain('上次采样于');
+  await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(3));
+  await workspace.close('host:a');
+  await vi.waitFor(() => expect(stop).toHaveBeenCalledTimes(3));
+  workspace.navigate('overview', 'a');
+  await nextTick();
+  expect(overview()?.textContent).not.toContain('92.0%');
 });
 
 it('opens assistant model binding through the existing plugin settings page', async () => {

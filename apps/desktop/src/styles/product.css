@@ -269,9 +269,13 @@ kbd {
   flex-shrink: 0;
 }
 .host-tools {
+  --host-plugin-text: #c7aef5;
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+}
+:root[data-theme='light'] .host-tools {
+  --host-plugin-text: #6845a0;
 }
 .host-tool {
   display: flex;
@@ -292,6 +296,9 @@ kbd {
 .host-tool.active {
   color: var(--accent);
   background: var(--accent-bg);
+}
+.host-tool:not(.active) > .host-plugin-label {
+  color: var(--host-plugin-text);
 }
 #terminal-session-tools {
   flex-shrink: 0;

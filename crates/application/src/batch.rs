@@ -3,13 +3,13 @@ use serverdeck_core::{
     IpcError,
     batch::{
         BatchCommand, BatchCommandInput, BatchPreview, BatchRequest, BatchResult, BatchRun,
-        BatchStatus, BatchTarget, MAX_TARGETS,
+        BatchStatus, BatchTarget, validate_targets,
     },
     hosts::Catalog,
     terminal::TerminalEvent,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     sync::{Mutex, MutexGuard, atomic::AtomicUsize},
     time::{Duration, Instant},
 };
@@ -106,7 +106,9 @@ fn targets(catalog: Catalog, host_ids: &[String]) -> Result<Vec<BatchTarget>, Er
     host_ids
         .iter()
         .map(|id| {
-            let host = hosts.get(id).ok_or(Error::NotFound)?;
+            let host = hosts.get(id).ok_or(Error::Validation(
+                "部分目标主机已删除，请修改命令的目标主机",
+            ))?;
             Ok(BatchTarget {
                 id: id.clone(),
                 name: host.config.display_name(),
@@ -145,21 +147,20 @@ impl Application {
     }
 
     pub async fn batch_prepare(&self, input: BatchRequest) -> Result<BatchPreview, Error> {
-        if input.host_ids.is_empty()
-            || input.host_ids.len() > MAX_TARGETS
-            || ![1, 3, 5].contains(&input.concurrency)
-            || input.host_ids.iter().any(|id| id.len() > 128)
-            || input.host_ids.iter().collect::<HashSet<_>>().len() != input.host_ids.len()
-        {
-            return Err(Error::Validation(
-                "请选择 1–32 台不同的主机及有效的并发上限",
-            ));
-        }
         let engine = self.terminals.clone();
         let prepared = self
             .blocking(move |db| {
                 let command = db.batch_command(&input.command_id, input.revision)?;
-                let targets = targets(db.catalog()?, &input.host_ids)?;
+                let host_ids = input.retry_host_ids.as_deref().unwrap_or(&command.host_ids);
+                let concurrency = command.concurrency;
+                if host_ids.is_empty() {
+                    return Err(Error::Validation("请先为命令保存目标主机"));
+                }
+                validate_targets(host_ids, concurrency)?;
+                if host_ids.iter().any(|id| !command.host_ids.contains(id)) {
+                    return Err(Error::Validation("重试目标必须属于已保存的主机"));
+                }
+                let targets = targets(db.catalog()?, host_ids)?;
                 let profiles = targets
                     .iter()
                     .map(|target| engine.profile_signature(&target.id).map_err(Into::into))
@@ -168,7 +169,7 @@ impl Application {
                     preview: BatchPreview {
                         token: Uuid::new_v4().to_string(),
                         command,
-                        concurrency: input.concurrency,
+                        concurrency,
                         targets,
                     },
                     profiles,

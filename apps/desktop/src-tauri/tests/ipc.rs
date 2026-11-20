@@ -26,7 +26,7 @@ fn batch_command_entry_points_are_scoped_to_the_local_main_window() {
     } else {
         "tauri://localhost"
     };
-    let input = json!({"id":null,"revision":null,"input":{"name":"Read state","command":"hostname\nuptime"}});
+    let input = json!({"id":null,"revision":null,"input":{"name":"Read state","command":"hostname\nuptime","hostIds":[],"concurrency":3}});
     let saved = get_ipc_response(&main, request("batch_save", input.clone(), origin))
         .unwrap()
         .deserialize::<Value>()
@@ -54,7 +54,7 @@ fn batch_command_entry_points_are_scoped_to_the_local_main_window() {
             ("batch_delete", json!({"id":saved["id"],"revision":1})),
             (
                 "batch_prepare",
-                json!({"input":{"commandId":saved["id"],"revision":1,"hostIds":["x"],"concurrency":1}}),
+                json!({"input":{"commandId":saved["id"],"revision":1}}),
             ),
             (
                 "batch_start",

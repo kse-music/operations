@@ -1,5 +1,6 @@
 use crate::{Error, hosts::EnvironmentTag, hosts::validate_name};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 pub const MAX_TARGETS: usize = 32;
 
@@ -10,6 +11,8 @@ pub struct BatchCommand {
     pub revision: u32,
     pub name: String,
     pub command: String,
+    pub host_ids: Vec<String>,
+    pub concurrency: u8,
 }
 
 #[derive(Deserialize)]
@@ -17,6 +20,23 @@ pub struct BatchCommand {
 pub struct BatchCommandInput {
     pub name: String,
     pub command: String,
+    pub host_ids: Vec<String>,
+    pub concurrency: u8,
+}
+
+pub fn validate_targets(host_ids: &[String], concurrency: u8) -> Result<(), Error> {
+    let mut seen = HashSet::new();
+    if host_ids.len() > MAX_TARGETS
+        || ![1, 3, 5].contains(&concurrency)
+        || host_ids
+            .iter()
+            .any(|id| id.is_empty() || id.len() > 128 || !seen.insert(id))
+    {
+        return Err(Error::Validation(
+            "最多选择 32 台不同的主机，并发上限须为 1、3 或 5",
+        ));
+    }
+    Ok(())
 }
 
 pub fn validate_command(name: &str, command: &str) -> Result<(), Error> {
@@ -62,8 +82,7 @@ pub struct BatchPreview {
 pub struct BatchRequest {
     pub command_id: String,
     pub revision: u32,
-    pub host_ids: Vec<String>,
-    pub concurrency: u8,
+    pub retry_host_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize)]

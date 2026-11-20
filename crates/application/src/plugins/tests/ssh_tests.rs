@@ -1024,6 +1024,11 @@ async fn batch_commands_over_ssh_require_confirmation_trust_and_preserve_per_hos
         .unwrap();
 
     let text = "printf 'fixture-large'\nprintf 'literal newline'";
+    let target_ids = vec![
+        first.host.id.clone(),
+        second.host.id.clone(),
+        untrusted.host.id.clone(),
+    ];
     let saved = app
         .batch_save(
             None,
@@ -1031,21 +1036,26 @@ async fn batch_commands_over_ssh_require_confirmation_trust_and_preserve_per_hos
             BatchCommandInput {
                 name: "协议验证".to_owned(),
                 command: text.to_owned(),
+                host_ids: target_ids.clone(),
+                concurrency: 3,
             },
         )
         .await
         .unwrap();
-    let target_ids = vec![
-        first.host.id.clone(),
-        second.host.id.clone(),
-        untrusted.host.id.clone(),
-    ];
+    assert!(matches!(
+        app.batch_prepare(BatchRequest {
+            command_id: saved.id.clone(),
+            revision: saved.revision,
+            retry_host_ids: Some(vec!["outside-saved-targets".into()]),
+        })
+        .await,
+        Err(Error::Validation(_))
+    ));
     let preview = app
         .batch_prepare(BatchRequest {
             command_id: saved.id.clone(),
             revision: saved.revision,
-            host_ids: target_ids.clone(),
-            concurrency: 3,
+            retry_host_ids: None,
         })
         .await
         .unwrap();
@@ -1099,6 +1109,16 @@ async fn batch_commands_over_ssh_require_confirmation_trust_and_preserve_per_hos
             .is_none()
     );
     assert!(app.terminals.ops_connections().unwrap().is_empty());
+    let retry = app
+        .batch_prepare(BatchRequest {
+            command_id: saved.id,
+            revision: saved.revision,
+            retry_host_ids: Some(vec![untrusted.host.id.clone()]),
+        })
+        .await
+        .unwrap();
+    assert_eq!(retry.targets.len(), 1);
+    assert_eq!(retry.targets[0].id, untrusted.host.id);
 
     let waiting = app
         .batch_save(
@@ -1107,6 +1127,8 @@ async fn batch_commands_over_ssh_require_confirmation_trust_and_preserve_per_hos
             BatchCommandInput {
                 name: "取消验证".into(),
                 command: "serverdeck-batch-fixture-hold".into(),
+                host_ids: target_ids,
+                concurrency: 1,
             },
         )
         .await
@@ -1115,8 +1137,7 @@ async fn batch_commands_over_ssh_require_confirmation_trust_and_preserve_per_hos
         .batch_prepare(BatchRequest {
             command_id: waiting.id.clone(),
             revision: waiting.revision,
-            host_ids: target_ids,
-            concurrency: 1,
+            retry_host_ids: None,
         })
         .await
         .unwrap();

@@ -148,8 +148,11 @@ const overviewHost = computed(() =>
   workspace.area === 'home' &&
   view.value === 'overview' &&
   !workspace.closing.includes(workspace.active)
-    ? currentHost.value
+    ? knownHost(currentHostId.value)
     : undefined,
+);
+const overviewWorkspaceHosts = computed(() =>
+  workspace.homeTabs.filter(isHostTab).map((tab) => tab.hostId),
 );
 const batchDirty = ref(false);
 const terminalVisible = computed(
@@ -933,7 +936,11 @@ watch(
           "
           @surface-navigate="surfaceNavigate"
         />
-        <HostOverviewView :host="overviewHost" @open-mount="openMountDirectory" />
+        <HostOverviewView
+          :host="overviewHost"
+          :workspace-hosts="overviewWorkspaceHosts"
+          @open-mount="openMountDirectory"
+        />
         <ServerView
           v-if="view === 'server'"
           :key="`server:${currentHostId}`"

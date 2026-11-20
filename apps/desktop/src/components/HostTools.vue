@@ -73,11 +73,12 @@ const enabled = computed(() =>
       :aria-current="
         active === 'extension' && activePlugin === plugin.manifest.id ? 'page' : undefined
       "
+      :aria-description="tr('插件')"
       :data-plugin-id="plugin.manifest.id"
       @click="$emit('plugin', plugin.manifest.id, primaryPluginPage(plugin))"
     >
       <PluginIcon :manifest="plugin.manifest" :source="plugin.source" />
-      <span>{{ plugins.metadata(plugin, plugin.manifest.name) }}</span>
+      <span class="host-plugin-label">{{ plugins.metadata(plugin, plugin.manifest.name) }}</span>
     </button>
   </nav>
 </template>

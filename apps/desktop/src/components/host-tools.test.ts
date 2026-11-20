@@ -89,13 +89,23 @@ it('shows enabled plugin functions beside SSH and SFTP without requiring host gr
 it('highlights the current plugin and hides remote plugins on the local device', async () => {
   const pinia = createPinia();
   const plugins = usePluginsStore(pinia);
-  plugins.installed = systemPluginFixtures().map((plugin) => ({ ...plugin, enabled: true }));
+  const items = systemPluginFixtures();
+  items[0]!.source = 'user';
+  plugins.installed = items.map((plugin) => ({ ...plugin, enabled: true }));
   const props = {
     active: 'extension' as const,
     activePlugin: plugins.installed[1]!.manifest.id,
     local: false,
   };
   mount(props, pinia);
+  expect(
+    [...root.querySelectorAll('.host-tool[aria-description="插件"] > .host-plugin-label')].map(
+      (label) => label.textContent,
+    ),
+  ).toEqual(items.map((plugin) => plugin.manifest.name));
+  expect(root.querySelector('.host-tool:not(.active) > .host-plugin-label')?.textContent).toBe(
+    items[0]!.manifest.name,
+  );
   expect(root.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
   expect(root.querySelector('[aria-current="page"]')?.getAttribute('data-plugin-id')).toBe(
     props.activePlugin,

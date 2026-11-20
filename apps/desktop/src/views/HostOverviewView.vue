@@ -12,11 +12,13 @@ import { hostDisplayName, type Host } from '../types/hosts';
 import { monitorLabels, percent } from '../types/monitor';
 import { stateLabels } from '../types/terminal';
 
-const props = defineProps<{ host?: Host }>();
+const props = defineProps<{ host?: Host; workspaceHosts: readonly string[] }>();
 defineEmits<{ openMount: [host: Host, path: string] }>();
 const hosts = useHostsStore();
 const {
-  snapshot,
+  sample,
+  cpuReading,
+  previousSample,
   sessionId,
   connection,
   ended,
@@ -26,8 +28,10 @@ const {
   refreshing,
   refresh,
   trust,
-} = useHostOverview(() => props.host?.id);
-const sample = computed(() => snapshot.value?.sample);
+} = useHostOverview(
+  () => props.host,
+  () => props.workspaceHosts,
+);
 const endpoint = computed(() => {
   const host = props.host;
   if (!host) return '';
@@ -35,16 +39,23 @@ const endpoint = computed(() => {
   return `${host.username}@${address}:${host.port}`;
 });
 const connected = computed(() => connection.value === 'connected' && !ended.value);
-const freshness = computed(() => {
-  const timestamp = sample.value?.sampledAt;
-  return timestamp === undefined
-    ? null
-    : new Intl.DateTimeFormat(locale.value, {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hourCycle: 'h23',
-      }).format(timestamp);
+const sampleTime = computed(
+  () =>
+    new Intl.DateTimeFormat(locale.value, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    }),
+);
+const freshness = computed(() =>
+  sample.value ? sampleTime.value.format(sample.value.sampledAt) : null,
+);
+const previousCpuLabel = computed(() => {
+  const reading = cpuReading.value;
+  return reading && reading.sampledAt !== sample.value?.sampledAt
+    ? tr('上次采样于 {0}', sampleTime.value.format(reading.sampledAt))
+    : undefined;
 });
 const uptime = computed(() => {
   const seconds = sample.value?.uptime;
@@ -53,7 +64,7 @@ const uptime = computed(() => {
   if (seconds >= 3600) return tr('已运行 {0} 小时', Math.floor(seconds / 3600));
   return tr('已运行 {0} 分钟', Math.floor(seconds / 60));
 });
-const cpu = computed(() => sample.value?.cpus.find((row) => row.name === 'cpu')?.usage ?? null);
+const cpu = computed(() => cpuReading.value?.usage ?? null);
 const memory = computed(() => sample.value?.memory);
 const disks = computed(() =>
   (sample.value?.disks ?? [])
@@ -99,7 +110,9 @@ function progress(value: number): number {
           {{ connected ? tr('SSH 已连接') : (stateLabels[connection] ?? tr('未连接')) }}
         </span>
         <span v-if="freshness" class="muted overview-timestamp">
-          {{ stale ? tr('上次采样于 {0}', freshness) : tr('采样于 {0}', freshness) }}
+          {{
+            stale || previousSample ? tr('上次采样于 {0}', freshness) : tr('采样于 {0}', freshness)
+          }}
         </span>
         <button
           type="button"
@@ -146,7 +159,9 @@ function progress(value: number): number {
         <section class="overview-metric">
           <h2>{{ tr('CPU 使用率') }}</h2>
           <div class="metric-values">
-            <strong :class="{ 'metric-unavailable': cpu === null }">{{ percent(cpu) }}</strong>
+            <strong :class="{ 'metric-unavailable': cpu === null }" :title="previousCpuLabel">
+              {{ cpu === null ? '—' : percent(cpu) }}
+            </strong>
             <span v-if="sample.system.cores !== null" class="muted">{{
               tr('{0} 核', sample.system.cores)
             }}</span>
@@ -156,6 +171,7 @@ function progress(value: number): number {
             :value="progress(cpu)"
             max="100"
             :aria-label="tr('CPU 使用率')"
+            :aria-description="previousCpuLabel"
           />
         </section>
         <section class="overview-metric">
