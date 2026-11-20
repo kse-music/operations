@@ -5,7 +5,7 @@ const menuModules = {
   终端: 'system',
   快捷键: 'system',
   数据与存储: 'system',
-  环境标签: 'system',
+  标签: 'system',
   模型: 'system',
   关于: 'system',
   插件管理: 'system',

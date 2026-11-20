@@ -52,7 +52,7 @@ it('routes settings entries to the settings page while keeping host and plugin f
     '终端',
     '快捷键',
     '数据与存储',
-    '环境标签',
+    '标签',
     '模型',
     '插件',
     '关于',

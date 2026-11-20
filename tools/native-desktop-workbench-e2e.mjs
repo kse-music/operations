@@ -187,11 +187,11 @@ try {
     const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia;
     pinia._s.get('workspace').navigate('forwarding', id);
   }, tagged.id);
-  await navigateWorkspace(page, '环境标签');
-  const tagSettings = page.getByRole('region', { name: '环境标签', exact: true });
+  await navigateWorkspace(page, '标签');
+  const tagSettings = page.getByRole('region', { name: '标签', exact: true });
   await tagSettings.getByRole('button', { name: '新建标签', exact: true }).click();
   const createTag = page.getByRole('dialog', { name: '新建标签', exact: true });
-  await createTag.getByLabel('环境标签名称').fill('验收灰度');
+  await createTag.getByLabel('名称', { exact: true }).fill('验收灰度');
   await createTag.getByRole('radio', { name: '紫色', exact: true }).check();
   await createTag.getByRole('button', { name: '保存', exact: true }).click();
   await createTag.waitFor({ state: 'hidden' });
@@ -203,7 +203,7 @@ try {
   const taggedTab = page.locator(`.workspace-tab[data-host-id="${tagged.id}"]`);
   const hostMenu = page.getByRole('menu', { name: '主机树操作', exact: true });
   const tagEntry = hostMenu.getByRole('menuitem', { name: '标签', exact: true });
-  const tagMenu = page.getByRole('menu', { name: '环境标签', exact: true });
+  const tagMenu = page.getByRole('menu', { name: '标签', exact: true });
   await taggedRow.click({ button: 'right' });
   assert.equal(await hostMenu.getByRole('menuitemradio').count(), 0);
   await tagEntry.hover();

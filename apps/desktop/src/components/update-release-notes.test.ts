@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createApp, h, nextTick, reactive } from 'vue';
 import { createPinia, disposePinia } from 'pinia';
+import { setLocale } from '@serverdeck/plugin-sdk/i18n';
 import DOMPurify from 'dompurify';
 import UpdateReleaseNotes from './UpdateReleaseNotes.vue';
 import { terminalApi } from '../services/terminal';
@@ -9,6 +10,7 @@ import { useNotificationsStore } from '../stores/notifications';
 const disposers: (() => void)[] = [];
 afterEach(() => {
   disposers.splice(0).forEach((dispose) => dispose());
+  setLocale('zh-CN');
 });
 
 function mountNotes(content: string) {
@@ -56,6 +58,25 @@ it('keeps raw HTML inert and blocks remote images and non-HTTP links', () => {
   expect([...root.querySelectorAll('a')].map((link) => link.href)).toEqual([
     'https://example.com/docs?a=1&b=2',
   ]);
+});
+
+it('labels the generated changelog link without changing its destination or the rest of the notes', async () => {
+  const changelog = 'https://github.com/kse-music/operations/compare/v0.9.12...v0.9.13';
+  const footer = `**Full Changelog**: ${changelog}`;
+  const customLink = `**Full Changelog**: [版本对比](${changelog})`;
+  const { root } = mountNotes(
+    `## 更新内容\n\n${customLink}\n\n\`\`\`md\n${footer}\n\`\`\`\n\n${footer}`,
+  );
+  const links = root.querySelectorAll<HTMLAnchorElement>('a');
+  expect(links).toHaveLength(2);
+  expect(links[0].parentElement?.textContent).toBe('Full Changelog: 版本对比');
+  expect(root.querySelector('pre code')?.textContent).toBe(`${footer}\n`);
+  expect(links[1].parentElement?.textContent).toBe('完整更新日志');
+  expect(links[1].getAttribute('href')).toBe(changelog);
+
+  setLocale('en-US');
+  await nextTick();
+  expect(root.querySelector('p:last-child a')?.textContent).toBe('Full changelog');
 });
 
 it('opens links through the existing browser IPC and reports failures', async () => {

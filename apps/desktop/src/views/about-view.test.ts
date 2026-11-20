@@ -106,8 +106,9 @@ it('renders release Markdown and gates installation on a verified package', asyn
   const app = createApp(AboutView).use(pinia);
   try {
     app.mount(root);
-    expect(root.querySelector('.update-notes strong')?.textContent).toBe('Full Changelog');
-    expect(root.querySelector('.update-notes a')?.getAttribute('href')).toBe(
+    const changelog = root.querySelector('.update-notes a');
+    expect(changelog?.textContent).toBe('完整更新日志');
+    expect(changelog?.getAttribute('href')).toBe(
       'https://github.com/kse-music/operations/compare/v0.9.2...v0.9.3',
     );
     expect(root.querySelector('.update-notes')?.textContent).toContain('<img');

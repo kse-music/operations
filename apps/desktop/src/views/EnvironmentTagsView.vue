@@ -10,6 +10,7 @@ import {
   type EnvironmentTag,
   type EnvironmentTagInput,
 } from '../types/hosts';
+import { viewLabels } from '../types/product';
 
 const store = useHostsStore();
 const tags = computed(() => store.catalog?.environmentTags?.tags ?? []);
@@ -56,10 +57,10 @@ async function remove(): Promise<void> {
 </script>
 
 <template>
-  <section class="page-view environment-settings" :aria-label="tr('环境标签')">
+  <section class="page-view environment-settings" :aria-label="viewLabels.settingsEnvironmentTags">
     <header class="environment-settings-header">
       <div>
-        <h2>{{ tr('环境标签') }}</h2>
+        <h2>{{ viewLabels.settingsEnvironmentTags }}</h2>
         <p class="subtle">{{ tr('修改名称或颜色后，所有使用该标签的主机会同步更新。') }}</p>
       </div>
       <button class="button primary" :disabled="!store.catalog || store.busy" @click="edit()">
@@ -74,10 +75,10 @@ async function remove(): Promise<void> {
       </template>
     </div>
     <p v-else-if="!tags.length" class="environment-settings-state subtle" role="status">
-      {{ tr('暂无环境标签') }}
+      {{ tr('暂无标签') }}
     </p>
     <div v-else class="environment-settings-table">
-      <table :aria-label="tr('环境标签')">
+      <table :aria-label="viewLabels.settingsEnvironmentTags">
         <thead>
           <tr>
             <th scope="col">{{ tr('标签') }}</th>
@@ -121,8 +122,7 @@ async function remove(): Promise<void> {
     >
       <form class="editor-form" @submit.prevent="save">
         <label
-          >{{ tr('环境标签名称')
-          }}<input v-model="draft.name" required autofocus :disabled="store.busy"
+          >{{ tr('名称') }}<input v-model="draft.name" required autofocus :disabled="store.busy"
         /></label>
         <fieldset class="environment-tag-colors" :disabled="store.busy">
           <legend>{{ tr('颜色') }}</legend>
@@ -134,7 +134,7 @@ async function remove(): Promise<void> {
         <div class="environment-settings-actions">
           <span class="subtle">{{ tr('标签预览') }}</span>
           <EnvironmentTagBadge
-            :tag="{ name: draft.name.trim() || tr('环境标签'), color: draft.color }"
+            :tag="{ name: draft.name.trim() || tr('标签'), color: draft.color }"
           />
         </div>
         <p v-if="store.error" class="error-text" role="alert">{{ store.error }}</p>
@@ -146,12 +146,7 @@ async function remove(): Promise<void> {
         </footer>
       </form>
     </Modal>
-    <Modal
-      v-if="deleting"
-      :title="tr('删除环境标签？')"
-      :busy="store.busy"
-      @close="deleting = null"
-    >
+    <Modal v-if="deleting" :title="tr('删除标签？')" :busy="store.busy" @close="deleting = null">
       <p>{{ tr('确定删除「{0}」吗？', deleting.name) }}</p>
       <p v-if="counts.get(deleting.id)">
         {{ tr('删除后，使用此标签的 {0} 台主机将清除该标签。', counts.get(deleting.id) ?? 0) }}

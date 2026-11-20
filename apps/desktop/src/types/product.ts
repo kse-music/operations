@@ -1,3 +1,4 @@
+import { locale } from '@serverdeck/plugin-sdk/i18n';
 import { tr } from '../i18n/messages';
 import { defaultSshOptions, type SshOptions } from './connection';
 export interface ProductPreferences {
@@ -29,7 +30,7 @@ export const viewLabels = {
     return tr('数据与存储');
   },
   get settingsEnvironmentTags() {
-    return tr('环境标签');
+    return locale.value === 'en-US' ? 'Tags' : '标签';
   },
   get terminals() {
     return tr('SSH 终端');

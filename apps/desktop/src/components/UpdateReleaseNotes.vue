@@ -11,11 +11,18 @@ const props = defineProps<{ content: string }>();
 const notifications = useNotificationsStore();
 const escapeHtml = (value: string) =>
   value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const generatedChangelog =
+  /^\*\*Full Changelog\*\*: (https:\/\/github\.com\/kse-music\/operations\/compare\/v\d+\.\d+\.\d+\.\.\.v\d+\.\d+\.\d+)$/;
 
 const markdown = new Marked({
   gfm: true,
   breaks: true,
   renderer: {
+    paragraph({ text }) {
+      const match = text.match(generatedChangelog);
+      if (!match) return false;
+      return `<p><a href="${match[1]}">${escapeHtml(tr('完整更新日志'))}</a></p>\n`;
+    },
     html({ text }) {
       return escapeHtml(text);
     },

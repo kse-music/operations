@@ -1,5 +1,5 @@
 import { tr } from '../i18n/messages';
-import type { WorkspaceView } from './product';
+import { viewLabels, type WorkspaceView } from './product';
 
 export const settingsNavigation = [
   {
@@ -33,7 +33,7 @@ export const settingsNavigation = [
   {
     view: 'settingsEnvironmentTags',
     get label() {
-      return tr('环境标签');
+      return viewLabels.settingsEnvironmentTags;
     },
     icon: 'environmentTags',
   },

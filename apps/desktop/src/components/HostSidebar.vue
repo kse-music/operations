@@ -1070,7 +1070,7 @@ onBeforeUnmount(() => {
           ref="tagMenuElement"
           class="context-menu host-environment-menu"
           role="menu"
-          :aria-label="tr('环境标签')"
+          :aria-label="tr('标签')"
           :style="{ left: `${tagMenuPosition.x}px`, top: `${tagMenuPosition.y}px` }"
           @keydown="menuKeys"
           @contextmenu.prevent
@@ -1099,7 +1099,7 @@ onBeforeUnmount(() => {
             <Eraser class="menu-icon-muted" aria-hidden="true" />{{ tr('清除标签') }}
           </button>
           <button role="menuitem" @click="manageEnvironmentTags">
-            <Tags class="menu-icon-muted" aria-hidden="true" />{{ tr('管理环境标签…') }}
+            <Tags class="menu-icon-muted" aria-hidden="true" />{{ tr('管理标签…') }}
           </button>
         </div>
       </template>

@@ -158,11 +158,13 @@ it('switches the shell and built-in plugin labels while preserving sessions and 
     'Terminal',
     'Shortcuts',
     'Data and storage',
-    'Environment tags',
+    'Tags',
     'Models',
     'Plugins',
     'About',
   ]);
+  await openNavigation('Tags');
+  expect(root.querySelector('.environment-settings h2')?.textContent).toBe('Tags');
   expect(document.querySelector('.host-tree-section')).toBe(tree);
   expect(document.querySelector('.host-tree-section')?.textContent).toContain('通用');
   expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
@@ -381,11 +383,12 @@ it('manages shared environment tags and applies them to context-menu targets and
   workspace.navigate('terminals', 'b');
   await flush();
   const menu = await context('a');
-  menuAction(menu, '管理环境标签…').click();
+  menuAction(menu, '管理标签…').click();
   await flush();
   expect(workspace.settingsView).toBe('settingsEnvironmentTags');
   const page = root.querySelector('.environment-settings')!;
-  expect(page.textContent).toContain('暂无环境标签');
+  expect(page.querySelector('h2')?.textContent).toBe('标签');
+  expect(page.textContent).toContain('暂无标签');
   menuAction(page, '新建标签').click();
   await flush();
   await editTag('新建标签', '灰度', 'violet');
@@ -405,7 +408,7 @@ it('manages shared environment tags and applies them to context-menu targets and
   const tabBadge = () => root.querySelector('.workspace-tab[data-host-id="b"] .environment-tag');
   expect(tabBadge()?.textContent).toBe('灰度');
 
-  await openNavigation('环境标签');
+  await openNavigation('标签');
   expect(root.querySelector('.environment-settings table')?.textContent).toContain('2 台主机');
   root.querySelector<HTMLButtonElement>('[aria-label="编辑标签 灰度"]')!.click();
   await flush();
@@ -432,10 +435,10 @@ it('manages shared environment tags and applies them to context-menu targets and
   expect(tabBadge()).toBeNull();
   expect(hosts.environmentTag('a')?.id).toBe('release');
 
-  await openNavigation('环境标签');
+  await openNavigation('标签');
   root.querySelector<HTMLButtonElement>('[aria-label="删除标签 生产演练"]')!.click();
   await flush();
-  const deleting = document.querySelector('dialog[aria-label="删除环境标签？"]')!;
+  const deleting = document.querySelector('dialog[aria-label="删除标签？"]')!;
   expect(deleting.textContent).toContain('1 台主机');
   menuAction(deleting, '删除').click();
   await flush();
@@ -2705,10 +2708,11 @@ it('lets the user dismiss exit review and disables its controls during confirmed
 it('opens an automatic update notice, downloads on request and reuses exit review', async () => {
   loadSidebarConfig();
   const updates = useUpdatesStore();
+  const changelog = 'https://github.com/kse-music/operations/compare/v0.9.12...v1.0.0';
   const found = {
     supported: true,
     phase: 'available',
-    release: { version: '1.0.0', notes: '修复连接' },
+    release: { version: '1.0.0', notes: `修复连接\n\n**Full Changelog**: ${changelog}` },
     downloadedBytes: 0,
     totalBytes: null,
     error: null,
@@ -2731,6 +2735,9 @@ it('opens an automatic update notice, downloads on request and reuses exit revie
   const notice = () => document.querySelector<HTMLDialogElement>('dialog[aria-label="发现新版本"]');
   expect(notice()?.textContent).toContain('新版本 v1.0.0');
   expect(notice()?.querySelector('.update-notes')?.textContent).toContain('修复连接');
+  const changelogLink = notice()?.querySelector('.update-notes a');
+  expect(changelogLink?.textContent).toBe('完整更新日志');
+  expect(changelogLink?.getAttribute('href')).toBe(changelog);
   expect(root.querySelector('.sidebar-app-actions .update-badge')).toBeNull();
   expect(download).not.toHaveBeenCalled();
   notice()!.querySelector<HTMLButtonElement>('button.primary')!.click();
