@@ -194,7 +194,11 @@ try {
     await sidePanel.waitFor({ state: 'hidden' });
     const hidden = await geometry();
     assert(Math.abs(hidden.main.left - hidden.rail.right) < 1, 'no blank track after unpinning');
-    await reveal.hover();
+    const markerHeight = await reveal.evaluate(
+      (button) => getComputedStyle(button, '::before').height,
+    );
+    assert.equal(markerHeight, '128px', 'the edge marker is visibly longer');
+    await reveal.hover({ position: { x: 6, y: 180 } });
     await pin.waitFor();
     assert.equal((await pin.innerText()).trim(), '');
     assert.equal(await pin.locator('svg').count(), 1);
