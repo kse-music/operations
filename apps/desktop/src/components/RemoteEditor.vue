@@ -5,6 +5,7 @@ import { onMounted, onBeforeUnmount, ref, reactive, computed, nextTick } from 'v
 import { Save, RotateCw, Search, WrapText } from '@lucide/vue';
 import * as monaco from 'monaco-editor/editor/editor.api';
 import 'monaco-editor/editor/contrib/find/browser/findController';
+import 'monaco-editor/features/codicon/register';
 import 'monaco-editor/languages/definitions/javascript/register';
 import 'monaco-editor/languages/definitions/typescript/register';
 import 'monaco-editor/languages/definitions/python/register';

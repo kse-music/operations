@@ -687,6 +687,20 @@
   min-height: 0;
   overflow: hidden;
 }
+/* Monaco's find controls share the application's .button class. */
+.remote-editor .monaco-editor .find-widget .button {
+  box-sizing: content-box;
+  min-height: 0;
+  border: 0;
+  background-color: transparent;
+}
+.remote-editor .monaco-editor .find-widget > .button:is(.toggle, .codicon-widget-close) {
+  top: 3px;
+  width: 22px;
+  height: 25px;
+  margin: 0 0 0 3px;
+  box-sizing: border-box;
+}
 .remote-editor .monaco-editor .find-widget .monaco-inputbox.synthetic-focus,
 .remote-editor .find-widget :is(input, textarea):focus-visible {
   outline: none;
