@@ -2,6 +2,241 @@ use super::*;
 use russh::keys::{Algorithm, HashAlg, PrivateKey, ssh_key::LineEnding};
 use serverdeck_core::connection::{ProxyKind, ProxySettings};
 
+fn tag_input(name: &str, color: EnvironmentTagColor) -> EnvironmentTagInput {
+    EnvironmentTagInput {
+        name: name.into(),
+        color,
+    }
+}
+
+#[tokio::test]
+async fn host_backup_restores_the_complete_tag_catalog_and_each_hosts_assignment() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut source =
+        Application::initialize(temp.path().join("source"), temp.path().join("logs")).unwrap();
+    source.secrets = Arc::new(TestStore::default());
+    use EnvironmentTagColor::{Blue, Green, Violet};
+    source
+        .environment_tag_save(Some("production".into()), tag_input("生产", Green))
+        .await
+        .unwrap();
+    source
+        .environment_tag_delete("staging".into())
+        .await
+        .unwrap();
+    source
+        .environment_tag_save(None, tag_input("闲置标签", Violet))
+        .await
+        .unwrap();
+    let mut original_ids = Vec::new();
+    for tag_id in [Some("production"), Some("testing"), None] {
+        let host = source
+            .host_save(None, host_input(AuthType::Agent), None)
+            .await
+            .unwrap();
+        original_ids.push(host.id.clone());
+        if let Some(tag_id) = tag_id {
+            source
+                .host_set_environment_tag(host.id, Some(tag_id.into()))
+                .await
+                .unwrap();
+        }
+    }
+    let path = temp.path().join("tagged.sdhosts");
+    source.host_backup_export(path.clone()).await.unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["version"], 2);
+    assert_eq!(json["environmentTags"]["tags"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        json["environmentTags"]["assignments"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let mut dest =
+        Application::initialize(temp.path().join("dest"), temp.path().join("logs")).unwrap();
+    dest.secrets = Arc::new(TestStore::default());
+    for (hosts, skipped) in [(3, 0), (0, 3)] {
+        let result = dest.host_backup_import(path.clone()).await.unwrap();
+        assert_eq!((result.hosts, result.skipped_hosts), (hosts, skipped));
+        let restored = dest.catalog().await.unwrap();
+        let tags = &restored.environment_tags;
+        let definitions: Vec<_> = tags
+            .tags
+            .iter()
+            .map(|tag| (tag.name.as_str(), tag.color))
+            .collect();
+        assert_eq!(
+            definitions,
+            [("生产", Green), ("测试", Blue), ("闲置标签", Violet)]
+        );
+        assert_eq!(restored.hosts.len(), 3);
+        let mut applied: Vec<_> = restored
+            .hosts
+            .iter()
+            .map(|host| {
+                assert!(!original_ids.contains(&host.id));
+                tags.assignments.get(&host.id).map(|id| id.as_str())
+            })
+            .collect();
+        applied.sort_unstable();
+        assert_eq!(applied, [None, Some("production"), Some("testing")]);
+    }
+}
+
+#[tokio::test]
+async fn host_backup_merges_tag_definitions_and_fills_only_unassigned_hosts() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut source =
+        Application::initialize(temp.path().join("source"), temp.path().join("logs")).unwrap();
+    let mut dest =
+        Application::initialize(temp.path().join("dest"), temp.path().join("logs")).unwrap();
+    source.secrets = Arc::new(TestStore::default());
+    dest.secrets = Arc::new(TestStore::default());
+    use EnvironmentTagColor::{Blue, Green, Violet};
+    let source_tags = source
+        .environment_tag_save(None, tag_input("Release", Violet))
+        .await
+        .unwrap();
+    let local_tags = dest
+        .environment_tag_save(None, tag_input("release", Green))
+        .await
+        .unwrap();
+    let source_id = source_tags.tags.last().unwrap().id.clone();
+    let local_id = local_tags.tags.last().unwrap().id.clone();
+    assert_ne!(local_id, source_id);
+    let mut reused = Vec::new();
+    for hostname in ["unassigned.example", "local-tag.example"] {
+        let input = HostInput {
+            hostname: hostname.into(),
+            ..host_input(AuthType::Agent)
+        };
+        let from_backup = source.host_save(None, input.clone(), None).await.unwrap();
+        source
+            .host_set_environment_tag(from_backup.id, Some(source_id.clone()))
+            .await
+            .unwrap();
+        reused.push(dest.host_save(None, input, None).await.unwrap().id);
+    }
+    dest.host_set_environment_tag(reused[1].clone(), Some("testing".into()))
+        .await
+        .unwrap();
+    source
+        .environment_tag_save(None, tag_input("备用", Blue))
+        .await
+        .unwrap();
+    let path = temp.path().join("merge-tags.sdhosts");
+    source.host_backup_export(path.clone()).await.unwrap();
+
+    assert!(matches!(
+        dest.host_backup_import(path.clone()).await,
+        Err(Error::Validation(
+            "本机有同名异色的环境标签，请先调整标签名称或颜色再导入"
+        ))
+    ));
+    let unchanged = dest.catalog().await.unwrap().environment_tags;
+    assert_eq!(unchanged.tags.len(), 4);
+    assert_eq!(unchanged.tags.last().unwrap().color, Green);
+    assert_eq!(unchanged.assignments.len(), 1);
+    assert_eq!(unchanged.assignments[&reused[1]], "testing");
+
+    dest.environment_tag_save(Some(local_id.clone()), tag_input("release", Violet))
+        .await
+        .unwrap();
+    let result = dest.host_backup_import(path).await.unwrap();
+    assert_eq!((result.hosts, result.skipped_hosts), (0, 2));
+    let merged = dest.catalog().await.unwrap();
+    assert_eq!(merged.hosts.len(), 2);
+    let tags = merged.environment_tags;
+    assert_eq!(tags.tags.len(), 5);
+    assert_eq!(
+        tags.tags
+            .iter()
+            .find(|tag| tag.id == local_id)
+            .unwrap()
+            .name,
+        "release"
+    );
+    assert_eq!(tags.assignments[&reused[0]], local_id);
+    assert_eq!(tags.assignments[&reused[1]], "testing");
+}
+
+#[tokio::test]
+async fn host_backup_imports_v1_without_changing_local_tags() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut dest =
+        Application::initialize(temp.path().join("dest"), temp.path().join("logs")).unwrap();
+    dest.secrets = Arc::new(TestStore::default());
+    dest.environment_tag_save(
+        Some("production".into()),
+        tag_input("本机生产", EnvironmentTagColor::Green),
+    )
+    .await
+    .unwrap();
+    let local = dest
+        .host_save(None, host_input(AuthType::Agent), None)
+        .await
+        .unwrap();
+    assert_eq!(local.config.hostname, "example.com");
+    dest.host_set_environment_tag(local.id.clone(), Some("production".into()))
+        .await
+        .unwrap();
+    let path = temp.path().join("v1.sdhosts");
+    // Historical v1 file shape, independent of the current exporter.
+    std::fs::write(
+        &path,
+        r#"{
+        "format": "serverdeck-hosts",
+        "version": 1,
+        "directory": {
+            "groups": [],
+            "hosts": [{
+                "id": "1f85926b-bdfc-4f2b-94e0-e9b8aeaf04ee",
+                "config": {
+                    "name": "Legacy host",
+                    "hostname": "legacy.example",
+                    "port": 2222,
+                    "username": "ops",
+                    "authType": "agent",
+                    "credentialId": null,
+                    "groupId": null,
+                    "description": "",
+                    "favorite": true,
+                    "connectTimeoutSecs": 15
+                }
+            }],
+            "credentials": [],
+            "trustedKeys": []
+        }
+    }"#,
+    )
+    .unwrap();
+
+    let result = dest.host_backup_import(path).await.unwrap();
+    assert_eq!((result.hosts, result.agent_hosts), (1, 1));
+    let catalog = dest.catalog().await.unwrap();
+    let host = catalog
+        .hosts
+        .iter()
+        .find(|host| host.config.favorite)
+        .unwrap();
+    assert_eq!(host.config.hostname, "legacy.example");
+    assert_eq!(host.config.port, 2222);
+    assert_eq!(catalog.environment_tags.tags[0].name, "本机生产");
+    assert_eq!(
+        catalog.environment_tags.tags[0].color,
+        EnvironmentTagColor::Green
+    );
+    assert_eq!(catalog.environment_tags.assignments.len(), 1);
+    assert_eq!(
+        catalog.environment_tags.assignments[&local.id],
+        "production"
+    );
+}
+
 #[tokio::test]
 async fn host_backup_preserves_tree_shared_credentials_proxy_jump_and_trust() {
     let temp = tempfile::tempdir().unwrap();
@@ -370,12 +605,17 @@ async fn host_backup_rolls_back_failed_import_and_preserves_previous_export() {
         Application::initialize(temp.path().join("source"), temp.path().join("logs")).unwrap();
     let source_store = Arc::new(TestStore::default());
     source.secrets = source_store.clone();
+    let tags = source
+        .environment_tag_save(None, tag_input("隔离", EnvironmentTagColor::Gray))
+        .await
+        .unwrap();
+    let tag_id = tags.tags.last().unwrap().id.clone();
     for hostname in ["one.example", "two.example"] {
         let input = HostInput {
             hostname: hostname.into(),
             ..host_input(AuthType::Password)
         };
-        source
+        let host = source
             .host_save(
                 None,
                 input,
@@ -383,6 +623,10 @@ async fn host_backup_rolls_back_failed_import_and_preserves_previous_export() {
                     password: Zeroizing::new("fixture".into()),
                 }),
             )
+            .await
+            .unwrap();
+        source
+            .host_set_environment_tag(host.id, Some(tag_id.clone()))
             .await
             .unwrap();
     }
@@ -406,11 +650,18 @@ async fn host_backup_rolls_back_failed_import_and_preserves_previous_export() {
         Application::initialize(temp.path().join("dest"), temp.path().join("dest-logs")).unwrap();
     let failing = Arc::new(FailSecondWrite(TestStore::default()));
     dest.secrets = failing.clone();
+    let original_tags =
+        serde_json::to_value(dest.catalog().await.unwrap().environment_tags).unwrap();
     assert!(matches!(
         dest.host_backup_import(path.clone()).await,
         Err(Error::SecureStore(_))
     ));
-    assert!(dest.catalog().await.unwrap().hosts.is_empty());
+    let catalog = dest.catalog().await.unwrap();
+    assert!(catalog.hosts.is_empty());
+    assert_eq!(
+        serde_json::to_value(catalog.environment_tags).unwrap(),
+        original_tags
+    );
     assert!(
         dest.database
             .trusted_key("one.example", 22)
@@ -428,13 +679,48 @@ async fn host_backup_rolls_back_failed_import_and_preserves_previous_export() {
     ] {
         let mut bad = json.clone();
         *bad.pointer_mut(pointer).unwrap() = if pointer == "/version" {
-            2.into()
+            3.into()
         } else {
             "unknown".into()
         };
         std::fs::write(&path, serde_json::to_vec(&bad).unwrap()).unwrap();
         assert!(dest.host_backup_import(path.clone()).await.is_err());
         assert!(dest.catalog().await.unwrap().hosts.is_empty());
+    }
+    let mut invalid_tags = json.clone();
+    invalid_tags["environmentTags"]["assignments"][0]["tagId"] = "missing".into();
+    let mut invalid_host = json.clone();
+    invalid_host["environmentTags"]["assignments"][0]["hostId"] = "missing".into();
+    let mut duplicate = json.clone();
+    let assignments = duplicate["environmentTags"]["assignments"]
+        .as_array_mut()
+        .unwrap();
+    assignments.push(assignments[0].clone());
+    for invalid in [invalid_tags, invalid_host, duplicate] {
+        std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(matches!(
+            dest.host_backup_import(path.clone()).await,
+            Err(Error::Validation("备份中的环境标签分配无效或重复"))
+        ));
+        let catalog = dest.catalog().await.unwrap();
+        assert!(catalog.hosts.is_empty());
+        assert_eq!(
+            serde_json::to_value(catalog.environment_tags).unwrap(),
+            original_tags
+        );
+    }
+    let mut missing_tags = json.clone();
+    missing_tags
+        .as_object_mut()
+        .unwrap()
+        .remove("environmentTags");
+    let mut null_tags = json.clone();
+    null_tags["environmentTags"] = serde_json::Value::Null;
+    let mut invalid_v1_tags = json;
+    invalid_v1_tags["version"] = 1.into();
+    for invalid in [missing_tags, null_tags, invalid_v1_tags] {
+        std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
+        assert!(dest.host_backup_import(path.clone()).await.is_err());
     }
     std::fs::write(&path, good).unwrap();
     let other = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).unwrap();
@@ -460,4 +746,7 @@ async fn host_backup_rolls_back_failed_import_and_preserves_previous_export() {
         Application::initialize(temp.path().join("fresh"), temp.path().join("fresh-logs")).unwrap();
     fresh.secrets = Arc::new(TestStore::default());
     assert_eq!(fresh.host_backup_import(path).await.unwrap().hosts, 2);
+    let restored = fresh.catalog().await.unwrap().environment_tags;
+    assert_eq!(restored.assignments.len(), 2);
+    assert!(restored.assignments.values().all(|id| id == &tag_id));
 }

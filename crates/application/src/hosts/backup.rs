@@ -1,6 +1,9 @@
 use super::*;
-use serde::Deserialize;
-use serverdeck_storage::hosts::{CredentialRecord, backup::Directory};
+use serde::{Deserialize, Deserializer};
+use serverdeck_storage::hosts::{
+    CredentialRecord,
+    backup::{Directory, DirectoryEnvironment},
+};
 use std::{
     fs::File,
     io::{BufWriter, Read, Write},
@@ -9,14 +12,24 @@ use std::{
 
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const FORMAT: &str = "serverdeck-hosts";
+const CURRENT_VERSION: u32 = 2;
 
 // Only decoded/encoded at the native file boundary. Never an IPC response or a log value.
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Backup {
     format: String,
     version: u32,
     directory: Directory<Zeroizing<String>>,
+    #[serde(default, deserialize_with = "read_environment")]
+    environment_tags: Option<DirectoryEnvironment>,
+}
+
+// Absence is the v1 representation. A present v2 payload must be an object.
+fn read_environment<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<DirectoryEnvironment>, D::Error> {
+    DirectoryEnvironment::deserialize(deserializer).map(Some)
 }
 
 #[derive(Serialize)]
@@ -99,7 +112,7 @@ fn export(db: &Database, store: &dyn SecretStore, path: &Path) -> Result<HostBac
         return Err(Error::Validation("主机备份文件须使用 .sdhosts 扩展名"));
     }
     let mut secret_bytes = 0;
-    let directory = db.export_host_directory(|record| {
+    let (directory, environment_tags) = db.export_host_directory(|record| {
         let value = portable_secret(store, record)?;
         secret_bytes += value.len() as u64;
         if secret_bytes > MAX_FILE_BYTES {
@@ -109,8 +122,9 @@ fn export(db: &Database, store: &dyn SecretStore, path: &Path) -> Result<HostBac
     })?;
     let backup = Backup {
         format: FORMAT.into(),
-        version: 1,
+        version: CURRENT_VERSION,
         directory,
+        environment_tags: Some(environment_tags),
     };
     let parent = path.parent().ok_or(Error::Validation("请选择本地文件"))?;
     let mut file = tempfile::NamedTempFile::new_in(parent).map_err(io_error)?;
@@ -146,7 +160,12 @@ fn import(db: &Database, store: &dyn SecretStore, path: &Path) -> Result<HostBac
         source: Some(Box::new(e)),
     })?;
     drop(bytes);
-    if backup.format != FORMAT || backup.version != 1 {
+    if backup.format != FORMAT
+        || !matches!(
+            (backup.version, &backup.environment_tags),
+            (1, None) | (2, Some(_))
+        )
+    {
         return Err(Error::Validation("主机备份格式或版本不受支持"));
     }
     for key in &backup.directory.trusted_keys {
@@ -165,6 +184,7 @@ fn import(db: &Database, store: &dyn SecretStore, path: &Path) -> Result<HostBac
     }
     let result = match db.import_host_directory(
         &backup.directory,
+        backup.environment_tags.as_ref(),
         &references,
         |reference| store.read(reference),
         |reference, value| store.write(reference, value.as_bytes()),

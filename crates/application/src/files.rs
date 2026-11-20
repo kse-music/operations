@@ -98,11 +98,11 @@ impl Application {
     pub async fn file_terminal(
         &self,
         host_id: String,
-        action: FileTerminalAction,
+        directory: String,
         size: TerminalSize,
         sink: Sink,
     ) -> Result<TerminalSession, Error> {
-        action.command()?;
+        remote_absolute(&directory)?;
         let secrets = self.secrets.clone();
         let (host, plan) = self
             .blocking(move |db| super::terminal::connection_plan(&db, secrets.as_ref(), &host_id))
@@ -111,21 +111,26 @@ impl Application {
             return Err(Error::ShuttingDown);
         }
         self.terminals
-            .open_file_terminal_plan(host, plan, size, sink, action)
+            .open_file_terminal_plan(host, plan, size, sink, &directory)
     }
     pub async fn files_list(&self, id: &str, path: &str) -> Result<DirectoryListing, Error> {
         self.files.list(id, path).await
     }
-    pub async fn files_last_directory(&self, host_id: String) -> Result<Option<String>, Error> {
-        self.blocking(move |db| db.sftp_last_directory(&host_id))
+    pub async fn files_last_directory(
+        &self,
+        host_id: String,
+        side: FileSide,
+    ) -> Result<Option<String>, Error> {
+        self.blocking(move |db| db.file_last_directory(&host_id, side))
             .await
     }
     pub async fn files_remember_directory(
         &self,
         host_id: String,
+        side: FileSide,
         path: String,
     ) -> Result<(), Error> {
-        self.blocking(move |db| db.save_sftp_last_directory(&host_id, path))
+        self.blocking(move |db| db.save_file_last_directory(&host_id, side, path))
             .await
     }
     pub async fn files_bookmarks(&self, host_id: String) -> Result<Vec<DirectoryBookmark>, Error> {

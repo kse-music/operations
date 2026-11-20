@@ -6,6 +6,7 @@ use std::{
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub mod ai;
 mod config_migrations;
+mod file_directory;
 mod forward_rules;
 pub mod hosts;
 mod local_sessions;
@@ -13,7 +14,6 @@ mod local_terminal;
 mod migrations;
 pub mod plugins;
 mod sftp_bookmarks;
-mod sftp_directory;
 pub mod ssh_sessions;
 pub mod trust;
 pub mod updates;

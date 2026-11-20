@@ -3,6 +3,7 @@ import { createPinia, disposePinia, getActivePinia, setActivePinia } from 'pinia
 vi.mock('../services/terminal', () => ({
   terminalApi: {
     close: vi.fn(),
+    hasForegroundCommand: vi.fn(),
     closeHost: vi.fn(),
     savedLocalSessions: vi.fn(),
     savedSshSessions: vi.fn(),
@@ -19,6 +20,7 @@ const host = { id: 'host', name: 'Host' } as Host;
 beforeEach(() => {
   setActivePinia(createPinia());
   vi.clearAllMocks();
+  vi.mocked(terminalApi.hasForegroundCommand).mockResolvedValue(false);
   vi.mocked(terminalApi.savedLocalSessions).mockResolvedValue([]);
   vi.mocked(terminalApi.savedSshSessions).mockResolvedValue([]);
 });
@@ -191,10 +193,15 @@ describe('independent terminal tabs', () => {
     const remove = store.registerUpload(first.key, () => true, stop);
     remove();
     store.open(host);
-    store.registerUpload(store.panes[1]!.key, () => true, stop);
+    const second = store.panes[1]!;
+    store.update(second.key, { state: 'connected', sessionId: 'ssh:running' });
+    vi.mocked(terminalApi.hasForegroundCommand).mockResolvedValue(true);
+    store.registerUpload(second.key, () => true, stop);
     const ask = vi.spyOn(usePluginsStore(), 'ask').mockResolvedValue(true);
     await store.closeAll(store.active);
     expect(ask).toHaveBeenCalledOnce();
+    expect(ask.mock.calls[0]?.[1]).toContain('仍有命令在前台运行');
+    expect(ask.mock.calls[0]?.[1]).toContain('关闭将停止上传');
     expect(stop).toHaveBeenCalledOnce();
     expect(store.panes).toEqual([]);
   });

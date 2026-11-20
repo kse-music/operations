@@ -26,6 +26,7 @@ const native = vi.hoisted(() => ({
   savedLocalSessions: vi.fn(),
   savedTitleCommands: vi.fn(),
   close: vi.fn(),
+  hasForegroundCommand: vi.fn(),
   input: vi.fn(),
   ack: vi.fn(),
   resize: vi.fn(),
@@ -160,6 +161,7 @@ beforeEach(async () => {
     },
   });
   native.close.mockResolvedValue(undefined);
+  native.hasForegroundCommand.mockResolvedValue(false);
   native.ack.mockResolvedValue(undefined);
   const open = (_host: unknown, _size: unknown, receive: (event: TerminalEvent) => void) => {
     const id = `session-${native.receivers.length}`;
@@ -474,7 +476,7 @@ it.each(['connected', 'disconnected'] as const)(
 it('duplicates the right-click target as an ordinary fresh shell and preserves the active tab until chosen', async () => {
   const store = useTerminalsStore();
   const original = store.tabs[0]!;
-  original.panes[0]!.fileAction = { kind: 'tail', path: '/sensitive/path' };
+  original.panes[0]!.fileDirectory = '/sensitive/path';
   store.open(host);
   await flush();
   const active = store.active;
@@ -494,7 +496,7 @@ it('duplicates the right-click target as an ordinary fresh shell and preserves t
   const added = store.tabs.at(-1)!;
   expect(added.panes).toHaveLength(1);
   expect(added.panes[0]!.key).not.toBe(original.panes[0]!.key);
-  expect(added.panes[0]!.fileAction).toBeUndefined();
+  expect(added.panes[0]!.fileDirectory).toBeUndefined();
   expect(added.panes[0]!.pluginTerminal).toBeUndefined();
   expect(added.panes[0]!.host?.id).toBe('host');
   expect(native.open).toHaveBeenLastCalledWith('host', expect.anything(), expect.any(Function));
@@ -658,11 +660,11 @@ it('reports reconnection failures and retains the tab with a clean display for r
   expect(useTerminalsStore().panes[0]?.state).toBe('connected');
 });
 
-it.each(['fileAction', 'containerShell', 'pluginTerminal'] as const)(
+it.each(['fileDirectory', 'containerShell', 'pluginTerminal'] as const)(
   'does not replay a %s when reconnecting',
   async (kind) => {
     const pane = useTerminalsStore().panes[0]!;
-    if (kind === 'fileAction') pane.fileAction = { kind: 'tail', path: '/logs' };
+    if (kind === 'fileDirectory') pane.fileDirectory = '/logs';
     else if (kind === 'containerShell')
       pane.containerShell = { id: 'container', bash: false, confirmed: true };
     else pane.pluginTerminal = { pluginId: 'plugin', owner: 'owner', ticket: 'ticket' };

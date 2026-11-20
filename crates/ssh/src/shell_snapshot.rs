@@ -21,6 +21,7 @@ pub(super) struct Tracker {
     payload: Vec<u8>,
     identity: String,
     state: SshPaneState,
+    command_running: bool,
 }
 impl Tracker {
     fn new(id: &str, identity: String) -> Self {
@@ -33,6 +34,7 @@ impl Tracker {
                 directory: String::new(),
                 command: String::new(),
             },
+            command_running: false,
         }
     }
     pub(super) fn feed(&mut self, mut bytes: &[u8]) {
@@ -77,6 +79,17 @@ impl Tracker {
         }
     }
     fn report(&mut self) {
+        match self.payload.as_slice() {
+            b"running;" => {
+                self.command_running = true;
+                return;
+            }
+            b"idle;" => {
+                self.command_running = false;
+                return;
+            }
+            _ => (),
+        }
         self.invalidate();
         let Some(encoded) = self.payload.get(4..) else {
             return;
@@ -104,6 +117,21 @@ impl Tracker {
 }
 
 impl Engine {
+    pub fn has_foreground_command(&self, id: &str) -> Result<bool, Error> {
+        let control = match self.control(id) {
+            Ok(control) => control,
+            Err(Error::NotFound) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        if !control.ready.load(Ordering::Acquire) || control.cancel.is_cancelled() {
+            return Ok(false);
+        }
+        Ok(matches!(
+            locked(&control.snapshot)?.as_ref(),
+            Some(Capture::Bash(tracker)) if tracker.command_running
+        ))
+    }
+
     pub fn open_interactive_plan(
         &self,
         host: Host,
@@ -311,6 +339,22 @@ pub(super) async fn start(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn activity_tracks_only_complete_reports_for_the_current_pty() {
+        let mut tracker = Tracker::new("pane", "identity".into());
+        assert!(!tracker.command_running);
+        tracker.feed(b"\x1b]777;sd-ssh;pane;runn");
+        assert!(!tracker.command_running);
+        tracker.feed(b"ing;\x07");
+        assert!(tracker.command_running);
+        tracker.feed(b"\x1b]777;sd-ssh;other;idle;\x07");
+        tracker.feed(b"\x1b]777;sd-ssh;pane;idle;unexpected\x07");
+        tracker.feed(b"\x1b]777;sd-ssh;pane;cmd;\x07");
+        assert!(tracker.command_running);
+        tracker.feed(b"\x1b]777;sd-ssh;pane;idle;\x07");
+        assert!(!tracker.command_running);
+    }
+
     #[test]
     fn shell_snapshot_tracks_fragmented_private_reports_and_discards_invalid_values() {
         let report = |id, tag, value: &str| {

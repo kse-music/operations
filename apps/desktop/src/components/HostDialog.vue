@@ -16,7 +16,11 @@ import {
   type HostAuthenticationInput,
   type HostKeyFingerprint,
 } from '../types/hosts';
-const props = defineProps<{ host?: Host; groupId?: string | null }>();
+const props = defineProps<{
+  host?: Host;
+  groupId?: string | null;
+  focusAuthentication?: boolean;
+}>();
 const emit = defineEmits<{ close: []; saved: [host: Host] }>();
 const store = useHostsStore();
 const application = useApplicationStore();
@@ -183,7 +187,7 @@ function proxyPasswordSaved(id: string): void {
           >{{ tr('主机名称（可选）')
           }}<input
             v-model="draft.name"
-            autofocus
+            :autofocus="!focusAuthentication"
             maxlength="128"
             :placeholder="tr('留空时显示地址，非 22 端口会附加端口号')"
         /></label>
@@ -230,7 +234,8 @@ function proxyPasswordSaved(id: string): void {
             type="password"
             autocomplete="new-password"
             maxlength="2048"
-            :required="!host"
+            :autofocus="focusAuthentication"
+            :required="!draft.credentialId"
             :placeholder="
               draft.credentialId ? tr('已保存，留空沿用原密码') : tr('输入 SSH 登录密码')
             "
@@ -247,7 +252,8 @@ function proxyPasswordSaved(id: string): void {
               class="private-key-input"
               rows="3"
               maxlength="1048576"
-              :required="!host"
+              :autofocus="focusAuthentication"
+              :required="!draft.credentialId"
               autocomplete="off"
               spellcheck="false"
               :placeholder="tr('粘贴完整私钥内容')"
@@ -421,7 +427,11 @@ function proxyPasswordSaved(id: string): void {
         {{
           testError ??
           (testMessage ||
-            (testing ? tr('正在连接并验证 SSH 登录…') : tr('测试连接成功后即可保存。')))
+            (testing
+              ? tr('正在连接并验证 SSH 登录…')
+              : focusAuthentication
+                ? tr('请补全登录凭据，测试通过后即可保存并打开主机。')
+                : tr('测试连接成功后即可保存。')))
         }}
       </p>
       <footer class="dialog-actions">
@@ -429,7 +439,9 @@ function proxyPasswordSaved(id: string): void {
           {{ testing ? tr('测试中…') : tr('测试连接') }}
         </button>
         <button type="submit" class="button primary" :disabled="busy || !testId">
-          {{ store.busy ? tr('保存中…') : tr('保存主机') }}
+          {{
+            store.busy ? tr('保存中…') : focusAuthentication ? tr('保存并打开主机') : tr('保存主机')
+          }}
         </button>
       </footer>
     </form>

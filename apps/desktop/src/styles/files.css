@@ -26,8 +26,7 @@
 .file-context-menu .file-menu-properties {
   color: var(--menu-icon-blue);
 }
-.file-context-menu .file-menu-edit,
-.file-context-menu .file-menu-terminal {
+.file-context-menu .file-menu-edit {
   color: var(--menu-icon-purple);
 }
 .file-context-menu .file-menu-delete {

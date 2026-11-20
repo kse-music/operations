@@ -7,6 +7,7 @@ mod tests;
 use rusqlite::{Connection, OptionalExtension, Row, TransactionBehavior, params};
 use serverdeck_core::{
     Error,
+    files::FileSide,
     hosts::*,
     openssh::{ImportCandidate, ImportPreview},
 };
@@ -268,9 +269,10 @@ impl Database {
         tx.execute("DELETE FROM hosts WHERE id=?1", [id])
             .map_err(storage_error)?;
         tx.execute(
-            "DELETE FROM application_settings WHERE key IN (?1,?2,?3)",
+            "DELETE FROM application_settings WHERE key IN (?1,?2,?3,?4)",
             params![
-                super::sftp_directory::key(id),
+                super::file_directory::key(id, FileSide::Remote),
+                super::file_directory::key(id, FileSide::Local),
                 super::sftp_bookmarks::key(id),
                 super::forward_rules::key(id)
             ],

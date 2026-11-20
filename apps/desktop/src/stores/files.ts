@@ -12,6 +12,7 @@ import type {
   RemoteCopyInput,
   FileSearchState,
   FileSearchOptions,
+  FileSide,
   NewDirectorySettings,
 } from '../types/files';
 import { unfinished, fileSearchActive, remoteJoin, transferUsesHost } from '../types/files';
@@ -54,12 +55,17 @@ interface LocalFileBrowser {
 }
 const directoryHistoryLimit = 100;
 
-function unavailableDirectory(cause: unknown): boolean {
+const unavailableDirectoryCodes = {
+  local: ['LOCAL_NOT_FOUND', 'LOCAL_PERMISSION', 'LOCAL_NOT_DIRECTORY'],
+  remote: ['SFTP_NOT_FOUND', 'SFTP_PERMISSION', 'SFTP_OPERATION'],
+};
+
+function unavailableDirectory(cause: unknown, side: FileSide): boolean {
   return (
     typeof cause === 'object' &&
     cause !== null &&
     'code' in cause &&
-    ['SFTP_NOT_FOUND', 'SFTP_PERMISSION', 'SFTP_OPERATION'].includes(String(cause.code))
+    unavailableDirectoryCodes[side].includes(String(cause.code))
   );
 }
 
@@ -117,23 +123,30 @@ export const useFilesStore = defineStore('files', () => {
   const searchStarts = new Map<string, Promise<void>>();
   const searchStops = new Map<string, Promise<boolean>>();
   const remoteHistories = new WeakMap<FileConnection, DirectoryHistory>();
-  const directoryWrites = new Map<string, Promise<void>>();
-  async function rememberDirectory(hostId: string, path: string): Promise<void> {
+  const directoryWrites = {
+    local: new Map<string, Promise<void>>(),
+    remote: new Map<string, Promise<void>>(),
+  };
+  async function rememberDirectory(hostId: string, path: string, side: FileSide): Promise<void> {
+    const writes = directoryWrites[side];
     const write = async () => {
       try {
-        await filesApi.rememberDirectory(hostId, path);
+        await filesApi.rememberDirectory(hostId, path, side);
       } catch (cause) {
-        error.value = tr('无法保存上次打开的远程目录：{0}', errorMessage(cause));
+        error.value =
+          side === 'local'
+            ? tr('无法保存上次打开的本地目录：{0}', errorMessage(cause))
+            : tr('无法保存上次打开的远程目录：{0}', errorMessage(cause));
       }
     };
-    const previous = directoryWrites.get(hostId);
+    const previous = writes.get(hostId);
     const saving = previous ? previous.then(write) : write();
-    directoryWrites.set(hostId, saving);
+    writes.set(hostId, saving);
     await saving;
-    if (directoryWrites.get(hostId) === saving) directoryWrites.delete(hostId);
+    if (writes.get(hostId) === saving) writes.delete(hostId);
   }
   async function flushDirectoryWrites(): Promise<void> {
-    await Promise.all(directoryWrites.values());
+    await Promise.all([...directoryWrites.local.values(), ...directoryWrites.remote.values()]);
   }
   function ensureSearch(connection = current.value): FileSearchState | undefined {
     if (!connection?.id || connection.state !== 'connected') return;
@@ -263,7 +276,7 @@ export const useFilesStore = defineStore('files', () => {
     return localBrowsers.value[hostId];
   }
   async function localLoad(
-    path: string | null = null,
+    path?: string | null,
     direction?: HistoryDirection,
     hostId = active.value,
   ): Promise<void> {
@@ -271,14 +284,39 @@ export const useFilesStore = defineStore('files', () => {
     const generation = ++browser.generation;
     const isCurrentRequest = () =>
       localBrowsers.value[hostId] === browser && generation === browser.generation;
-    browser.pendingPath = path;
+    browser.pendingPath = path ?? null;
     browser.loading = true;
     try {
-      const value = await filesApi.local(path);
-      if (isCurrentRequest()) {
-        recordDirectory(browser.history, browser.listing?.path, value.path, direction);
-        browser.listing = value;
+      let saved: string | null = null;
+      let remember = !!hostId;
+      if (path === undefined && remember) {
+        try {
+          await directoryWrites.local.get(hostId);
+          if (!isCurrentRequest()) return;
+          saved = await filesApi.lastDirectory(hostId, 'local');
+        } catch (cause) {
+          if (!isCurrentRequest()) return;
+          error.value = tr('无法读取上次打开的本地目录：{0}', errorMessage(cause));
+          remember = false;
+        }
       }
+      if (!isCurrentRequest()) return;
+      browser.pendingPath = path ?? saved;
+      let value: DirectoryListing;
+      try {
+        value = await filesApi.local(browser.pendingPath);
+      } catch (cause) {
+        if (!saved || !unavailableDirectory(cause, 'local')) throw cause;
+        if (!isCurrentRequest()) return;
+        browser.pendingPath = null;
+        value = await filesApi.local(null);
+      }
+      if (!isCurrentRequest()) return;
+      const previous = browser.listing?.path;
+      recordDirectory(browser.history, previous, value.path, direction);
+      browser.listing = value;
+      if (remember && value.path !== (previous ?? saved))
+        return rememberDirectory(hostId, value.path, 'local');
     } catch (cause) {
       if (isCurrentRequest()) error.value = errorMessage(cause);
     } finally {
@@ -309,9 +347,9 @@ export const useFilesStore = defineStore('files', () => {
       let saved: string | null = null;
       if (path === null) {
         try {
-          await directoryWrites.get(host.id);
+          await directoryWrites.remote.get(host.id);
           if (!isCurrentRequest()) return;
-          saved = await filesApi.lastDirectory(host.id);
+          saved = await filesApi.lastDirectory(host.id, 'remote');
         } catch (cause) {
           if (!isCurrentRequest()) return;
           error.value = tr('无法读取上次打开的远程目录：{0}', errorMessage(cause));
@@ -323,7 +361,7 @@ export const useFilesStore = defineStore('files', () => {
       try {
         value = await filesApi.list(id, path ?? saved ?? '.');
       } catch (cause) {
-        if (!saved || !unavailableDirectory(cause)) throw cause;
+        if (!saved || !unavailableDirectory(cause, 'remote')) throw cause;
         if (!isCurrentRequest()) return;
         value = await filesApi.list(id, '.');
       }
@@ -335,7 +373,7 @@ export const useFilesStore = defineStore('files', () => {
       connection.listing = value;
       connection.path = value.path;
       if (remember && value.path !== (previous ?? saved))
-        await rememberDirectory(host.id, value.path);
+        await rememberDirectory(host.id, value.path, 'remote');
     } catch (cause) {
       if (!isCurrentRequest()) return;
       connection.error = errorMessage(cause);
@@ -450,7 +488,7 @@ export const useFilesStore = defineStore('files', () => {
       !closingHosts.value.includes(host.id)
     ) {
       const browser = ensureLocalBrowser(host.id);
-      if (!browser.listing && !browser.loading) await localLoad(null, undefined, host.id);
+      if (!browser.listing && !browser.loading) await localLoad(undefined, undefined, host.id);
     }
   }
   const switching = new Map<string, Promise<boolean>>();
@@ -493,7 +531,7 @@ export const useFilesStore = defineStore('files', () => {
         remoteHistories.delete(connection);
         connection.search = undefined;
         connection.newDirectorySettings = undefined;
-        await rememberDirectory(host.id, value.listing.path);
+        await rememberDirectory(host.id, value.listing.path, 'remote');
         return true;
       } catch (cause) {
         error.value = errorMessage(cause);
@@ -786,7 +824,7 @@ export const useFilesStore = defineStore('files', () => {
       }
       // Keep cancellation failures and recovery paths visible before clearing the records.
       tasks.value = await filesApi.tasks();
-      await directoryWrites.get(hostId);
+      await Promise.all([directoryWrites.local.get(hostId), directoryWrites.remote.get(hostId)]);
       return true;
     } catch (cause) {
       error.value = errorMessage(cause);

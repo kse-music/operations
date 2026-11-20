@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createApp, nextTick, type App } from 'vue';
 import { createPinia, disposePinia, setActivePinia, type Pinia } from 'pinia';
 import HostSidebar from './HostSidebar.vue';
@@ -8,10 +8,15 @@ import { hostInput, type HostGroup } from '../types/hosts';
 
 let app: App | undefined, pinia: Pinia, root: HTMLDivElement;
 const originalShow = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal');
-afterEach(() => {
+beforeEach(() => window.localStorage.clear());
+function unmount() {
   app?.unmount();
+  app = undefined;
   if (pinia) disposePinia(pinia);
   root?.remove();
+}
+afterEach(() => {
+  unmount();
   if (originalShow) Object.defineProperty(HTMLDialogElement.prototype, 'showModal', originalShow);
   else Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
 });
@@ -309,6 +314,65 @@ it('toggles folders only from the arrow and permits F2 from both collapsed names
   expect(root.querySelector('[data-host-id="h1"]')).not.toBeNull();
   await pressF2(arrow);
   expect(renameInput()!.value).toBe('上海');
+});
+
+it('restores nested folder states on reopen and still reveals matching search results', async () => {
+  const { store } = await mount();
+  const expander = (id: string) => folder(id).querySelector<HTMLButtonElement>('.group-expander')!;
+  const host = () => root.querySelector('[data-host-id="h1"]');
+  expect(host()).not.toBeNull();
+  store.selectedId = 'h1';
+  await nextTick();
+  expander('child').click();
+  await nextTick();
+  store.catalog = { ...store.catalog! };
+  await nextTick();
+  expect(host()).toBeNull();
+  expander('parent').click();
+  await nextTick();
+  expect(folder('child')).toBeNull();
+
+  unmount();
+  const { store: reopened } = await mount();
+  expect(expander('parent').getAttribute('aria-expanded')).toBe('false');
+  expect(folder('child')).toBeNull();
+
+  reopened.search = 'host1.example';
+  await nextTick();
+  expect(host()).not.toBeNull();
+  expect(expander('child').disabled).toBe(true);
+  reopened.search = '';
+  await nextTick();
+  expect(expander('parent').getAttribute('aria-expanded')).toBe('false');
+
+  expander('parent').click();
+  await nextTick();
+  expect(expander('child').getAttribute('aria-expanded')).toBe('false');
+  expect(host()).toBeNull();
+  expander('child').click();
+  await nextTick();
+  expect(host()).not.toBeNull();
+
+  unmount();
+  await mount();
+  expect(host()).not.toBeNull();
+});
+
+it('keeps folder controls usable when saved state cannot be read or written', async () => {
+  vi.spyOn(Storage.prototype, 'getItem').mockReturnValueOnce('{');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+    throw new DOMException('Storage is full', 'QuotaExceededError');
+  });
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await mount();
+  const expander = folder('child').querySelector<HTMLButtonElement>('.group-expander')!;
+  expect(expander.getAttribute('aria-expanded')).toBe('true');
+  expander.click();
+  await nextTick();
+  expect(expander.getAttribute('aria-expanded')).toBe('false');
+  expect(root.querySelector('[data-host-id="h1"]')).toBeNull();
+  expect(warn).toHaveBeenCalledWith('Could not restore host folder expansion state.');
+  expect(warn).toHaveBeenCalledWith('Could not save host folder expansion state.');
 });
 
 it.each(['menu', 'F2'])(

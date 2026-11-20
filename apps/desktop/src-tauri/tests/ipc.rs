@@ -342,6 +342,21 @@ fn administrator_terminal_requires_main_window_local_origin_and_valid_size_befor
                 .is_some_and(|text| text.contains("not allowed"))
         );
     }
+    let foreground = "terminal_has_foreground_command";
+    for id in ["local:missing", "missing-ssh-session"] {
+        let session = json!({"id":id});
+        assert_eq!(
+            get_ipc_response(&main, request(foreground, session.clone(), origin))
+                .unwrap()
+                .deserialize::<Value>()
+                .unwrap(),
+            json!(false)
+        );
+        assert!(get_ipc_response(&other, request(foreground, session.clone(), origin)).is_err());
+        assert!(
+            get_ipc_response(&main, request(foreground, session, "https://example.com")).is_err()
+        );
+    }
     for (command, input) in [
         ("terminal_ssh_saved_sessions", json!({"hostId":"missing"})),
         (
@@ -632,6 +647,25 @@ fn file_opening_commands_reject_untrusted_windows_and_invalid_files_without_laun
     )
     .unwrap_err();
     assert!(error["message"].as_str().unwrap().contains("确认"));
+    for (command, body) in [
+        (
+            "terminal_local_open",
+            json!({"directory":"relative","size":{"cols":80,"rows":24},"events":"__CHANNEL__:1"}),
+        ),
+        (
+            "file_terminal",
+            json!({"hostId":"missing","directory":"relative","size":{"cols":80,"rows":24},"events":"__CHANNEL__:1"}),
+        ),
+    ] {
+        let error = get_ipc_response(&main, request(command, body.clone(), origin))
+            .expect_err("terminal startup must reject relative directories");
+        assert_eq!(error["code"], "VALIDATION");
+        for (window, url) in [(&other, origin), (&main, "https://example.com")] {
+            let error = get_ipc_response(window, request(command, body.clone(), url))
+                .expect_err("directory terminals are restricted to the main window");
+            assert!(error.as_str().is_some_and(|s| s.contains("not allowed")));
+        }
+    }
 }
 
 #[test]
@@ -1606,6 +1640,26 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
         invoke("files_last_directory", json!({"hostId":host["id"]})),
         "/srv/example"
     );
+    let local = directory.path().join("local 中文");
+    std::fs::create_dir(&local).unwrap();
+    let listing = invoke("files_local", json!({"path":local}));
+    let local_query = json!({"hostId":host["id"],"side":"local"});
+    assert!(invoke("files_last_directory", local_query.clone()).is_null());
+    let local_save = json!({"hostId":host["id"],"side":"local","path":listing["path"]});
+    invoke("files_remember_directory", local_save.clone());
+    assert_eq!(
+        invoke("files_last_directory", local_query.clone()),
+        listing["path"]
+    );
+    assert_eq!(
+        invoke("files_last_directory", json!({"hostId":host["id"]})),
+        "/srv/example"
+    );
+    let file = local.join("file.txt");
+    std::fs::write(&file, b"fixture").unwrap();
+    let error = get_ipc_response(&main, request("files_local", json!({"path":file}), origin))
+        .expect_err("a saved directory may have been replaced with a file");
+    assert_eq!(error["code"], "LOCAL_NOT_DIRECTORY");
     let bookmark = json!({"name":"日志","path":"/var/log"});
     let bookmarked = json!([bookmark]);
     assert_eq!(
@@ -1632,6 +1686,8 @@ fn host_management_ipc_uses_sqlite_and_never_exposes_secret_read_commands() {
     for (window, url) in [(&other, origin), (&main, "https://example.com")] {
         for (command, body) in [
             ("files_last_directory", json!({"hostId":host["id"]})),
+            ("files_last_directory", local_query.clone()),
+            ("files_remember_directory", local_save.clone()),
             ("host_backup", json!({"action":"export"})),
             ("host_backup", json!({"action":"import"})),
             (

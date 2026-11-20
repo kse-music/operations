@@ -337,7 +337,21 @@ async fn loopback_saved_bash_pane_reopens_in_directory_and_waits_for_enter() {
     };
     let mut original = start(None, false);
     connected(&engine, &mut original, &pin).await;
-    until(&engine, &mut original, ";cwd;").await;
+    until(&engine, &mut original, ";idle;\x07").await;
+    assert!(!engine.has_foreground_command(&original.info.id).unwrap());
+    original.text.clear();
+    engine
+        .input(
+            &original.info.id,
+            b"bash -c 'echo ssh-\"running\"; exec sleep 60'\r".to_vec(),
+        )
+        .unwrap();
+    until(&engine, &mut original, "ssh-running").await;
+    assert!(engine.has_foreground_command(&original.info.id).unwrap());
+    original.text.clear();
+    engine.input(&original.info.id, b"\x03".to_vec()).unwrap();
+    until(&engine, &mut original, ";idle;\x07").await;
+    assert!(!engine.has_foreground_command(&original.info.id).unwrap());
     let line = "printf 'verified-%s\\n' original";
     original.text.clear();
     engine

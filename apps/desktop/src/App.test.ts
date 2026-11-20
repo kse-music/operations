@@ -249,6 +249,7 @@ it('keeps terminal status on the active host, session and focused split pane onl
 beforeEach(async () => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
   vi.spyOn(terminalApi, 'savedSshSessions').mockResolvedValue([]);
+  vi.spyOn(terminalApi, 'hasForegroundCommand').mockResolvedValue(false);
   vi.spyOn(pluginsApi, 'inventory').mockImplementation(async () => ({
     installed: await pluginsApi.list(),
     problems: [],
@@ -284,6 +285,8 @@ beforeEach(async () => {
   vi.spyOn(pluginsApi, 'closeScope').mockResolvedValue();
   vi.spyOn(pluginsApi, 'cancelScope').mockResolvedValue();
   vi.spyOn(filesApi, 'tasks').mockResolvedValue([]);
+  vi.spyOn(filesApi, 'lastDirectory').mockResolvedValue(null);
+  vi.spyOn(filesApi, 'rememberDirectory').mockResolvedValue();
   vi.spyOn(filesApi, 'connections').mockResolvedValue([]);
   vi.spyOn(filesApi, 'close').mockResolvedValue();
   vi.spyOn(filesApi, 'clearTransfers').mockResolvedValue();
@@ -482,8 +485,15 @@ it.each(['empty', 'unavailable'])(
   'defaults to backup import from the %s host list and allows retry after cancellation or failure',
   async (state) => {
     const store = useHostsStore();
-    const restored = store.catalog!;
-    store.catalog = state === 'empty' ? { ...restored, hosts: [] } : null;
+    const previous = store.catalog!;
+    const restored = {
+      ...previous,
+      environmentTags: {
+        tags: [{ id: 'restored-tag', name: '恢复的标签', color: 'violet' as const }],
+        assignments: { a: 'restored-tag' },
+      },
+    };
+    store.catalog = state === 'empty' ? { ...previous, hosts: [] } : null;
     store.search = 'hidden host';
     const list = vi.spyOn(hostsApi, 'list').mockResolvedValue(restored);
     const backup = vi
@@ -542,6 +552,7 @@ it.each(['empty', 'unavailable'])(
     expect(list).toHaveBeenCalledOnce();
     expect(store.catalog).toEqual(restored);
     expect(store.search).toBe('');
+    expect(root.querySelector('.environment-tag')?.textContent).toBe('恢复的标签');
     expect(store.notice).toContain('已导入 2 台主机');
     expect(store.notice).toContain('已复用 2 个文件夹');
     expect(store.notice).toContain('已跳过 3 台重复主机');
@@ -1817,6 +1828,121 @@ it('uses the right-clicked folder when creating a host without a group selector'
   expect(useTerminalsStore().panes).toHaveLength(0);
 });
 
+it.each([
+  ['password', 'input[type="password"]'],
+  ['private_key', 'textarea.private-key-input'],
+] as const)('prompts for missing %s before opening a host', async (authType, selector) => {
+  const host = useHostsStore().catalog!.hosts[0]!;
+  host.authType = authType;
+  host.username = 'ops';
+  const open = vi.spyOn(useTerminalsStore(), 'open');
+  const test = vi.spyOn(hostsApi, 'test');
+  await flush();
+  const row = root.querySelector<HTMLElement>('.tree-host[data-host-id="a"]')!;
+  row.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
+
+  row.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+  );
+  await flush();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="编辑主机"]')!;
+  expect(dialog.querySelector('form [autofocus]')).toBe(
+    dialog.querySelector(`${selector}[required]`),
+  );
+  expect(dialog.querySelectorAll('form [autofocus]')).toHaveLength(1);
+  expect(dialog.querySelector<HTMLInputElement>(selector)?.value).toBe('');
+  expect(dialog.querySelector('form')?.checkValidity()).toBe(false);
+  expect(useWorkspaceStore().tabs).toHaveLength(0);
+  expect(test).not.toHaveBeenCalled();
+  expect(open).not.toHaveBeenCalled();
+  dialog.querySelector<HTMLButtonElement>('[aria-label="关闭对话框"]')!.click();
+  await flush();
+  expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
+  expect(useWorkspaceStore().tabs).toHaveLength(0);
+  expect(open).not.toHaveBeenCalled();
+});
+
+it('opens the requested host after testing and saving its missing password', async () => {
+  const store = useHostsStore();
+  const host = store.catalog!.hosts[0]!;
+  host.authType = 'password';
+  host.username = 'ops';
+  const test = vi
+    .spyOn(hostsApi, 'test')
+    .mockRejectedValueOnce(new Error('SSH 认证失败'))
+    .mockResolvedValue({ status: 'connected', testId: 'verified-host', expiresInSeconds: 300 });
+  const saved = { ...host, credentialId: 'saved-password' };
+  const update = vi.spyOn(hostsApi, 'updateTested').mockResolvedValue(saved);
+  vi.spyOn(hostsApi, 'list').mockImplementation(async () => ({
+    ...store.catalog!,
+    hosts: [saved, store.catalog!.hosts[1]!],
+  }));
+  await flush();
+  root
+    .querySelector('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await flush();
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="编辑主机"]')!;
+  const password = dialog.querySelector<HTMLInputElement>('input[type="password"]')!;
+  const testButton = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '测试连接',
+  )!;
+  const saveButton = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(saveButton.textContent?.trim()).toBe('保存并打开主机');
+  testButton.click();
+  expect(test).not.toHaveBeenCalled();
+  password.value = 'fixture-only-password';
+  password.dispatchEvent(new Event('input', { bubbles: true }));
+  await nextTick();
+
+  testButton.click();
+  await vi.waitFor(() =>
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe('SSH 认证失败'),
+  );
+  expect(saveButton.disabled).toBe(true);
+  expect(useWorkspaceStore().tabs).toHaveLength(0);
+  testButton.click();
+  await vi.waitFor(() => expect(saveButton.disabled).toBe(false));
+  expect(update).not.toHaveBeenCalled();
+  expect(useWorkspaceStore().tabs).toHaveLength(0);
+  saveButton.click();
+  await vi.waitFor(() =>
+    expect(useTerminalsStore().panes[0]?.host?.credentialId).toBe('saved-password'),
+  );
+  expect(update).toHaveBeenCalledExactlyOnceWith(
+    'a',
+    hostInput(host),
+    { kind: 'password', password: 'fixture-only-password' },
+    'verified-host',
+  );
+  expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
+  expect(useWorkspaceStore().current).toMatchObject({ hostId: 'a', view: 'terminals' });
+});
+
+it('opens an imported host whose credential references a private key file', async () => {
+  const catalog = useHostsStore().catalog!;
+  const host = catalog.hosts[0]!;
+  host.authType = 'private_key';
+  host.credentialId = 'key-path';
+  catalog.credentials.push({
+    id: 'key-path',
+    name: 'Imported key',
+    kind: 'private_key',
+    keyPath: 'C:/keys/imported.pem',
+    hasSecret: false,
+    hostCount: 1,
+    revision: 1,
+  });
+  await flush();
+  root
+    .querySelector('.tree-host[data-host-id="a"]')!
+    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+  await vi.waitFor(() => expect(useTerminalsStore().panes[0]?.host?.id).toBe('a'));
+  expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
+});
+
 it('creates an administrator session from the local list background menu', async () => {
   const store = useTerminalsStore(),
     workspace = useWorkspaceStore();
@@ -1944,8 +2070,15 @@ it('keeps host and plugin function tabs in one row while settings preserve the a
   expect(close).not.toHaveBeenCalled();
 });
 
-it('restores each host local drive, path, listing and mouse history when switching workspace tabs', async () => {
+it('restores each host local drive after switching and reopening workspace tabs', async () => {
   const files = useFilesStore();
+  const savedLocal = new Map<string, string>();
+  vi.mocked(filesApi.lastDirectory).mockImplementation(async (id, side) =>
+    side === 'local' ? (savedLocal.get(id) ?? null) : null,
+  );
+  vi.mocked(filesApi.rememberDirectory).mockImplementation(async (id, path, side) => {
+    if (side === 'local') savedLocal.set(id, path);
+  });
   const listing = (path: string): DirectoryListing => ({
     path,
     parent: null,
@@ -2037,7 +2170,72 @@ it('restores each host local drive, path, listing and mouse history when switchi
   await selectHost('b');
   expect(localInput().value).toBe('D:/home');
   expect(drive().textContent).toContain('D: 本地磁盘');
+
+  root.querySelector<HTMLButtonElement>('.workspace-tab[data-host-id="a"] .tab-close')!.click();
+  await vi.waitFor(() => expect(workspace.tabs.some((tab) => tab.hostId === 'a')).toBe(false));
+  expect(files.localBrowsers.a).toBeUndefined();
+  vi.spyOn(filesApi, 'open').mockImplementation(async (id, receive) => {
+    receive({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: `sftp-${id}`, hostId: id, transportId: 'transport', routeHostIds: [] };
+  });
+  vi.spyOn(filesApi, 'list').mockResolvedValue({ path: '/srv/a', parent: '/srv', entries: [] });
+  workspace.navigate('files', 'a');
+  await flush();
+  await vi.waitFor(() => expect(localInput().value).toBe('E:/'));
+  expect(drive().textContent).toContain('E: 本地磁盘');
+  expect(localPane().textContent).toContain('release.zip');
+  expect(files.stepHistory('local', 'back')).toBe(false);
 });
+
+it.each(['local', 'remote'] as const)(
+  'opens and focuses a new %s terminal in the listed directory directly from the files toolbar',
+  async (side) => {
+    const files = useFilesStore(),
+      workspace = useWorkspaceStore(),
+      terminals = useTerminalsStore();
+    const host = useHostsStore().catalog!.hosts[0]!;
+    const local = 'D:/listed folder';
+    const remote = "/srv/listed 'folder";
+    files.active = host.id;
+    files.local = { path: local, parent: null, entries: [] };
+    files.connections[host.id] = {
+      host,
+      id: 'sftp-listed',
+      state: 'connected',
+      error: null,
+      trust: null,
+      path: remote,
+      listing: { path: remote, parent: '/srv', entries: [] },
+      loading: false,
+    };
+    const targetHost = side === 'local' ? null : host;
+    terminals.open(targetHost);
+    const original = terminals.tabs[0]!;
+    workspace.navigate('files', host.id);
+    await flush();
+
+    const addressLabel = side === 'local' ? '本地路径' : '远程路径';
+    const address = root.querySelector<HTMLInputElement>(`[aria-label="${addressLabel}"]`)!;
+    address.value = '/not-submitted';
+    address.dispatchEvent(new Event('input', { bubbles: true }));
+    const label = side === 'local' ? '在当前目录打开本地终端' : '在当前目录打开远程终端';
+    root.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.click();
+    await flush();
+
+    expect(workspace.current).toMatchObject({ view: 'terminals', hostId: targetHost?.id ?? '' });
+    expect(terminals.tabs).toHaveLength(2);
+    expect(terminals.tabs[0]).toBe(original);
+    const added = terminals.tabs[1]!;
+    expect(terminals.active).toBe(added.key);
+    expect(added.panes[0]).toMatchObject({
+      host: targetHost,
+      fileDirectory: side === 'local' ? local : remote,
+      connectRequested: true,
+    });
+    expect(document.querySelector('dialog[open]')).toBeNull();
+    expect(files.connections[host.id]?.id).toBe('sftp-listed');
+  },
+);
 
 it('switches full file pages from the toolbar without closing file or terminal sessions', async () => {
   const files = useFilesStore(),
@@ -3000,7 +3198,7 @@ it.each(['remote', 'local'])(
     });
     if (host)
       terminals.update(source.panes[0]!.key, {
-        fileAction: { kind: 'tail', path: '/previous.log' },
+        fileDirectory: '/previous',
       });
     terminals.rename(source.key, '源会话');
     terminals.split(source.panes[0]!.key, 'columns');
@@ -3034,7 +3232,7 @@ it.each(['remote', 'local'])(
     expect(added.panes[0]!.sessionId).toBeUndefined();
     expect(added.panes[0]!.transportId).toBeUndefined();
     expect(added.panes[0]!.cwd).toBeUndefined();
-    expect(added.panes[0]!.fileAction).toBeUndefined();
+    expect(added.panes[0]!.fileDirectory).toBeUndefined();
     expect(JSON.stringify(terminals.tabs.slice(0, 2))).toBe(original);
     expect(document.querySelector('[role="menu"]')).toBeNull();
   },
@@ -3364,6 +3562,58 @@ it('supports keyboard opening, navigation and Escape without activating the targ
   expect(document.activeElement).toBe(tab);
   expect(workspace.active).toBe('host:b');
 });
+
+it.each(['local', 'ssh'])(
+  'confirms before closing a %s tab with a foreground command in an unfocused split',
+  async (kind) => {
+    const terminals = useTerminalsStore();
+    const host = kind === 'ssh' ? useHostsStore().catalog!.hosts[0]! : null;
+    const hostId = host?.id ?? '';
+    const runningId = `${kind}:running`;
+    const idleId = `${kind}:idle`;
+    useWorkspaceStore().navigate('terminals', hostId);
+    terminals.open(host);
+    const tab = terminals.hostTabs(hostId)[0]!;
+    terminals.update(terminals.focused, { state: 'connected', sessionId: runningId });
+    terminals.split(terminals.focused, 'rows');
+    terminals.update(terminals.focused, { state: 'connected', sessionId: idleId });
+    const foreground = vi
+      .spyOn(terminalApi, 'hasForegroundCommand')
+      .mockImplementation(async (id) => id === runningId);
+    const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
+    await flush();
+
+    await closeSession(0);
+    expect(foreground.mock.calls).toEqual([[runningId], [idleId]]);
+    const dialog = () =>
+      document.querySelector<HTMLDialogElement>('dialog[aria-label="关闭终端"]')!;
+    expect(dialog().textContent).toContain('仍有命令在前台运行');
+    expect(close).not.toHaveBeenCalled();
+    const click = (text: string) =>
+      [...dialog().querySelectorAll('button')]
+        .find((button) => button.textContent?.trim() === text)!
+        .click();
+    click('取消');
+    await flush();
+    expect(dialog()).toBeNull();
+    expect(tab.panes).toHaveLength(2);
+    expect(close).not.toHaveBeenCalled();
+
+    await closeSession(0);
+    click('仍要关闭');
+    await flush();
+    expect(close.mock.calls).toEqual([[runningId], [idleId]]);
+    expect(terminals.hostTabs(hostId)).toHaveLength(0);
+
+    terminals.open(host);
+    terminals.update(terminals.focused, { state: 'connected', sessionId: idleId });
+    await flush();
+    await closeSession(0);
+    expect(dialog()).toBeNull();
+    expect(close).toHaveBeenLastCalledWith(idleId);
+    expect(terminals.hostTabs(hostId)).toHaveLength(0);
+  },
+);
 
 it('activating an empty host workspace does not silently create a replacement Shell', async () => {
   const terminals = useTerminalsStore(),

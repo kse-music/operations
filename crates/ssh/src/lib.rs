@@ -352,9 +352,12 @@ impl Engine {
         plan: ConnectionPlan,
         size: TerminalSize,
         sink: Sink,
-        action: serverdeck_core::files::FileTerminalAction,
+        directory: &str,
     ) -> Result<TerminalSession, Error> {
-        let command = action.command()?;
+        let command = format!(
+            "cd -- {} && exec \"${{SHELL:-/bin/sh}}\" -i",
+            serverdeck_core::files::shell_quote(directory)?
+        );
         self.open_internal(
             host,
             plan,

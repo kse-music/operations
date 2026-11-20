@@ -109,7 +109,7 @@ useErrorNotifications(fileError);
     </div>
     <div v-if="backupMode" class="import-body">
       <p class="import-intro subtle">
-        {{ tr('选择 .sdhosts 文件，恢复其中的主机、文件夹和已保存的登录凭据。') }}
+        {{ tr('选择 .sdhosts 文件，恢复主机、文件夹、已保存的登录凭据和环境标签。') }}
       </p>
     </div>
     <div v-else class="import-body">

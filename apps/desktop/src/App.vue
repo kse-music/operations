@@ -154,6 +154,12 @@ function navigate(
 ): void {
   if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
+  if (host && hostViews.has(value) && host.authType !== 'agent' && host.credentialId === null) {
+    if (store.busy || workspace.closing.includes(`host:${host.id}`)) return;
+    store.error = null;
+    credentialPrompt.value = { host, view: value, section };
+    return;
+  }
   if (value === 'terminals' && !hostId) {
     terminals.activateHost('');
     if (!terminals.active && !workspace.tabs.some((tab) => isHostTab(tab) && !tab.hostId))
@@ -189,10 +195,9 @@ function fromSearch(value: View, hostId = currentHostId.value) {
   navigate(value, hostId);
 }
 function setContext(hostId: string) {
-  const existing = workspace.tabs.some((tab) => isHostTab(tab) && tab.hostId === hostId);
-  workspace.selectHost(hostId);
-  const tab = workspace.current;
-  if (tab && (!existing || tab.view === 'terminals')) navigate(tab.view, tab.hostId, tab.section);
+  const tab = workspace.tabs.find((tab) => isHostTab(tab) && tab.hostId === hostId);
+  if (tab && tab.view !== 'terminals') workspace.activate(tab.key);
+  else navigate('terminals', hostId, tab?.section);
 }
 function tabName(tab: WorkspaceTab) {
   if (isHostTab(tab))
@@ -489,19 +494,25 @@ async function confirmExit(): Promise<void> {
     exitBusy.value = false;
   }
 }
-function fileTerminal(host: Host, action: import('./types/files').FileTerminalAction): void {
-  if (!currentConfiguration(host)) return;
-  terminals.open(host, action);
-  navigate('terminals', host.id);
+function fileTerminal(host: Host | null, directory: string): void {
+  if (workspace.navigationBlocked || (host && !currentConfiguration(host))) return;
+  if (terminals.open(host, directory)) navigate('terminals', host?.id ?? '');
+  else if (terminals.error) notifications.push(terminals.error, true);
 }
 
 const hostDialog = ref(false);
 const hostFolderId = ref<string | null>(null);
+const credentialPrompt = ref<{ host: Host; view: View; section: WorkspaceTab['section'] }>();
 const hostImport = ref<'ssh' | 'all'>();
 function openHost(groupId: string | null = null): void {
   store.error = null;
   hostFolderId.value = groupId;
   hostDialog.value = true;
+}
+function resumeHostOpen(host: Host): void {
+  const target = credentialPrompt.value;
+  // A failed catalog refresh already reports an error and may leave the old credentials in view.
+  if (target && !store.error) navigate(target.view, host.id, target.section);
 }
 function revealHost(host: Host): void {
   if (!store.visible.some((item) => item.id === host.id)) {
@@ -1025,6 +1036,13 @@ watch(
     :group-id="hostFolderId"
     @saved="revealHost"
     @close="hostDialog = false"
+  />
+  <HostDialog
+    v-if="credentialPrompt"
+    :host="credentialPrompt.host"
+    focus-authentication
+    @saved="resumeHostOpen"
+    @close="credentialPrompt = undefined"
   />
   <ImportDialog
     v-if="hostImport"

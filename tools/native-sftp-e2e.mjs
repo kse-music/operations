@@ -280,19 +280,36 @@ export async function sftpChecks({ page, artifacts, passed, registerCleanup, pro
     (value) => document.querySelector('input[aria-label="远程路径"]')?.value === value,
     `${root}/子目录`,
   );
-  await remotePath(root);
-  await context(renamed, '在新终端中打开');
-  dialog = page.getByRole('dialog', { name: '确认打开文件终端', exact: true });
-  await dialog.getByRole('button', { name: '确认打开新终端', exact: true }).click();
+  await page.getByRole('button', { name: '在当前目录打开远程终端', exact: true }).click();
+  await page.locator('.terminal-pane:visible .xterm-container[data-state="connected"]').waitFor();
+  const expectedRemote = `${root}/子目录`.replaceAll("'", "'\"'\"'");
+  await shell(
+    String.raw`if [ "$PWD" = '${expectedRemote}' ]; then printf '\n__SFTP_REMOTE_CWD_%s__\n' OK; fi`,
+  );
   await page
     .locator('.terminal-pane:visible .xterm-rows')
-    .filter({ hasText: '__SFTP_LOG_EXTERNAL__' })
+    .filter({ hasText: '__SFTP_REMOTE_CWD_OK__' })
     .waitFor();
-  await page.locator('.terminal-pane:visible .xterm-helper-textarea').focus();
-  await page.keyboard.press('q');
-  await page.locator('.terminal-pane:visible .xterm-container[data-state="closed"]').waitFor();
   await navFiles();
-  passed('native OSC 7 working-directory link and safely quoted independent less PTY');
+  const hostId = await page.locator('.workspace-tab.active').getAttribute('data-host-id');
+  assert(hostId);
+  await page.getByRole('button', { name: '在当前目录打开本地终端', exact: true }).click();
+  await page.locator('.terminal-pane:visible .xterm-container[data-state="connected"]').waitFor();
+  await shell(
+    "[Console]::WriteLine(('__SFTP_LOCAL_CWD_' + (Split-Path -Leaf (Get-Location).ProviderPath) + '__'))",
+  );
+  await page
+    .locator('.terminal-pane:visible .xterm-rows')
+    .filter({ hasText: `__SFTP_LOCAL_CWD_${path.basename(source)}__` })
+    .waitFor();
+  await page
+    .locator(`.workspace-tab[data-host-id=${JSON.stringify(hostId)}]`)
+    .getByRole('tab')
+    .click();
+  await remotePath(root);
+  passed(
+    'native OSC 7 link and both file toolbars opening independent terminals in their directories',
+  );
   // A sparse local file is a real large file, cancelled while bytes are in flight.
   const cancelFile = await open(path.join(source, 'cancel-large.bin'), 'w');
   await cancelFile.truncate(128 * 1024 * 1024);

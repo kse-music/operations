@@ -9,6 +9,7 @@ import type {
   LocalRecycle,
   LocalRename,
   FileEntry,
+  FileSide,
   PropertyRequest,
   PropertyResult,
   RemoteAction,
@@ -18,7 +19,6 @@ import type {
   ConflictPolicy,
   TextDocument,
   SaveResult,
-  FileTerminalAction,
   SftpUser,
   FileUserSession,
   ExternalDocument,
@@ -41,17 +41,18 @@ export const filesApi = {
   terminal(
     hostId: string,
     size: TerminalSize,
-    action: FileTerminalAction,
+    directory: string,
     receive: (event: TerminalEvent) => void,
   ): Promise<TerminalSession> {
     const events = new Channel<TerminalEvent>();
     events.onmessage = receive;
-    return call('file_terminal', { hostId, size, action, events });
+    return call('file_terminal', { hostId, size, directory, events });
   },
   list: (id: string, path: string) => call<DirectoryListing>('files_list', { id, path }),
-  lastDirectory: (hostId: string) => call<string | null>('files_last_directory', { hostId }),
-  rememberDirectory: (hostId: string, path: string) =>
-    call<void>('files_remember_directory', { hostId, path }),
+  lastDirectory: (hostId: string, side: FileSide) =>
+    call<string | null>('files_last_directory', { hostId, side }),
+  rememberDirectory: (hostId: string, path: string, side: FileSide) =>
+    call<void>('files_remember_directory', { hostId, path, side }),
   bookmarks: (hostId: string) => call<DirectoryBookmark[]>('files_bookmarks', { hostId }),
   addBookmark: (hostId: string, bookmark: DirectoryBookmark) =>
     call<DirectoryBookmark[]>('files_add_bookmark', { hostId, bookmark }),

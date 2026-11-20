@@ -37,14 +37,14 @@ pub async fn files_switch_user(
 pub async fn file_terminal(
     application: tauri::State<'_, Application>,
     host_id: String,
-    action: FileTerminalAction,
+    directory: String,
     size: TerminalSize,
     events: tauri::ipc::Channel<TerminalEvent>,
 ) -> Result<TerminalSession, IpcError> {
     application
         .file_terminal(
             host_id,
-            action,
+            directory,
             size,
             std::sync::Arc::new(move |event| events.send(event).is_ok()),
         )
@@ -63,9 +63,10 @@ pub async fn files_list(
 pub async fn files_last_directory(
     application: tauri::State<'_, Application>,
     host_id: String,
+    side: Option<FileSide>,
 ) -> Result<Option<String>, IpcError> {
     application
-        .files_last_directory(host_id)
+        .files_last_directory(host_id, side.unwrap_or_default())
         .await
         .map_err(Into::into)
 }
@@ -73,10 +74,11 @@ pub async fn files_last_directory(
 pub async fn files_remember_directory(
     application: tauri::State<'_, Application>,
     host_id: String,
+    side: Option<FileSide>,
     path: String,
 ) -> Result<(), IpcError> {
     application
-        .files_remember_directory(host_id, path)
+        .files_remember_directory(host_id, side.unwrap_or_default(), path)
         .await
         .map_err(Into::into)
 }

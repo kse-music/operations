@@ -62,6 +62,25 @@ class Shell:
 
 
 class SessionTest(unittest.TestCase):
+    def test_foreground_activity_is_independent_of_history_and_clears_after_interrupt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".bash_profile").write_text("PS1='ready> '; HISTFILE=/dev/null\n")
+            shell = Shell(root, "no")
+            try:
+                shell.report(b"idle", "")
+                shell.send(b"bash -c 'echo test-running; exec sleep 60'\n")
+                shell.report(b"running", "")
+                shell.report(b"cmd", "")
+                shell.until(b"test-running\r\n")
+                shell.send(b"\x03")
+                shell.report(b"idle", "")
+                shell.send(b"sleep 1 &\n")
+                shell.report(b"running", "")
+                shell.report(b"idle", "")
+            finally:
+                shell.close()
+
     def test_capture_and_restore_only_on_enter(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

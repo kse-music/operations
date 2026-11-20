@@ -322,20 +322,18 @@ pub struct EnvironmentTagInput {
     pub color: EnvironmentTagColor,
 }
 
-impl EnvironmentTagInput {
-    pub fn normalized_name(&self) -> Result<&str, Error> {
-        let name = self.name.trim();
-        if name.is_empty() || name.chars().count() > 10 || name.chars().any(char::is_control) {
-            return Err(Error::Validation(
-                "环境标签名称须为 1–10 个字符，且不含控制字符",
-            ));
-        }
-        Ok(name)
+pub fn normalize_environment_tag_name(name: &str) -> Result<&str, Error> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 10 || name.chars().any(char::is_control) {
+        return Err(Error::Validation(
+            "环境标签名称须为 1–10 个字符，且不含控制字符",
+        ));
     }
+    Ok(name)
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EnvironmentTag {
     pub id: String,
     pub name: String,

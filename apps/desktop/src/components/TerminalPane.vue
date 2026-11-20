@@ -67,7 +67,7 @@ const dropEnabled = computed(
     !props.standalone &&
     !props.tab.pluginTerminal &&
     !props.tab.containerShell &&
-    !props.tab.fileAction &&
+    !props.tab.fileDirectory &&
     !uploadProgress.value,
 );
 function canReceiveDrop(): boolean {
@@ -314,12 +314,12 @@ async function connect(explicitRestore = props.tab.restoreFromSavedMenu ?? false
             size: import('../types/terminal').TerminalSize,
             receive: (event: TerminalEvent) => void,
           ) => opsApi.shell(hostId, size, props.tab.containerShell!, receive)
-        : props.tab.fileAction
+        : props.tab.fileDirectory
           ? (
               hostId: string,
               size: import('../types/terminal').TerminalSize,
               receive: (event: TerminalEvent) => void,
-            ) => filesApi.terminal(hostId, size, props.tab.fileAction!, receive)
+            ) => filesApi.terminal(hostId, size, props.tab.fileDirectory!, receive)
           : props.tab.savedSource
             ? (
                 hostId: string,
@@ -422,7 +422,9 @@ async function connect(explicitRestore = props.tab.restoreFromSavedMenu ?? false
           )
         : props.tab.elevated
           ? terminalApi.openLocal(size, receive, true)
-          : terminalApi.openLocal(size, receive);
+          : props.tab.fileDirectory
+            ? terminalApi.openLocal(size, receive, false, props.tab.fileDirectory)
+            : terminalApi.openLocal(size, receive);
     const value = await opening;
     if (disposed || attempt !== generation) {
       await terminalApi.close(value.id);
@@ -451,7 +453,9 @@ async function changeConnection(
   if (disposed || working.value) return;
   if (
     action === 'reconnect' &&
-    (props.tab.fileAction || props.tab.containerShell || props.tab.pluginTerminal)
+    ((props.tab.host && props.tab.fileDirectory) ||
+      props.tab.containerShell ||
+      props.tab.pluginTerminal)
   )
     return;
   working.value = true;

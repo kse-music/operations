@@ -138,6 +138,7 @@ fn main() {
             "terminal_zmodem_read",
             "terminal_zmodem_write",
             "terminal_local_open",
+            "terminal_has_foreground_command",
             "terminal_ssh_saved_sessions",
             "terminal_saved_title_commands",
             "terminal_ssh_save",

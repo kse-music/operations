@@ -23,6 +23,7 @@ const originalPointerMethods = pointerMethods.map((name) =>
 const originalPoint = Object.getOwnPropertyDescriptor(document, 'elementFromPoint');
 const hitTarget = vi.fn();
 beforeEach(() => {
+  window.localStorage.clear();
   const captured = new Set<number>();
   for (const [name, value] of [
     ['setPointerCapture', (id: number) => captured.add(id)],

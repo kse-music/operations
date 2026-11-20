@@ -9,6 +9,7 @@ __sd_bash_version=$(( BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1] ))
 __sd_b64() { printf '%s' "$1" | command base64 | tr -d '\r\n'; }
 __sd_hist() { HISTTIMEFORMAT= builtin history 1; }
 __sd_previous=$(__sd_hist)
+__sd_activity() { printf '\033]777;sd-ssh;%s;%s;\007' "$__sd_token" "$1"; }
 __sd_prompt() {
     if [[ -n ${__sd_run_keys-} ]]; then
         local map
@@ -21,6 +22,7 @@ __sd_prompt() {
     fi
     __sd_previous=$(__sd_hist)
     printf '\033]777;sd-ssh;%s;cwd;%s\007' "$__sd_token" "$(__sd_b64 "$PWD")"
+    __sd_activity idle
 }
 __sd_submit() {
     local row line='' LC_ALL=C
@@ -89,7 +91,7 @@ fi
 __sd_prompt_hook=__sd_prompt
 if (( __sd_bash_version >= 404 )); then
     # PS0 expands after Readline accepts a command and before that command runs.
-    PS0='$(__sd_submit)'${PS0-}
+    PS0='$(__sd_activity running; __sd_submit)'${PS0-}
 elif [[ -z $(trap -p DEBUG) ]]; then
     # DEBUG fires for prompt hooks as well. Arm the trap only between prompts
     # so it reports once per submission, with the history rules still in effect.
@@ -113,6 +115,7 @@ elif [[ -z $(trap -p DEBUG) ]]; then
                 $BASH_COMMAND != __sd_prompt_begin && $BASH_COMMAND != __sd_legacy_insert &&
                 $BASH_COMMAND != __sd_insert_and_accept ]]; then
         __sd_pending=
+        __sd_activity running
         __sd_submit
     fi' DEBUG
 fi

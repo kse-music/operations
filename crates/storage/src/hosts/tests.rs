@@ -1,4 +1,5 @@
 use super::*;
+use FileSide::{Local, Remote};
 use serverdeck_core::openssh;
 
 fn input() -> HostInput {
@@ -115,39 +116,71 @@ fn environment_tags_are_shared_persistent_and_bound_to_existing_hosts() {
 }
 
 #[test]
-fn last_sftp_directory_is_host_scoped_persistent_and_removed_with_host() {
+fn last_file_directories_are_scoped_by_host_and_side_and_removed_with_host() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");
     let db = Database::open(&path).expect("db");
     let host = db.host_create(input()).expect("first host");
     let other = db.host_create(input()).expect("other host");
-    assert_eq!(db.sftp_last_directory(&host.id).unwrap(), None);
-    db.save_sftp_last_directory(&host.id, "/var/log/nginx".into())
+    let base = dir.path().canonicalize().unwrap();
+    let local_path = base.join("logs 中文");
+    let local_path = local_path.to_str().unwrap();
+    let other_path = base.join("app");
+    let other_path = other_path.to_str().unwrap();
+    assert_eq!(db.file_last_directory(&host.id, Local).unwrap(), None);
+    assert_eq!(db.file_last_directory(&host.id, Remote).unwrap(), None);
+    db.save_file_last_directory(&host.id, Remote, "/var/log/nginx".into())
         .unwrap();
-    db.save_sftp_last_directory(&other.id, "/srv/app".into())
+    db.save_file_last_directory(&other.id, Remote, "/srv/app".into())
         .unwrap();
-    assert!(
-        db.save_sftp_last_directory(&host.id, "../bad".into())
-            .is_err()
-    );
+    db.save_file_last_directory(&host.id, Local, local_path.into())
+        .unwrap();
+    db.save_file_last_directory(&other.id, Local, other_path.into())
+        .unwrap();
+    for side in [Local, Remote] {
+        for invalid in ["../bad", "bad\0path"] {
+            assert!(
+                db.save_file_last_directory(&host.id, side, invalid.into())
+                    .is_err()
+            );
+        }
+    }
     drop(db);
 
     let db = Database::open(path).expect("reopen");
     assert_eq!(
-        db.sftp_last_directory(&host.id).unwrap().as_deref(),
+        db.file_last_directory(&host.id, Remote).unwrap().as_deref(),
         Some("/var/log/nginx")
     );
     assert_eq!(
-        db.sftp_last_directory(&other.id).unwrap().as_deref(),
+        db.file_last_directory(&other.id, Remote)
+            .unwrap()
+            .as_deref(),
         Some("/srv/app")
     );
-    db.host_delete(&host.id).unwrap();
-    db.save_sftp_last_directory(&host.id, "/late".into())
-        .unwrap();
-    assert_eq!(db.sftp_last_directory(&host.id).unwrap(), None);
     assert_eq!(
-        db.sftp_last_directory(&other.id).unwrap().as_deref(),
+        db.file_last_directory(&host.id, Local).unwrap().as_deref(),
+        Some(local_path)
+    );
+    assert_eq!(
+        db.file_last_directory(&other.id, Local).unwrap().as_deref(),
+        Some(other_path)
+    );
+    db.host_delete(&host.id).unwrap();
+    for (side, stale_path) in [(Remote, "/late"), (Local, local_path)] {
+        db.save_file_last_directory(&host.id, side, stale_path.into())
+            .unwrap();
+        assert_eq!(db.file_last_directory(&host.id, side).unwrap(), None);
+    }
+    assert_eq!(
+        db.file_last_directory(&other.id, Remote)
+            .unwrap()
+            .as_deref(),
         Some("/srv/app")
+    );
+    assert_eq!(
+        db.file_last_directory(&other.id, Local).unwrap().as_deref(),
+        Some(other_path)
     );
 }
 
@@ -351,41 +384,48 @@ fn damage_or_unknown_versions_in_forward_rules_are_preserved() {
 }
 
 #[test]
-fn unknown_sftp_directory_format_is_preserved_and_does_not_block_catalog() {
+fn unknown_file_directory_formats_are_preserved_and_do_not_block_catalog() {
     let dir = tempfile::tempdir().expect("dir");
     let path = dir.path().join("hosts.sqlite3");
     let db = Database::open(&path).expect("db");
     let host = db.host_create(input()).expect("host");
-    let key = crate::sftp_directory::key(&host.id);
     let json = r#"{"version":2,"path":"/srv"}"#;
-    db.connect()
-        .unwrap()
-        .execute(
-            "INSERT INTO application_settings(key,value) VALUES(?1,?2)",
-            params![key, json],
-        )
-        .unwrap();
+    for key in [
+        format!("sftp_last_directory:{}", host.id),
+        format!("local_file_last_directory:{}", host.id),
+    ] {
+        db.connect()
+            .unwrap()
+            .execute(
+                "INSERT INTO application_settings(key,value) VALUES(?1,?2)",
+                params![key, json],
+            )
+            .unwrap();
+    }
 
     let db = Database::open(&path).expect("reopen");
     assert_eq!(db.catalog().unwrap().hosts.len(), 1);
-    assert!(matches!(
-        db.sftp_last_directory(&host.id),
-        Err(Error::UnsupportedConfig(2))
-    ));
-    assert!(matches!(
-        db.save_sftp_last_directory(&host.id, "/tmp".into()),
-        Err(Error::UnsupportedConfig(2))
-    ));
-    let raw: String = db
-        .connect()
-        .unwrap()
-        .query_row(
-            "SELECT value FROM application_settings WHERE key=?1",
-            [key],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(raw, json);
+    let local = dir.path().to_str().unwrap();
+    for (side, new_path) in [(Remote, "/tmp"), (Local, local)] {
+        assert!(matches!(
+            db.file_last_directory(&host.id, side),
+            Err(Error::UnsupportedConfig(2))
+        ));
+        assert!(matches!(
+            db.save_file_last_directory(&host.id, side, new_path.into()),
+            Err(Error::UnsupportedConfig(2))
+        ));
+        let raw: String = db
+            .connect()
+            .unwrap()
+            .query_row(
+                "SELECT value FROM application_settings WHERE key=?1",
+                [crate::file_directory::key(&host.id, side)],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw, json);
+    }
 }
 
 #[test]

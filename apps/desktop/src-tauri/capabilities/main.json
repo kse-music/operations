@@ -122,6 +122,7 @@
     "allow-terminal-zmodem-read",
     "allow-terminal-zmodem-write",
     "allow-terminal-local-open",
+    "allow-terminal-has-foreground-command",
     "allow-terminal-ssh-saved-sessions",
     "allow-terminal-saved-title-commands",
     "allow-terminal-ssh-save",

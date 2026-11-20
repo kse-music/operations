@@ -461,6 +461,14 @@ pub struct ExternalDocument {
     pub ready: bool,
 }
 
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileSide {
+    Local,
+    #[default]
+    Remote,
+}
+
 pub fn valid_path(path: &str) -> Result<(), Error> {
     if path.is_empty() || path.len() > 4096 || path.contains('\0') {
         return Err(Error::Validation("路径为空、包含 NUL 或超过 4096 字节"));
@@ -498,25 +506,6 @@ pub fn remote_parent(path: &str) -> Option<String> {
 pub fn shell_quote(path: &str) -> Result<String, Error> {
     remote_absolute(path)?;
     Ok(format!("'{}'", path.replace('\'', "'\"'\"'")))
-}
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum FileTerminalAction {
-    Directory { path: String },
-    View { path: String },
-    Tail { path: String },
-}
-impl FileTerminalAction {
-    pub fn command(&self) -> Result<String, Error> {
-        Ok(match self {
-            Self::Directory { path } => format!(
-                "cd -- {} && exec \"${{SHELL:-/bin/sh}}\" -i",
-                shell_quote(path)?
-            ),
-            Self::View { path } => format!("exec less -- {}", shell_quote(path)?),
-            Self::Tail { path } => format!("exec tail -f -- {}", shell_quote(path)?),
-        })
-    }
 }
 
 #[cfg(test)]

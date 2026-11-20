@@ -25,7 +25,7 @@ export interface TerminalPaneModel {
   cwd?: string;
   cipher?: string;
   screen?: import('../types/terminal').TerminalScreen;
-  fileAction?: import('../types/files').FileTerminalAction;
+  fileDirectory?: string;
   containerShell?: import('../types/ops').ContainerShell;
   pluginTerminal?: { pluginId: string; owner: string; ticket: string };
   savedSource?: { id: string; pane: number };
@@ -243,7 +243,10 @@ export const useTerminalsStore = defineStore('terminals', () => {
       !saving.value &&
       !deleting.value &&
       !changingConnections.value.includes(key) &&
-      tab.panes.every((pane) => !pane.fileAction && !pane.containerShell && !pane.pluginTerminal) &&
+      tab.panes.every(
+        (pane) =>
+          !(pane.host && pane.fileDirectory) && !pane.containerShell && !pane.pluginTerminal,
+      ) &&
       !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
       (tab.panes.every((pane) => pane.state === 'connected' && !!pane.sessionId) ||
         (!!tab.savedId &&
@@ -359,7 +362,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
       !tab.panes.some((pane) => closingPanes.has(pane.key)) &&
       tab.panes.every(
         (pane) =>
-          !pane.fileAction &&
+          !(pane.host && pane.fileDirectory) &&
           !pane.containerShell &&
           !pane.pluginTerminal &&
           ['closed', 'failed', 'disconnected'].includes(pane.state),
@@ -428,26 +431,38 @@ export const useTerminalsStore = defineStore('terminals', () => {
       if (uploads.get(key) === entry) uploads.delete(key);
     };
   }
-  function confirmUploadClose(targets: TerminalPaneModel[]): boolean | Promise<boolean> {
+  function confirmTerminalClose(
+    targets: TerminalPaneModel[],
+    running = false,
+  ): boolean | Promise<boolean> {
     const uploading = targets.filter((pane) => uploads.get(pane.key)?.active());
     const count = uploading.length;
-    return (
-      !count ||
-      usePluginsStore().ask(
-        tr('停止上传并关闭终端'),
-        tr('目标终端还有 ') +
-          count +
-          tr(
-            ' 个待确认或进行中的拖放上传。关闭将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
-          ),
-        undefined,
-        undefined,
-        { hostIds: uploading.flatMap((pane) => (pane.host ? [pane.host.id] : [])) },
-      )
+    if (!count && !running) return true;
+    const activityWarning = running
+      ? tr('目标终端仍有命令在前台运行。关闭终端可能会中断这些命令。')
+      : '';
+    const uploadWarning = count
+      ? tr('目标终端还有 ') +
+        count +
+        tr(
+          ' 个待确认或进行中的拖放上传。关闭将停止上传，保留已提交文件；断线时可能保留临时目录。是否继续？',
+        )
+      : '';
+    return usePluginsStore().ask(
+      count ? tr('停止上传并关闭终端') : tr('关闭终端'),
+      [activityWarning, uploadWarning].filter(Boolean).join('\n\n'),
+      undefined,
+      undefined,
+      {
+        hostIds: (running ? targets : uploading).flatMap((pane) =>
+          pane.host ? [pane.host.id] : [],
+        ),
+        confirmLabel: running ? tr('仍要关闭') : undefined,
+      },
     );
   }
   function confirmHostUploadClose(id: string): boolean | Promise<boolean> {
-    return confirmUploadClose(hostTabs(id).flatMap((tab) => tab.panes));
+    return confirmTerminalClose(hostTabs(id).flatMap((tab) => tab.panes));
   }
   function nextSessionNumber(hostId: string): number {
     const number = (sessionNumbers.get(hostId) ?? 0) + 1;
@@ -493,16 +508,16 @@ export const useTerminalsStore = defineStore('terminals', () => {
   }
   function open(
     host: Host | null,
-    fileAction?: import('../types/files').FileTerminalAction,
+    fileDirectory?: string,
     containerShell?: import('../types/ops').ContainerShell,
     elevated = false,
-  ): void {
+  ): boolean {
     if (runningPaneCount() >= 32) {
       error.value = tr('最多打开 32 个终端窗格。');
-      return;
+      return false;
     }
     const pane = newPane(host);
-    pane.fileAction = fileAction;
+    pane.fileDirectory = fileDirectory;
     pane.containerShell = containerShell;
     if (!host) pane.elevated = elevated;
     const key = crypto.randomUUID();
@@ -515,6 +530,7 @@ export const useTerminalsStore = defineStore('terminals', () => {
     });
     active.value = key;
     focused.value = pane.key;
+    return true;
   }
   function split(key: string, axis: SplitAxis): void {
     const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
@@ -613,22 +629,10 @@ export const useTerminalsStore = defineStore('terminals', () => {
     if (active.value === key)
       select(hostTabs(hostId)[Math.min(position, available.length - 2)]?.key ?? '', false);
   }
-  async function closePane(key: string, approved = false): Promise<void> {
-    const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
-    const pane = tab?.panes.find((p) => p.key === key);
-    if (
-      !tab ||
-      !pane ||
-      closingPanes.has(key) ||
-      changingConnections.value.includes(tab.key) ||
-      saving.value === tab.key
-    )
-      return;
-    closingPanes.add(key);
+  async function closeAndRemovePane(tab: TerminalTab, pane: TerminalPaneModel): Promise<void> {
+    const key = pane.key;
     let previousState = pane.state;
     try {
-      const decision = approved || confirmUploadClose([pane]);
-      if (decision !== true && !(await decision)) return;
       const upload = uploads.get(pane.key);
       if (upload?.active()) await upload.stop();
       if (pane.sessionId) {
@@ -649,30 +653,57 @@ export const useTerminalsStore = defineStore('terminals', () => {
     } catch (cause) {
       if (pane.state === 'closing') pane.state = previousState;
       error.value = errorMessage(cause);
-    } finally {
-      closingPanes.delete(key);
     }
   }
-  async function close(key: string, approved = false): Promise<void> {
+  async function closePanes(
+    targets: { tab: TerminalTab; pane: TerminalPaneModel }[],
+    approved = false,
+  ): Promise<void> {
+    if (
+      targets.some(
+        ({ tab, pane }) =>
+          closingPanes.has(pane.key) ||
+          changingConnections.value.includes(tab.key) ||
+          saving.value === tab.key,
+      )
+    )
+      return;
+    for (const { pane } of targets) closingPanes.add(pane.key);
+    try {
+      if (!approved) {
+        const sessions = targets.map(({ pane }) => pane.sessionId);
+        const checks = sessions.flatMap((id) => (id ? [terminalApi.hasForegroundCommand(id)] : []));
+        const running = checks.length > 0 && (await Promise.all(checks)).some(Boolean);
+        const decision = confirmTerminalClose(
+          targets.map(({ pane }) => pane),
+          running,
+        );
+        if (decision !== true && !(await decision)) return;
+        if (targets.some(({ pane }, index) => pane.sessionId !== sessions[index])) return;
+      }
+      for (const { tab, pane } of targets) await closeAndRemovePane(tab, pane);
+    } catch (cause) {
+      error.value = errorMessage(cause);
+    } finally {
+      for (const { pane } of targets) closingPanes.delete(pane.key);
+    }
+  }
+  async function closePane(key: string): Promise<void> {
+    const tab = tabs.value.find((t) => t.panes.some((p) => p.key === key));
+    const pane = tab?.panes.find((p) => p.key === key);
+    if (tab && pane) await closePanes([{ tab, pane }]);
+  }
+  async function close(key: string): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
-    if (!tab || changingConnections.value.includes(key)) return;
-    const decision = approved || confirmUploadClose(tab.panes);
-    if (decision !== true && !(await decision)) return;
-    for (const pane of [...tab.panes]) await closePane(pane.key, true);
+    if (tab) await closePanes(tab.panes.map((pane) => ({ tab, pane })));
   }
   async function closeAll(key: string, approved = false): Promise<void> {
     const tab = tabs.value.find((t) => t.key === key);
     if (!tab) return;
-    if (
-      hostTabs(tab.panes[0]?.host?.id ?? '').some((tab) =>
-        changingConnections.value.includes(tab.key),
-      )
-    )
-      return;
-    const decision = approved || confirmHostUploadClose(tab.panes[0]?.host?.id ?? '');
-    if (decision !== true && !(await decision)) return;
-    const targets = hostTabs(tab.panes[0]?.host?.id ?? '').map((t) => t.key);
-    for (const id of targets) await close(id, true);
+    const targets = hostTabs(tab.panes[0]?.host?.id ?? '').flatMap((tab) =>
+      tab.panes.map((pane) => ({ tab, pane })),
+    );
+    await closePanes(targets, approved);
   }
   async function closeWorkspace(hostId: string): Promise<void> {
     const first = hostTabs(hostId)[0];

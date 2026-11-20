@@ -394,6 +394,7 @@ mod tests {
                 size: TerminalSize { cols: 90, rows: 25 },
                 launch: ShellLaunch {
                     directory: Some(directory.clone()),
+                    require_directory: false,
                     protected_command: Some("AQID".into()),
                     auto_run: true,
                     token,

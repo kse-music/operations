@@ -653,6 +653,112 @@ describe('local file workspace ownership', () => {
     mocks.local.mockImplementation(async (path) => listing(path ?? 'C:/home'));
   });
 
+  it('restores the last successful local path after closing a host and recreating the store', async () => {
+    const saved = new Map<string, string>();
+    mocks.lastDirectory.mockImplementation(async (id, side) =>
+      side === 'local' ? (saved.get(id) ?? null) : null,
+    );
+    mocks.rememberDirectory.mockImplementation(async (id, path, side) => {
+      if (side === 'local') saved.set(id, path);
+    });
+    const firstPath = 'D:/logs 中文';
+    let store = useFilesStore();
+    store.active = 'a';
+    await store.localLoad(firstPath);
+    mocks.local.mockRejectedValueOnce({ code: 'LOCAL_PERMISSION', message: 'denied' });
+    await store.localLoad('D:/denied');
+    expect(saved.get('a')).toBe(firstPath);
+    store.active = 'b';
+    await store.localLoad('E:/project');
+
+    expect(await store.clearHostTransfers('a')).toBe(true);
+    store.active = 'a';
+    await store.localLoad();
+    expect(store.local?.path).toBe(firstPath);
+    expect(store.stepHistory('local', 'back')).toBe(false);
+
+    disposePinia(getActivePinia()!);
+    setActivePinia(createPinia());
+    store = useFilesStore();
+    store.active = 'a';
+    await store.localLoad();
+    expect(store.local?.path).toBe(firstPath);
+    store.active = 'b';
+    await store.localLoad();
+    expect(store.local?.path).toBe('E:/project');
+    expect(store.stepHistory('local', 'back')).toBe(false);
+
+    mocks.lastDirectory.mockClear();
+    await store.localLoad(null);
+    expect(mocks.lastDirectory).not.toHaveBeenCalled();
+    expect(store.local?.path).toBe('C:/home');
+    expect(saved.get('b')).toBe('C:/home');
+  });
+
+  it.each(['LOCAL_NOT_FOUND', 'LOCAL_PERMISSION', 'LOCAL_NOT_DIRECTORY'])(
+    'uses and remembers the home directory when a saved local path returns %s',
+    async (code) => {
+      const store = useFilesStore();
+      store.active = 'a';
+      mocks.lastDirectory.mockResolvedValueOnce('D:/unavailable');
+      mocks.local.mockRejectedValueOnce({ code, message: 'unavailable' });
+      await store.localLoad();
+      expect(mocks.local.mock.calls).toEqual([['D:/unavailable'], [null]]);
+      expect(store.local?.path).toBe('C:/home');
+      expect(mocks.rememberDirectory).toHaveBeenCalledExactlyOnceWith('a', 'C:/home', 'local');
+    },
+  );
+
+  it('keeps a saved location intact when loading its setting fails', async () => {
+    const store = useFilesStore();
+    store.active = 'a';
+    mocks.lastDirectory.mockRejectedValueOnce({ message: 'invalid setting' });
+    await store.localLoad();
+    expect(store.local?.path).toBe('C:/home');
+    expect(store.error).toContain('invalid setting');
+    expect(mocks.rememberDirectory).not.toHaveBeenCalled();
+  });
+
+  it('waits for the latest local write before restoring a reopened host and exiting', async () => {
+    const store = useFilesStore();
+    store.active = 'a';
+    let written: string | null = null;
+    let finish!: () => void;
+    mocks.lastDirectory.mockImplementation(async () => written);
+    mocks.rememberDirectory
+      .mockImplementationOnce(
+        (_id, path) =>
+          new Promise<void>((resolve) => {
+            finish = () => {
+              written = path;
+              resolve();
+            };
+          }),
+      )
+      .mockImplementation(async (_id, path) => {
+        written = path;
+      });
+    const first = store.localLoad('D:/first');
+    await vi.waitFor(() => expect(mocks.rememberDirectory).toHaveBeenCalledOnce());
+    const second = store.localLoad('D:/latest');
+    await vi.waitFor(() => expect(store.local?.path).toBe('D:/latest'));
+    expect(await store.clearHostTransfers('a')).toBe(true);
+    const reopening = store.localLoad();
+    const flushed = vi.fn();
+    const exit = store.flushDirectoryWrites().then(flushed);
+    await Promise.resolve();
+    expect(flushed).not.toHaveBeenCalled();
+    expect(mocks.lastDirectory).not.toHaveBeenCalled();
+    finish();
+    await Promise.all([first, second, reopening, exit]);
+    expect(mocks.rememberDirectory.mock.calls).toEqual([
+      ['a', 'D:/first', 'local'],
+      ['a', 'D:/latest', 'local'],
+    ]);
+    expect(store.local?.path).toBe('D:/latest');
+    expect(flushed).toHaveBeenCalledOnce();
+  });
+
   it('keeps local directories and back/forward history on each host', async () => {
     const store = useFilesStore();
     store.active = 'a';
@@ -937,7 +1043,7 @@ describe('file workspace ownership', () => {
     finish({ path: '/old', parent: '/', entries: [] });
     await slow;
     expect(store.current?.path).toBe('/new');
-    expect(mocks.rememberDirectory).not.toHaveBeenCalledWith(host.id, '/old');
+    expect(mocks.rememberDirectory).not.toHaveBeenCalledWith(host.id, '/old', 'remote');
     expect(store.stepHistory('remote', 'back')).toBe(true);
     await vi.waitFor(() => expect(store.current?.path).toBe('/home'));
     expect(store.stepHistory('remote', 'back')).toBe(false);
@@ -946,9 +1052,11 @@ describe('file workspace ownership', () => {
   it('restores the last successful remote directory separately for each host after recreating the store', async () => {
     const saved = new Map<string, string>();
     const other = { ...host, id: 'other' };
-    mocks.lastDirectory.mockImplementation(async (id: string) => saved.get(id) ?? null);
-    mocks.rememberDirectory.mockImplementation(async (id: string, path: string) => {
-      saved.set(id, path);
+    mocks.lastDirectory.mockImplementation(async (id, side) =>
+      side === 'remote' ? (saved.get(id) ?? null) : null,
+    );
+    mocks.rememberDirectory.mockImplementation(async (id, path, side) => {
+      if (side === 'remote') saved.set(id, path);
     });
     mocks.open.mockImplementation(async (id, receive) => {
       receive({ type: 'state', state: 'connected' });
@@ -993,7 +1101,7 @@ describe('file workspace ownership', () => {
         receive({ type: 'state', state: 'connected' });
         return { id: 'session' };
       });
-      mocks.lastDirectory.mockResolvedValue('/old/path');
+      mocks.lastDirectory.mockResolvedValueOnce('/old/path');
       mocks.list
         .mockRejectedValueOnce({ code, message: 'unavailable' })
         .mockResolvedValueOnce({ path: '/home/ops', parent: '/home', entries: [] });
@@ -1005,7 +1113,9 @@ describe('file workspace ownership', () => {
       ]);
       expect(store.current?.path).toBe('/home/ops');
       expect(store.current?.error).toBeNull();
-      expect(mocks.rememberDirectory).toHaveBeenCalledExactlyOnceWith(host.id, '/home/ops');
+      expect(mocks.rememberDirectory.mock.calls.filter(([, , side]) => side === 'remote')).toEqual([
+        [host.id, '/home/ops', 'remote'],
+      ]);
     },
   );
 
@@ -1014,14 +1124,14 @@ describe('file workspace ownership', () => {
       receive({ type: 'state', state: 'connected' });
       return { id: 'session' };
     });
-    mocks.lastDirectory.mockResolvedValue('/old/path');
+    mocks.lastDirectory.mockResolvedValueOnce('/old/path');
     mocks.list.mockRejectedValue({ code: 'SFTP_NETWORK', message: 'network failed' });
     const store = useFilesStore();
     await store.open(host);
     expect(mocks.list).toHaveBeenCalledExactlyOnceWith('session', '/old/path');
     expect(store.current?.state).toBe('failed');
     expect(store.current?.error).toBe('network failed');
-    expect(mocks.rememberDirectory).not.toHaveBeenCalled();
+    expect(mocks.rememberDirectory.mock.calls.some(([, , side]) => side === 'remote')).toBe(false);
   });
 
   it('finishes overlapping directory writes in navigation order before exit', async () => {
@@ -1048,8 +1158,8 @@ describe('file workspace ownership', () => {
     completeFirst();
     await Promise.all([first, second, exit]);
     expect(mocks.rememberDirectory.mock.calls).toEqual([
-      [host.id, '/first'],
-      [host.id, '/second'],
+      [host.id, '/first', 'remote'],
+      [host.id, '/second', 'remote'],
     ]);
     expect(flushed).toHaveBeenCalledOnce();
   });

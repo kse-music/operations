@@ -697,16 +697,23 @@ impl Application {
     pub async fn terminal_close_host(&self, host_id: &str) -> Result<(), Error> {
         self.operations_host.close_host(host_id).await
     }
+    pub fn terminal_has_foreground_command(&self, id: &str) -> Result<bool, Error> {
+        if id.starts_with("local:") {
+            return self.local_terminals.has_foreground_command(id);
+        }
+        self.terminals.has_foreground_command(id)
+    }
     pub async fn terminal_local_open(
         &self,
         size: TerminalSize,
         sink: Sink,
+        directory: Option<String>,
     ) -> Result<serverdeck_core::terminal::LocalTerminalSession, Error> {
         if self.shutting_down.load(Ordering::Acquire) {
             return Err(Error::ShuttingDown);
         }
         size.validate()?;
-        self.local_terminals.open(size, sink).await
+        self.local_terminals.open(size, sink, directory).await
     }
     pub async fn terminal_local_open_elevated(
         &self,

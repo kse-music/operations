@@ -83,6 +83,7 @@ export const terminalApi = {
     size: TerminalSize,
     receive: (event: TerminalEvent) => void,
     elevated = false,
+    directory?: string,
   ): Promise<LocalTerminalSession> {
     ensureDesktop();
     const events = new Channel<TerminalEvent>();
@@ -90,6 +91,7 @@ export const terminalApi = {
     return invoke(elevated ? 'terminal_local_open_elevated' : 'terminal_local_open', {
       size,
       events,
+      ...(!elevated && directory !== undefined && { directory }),
     });
   },
   open(
@@ -131,6 +133,8 @@ export const terminalApi = {
     invoke('terminal_resize', { id, size: { cols: size.cols, rows: size.rows } }),
   ack: (id: string, sequence: number): Promise<void> => invoke('terminal_ack', { id, sequence }),
   trust: (id: string, accept: boolean): Promise<void> => invoke('terminal_trust', { id, accept }),
+  hasForegroundCommand: (id: string): Promise<boolean> =>
+    invoke('terminal_has_foreground_command', { id }),
   close: (id: string): Promise<void> => invoke('terminal_close', { id }),
   closeHost: (hostId: string): Promise<void> => invoke('terminal_close_host', { hostId }),
 };

@@ -59,7 +59,6 @@ import {
   type ConflictPolicy,
   type Direction,
   type TransferInfo,
-  type FileTerminalAction,
   type FileSearchResult,
   type NewDirectoryInput,
 } from '../types/files';
@@ -67,7 +66,7 @@ import { hostDisplayName, type Host } from '../types/hosts';
 const props = defineProps<{ hostId?: string; inactive?: boolean }>();
 const application = useApplicationStore();
 const emit = defineEmits<{
-  terminal: [host: Host, action: FileTerminalAction];
+  terminal: [host: Host | null, directory: string];
 }>();
 const store = useFilesStore(),
   hosts = useHostsStore(),
@@ -284,8 +283,7 @@ const menu = ref<{ side: 'local' | 'remote'; entry: FileEntry; x: number; y: num
     name: string;
     hasDirectory: boolean;
   } | null>(null),
-  properties = ref<{ id: string; hostId: string; entry: FileEntry } | null>(null),
-  terminalAction = ref<FileTerminalAction | null>(null);
+  properties = ref<{ id: string; hostId: string; entry: FileEntry } | null>(null);
 const remoteCopy = ref<{
   id: string;
   hostId: string;
@@ -459,6 +457,15 @@ const remoteConnection = computed(() => {
 const treeConnection = computed(() =>
   remoteConnection.value?.listing ? remoteConnection.value : null,
 );
+const localTerminalDirectory = computed(() =>
+  !props.inactive && !store.localLoading ? store.local?.path : undefined,
+);
+const remoteTerminalConnection = computed(() => {
+  const connection = treeConnection.value;
+  return !props.inactive && connection?.host.id === chosen.value && !connection.loading
+    ? connection
+    : null;
+});
 async function selectRemoteFolder(path: string): Promise<void> {
   if (store.current?.state !== 'connected' || store.closingHosts.includes(chosen.value)) return;
   if (remoteFolders.value.some((folder) => folder.path === path)) await store.navigate(path);
@@ -1021,11 +1028,12 @@ async function showProperties(): Promise<void> {
     store.error = errorMessage(cause);
   }
 }
-function requestTerminal(kind: 'directory' | 'view'): void {
-  const entry = menu.value?.entry;
-  if (!entry) return;
-  terminalAction.value = { kind, path: entry.path };
-  menu.value = null;
+function openLocalTerminal(): void {
+  if (localTerminalDirectory.value) emit('terminal', null, localTerminalDirectory.value);
+}
+function openRemoteTerminal(): void {
+  const connection = remoteTerminalConnection.value;
+  if (connection?.listing) emit('terminal', connection.host, connection.listing.path);
 }
 async function openEntry(side: 'local' | 'remote', entry: FileEntry): Promise<void> {
   if (entry.kind === 'directory' || entry.kind === 'symlink') {
@@ -1157,7 +1165,7 @@ onBeforeUnmount(() => {
             class="tool-button"
             :aria-label="tr('刷新本地')"
             :title="tr('刷新本地')"
-            @click="store.localLoad(store.local?.path ?? null)"
+            @click="store.localLoad(store.local?.path)"
           >
             <RefreshCw class="menu-icon-green" :size="14" aria-hidden="true" /></button
           ><button
@@ -1205,6 +1213,16 @@ onBeforeUnmount(() => {
             @click="showLocalTree = !showLocalTree"
           >
             <FolderTree class="menu-icon-gold" :size="16" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            type="button"
+            :aria-label="tr('在当前目录打开本地终端')"
+            :title="tr('在当前目录打开本地终端')"
+            :disabled="!localTerminalDirectory"
+            @click="openLocalTerminal"
+          >
+            <SquareTerminal class="menu-icon-purple" :size="16" aria-hidden="true" />
           </button>
         </div>
         <div class="file-browser" :class="{ 'with-tree': showLocalTree && localRoot }">
@@ -1404,6 +1422,16 @@ onBeforeUnmount(() => {
             @click="showRemoteTree = !showRemoteTree"
           >
             <FolderTree class="menu-icon-gold" :size="16" aria-hidden="true" />
+          </button>
+          <button
+            class="tool-button"
+            type="button"
+            :aria-label="tr('在当前目录打开远程终端')"
+            :title="tr('在当前目录打开远程终端')"
+            :disabled="!remoteTerminalConnection"
+            @click="openRemoteTerminal"
+          >
+            <SquareTerminal class="menu-icon-purple" :size="16" aria-hidden="true" />
           </button>
         </div>
         <div class="file-browser" :class="{ 'with-tree': showRemoteTree && treeConnection }">
@@ -1626,13 +1654,6 @@ onBeforeUnmount(() => {
         <Trash2 class="file-menu-delete" aria-hidden="true" />{{ tr('删除') }}</button
       ><button role="menuitem" @click="mutate('rename', menu!.side)">
         <TextCursorInput class="file-menu-rename" aria-hidden="true" />{{ tr('重命名') }}</button
-      ><button
-        v-if="menu.side === 'remote'"
-        role="menuitem"
-        @click="requestTerminal(menu!.entry.kind === 'directory' ? 'directory' : 'view')"
-      >
-        <SquareTerminal class="file-menu-terminal" aria-hidden="true" />
-        {{ tr(' 在新终端中打开 ') }}</button
       ><button role="menuitem" @click="showProperties">
         <Info class="file-menu-properties" aria-hidden="true" />{{ tr('属性') }}
       </button>
@@ -1803,34 +1824,6 @@ onBeforeUnmount(() => {
       <button class="button" @click="store.trust(false)">{{ tr('拒绝连接') }}</button
       ><button class="button primary" @click="store.trust(true)">
         {{ tr('已核对，信任并连接') }}
-      </button>
-    </footer></Modal
-  >
-  <Modal
-    v-if="terminalAction"
-    :title="tr('确认打开文件终端')"
-    :host-ids="store.current ? [store.current.host.id] : undefined"
-    @close="terminalAction = null"
-    ><p>
-      {{ hostDisplayName(store.current?.host) }} ·
-      {{ terminalAction.kind === 'view' ? tr('运行 less') : tr('进入目录并打开交互式 Shell') }}
-    </p>
-    <pre class="file-path-preview">{{ terminalAction.path }}</pre>
-    <p>
-      {{
-        tr('将新建独立 PTY，路径通过后端固定命令和 POSIX 单引号转义处理，不向已有 Shell 注入输入。')
-      }}
-    </p>
-    <footer class="dialog-actions">
-      <button class="button" @click="terminalAction = null">{{ tr('取消') }}</button
-      ><button
-        class="button primary"
-        @click="
-          emit('terminal', store.current!.host, terminalAction!);
-          terminalAction = null;
-        "
-      >
-        {{ tr(' 确认打开新终端 ') }}
       </button>
     </footer></Modal
   >

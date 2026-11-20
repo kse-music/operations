@@ -463,10 +463,12 @@ async fn shell_only_ssh_server_can_restore_layout_without_sending_a_command() {
     };
     let mut first = open(None);
     state(&mut first, "connected").await;
+    assert!(!engine.has_foreground_command(&first.info.id).unwrap());
     let snapshot = engine.shell_snapshot(&host.id, &first.info.id).unwrap();
     assert!(snapshot.state.is_none());
     assert!(engine.shell_snapshot("other", &first.info.id).is_err());
     engine.close(&first.info.id).await.unwrap();
+    assert!(!engine.has_foreground_command(&first.info.id).unwrap());
     let mut restored = open(Some(snapshot));
     state(&mut restored, "connected").await;
     engine

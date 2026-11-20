@@ -1,4 +1,6 @@
 import { displayLocalPath } from '@serverdeck/plugin-sdk/paths';
+
+export type FileSide = 'local' | 'remote';
 import { tr } from '../i18n/messages';
 export type EntryKind = 'file' | 'directory' | 'symlink' | 'other';
 export interface FileEntry {
@@ -202,7 +204,6 @@ export interface ExternalDocument {
   atomicSave: boolean;
   ready: boolean;
 }
-export type FileTerminalAction = { kind: 'directory' | 'view' | 'tail'; path: string };
 export const unfinished = (task: TransferInfo): boolean =>
   ['queued', 'scanning', 'running', 'verifying', 'awaitingRestart', 'cancelling'].includes(
     task.state,

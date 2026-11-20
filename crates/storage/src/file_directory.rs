@@ -1,6 +1,7 @@
 use super::*;
 use serde::{Deserialize, Serialize};
-use serverdeck_core::files::remote_absolute;
+use serverdeck_core::files::{FileSide, remote_absolute, valid_path};
+use std::path::Path;
 
 const VERSION: u32 = 1;
 
@@ -11,11 +12,28 @@ struct SavedDirectory {
     path: String,
 }
 
-pub(super) fn key(host_id: &str) -> String {
-    format!("sftp_last_directory:{host_id}")
+pub(super) fn key(host_id: &str, side: FileSide) -> String {
+    let prefix = match side {
+        FileSide::Local => "local_file_last_directory",
+        FileSide::Remote => "sftp_last_directory",
+    };
+    format!("{prefix}:{host_id}")
 }
 
-fn load(connection: &Connection, key: &str) -> Result<Option<String>, Error> {
+fn validate_path(path: &str, side: FileSide) -> Result<(), Error> {
+    match side {
+        FileSide::Remote => remote_absolute(path),
+        FileSide::Local => {
+            valid_path(path)?;
+            if !Path::new(path).is_absolute() {
+                return Err(Error::Validation("本地目录必须是绝对路径"));
+            }
+            Ok(())
+        }
+    }
+}
+
+fn load(connection: &Connection, key: &str, side: FileSide) -> Result<Option<String>, Error> {
     let json: Option<String> = connection
         .query_row(
             "SELECT value FROM application_settings WHERE key=?1",
@@ -29,17 +47,26 @@ fn load(connection: &Connection, key: &str) -> Result<Option<String>, Error> {
     if directory.version != VERSION {
         return Err(Error::UnsupportedConfig(directory.version));
     }
-    remote_absolute(&directory.path)?;
+    validate_path(&directory.path, side)?;
     Ok(Some(directory.path))
 }
 
 impl Database {
-    pub fn sftp_last_directory(&self, host_id: &str) -> Result<Option<String>, Error> {
-        load(&self.connect()?, &key(host_id))
+    pub fn file_last_directory(
+        &self,
+        host_id: &str,
+        side: FileSide,
+    ) -> Result<Option<String>, Error> {
+        load(&self.connect()?, &key(host_id, side), side)
     }
 
-    pub fn save_sftp_last_directory(&self, host_id: &str, path: String) -> Result<(), Error> {
-        remote_absolute(&path)?;
+    pub fn save_file_last_directory(
+        &self,
+        host_id: &str,
+        side: FileSide,
+        path: String,
+    ) -> Result<(), Error> {
+        validate_path(&path, side)?;
         let mut connection = self.connect()?;
         let tx = connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -51,12 +78,12 @@ impl Database {
                 |row| row.get(0),
             )
             .map_err(storage_error)?;
-        // An open SFTP session can outlive its saved host.
+        // A directory read can complete after its host has been removed.
         if !exists {
             return Ok(());
         }
-        let key = key(host_id);
-        if load(&tx, &key)?.as_deref() == Some(path.as_str()) {
+        let key = key(host_id, side);
+        if load(&tx, &key, side)?.as_deref() == Some(path.as_str()) {
             return Ok(());
         }
         let json = serde_json::to_string(&SavedDirectory {

@@ -69,7 +69,31 @@ const emit = defineEmits<{
   plugin: [id: string, contribution: string, hostId: string];
   manageEnvironmentTags: [];
 }>();
-const collapsed = ref<string[]>([]);
+const collapsedFoldersKey = 'serverdeck.host-tree.collapsed.v1';
+function readCollapsedFolders(): string[] {
+  try {
+    const saved = window.localStorage.getItem(collapsedFoldersKey);
+    if (saved === null) return [];
+    const ids: unknown = JSON.parse(saved);
+    if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) return ids;
+  } catch {
+    // Unavailable or malformed storage falls back to the default tree.
+  }
+  console.warn('Could not restore host folder expansion state.');
+  return [];
+}
+const collapsed = ref(readCollapsedFolders());
+watch(
+  collapsed,
+  (ids) => {
+    try {
+      window.localStorage.setItem(collapsedFoldersKey, JSON.stringify(ids));
+    } catch {
+      console.warn('Could not save host folder expansion state.');
+    }
+  },
+  { flush: 'sync' },
+);
 const selectedFolder = ref<string>();
 watch(
   () => store.selectedId,
@@ -218,12 +242,15 @@ watch(
 );
 watch(
   () => [store.selectedId, store.catalog] as const,
-  ([id], [previousId]) => {
-    const host = store.catalog?.hosts.find((item) => item.id === id);
+  ([id], [previousId, previousCatalog]) => {
+    const host = store.selected;
     if (!host) return;
     if (id !== previousId && favoritesOnly.value && !host.favorite) showFavorites(false);
-    const ancestors = folderAncestors(store.catalog?.groups ?? [], host.groupId);
-    collapsed.value = collapsed.value.filter((group) => !ancestors.includes(group));
+    if (
+      id !== previousId ||
+      previousCatalog?.hosts.find((item) => item.id === id)?.groupId !== host.groupId
+    )
+      revealFolder(host.groupId);
     const index = visibleHosts.value.findIndex((item) => item.id === id);
     if (index >= limit.value) limit.value = Math.ceil((index + 1) / 200) * 200;
   },
@@ -275,6 +302,11 @@ function toggle(id: string): void {
   collapsed.value = collapsed.value.includes(id)
     ? collapsed.value.filter((i) => i !== id)
     : [...collapsed.value, id];
+}
+function revealFolder(id: string | null): void {
+  const ancestors = folderAncestors(store.catalog?.groups ?? [], id);
+  const remaining = collapsed.value.filter((group) => !ancestors.includes(group));
+  if (remaining.length !== collapsed.value.length) collapsed.value = remaining;
 }
 
 type HostTarget = { kind: 'host'; id: string; favoriteRow: boolean };
@@ -679,8 +711,7 @@ async function runContext(action: MenuAction): Promise<void> {
 function folderSaved(group: HostGroup): void {
   showFavorites(false);
   store.search = '';
-  const ancestors = folderAncestors(store.catalog?.groups ?? [], group.id);
-  collapsed.value = collapsed.value.filter((id) => !ancestors.includes(id));
+  revealFolder(group.id);
 }
 async function removeFolder(): Promise<void> {
   const group = deletingFolder.value;
@@ -701,7 +732,13 @@ watch(
         !catalog.groups.some((group) => group.id === selectedFolder.value))
     )
       selectedFolder.value = undefined;
+    if (catalog && collapsed.value.length) {
+      const groupIds = new Set(catalog.groups.map((group) => group.id));
+      const remaining = collapsed.value.filter((id) => groupIds.has(id));
+      if (remaining.length !== collapsed.value.length) collapsed.value = remaining;
+    }
   },
+  { immediate: true },
 );
 watch(
   () => [store.catalog, store.search] as const,

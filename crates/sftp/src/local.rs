@@ -12,6 +12,7 @@ pub(crate) fn io(error: std::io::Error) -> Error {
         std::io::ErrorKind::PermissionDenied => ("LOCAL_PERMISSION", "本地文件权限不足"),
         std::io::ErrorKind::AlreadyExists => ("FILE_CONFLICT", "目标已存在，请选择冲突策略"),
         std::io::ErrorKind::NotFound => ("LOCAL_NOT_FOUND", "本地路径不存在，请刷新"),
+        std::io::ErrorKind::NotADirectory => ("LOCAL_NOT_DIRECTORY", "本地路径不是目录"),
         _ => ("LOCAL_IO", "本地文件读写失败，请检查路径、空间和权限"),
     };
     Error::Connection {

@@ -84,6 +84,8 @@ beforeEach(async () => {
     { path: 'C:\\', name: 'C: 本地磁盘' },
     { path: 'D:\\', name: 'D: 本地磁盘' },
   ]);
+  vi.spyOn(filesApi, 'lastDirectory').mockResolvedValue(null);
+  vi.spyOn(filesApi, 'rememberDirectory').mockResolvedValue();
   await mountView();
 });
 afterEach(() => {
@@ -1207,7 +1209,6 @@ it.each([
       ...(side === 'remote' ? ['远程复制'] : []),
       '删除',
       '重命名',
-      ...(side === 'remote' ? ['在新终端中打开'] : []),
       '属性',
     ]);
     for (const button of buttons) {
@@ -1219,6 +1220,27 @@ it.each([
     expect(root.querySelector('.file-context-menu')).toBeNull();
   },
 );
+
+it('places the terminal shortcuts after the directory trees and disables unavailable targets', async () => {
+  const files = useFilesStore(pinia);
+  const local = root.querySelector<HTMLButtonElement>('[aria-label="在当前目录打开本地终端"]')!;
+  const remote = root.querySelector<HTMLButtonElement>('[aria-label="在当前目录打开远程终端"]')!;
+  expect(local.previousElementSibling?.getAttribute('aria-label')).toBe('显示本地目录树');
+  expect(remote.previousElementSibling?.getAttribute('aria-label')).toBe('显示远程目录树');
+  expect(local.disabled).toBe(false);
+  expect(remote.disabled).toBe(false);
+
+  files.local = null;
+  files.current!.loading = true;
+  await nextTick();
+  expect(local.disabled).toBe(true);
+  expect(remote.disabled).toBe(true);
+
+  files.current!.loading = false;
+  files.current!.switchingUser = true;
+  await nextTick();
+  expect(remote.disabled).toBe(true);
+});
 
 it.each(['local', 'remote'] as const)(
   'closes the %s file menu on a right-click anywhere else, even when propagation is stopped',
@@ -1947,6 +1969,7 @@ it('navigates to a selected ancestor through the current SFTP connection and rec
   expect(folderName()).toBe('srv');
   expect(folderOptions()).toHaveLength(0);
   expect(files.local).toBe(local);
+  await vi.waitFor(() => expect(files.current?.loading).toBe(false));
   expect(files.stepHistory('remote', 'back')).toBe(true);
   await vi.waitFor(() => expect(files.current?.path).toBe('/srv/api'));
   expect(folderName()).toBe('api');

@@ -4,14 +4,21 @@ $global:serverDeckPending = $env:SERVERDECK_START_COMMAND
 if ($null -ne $global:serverDeckPending) { Remove-Item Env:\SERVERDECK_START_COMMAND }
 $global:serverDeckRunSavedCommand = $env:SERVERDECK_RUN_SAVED_COMMAND -eq '1'
 $env:SERVERDECK_RUN_SAVED_COMMAND = $null
+$serverDeckRequireDirectory = $env:SERVERDECK_REQUIRE_START_DIRECTORY -eq '1'
+$env:SERVERDECK_REQUIRE_START_DIRECTORY = $null
 if ($env:SERVERDECK_START_DIRECTORY) {
     try { Set-Location -LiteralPath $env:SERVERDECK_START_DIRECTORY -ErrorAction Stop }
     catch {
+        if ($serverDeckRequireDirectory) {
+            Write-Error -ErrorRecord $_ -ErrorAction Continue
+            exit 1
+        }
         $global:serverDeckPending = $null
         Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop
     }
     Remove-Item Env:\SERVERDECK_START_DIRECTORY
 }
+Remove-Variable serverDeckRequireDirectory
 function global:prompt {
     $serverDeckDirectory = ''
     if ($PWD.Provider.Name -eq 'FileSystem') { $serverDeckDirectory = $PWD.ProviderPath }
@@ -20,6 +27,9 @@ function global:prompt {
 }
 function global:Write-ServerDeckCommand([string] $blob) {
     [Console]::Write(([string][char]27 + ']777;serverdeck-command;__TOKEN__;' + $blob + [char]7))
+}
+function global:Write-ServerDeckActivity([string] $state) {
+    [Console]::Write(([string][char]27 + ']777;serverdeck-activity;__TOKEN__;' + $state + [char]7))
 }
 function global:Test-ServerDeckLine([string] $line) {
     return ![string]::IsNullOrWhiteSpace($line) -and $line -notmatch '[\p{Cc}\p{Zl}\p{Zp}]' -and
@@ -32,6 +42,7 @@ try {
     $global:serverDeckReadLine = (Get-Command PSConsoleHostReadLine -CommandType Function -ErrorAction Stop).ScriptBlock
     $global:serverDeckDefaultHistory = (Get-PSReadLineOption).AddToHistoryHandler
     function global:PSConsoleHostReadLine {
+        Write-ServerDeckActivity 'idle'
         $submitSavedLine = $global:serverDeckRunSavedCommand -and $global:serverDeckPending
         if ($submitSavedLine) {
             # Return the validated line through the host's normal command-input path.
@@ -43,6 +54,7 @@ try {
         }
         $global:serverDeckPending = $null
         if (![string]::IsNullOrWhiteSpace($line)) {
+            Write-ServerDeckActivity 'running'
             $blob = ''
             try {
                 $options = Get-PSReadLineOption

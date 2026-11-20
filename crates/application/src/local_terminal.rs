@@ -169,6 +169,17 @@ impl LocalTerminals {
             elevated: control.elevated.load(Ordering::Acquire),
         })
     }
+    pub(crate) fn has_foreground_command(&self, id: &str) -> Result<bool, Error> {
+        let control = match self.get(id) {
+            Ok(control) => control,
+            Err(Error::NotFound) => return Ok(false),
+            Err(error) => return Err(error),
+        };
+        if control.cancelled.load(Ordering::Acquire) || *control.done.borrow() {
+            return Ok(false);
+        }
+        Ok(lock(&control.shell_state)?.command_running)
+    }
     pub(crate) async fn open_saved(
         &self,
         pane: serverdeck_core::terminal::SavedLocalPane,
@@ -185,6 +196,7 @@ impl LocalTerminals {
             pane.elevated,
             Some(ShellLaunch {
                 directory: Some(pane.directory),
+                require_directory: false,
                 protected_command: pane.protected_command,
                 auto_run,
                 token: uuid::Uuid::new_v4(),
@@ -196,8 +208,16 @@ impl LocalTerminals {
         &self,
         size: TerminalSize,
         sink: Sink,
+        directory: Option<String>,
     ) -> Result<LocalTerminalSession, Error> {
-        self.open_mode(size, sink, false, None).await
+        let launch = directory.map(|directory| ShellLaunch {
+            directory: Some(directory),
+            require_directory: true,
+            protected_command: None,
+            auto_run: false,
+            token: uuid::Uuid::new_v4(),
+        });
+        self.open_mode(size, sink, false, launch).await
     }
     pub(crate) async fn open_elevated(
         &self,
@@ -219,6 +239,7 @@ impl LocalTerminals {
         size.validate()?;
         let launch = launch.unwrap_or_else(|| ShellLaunch {
             directory: None,
+            require_directory: false,
             protected_command: None,
             auto_run: false,
             token: uuid::Uuid::new_v4(),
@@ -462,7 +483,7 @@ fn run(
         let elevated = false;
         control.elevated.store(elevated, Ordering::Release);
         let (mut command, name) = shell()?;
-        launch.configure(&mut command);
+        launch.configure(&mut command)?;
         let pair = native_pty_system()
             .openpty(dimensions(size))
             .map_err(|error| failed("无法创建本地伪终端", error))?;
@@ -918,6 +939,57 @@ mod tests {
 
     #[cfg(windows)]
     #[tokio::test(flavor = "multi_thread")]
+    async fn real_powershell_tracks_a_batch_program_until_it_returns_to_input() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("run.cmd"),
+            "@echo off\r\necho SD_BATCH_RUNNING\r\nping -n 4 127.0.0.1 >nul\r\n",
+        )
+        .unwrap();
+        let terminals = LocalTerminals::new();
+        let size = TerminalSize { cols: 90, rows: 25 };
+        let token = uuid::Uuid::new_v4();
+        let idle = format!("\x1b]777;serverdeck-activity;{token};idle\x07");
+        let (sink, mut output) = events();
+        let session = terminals
+            .open_mode(
+                size,
+                sink,
+                false,
+                Some(ShellLaunch {
+                    directory: Some(root.path().to_str().unwrap().into()),
+                    require_directory: false,
+                    protected_command: None,
+                    auto_run: false,
+                    token,
+                }),
+            )
+            .await
+            .unwrap();
+        let id = &session.id;
+        until(&terminals, id, &mut output, &idle).await;
+        assert!(!terminals.has_foreground_command(id).unwrap());
+
+        // The close warning must still work when command history is disabled.
+        terminals
+            .input(
+                id,
+                b"Set-PSReadLineOption -HistorySaveStyle SaveNothing\r".to_vec(),
+            )
+            .unwrap();
+        until(&terminals, id, &mut output, &idle).await;
+        terminals.input(id, b".\\run.cmd\r".to_vec()).unwrap();
+        until(&terminals, id, &mut output, "SD_BATCH_RUNNING").await;
+        assert!(terminals.has_foreground_command(id).unwrap());
+        until(&terminals, id, &mut output, &idle).await;
+        assert!(!terminals.has_foreground_command(id).unwrap());
+
+        terminals.close(id).await.unwrap();
+        assert!(!terminals.has_foreground_command(id).unwrap());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread")]
     async fn real_powershell_manual_sessions_are_independent_and_new_shells_start_at_home() {
         use serverdeck_core::terminal::{LocalTerminalLayout, SaveTerminalInput};
         let root = tempfile::tempdir().unwrap();
@@ -946,7 +1018,7 @@ mod tests {
             rows: 30,
         };
         let (sink, mut first_events) = events();
-        let first = app.terminal_local_open(size, sink).await.unwrap();
+        let first = app.terminal_local_open(size, sink, None).await.unwrap();
         until_directory(&app.local_terminals, &first.id, &mut first_events, &home).await;
         assert!(
             app.local_terminals
@@ -985,7 +1057,7 @@ mod tests {
             .await
             .unwrap();
         let (sink, mut second_events) = events();
-        let second = app.terminal_local_open(size, sink).await.unwrap();
+        let second = app.terminal_local_open(size, sink, None).await.unwrap();
         until_directory(&app.local_terminals, &second.id, &mut second_events, &home).await;
         let command = format!(
             "Set-Location -LiteralPath '{}'\r",
@@ -1220,7 +1292,7 @@ mod tests {
             app.terminal_close(&reopened.id).await.unwrap();
         }
         let (sink, mut output) = events();
-        let ordinary = app.terminal_local_open(size, sink).await.unwrap();
+        let ordinary = app.terminal_local_open(size, sink, None).await.unwrap();
         until_directory(&app.local_terminals, &ordinary.id, &mut output, &home).await;
         app.terminal_input(
             &ordinary.id,
@@ -1269,18 +1341,81 @@ mod tests {
         app.shutdown().await;
     }
 
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn file_browser_opens_powershell_in_the_listed_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("中文 space '&;$");
+        std::fs::create_dir(&target).unwrap();
+        let marker_file = target.join("marker.txt");
+        std::fs::write(&marker_file, "current directory").unwrap();
+        let app =
+            crate::Application::initialize(root.path().join("data"), root.path().join("logs"))
+                .unwrap();
+        let listing = app
+            .files_local(Some(target.to_str().unwrap().to_owned()))
+            .await
+            .unwrap();
+        let ordinary = listing.path.strip_prefix(r"\\?\").unwrap();
+        let size = TerminalSize {
+            cols: 160,
+            rows: 30,
+        };
+        let (sink, mut output) = events();
+        let session = app
+            .terminal_local_open(size, sink, Some(listing.path.clone()))
+            .await
+            .unwrap();
+        let prompt = format!("PS {ordinary}>");
+        let text = until(&app.local_terminals, &session.id, &mut output, &prompt).await;
+        assert!(!text.contains(r"Microsoft.PowerShell.Core\FileSystem::"));
+        assert_eq!(
+            app.local_terminals.snapshot(&session.id).unwrap().directory,
+            ordinary
+        );
+        app.terminal_input(
+            &session.id,
+            b"if (Test-Path -LiteralPath marker.txt -PathType Leaf) { [Console]::WriteLine(('SD_FILE_' + 'FOUND')) }\r".to_vec(),
+        )
+        .unwrap();
+        until(
+            &app.local_terminals,
+            &session.id,
+            &mut output,
+            "SD_FILE_FOUND",
+        )
+        .await;
+        app.terminal_close(&session.id).await.unwrap();
+
+        std::fs::remove_file(marker_file).unwrap();
+        std::fs::remove_dir(target).unwrap();
+        let error = app
+            .terminal_local_open(size, Arc::new(|_| true), Some(listing.path))
+            .await
+            .expect_err("a disappeared directory must not open a shell at home");
+        assert!(matches!(
+            error,
+            Error::Connection {
+                code: "LOCAL_TERMINAL",
+                source: Some(_),
+                ..
+            }
+        ));
+        app.shutdown().await;
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn real_shell_input_output_resize_exit_and_independent_cancellation() {
         let engine = LocalTerminals::new();
         let (sink, mut first_events) = events();
         let first = engine
-            .open(TerminalSize { cols: 90, rows: 25 }, sink)
+            .open(TerminalSize { cols: 90, rows: 25 }, sink, None)
             .await
             .expect("first PTY");
         assert_eq!(first.shell, shell().expect("default shell").1);
         let (sink, mut second_events) = events();
         let second = engine
-            .open(TerminalSize { cols: 90, rows: 25 }, sink)
+            .open(TerminalSize { cols: 90, rows: 25 }, sink, None)
             .await
             .expect("second PTY");
         // Do not acknowledge the first session: closing must unblock its reader anyway.
@@ -1344,7 +1479,9 @@ mod tests {
         assert!(lock(&engine.sessions).expect("sessions").is_empty());
         let (sink, _) = events();
         assert!(matches!(
-            engine.open(TerminalSize { cols: 80, rows: 24 }, sink).await,
+            engine
+                .open(TerminalSize { cols: 80, rows: 24 }, sink, None)
+                .await,
             Err(Error::ShuttingDown)
         ));
     }
@@ -1354,7 +1491,7 @@ mod tests {
         let (sink, _) = events();
         assert!(matches!(
             engine
-                .open(TerminalSize { cols: 0, rows: 24 }, sink.clone())
+                .open(TerminalSize { cols: 0, rows: 24 }, sink.clone(), None)
                 .await,
             Err(Error::Validation(_))
         ));
@@ -1365,7 +1502,9 @@ mod tests {
             .await
             .expect("slots");
         assert!(matches!(
-            engine.open(TerminalSize { cols: 80, rows: 24 }, sink).await,
+            engine
+                .open(TerminalSize { cols: 80, rows: 24 }, sink, None)
+                .await,
             Err(Error::Busy)
         ));
         assert!(matches!(

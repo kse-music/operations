@@ -2,7 +2,10 @@ use super::{Database, decode_error, storage_error};
 use rusqlite::{Connection, TransactionBehavior, params};
 use serverdeck_core::{
     Error,
-    hosts::{EnvironmentTag, EnvironmentTagColor, EnvironmentTagInput, EnvironmentTags},
+    hosts::{
+        EnvironmentTag, EnvironmentTagColor, EnvironmentTagInput, EnvironmentTags,
+        normalize_environment_tag_name,
+    },
 };
 use uuid::Uuid;
 
@@ -51,7 +54,7 @@ impl Database {
         id: Option<&str>,
         input: EnvironmentTagInput,
     ) -> Result<EnvironmentTags, Error> {
-        let name = input.normalized_name()?;
+        let name = normalize_environment_tag_name(&input.name)?;
         self.change_environment_tags(|tx| {
             let duplicate: bool = tx
                 .query_row(

@@ -180,8 +180,19 @@ pub async fn terminal_local_open_saved(
 }
 
 #[tauri::command]
+pub fn terminal_has_foreground_command(
+    application: tauri::State<'_, Application>,
+    id: String,
+) -> Result<bool, IpcError> {
+    application
+        .terminal_has_foreground_command(&id)
+        .map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn terminal_local_open(
     application: tauri::State<'_, Application>,
+    directory: Option<String>,
     size: TerminalSize,
     events: tauri::ipc::Channel<TerminalEvent>,
 ) -> Result<serverdeck_core::terminal::LocalTerminalSession, IpcError> {
@@ -189,6 +200,7 @@ pub async fn terminal_local_open(
         .terminal_local_open(
             size,
             std::sync::Arc::new(move |event| events.send(event).is_ok()),
+            directory,
         )
         .await
         .map_err(Into::into)

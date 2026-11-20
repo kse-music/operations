@@ -127,6 +127,7 @@ describe.each(['local', 'ssh', 'administrator'])('%s terminal lifecycle', (kind)
     vi.spyOn(terminalApi, 'resize').mockResolvedValue();
     vi.spyOn(terminalApi, 'input').mockResolvedValue();
     vi.spyOn(terminalApi, 'ack').mockResolvedValue();
+    vi.spyOn(terminalApi, 'hasForegroundCommand').mockResolvedValue(false);
     vi.spyOn(terminalApi, 'close').mockResolvedValue();
     root = document.createElement('div');
     document.body.append(root);
@@ -242,6 +243,7 @@ describe.each(['local', 'ssh', 'administrator'])('%s terminal lifecycle', (kind)
       vi.mocked(terminalApi.close).mockReturnValueOnce(close.promise);
       await startRequest(operation);
       const closing = store.closePane(store.focused);
+      await settle();
       expect(store.panes[0]?.state).toBe('closing');
       request.reject(missing);
       await settle();
@@ -348,6 +350,8 @@ describe.each(['local', 'ssh', 'administrator'])('%s terminal lifecycle', (kind)
     const close = deferred();
     vi.mocked(terminalApi.close).mockReturnValueOnce(close.promise);
     const closing = store.closePane(store.focused);
+    await settle();
+    expect(store.panes[0]?.state).toBe('closing');
     receive({ type: 'state', state: 'failed', code: 'WORKER', message: '终端进程异常结束' });
     close.reject({ message: '关闭失败，请重试' });
     await closing;

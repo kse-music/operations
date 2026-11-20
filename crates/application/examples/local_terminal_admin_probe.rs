@@ -27,7 +27,11 @@ async fn probe() -> Result<(), Box<dyn std::error::Error>> {
     let (send, mut events) = tokio::sync::mpsc::channel(64);
     let sink: serverdeck_ssh::Sink = Arc::new(move |event| send.try_send(event).is_ok());
     let normal = app
-        .terminal_local_open(TerminalSize { cols: 80, rows: 24 }, Arc::new(|_| true))
+        .terminal_local_open(
+            TerminalSize { cols: 80, rows: 24 },
+            Arc::new(|_| true),
+            None,
+        )
         .await?;
     assert!(
         !normal.elevated,
