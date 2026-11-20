@@ -17,7 +17,9 @@ pre {
 .app-shell {
   --module-header-height: 44px;
   --navigation-width: 52px;
-  --sidebar-layout-width: var(--sidebar-width);
+  --sidebar-open-width: var(--sidebar-width);
+  --sidebar-layout-width: var(--sidebar-open-width);
+  position: relative;
   height: 100dvh;
   min-height: 560px;
   display: grid;

@@ -227,7 +227,7 @@ try {
     assert.equal(await page.locator('.tree-host').count(), 1);
     await hostSearch.fill('');
     assert.equal(await page.locator('.tree-host').count(), 2);
-    assert.equal(await page.getByRole('button', { name: '收起主机栏', exact: true }).count(), 0);
+    assert(await page.getByRole('button', { name: '取消固定主机栏', exact: true }).isVisible());
     await page.screenshot({ path: output + '/' + name + '-workspace.png' });
     await navigateWorkspace(page, 'SFTP 文件');
     await page.locator('.files-view').waitFor();

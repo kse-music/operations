@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue';
-import { ListTodo, Play, Plus, Server, Square, Terminal, Trash2 } from '@lucide/vue';
+import { Play, Plus, Server, Square, Terminal, Trash2 } from '@lucide/vue';
 import { tr } from '../i18n/messages';
 import { useBatchCommands } from '../composables/useBatchCommands';
 import { useApplicationStore } from '../stores/application';
@@ -233,15 +233,17 @@ async function confirmDeletion(): Promise<void> {
   <section class="batch-workspace" :aria-label="tr('批量命令')" :style="shellStyle">
     <Teleport to="#batch-command-list">
       <section class="batch-library" :aria-label="tr('命令列表')">
-        <div class="host-list-heading batch-library-heading">
-          <h2>{{ tr('命令列表') }}</h2>
+        <div class="host-list-heading">
+          <h2 class="host-list-title">{{ tr('命令列表') }}</h2>
           <button
-            class="button"
+            class="shell-icon-button"
             type="button"
+            :aria-label="tr('新建命令')"
+            :title="tr('新建命令')"
             :disabled="loading || busy || !commands"
             @click="createCommand"
           >
-            <Plus :size="15" aria-hidden="true" />{{ tr('新建') }}
+            <Plus :size="15" aria-hidden="true" />
           </button>
         </div>
         <p v-if="loading" class="batch-library-empty" role="status">{{ tr('正在读取命令…') }}</p>
@@ -281,7 +283,7 @@ async function confirmDeletion(): Promise<void> {
                 <Play :size="15" aria-hidden="true" />
               </button>
               <button
-                class="icon-button"
+                class="icon-button danger"
                 type="button"
                 :title="tr('删除命令')"
                 :aria-label="tr('删除命令 {0}', entry.name)"
@@ -298,13 +300,6 @@ async function confirmDeletion(): Promise<void> {
         </div>
       </section>
     </Teleport>
-    <div class="workspace-navigation">
-      <div class="tabbar workspace-tabs">
-        <span class="batch-workspace-label"
-          ><ListTodo :size="16" aria-hidden="true" />{{ tr('批量命令') }}</span
-        >
-      </div>
-    </div>
     <div
       class="content-scroll batch-content"
       :class="{ 'batch-content-results': !!visibleResult && !preview }"
@@ -614,7 +609,12 @@ async function confirmDeletion(): Promise<void> {
                         @change="setTarget(host.id, ($event.target as HTMLInputElement).checked)"
                       />
                     </td>
-                    <td><Server :size="14" aria-hidden="true" /> {{ hostDisplayName(host) }}</td>
+                    <td>
+                      <span class="batch-host-label">
+                        <Server :size="14" aria-hidden="true" />
+                        {{ hostDisplayName(host) }}
+                      </span>
+                    </td>
                     <td>
                       <code dir="ltr">{{ login(host) }}</code>
                     </td>
@@ -707,15 +707,6 @@ async function confirmDeletion(): Promise<void> {
   min-height: 0;
   flex: 1;
 }
-.batch-workspace-label {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  padding: 0 14px;
-  background: var(--panel);
-  border-top: 2px solid var(--accent);
-}
-.batch-workspace-label svg,
 .batch-command-item svg {
   color: var(--accent);
   flex-shrink: 0;
@@ -725,12 +716,6 @@ async function confirmDeletion(): Promise<void> {
   flex-direction: column;
   min-height: 0;
   height: 100%;
-}
-.batch-library-heading {
-  gap: 8px;
-}
-.batch-library-heading .button {
-  padding-inline: 8px;
 }
 .batch-command-list {
   min-height: 0;
@@ -887,6 +872,9 @@ async function confirmDeletion(): Promise<void> {
   border: 1px solid var(--border);
   border-radius: 5px;
 }
+.batch-picker-scroll :is(th, td) {
+  white-space: nowrap;
+}
 .batch-picker-scroll th {
   position: sticky;
   top: 0;
@@ -895,7 +883,10 @@ async function confirmDeletion(): Promise<void> {
 .batch-picker-scroll td {
   padding-block: 6px;
 }
-.batch-picker-scroll td:nth-child(2) svg {
+.batch-host-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   vertical-align: middle;
 }
 .batch-editor-actions {

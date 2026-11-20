@@ -399,7 +399,7 @@ export async function checkPluginComponents({ page, invoke, run, passed, fixture
   ]) {
     await page.setViewportSize({ width, height });
     await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme);
-    const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
+    const collapse = page.getByRole('button', { name: '取消固定主机栏', exact: true });
     if (width < 1000 && (await collapse.isVisible())) await collapse.click();
     for (const [name, label] of [
       ['Docker 管理', 'docker'],

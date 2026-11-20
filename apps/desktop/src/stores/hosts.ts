@@ -36,6 +36,7 @@ export const useHostsStore = defineStore('hosts', () => {
   const notice = ref<string | null>(null);
   const search = ref('');
   const selectedId = ref<string | null>(null);
+  const homeTargetId = ref<string | null>(null);
   const visible = computed(() => filterHosts(catalog.value?.hosts ?? [], search.value));
   const selected = computed(() => catalog.value?.hosts.find((h) => h.id === selectedId.value));
   const tagsById = computed(
@@ -49,6 +50,7 @@ export const useHostsStore = defineStore('hosts', () => {
     const data = await hostsApi.list();
     catalog.value = data;
     if (!data.hosts.some((h) => h.id === selectedId.value)) selectedId.value = null;
+    if (!data.hosts.some((h) => h.id === homeTargetId.value)) homeTargetId.value = null;
   }
   async function load(): Promise<void> {
     if (busy.value) return;
@@ -183,6 +185,7 @@ export const useHostsStore = defineStore('hosts', () => {
     notice,
     search,
     selectedId,
+    homeTargetId,
     visible,
     selected,
     load,

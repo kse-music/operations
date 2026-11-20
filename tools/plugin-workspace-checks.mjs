@@ -146,7 +146,7 @@ export async function checkWorkspaceTools({ page, invoke, run, passed }) {
     [390, 844, 'light'],
   ]) {
     await page.setViewportSize({ width, height });
-    const collapse = page.getByRole('button', { name: '收起主机栏', exact: true });
+    const collapse = page.getByRole('button', { name: '取消固定主机栏', exact: true });
     if (width <= 720 && (await collapse.isVisible())) await collapse.click();
     await page.evaluate(() => {
       document.querySelector('.workspace-main')?.scrollTo(0, 0);

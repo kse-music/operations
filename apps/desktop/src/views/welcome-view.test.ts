@@ -5,6 +5,7 @@ import WelcomeView from './WelcomeView.vue';
 import { useHostsStore } from '../stores/hosts';
 import { usePluginsStore } from '../stores/plugins';
 import { hostInput, type Host } from '../types/hosts';
+import { hostsApi } from '../services/hosts';
 import { toolPluginState } from '../services/system-plugins.fixture';
 
 const dockerId = 'cn.hiboot.plugins.docker';
@@ -108,10 +109,8 @@ it('distinguishes host loading and failure from the empty state and retries the 
   expect(root.querySelector('.welcome-host-empty')).not.toBeNull();
 });
 
-it('shows a single host without a picker and falls back from an invalid saved selection', () => {
-  const hosts = useHostsStore();
-  hosts.catalog!.hosts = [host('a')];
-  hosts.selectedId = 'deleted';
+it('shows a single host without a picker and opens files for that host', () => {
+  useHostsStore().catalog!.hosts = [host('a')];
   mount();
   expect(root.querySelector('select')).toBeNull();
   expect(root.querySelector('.welcome-target-name')?.textContent).toContain('Host a');
@@ -119,12 +118,10 @@ it('shows a single host without a picker and falls back from an invalid saved se
   expect(events.onFiles).toHaveBeenCalledExactlyOnceWith('a');
 });
 
-it('selects a shared target without opening resources and routes each tool to that target', async () => {
-  useHostsStore().selectedId = 'a';
+it('selects a homepage target without opening resources and routes each tool to that target', async () => {
   mount();
   choose('b');
   await nextTick();
-  expect(useHostsStore().selectedId).toBe('b');
   Object.values(events).forEach((event) => expect(event).not.toHaveBeenCalled());
   action('files').click();
   action(dockerId).click();
@@ -140,13 +137,15 @@ it('selects a shared target without opening resources and routes each tool to th
 
 it('falls back when the selected host is deleted and returns to the guide after the last deletion', async () => {
   const hosts = useHostsStore();
-  hosts.selectedId = 'b';
   mount();
-  hosts.catalog!.hosts = [host('a')];
+  choose('b');
+  vi.spyOn(hostsApi, 'list').mockResolvedValue({ ...hosts.catalog!, hosts: [host('a')] });
+  await hosts.load();
   await nextTick();
   action('files').click();
   expect(events.onFiles).toHaveBeenCalledExactlyOnceWith('a');
   expect(root.querySelector('select')).toBeNull();
+  expect(hosts.homeTargetId).toBeNull();
   const previousAction = action('files');
   hosts.catalog!.hosts = [];
   previousAction.click();

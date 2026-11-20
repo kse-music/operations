@@ -432,8 +432,7 @@
   min-height: 0;
   flex: 1;
 }
-.settings-sidebar > h2,
-.local-session-sidebar > h2 {
+.settings-sidebar > h2 {
   margin: 0;
   padding: 16px;
   font-size: var(--font-size-section);

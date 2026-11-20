@@ -81,23 +81,17 @@ async function openPluginModal(name: string): Promise<HTMLElement> {
   expect(document.querySelector(`[aria-label="${name} · 配置"]`)).not.toBeNull();
   return document.querySelector<HTMLDialogElement>('.settings-page')!;
 }
-async function localSessionMenu(): Promise<Element> {
-  document
-    .querySelector('.local-session-sidebar .terminal-session-header')!
-    .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-  await flush();
-  return document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
-}
+const creationMenu = () => document.querySelector('[role="menu"][aria-label="新建终端会话"]');
 async function newSession(): Promise<void> {
-  if (document.querySelector('.local-session-sidebar .terminal-session-header')) {
-    const menu = await localSessionMenu();
+  document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
+  await flush();
+  const menu = creationMenu();
+  if (menu) {
     [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((item) => item.textContent?.trim() === '新建')!
       .click();
-  } else {
-    document.querySelector<HTMLButtonElement>('[aria-label="新建终端会话"]')!.click();
+    await flush();
   }
-  await flush();
 }
 async function closeSession(index: number): Promise<void> {
   root
@@ -191,8 +185,11 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
     await flush();
     expect(useWorkspaceStore().area).toBe('batch');
     expect(root.querySelector<HTMLElement>('#host-tree-panel')?.style.display).toBe('none');
+    const batchWorkspace = root.querySelector('.batch-workspace')!;
+    expect(batchWorkspace.firstElementChild?.classList.contains('batch-content')).toBe(true);
     const library = root.querySelector('#batch-command-list')!;
-    library.querySelector<HTMLButtonElement>('button')!.click();
+    const newCommand = library.querySelector<HTMLButtonElement>('button[aria-label="新建命令"]')!;
+    newCommand.click();
     await flush();
     const editor = root.querySelector<HTMLFormElement>('.batch-edit')!;
     const byText = (label: string) =>
@@ -237,7 +234,7 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
       root.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!;
     const runFromList = () =>
       library.querySelector<HTMLButtonElement>('button[aria-label="运行 检查"]')!;
-    library.querySelector<HTMLButtonElement>('button')!.click();
+    newCommand.click();
     await flush();
     byText('取消').click();
     await flush();
@@ -533,7 +530,7 @@ it('manages shared environment tags and applies them to context-menu targets and
   const context = async (id: string) => {
     hostRow(id).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     await flush();
-    document.querySelector<HTMLButtonElement>('.host-tree-menu [aria-haspopup="menu"]')!.click();
+    document.querySelector<HTMLButtonElement>('[aria-controls="host-environment-menu"]')!.click();
     await flush();
     return document.querySelector('.host-environment-menu')!;
   };
@@ -776,19 +773,38 @@ it.each(['cn.hiboot.plugins.docker', 'cn.hiboot.plugins.assistant'])(
   },
 );
 
-it('opens the homepage file tool for its selected host without creating a terminal', async () => {
+it('keeps the homepage file target independent of sidebar selection and remembers it on return', async () => {
   const files = useFilesStore();
   const openFiles = vi.spyOn(files, 'open').mockResolvedValue();
   vi.spyOn(files, 'openLocal').mockResolvedValue();
   vi.spyOn(filesApi, 'localDrives').mockResolvedValue([]);
   const open = vi.spyOn(useTerminalsStore(), 'open');
-  useHostsStore().selectedId = 'b';
+  const picker = () => root.querySelector<HTMLSelectElement>('.welcome-target select')!;
+  const hostRow = (id: string) =>
+    root.querySelector<HTMLButtonElement>(`.tree-host[data-host-id="${id}"]`)!;
+
+  hostRow('b').click();
   await flush();
+  expect(hostRow('b').getAttribute('aria-current')).toBe('true');
+  expect(picker().value).toBe('a');
+
+  hostRow('a').click();
+  picker().value = 'b';
+  picker().dispatchEvent(new Event('change', { bubbles: true }));
+  await flush();
+  expect(hostRow('a').getAttribute('aria-current')).toBe('true');
+  expect(useWorkspaceStore().tabs).toEqual([]);
   document.querySelector<HTMLButtonElement>('[data-home-tool="files"] .button')!.click();
   await flush();
   expect(useWorkspaceStore().current).toMatchObject({ view: 'files', hostId: 'b' });
   expect(openFiles).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
   expect(open).not.toHaveBeenCalled();
+
+  hostRow('a').click();
+  root.querySelector<HTMLButtonElement>('.workspace-start-tab')!.click();
+  await flush();
+  expect(hostRow('a').getAttribute('aria-current')).toBe('true');
+  expect(picker().value).toBe('b');
 });
 
 function sampledHost(
@@ -1055,18 +1071,17 @@ it('opens one fresh local terminal from the welcome page even when a remote host
   expect(useWorkspaceStore().current).toMatchObject({ view: 'terminals', hostId: '' });
   expect(document.querySelector('[aria-label="欢迎页面"]')).toBeNull();
 });
-async function restoreFromSessionMenu(title: string): Promise<void> {
+async function hostSavedSessions(hostId: string): Promise<HTMLElement> {
   document
-    .querySelector('.terminal-session-header')!
+    .querySelector(`.tree-host[data-host-id="${hostId}"]`)!
     .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
   await flush();
-  const menu = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
-  [...menu.querySelectorAll<HTMLButtonElement>('button')]
-    .find((item) => item.textContent?.trim() === '已保存会话')!
-    .dispatchEvent(new Event('pointerenter'));
+  document.querySelector<HTMLButtonElement>('[aria-controls="host-saved-sessions-menu"]')!.click();
   await flush();
-  const saved = document.querySelector('[role="menu"][aria-label="已保存会话"]')!;
-  [...saved.querySelectorAll<HTMLButtonElement>('button')]
+  return document.querySelector<HTMLElement>('#host-saved-sessions-menu')!;
+}
+async function chooseSavedSession(panel: HTMLElement, title: string): Promise<void> {
+  [...panel.querySelectorAll<HTMLButtonElement>('button')]
     .find((item) => item.textContent?.trim() === title)!
     .click();
   await flush();
@@ -1109,7 +1124,12 @@ it.each(['rail', 'welcome'] as const)(
     expect(open).toHaveBeenCalledExactlyOnceWith(null);
     expect(useWorkspaceStore().area).toBe('local');
 
-    await restoreFromSessionMenu('第二个');
+    const panel = document.querySelector<HTMLElement>('#local-session-panel')!;
+    expect(panel.style.display).not.toBe('none');
+    expect(panel.parentElement?.classList.contains('sidebar-preview')).toBe(false);
+    expect(panel.querySelector('[aria-label="取消固定已保存会话栏"]')).not.toBeNull();
+    expect(panel.querySelector('.terminal-tab')).toBeNull();
+    await chooseSavedSession(panel, '第二个');
     expect(terminals.tabs.map((tab) => tab.savedId)).toEqual([undefined, 'second']);
     expect(terminals.tabs[1]!.panes[0]).toMatchObject({
       connectRequested: true,
@@ -1120,12 +1140,12 @@ it.each(['rail', 'welcome'] as const)(
   },
 );
 
-it('opens a fresh SSH shell even with saved sessions and restores a snapshot via the menu', async () => {
+it('opens a fresh SSH shell normally and restores only the snapshot picked from another host', async () => {
   const terminals = useTerminalsStore();
-  vi.mocked(terminalApi.savedSshSessions).mockResolvedValue([
+  vi.mocked(terminalApi.savedSshSessions).mockImplementation(async (hostId) => [
     {
       id: 'saved-ssh',
-      title: '部署',
+      title: `部署 ${hostId}`,
       paneCount: 1,
       layoutOnlyPanes: 0,
       layout: { kind: 'leaf', pane: 0 },
@@ -1140,12 +1160,24 @@ it('opens a fresh SSH shell even with saved sessions and restores a snapshot via
   expect(ordinary.panes[0]!.connectRequested).toBe(true);
   expect(ordinary.panes[0]!.savedSource).toBeUndefined();
 
-  await restoreFromSessionMenu('部署');
-  expect(terminals.hostTabs('a').map((tab) => tab.savedId)).toEqual([undefined, 'saved-ssh']);
-  const restored = terminals.hostTabs('a')[1]!;
+  const panel = await hostSavedSessions('b');
+  expect(panel.textContent).toContain('部署 b');
+  expect(panel.textContent).not.toContain('部署 a');
+  panel.focus();
+  panel.dispatchEvent(
+    new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }),
+  );
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('删除“部署 b”的保存记录');
+  expect(useWorkspaceStore().hostId).toBe('a');
+  expect(terminals.hostTabs('b')).toHaveLength(0);
+  await chooseSavedSession(panel, '部署 b');
+  expect(terminals.hostTabs('a')).toEqual([ordinary]);
+  expect(terminals.hostTabs('b').map((tab) => tab.savedId)).toEqual(['saved-ssh']);
+  const restored = terminals.hostTabs('b')[0]!;
   expect(restored.panes[0]).toMatchObject({
     connectRequested: true,
     savedSource: { id: 'saved-ssh', pane: 0 },
+    restoreFromSavedMenu: true,
   });
   expect(terminals.active).toBe(restored.key);
 });
@@ -1920,17 +1952,20 @@ it('keeps all three columns and preserves the host tree and search across naviga
   const rail = document.querySelector('.activity-rail');
   useHostsStore().search = 'Host a';
   await nextTick();
-  expect(document.querySelector('[aria-label="收起主机栏"]')?.getAttribute('aria-expanded')).toBe(
-    'true',
-  );
+  expect(
+    document.querySelector('[aria-label="取消固定主机栏"]')?.getAttribute('aria-controls'),
+  ).toBe('host-tree-panel');
   expect(document.querySelector('[aria-label="展开主机列表"]')).toBeNull();
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
   expect(workspace.area).toBe('local');
   expect(document.querySelector('.sidebar')).toBe(sidebar);
   expect(document.querySelector('.activity-rail')).toBe(rail);
-  expect(document.querySelector('.local-session-sidebar .terminal-tabs')).not.toBeNull();
-  expect(document.querySelector('.local-session-sidebar h2')?.textContent).toBe('本地终端');
+  expect(
+    document.querySelector('.terminal-primary .terminal-tabs')?.getAttribute('aria-orientation'),
+  ).toBe('horizontal');
+  expect(document.querySelector('.local-session-sidebar .terminal-tabs')).toBeNull();
+  expect(document.querySelector('.local-session-sidebar h2')?.textContent).toBe('本地会话');
   expect(document.querySelector('.workspace-header')).toBeNull();
   await openNavigation('关于');
   expect(workspace.area).toBe('settings');
@@ -1947,7 +1982,7 @@ it('keeps all three columns and preserves the host tree and search across naviga
   expect(document.querySelector('.sidebar')).toBe(sidebar);
 });
 
-it('collapses the host list and restores its width, search, scroll and keyboard focus without saving configuration', async () => {
+it('previews and pins the same host list with its width, search, scroll and focus intact', async () => {
   loadSidebarConfig();
   useApplicationStore().state!.config.sidebarWidth = 312;
   const save = vi.spyOn(ipc, 'saveConfig');
@@ -1964,10 +1999,11 @@ it('collapses the host list and restores its width, search, scroll and keyboard 
   favorites.click();
   await flush();
   scroll.scrollTop = 64;
-  const collapse = tree.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!;
-  collapse.click();
+  const pin = tree.querySelector<HTMLButtonElement>('.sidebar-toggle')!;
+  pin.click();
   await flush();
-  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
+  const shell = document.querySelector<HTMLElement>('.app-shell')!;
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(true);
   expect(tree.style.display).toBe('none');
   expect(document.querySelector<HTMLElement>('.sidebar-resizer')!.style.display).toBe('none');
   const expand = document.querySelector<HTMLButtonElement>('[aria-label="展开主机列表"]')!;
@@ -1976,7 +2012,16 @@ it('collapses the host list and restores its width, search, scroll and keyboard 
   expect(document.activeElement).toBe(expand);
   expand.click();
   await flush();
-  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(false);
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(true);
+  expect(tree.parentElement?.classList.contains('sidebar-preview')).toBe(true);
+  expect(document.querySelector<HTMLElement>('.sidebar-resizer')!.style.display).toBe('none');
+  expect(pin.getAttribute('aria-label')).toBe('固定主机栏');
+  expect(document.activeElement).toBe(pin);
+  pin.click();
+  await flush();
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(false);
+  expect(tree.parentElement?.classList.contains('sidebar-preview')).toBe(false);
+  expect(pin.getAttribute('aria-label')).toBe('取消固定主机栏');
   expect(document.querySelector('#host-tree-panel')).toBe(tree);
   expect(tree.style.display).not.toBe('none');
   expect(tree.querySelector('input')).toBe(search);
@@ -1984,55 +2029,149 @@ it('collapses the host list and restores its width, search, scroll and keyboard 
   expect(favorites.getAttribute('aria-pressed')).toBe('true');
   expect(scroll.scrollTop).toBe(64);
   expect(hosts.selectedId).toBe(hosts.catalog!.hosts[0]!.id);
-  expect(document.activeElement).toBe(collapse);
-  expect(
-    document.querySelector<HTMLElement>('.app-shell')!.style.getPropertyValue('--sidebar-width'),
-  ).toBe('312px');
+  expect(document.activeElement).toBe(pin);
+  expect(shell.style.getPropertyValue('--sidebar-width')).toBe('312px');
   expect(document.querySelector<HTMLElement>('.sidebar-resizer')!.style.display).not.toBe('none');
   expect(save).not.toHaveBeenCalled();
 });
 
-it('keeps host and local collapse states independent while preserving live sessions and the settings menu', async () => {
-  document.querySelector<HTMLButtonElement>('[aria-label="收起主机栏"]')!.click();
+it('peeks only after a mouse dwell and keeps the search and teleported host menu usable', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    document.querySelector<HTMLButtonElement>('[aria-label="取消固定主机栏"]')!.click();
+    await nextTick();
+    const edge = () => document.querySelector<HTMLButtonElement>('.sidebar-edge')!;
+    const sidebar = document.querySelector<HTMLElement>('#host-sidebar')!;
+    const dispatch = (element: HTMLElement, type: string, pointerType = 'mouse') =>
+      element.dispatchEvent(new PointerEvent(type, { pointerType }));
+    dispatch(edge(), 'pointermove', 'touch');
+    vi.advanceTimersByTime(180);
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+    dispatch(edge(), 'pointermove');
+    vi.advanceTimersByTime(179);
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+    dispatch(edge(), 'pointerleave');
+    vi.advanceTimersByTime(180);
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+
+    dispatch(edge(), 'pointermove');
+    vi.advanceTimersByTime(180);
+    await nextTick();
+    expect(sidebar.classList.contains('sidebar-preview')).toBe(true);
+    dispatch(sidebar, 'pointerenter');
+    const search = sidebar.querySelector<HTMLInputElement>('#host-tree-search')!;
+    search.focus();
+    dispatch(sidebar, 'pointerleave');
+    sidebar.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+    vi.advanceTimersByTime(300);
+    await nextTick();
+    expect(sidebar.classList.contains('sidebar-preview')).toBe(true);
+    search.blur();
+    vi.advanceTimersByTime(299);
+    await nextTick();
+    expect(sidebar.classList.contains('sidebar-preview')).toBe(true);
+    vi.advanceTimersByTime(1);
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+
+    edge().click();
+    await nextTick();
+    sidebar
+      .querySelector('.tree-host')!
+      .dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await nextTick();
+    const menu = document.querySelector<HTMLElement>('.host-tree-menu')!;
+    expect(menu.contains(document.activeElement)).toBe(true);
+    dispatch(sidebar, 'pointerleave');
+    vi.advanceTimersByTime(300);
+    await nextTick();
+    expect(sidebar.classList.contains('sidebar-preview')).toBe(true);
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await nextTick();
+    expect(document.querySelector('.host-tree-menu')).toBeNull();
+    expect(sidebar.classList.contains('sidebar-preview')).toBe(true);
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+    expect(document.activeElement).toBe(edge());
+
+    edge().click();
+    await nextTick();
+    document.querySelector('.main-content')!.dispatchEvent(new PointerEvent('pointerdown'));
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+
+    dispatch(edge(), 'pointermove');
+    const workspace = useWorkspaceStore();
+    workspace.showBatch();
+    vi.advanceTimersByTime(180);
+    await nextTick();
+    expect(edge()).toBeNull();
+    expect(sidebar.classList.contains('sidebar-preview')).toBe(false);
+    workspace.showHome();
+    await nextTick();
+    expect(sidebar.style.display).toBe('none');
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('keeps host and local pin states independent while preserving live sessions and the settings menu', async () => {
+  document.querySelector<HTMLButtonElement>('[aria-label="取消固定主机栏"]')!.click();
   await flush();
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
-  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(false);
+  const shell = document.querySelector('.app-shell')!;
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(false);
   const terminals = useTerminalsStore();
   terminals.update(terminals.focused, { state: 'connected', sessionId: 'collapse-live-local' });
   const snapshot = JSON.stringify(terminals.tabs);
   const pane = document.querySelector('.split-pane');
-  const header = document.querySelector('.local-session-sidebar .terminal-session-header');
+  const header = document.querySelector('.terminal-primary .terminal-session-header');
   const close = vi.spyOn(terminalApi, 'close').mockResolvedValue();
   const sidebar = document.querySelector<HTMLElement>('#local-session-panel')!;
-  const collapse = sidebar.querySelector<HTMLButtonElement>('[aria-label="收起本地会话"]')!;
-  collapse.click();
+  const pin = sidebar.querySelector<HTMLButtonElement>('.sidebar-toggle')!;
+  expect(sidebar.style.display).not.toBe('none');
+  pin.click();
   await flush();
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(true);
   expect(sidebar.style.display).toBe('none');
-  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
-  const expand = document.querySelector<HTMLButtonElement>('[aria-label="展开本地会话"]')!;
+  const expand = document.querySelector<HTMLButtonElement>('[aria-label="展开已保存会话"]')!;
   expect(expand.getAttribute('aria-controls')).toBe('local-session-panel');
   expect(document.activeElement).toBe(expand);
   expect(document.querySelector('.split-pane')).toBe(pane);
-  expect(document.querySelector('.local-session-sidebar .terminal-session-header')).toBe(header);
+  expect(document.querySelector('.terminal-primary .terminal-session-header')).toBe(header);
   expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
   await openNavigation('关于');
-  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(false);
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(false);
   expect(document.querySelector<HTMLElement>('.settings-sidebar')!.style.display).not.toBe('none');
-  expect(document.querySelector('.sidebar-expand')).toBeNull();
+  expect(document.querySelector('.sidebar-edge')).toBeNull();
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="首页"]')!.click();
   await flush();
   document.querySelector<HTMLButtonElement>('[aria-label="展开主机列表"]')!.click();
   await flush();
+  document.querySelector<HTMLButtonElement>('[aria-label="固定主机栏"]')!.click();
+  await flush();
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
-  expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
-  document.querySelector<HTMLButtonElement>('[aria-label="展开本地会话"]')!.click();
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(true);
+  document.querySelector<HTMLButtonElement>('[aria-label="展开已保存会话"]')!.click();
   await flush();
   expect(sidebar.style.display).not.toBe('none');
-  expect(document.querySelector('.local-session-sidebar .terminal-session-header')).toBe(header);
+  expect(document.querySelector('.terminal-primary .terminal-session-header')).toBe(header);
   expect(document.querySelector('.split-pane')).toBe(pane);
-  expect(document.activeElement).toBe(collapse);
+  expect(document.activeElement).toBe(pin);
+  expect(pin.getAttribute('aria-label')).toBe('固定已保存会话栏');
+  pin.click();
+  await flush();
+  expect(shell.classList.contains('sidebar-auto-hide')).toBe(false);
   expect(JSON.stringify(terminals.tabs)).toBe(snapshot);
   expect(close).not.toHaveBeenCalled();
 });
@@ -2041,16 +2180,19 @@ it('translates the host and local sidebar toggle labels', async () => {
   loadSidebarConfig();
   useApplicationStore().state!.config.product.language = 'en-US';
   await flush();
-  document.querySelector<HTMLButtonElement>('[aria-label="Collapse host sidebar"]')!.click();
+  document.querySelector<HTMLButtonElement>('[aria-label="Unpin host sidebar"]')!.click();
   await flush();
   expect(document.querySelector('[aria-label="Expand host list"]')).not.toBeNull();
   document
     .querySelector<HTMLButtonElement>('.activity-rail [aria-label="Local terminal"]')!
     .click();
   await flush();
-  document.querySelector<HTMLButtonElement>('[aria-label="Collapse local sessions"]')!.click();
+  expect(document.querySelector('.local-session-sidebar h2')?.textContent).toBe('Local sessions');
+  document.querySelector<HTMLButtonElement>('[aria-label="Unpin saved sessions"]')!.click();
   await flush();
-  expect(document.querySelector('[aria-label="Expand local sessions"]')).not.toBeNull();
+  document.querySelector<HTMLButtonElement>('[aria-label="Expand saved sessions"]')!.click();
+  await flush();
+  expect(document.querySelector('[aria-label="Pin saved sessions"]')).not.toBeNull();
 });
 
 it('retains remote and local sessions and settings drafts while switching the fixed rail', async () => {
@@ -2096,17 +2238,17 @@ it('retains remote and local sessions and settings drafts while switching the fi
   expect(close).not.toHaveBeenCalled();
 });
 
-it('supports vertical keyboard selection in the local session list', async () => {
+it('supports horizontal keyboard selection in the local terminal header', async () => {
   const terminals = useTerminalsStore();
   for (let index = 0; index < 3; index++) terminals.open(null);
   useWorkspaceStore().navigate('terminals', '');
   await flush();
-  const list = document.querySelector('.local-session-sidebar [role="tablist"]')!;
-  expect(list.getAttribute('aria-orientation')).toBe('vertical');
+  const list = document.querySelector('.terminal-primary [role="tablist"]')!;
+  expect(list.getAttribute('aria-orientation')).toBe('horizontal');
   const buttons = [...list.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
   buttons[0]!.focus();
   buttons[0]!.dispatchEvent(
-    new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }),
+    new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }),
   );
   await flush();
   expect(terminals.active).toBe(terminals.hostTabs('')[1]?.key);
@@ -2170,7 +2312,7 @@ it('keeps only the sidebar toggle beside the host title and shows ungrouped host
     [...heading.querySelectorAll(':scope > button')].map((button) =>
       button.getAttribute('aria-label'),
     ),
-  ).toEqual(['收起主机栏']);
+  ).toEqual(['取消固定主机栏']);
   expect(document.querySelector('[aria-label="选择 ServerDeck 主机文件"]')).toBeNull();
   expect(heading.nextElementSibling?.matches('.host-views')).toBe(true);
 });
@@ -2275,62 +2417,82 @@ it.each([
   expect(open).not.toHaveBeenCalled();
 });
 
-it('opens the requested host after testing and saving its missing password', async () => {
-  const store = useHostsStore();
-  const host = store.catalog!.hosts[0]!;
-  host.authType = 'password';
-  host.username = 'ops';
-  const test = vi
-    .spyOn(hostsApi, 'test')
-    .mockRejectedValueOnce(new Error('SSH 认证失败'))
-    .mockResolvedValue({ status: 'connected', testId: 'verified-host', expiresInSeconds: 300 });
-  const saved = { ...host, credentialId: 'saved-password' };
-  const update = vi.spyOn(hostsApi, 'updateTested').mockResolvedValue(saved);
-  vi.spyOn(hostsApi, 'list').mockImplementation(async () => ({
-    ...store.catalog!,
-    hosts: [saved, store.catalog!.hosts[1]!],
-  }));
-  await flush();
-  root
-    .querySelector('.tree-host[data-host-id="a"]')!
-    .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-  await flush();
-  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="编辑主机"]')!;
-  const password = dialog.querySelector<HTMLInputElement>('input[type="password"]')!;
-  const testButton = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent?.trim() === '测试连接',
-  )!;
-  const saveButton = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!;
-  expect(saveButton.textContent?.trim()).toBe('保存并打开主机');
-  testButton.click();
-  expect(test).not.toHaveBeenCalled();
-  password.value = 'fixture-only-password';
-  password.dispatchEvent(new Event('input', { bubbles: true }));
-  await nextTick();
+it.each(['ordinary', 'saved'])(
+  'opens the requested %s session after saving the missing password',
+  async (entry) => {
+    const store = useHostsStore();
+    const host = store.catalog!.hosts[0]!;
+    host.authType = 'password';
+    host.username = 'ops';
+    const test = vi
+      .spyOn(hostsApi, 'test')
+      .mockRejectedValueOnce(new Error('SSH 认证失败'))
+      .mockResolvedValue({ status: 'connected', testId: 'verified-host', expiresInSeconds: 300 });
+    const saved = { ...host, credentialId: 'saved-password' };
+    const update = vi.spyOn(hostsApi, 'updateTested').mockResolvedValue(saved);
+    vi.spyOn(hostsApi, 'list').mockImplementation(async () => ({
+      ...store.catalog!,
+      hosts: [saved, store.catalog!.hosts[1]!],
+    }));
+    await flush();
+    if (entry === 'saved') {
+      vi.mocked(terminalApi.savedSshSessions).mockResolvedValue([
+        {
+          id: 'saved-ssh',
+          title: '部署',
+          paneCount: 1,
+          layoutOnlyPanes: 0,
+          layout: { kind: 'leaf', pane: 0 },
+        },
+      ]);
+      await chooseSavedSession(await hostSavedSessions('a'), '部署');
+    } else {
+      root
+        .querySelector('.tree-host[data-host-id="a"]')!
+        .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    }
+    await flush();
+    const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="编辑主机"]')!;
+    const password = dialog.querySelector<HTMLInputElement>('input[type="password"]')!;
+    const testButton = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.trim() === '测试连接',
+    )!;
+    const saveButton = dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    expect(saveButton.textContent?.trim()).toBe('保存并打开主机');
+    testButton.click();
+    expect(test).not.toHaveBeenCalled();
+    password.value = 'fixture-only-password';
+    password.dispatchEvent(new Event('input', { bubbles: true }));
+    await nextTick();
 
-  testButton.click();
-  await vi.waitFor(() =>
-    expect(dialog.querySelector('[role="alert"]')?.textContent).toBe('SSH 认证失败'),
-  );
-  expect(saveButton.disabled).toBe(true);
-  expect(useWorkspaceStore().tabs).toHaveLength(0);
-  testButton.click();
-  await vi.waitFor(() => expect(saveButton.disabled).toBe(false));
-  expect(update).not.toHaveBeenCalled();
-  expect(useWorkspaceStore().tabs).toHaveLength(0);
-  saveButton.click();
-  await vi.waitFor(() =>
-    expect(useTerminalsStore().panes[0]?.host?.credentialId).toBe('saved-password'),
-  );
-  expect(update).toHaveBeenCalledExactlyOnceWith(
-    'a',
-    hostInput(host),
-    { kind: 'password', password: 'fixture-only-password' },
-    'verified-host',
-  );
-  expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
-  expect(useWorkspaceStore().current).toMatchObject({ hostId: 'a', view: 'terminals' });
-});
+    testButton.click();
+    await vi.waitFor(() =>
+      expect(dialog.querySelector('[role="alert"]')?.textContent).toBe('SSH 认证失败'),
+    );
+    expect(saveButton.disabled).toBe(true);
+    expect(useWorkspaceStore().tabs).toHaveLength(0);
+    testButton.click();
+    await vi.waitFor(() => expect(saveButton.disabled).toBe(false));
+    expect(update).not.toHaveBeenCalled();
+    expect(useWorkspaceStore().tabs).toHaveLength(0);
+    saveButton.click();
+    await vi.waitFor(() =>
+      expect(useTerminalsStore().panes[0]?.host?.credentialId).toBe('saved-password'),
+    );
+    expect(update).toHaveBeenCalledExactlyOnceWith(
+      'a',
+      hostInput(host),
+      { kind: 'password', password: 'fixture-only-password' },
+      'verified-host',
+    );
+    expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
+    expect(useWorkspaceStore().current).toMatchObject({ hostId: 'a', view: 'terminals' });
+    const sessions = useTerminalsStore().hostTabs('a');
+    expect(sessions.map((session) => session.savedId)).toEqual([
+      entry === 'saved' ? 'saved-ssh' : undefined,
+    ]);
+  },
+);
 
 it('opens an imported host whose credential references a private key file', async () => {
   const catalog = useHostsStore().catalog!;
@@ -2354,7 +2516,7 @@ it('opens an imported host whose credential references a private key file', asyn
   expect(document.querySelector('dialog[aria-label="编辑主机"]')).toBeNull();
 });
 
-it('creates an administrator session from the local list background menu', async () => {
+it('creates an administrator session from the local terminal plus menu', async () => {
   const store = useTerminalsStore(),
     workspace = useWorkspaceStore();
   document.querySelector<HTMLButtonElement>('[aria-label="本地终端"]')!.click();
@@ -2362,7 +2524,11 @@ it('creates an administrator session from the local list background menu', async
   const ordinary = store.panes[0]!;
   expect(document.querySelector('.sidebar [aria-label="本地终端（管理员）"]')).toBeNull();
   expect(document.querySelector('.local-session-sidebar [aria-label="新建终端会话"]')).toBeNull();
-  const menu = await localSessionMenu();
+  document
+    .querySelector<HTMLButtonElement>('.terminal-primary [aria-label="新建终端会话"]')!
+    .click();
+  await flush();
+  const menu = creationMenu()!;
   expect(store.hostTabs('')).toHaveLength(1);
   [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
     .find((item) => item.textContent?.trim() === '新建(管理员)')!
@@ -2419,7 +2585,7 @@ it.each([null, '', 'a'])(
       await flush();
     }
     expect(document.querySelector('.workspace-tab[data-host-id=""]')).toBeNull();
-    expect(document.querySelector('.local-session-sidebar .terminal-tab')).not.toBeNull();
+    expect(document.querySelector('.terminal-primary .terminal-tab')).not.toBeNull();
     await workspace.close('host:');
     await flush();
     expect(document.querySelector('.workspace-group-tab')).toBeNull();
@@ -2969,7 +3135,7 @@ it.each(['button', 'middle', 'menu'])(
       terminals.update(pane.key, { sessionId: pane.key, state: 'connected' });
     workspace.navigate('terminals', '');
     await flush();
-    const tabs = [...document.querySelectorAll('.local-session-sidebar .terminal-tab')];
+    const tabs = [...document.querySelectorAll('.terminal-primary .terminal-tab')];
     if (action === 'menu') {
       tabs[0]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
       await nextTick();
@@ -2987,7 +3153,9 @@ it.each(['button', 'middle', 'menu'])(
     await flush();
     expect(terminals.hostTabs('')).toHaveLength(0);
     expect(workspace.area).toBe('local');
-    expect(document.querySelector('.local-session-empty')?.textContent).toContain('没有打开的终端');
+    expect(document.querySelector('.terminal-primary .workspace-empty h2')?.textContent).toBe(
+      '没有打开的终端',
+    );
     expect(close.mock.calls.map(([id]) => id).sort()).toEqual(
       localPanes.map((pane) => pane.key).sort(),
     );
@@ -3012,7 +3180,9 @@ it('keeps an empty local session list after the last close and opens a replaceme
   await flush();
   expect(terminals.panes).toHaveLength(0);
   expect(workspace.area).toBe('local');
-  expect(document.querySelector('.local-session-empty')?.textContent).toContain('没有打开的终端');
+  expect(document.querySelector('.terminal-primary .workspace-empty h2')?.textContent).toBe(
+    '没有打开的终端',
+  );
   document.querySelector<HTMLButtonElement>('.activity-rail [aria-label="本地终端"]')!.click();
   await flush();
   expect(terminals.panes).toHaveLength(0);
@@ -3629,7 +3799,7 @@ it.each(['remote', 'local'])(
     expect(terminals.active).toBe(previous);
     const menu = document.querySelector('[role="menu"][aria-label="终端会话操作"]')!;
     expect([...menu.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(
-      ['复制', '保存Ctrl+S', '重命名F2', '重新连接', '断开连接', '已保存会话', '关闭所有'],
+      ['复制', '保存Ctrl+S', '重命名F2', '重新连接', '断开连接', '关闭所有'],
     );
     expect(JSON.stringify(terminals.tabs)).toBe(original);
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));

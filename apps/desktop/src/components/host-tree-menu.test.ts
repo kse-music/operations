@@ -125,7 +125,8 @@ it('opens a target-specific tag submenu and returns focus level by level', async
   };
   store.selectedId = 'h0';
   const host = (id: string) => root.querySelector<HTMLButtonElement>(`[data-host-id="${id}"]`)!;
-  const trigger = () => menu().querySelector<HTMLButtonElement>('[aria-haspopup="menu"]')!;
+  const trigger = () =>
+    menu().querySelector<HTMLButtonElement>('[aria-controls="host-environment-menu"]')!;
   const submenu = () => document.querySelector<HTMLElement>('.host-environment-menu');
   const press = async (target: HTMLElement, key: string) => {
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
@@ -618,7 +619,7 @@ it('creates hosts in the right-clicked folder while host menus exclude folder cr
   await action('新建主机');
   expect(create).toHaveBeenCalledExactlyOnceWith('child');
   await open(root.querySelector<HTMLElement>('[data-host-id="h1"]')!);
-  expect(labels()).toEqual(['连接', '编辑', '重命名', '复制', '删除', '标签']);
+  expect(labels()).toEqual(['连接', '编辑', '重命名', '复制', '删除', '已保存会话', '标签']);
   expect(store.selectedId).toBe('h0');
   expect(select).not.toHaveBeenCalled();
   await action('编辑');

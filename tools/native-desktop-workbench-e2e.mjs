@@ -95,7 +95,7 @@ try {
   safe = true;
   await page.getByRole('button', { name: '本地终端', exact: true }).click();
   const terminal = page.locator('.terminal-pane:visible');
-  const sessions = page.locator('#local-terminal-session-list .terminal-tab');
+  const sessions = page.locator('.terminal-primary .terminal-tab');
   await terminal.locator('.xterm-container[data-state="connected"]').waitFor();
   assert.equal(await sessions.count(), 1);
   const sessionKey = await sessions.getAttribute('data-session-key');

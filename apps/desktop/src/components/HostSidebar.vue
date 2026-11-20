@@ -16,6 +16,7 @@ import {
   Pencil,
   Plug,
   Puzzle,
+  Save,
   Search,
   Server,
   Star,
@@ -38,18 +39,21 @@ import {
   type Component,
 } from 'vue';
 import { useHostsStore } from '../stores/hosts';
+import { useTerminalsStore } from '../stores/terminals';
 import { hostDisplayName, type Host, type HostGroup } from '../types/hosts';
 import { useFilesStore } from '../stores/files';
 import HostTreeControls from './HostTreeControls.vue';
 import HostIcon from './HostIcon.vue';
 import EnvironmentTagBadge from './EnvironmentTagBadge.vue';
 import TreeRenameInput from './TreeRenameInput.vue';
+import SavedTerminalSessions from './SavedTerminalSessions.vue';
 import GroupManager from './GroupManager.vue';
 import Modal from './Modal.vue';
 import { hostsApi } from '../services/hosts';
 import { folderAncestors, hostFolderRows } from '../services/host-tree';
 import { submenuPosition } from '../services/context-menu';
 const store = useHostsStore();
+const terminals = useTerminalsStore();
 const files = useFilesStore();
 const operations = useOpsStore();
 const props = withDefaults(defineProps<{ active?: boolean }>(), {
@@ -68,6 +72,7 @@ const emit = defineEmits<{
   saved: [host: Host];
   plugin: [id: string, contribution: string, hostId: string];
   manageEnvironmentTags: [];
+  restoreSession: [host: Host, id: string];
 }>();
 const collapsedFoldersKey = 'serverdeck.host-tree.collapsed.v1';
 function readCollapsedFolders(): string[] {
@@ -420,13 +425,18 @@ const context = ref<{ target: ContextTarget; x: number; y: number }>();
 const contextHostId = computed(() =>
   context.value?.target.kind === 'host' ? context.value.target.id : null,
 );
+const contextHost = computed(() =>
+  store.catalog?.hosts.find((host) => host.id === contextHostId.value),
+);
 const contextTagId = computed(() =>
   contextHostId.value ? store.environmentTag(contextHostId.value)?.id : undefined,
 );
 const menuElement = ref<HTMLElement>();
-const tagMenuElement = ref<HTMLElement>();
+type HostSubmenu = 'tags' | 'sessions';
+const submenuElement = ref<HTMLElement>();
 const tagMenuTrigger = ref<HTMLButtonElement>();
-const tagMenuPosition = ref<{ x: number; y: number }>();
+const savedMenuTrigger = ref<HTMLButtonElement>();
+const submenu = ref<{ kind: HostSubmenu; x: number; y: number; width?: string }>();
 let contextTrigger: HTMLElement | undefined;
 let contextScrollTop = 0;
 const controls = new Map<string, InstanceType<typeof HostTreeControls>>();
@@ -500,39 +510,71 @@ const menuItems = computed<MenuItem[]>(() => {
   return [...createItems, ...transferItems];
 });
 function dismissContext(restoreFocus = false): void {
-  closeTagMenu();
+  closeSubmenu();
   context.value = undefined;
   if (restoreFocus && contextTrigger?.isConnected) contextTrigger.focus({ preventScroll: true });
 }
-function closeTagMenu(restoreFocus = false): void {
-  tagMenuPosition.value = undefined;
-  if (restoreFocus) tagMenuTrigger.value?.focus({ preventScroll: true });
+function submenuTrigger(kind: HostSubmenu): HTMLButtonElement | undefined {
+  return kind === 'tags' ? tagMenuTrigger.value : savedMenuTrigger.value;
 }
-async function openTagMenu(focus = false): Promise<void> {
-  const target = context.value;
-  if (!target || !tagMenuTrigger.value || store.busy) return;
-  tagMenuPosition.value ??= { x: target.x, y: target.y };
-  await nextTick();
-  if (
-    context.value !== target ||
-    !tagMenuPosition.value ||
-    !menuElement.value ||
-    !tagMenuElement.value ||
-    !tagMenuTrigger.value
-  )
-    return;
-  tagMenuPosition.value = submenuPosition(
-    menuElement.value.getBoundingClientRect(),
-    tagMenuTrigger.value.getBoundingClientRect().top,
-    tagMenuElement.value.getBoundingClientRect(),
+function closeSubmenu(restoreFocus = false): void {
+  const current = submenu.value;
+  submenu.value = undefined;
+  if (restoreFocus && current) submenuTrigger(current.kind)?.focus({ preventScroll: true });
+}
+function positionSubmenu(): void {
+  const current = submenu.value;
+  const trigger = current && submenuTrigger(current.kind);
+  if (!current || !trigger || !menuElement.value || !submenuElement.value) return;
+  Object.assign(
+    current,
+    submenuPosition(
+      menuElement.value.getBoundingClientRect(),
+      trigger.getBoundingClientRect().top,
+      submenuElement.value.getBoundingClientRect(),
+    ),
   );
-  if (focus)
-    tagMenuElement.value.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+}
+async function openSubmenu(kind: HostSubmenu, focus = false): Promise<void> {
+  const target = context.value;
+  const parent = menuElement.value;
+  if (!target || !parent || !submenuTrigger(kind) || store.busy) return;
+  if (submenu.value?.kind !== kind)
+    submenu.value = {
+      kind,
+      x: target.x,
+      y: target.y,
+      width: kind === 'sessions' ? `${parent.getBoundingClientRect().width}px` : undefined,
+    };
+  await nextTick();
+  const element = submenuElement.value;
+  if (context.value !== target || submenu.value?.kind !== kind || !element) return;
+  positionSubmenu();
+  if (focus) (element.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? element).focus();
 }
 function hoverMenu(event: PointerEvent): void {
-  const button = (event.target as HTMLElement).closest('button');
-  if (button && button !== tagMenuTrigger.value)
-    closeTagMenu(tagMenuElement.value?.contains(document.activeElement));
+  const current = submenu.value;
+  const button = (event.target as Element).closest('button');
+  if (current && button && button !== submenuTrigger(current.kind))
+    closeSubmenu(submenuElement.value?.contains(document.activeElement));
+}
+watch(
+  () => {
+    const id = contextHostId.value;
+    return submenu.value?.kind === 'sessions' && id
+      ? [terminals.savedSessions(id).length, terminals.sshLoading.has(id), terminals.sshErrors[id]]
+      : undefined;
+  },
+  (state) => {
+    if (state) positionSubmenu();
+  },
+  { flush: 'post' },
+);
+function restoreSession(id: string): void {
+  const host = contextHost.value;
+  if (!host) return;
+  dismissContext(true);
+  emit('restoreSession', host, id);
 }
 async function assignEnvironmentTag(tagId: string | null): Promise<void> {
   const hostId = contextHostId.value;
@@ -550,7 +592,7 @@ function outsideContext(event: PointerEvent): void {
   if (
     context.value &&
     !menuElement.value?.contains(target) &&
-    !tagMenuElement.value?.contains(target)
+    !submenuElement.value?.contains(target)
   )
     dismissContext();
 }
@@ -581,7 +623,7 @@ async function openContext(
   contextScrollTop = list.value?.scrollTop ?? 0;
   const anchor = contextTrigger.getBoundingClientRect();
   const anchored = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
-  closeTagMenu();
+  closeSubmenu();
   context.value = {
     target,
     x: anchored ? anchor.left : event.clientX,
@@ -634,14 +676,19 @@ function rowKeys(target: ContextTarget, event: KeyboardEvent): void {
 }
 function menuKeys(event: KeyboardEvent): void {
   const element = event.currentTarget as HTMLElement;
-  if (element === tagMenuElement.value && ['Escape', 'ArrowLeft'].includes(event.key)) {
+  if (element === submenuElement.value && ['Escape', 'ArrowLeft'].includes(event.key)) {
     event.preventDefault();
-    closeTagMenu(true);
+    closeSubmenu(true);
     return;
   }
   if (event.key === 'ArrowRight' && document.activeElement === tagMenuTrigger.value) {
     event.preventDefault();
-    void openTagMenu(true);
+    void openSubmenu('tags', true);
+    return;
+  }
+  if (event.key === 'ArrowRight' && document.activeElement === savedMenuTrigger.value) {
+    event.preventDefault();
+    void openSubmenu('sessions', true);
     return;
   }
   if (event.key === 'Escape' || event.key === 'Tab') {
@@ -653,16 +700,19 @@ function menuKeys(event: KeyboardEvent): void {
   event.preventDefault();
   const items = [...element.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
   if (!items.length) return;
-  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+  const focused = items.indexOf(document.activeElement as HTMLButtonElement);
+  const delta = event.key === 'ArrowUp' ? -1 : 1;
+  const index = focused < 0 && delta < 0 ? 0 : focused;
   const next =
     items[
       event.key === 'Home'
         ? 0
         : event.key === 'End'
           ? items.length - 1
-          : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+          : (index + delta + items.length) % items.length
     ];
-  if (element === menuElement.value && next !== tagMenuTrigger.value) closeTagMenu();
+  if (element === menuElement.value && submenu.value && next !== submenuTrigger(submenu.value.kind))
+    closeSubmenu();
   next?.focus();
 }
 async function runContext(action: MenuAction): Promise<void> {
@@ -1023,6 +1073,7 @@ onBeforeUnmount(() => {
         <div
           ref="menuElement"
           class="context-menu host-tree-menu"
+          data-sidebar-menu="home"
           role="menu"
           :aria-label="tr('主机树操作')"
           :style="{ left: `${context.x}px`, top: `${context.y}px` }"
@@ -1043,17 +1094,35 @@ onBeforeUnmount(() => {
               }}
             </button>
           </template>
-          <template v-if="contextHostId && store.catalog?.environmentTags">
+          <template v-if="contextHost">
             <div role="separator"></div>
             <button
+              ref="savedMenuTrigger"
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-controls="host-saved-sessions-menu"
+              :aria-expanded="submenu?.kind === 'sessions'"
+              :disabled="store.busy"
+              @pointerenter="openSubmenu('sessions')"
+              @click="openSubmenu('sessions', true)"
+            >
+              <Save class="menu-icon-green" aria-hidden="true" />
+              <span>{{ tr('已保存会话') }}</span>
+              <ChevronRight
+                class="host-menu-environment-arrow menu-icon-muted"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              v-if="store.catalog?.environmentTags"
               ref="tagMenuTrigger"
               role="menuitem"
               aria-haspopup="menu"
               aria-controls="host-environment-menu"
-              :aria-expanded="!!tagMenuPosition"
+              :aria-expanded="submenu?.kind === 'tags'"
               :disabled="store.busy"
-              @pointerenter="openTagMenu()"
-              @click="openTagMenu(true)"
+              @pointerenter="openSubmenu('tags')"
+              @click="openSubmenu('tags', true)"
             >
               <Tags class="menu-icon-purple" aria-hidden="true" />
               <span>{{ tr('标签') }}</span>
@@ -1065,13 +1134,15 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div
-          v-if="tagMenuPosition && contextHostId && store.catalog?.environmentTags"
+          v-if="submenu?.kind === 'tags' && contextHost && store.catalog?.environmentTags"
           id="host-environment-menu"
-          ref="tagMenuElement"
+          ref="submenuElement"
           class="context-menu host-environment-menu"
+          data-sidebar-menu="home"
           role="menu"
           :aria-label="tr('标签')"
-          :style="{ left: `${tagMenuPosition.x}px`, top: `${tagMenuPosition.y}px` }"
+          :style="{ left: `${submenu.x}px`, top: `${submenu.y}px` }"
+          tabindex="-1"
           @keydown="menuKeys"
           @contextmenu.prevent
         >
@@ -1101,6 +1172,26 @@ onBeforeUnmount(() => {
           <button role="menuitem" @click="manageEnvironmentTags">
             <Tags class="menu-icon-muted" aria-hidden="true" />{{ tr('管理标签…') }}
           </button>
+        </div>
+        <div
+          v-else-if="submenu?.kind === 'sessions' && contextHost"
+          id="host-saved-sessions-menu"
+          ref="submenuElement"
+          class="context-menu"
+          data-sidebar-menu="home"
+          role="menu"
+          :aria-label="tr('已保存会话')"
+          :style="{ left: `${submenu.x}px`, top: `${submenu.y}px`, width: submenu.width }"
+          tabindex="-1"
+          @keydown="menuKeys"
+          @contextmenu.prevent
+        >
+          <SavedTerminalSessions
+            :key="contextHost.id"
+            :host="contextHost"
+            menu
+            @restore="restoreSession"
+          />
         </div>
       </template>
     </Teleport>

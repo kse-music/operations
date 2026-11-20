@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { PanelLeftClose, PanelLeftOpen } from '@lucide/vue';
+import { Pin, PinOff } from '@lucide/vue';
 
-defineProps<{ collapsed?: boolean; controls: string; label: string }>();
+defineProps<{ pinned: boolean; controls: string; label: string }>();
 defineEmits<{ toggle: [] }>();
 </script>
 
@@ -12,10 +12,9 @@ defineEmits<{ toggle: [] }>();
     :aria-label="label"
     :title="label"
     :aria-controls="controls"
-    :aria-expanded="!collapsed"
     @click="$emit('toggle')"
   >
-    <PanelLeftOpen v-if="collapsed" :size="16" aria-hidden="true" />
-    <PanelLeftClose v-else :size="16" aria-hidden="true" />
+    <PinOff v-if="pinned" :size="16" aria-hidden="true" />
+    <Pin v-else :size="16" aria-hidden="true" />
   </button>
 </template>

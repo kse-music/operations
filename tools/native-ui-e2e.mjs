@@ -64,10 +64,9 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const rpc = (name, args = {}) =>
   page.evaluate(({ name, args }) => window.__TAURI_INTERNALS__.invoke(name, args), { name, args });
 async function newLocalSession() {
-  const list = page.locator('.local-session-sidebar .terminal-session-header');
-  await list.press('Shift+F10');
+  await page.getByRole('button', { name: '新建终端会话', exact: true }).click();
   await page
-    .getByRole('menu', { name: '终端会话操作', exact: true })
+    .getByRole('menu', { name: '新建终端会话', exact: true })
     .getByRole('menuitem', { name: '新建', exact: true })
     .click();
 }
@@ -213,15 +212,19 @@ try {
   assert.equal(await page.locator('.sidebar-app-actions button').count(), 1);
   assert.equal(await page.locator('.split-toolbar, [aria-label="会话操作"]').count(), 0);
   assert.equal(await page.locator('.activity-rail').isVisible(), true);
-  assert.equal(await page.locator('.sidebar').isVisible(), true);
-  assert.equal(await page.locator('.activity-rail button').count(), 3);
-  assert.equal(await page.locator('.local-session-sidebar').isVisible(), true);
-  assert.equal(await page.getByRole('button', { name: '收起主机栏', exact: true }).count(), 0);
+  assert.equal(await page.locator('#local-session-panel').isVisible(), true);
+  assert.equal(await page.locator('.activity-rail button').count(), 4);
+  assert.equal(await page.locator('.terminal-primary .terminal-session-header').isVisible(), true);
+  assert.equal(
+    await page.getByRole('button', { name: '取消固定已保存会话栏', exact: true }).isVisible(),
+    true,
+  );
+  assert.equal(await page.getByRole('button', { name: '取消固定主机栏', exact: true }).count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'fixed-three-columns.png') });
   passed.push('About shows backend version; fixed rail and context sidebar remain available');
   for (const target of [
     page.locator('.activity-rail'),
-    page.locator('.sidebar'),
+    page.locator('#local-session-panel'),
     active().locator('.xterm-helper-textarea'),
     page.locator('.app-header'),
   ])
@@ -774,7 +777,7 @@ try {
     await page
       .locator('.host-library-heading > button')
       .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
-    ['收起主机栏'],
+    ['取消固定主机栏'],
   );
   assert.equal(await page.getByRole('dialog').count(), 0);
   await page.screenshot({ path: path.join(artifacts, 'host-tree-crud.png') });

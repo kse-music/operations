@@ -9,10 +9,12 @@ import { useNotificationsStore } from '../stores/notifications';
 export function useWindowControls() {
   const desktop = isTauri();
   const macosTitlebar = desktop && navigator.platform.startsWith('Mac');
-  const nativeWindow = desktop && !macosTitlebar ? getCurrentWindow() : undefined;
+  const nativeWindow = desktop ? getCurrentWindow() : undefined;
   const maximized = ref(false);
+  const fullscreen = ref(false);
   const notifications = useNotificationsStore();
   let disposed = false;
+  let latestStateQuery = 0;
   let releaseResize: UnlistenFn | undefined;
 
   async function run(action: (window: Window) => Promise<unknown>): Promise<void> {
@@ -24,21 +26,24 @@ export function useWindowControls() {
     }
   }
 
-  async function syncMaximized(): Promise<void> {
+  async function syncWindowState(): Promise<void> {
+    const query = ++latestStateQuery;
     await run(async (window) => {
-      const value = await window.isMaximized();
-      if (!disposed) maximized.value = value;
+      const value = await (macosTitlebar ? window.isFullscreen() : window.isMaximized());
+      if (disposed || query !== latestStateQuery) return;
+      if (macosTitlebar) fullscreen.value = value;
+      else maximized.value = value;
     });
   }
 
   onMounted(async () => {
     if (!nativeWindow) return;
     await run(async (window) => {
-      const release = await window.onResized(() => void syncMaximized());
+      const release = await window.onResized(() => void syncWindowState());
       if (disposed) release();
       else releaseResize = release;
     });
-    if (!disposed) await syncMaximized();
+    if (!disposed) await syncWindowState();
   });
   onBeforeUnmount(() => {
     disposed = true;
@@ -46,14 +51,15 @@ export function useWindowControls() {
   });
 
   return {
-    available: nativeWindow !== undefined,
+    available: desktop && !macosTitlebar,
     macosTitlebar,
     maximized,
+    fullscreen,
     minimize: () => run((window) => window.minimize()),
     toggleMaximize: () =>
       run(async (window) => {
         await window.toggleMaximize();
-        await syncMaximized();
+        await syncWindowState();
       }),
     // close() requests CloseRequested; Rust retains exit review and resource cleanup.
     close: () => run((window) => window.close()),

@@ -14,11 +14,54 @@ kbd {
   min-height: 0;
   overflow: hidden;
 }
-.app-shell.sidebar-collapsed {
-  --sidebar-layout-width: 36px;
+.app-shell.sidebar-auto-hide {
+  --sidebar-layout-width: 0px;
 }
-.sidebar-expand {
-  margin: 7px 3px;
+.sidebar-preview {
+  grid-area: auto;
+  position: absolute;
+  inset: var(--module-header-height) auto 28px var(--navigation-width);
+  width: var(--sidebar-open-width);
+  z-index: 15;
+  box-shadow: 6px 0 20px rgb(0 0 0 / 24%);
+}
+.sidebar-edge {
+  position: absolute;
+  top: calc(2 * var(--module-header-height) + 3px);
+  left: var(--navigation-width);
+  z-index: 14;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 64px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  color: var(--muted);
+}
+.sidebar-edge::before {
+  content: '';
+  width: 2px;
+  height: 24px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.6;
+}
+.sidebar-edge:hover,
+.sidebar-edge:focus-visible {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+.sidebar-edge:is(:hover, :focus-visible)::before {
+  opacity: 1;
+}
+@media (pointer: coarse) {
+  .sidebar-edge {
+    width: 44px;
+    justify-items: start;
+    padding-left: 5px;
+  }
 }
 .sidebar-toggle:focus-visible {
   background: var(--accent-bg);
@@ -128,6 +171,9 @@ kbd {
 .shell-icon-button:hover {
   background: var(--hover);
   color: var(--text);
+}
+.sidebar-preview .sidebar-toggle {
+  color: var(--accent);
 }
 .add-host-button {
   color: var(--accent);
@@ -569,7 +615,7 @@ kbd {
   }
   .app-shell {
     --navigation-width: 44px;
-    --sidebar-layout-width: clamp(110px, 30vw, 200px);
+    --sidebar-open-width: clamp(110px, 30vw, 200px);
     min-height: 0;
   }
   .activity-rail .nav-item {

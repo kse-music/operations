@@ -149,15 +149,22 @@ async function sidebarLayout() {
     const settings = document.querySelector('.sidebar-app-actions button').getBoundingClientRect();
     return {
       railWidth: rail.width,
-      columnsFit: rail.right <= sidebar.left + 1 && sidebar.right <= main.left + 1,
+      columnsFit: sidebar.width
+        ? rail.right <= sidebar.left + 1 && sidebar.right <= main.left + 1
+        : Math.abs(rail.right - main.left) <= 1,
       footerPinned: settings.bottom <= rail.bottom && rail.bottom - settings.bottom <= 18,
-      noCollapse: !document.querySelector('[aria-label="收起主机栏"], [aria-label="展开主机列表"]'),
+      noSidebarControlsInTitlebar: !document.querySelector(
+        '.app-header [aria-controls="host-tree-panel"], .app-header [aria-controls="local-session-panel"]',
+      ),
       noOverflow: document.documentElement.scrollWidth <= innerWidth,
     };
   });
   assert.equal(layout.railWidth, 52);
   assert(
-    layout.columnsFit && layout.footerPinned && layout.noCollapse && layout.noOverflow,
+    layout.columnsFit &&
+      layout.footerPinned &&
+      layout.noSidebarControlsInTitlebar &&
+      layout.noOverflow,
     JSON.stringify(layout),
   );
 }

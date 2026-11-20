@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { submenuPosition } from '../services/context-menu';
 import { tr } from '../i18n/messages';
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import {
   Check,
-  ChevronRight,
   Copy,
   ListX,
   Plus,
@@ -37,27 +35,23 @@ const props = withDefaults(
     visible?: boolean;
     hostId?: string;
     toolbarTarget?: string;
-    localSessionTarget?: string;
   }>(),
   {
     visible: true,
     hostId: '',
     toolbarTarget: '',
-    localSessionTarget: '',
   },
 );
 const hosts = useHostsStore();
 const tabs = computed(() => store.hostTabs(props.hostId));
-const sidebarSessions = computed(() => !props.hostId && !!props.localSessionTarget);
-const sessionTarget = computed(() =>
-  sidebarSessions.value ? props.localSessionTarget : props.toolbarTarget,
-);
+const sessionTarget = computed(() => (props.hostId ? props.toolbarTarget : ''));
+const sessionHeader = ref<HTMLElement>();
 function sessionKeys(event: KeyboardEvent): void {
-  if (!sidebarSessions.value || !props.visible || event.defaultPrevented) return;
+  if (!props.visible || event.defaultPrevented) return;
   const target = event.target as HTMLElement;
   if (
     !target.matches('[role="tab"]') ||
-    !['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)
+    !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
   )
     return;
   const buttons = [
@@ -69,7 +63,7 @@ function sessionKeys(event: KeyboardEvent): void {
       ? 0
       : event.key === 'End'
         ? buttons.length - 1
-        : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
   event.preventDefault();
   buttons[next]?.click();
   buttons[next]?.focus();
@@ -107,124 +101,51 @@ const tab = computed(() => store.tabs.find((t) => t.key === store.active));
 const menu = ref<{ key: string | undefined; x: number; y: number } | null>(null);
 const menuElement = ref<HTMLElement>();
 const menuTarget = computed(() => store.tabs.find((item) => item.key === menu.value?.key));
-const localBackgroundMenu = computed(
-  () => !props.hostId && menu.value !== null && menu.value.key === undefined,
-);
 const canOpenElevated = computed(() => !props.hostId && navigator.platform.startsWith('Win'));
-const savedSessions = computed(() => store.savedSessions(props.hostId));
-const savedTrigger = ref<HTMLButtonElement>();
-const savedMenuElement = ref<HTMLElement>();
-const savedMenuPosition = ref<{ x: number; y: number; width: number } | null>(null);
+const creationMenu = computed(
+  () => canOpenElevated.value && menu.value !== null && menu.value.key === undefined,
+);
 let menuTrigger: HTMLElement | null = null;
 function closeMenu(): void {
-  savedMenuPosition.value = null;
   menu.value = null;
   if (props.visible && menuTrigger?.isConnected) menuTrigger.focus({ preventScroll: true });
   menuTrigger = null;
 }
 function createLocalSession(elevated: boolean): void {
-  if (!props.visible || !localBackgroundMenu.value || (elevated && !canOpenElevated.value)) return;
+  if (!props.visible || !creationMenu.value) return;
   closeMenu();
   store.open(null, undefined, undefined, elevated);
 }
+function addSession(event: MouseEvent): void {
+  if (canOpenElevated.value) void openMenu(undefined, event);
+  else newTerminal();
+}
 async function openMenu(key: string | undefined, event: MouseEvent | KeyboardEvent): Promise<void> {
-  if (!props.visible) return;
-  savedMenuPosition.value = null;
+  if (!props.visible || (key === undefined && !canOpenElevated.value)) return;
+  event.preventDefault();
+  event.stopPropagation();
   const target = event.currentTarget as HTMLElement;
   menuTrigger = key ? (target.querySelector<HTMLElement>('[role=tab]') ?? target) : target;
   const bounds = target.getBoundingClientRect();
-  const anchored = event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
+  const anchored =
+    key === undefined || event instanceof KeyboardEvent || (!event.clientX && !event.clientY);
   menu.value = {
     key,
     x: anchored ? bounds.left : event.clientX,
     y: anchored ? bounds.bottom : event.clientY,
   };
+  const openedMenu = menu.value;
   await nextTick();
-  if (!menu.value || !menuElement.value) return;
+  if (menu.value !== openedMenu || !menuElement.value) return;
   const size = menuElement.value.getBoundingClientRect();
-  menu.value.x = Math.max(8, Math.min(menu.value.x, window.innerWidth - size.width - 8));
-  menu.value.y = Math.max(8, Math.min(menu.value.y, window.innerHeight - size.height - 8));
+  openedMenu.x = Math.max(8, Math.min(openedMenu.x, window.innerWidth - size.width - 8));
+  openedMenu.y = Math.max(8, Math.min(openedMenu.y, window.innerHeight - size.height - 8));
   await nextTick();
-  menuElement.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
-}
-async function openSavedMenu(focus = false): Promise<void> {
-  if (!savedTrigger.value || !menuElement.value) return;
-  if (!savedMenuPosition.value) {
-    savedMenuPosition.value = {
-      x: 8,
-      y: 8,
-      width: menuElement.value.getBoundingClientRect().width,
-    };
-    const currentHost = host.value;
-    if (props.hostId && currentHost)
-      void store
-        .loadHostSessions(currentHost)
-        .then(() => store.loadSavedTitleCommands(currentHost.id));
-    else if (!props.hostId) void store.loadSaved().then(() => store.loadSavedTitleCommands(''));
-  }
-  await nextTick();
-  positionSavedMenu();
-  if (focus && savedMenuElement.value)
-    (
-      savedMenuElement.value.querySelector<HTMLButtonElement>('button:not(:disabled)') ??
-      savedMenuElement.value
-    ).focus();
-}
-function positionSavedMenu(): void {
-  if (!savedMenuElement.value || !menuElement.value || !savedTrigger.value) return;
-  const parent = menuElement.value.getBoundingClientRect();
-  const trigger = savedTrigger.value.getBoundingClientRect();
-  const { width } = parent;
-  const { height } = savedMenuElement.value.getBoundingClientRect();
-  savedMenuPosition.value = {
-    ...submenuPosition(parent, trigger.top, { width, height }),
-    width,
-  };
-}
-watch(
-  () => [savedSessions.value, props.hostId ? store.sshErrors[props.hostId] : store.savedError],
-  positionSavedMenu,
-  { flush: 'post' },
-);
-function hoverMenu(event: PointerEvent): void {
-  const button = (event.target as HTMLElement).closest('button');
-  if (button && button !== savedTrigger.value) savedMenuPosition.value = null;
-}
-function restoreSaved(id: string): void {
-  closeMenu();
-  if (!props.hostId || host.value) store.restoreSavedSession(host.value, id);
-}
-async function deleteSaved(id: string, event: MouseEvent): Promise<void> {
-  const button = event.currentTarget as HTMLButtonElement;
-  const menu = savedMenuElement.value;
-  const index = savedSessions.value.findIndex((entry) => entry.id === id);
-  await store.deleteSavedSession(props.hostId, id);
-  await nextTick();
-  if (
-    button.isConnected ||
-    !menu ||
-    savedMenuElement.value !== menu ||
-    document.activeElement !== document.body
-  )
-    return;
-  const remaining = menu.querySelectorAll<HTMLButtonElement>(
-    '.terminal-saved-session-remove:not(:disabled)',
-  );
-  (remaining[Math.min(index, remaining.length - 1)] ?? menu).focus();
+  if (menu.value === openedMenu)
+    menuElement.value?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
 }
 function menuKey(event: KeyboardEvent): void {
   const element = event.currentTarget as HTMLElement;
-  if (element === savedMenuElement.value && ['Escape', 'ArrowLeft'].includes(event.key)) {
-    event.preventDefault();
-    savedMenuPosition.value = null;
-    savedTrigger.value?.focus();
-    return;
-  }
-  if (event.key === 'ArrowRight' && document.activeElement === savedTrigger.value) {
-    event.preventDefault();
-    void openSavedMenu(true);
-    return;
-  }
   if (['Escape', 'Tab'].includes(event.key)) {
     event.preventDefault();
     closeMenu();
@@ -246,13 +167,12 @@ function runMenu(
   action: 'duplicate' | 'rename' | 'reconnect' | 'disconnect' | 'all' | 'save',
 ): void {
   const target = menuTarget.value;
-  const closeTarget = target ?? tabs.value[0];
   closeMenu();
+  if (!target) return;
   if (action === 'all') {
-    if (closeTarget) void store.closeAll(closeTarget.key);
+    void store.closeAll(target.key);
     return;
   }
-  if (!target) return;
   if (action === 'duplicate' || action === 'reconnect') {
     const snapshot = target.panes[0]?.host;
     const configured = snapshot && hosts.catalog?.hosts.find((item) => item.id === snapshot.id);
@@ -456,11 +376,21 @@ onMounted(() => {
 watch(
   () => [props.visible, props.hostId],
   () => {
-    savedMenuPosition.value = null;
     menu.value = null;
     menuTrigger = null;
     renaming.value = null;
   },
+);
+watch(
+  () => [store.active, props.visible, props.hostId],
+  () => {
+    if (props.visible)
+      sessionHeader.value?.querySelector('.terminal-tab.active')?.scrollIntoView?.({
+        block: 'nearest',
+        inline: 'nearest',
+      });
+  },
+  { flush: 'post' },
 );
 watch(
   () => store.tabs.map((item) => item.key),
@@ -473,53 +403,19 @@ watch(
 </script>
 <template>
   <div class="terminals-view">
-    <div v-if="!props.hostId && store.savedError" class="workspace-empty" role="alert">
-      <p>{{ store.savedError }}</p>
-      <button class="button" :disabled="store.savedLoading" @click="store.loadSaved">
-        {{ tr('重试加载已保存会话') }}
-      </button>
-    </div>
-    <div v-if="props.hostId && store.sshErrors[props.hostId]" class="workspace-empty" role="alert">
-      <p>{{ store.sshErrors[props.hostId] }}</p>
-      <button v-if="!tabs.length && host" class="button" @click="newTerminal">
-        {{ tr('新建终端') }}
-      </button>
-      <button class="button" @click="host && emit('retryHost', host)">
-        {{ tr('重试加载已保存会话') }}
-      </button>
-    </div>
-    <div v-else-if="store.sshLoading.has(props.hostId)" class="workspace-empty" role="status">
-      {{ tr('正在加载已保存会话…') }}
-    </div>
-    <div v-else-if="!tabs.length" class="workspace-empty">
-      <h2>{{ tr('没有打开的终端') }}</h2>
-      <p v-if="!props.hostId && store.savedLoading" role="status">
-        {{ tr('正在加载已保存会话…') }}
-      </p>
-      <p v-else>{{ tr('当前主机尚无终端。可新建会话，或通过工作区标签切换主机。') }}</p>
-      <button class="button" :disabled="!!props.hostId && !host" @click="newTerminal">
-        {{ props.hostId ? tr('新建终端') : tr('打开本地终端') }}
-      </button>
-    </div>
     <Teleport :to="sessionTarget || 'body'" :disabled="!sessionTarget">
       <div
+        ref="sessionHeader"
         class="terminal-session-header"
         role="group"
         :aria-label="tr('终端会话栏')"
-        tabindex="0"
-        @contextmenu.prevent.stop="openMenu(undefined, $event)"
-        @keydown.self.shift.f10.prevent.stop="openMenu(undefined, $event)"
-        @keydown.self.context-menu.prevent.stop="openMenu(undefined, $event)"
       >
-        <p v-if="!tabs.length && sidebarSessions" class="local-session-empty" role="status">
-          {{ tr('没有打开的终端') }}
-        </p>
         <div
-          v-else-if="tabs.length"
+          v-if="tabs.length"
           class="terminal-tabs"
           role="tablist"
-          :aria-label="sidebarSessions ? tr('本地终端会话') : tr('终端标签')"
-          :aria-orientation="sidebarSessions ? 'vertical' : 'horizontal'"
+          :aria-label="props.hostId ? tr('终端标签') : tr('本地终端会话')"
+          aria-orientation="horizontal"
           @keydown="sessionKeys"
         >
           <div
@@ -558,7 +454,7 @@ watch(
               role="tab"
               :title="sessionTitle(item)"
               :aria-selected="store.active === item.key"
-              :tabindex="sidebarSessions && store.active !== item.key ? -1 : 0"
+              :tabindex="store.active === item.key ? 0 : -1"
               @click="store.select(item.key)"
               @dblclick="rename(item.key)"
             >
@@ -610,16 +506,40 @@ watch(
           </div>
         </div>
         <button
-          v-if="props.hostId"
           class="shell-icon-button"
           :aria-label="tr('新建终端会话')"
           :title="tr('新建终端会话')"
-          @click="newTerminal"
+          :aria-haspopup="canOpenElevated ? 'menu' : undefined"
+          :aria-expanded="canOpenElevated ? creationMenu : undefined"
+          :disabled="!!props.hostId && !host"
+          @click="addSession"
         >
           <Plus :size="15" aria-hidden="true" />
         </button>
       </div>
     </Teleport>
+    <div v-if="props.hostId && store.sshErrors[props.hostId]" class="workspace-empty" role="alert">
+      <p>{{ store.sshErrors[props.hostId] }}</p>
+      <button v-if="!tabs.length && host" class="button" @click="newTerminal">
+        {{ tr('新建终端') }}
+      </button>
+      <button class="button" @click="host && emit('retryHost', host)">
+        {{ tr('重试加载已保存会话') }}
+      </button>
+    </div>
+    <div v-else-if="store.sshLoading.has(props.hostId)" class="workspace-empty" role="status">
+      {{ tr('正在加载已保存会话…') }}
+    </div>
+    <div v-else-if="!tabs.length" class="workspace-empty">
+      <h2>{{ tr('没有打开的终端') }}</h2>
+      <p v-if="props.hostId">
+        {{ tr('当前主机尚无终端。可新建会话，或通过工作区标签切换主机。') }}
+      </p>
+      <p v-else>{{ tr('可新建终端，或从侧栏恢复已保存的会话。') }}</p>
+      <button class="button" :disabled="!!props.hostId && !host" @click="newTerminal">
+        {{ props.hostId ? tr('新建终端') : tr('打开本地终端') }}
+      </button>
+    </div>
     <div ref="area" class="split-area">
       <div
         v-for="item in paneViews"
@@ -673,21 +593,19 @@ watch(
         ref="menuElement"
         class="context-menu terminal-session-menu"
         role="menu"
-        :aria-label="tr('终端会话操作')"
+        :aria-label="creationMenu ? tr('新建终端会话') : tr('终端会话操作')"
         :style="{ left: `${menu.x}px`, top: `${menu.y}px` }"
         @keydown="menuKey"
-        @pointerover="hoverMenu"
       >
-        <template v-if="localBackgroundMenu">
+        <template v-if="creationMenu">
           <button role="menuitem" @click="createLocalSession(false)">
             <SquareTerminal class="menu-icon-purple" aria-hidden="true" />{{ tr('新建') }}
           </button>
-          <button v-if="canOpenElevated" role="menuitem" @click="createLocalSession(true)">
+          <button role="menuitem" @click="createLocalSession(true)">
             <Shield class="menu-icon-gold" aria-hidden="true" />{{ tr('新建(管理员)') }}
           </button>
-          <div role="separator"></div>
         </template>
-        <template v-if="menuTarget">
+        <template v-else-if="menuTarget">
           <button role="menuitem" @click="runMenu('duplicate')">
             <Copy class="menu-icon-blue" aria-hidden="true" />{{ tr('复制') }}
           </button>
@@ -723,71 +641,10 @@ watch(
           >
             <Unplug class="menu-icon-red" aria-hidden="true" />{{ tr('断开连接') }}
           </button>
+          <button role="menuitem" @click="runMenu('all')">
+            <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
+          </button>
         </template>
-        <button
-          ref="savedTrigger"
-          role="menuitem"
-          aria-haspopup="menu"
-          aria-controls="terminal-saved-session-menu"
-          :aria-expanded="!!savedMenuPosition"
-          @pointerenter="openSavedMenu()"
-          @click="openSavedMenu(true)"
-        >
-          <Save class="menu-icon-green" aria-hidden="true" />
-          <span>{{ tr('已保存会话') }}</span>
-          <ChevronRight class="terminal-saved-menu-arrow" aria-hidden="true" />
-        </button>
-        <button v-if="tabs.length" role="menuitem" @click="runMenu('all')">
-          <ListX class="menu-icon-red" aria-hidden="true" />{{ tr('关闭所有') }}
-        </button>
-      </div>
-      <div
-        v-if="savedMenuPosition"
-        id="terminal-saved-session-menu"
-        ref="savedMenuElement"
-        class="context-menu terminal-session-menu terminal-saved-session-menu"
-        role="menu"
-        :aria-label="tr('已保存会话')"
-        tabindex="-1"
-        :style="{
-          left: `${savedMenuPosition.x}px`,
-          top: `${savedMenuPosition.y}px`,
-          width: `${savedMenuPosition.width}px`,
-        }"
-        @keydown="menuKey"
-      >
-        <div
-          v-for="entry in savedSessions"
-          :key="entry.id"
-          class="terminal-saved-session-row"
-          role="group"
-        >
-          <button
-            role="menuitem"
-            :title="store.savedSessionTitle(entry)"
-            @click="restoreSaved(entry.id)"
-          >
-            <span>{{ store.savedSessionTitle(entry) }}</span>
-          </button>
-          <button
-            role="menuitem"
-            class="terminal-saved-session-remove"
-            :aria-label="tr('删除“{0}”的保存记录', entry.title)"
-            :title="tr('删除保存记录')"
-            :disabled="!store.canDeleteSaved(props.hostId, entry.id)"
-            @click="deleteSaved(entry.id, $event)"
-          >
-            <X class="menu-icon-red" aria-hidden="true" />
-          </button>
-        </div>
-        <p v-if="!savedSessions.length" class="terminal-saved-session-empty" role="status">
-          {{
-            (props.hostId ? store.sshErrors[props.hostId] : store.savedError) ||
-            (store.savedLoading || store.sshLoading.has(props.hostId)
-              ? tr('正在加载已保存会话…')
-              : tr('没有已保存的会话'))
-          }}
-        </p>
       </div>
     </template>
   </Teleport>

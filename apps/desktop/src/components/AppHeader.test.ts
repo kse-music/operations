@@ -9,7 +9,9 @@ import { useNotificationsStore } from '../stores/notifications';
 const native = vi.hoisted(() => ({
   available: true,
   maximized: false,
+  fullscreen: false,
   isMaximized: vi.fn(),
+  isFullscreen: vi.fn(),
   minimize: vi.fn(),
   toggleMaximize: vi.fn(),
   close: vi.fn(),
@@ -38,7 +40,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   native.available = true;
   native.maximized = false;
+  native.fullscreen = false;
   native.isMaximized.mockImplementation(async () => native.maximized);
+  native.isFullscreen.mockImplementation(async () => native.fullscreen);
   native.minimize.mockResolvedValue(undefined);
   native.close.mockResolvedValue(undefined);
   native.toggleMaximize.mockImplementation(async () => {
@@ -66,6 +70,7 @@ it.each(['Win32', 'Linux x86_64'])(
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     await mount();
     expect(root.querySelector('.macos-titlebar')).toBeNull();
+    expect(native.isFullscreen).not.toHaveBeenCalled();
     button('全局搜索')
       .querySelector('svg')!
       .dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -134,16 +139,44 @@ it('releases a subscription that completes after unmount', async () => {
   expect(native.isMaximized).not.toHaveBeenCalled();
 });
 
-it('reserves room for macOS system controls and keeps search and dragging available', async () => {
+it('reclaims space in macOS fullscreen and restores it when the window leaves fullscreen', async () => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
   renderHeader();
-  await nextTick();
+  await vi.waitFor(() => expect(native.isFullscreen).toHaveBeenCalledOnce());
   expect(root.querySelector('.macos-titlebar[data-tauri-drag-region="deep"]')).not.toBeNull();
+  native.fullscreen = true;
+  resized!();
+  await vi.waitFor(() => expect(root.querySelector('.macos-titlebar')).toBeNull());
   expect(root.querySelector('.window-controls')).toBeNull();
-  expect(getCurrentWindow).not.toHaveBeenCalled();
-  expect(native.onResized).not.toHaveBeenCalled();
   button('全局搜索').click();
   expect(search).toHaveBeenCalledOnce();
+  native.fullscreen = false;
+  native.maximized = true;
+  resized!();
+  await vi.waitFor(() =>
+    expect(root.querySelector('.macos-titlebar[data-tauri-drag-region="deep"]')).not.toBeNull(),
+  );
+  expect(native.isMaximized).not.toHaveBeenCalled();
+});
+
+it('reads macOS fullscreen at mount and ignores stale state after a resize', async () => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  native.fullscreen = true;
+  renderHeader();
+  await vi.waitFor(() => expect(root.querySelector('.macos-titlebar')).toBeNull());
+
+  let finish: (value: boolean) => void;
+  native.isFullscreen.mockImplementationOnce(
+    () => new Promise<boolean>((resolve) => (finish = resolve)),
+  );
+  resized!();
+  native.fullscreen = false;
+  resized!();
+  await vi.waitFor(() => expect(root.querySelector('.macos-titlebar')).not.toBeNull());
+  finish!(true);
+  await Promise.resolve();
+  await nextTick();
+  expect(root.querySelector('.macos-titlebar')).not.toBeNull();
 });
 
 it('keeps browser preview on macOS usable without accessing native windows', async () => {

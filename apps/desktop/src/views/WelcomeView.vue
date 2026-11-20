@@ -30,12 +30,12 @@ const hosts = useHostsStore();
 const plugins = usePluginsStore();
 const targets = computed(() => filterHosts(hosts.catalog?.hosts ?? [], ''));
 const target = computed(
-  () => targets.value.find((host) => host.id === hosts.selectedId) ?? targets.value[0],
+  () => targets.value.find((host) => host.id === hosts.homeTargetId) ?? targets.value[0],
 );
 const targetId = computed({
   get: () => target.value?.id ?? '',
   set: (id: string) => {
-    hosts.selectedId = id;
+    hosts.homeTargetId = id;
   },
 });
 const hostUnavailable = computed(() => hosts.busy || !!hosts.error);

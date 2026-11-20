@@ -27,7 +27,9 @@ export async function showHostTree(page) {
     await page.locator('.activity-rail').getByRole('button', { name: '首页', exact: true }).click();
   }
   const expand = page.getByRole('button', { name: '展开主机列表', exact: true });
-  if (await expand.isVisible()) await expand.click();
+  if (await expand.isVisible()) await expand.press('Enter');
+  const pin = page.getByRole('button', { name: '固定主机栏', exact: true });
+  if (await pin.isVisible()) await pin.click();
   const library = page.locator('.host-views').getByRole('button', { name: '全部', exact: true });
   if ((await library.getAttribute('aria-pressed')) === 'false') await library.click();
 }

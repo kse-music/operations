@@ -14,6 +14,7 @@ import {
 import { useApplicationStore } from './stores/application';
 import { useUpdatesStore } from './stores/updates';
 import { useTheme } from './composables/theme';
+import { useWorkspaceSidebar } from './composables/workspace-sidebar';
 import { defaultInterfaceFontSize } from './types/preferences';
 import SettingsView from './views/SettingsView.vue';
 import SettingsNavigation from './components/SettingsNavigation.vue';
@@ -21,6 +22,7 @@ import TerminalStatus from './components/TerminalStatus.vue';
 import HostSidebar from './components/HostSidebar.vue';
 import EnvironmentTagBadge from './components/EnvironmentTagBadge.vue';
 import SidebarToggle from './components/SidebarToggle.vue';
+import SavedTerminalSessions from './components/SavedTerminalSessions.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
 import WelcomeView from './views/WelcomeView.vue';
@@ -165,18 +167,19 @@ const statusPane = computed(() => {
   return tab.panes.find((pane) => pane.key === terminals.focused) ?? tab.panes[0];
 });
 const cachedPluginPages = computed(() => workspace.pluginPages);
+type HostOpenOptions = { filePath?: string; savedSessionId?: string };
 function navigate(
   value: View,
   hostId = currentHostId.value,
   section?: WorkspaceTab['section'],
-  filePath?: string,
+  options?: HostOpenOptions,
 ): void {
   if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
   if (host && hostViews.has(value) && host.authType !== 'agent' && host.credentialId === null) {
     if (store.busy || workspace.closing.includes(`host:${host.id}`)) return;
     store.error = null;
-    credentialPrompt.value = { host, view: value, section, filePath };
+    credentialPrompt.value = { host, view: value, section, options };
     return;
   }
   if (value === 'terminals' && !hostId) {
@@ -187,11 +190,12 @@ function navigate(
   if (value === 'files') files.active = hostId;
   if (value === 'server') operations.active = hostId;
   workspace.navigate(value, hostId, section);
-  if (value === 'files' && host && filePath !== undefined) void files.open(host, filePath);
-  if (value === 'terminals' && host) void enterTerminalHost(host);
+  if (value === 'files' && host && options?.filePath !== undefined)
+    void files.open(host, options.filePath);
+  if (value === 'terminals' && host) void enterTerminalHost(host, options?.savedSessionId);
   if (hostViews.has(value)) store.selectedId = host?.id ?? null;
 }
-async function enterTerminalHost(host: Host) {
+async function enterTerminalHost(host: Host, savedSessionId?: string) {
   const loaded = await terminals.loadHostSessions(host);
   const target = workspace.current;
   if (
@@ -202,6 +206,10 @@ async function enterTerminalHost(host: Host) {
     workspace.closing.includes(target.key)
   )
     return;
+  if (savedSessionId !== undefined) {
+    if (currentConfiguration(host)) terminals.restoreSavedSession(host, savedSessionId);
+    return;
+  }
   terminals.activateHost(host.id);
   if (!terminals.active) terminals.open(host);
   else {
@@ -218,6 +226,9 @@ function setContext(hostId: string) {
   const tab = workspace.tabs.find((tab) => isHostTab(tab) && tab.hostId === hostId);
   if (tab && tab.view !== 'terminals') workspace.activate(tab.key);
   else navigate('terminals', hostId, tab?.section);
+}
+function restoreHostSession(host: Host, id: string): void {
+  if (currentConfiguration(host)) navigate('terminals', host.id, undefined, { savedSessionId: id });
 }
 function tabName(tab: WorkspaceTab) {
   if (isHostTab(tab))
@@ -405,23 +416,23 @@ function globalShortcut(event: KeyboardEvent) {
   else if (action === 'settings') navigate('settings');
 }
 const sidebarDraft = ref<number | null>(null);
-const sidebarElement = ref<HTMLElement>();
-const collapsedSidebars = ref({ home: false, local: false });
-const sidebarCollapsed = computed(
-  () =>
-    (workspace.area === 'home' || workspace.area === 'local') &&
-    collapsedSidebars.value[workspace.area],
+const {
+  sidebar: sidebarElement,
+  edge: sidebarEdge,
+  controls: sidebarControls,
+  autoHide: sidebarAutoHide,
+  preview: sidebarPreview,
+  visible: sidebarVisible,
+  hoverEdge,
+  leaveEdge,
+  enterSidebar,
+  leaveSidebar,
+  openFromEdge,
+  togglePin,
+} = useWorkspaceSidebar(() => workspace.area);
+const sidebarRevealLabel = computed(() =>
+  workspace.area === 'local' ? tr('展开已保存会话') : tr('展开主机列表'),
 );
-async function toggleSidebar(): Promise<void> {
-  const area = workspace.area;
-  if (area !== 'home' && area !== 'local') return;
-  collapsedSidebars.value[area] = !collapsedSidebars.value[area];
-  await nextTick();
-  const selector = collapsedSidebars.value[area]
-    ? '.sidebar-expand'
-    : `.sidebar-toggle[aria-controls="${area === 'home' ? 'host-tree-panel' : 'local-session-panel'}"]`;
-  sidebarElement.value?.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
-}
 function clampSidebarWidth(width: number): number {
   return Math.max(200, Math.min(400, Math.round(width)));
 }
@@ -524,7 +535,7 @@ function fileTerminal(host: Host | null, directory: string): void {
 function openMountDirectory(host: Host, path: string): void {
   const fileHost = files.connections[host.id]?.host;
   if (!currentConfiguration(host) || (fileHost && !currentConfiguration(fileHost))) return;
-  navigate('files', host.id, undefined, path);
+  navigate('files', host.id, undefined, { filePath: path });
 }
 
 const hostDialog = ref(false);
@@ -533,7 +544,7 @@ const credentialPrompt = ref<{
   host: Host;
   view: View;
   section: WorkspaceTab['section'];
-  filePath?: string;
+  options?: HostOpenOptions;
 }>();
 const hostImport = ref<'ssh' | 'all'>();
 function openHost(groupId: string | null = null): void {
@@ -544,7 +555,7 @@ function openHost(groupId: string | null = null): void {
 function resumeHostOpen(host: Host): void {
   const target = credentialPrompt.value;
   // A failed catalog refresh already reports an error and may leave the old credentials in view.
-  if (target && !store.error) navigate(target.view, host.id, target.section, target.filePath);
+  if (target && !store.error) navigate(target.view, host.id, target.section, target.options);
 }
 function revealHost(host: Host): void {
   if (!store.visible.some((item) => item.id === host.id)) {
@@ -721,7 +732,7 @@ watch(
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }" :style="layoutStyle">
+  <div class="app-shell" :class="{ 'sidebar-auto-hide': sidebarAutoHide }" :style="layoutStyle">
     <AppHeader
       :search-shortcut="
         application.state?.config.product?.shortcuts.search ?? defaultShortcuts.search!
@@ -736,20 +747,35 @@ watch(
       @batch="workspace.showBatch()"
       @settings="workspace.showSettings()"
     />
-    <aside id="host-sidebar" ref="sidebarElement" class="sidebar" :aria-label="tr('侧栏菜单')">
-      <SidebarToggle
-        v-if="sidebarCollapsed"
-        class="sidebar-expand"
-        collapsed
-        :controls="workspace.area === 'home' ? 'host-tree-panel' : 'local-session-panel'"
-        :label="workspace.area === 'home' ? tr('展开主机列表') : tr('展开本地会话')"
-        @toggle="toggleSidebar"
-      />
+    <button
+      v-if="sidebarAutoHide && !sidebarPreview"
+      ref="sidebarEdge"
+      class="sidebar-edge"
+      type="button"
+      :aria-label="sidebarRevealLabel"
+      :title="sidebarRevealLabel"
+      :aria-controls="sidebarControls"
+      aria-expanded="false"
+      @pointermove="hoverEdge"
+      @pointerleave="leaveEdge"
+      @click="openFromEdge"
+    ></button>
+    <aside
+      v-show="sidebarVisible"
+      id="host-sidebar"
+      ref="sidebarElement"
+      class="sidebar"
+      :class="{ 'sidebar-preview': sidebarPreview }"
+      :aria-label="tr('侧栏菜单')"
+      @pointerenter="enterSidebar"
+      @pointerleave="leaveSidebar"
+    >
       <HostSidebar
-        v-show="workspace.area === 'home' && !sidebarCollapsed"
+        v-show="workspace.area === 'home' && sidebarVisible"
         id="host-tree-panel"
-        :active="workspace.area === 'home' && !sidebarCollapsed"
+        :active="workspace.area === 'home' && sidebarVisible"
         @plugin="openPlugin"
+        @restore-session="restoreHostSession"
         @manage-environment-tags="navigate('settingsEnvironmentTags')"
         @create="openHost($event)"
         @import-hosts="hostImport = 'all'"
@@ -759,32 +785,37 @@ watch(
         <template #heading-actions>
           <SidebarToggle
             controls="host-tree-panel"
-            :label="tr('收起主机栏')"
-            @toggle="toggleSidebar"
+            :pinned="!sidebarPreview"
+            :label="sidebarPreview ? tr('固定主机栏') : tr('取消固定主机栏')"
+            @toggle="togglePin"
           />
         </template>
       </HostSidebar>
       <section
-        v-show="workspace.area === 'local' && !sidebarCollapsed"
+        v-show="workspace.area === 'local' && sidebarVisible"
         id="local-session-panel"
         class="local-session-sidebar"
-        :aria-label="tr('本地终端会话')"
+        aria-labelledby="local-session-heading"
       >
         <div class="host-list-heading local-session-heading">
-          <h2>{{ tr('本地终端') }}</h2>
+          <h2 id="local-session-heading">{{ tr('本地会话') }}</h2>
           <SidebarToggle
             controls="local-session-panel"
-            :label="tr('收起本地会话')"
-            @toggle="toggleSidebar"
+            :pinned="!sidebarPreview"
+            :label="sidebarPreview ? tr('固定已保存会话栏') : tr('取消固定已保存会话栏')"
+            @toggle="togglePin"
           />
         </div>
-        <div id="local-terminal-session-list"></div>
+        <SavedTerminalSessions
+          :active="workspace.area === 'local'"
+          @restore="terminals.restoreSavedSession(null, $event)"
+        />
       </section>
       <div v-show="batchOpen" id="batch-command-list" class="batch-sidebar-target"></div>
       <SettingsNavigation v-show="settingsOpen" />
     </aside>
     <div
-      v-show="!sidebarCollapsed"
+      v-show="!sidebarAutoHide"
       class="sidebar-resizer"
       role="separator"
       :aria-label="tr('调整主机侧栏宽度')"
@@ -976,7 +1007,6 @@ watch(
             :visible="terminalVisible"
             :host-id="currentHostId"
             toolbar-target="#terminal-session-tools"
-            local-session-target="#local-terminal-session-list"
             @server="openServer"
             @retry-host="enterTerminalHost"
           />
