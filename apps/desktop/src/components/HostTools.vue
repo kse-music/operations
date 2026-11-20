@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { tr } from '../i18n/messages';
 
-import { ArrowRightLeft, FolderSync, SquareTerminal } from '@lucide/vue';
+import { Activity, ArrowRightLeft, FolderSync, SquareTerminal } from '@lucide/vue';
 import { computed } from 'vue';
 import { viewLabels, type WorkspaceView } from '../types/product';
 import { usePluginsStore } from '../stores/plugins';
@@ -15,6 +15,13 @@ defineEmits<{
   plugin: [id: string, contribution: string];
 }>();
 const tools = [
+  {
+    view: 'overview',
+    get label() {
+      return viewLabels.overview;
+    },
+    icon: Activity,
+  },
   {
     view: 'terminals',
     get label() {

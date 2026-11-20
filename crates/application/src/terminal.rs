@@ -573,7 +573,7 @@ impl Application {
         self.terminal_uploads.clear()?;
         self.local_terminals.close_all(false).await?;
         self.operations_host.close_all_logs().await?;
-        self.monitors.pause_all();
+        self.monitors.reset().await;
         self.files.reset_editors();
         self.terminals.close_views().await
     }

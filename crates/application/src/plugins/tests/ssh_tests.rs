@@ -830,6 +830,9 @@ impl server::Handler for Handler {
         let command = String::from_utf8_lossy(command).to_string();
         self.calls.lock().unwrap().push(command.clone());
         s.channel_success(id)?;
+        if command == "serverdeck-batch-fixture-hold" {
+            return Ok(());
+        }
         if command.contains("fixture-failure") {
             s.extended_data(id, 1, b"fixture permission denied".to_vec())?;
             s.exit_status_request(id, 7)?;
@@ -985,6 +988,158 @@ async fn ssh(app: &Application) -> Ssh {
         calls,
         task,
     }
+}
+
+#[tokio::test]
+async fn batch_commands_over_ssh_require_confirmation_trust_and_preserve_per_host_outcomes() {
+    use serverdeck_core::batch::{BatchCommandInput, BatchRequest, BatchStatus};
+
+    let fixture = Fixture::new();
+    let app = &fixture.app;
+    let first = ssh(app).await;
+    let second = ssh(app).await;
+    let untrusted = ssh(app).await;
+    for peer in [&first, &second, &untrusted] {
+        app.terminals.close(&peer.session.id).await.unwrap();
+    }
+    let peer = &untrusted.host.config;
+    rusqlite::Connection::open(app.data_directory.join("serverdeck.sqlite3"))
+        .unwrap()
+        .execute(
+            "DELETE FROM ssh_known_hosts WHERE hostname=?1 AND port=?2",
+            rusqlite::params![peer.hostname, peer.port],
+        )
+        .unwrap();
+    let production = app
+        .database
+        .catalog()
+        .unwrap()
+        .environment_tags
+        .tags
+        .into_iter()
+        .find(|tag| tag.name == "生产")
+        .unwrap();
+    app.database
+        .host_set_environment_tag(&first.host.id, Some(&production.id))
+        .unwrap();
+
+    let text = "printf 'fixture-large'\nprintf 'literal newline'";
+    let saved = app
+        .batch_save(
+            None,
+            None,
+            BatchCommandInput {
+                name: "协议验证".to_owned(),
+                command: text.to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+    let target_ids = vec![
+        first.host.id.clone(),
+        second.host.id.clone(),
+        untrusted.host.id.clone(),
+    ];
+    let preview = app
+        .batch_prepare(BatchRequest {
+            command_id: saved.id.clone(),
+            revision: saved.revision,
+            host_ids: target_ids.clone(),
+            concurrency: 3,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        app.batch_start(preview.token.clone(), false).await,
+        Err(Error::Validation(_))
+    ));
+    for peer in [&first, &second, &untrusted] {
+        assert!(peer.calls.lock().unwrap().is_empty());
+    }
+    let started = app.batch_start(preview.token.clone(), true).await.unwrap();
+    let finished = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let batch = app.batch_status(None, None).unwrap().unwrap();
+            assert_eq!(batch.id, started.id);
+            if batch.finished {
+                break batch;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    for (result, peer) in finished.results.iter().zip([&first, &second]) {
+        assert_eq!(result.target.id, peer.host.id);
+        assert!(result.status == BatchStatus::Succeeded);
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.stdout.len(), 16 * 1024);
+        assert!(result.truncated);
+        assert_eq!(*peer.calls.lock().unwrap(), [text]);
+    }
+    assert!(finished.results[2].status == BatchStatus::ConnectionFailed);
+    assert!(
+        finished.results[2]
+            .message
+            .as_deref()
+            .unwrap()
+            .contains("指纹")
+    );
+    assert!(untrusted.calls.lock().unwrap().is_empty());
+    assert!(
+        app.database
+            .trusted_key(&peer.hostname, peer.port)
+            .unwrap()
+            .is_none()
+    );
+    assert!(app.batch_start(preview.token, true).await.is_err());
+    assert!(
+        app.batch_status(Some(&finished.id), Some(finished.revision))
+            .unwrap()
+            .is_none()
+    );
+    assert!(app.terminals.ops_connections().unwrap().is_empty());
+
+    let waiting = app
+        .batch_save(
+            None,
+            None,
+            BatchCommandInput {
+                name: "取消验证".into(),
+                command: "serverdeck-batch-fixture-hold".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let preview = app
+        .batch_prepare(BatchRequest {
+            command_id: waiting.id.clone(),
+            revision: waiting.revision,
+            host_ids: target_ids,
+            concurrency: 1,
+        })
+        .await
+        .unwrap();
+    let started = app.batch_start(preview.token, true).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while first.calls.lock().unwrap().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    app.batch_cancel(&started.id).unwrap();
+    app.batch.shutdown().await;
+    let stopped = app.batch_status(None, None).unwrap().unwrap();
+    assert!(stopped.finished && stopped.stopping);
+    assert!(stopped.results[0].status == BatchStatus::Unknown);
+    assert!(
+        stopped.results[1..]
+            .iter()
+            .all(|row| row.status == BatchStatus::NotSent)
+    );
+    assert_eq!(second.calls.lock().unwrap().len(), 1);
+    app.shutdown().await;
 }
 async fn approved(
     app: &Application,

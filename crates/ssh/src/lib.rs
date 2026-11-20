@@ -112,6 +112,7 @@ enum SessionKind {
     DedicatedFiles,
     Monitor,
     Operations,
+    Batch,
     Forwarding,
 }
 struct Control {
@@ -171,6 +172,7 @@ impl Engine {
                         SessionKind::Files | SessionKind::DedicatedFiles => "files",
                         SessionKind::Monitor => "monitor",
                         SessionKind::Operations => "operations",
+                        SessionKind::Batch => "batch",
                         SessionKind::Forwarding => "forwarding",
                     },
                     state: if c.ready.load(Ordering::Acquire) {
@@ -286,6 +288,22 @@ impl Engine {
             TerminalSize { cols: 80, rows: 24 },
             sink,
             SessionKind::Operations,
+            None,
+            None,
+        )
+    }
+    pub fn open_batch_plan(
+        &self,
+        host: Host,
+        plan: ConnectionPlan,
+        sink: Sink,
+    ) -> Result<TerminalSession, Error> {
+        self.open_internal(
+            host,
+            plan,
+            TerminalSize { cols: 80, rows: 24 },
+            sink,
+            SessionKind::Batch,
             None,
             None,
         )

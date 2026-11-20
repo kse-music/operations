@@ -1,4 +1,5 @@
 pub mod ai;
+pub mod batch;
 pub mod monitor;
 pub mod ops;
 pub mod product;

@@ -182,23 +182,21 @@ impl Monitors {
         });
         Ok(())
     }
+    pub fn refresh(&self, host: &str) -> Result<(), Error> {
+        let control = self.control(host)?;
+        if !control.settings.borrow().visible || !self.engine.monitor_ready(&control.session.id)? {
+            return Err(Error::Busy);
+        }
+        // Wake the sampler without replacing the SSH lease or dropping the previous counters.
+        control.settings.send_modify(|_| {});
+        Ok(())
+    }
     pub fn configure(&self, interval: u8) {
         if let Ok(registry) = self.registry.lock() {
             for control in registry.tasks.values() {
                 control.settings.send_if_modified(|s| {
                     let changed = s.interval != interval;
                     s.interval = interval;
-                    changed
-                });
-            }
-        }
-    }
-    pub fn pause_all(&self) {
-        if let Ok(registry) = self.registry.lock() {
-            for control in registry.tasks.values() {
-                control.settings.send_if_modified(|s| {
-                    let changed = s.visible;
-                    s.visible = false;
                     changed
                 });
             }
@@ -251,9 +249,15 @@ impl Monitors {
             );
         }
     }
+    pub async fn reset(&self) {
+        self.stop_all(false).await;
+    }
     pub async fn shutdown(&self) {
+        self.stop_all(true).await;
+    }
+    async fn stop_all(&self, shutdown: bool) {
         let tasks = if let Ok(mut registry) = self.registry.lock() {
-            registry.stopping = true;
+            registry.stopping |= shutdown;
             registry.tasks.drain().map(|(_, c)| c).collect::<Vec<_>>()
         } else {
             vec![]

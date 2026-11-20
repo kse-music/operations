@@ -8,6 +8,70 @@ use tauri::{
 use tauri_plugin_updater::UpdaterExt;
 
 #[test]
+fn batch_command_entry_points_are_scoped_to_the_local_main_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .manage(Application::initialize(dir.path().join("data"), dir.path().join("logs")).unwrap())
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let editor = tauri::WebviewWindowBuilder::new(&app, "remote-editor-test", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let input = json!({"id":null,"revision":null,"input":{"name":"Read state","command":"hostname\nuptime"}});
+    let saved = get_ipc_response(&main, request("batch_save", input.clone(), origin))
+        .unwrap()
+        .deserialize::<Value>()
+        .unwrap();
+    let listed = get_ipc_response(&main, request("batch_list", json!({}), origin))
+        .unwrap()
+        .deserialize::<Value>()
+        .unwrap();
+    assert_eq!(listed, json!([saved]));
+    assert!(
+        get_ipc_response(
+            &main,
+            request(
+                "batch_start",
+                json!({"token":"unknown","productionConfirmed":true}),
+                origin
+            )
+        )
+        .is_err()
+    );
+    for (window, url) in [(&editor, origin), (&main, "https://untrusted.invalid")] {
+        for (command, body) in [
+            ("batch_list", json!({})),
+            ("batch_save", input.clone()),
+            ("batch_delete", json!({"id":saved["id"],"revision":1})),
+            (
+                "batch_prepare",
+                json!({"input":{"commandId":saved["id"],"revision":1,"hostIds":["x"],"concurrency":1}}),
+            ),
+            (
+                "batch_start",
+                json!({"token":"unknown","productionConfirmed":true}),
+            ),
+            ("batch_status", json!({})),
+            ("batch_cancel", json!({"id":"unknown"})),
+        ] {
+            assert!(
+                get_ipc_response(window, request(command, body, url)).is_err(),
+                "{command}"
+            );
+        }
+    }
+}
+
+#[test]
 fn retired_development_kit_export_is_unavailable() {
     let app = mock_builder()
         .invoke_handler(serverdeck_desktop_lib::command_handler())
@@ -207,6 +271,42 @@ fn request(command: &str, body: Value, url: &str) -> InvokeRequest {
         body: InvokeBody::Json(body),
         headers: Default::default(),
         invoke_key: INVOKE_KEY.into(),
+    }
+}
+
+#[test]
+fn monitor_refresh_is_local_only_and_limited_to_the_main_window() {
+    let directory = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .manage(
+            Application::initialize(directory.path().join("data"), directory.path().join("logs"))
+                .unwrap(),
+        )
+        .invoke_handler(serverdeck_desktop_lib::command_handler())
+        .build(tauri::generate_context!())
+        .unwrap();
+    let main = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let editor = tauri::WebviewWindowBuilder::new(&app, "remote-editor-test", Default::default())
+        .build()
+        .unwrap();
+    let origin = if cfg!(windows) {
+        "http://tauri.localhost"
+    } else {
+        "tauri://localhost"
+    };
+    let body = json!({"hostId":"missing"});
+    let invoke =
+        |window, url| get_ipc_response(window, request("monitor_refresh", body.clone(), url));
+    assert_eq!(invoke(&main, origin).unwrap_err()["code"], "NOT_FOUND");
+    for (window, url) in [(&editor, origin), (&main, "https://untrusted.invalid")] {
+        assert!(
+            invoke(window, url)
+                .unwrap_err()
+                .to_string()
+                .contains("not allowed")
+        );
     }
 }
 

@@ -14,7 +14,7 @@
 | `crates/application`                        | 用例编排、资源所有权、有界阻塞工作和关闭协调     |
 | `crates/storage` / `security`               | SQLite 与配置升级；系统凭据及秘密生命周期        |
 | `crates/ssh` / `sftp`                       | 信任、认证、连接/Channel；文件、传输和原子编辑   |
-| `crates/monitor` / `ops`                    | 宿主内部监控与运维服务                           |
+| `crates/monitor` / `ops`                    | 主机概览的 SSH 采样与宿主内部运维服务            |
 | `crates/tasks` / `ai`                       | 有界单次 SSH 执行；模型传输、本地 CLI 与安装器   |
 | `crates/plugin-core` / `plugin-runtime`     | 包、仓库、授权与 Wasmi 运行时                    |
 | `crates/plugin-sdk` / `packages/plugin-sdk` | 公开协议、WASM async 执行器、TS 客户端和通用 UI  |

@@ -238,7 +238,13 @@ async fn state(
         }
     })
     .await
-    .expect(wanted)
+    .unwrap_or_else(|_| {
+        let last = m.snapshot(host, None).expect("snapshot").expect("value");
+        panic!(
+            "expected {wanted}, last state: {}, error: {:?}",
+            last.state, last.error
+        );
+    })
 }
 #[tokio::test]
 async fn one_task_per_host_pause_resume_stop_and_terminal_survives() {
@@ -316,6 +322,44 @@ async fn one_task_per_host_pause_resume_stop_and_terminal_survives() {
     .expect("echo");
     f.engine.shutdown().await;
     assert_eq!(f.engine.counts().expect("released"), (0, 0));
+}
+#[tokio::test]
+async fn refresh_resamples_the_same_lease_before_the_next_interval() {
+    let f = Fixture::start().await;
+    let m = Monitors::new(f.engine.clone());
+    let session = m
+        .open(f.host.clone(), f.plan(), 30, Arc::new(|_| true))
+        .expect("monitor");
+    let initial = state(&m, &f.host.id, "partial").await;
+    assert_eq!(initial.sample.expect("initial sample").cpus[0].usage, None);
+    m.refresh(&f.host.id).expect("request refresh");
+    let refreshed = tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let current = state(&m, &f.host.id, "partial").await;
+            if current.history.len() > initial.history.len() {
+                break current;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("refresh finished before the 30-second interval");
+    assert_eq!(refreshed.session_id, session.id);
+    let cpu = refreshed.sample.expect("refreshed sample").cpus[0]
+        .usage
+        .expect("CPU rate from consecutive samples");
+    assert!((cpu - 100.0 / 3.0).abs() < 1e-6);
+    assert_eq!(f.engine.counts().expect("same lease"), (1, 1));
+    m.reset().await;
+    assert_eq!(f.engine.counts().expect("reset released the lease"), (0, 0));
+    assert!(m.refresh(&f.host.id).is_err());
+    let reopened = f.open(&m);
+    assert_ne!(reopened.id, session.id);
+    assert_eq!(
+        state(&m, &f.host.id, "partial").await.session_id,
+        reopened.id
+    );
+    m.shutdown().await;
 }
 #[tokio::test]
 async fn timeout_permissions_output_limit_and_shutdown_release_channels() {

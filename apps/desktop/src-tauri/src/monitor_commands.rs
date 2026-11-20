@@ -40,6 +40,13 @@ pub fn monitor_visible(
         .map_err(Into::into)
 }
 #[tauri::command]
+pub fn monitor_refresh(
+    application: State<'_, Application>,
+    host_id: String,
+) -> Result<(), IpcError> {
+    application.monitor_refresh(&host_id).map_err(Into::into)
+}
+#[tauri::command]
 pub async fn monitor_stop(
     application: State<'_, Application>,
     host_id: String,

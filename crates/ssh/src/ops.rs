@@ -114,10 +114,24 @@ impl Engine {
         Ok(owner.ready.load(Ordering::Acquire))
     }
     pub async fn open_ops_channel(&self, id: &str) -> Result<subsystem::SubsystemChannel, Error> {
-        if !self.ops_ready(id)? {
+        self.open_command_channel(id, false).await
+    }
+    pub async fn open_exec_channel(&self, id: &str) -> Result<subsystem::SubsystemChannel, Error> {
+        self.open_command_channel(id, true).await
+    }
+    async fn open_command_channel(
+        &self,
+        id: &str,
+        allow_batch: bool,
+    ) -> Result<subsystem::SubsystemChannel, Error> {
+        let owner = self.control(id)?;
+        if !(owner.kind == SessionKind::Operations
+            || (allow_batch && owner.kind == SessionKind::Batch))
+            || !owner.ready.load(Ordering::Acquire)
+            || owner.cancel.is_cancelled()
+        {
             return Err(failure("OPS_NOT_READY", "运维连接尚未就绪"));
         }
-        let owner = self.control(id)?;
         let transport = locked(&self.registry)?
             .transports
             .values()

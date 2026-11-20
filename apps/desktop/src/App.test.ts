@@ -15,6 +15,7 @@ import { terminalApi } from './services/terminal';
 import { forwardingApi } from './services/forwarding';
 import { hostsApi } from './services/hosts';
 import { filesApi } from './services/files';
+import { monitorApi } from './services/monitor';
 import { hostInput, type EnvironmentTags } from './types/hosts';
 import * as ipc from './services/ipc';
 import { defaultTerminalPreferences } from './types/preferences';
@@ -24,8 +25,10 @@ import { usePluginsStore } from './stores/plugins';
 import { useNotificationsStore } from './stores/notifications';
 import { systemPluginFixtures, toolPluginState } from './services/system-plugins.fixture';
 import { aiApi } from './services/ai';
+import { batchApi } from './services/batch';
 import type { DirectoryListing, TransferInfo } from './types/files';
 import type { ForwardInfo, LocalForwardInput } from './types/connection';
+import type { Disk, MonitorSnapshot } from './types/monitor';
 import type { TerminalEvent } from './types/terminal';
 
 // Exercise the shell, workspace tabs and session tabs without xterm's browser canvas or a remote connection.
@@ -123,6 +126,99 @@ function loadSidebarConfig(): void {
     },
   };
 }
+
+it('opens the independent batch workspace, saves multiline text and sends only after confirming targets', async () => {
+  const saved = { id: 'command-a', revision: 1, name: '检查', command: 'hostname\nuptime' };
+  const host = useHostsStore().catalog!.hosts[0]!;
+  const target = {
+    id: host.id,
+    name: host.name,
+    hostname: host.hostname,
+    username: host.username,
+    port: host.port,
+    environment: { id: 'production', name: '生产', color: 'red' as const },
+  };
+  vi.spyOn(batchApi, 'list').mockResolvedValue([]);
+  vi.spyOn(batchApi, 'status').mockResolvedValue(null);
+  const save = vi.spyOn(batchApi, 'save').mockResolvedValue(saved);
+  const prepare = vi.spyOn(batchApi, 'prepare').mockResolvedValue({
+    token: 'preview-token',
+    command: saved,
+    concurrency: 3,
+    targets: [target],
+  });
+  const send = vi.spyOn(batchApi, 'start').mockResolvedValue({
+    id: 'batch-a',
+    revision: 1,
+    command: saved,
+    finished: true,
+    stopping: false,
+    results: [
+      {
+        target,
+        status: 'succeeded',
+        exitCode: 0,
+        stdout: 'output from host',
+        stderr: '',
+        truncated: false,
+        message: null,
+      },
+    ],
+  });
+  const nav = root.querySelector<HTMLButtonElement>('button[aria-label="批量命令"]')!;
+  expect(nav.previousElementSibling?.getAttribute('aria-label')).toBe('本地终端');
+  nav.click();
+  await flush();
+  expect(useWorkspaceStore().area).toBe('batch');
+  expect(root.querySelector<HTMLElement>('#host-tree-panel')?.style.display).toBe('none');
+  const library = root.querySelector('#batch-command-list')!;
+  library.querySelector<HTMLButtonElement>('button')!.click();
+  await flush();
+  const editor = root.querySelector<HTMLFormElement>('.batch-edit')!;
+  const name = editor.querySelector<HTMLInputElement>('input')!;
+  const command = editor.querySelector<HTMLTextAreaElement>('.batch-shell-editor textarea')!;
+  expect(command.rows).toBeGreaterThanOrEqual(8);
+  for (const [field, value] of [
+    [name, saved.name],
+    [command, saved.command],
+  ] as const) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  editor.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  await flush();
+  expect(save).toHaveBeenCalledWith({ name: saved.name, command: saved.command }, null);
+  expect(library.textContent).toContain(saved.name);
+  const byText = (label: string) =>
+    [...root.querySelectorAll<HTMLButtonElement>('.batch-workspace button')].find(
+      (button) => button.textContent?.trim() === label,
+    )!;
+  expect(byText('预览发送').disabled).toBe(true);
+  root.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!.click();
+  await flush();
+  byText('预览发送').click();
+  await flush();
+  expect(prepare).toHaveBeenCalledWith({
+    commandId: saved.id,
+    revision: 1,
+    hostIds: [host.id],
+    concurrency: 3,
+  });
+  expect(send).not.toHaveBeenCalled();
+  expect(byText('发送到 1 台主机').disabled).toBe(true);
+  root.querySelector<HTMLInputElement>('.batch-confirm input')!.click();
+  await flush();
+  byText('发送到 1 台主机').click();
+  await flush();
+  expect(send).toHaveBeenCalledWith('preview-token', true);
+  expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
+  useWorkspaceStore().showHome();
+  await flush();
+  expect(root.querySelector<HTMLElement>('#batch-command-list')?.style.display).toBe('none');
+  nav.click();
+  await flush();
+  expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
+});
 
 it('switches the shell and built-in plugin labels while preserving sessions and user names', async () => {
   loadSidebarConfig();
@@ -614,6 +710,156 @@ it('opens the homepage file tool for its selected host without creating a termin
   expect(useWorkspaceStore().current).toMatchObject({ view: 'files', hostId: 'b' });
   expect(openFiles).toHaveBeenCalledWith(expect.objectContaining({ id: 'b' }));
   expect(open).not.toHaveBeenCalled();
+});
+
+function sampledHost(hostId: string, revision: number, usage: number): MonitorSnapshot {
+  const mount = '/var/lib/应用 数据';
+  const disk: Disk = {
+    mount,
+    source: '/dev/sda',
+    filesystem: 'ext4',
+    device: '8:0',
+    pseudo: false,
+    image: false,
+    container: false,
+    duplicateOf: null,
+    total: 100 * 1024 ** 3,
+    used: usage * 1024 ** 3,
+    available: (100 - usage) * 1024 ** 3,
+    usage,
+    error: null,
+  };
+  return {
+    hostId,
+    sessionId: `monitor-${hostId}`,
+    revision,
+    state: 'running',
+    intervalSecs: 30,
+    error: null,
+    history: [],
+    sample: {
+      sampledAt: 1_790_000_000_000 + revision * 1000,
+      uptime: 12 * 86400,
+      load: [0.72, 0.64, 0.59],
+      cpus: [{ name: 'cpu', usage: null, iowait: null }],
+      memory: null,
+      disks: [disk, { ...disk, mount: '/', usage: 35 }, { ...disk, mount: '/proc', pseudo: true }],
+      network: [],
+      warnings: [],
+      rateStatus: 'first',
+      system: {
+        hostname: null,
+        distribution: 'Test Distribution',
+        kernel: null,
+        architecture: null,
+        cpuModel: null,
+        cores: 8,
+        systemTime: null,
+        timezone: null,
+      },
+    },
+  };
+}
+
+it('refreshes the selected host and opens its exact sampled mount path in SFTP', async () => {
+  const open = vi.spyOn(monitorApi, 'open').mockImplementation(async (id, emit) => {
+    emit({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: `monitor-${id}`, hostId: id, transportId: 'transport', routeHostIds: [id] };
+  });
+  let snapshot = sampledHost('b', 1, 92);
+  vi.spyOn(monitorApi, 'snapshot').mockImplementation(async (_id, after) =>
+    after === snapshot.revision ? null : snapshot,
+  );
+  const refresh = vi.spyOn(monitorApi, 'refresh').mockImplementation(async () => {
+    snapshot = sampledHost('b', 2, 40);
+  });
+  const stop = vi.spyOn(monitorApi, 'stop').mockResolvedValue();
+  const sftp = vi.spyOn(filesApi, 'open').mockImplementation(async (id, emit) => {
+    emit({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: 'sftp-b', hostId: id, transportId: 'transport', routeHostIds: [id] };
+  });
+  const list = vi.spyOn(filesApi, 'list').mockImplementation(async (_id, path) => ({
+    path,
+    parent: '/var/lib',
+    entries: [],
+  }));
+  vi.spyOn(filesApi, 'localDrives').mockResolvedValue([]);
+  const workspace = useWorkspaceStore();
+  workspace.navigate('forwarding', 'b');
+  await nextTick();
+  root.querySelector<HTMLButtonElement>('.host-tools [aria-label="概览"]')!.click();
+  await flush();
+  const overview = () => root.querySelector<HTMLElement>('.host-overview')!;
+  await vi.waitFor(() =>
+    expect(overview().querySelector('.overview-warning')?.textContent).toContain('92.0%'),
+  );
+  expect(open).toHaveBeenCalledExactlyOnceWith('b', expect.any(Function));
+  expect(overview().textContent).toContain('待计算');
+  expect(overview().textContent).not.toContain('/proc');
+  expect(overview().querySelector('tbody tr th')?.textContent).toBe('/var/lib/应用 数据');
+  overview().querySelector<HTMLButtonElement>('.overview-controls button')!.click();
+  await vi.waitFor(() => expect(overview().textContent).toContain('40.0%'), { timeout: 2000 });
+  expect(refresh).toHaveBeenCalledExactlyOnceWith('b');
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(overview().querySelector('.overview-warning')).toBeNull();
+
+  overview()
+    .querySelector<HTMLButtonElement>('[aria-label="在 SFTP 中打开 /var/lib/应用 数据"]')!
+    .click();
+  await flush();
+  expect(workspace.current).toMatchObject({ view: 'files', hostId: 'b' });
+  expect(sftp).toHaveBeenCalledExactlyOnceWith('b', expect.any(Function));
+  await vi.waitFor(() =>
+    expect(useFilesStore().connections.b?.listing?.path).toBe('/var/lib/应用 数据'),
+  );
+  expect(list).toHaveBeenCalledExactlyOnceWith('sftp-b', '/var/lib/应用 数据');
+  expect(stop).toHaveBeenCalledExactlyOnceWith('b');
+});
+
+it('stops a late overview lease before opening another host and ignores obsolete events', async () => {
+  let finish!: () => void;
+  let emitOld!: (event: TerminalEvent) => void;
+  const open = vi.spyOn(monitorApi, 'open').mockImplementation(async (id, emit) => {
+    if (id === 'a') {
+      emitOld = emit;
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    }
+    emit({ type: 'state', state: 'connected', code: null, message: null });
+    return { id: `monitor-${id}`, hostId: id, transportId: id, routeHostIds: [id] };
+  });
+  const read = vi
+    .spyOn(monitorApi, 'snapshot')
+    .mockImplementation(async (id) => sampledHost(id, 1, 35));
+  const stop = vi.spyOn(monitorApi, 'stop').mockResolvedValue();
+  const workspace = useWorkspaceStore();
+  workspace.navigate('overview', 'a');
+  await flush();
+  await vi.waitFor(() => expect(open).toHaveBeenCalledTimes(1));
+  workspace.navigate('overview', 'b');
+  await flush();
+  expect(open).toHaveBeenCalledTimes(1);
+  finish();
+  await vi.waitFor(() =>
+    expect(root.querySelector('.host-overview')?.textContent).toContain('Test Distribution'),
+  );
+  expect(stop).toHaveBeenCalledExactlyOnceWith('a');
+  expect(stop.mock.invocationCallOrder[0]).toBeLessThan(open.mock.invocationCallOrder[1]!);
+  expect(read).toHaveBeenCalledExactlyOnceWith('b', undefined);
+  emitOld({
+    type: 'trust',
+    hostname: 'a.example',
+    port: 22,
+    algorithm: 'ssh-ed25519',
+    fingerprint: 'old',
+  });
+  await nextTick();
+  expect(root.querySelector('.host-overview h1')?.textContent).toBe('Host b');
+  expect(document.querySelector('[aria-label="确认 SSH 主机指纹"]')).toBeNull();
+  workspace.showSettings();
+  await vi.waitFor(() => expect(stop).toHaveBeenCalledWith('b'));
+  expect(root.querySelector('.host-overview')).toBeNull();
 });
 
 it('opens assistant model binding through the existing plugin settings page', async () => {
@@ -3123,7 +3369,7 @@ it('places session controls below the host toolbar and retains names within the 
     [...document.querySelectorAll('.workspace-header .host-tools button')].map((button) =>
       button.textContent?.trim(),
     ),
-  ).toEqual(['SSH 终端', 'SFTP 文件', '端口转发', 'AI 运维助手', 'Docker 管理']);
+  ).toEqual(['概览', 'SSH 终端', 'SFTP 文件', '端口转发', 'AI 运维助手', 'Docker 管理']);
   expect(document.querySelector('.terminal-session-header .terminal-tabs')).not.toBeNull();
   expect(document.querySelector('.split-toolbar, [aria-label="会话操作"]')).toBeNull();
   expect(document.querySelector('#terminal-session-tools .terminal-session-header')).not.toBeNull();

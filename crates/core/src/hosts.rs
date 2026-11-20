@@ -332,7 +332,7 @@ pub fn normalize_environment_tag_name(name: &str) -> Result<&str, Error> {
     Ok(name)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentTag {
     pub id: String,

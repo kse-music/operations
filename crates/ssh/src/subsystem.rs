@@ -44,17 +44,16 @@ impl Engine {
             connection.take();
         }
         if connection.is_none() {
+            let trust = if control.kind == SessionKind::Batch {
+                trust::Trust::Known
+            } else {
+                trust::Trust::Interactive {
+                    control: self.control(&control.info.id)?,
+                    sink: sink.clone(),
+                }
+            };
             *connection = Some(Arc::new(
-                connect::establish(
-                    self.database.clone(),
-                    plan,
-                    trust::Trust::Interactive {
-                        control: self.control(&control.info.id)?,
-                        sink: sink.clone(),
-                    },
-                    sink,
-                )
-                .await?,
+                connect::establish(self.database.clone(), plan, trust, sink).await?,
             ));
         }
         connection
@@ -79,6 +78,10 @@ impl Engine {
             _ = control.cancel.cancelled() => Ok(()),
             _ = connection.alive.cancelled() => Err(failure("SSH_DISCONNECTED", if control.kind == SessionKind::Forwarding {
                 "SSH 断线，转发监听已关闭"
+            } else if control.kind == SessionKind::Monitor {
+                "SSH 断线，监控已停止"
+            } else if control.kind == SessionKind::Batch {
+                "SSH 断线，批量命令连接已关闭"
             } else {
                 "SSH 断线，文件会话已关闭"
             })),

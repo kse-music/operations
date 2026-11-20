@@ -1,4 +1,5 @@
 mod ai;
+mod batch;
 mod bundled_plugins;
 mod files;
 mod hosts;
@@ -50,6 +51,7 @@ pub struct Application {
     monitors: serverdeck_monitor::Monitors,
     operations_host: serverdeck_ops::Operations,
     tasks: serverdeck_tasks::Tasks,
+    batch: Arc<batch::BatchRuntime>,
     database: Database,
     secrets: Arc<dyn SecretStore>,
     host_tests: Arc<hosts::HostTests>,
@@ -87,6 +89,7 @@ impl Application {
             terminal_uploads: terminal_upload::TerminalUploads::default(),
             local_terminals: local_terminal::LocalTerminals::new(),
             tasks,
+            batch: Arc::default(),
             operations_host,
             monitors,
             terminals,
@@ -175,6 +178,7 @@ impl Application {
 
     pub async fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Release);
+        self.batch.shutdown().await;
         self.local_tool_installer.shutdown();
         self.host_tests.stop.cancel();
         match self.plugin_host.ids() {

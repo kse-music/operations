@@ -1021,6 +1021,25 @@ describe('file workspace ownership', () => {
     expect(store.current?.path).toBe('/home/user');
     expect(mocks.close).not.toHaveBeenCalled();
   });
+  it('uses the latest explicit mount path while waiting for a connection and preserves listing errors', async () => {
+    let receive!: (event: import('../types/terminal').TerminalEvent) => void;
+    mocks.open.mockImplementation(async (_host, events) => {
+      receive = events;
+      return { id: 'session' };
+    });
+    mocks.list.mockRejectedValueOnce({ code: 'SFTP_PERMISSION', message: 'Permission denied' });
+    const store = useFilesStore();
+    await store.open(host);
+    await store.open(host, '/older');
+    await store.open(host, '/mnt/应用 数据');
+    receive({ type: 'state', state: 'connected', code: null, message: null });
+    await vi.waitFor(() => expect(store.current?.error).toBe('Permission denied'));
+    expect(mocks.open).toHaveBeenCalledTimes(1);
+    expect(mocks.list).toHaveBeenCalledExactlyOnceWith('session', '/mnt/应用 数据');
+    expect(mocks.lastDirectory).not.toHaveBeenCalledWith(host.id, 'remote');
+    expect(mocks.rememberDirectory).not.toHaveBeenCalledWith(host.id, expect.any(String), 'remote');
+    expect(store.current?.listing).toBeNull();
+  });
   it('does not replace a newer directory response with stale in-flight navigation', async () => {
     mocks.open.mockImplementation(async (_host, receive) => {
       receive({ type: 'state', state: 'connected' });

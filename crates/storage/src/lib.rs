@@ -5,6 +5,7 @@ use std::{
 
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub mod ai;
+mod batch;
 mod config_migrations;
 mod file_directory;
 mod forward_rules;

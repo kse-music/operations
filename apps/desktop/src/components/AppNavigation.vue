@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { House, Settings, SquareTerminal } from '@lucide/vue';
+import { House, ListTodo, Settings, SquareTerminal } from '@lucide/vue';
 import { tr } from '../i18n/messages';
 import type { WorkspaceArea } from '../stores/workspace';
 defineProps<{ area: WorkspaceArea; disabled?: boolean }>();
-defineEmits<{ home: []; local: []; settings: [] }>();
+defineEmits<{ home: []; local: []; batch: []; settings: [] }>();
 </script>
 <template>
   <nav class="activity-rail" :aria-label="tr('应用导航')">
@@ -29,6 +29,17 @@ defineEmits<{ home: []; local: []; settings: [] }>();
         @click="$emit('local')"
       >
         <SquareTerminal :size="20" aria-hidden="true" />
+      </button>
+      <button
+        class="nav-item"
+        :aria-label="tr('批量命令')"
+        :title="tr('批量命令')"
+        :class="{ active: area === 'batch' }"
+        :aria-current="area === 'batch' ? 'page' : undefined"
+        :disabled="disabled"
+        @click="$emit('batch')"
+      >
+        <ListTodo :size="20" aria-hidden="true" />
       </button>
     </div>
     <div class="activity-group sidebar-app-actions">

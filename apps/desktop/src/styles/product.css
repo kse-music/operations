@@ -190,6 +190,10 @@ kbd {
   min-width: 0;
   background: var(--rail);
 }
+.batch-sidebar-target {
+  min-height: 0;
+  flex: 1;
+}
 .workspace-tabs {
   overflow-x: auto;
   overflow-y: hidden;

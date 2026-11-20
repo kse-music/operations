@@ -29,7 +29,7 @@ export function pluginPageKey(
   return `extension:${tab.pluginId}:${tab.contributionId}:${tab.hostId}`;
 }
 export type WorkspaceCloseScope = 'current' | 'right' | 'others' | 'all';
-export type WorkspaceArea = 'home' | 'local' | 'settings';
+export type WorkspaceArea = 'home' | 'local' | 'batch' | 'settings';
 export const useWorkspaceStore = defineStore('workspace', () => {
   const tabs = ref<WorkspaceTab[]>([]),
     active = ref(''),
@@ -37,6 +37,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const homeTabs = computed(() => tabs.value.filter((tab) => !isLocalTab(tab)));
   const settingsView = ref<SettingsView | null>(null);
   const area = ref<WorkspaceArea>('home');
+  const batchOpened = ref(false);
   const settingsBusy = ref(false);
   const settingsDirty = ref(false);
   const navigationBlocked = computed(
@@ -45,6 +46,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       (settingsBusy.value || pluginSettingsBusy.value || usePluginsStore().busy),
   );
   let homeKey = '';
+  let returnToBatch = false;
   const pluginSettingsBusy = ref(false);
   const current = computed(() => tabs.value.find((t) => t.key === active.value));
   const pluginPages = ref<WorkspaceTab[]>([]);
@@ -80,6 +82,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function showSettings(): void {
     if (navigationBlocked.value) return;
     settingsView.value ??= 'settings';
+    enterSettings();
+  }
+  function showBatch(): void {
+    if (navigationBlocked.value) return;
+    batchOpened.value = true;
+    area.value = 'batch';
+  }
+  function enterSettings(): void {
+    if (area.value !== 'settings') returnToBatch = area.value === 'batch';
     area.value = 'settings';
   }
   function openPluginSettings(pluginId: string, contributionId?: string): void {
@@ -95,7 +106,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (pluginConfiguration.value.pluginId !== pluginId)
         plugins.error = tr('请先返回插件列表，再打开其他插件配置。');
       settingsView.value = 'plugins';
-      area.value = 'settings';
+      enterSettings();
       return;
     }
     const settings = plugins.extensions.find(
@@ -105,7 +116,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         (!contributionId || entry.id === contributionId),
     );
     settingsView.value = 'plugins';
-    area.value = 'settings';
+    enterSettings();
     pluginConfiguration.value = { pluginId, contributionId: settings?.id ?? null };
   }
   function closePluginSettings(): void {
@@ -160,7 +171,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (pluginSettingsBusy.value || usePluginsStore().busy) return;
       pluginConfiguration.value = undefined;
       settingsView.value = view;
-      area.value = 'settings';
+      enterSettings();
       return;
     }
     const hostView = hostViews.has(view);
@@ -186,7 +197,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (pluginSettingsBusy.value || usePluginsStore().busy) return;
     pluginConfiguration.value = undefined;
     settingsView.value = null;
-    area.value = current.value && isLocalTab(current.value) ? 'local' : 'home';
+    area.value = returnToBatch
+      ? 'batch'
+      : current.value && isLocalTab(current.value)
+        ? 'local'
+        : 'home';
   }
   async function close(key: string, scope: WorkspaceCloseScope = 'current'): Promise<void> {
     if (navigationBlocked.value) return;
@@ -270,6 +285,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     tabs.value = tabs.value.filter((tab) => !removed.has(tab));
     const next = homeTabs.value[Math.min(index, homeTabs.value.length - 1)];
     if (!homeTabs.value.some((tab) => tab.key === homeKey)) homeKey = next?.key ?? '';
+    const keepBatch = area.value === 'batch';
     if (active.value && !tabs.value.some((tab) => tab.key === active.value)) {
       if (next) activate(next.key);
       else {
@@ -277,7 +293,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         area.value = 'home';
       }
     }
-    if (previousArea === 'settings') area.value = 'settings';
+    if (keepBatch) area.value = 'batch';
+    else if (previousArea === 'settings') area.value = 'settings';
   }
   return {
     tabs,
@@ -289,10 +306,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     settingsCloseGuard,
     settingsView,
     area,
+    batchOpened,
     settingsBusy,
     settingsDirty,
     navigationBlocked,
     showHome,
+    showBatch,
     showSettings,
     pluginSettingsBusy,
     closeSettings,

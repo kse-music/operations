@@ -32,6 +32,9 @@ impl Application {
             result => result,
         }
     }
+    pub fn monitor_refresh(&self, host: &str) -> Result<(), Error> {
+        self.monitors.refresh(host)
+    }
     pub async fn monitor_stop(&self, host: &str) -> Result<(), Error> {
         self.monitors.stop(host).await
     }

@@ -15,5 +15,6 @@ export const monitorApi = {
   snapshot: (hostId: string, after: number | null = null) =>
     call<MonitorSnapshot | null>('monitor_snapshot', { hostId, after }),
   visible: (hostId: string, visible: boolean) => call<void>('monitor_visible', { hostId, visible }),
+  refresh: (hostId: string) => call<void>('monitor_refresh', { hostId }),
   stop: (hostId: string) => call<void>('monitor_stop', { hostId }),
 };

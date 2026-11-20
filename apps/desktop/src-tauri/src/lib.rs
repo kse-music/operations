@@ -1,4 +1,5 @@
 mod ai_commands;
+mod batch_commands;
 pub mod browser_commands;
 pub mod commands;
 pub mod editor_commands;
@@ -187,6 +188,13 @@ pub fn run() {
 pub fn command_handler<R: tauri::Runtime>()
 -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
+        batch_commands::batch_list,
+        batch_commands::batch_save,
+        batch_commands::batch_delete,
+        batch_commands::batch_prepare,
+        batch_commands::batch_start,
+        batch_commands::batch_status,
+        batch_commands::batch_cancel,
         update_commands::app_update_status,
         update_commands::app_update_check,
         update_commands::app_update_auto_check,
@@ -249,6 +257,7 @@ pub fn command_handler<R: tauri::Runtime>()
         monitor_commands::monitor_open,
         monitor_commands::monitor_snapshot,
         monitor_commands::monitor_visible,
+        monitor_commands::monitor_refresh,
         monitor_commands::monitor_stop,
         file_commands::files_connections,
         file_commands::files_open,

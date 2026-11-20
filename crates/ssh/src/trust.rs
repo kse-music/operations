@@ -15,6 +15,7 @@ pub fn validate_saved_host_key(public_key: &str, fingerprint: &str) -> Result<()
 
 #[derive(Clone)]
 pub(crate) enum Trust {
+    Known,
     Interactive {
         control: Arc<Control>,
         sink: Sink,
@@ -105,6 +106,7 @@ impl client::Handler for Verifier {
                         "主机密钥已变化，连接已阻止。请通过可信渠道核查服务器，不能在此覆盖旧密钥"
                     }
                     "SSH_TRUST_REJECTED" => "未确认主机指纹，连接已取消",
+                    "SSH_TRUST_REQUIRED" => "请先在主机连接中核对并信任 SSH 指纹",
                     "SSH_CERTIFICATE" => "暂不支持主机证书，连接已拒绝",
                     _ => "主机密钥校验失败或确认超时，连接已拒绝",
                 };
@@ -149,6 +151,12 @@ impl Verifier {
             fingerprint: fingerprint.clone(),
         };
         match &self.trust {
+            Trust::Known => {
+                return Err(failure(
+                    "SSH_TRUST_REQUIRED",
+                    "请先在主机连接中核对并信任 SSH 指纹",
+                ));
+            }
             Trust::Interactive { control, sink } => self.confirm(control, sink, presented).await?,
             Trust::Test {
                 confirmed,

@@ -100,7 +100,7 @@ pub(crate) async fn remote_input(
 ) -> Outcome {
     let deadline = tokio::time::sleep(Duration::from_secs(seconds.into()));
     tokio::pin!(deadline);
-    let opened = tokio::select! {r=engine.open_ops_channel(id)=>r,_=cancel.cancelled()=>return Outcome::uncertain("已取消；远端尚未执行或结果未确认"),_= &mut deadline=>return Outcome::uncertain("SSH Channel 创建超时，结果未确认")};
+    let opened = tokio::select! {r=engine.open_exec_channel(id)=>r,_=cancel.cancelled()=>return Outcome::uncertain("已取消；远端尚未执行或结果未确认"),_= &mut deadline=>return Outcome::uncertain("SSH Channel 创建超时，结果未确认")};
     let mut opened = match opened {
         Ok(v) => v,
         Err(e) => return Outcome::failed(serverdeck_core::IpcError::from(e).message),

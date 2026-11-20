@@ -35,6 +35,9 @@ export const viewLabels = {
   get terminals() {
     return tr('SSH 终端');
   },
+  get overview() {
+    return tr('概览');
+  },
   get files() {
     return tr('SFTP 文件');
   },
@@ -86,7 +89,13 @@ export const settingsCategories = [
   },
 ] as const;
 export type SettingsCategory = (typeof settingsCategories)[number]['id'];
-export const hostViews = new Set<WorkspaceView>(['terminals', 'files', 'forwarding', 'server']);
+export const hostViews = new Set<WorkspaceView>([
+  'overview',
+  'terminals',
+  'files',
+  'forwarding',
+  'server',
+]);
 export function globalKey(event: KeyboardEvent): string | null {
   if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.isComposing || event.repeat)
     return null;
@@ -106,7 +115,7 @@ export interface ConnectionStatus {
   hostId: string;
   transportId: string;
   routeHostIds: string[];
-  kind: 'terminal' | 'files' | 'monitor' | 'operations' | 'forwarding';
+  kind: 'terminal' | 'files' | 'monitor' | 'operations' | 'batch' | 'forwarding';
   state: string;
 }
 export interface BackgroundSnapshot {

@@ -24,6 +24,7 @@ import SidebarToggle from './components/SidebarToggle.vue';
 import AppNavigation from './components/AppNavigation.vue';
 import AppHeader from './components/AppHeader.vue';
 import WelcomeView from './views/WelcomeView.vue';
+import BatchCommandsView from './views/BatchCommandsView.vue';
 import HostTools from './components/HostTools.vue';
 import {
   CopyX,
@@ -91,15 +92,17 @@ const currentHost = computed(() => {
   if (!configured) return;
   const module = workspace.current?.view,
     kind =
-      module === 'terminals'
-        ? 'terminal'
-        : module === 'files'
-          ? 'files'
-          : module === 'forwarding'
-            ? 'forwarding'
-            : module === 'server' || module === 'extension'
-              ? 'operations'
-              : '';
+      module === 'overview'
+        ? 'monitor'
+        : module === 'terminals'
+          ? 'terminal'
+          : module === 'files'
+            ? 'files'
+            : module === 'forwarding'
+              ? 'forwarding'
+              : module === 'server' || module === 'extension'
+                ? 'operations'
+                : '';
   const terminal = terminals.panes.find((p) => p.key === terminals.focused && p.host?.id === id);
   const snapshot =
     kind === 'terminal'
@@ -140,8 +143,20 @@ const isHostWorkspace = computed(() => {
   return !!tab && isHostTab(tab);
 });
 const settingsOpen = computed(() => workspace.area === 'settings');
+const batchOpen = computed(() => workspace.area === 'batch');
+const overviewHost = computed(() =>
+  workspace.area === 'home' &&
+  view.value === 'overview' &&
+  !workspace.closing.includes(workspace.active)
+    ? currentHost.value
+    : undefined,
+);
+const batchDirty = ref(false);
+const terminalVisible = computed(
+  () => !settingsOpen.value && !batchOpen.value && view.value === 'terminals',
+);
 const statusPane = computed(() => {
-  if (settingsOpen.value || view.value !== 'terminals') return;
+  if (!terminalVisible.value) return;
   const tab = terminals.tabs.find((tab) => tab.key === terminals.active);
   if (!tab || (tab.panes[0]?.host?.id ?? '') !== currentHostId.value) return;
   return tab.panes.find((pane) => pane.key === terminals.focused) ?? tab.panes[0];
@@ -151,13 +166,14 @@ function navigate(
   value: View,
   hostId = currentHostId.value,
   section?: WorkspaceTab['section'],
+  filePath?: string,
 ): void {
   if (workspace.navigationBlocked) return;
   const host = knownHost(hostId);
   if (host && hostViews.has(value) && host.authType !== 'agent' && host.credentialId === null) {
     if (store.busy || workspace.closing.includes(`host:${host.id}`)) return;
     store.error = null;
-    credentialPrompt.value = { host, view: value, section };
+    credentialPrompt.value = { host, view: value, section, filePath };
     return;
   }
   if (value === 'terminals' && !hostId) {
@@ -168,6 +184,7 @@ function navigate(
   if (value === 'files') files.active = hostId;
   if (value === 'server') operations.active = hostId;
   workspace.navigate(value, hostId, section);
+  if (value === 'files' && host && filePath !== undefined) void files.open(host, filePath);
   if (value === 'terminals' && host) void enterTerminalHost(host);
   if (hostViews.has(value)) store.selectedId = host?.id ?? null;
 }
@@ -359,8 +376,7 @@ function workspaceKeys(event: KeyboardEvent) {
 const defaultShortcuts = defaultProductPreferences().shortcuts;
 function globalShortcut(event: KeyboardEvent) {
   if (
-    workspace.area !== 'settings' &&
-    view.value === 'terminals' &&
+    terminalVisible.value &&
     event.ctrlKey &&
     !event.metaKey &&
     !event.altKey &&
@@ -389,11 +405,13 @@ const sidebarDraft = ref<number | null>(null);
 const sidebarElement = ref<HTMLElement>();
 const collapsedSidebars = ref({ home: false, local: false });
 const sidebarCollapsed = computed(
-  () => workspace.area !== 'settings' && collapsedSidebars.value[workspace.area],
+  () =>
+    (workspace.area === 'home' || workspace.area === 'local') &&
+    collapsedSidebars.value[workspace.area],
 );
 async function toggleSidebar(): Promise<void> {
   const area = workspace.area;
-  if (area === 'settings') return;
+  if (area !== 'home' && area !== 'local') return;
   collapsedSidebars.value[area] = !collapsedSidebars.value[area];
   await nextTick();
   const selector = collapsedSidebars.value[area]
@@ -454,6 +472,7 @@ function openServer(host: Host): void {
   navigate('server', host.id);
 }
 const FilesView = defineAsyncComponent(() => import('./views/FilesView.vue'));
+const HostOverviewView = defineAsyncComponent(() => import('./views/HostOverviewView.vue'));
 const ForwardingView = defineAsyncComponent(() => import('./views/ForwardingView.vue'));
 import { useTerminalsStore } from './stores/terminals';
 
@@ -499,10 +518,20 @@ function fileTerminal(host: Host | null, directory: string): void {
   if (terminals.open(host, directory)) navigate('terminals', host?.id ?? '');
   else if (terminals.error) notifications.push(terminals.error, true);
 }
+function openMountDirectory(host: Host, path: string): void {
+  const fileHost = files.connections[host.id]?.host;
+  if (!currentConfiguration(host) || (fileHost && !currentConfiguration(fileHost))) return;
+  navigate('files', host.id, undefined, path);
+}
 
 const hostDialog = ref(false);
 const hostFolderId = ref<string | null>(null);
-const credentialPrompt = ref<{ host: Host; view: View; section: WorkspaceTab['section'] }>();
+const credentialPrompt = ref<{
+  host: Host;
+  view: View;
+  section: WorkspaceTab['section'];
+  filePath?: string;
+}>();
 const hostImport = ref<'ssh' | 'all'>();
 function openHost(groupId: string | null = null): void {
   store.error = null;
@@ -512,7 +541,7 @@ function openHost(groupId: string | null = null): void {
 function resumeHostOpen(host: Host): void {
   const target = credentialPrompt.value;
   // A failed catalog refresh already reports an error and may leave the old credentials in view.
-  if (target && !store.error) navigate(target.view, host.id, target.section);
+  if (target && !store.error) navigate(target.view, host.id, target.section, target.filePath);
 }
 function revealHost(host: Host): void {
   if (!store.visible.some((item) => item.id === host.id)) {
@@ -574,7 +603,7 @@ onMounted(async () => {
   }
 });
 function protectDraft(event: BeforeUnloadEvent): void {
-  if (files.dirty || plugins.dirty || workspace.settingsDirty) {
+  if (files.dirty || plugins.dirty || workspace.settingsDirty || batchDirty.value) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -701,6 +730,7 @@ watch(
       :disabled="workspace.navigationBlocked"
       @home="workspace.showHome()"
       @local="navigate('terminals', '')"
+      @batch="workspace.showBatch()"
       @settings="workspace.showSettings()"
     />
     <aside id="host-sidebar" ref="sidebarElement" class="sidebar" :aria-label="tr('侧栏菜单')">
@@ -747,6 +777,7 @@ watch(
         </div>
         <div id="local-terminal-session-list"></div>
       </section>
+      <div v-show="batchOpen" id="batch-command-list" class="batch-sidebar-target"></div>
       <SettingsNavigation v-show="settingsOpen" />
     </aside>
     <div
@@ -764,6 +795,12 @@ watch(
     />
     <main class="main-content">
       <SettingsView v-if="workspace.settingsView" v-show="settingsOpen" :active="settingsOpen" />
+      <BatchCommandsView
+        v-if="workspace.batchOpened"
+        v-show="batchOpen"
+        :active="batchOpen"
+        @dirty="batchDirty = $event"
+      />
       <div v-show="workspace.area === 'home'" class="workspace-navigation">
         <div
           class="tabbar workspace-tabs"
@@ -824,7 +861,7 @@ watch(
       </div>
       <div
         v-if="isHostWorkspace && currentHostId"
-        v-show="!settingsOpen"
+        v-show="workspace.area === 'home'"
         class="workspace-header"
         :inert="workspace.closing.includes(workspace.active)"
       >
@@ -841,14 +878,18 @@ watch(
         v-show="!settingsOpen && view === 'terminals' && workspace.area === 'home'"
         id="terminal-session-tools"
       ></div>
-      <p v-if="!settingsOpen && isHostWorkspace && connectionChanged" class="banner" role="status">
+      <p
+        v-if="workspace.area === 'home' && isHostWorkspace && connectionChanged"
+        class="banner"
+        role="status"
+      >
         {{ tr(' 当前仍操作建立时的连接：') }}{{ currentHost?.username }}@{{
           currentHost?.hostname
         }}:{{ currentHost?.port
         }}{{ tr('。主机配置已更新，请先停止此模块连接，再重新连接以应用新地址或账号。 ') }}
       </p>
       <div
-        v-show="!settingsOpen && view !== 'terminals'"
+        v-show="workspace.area === 'home' && view !== 'terminals'"
         class="content-scroll"
         :class="{ 'plugin-frame-workspace': view === 'extension' }"
         :inert="workspace.closing.includes(workspace.active)"
@@ -873,7 +914,7 @@ watch(
           :key="page.key"
           :active="
             workspace.activePluginKey === page.key &&
-            !settingsOpen &&
+            workspace.area === 'home' &&
             !workspace.closing.includes(page.hostId ? `host:${page.hostId}` : page.key)
           "
           :plugin-id="page.pluginId!"
@@ -892,6 +933,7 @@ watch(
           "
           @surface-navigate="surfaceNavigate"
         />
+        <HostOverviewView :host="overviewHost" @open-mount="openMountDirectory" />
         <ServerView
           v-if="view === 'server'"
           :key="`server:${currentHostId}`"
@@ -912,24 +954,19 @@ watch(
           v-else-if="view === 'forwarding' && currentHostId"
           :key="`forwarding:${currentHostId}`"
           :host-id="currentHostId"
-          :inactive="settingsOpen || workspace.closing.includes(workspace.active)"
+          :inactive="workspace.area !== 'home' || workspace.closing.includes(workspace.active)"
         />
       </div>
       <div
         class="terminal-workspace"
-        :class="{ 'terminal-hidden': settingsOpen || view !== 'terminals' }"
-        :inert="
-          settingsOpen ||
-          view !== 'terminals' ||
-          workspace.closing.includes(workspace.active) ||
-          undefined
-        "
-        :aria-hidden="settingsOpen || view !== 'terminals' || undefined"
+        :class="{ 'terminal-hidden': !terminalVisible }"
+        :inert="!terminalVisible || workspace.closing.includes(workspace.active) || undefined"
+        :aria-hidden="!terminalVisible || undefined"
       >
         <div class="terminal-primary">
           <TerminalsView
             v-if="view === 'terminals' || terminals.tabs.length"
-            :visible="!settingsOpen && view === 'terminals'"
+            :visible="terminalVisible"
             :host-id="currentHostId"
             toolbar-target="#terminal-session-tools"
             local-session-target="#local-terminal-session-list"
@@ -1008,7 +1045,7 @@ watch(
           <ListTodo :size="16" aria-hidden="true" />
           <div>
             <strong>{{ tr('未完成的任务') }}</strong>
-            <p>{{ tr('请求取消未完成的传输和诊断。') }}</p>
+            <p>{{ tr('请求取消未完成的传输、诊断和批量命令。') }}</p>
           </div>
         </li>
         <li>
@@ -1016,6 +1053,7 @@ watch(
           <div>
             <strong>{{ tr('未保存的修改') }}</strong>
             <p>{{ tr('关闭独立编辑器，放弃未保存的文本编辑。') }}</p>
+            <p v-if="batchDirty">{{ tr('放弃未保存的批量命令编辑。') }}</p>
           </div>
         </li>
       </ul>

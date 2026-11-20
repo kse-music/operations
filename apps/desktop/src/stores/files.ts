@@ -33,6 +33,7 @@ export interface FileConnection {
   error: string | null;
   trust: Extract<TerminalEvent, { type: 'trust' }> | null;
   path: string;
+  initialPath?: string;
   pendingPath?: string;
   listing: DirectoryListing | null;
   loading: boolean;
@@ -426,7 +427,12 @@ export const useFilesStore = defineStore('files', () => {
     if (closingHosts.value.includes(host.id)) return;
     if (!options.background) active.value = host.id;
     let connection = connections.value[host.id];
-    if (connection?.switchingUser) return;
+    if (connection?.switchingUser) {
+      if (path === undefined || options.background) return;
+      await switching.get(host.id);
+      if (active.value !== host.id || closingHosts.value.includes(host.id)) return;
+      connection = connections.value[host.id];
+    }
     if (connection?.id && connection.state === 'connected') {
       if (options.background) return;
       connection.followPane = pane;
@@ -436,8 +442,15 @@ export const useFilesStore = defineStore('files', () => {
     if (
       connection &&
       ['opening', 'connecting', 'authenticating', 'awaiting_trust'].includes(connection.state)
-    )
+    ) {
+      if (path !== undefined && !options.background) {
+        connection.initialPath = path;
+        connection.path = path;
+        connection.followPane = pane;
+      }
       return;
+    }
+    const initialPath = path ?? connection?.initialPath;
     if (connection?.id) {
       try {
         await filesApi.close(connection.id, false);
@@ -451,15 +464,24 @@ export const useFilesStore = defineStore('files', () => {
       state: 'opening',
       error: null,
       trust: null,
-      path: path ?? '.',
+      path: initialPath ?? '.',
+      initialPath,
       listing: null,
       loading: false,
       followPane: pane,
     };
     connection = connections.value[host.id]!;
     try {
-      const listInitialDirectory = () =>
-        navigate(path ?? null, connection, undefined, !options.background);
+      const listInitialDirectory = () => {
+        const target = connection.initialPath ?? null;
+        delete connection.initialPath;
+        return navigate(
+          target,
+          connection,
+          undefined,
+          !options.background || (target !== null && active.value === host.id),
+        );
+      };
       let eventSession = '';
       const request = filesApi.open(host.id, (event) => {
         if (eventSession && connection.id !== eventSession) return;

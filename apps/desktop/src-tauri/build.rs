@@ -10,6 +10,13 @@ fn main() {
     }
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
+            "batch_list",
+            "batch_save",
+            "batch_delete",
+            "batch_prepare",
+            "batch_start",
+            "batch_status",
+            "batch_cancel",
             "app_update_status",
             "app_update_check",
             "app_update_auto_check",
@@ -72,6 +79,7 @@ fn main() {
             "monitor_open",
             "monitor_snapshot",
             "monitor_visible",
+            "monitor_refresh",
             "monitor_stop",
             "files_connections",
             "files_open",
