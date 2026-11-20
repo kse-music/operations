@@ -128,27 +128,38 @@ function loadSidebarConfig(): void {
 }
 
 it.each([null, '生产', 'pRoDuCtIoN'])(
-  'runs the saved batch from the list (%s)',
+  'runs a saved batch of more than 32 hosts from the editor and list (%s)',
   async (productionTag) => {
-    const host = useHostsStore().catalog!.hosts[0]!;
+    const catalog = useHostsStore().catalog!;
+    const firstHost = catalog.hosts[0]!;
+    catalog.hosts = [
+      firstHost,
+      ...Array.from({ length: 39 }, (_, index) => ({
+        ...firstHost,
+        id: `batch-host-${index}`,
+        name: `Test host ${index.toString().padStart(2, '0')}`,
+        hostname: `batch-host-${index}.invalid`,
+      })),
+    ];
     const saved = {
       id: 'command-a',
       revision: 1,
       name: '检查',
       command: 'hostname\nuptime',
-      hostIds: [host.id],
+      hostIds: catalog.hosts.map(({ id }) => id),
       concurrency: 3,
     };
-    const target = {
-      id: host.id,
-      name: host.name,
-      hostname: host.hostname,
-      username: host.username,
-      port: host.port,
-      environment: productionTag
-        ? { id: 'production', name: productionTag, color: 'red' as const }
-        : null,
-    };
+    const targets = catalog.hosts.map(({ id, name, hostname, username, port }) => ({
+      id,
+      name,
+      hostname,
+      username,
+      port,
+      environment:
+        productionTag && id === firstHost.id
+          ? { id: 'production', name: productionTag, color: 'red' as const }
+          : null,
+    }));
     vi.spyOn(batchApi, 'list').mockResolvedValue([]);
     vi.spyOn(batchApi, 'status').mockResolvedValue(null);
     const save = vi.spyOn(batchApi, 'save').mockResolvedValue(saved);
@@ -156,7 +167,7 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
       token: 'preview-token',
       command: saved,
       concurrency: 3,
-      targets: [target],
+      targets,
     });
     const send = vi.spyOn(batchApi, 'start').mockResolvedValue({
       id: 'batch-a',
@@ -164,17 +175,15 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
       command: saved,
       finished: true,
       stopping: false,
-      results: [
-        {
-          target,
-          status: 'succeeded',
-          exitCode: 0,
-          stdout: 'output from host',
-          stderr: '',
-          truncated: false,
-          message: null,
-        },
-      ],
+      results: targets.map((target) => ({
+        target,
+        status: 'succeeded',
+        exitCode: 0,
+        stdout: 'output from host',
+        stderr: '',
+        truncated: false,
+        message: null,
+      })),
     });
     const nav = root.querySelector<HTMLButtonElement>('button[aria-label="批量命令"]')!;
     expect(nav.previousElementSibling?.getAttribute('aria-label')).toBe('本地终端');
@@ -186,6 +195,19 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
     library.querySelector<HTMLButtonElement>('button')!.click();
     await flush();
     const editor = root.querySelector<HTMLFormElement>('.batch-edit')!;
+    const byText = (label: string) =>
+      [...root.querySelectorAll<HTMLButtonElement>('.batch-workspace button')].find(
+        (button) => button.textContent?.trim() === label,
+      )!;
+    expect(byText('运行').disabled).toBe(true);
+    expect(byText('还原')).toBeUndefined();
+    expect(byText('预览发送')).toBeUndefined();
+    const filters = editor.querySelector('.batch-filters')!;
+    const folder = filters.querySelector('[role="combobox"][aria-label="目录"]');
+    const environment = filters.querySelector<HTMLSelectElement>('select[aria-label="环境标签"]');
+    expect(folder?.textContent?.trim()).toBe('全部目录');
+    expect(environment?.selectedOptions[0]?.textContent).toBe('全部环境');
+    expect(filters.querySelector('label')).toBeNull();
     const name = editor.querySelector<HTMLInputElement>('input')!;
     const command = editor.querySelector<HTMLTextAreaElement>('.batch-shell-editor textarea')!;
     expect(command.rows).toBeGreaterThanOrEqual(8);
@@ -196,54 +218,70 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
       field.value = value;
       field.dispatchEvent(new Event('input', { bubbles: true }));
     }
-    editor.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!.click();
+    const selectAll = () =>
+      editor.querySelector<HTMLInputElement>('input[aria-label="全选当前筛选范围的主机"]')!;
+    expect(selectAll().disabled).toBe(false);
+    selectAll().click();
     await flush();
-    editor.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    expect(selectAll().checked).toBe(true);
+    expect(byText('运行').disabled).toBe(true);
+    expect(prepare).not.toHaveBeenCalled();
+    byText('保存').click();
     await flush();
     expect(save).toHaveBeenCalledWith(
-      { name: saved.name, command: saved.command, hostIds: [host.id], concurrency: 3 },
+      { name: saved.name, command: saved.command, hostIds: saved.hostIds, concurrency: 3 },
       null,
     );
     expect(library.textContent).toContain(saved.name);
-    const byText = (label: string) =>
-      [...root.querySelectorAll<HTMLButtonElement>('.batch-workspace button')].find(
-        (button) => button.textContent?.trim() === label,
-      )!;
     const targetCheckbox = () =>
       root.querySelector<HTMLInputElement>('input[aria-label="选择主机 Host a"]')!;
     const runFromList = () =>
       library.querySelector<HTMLButtonElement>('button[aria-label="运行 检查"]')!;
+    library.querySelector<HTMLButtonElement>('button')!.click();
+    await flush();
+    byText('取消').click();
+    await flush();
     expect(targetCheckbox().checked).toBe(true);
+    expect(byText('清空选择')).toBeUndefined();
+    expect(byText('还原').disabled).toBe(true);
+    expect(byText('运行').disabled).toBe(false);
+    const concurrency = editor.querySelector<HTMLSelectElement>('.batch-editor-actions select')!;
+    name.value = '未保存名称';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    command.value = '未保存命令';
+    command.dispatchEvent(new Event('input', { bubbles: true }));
+    concurrency.value = '5';
+    concurrency.dispatchEvent(new Event('change', { bubbles: true }));
     targetCheckbox().click();
     await flush();
     expect(runFromList().disabled).toBe(true);
-    byText('还原修改').click();
+    expect(byText('运行').disabled).toBe(true);
+    expect(editor.querySelector('.batch-filters .batch-restore')).toBe(byText('还原'));
+    byText('还原').click();
     await flush();
-    expect(targetCheckbox().checked).toBe(true);
-    byText('预览发送').click();
-    await flush();
-    expect(byText('发送到 1 台主机')).toBeDefined();
-    expect(send).not.toHaveBeenCalled();
-    byText('返回修改').click();
-    await flush();
+    expect(name.value).toBe(saved.name);
+    expect(command.value).toBe(saved.command);
+    expect(concurrency.value).toBe(String(saved.concurrency));
+    expect(selectAll().checked).toBe(true);
+    expect(byText('保存').disabled).toBe(true);
+    expect(byText('运行').disabled).toBe(false);
+    expect(save).toHaveBeenCalledTimes(1);
 
-    runFromList().click();
-    runFromList().click();
+    byText('运行').click();
     await flush();
-    expect(prepare).toHaveBeenCalledTimes(2);
-    expect(prepare).toHaveBeenLastCalledWith({
+    expect(prepare).toHaveBeenCalledExactlyOnceWith({
       commandId: saved.id,
       revision: 1,
     });
     if (productionTag) {
       expect(send).not.toHaveBeenCalled();
-      expect(byText('发送到 1 台主机').disabled).toBe(true);
+      expect(byText('发送到 40 台主机').disabled).toBe(true);
       root.querySelector<HTMLInputElement>('.batch-confirm input')!.click();
       await flush();
-      byText('发送到 1 台主机').click();
+      byText('发送到 40 台主机').click();
       await flush();
     } else {
-      expect(byText('发送到 1 台主机')).toBeUndefined();
+      expect(byText('发送到 40 台主机')).toBeUndefined();
     }
     expect(send).toHaveBeenCalledExactlyOnceWith('preview-token', Boolean(productionTag));
     expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
@@ -254,8 +292,9 @@ it.each([null, '生产', 'pRoDuCtIoN'])(
     await flush();
     expect(root.querySelector('.batch-output')?.textContent).toContain('output from host');
     runFromList().click();
+    runFromList().click();
     await flush();
-    expect(prepare).toHaveBeenCalledTimes(3);
+    expect(prepare).toHaveBeenCalledTimes(2);
     expect(send).toHaveBeenCalledTimes(productionTag ? 1 : 2);
   },
 );

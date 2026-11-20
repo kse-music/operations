@@ -7,7 +7,7 @@ import { useApplicationStore } from '../stores/application';
 import { filterHosts, useHostsStore } from '../stores/hosts';
 import { folderAncestors } from '../services/host-tree';
 import { hostDisplayName } from '../types/hosts';
-import { batchTargetLimit, type BatchCommand, type BatchStatus } from '../types/batch';
+import type { BatchCommand, BatchStatus } from '../types/batch';
 import { defaultTerminalPreferences, terminalThemes } from '../types/preferences';
 import EnvironmentTagBadge from '../components/EnvironmentTagBadge.vue';
 import HostFolderPicker from '../components/HostFolderPicker.vue';
@@ -38,13 +38,13 @@ const {
   load,
   activate,
   create,
-  resetEditor,
+  cancelNewDraft,
+  restoreSaved,
   showEditor,
   hasChanges,
   isRunning,
   save,
   remove,
-  prepare,
   runSaved,
   start,
   stop,
@@ -70,17 +70,15 @@ const visibleHosts = computed(() => {
       (!selected.environment || hosts.environmentTag(host.id)?.id === selected.environment),
   );
 });
+const selectedIds = computed(() => new Set(editor.value?.hostIds));
 const visibleSelected = computed(
-  () => visibleHosts.value.filter((host) => editor.value?.hostIds.includes(host.id)).length,
+  () => visibleHosts.value.filter((host) => selectedIds.value.has(host.id)).length,
 );
 const allVisibleSelected = computed(
   () => visibleHosts.value.length !== 0 && visibleSelected.value === visibleHosts.value.length,
 );
 const elsewhere = computed(
   () => (editor.value?.hostIds.length ?? 0) - visibleSelected.value - missingCount.value,
-);
-const exceedsLimit = computed(
-  () => elsewhere.value + missingCount.value + visibleHosts.value.length > batchTargetLimit,
 );
 const output = computed(
   () =>
@@ -182,7 +180,7 @@ function removeMissing(): void {
 function setTarget(id: string, checked: boolean): void {
   const selected = editor.value;
   if (!selected) return;
-  if (checked && !selected.hostIds.includes(id) && selected.hostIds.length < batchTargetLimit) {
+  if (checked && !selectedIds.value.has(id)) {
     selected.hostIds.push(id);
   } else if (!checked) {
     selected.hostIds = selected.hostIds.filter((value) => value !== id);
@@ -190,8 +188,12 @@ function setTarget(id: string, checked: boolean): void {
 }
 
 function toggleVisible(checked: boolean): void {
-  if (checked && exceedsLimit.value) return;
-  for (const host of visibleHosts.value) setTarget(host.id, checked);
+  const draft = editor.value;
+  if (!draft) return;
+  const visibleIds = new Set(visibleHosts.value.map(({ id }) => id));
+  draft.hostIds = checked
+    ? [...new Set([...draft.hostIds, ...visibleIds])]
+    : draft.hostIds.filter((id) => !visibleIds.has(id));
 }
 
 function login(target: { hostname: string; username: string; port: number }): string {
@@ -393,7 +395,7 @@ async function confirmDeletion(): Promise<void> {
                 class="button"
                 type="button"
                 :disabled="runDisabled(current)"
-                @click="prepare(current, visibleResult)"
+                @click="runSaved(current, visibleResult)"
               >
                 {{ tr('重试连接失败') }}
               </button>
@@ -490,7 +492,7 @@ async function confirmDeletion(): Promise<void> {
           </button>
         </div>
         <div class="batch-editor-grid">
-          <section class="batch-fields" :aria-label="tr('命令配置')">
+          <section class="batch-fields batch-command-fields" :aria-label="tr('命令配置')">
             <label class="batch-field">
               <span>{{ tr('命令名称') }}</span>
               <input
@@ -501,7 +503,7 @@ async function confirmDeletion(): Promise<void> {
                 required
               />
             </label>
-            <label class="batch-field">
+            <label class="batch-field batch-command-field">
               <span>{{ tr('SSH 命令') }}</span>
               <span class="batch-shell batch-shell-editor">
                 <span aria-hidden="true" class="batch-prompt">$</span>
@@ -518,7 +520,6 @@ async function confirmDeletion(): Promise<void> {
                 ></textarea>
               </span>
             </label>
-            <p class="muted">{{ tr('命令文本保存在本机，请勿在其中填写密码、密钥或令牌。') }}</p>
           </section>
           <section class="batch-fields batch-target-fields" :aria-label="tr('目标主机')">
             <div class="batch-row">
@@ -530,35 +531,33 @@ async function confirmDeletion(): Promise<void> {
                 ></span
               >
             </div>
-            <div v-if="hosts.catalog?.hosts.length" class="batch-filters">
-              <div class="batch-filter batch-folder-filter">
-                <label for="batch-folder-filter">{{ tr('目录') }}</label>
-                <HostFolderPicker
-                  id="batch-folder-filter"
-                  v-model="editor.folder"
-                  :label="tr('目录')"
-                  :root-label="tr('全部目录')"
-                  :groups="groups"
-                  :disabled="busy || !active"
-                />
-              </div>
-              <label class="batch-filter"
-                ><span>{{ tr('环境标签') }}</span
-                ><select v-model="editor.environment" :disabled="busy">
+            <div v-if="hosts.catalog?.hosts.length || current" class="batch-filters">
+              <template v-if="hosts.catalog?.hosts.length">
+                <div class="batch-folder-filter">
+                  <HostFolderPicker
+                    id="batch-folder-filter"
+                    v-model="editor.folder"
+                    :label="tr('目录')"
+                    :root-label="tr('全部目录')"
+                    :groups="groups"
+                    :disabled="busy || !active"
+                  />
+                </div>
+                <select v-model="editor.environment" :aria-label="tr('环境标签')" :disabled="busy">
                   <option value="">{{ tr('全部环境') }}</option>
                   <option v-for="tag in environments" :key="tag.id" :value="tag.id">
                     {{ tag.name }}
                   </option>
-                </select></label
-              >
+                </select>
+              </template>
               <button
-                v-if="editor.hostIds.length"
-                class="button"
+                v-if="current"
+                class="button batch-restore"
                 type="button"
-                :disabled="busy"
-                @click="editor.hostIds = []"
+                :disabled="busy || !editorDirty"
+                @click="restoreSaved"
               >
-                {{ tr('清空选择') }}
+                {{ tr('还原') }}
               </button>
             </div>
             <div v-if="missingCount" class="banner batch-alert" role="status">
@@ -595,7 +594,7 @@ async function confirmDeletion(): Promise<void> {
                         :aria-label="tr('全选当前筛选范围的主机')"
                         :checked="allVisibleSelected"
                         :indeterminate="visibleSelected > 0 && !allVisibleSelected"
-                        :disabled="busy || (exceedsLimit && !allVisibleSelected)"
+                        :disabled="busy"
                         @change="toggleVisible(($event.target as HTMLInputElement).checked)"
                       />
                     </th>
@@ -610,12 +609,8 @@ async function confirmDeletion(): Promise<void> {
                       <input
                         type="checkbox"
                         :aria-label="tr('选择主机 {0}', hostDisplayName(host))"
-                        :checked="editor.hostIds.includes(host.id)"
-                        :disabled="
-                          busy ||
-                          (editor.hostIds.length >= batchTargetLimit &&
-                            !editor.hostIds.includes(host.id))
-                        "
+                        :checked="selectedIds.has(host.id)"
+                        :disabled="busy"
                         @change="setTarget(host.id, ($event.target as HTMLInputElement).checked)"
                       />
                     </td>
@@ -628,9 +623,6 @@ async function confirmDeletion(): Promise<void> {
                 </tbody>
               </table>
             </div>
-            <p v-if="exceedsLimit || editor.hostIds.length >= batchTargetLimit" class="muted">
-              {{ tr('每批最多选择 32 台主机。') }}
-            </p>
           </section>
         </div>
         <footer class="batch-row batch-editor-actions">
@@ -644,30 +636,29 @@ async function confirmDeletion(): Promise<void> {
           </label>
           <div class="action-row">
             <button
-              v-if="!editor.previous || editorDirty"
+              v-if="!editor.previous"
               class="button"
               type="button"
               :disabled="busy"
-              @click="resetEditor"
+              @click="cancelNewDraft"
             >
-              {{ editor.previous ? tr('还原修改') : tr('取消') }}
-            </button>
-            <button
-              v-if="current"
-              class="button"
-              type="button"
-              :title="runHint(current)"
-              :disabled="runDisabled(current)"
-              @click="prepare(current)"
-            >
-              <Play :size="15" aria-hidden="true" />{{ tr('预览发送') }}
+              {{ tr('取消') }}
             </button>
             <button
               class="button primary"
               type="submit"
               :disabled="busy || !validDraft || !editorDirty"
             >
-              {{ tr('保存命令') }}
+              {{ tr('保存') }}
+            </button>
+            <button
+              class="button"
+              type="button"
+              :title="current ? runHint(current) : tr('保存修改后运行')"
+              :disabled="!current || runDisabled(current)"
+              @click="current && runSaved(current)"
+            >
+              <Play :size="15" aria-hidden="true" />{{ tr('运行') }}
             </button>
           </div>
         </footer>
@@ -851,10 +842,11 @@ async function confirmDeletion(): Promise<void> {
   gap: 6px;
 }
 .batch-field > span,
-.batch-filter > :is(span, label) {
+.batch-filter > span {
   font-weight: 600;
 }
-.batch-filter select {
+.batch-filter select,
+.batch-filters > select {
   max-width: min(20rem, 100%);
 }
 .batch-folder-filter {
@@ -865,6 +857,9 @@ async function confirmDeletion(): Promise<void> {
   width: clamp(132px, 16vw, 205px);
   max-width: 100%;
   min-height: var(--control-height);
+}
+.batch-restore {
+  margin-left: auto;
 }
 .batch-edit {
   max-width: 1440px;
@@ -877,10 +872,11 @@ async function confirmDeletion(): Promise<void> {
   gap: 12px;
 }
 .batch-editor-grid {
+  --batch-target-padding: 12px;
   grid-template-columns: minmax(0, 1fr);
 }
 .batch-target-fields {
-  padding: 12px;
+  padding: var(--batch-target-padding);
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
@@ -918,6 +914,21 @@ async function confirmDeletion(): Promise<void> {
   .batch-editor-grid {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
     gap: 18px;
+  }
+  .batch-editor-grid:has(.batch-picker-scroll) .batch-command-fields,
+  .batch-editor-grid:has(.batch-picker-scroll) .batch-command-field {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .batch-editor-grid:has(.batch-picker-scroll) .batch-command-fields {
+    padding-bottom: calc(var(--batch-target-padding) + 1px);
+  }
+  .batch-editor-grid:has(.batch-picker-scroll) .batch-shell-editor textarea {
+    height: 0;
+    min-height: 100%;
+    resize: none;
+  }
+  .batch-picker-scroll {
+    min-height: 240px;
   }
 }
 .batch-shell {

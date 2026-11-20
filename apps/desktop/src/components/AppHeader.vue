@@ -8,12 +8,13 @@ defineProps<{ searchShortcut: string }>();
 const emit = defineEmits<{
   search: [];
 }>();
-const { available, maximized, minimize, toggleMaximize, close } = useWindowControls();
+const { available, macosTitlebar, maximized, minimize, toggleMaximize, close } =
+  useWindowControls();
 </script>
 <template>
   <header
     class="app-header"
-    :class="{ 'native-titlebar': available }"
+    :class="{ 'native-titlebar': available, 'macos-titlebar': macosTitlebar }"
     data-tauri-drag-region="deep"
   >
     <div class="app-brand">

@@ -9,7 +9,7 @@ use serverdeck_core::{
     terminal::TerminalEvent,
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Mutex, MutexGuard, atomic::AtomicUsize},
     time::{Duration, Instant},
 };
@@ -24,7 +24,7 @@ const COMMAND_TIMEOUT: u16 = 30;
 fn changed_target() -> Error {
     Error::Connection {
         code: "BATCH_TARGET_CHANGED",
-        message: "目标连接配置已变化，请重新预览确认",
+        message: "目标连接配置已变化，请重新运行",
         source: None,
     }
 }
@@ -157,8 +157,11 @@ impl Application {
                     return Err(Error::Validation("请先为命令保存目标主机"));
                 }
                 validate_targets(host_ids, concurrency)?;
-                if host_ids.iter().any(|id| !command.host_ids.contains(id)) {
-                    return Err(Error::Validation("重试目标必须属于已保存的主机"));
+                if let Some(retry_ids) = &input.retry_host_ids {
+                    let saved: HashSet<_> = command.host_ids.iter().collect();
+                    if retry_ids.iter().any(|id| !saved.contains(id)) {
+                        return Err(Error::Validation("重试目标必须属于已保存的主机"));
+                    }
                 }
                 let targets = targets(db.catalog()?, host_ids)?;
                 let profiles = targets

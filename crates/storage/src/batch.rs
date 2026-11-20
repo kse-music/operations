@@ -232,10 +232,10 @@ mod tests {
     use super::*;
     use serverdeck_core::hosts::{AuthType, Host, HostInput};
 
-    fn add_host(db: &Database) -> Host {
+    fn add_host(db: &Database, hostname: &str) -> Host {
         db.host_create(HostInput {
             name: "主机".into(),
-            hostname: "fixture.invalid".into(),
+            hostname: hostname.into(),
             port: 22,
             username: "ops".into(),
             auth_type: AuthType::Agent,
@@ -255,7 +255,7 @@ mod tests {
         let path = dir.path().join("serverdeck.sqlite3");
         let db = Database::open(&path).unwrap();
         assert!(db.batch_commands().unwrap().is_empty());
-        let host = add_host(&db);
+        let host = add_host(&db, "fixture.invalid");
         let input = || BatchCommandInput {
             name: "  运行信息  ".to_owned(),
             command: "hostname\n\nuptime\n".to_owned(),
@@ -309,10 +309,44 @@ mod tests {
     }
 
     #[test]
+    fn batch_library_saves_and_reopens_more_than_32_distinct_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("serverdeck.sqlite3");
+        let db = Database::open(&path).unwrap();
+        let host_ids: Vec<_> = (0..40)
+            .map(|index| add_host(&db, &format!("host-{index}.invalid")).id)
+            .collect();
+        let input = |host_ids, concurrency| BatchCommandInput {
+            name: "巡检".into(),
+            command: "df -h".into(),
+            host_ids,
+            concurrency,
+        };
+        let saved = db
+            .save_batch_command(None, None, input(host_ids.clone(), 3))
+            .unwrap();
+        let mut duplicate_ids = host_ids.clone();
+        duplicate_ids.push(host_ids[0].clone());
+        assert!(matches!(
+            db.save_batch_command(Some(&saved.id), Some(1), input(duplicate_ids, 3)),
+            Err(Error::Validation(_))
+        ));
+        assert!(matches!(
+            db.save_batch_command(Some(&saved.id), Some(1), input(host_ids.clone(), 6)),
+            Err(Error::Validation(_))
+        ));
+        drop(db);
+        let reopened = Database::open(path).unwrap();
+        let stored = reopened.batch_command(&saved.id, 1).unwrap();
+        assert_eq!(stored.host_ids, host_ids);
+        assert_eq!(stored.concurrency, 3);
+    }
+
+    #[test]
     fn batch_library_upgrades_v1_with_one_backup_and_retries_after_backup_failure() {
         let dir = tempfile::tempdir().unwrap();
         let db = Database::open(dir.path().join("serverdeck.sqlite3")).unwrap();
-        let host = add_host(&db);
+        let host = add_host(&db, "fixture.invalid");
         let id = Uuid::new_v4().to_string();
         let old = serde_json::json!({"version":1,"commands":[{"id":id,"revision":9,"name":"旧命令","command":"hostname\nuptime\n"}]}).to_string();
         let conn = db.connect().unwrap();

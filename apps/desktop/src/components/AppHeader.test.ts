@@ -60,21 +60,26 @@ afterEach(() => {
   setLocale('zh-CN');
 });
 
-it('keeps search independent of native window actions', async () => {
-  await mount();
-  button('全局搜索')
-    .querySelector('svg')!
-    .dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  expect(search).toHaveBeenCalledOnce();
-  expect(native.minimize).not.toHaveBeenCalled();
-  expect(native.toggleMaximize).not.toHaveBeenCalled();
-  expect(native.close).not.toHaveBeenCalled();
-  button('最小化窗口').click();
-  button('关闭窗口').click();
-  await nextTick();
-  expect(native.minimize).toHaveBeenCalledOnce();
-  expect(native.close).toHaveBeenCalledOnce();
-});
+it.each(['Win32', 'Linux x86_64'])(
+  'keeps search independent of window actions on %s',
+  async (platform) => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    await mount();
+    expect(root.querySelector('.macos-titlebar')).toBeNull();
+    button('全局搜索')
+      .querySelector('svg')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(search).toHaveBeenCalledOnce();
+    expect(native.minimize).not.toHaveBeenCalled();
+    expect(native.toggleMaximize).not.toHaveBeenCalled();
+    expect(native.close).not.toHaveBeenCalled();
+    button('最小化窗口').click();
+    button('关闭窗口').click();
+    await nextTick();
+    expect(native.minimize).toHaveBeenCalledOnce();
+    expect(native.close).toHaveBeenCalledOnce();
+  },
+);
 
 it('shows restore for an initially maximized window and follows native resize changes', async () => {
   native.maximized = true;
@@ -129,9 +134,23 @@ it('releases a subscription that completes after unmount', async () => {
   expect(native.isMaximized).not.toHaveBeenCalled();
 });
 
-it('keeps browser preview usable without accessing native windows', async () => {
+it('reserves room for macOS system controls and keeps search and dragging available', async () => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  renderHeader();
+  await nextTick();
+  expect(root.querySelector('.macos-titlebar[data-tauri-drag-region="deep"]')).not.toBeNull();
+  expect(root.querySelector('.window-controls')).toBeNull();
+  expect(getCurrentWindow).not.toHaveBeenCalled();
+  expect(native.onResized).not.toHaveBeenCalled();
+  button('全局搜索').click();
+  expect(search).toHaveBeenCalledOnce();
+});
+
+it('keeps browser preview on macOS usable without accessing native windows', async () => {
   native.available = false;
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
   await mount();
+  expect(root.querySelector('.macos-titlebar')).toBeNull();
   expect(root.querySelector('.window-controls')).toBeNull();
   expect(getCurrentWindow).not.toHaveBeenCalled();
   button('全局搜索').click();

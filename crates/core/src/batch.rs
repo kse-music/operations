@@ -2,8 +2,6 @@ use crate::{Error, hosts::EnvironmentTag, hosts::validate_name};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-pub const MAX_TARGETS: usize = 32;
-
 #[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BatchCommand {
@@ -26,15 +24,14 @@ pub struct BatchCommandInput {
 
 pub fn validate_targets(host_ids: &[String], concurrency: u8) -> Result<(), Error> {
     let mut seen = HashSet::new();
-    if host_ids.len() > MAX_TARGETS
-        || ![1, 3, 5].contains(&concurrency)
-        || host_ids
-            .iter()
-            .any(|id| id.is_empty() || id.len() > 128 || !seen.insert(id))
+    if ![1, 3, 5].contains(&concurrency) {
+        return Err(Error::Validation("并发上限须为 1、3 或 5"));
+    }
+    if host_ids
+        .iter()
+        .any(|id| id.is_empty() || id.len() > 128 || !seen.insert(id))
     {
-        return Err(Error::Validation(
-            "最多选择 32 台不同的主机，并发上限须为 1、3 或 5",
-        ));
+        return Err(Error::Validation("目标主机标识无效或重复"));
     }
     Ok(())
 }

@@ -44,6 +44,10 @@ kbd {
 .native-titlebar button {
   app-region: no-drag;
 }
+.app-header.macos-titlebar {
+  /* Leave room for the three native buttons positioned by the main window builder. */
+  padding-left: 84px;
+}
 .window-controls {
   display: flex;
   align-self: stretch;

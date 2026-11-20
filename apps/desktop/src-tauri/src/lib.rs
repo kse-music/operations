@@ -64,7 +64,15 @@ pub fn run() {
                 app.manage(application);
                 let window_config = app.config().app.windows.iter().find(|w| w.label == "main")
                     .ok_or("main window configuration missing")?;
-                tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                let builder = tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?;
+                #[cfg(target_os = "macos")]
+                let builder = builder
+                    .decorations(true)
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    // Align the system buttons with the 44 px AppHeader.
+                    .traffic_light_position(tauri::LogicalPosition::new(14.0, 16.0));
+                builder
                     .initialization_script_for_all_frames(PREVENT_NATIVE_CONTEXT_MENU)
                     .on_navigation({
                         let handle = app.handle().clone();

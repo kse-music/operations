@@ -1,7 +1,5 @@
 import type { EnvironmentTag } from './hosts';
 
-export const batchTargetLimit = 32;
-
 export interface BatchCommandInput {
   name: string;
   command: string;

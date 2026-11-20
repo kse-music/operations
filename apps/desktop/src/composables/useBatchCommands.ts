@@ -24,13 +24,13 @@ function draftFor(previous: BatchCommand | null, filters?: Editor): Editor {
 function draftChanged(draft?: Editor | null): boolean {
   if (!draft) return false;
   const saved = draft.previous;
-  const savedIds = saved?.hostIds ?? [];
+  const savedIds = new Set(saved?.hostIds);
   return (
     draft.name !== (saved?.name ?? '') ||
     draft.command !== (saved?.command ?? '') ||
     draft.concurrency !== (saved?.concurrency ?? 3) ||
-    draft.hostIds.length !== savedIds.length ||
-    draft.hostIds.some((id) => !savedIds.includes(id))
+    draft.hostIds.length !== savedIds.size ||
+    draft.hostIds.some((id) => !savedIds.has(id))
   );
 }
 
@@ -96,16 +96,19 @@ export function useBatchCommands() {
     showEditor();
   }
 
-  function resetEditor(): void {
+  function cancelNewDraft(): void {
+    newDraft.value = null;
+    const entry =
+      commands.value?.find((item) => item.id === previousSelection) ?? commands.value?.[0];
+    if (entry) activate(entry.id);
+    actionError.value = null;
+  }
+
+  function restoreSaved(): void {
+    const saved = current.value;
     const draft = editor.value;
-    if (draft?.previous) {
-      if (current.value) drafts.set(current.value.id, draftFor(current.value, draft));
-    } else {
-      newDraft.value = null;
-      const entry =
-        commands.value?.find((item) => item.id === previousSelection) ?? commands.value?.[0];
-      if (entry) activate(entry.id);
-    }
+    if (!saved || !draft) return;
+    drafts.set(saved.id, draftFor(saved, draft));
     actionError.value = null;
   }
 
@@ -232,11 +235,7 @@ export function useBatchCommands() {
     });
   }
 
-  async function prepareRun(
-    command: BatchCommand,
-    mode: 'review' | 'direct',
-    previous?: BatchRun,
-  ): Promise<void> {
+  async function runSaved(command: BatchCommand, previous?: BatchRun): Promise<void> {
     if (busy.value || running.value || hasChanges(command.id) || !command.hostIds.length) return;
     activate(command.id);
     if (previous) showingResult.value = true;
@@ -249,21 +248,13 @@ export function useBatchCommands() {
         revision: command.revision,
         ...(retryHostIds ? { retryHostIds } : {}),
       });
-      if (mode === 'direct' && countProductionTargets(prepared) === 0) {
+      if (!previous && countProductionTargets(prepared) === 0) {
         await execute(prepared, false);
       } else {
         preview.value = prepared;
         retryBase.value = previous ?? null;
       }
     });
-  }
-
-  function prepare(command: BatchCommand, previous?: BatchRun): Promise<void> {
-    return prepareRun(command, 'review', previous);
-  }
-
-  function runSaved(command: BatchCommand): Promise<void> {
-    return prepareRun(command, 'direct');
   }
 
   async function execute(prepared: BatchPreview, productionConfirmed: boolean): Promise<void> {
@@ -338,13 +329,13 @@ export function useBatchCommands() {
     load,
     activate,
     create,
-    resetEditor,
+    cancelNewDraft,
+    restoreSaved,
     showEditor,
     hasChanges,
     isRunning,
     save,
     remove,
-    prepare,
     runSaved,
     start,
     stop,

@@ -7,7 +7,9 @@ import { errorMessage } from '../services/ipc';
 import { useNotificationsStore } from '../stores/notifications';
 
 export function useWindowControls() {
-  const nativeWindow = isTauri() ? getCurrentWindow() : undefined;
+  const desktop = isTauri();
+  const macosTitlebar = desktop && navigator.platform.startsWith('Mac');
+  const nativeWindow = desktop && !macosTitlebar ? getCurrentWindow() : undefined;
   const maximized = ref(false);
   const notifications = useNotificationsStore();
   let disposed = false;
@@ -30,6 +32,7 @@ export function useWindowControls() {
   }
 
   onMounted(async () => {
+    if (!nativeWindow) return;
     await run(async (window) => {
       const release = await window.onResized(() => void syncMaximized());
       if (disposed) release();
@@ -44,6 +47,7 @@ export function useWindowControls() {
 
   return {
     available: nativeWindow !== undefined,
+    macosTitlebar,
     maximized,
     minimize: () => run((window) => window.minimize()),
     toggleMaximize: () =>
